@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Messenger User Guide
 
 This guide walks through setting up each messaging provider, configuring the CLI, and using the library from Rust code.
@@ -69,6 +73,7 @@ Prefer a Discord **webhook** over a bot when you only need one-way notifications
 - Attachments: supported (local path or in-memory bytes).
 - Replies: **not supported** — `plan_send()` and `send()` return `MessengerError::UnsupportedFeature { provider: DiscordWebhook, feature: "replies" }` before any network call. Use the bot adapter if you need threaded replies.
 - Thread routing: optional, supplied at dispatch time via `Target::discord_webhook_thread(thread_id)`. Thread IDs are not part of the route config.
+- Long messages: content over Discord's 2000-character limit is sent as consecutive posts, split at paragraph, then line, then character boundaries, with code blocks closed and reopened across posts. The receipt identifies the first post and lists every post id in `metadata["post_message_ids"]`. See [Discord: Long messages](platforms/discord.md#long-messages).
 
 **Environment variable:** `DISCORD_WEBHOOK_URL`
 
@@ -778,6 +783,14 @@ Two generations from the same inputs are byte-identical. Invalid inputs, a missi
 
 A refresh re-researches one platform in three passes: independent discovery, reconciliation against the curated sources and previous research, and curated-source maintenance. An independent evidence review follows. Each platform run is one [Claudine](../../claudine/docs/cli/sequence.md) sequence, executed by the Messenger-owned runner (`messenger research run RUN_ID`), which holds the fleet lock for the whole execution so platforms run one at a time and records what it observed in the run record.
 
+The runner's process result and the research status answer different questions.
+`finished` means the sequence process exited successfully; it does not mean the
+research passed its checks. The run reaches `awaiting_review` only after every
+required stage passes. `interrupted` records an interrupted sequence, and
+`stopped` records an unsuccessful exit, a launch failure, or an enforced stop.
+None of these process observations
+authorizes publication: `promote` still checks the run's status and stages.
+
 The run owns every process its sequence starts, and the fleet lock stays held until the sequence's work has ended, so no second run, cleanup, or promotion starts while a task of the first is still working:
 
 - **Stopped at the limit.** The runner first asks the sequence to stop as Ctrl+C would (on macOS, Linux, and WSL2), so Claudine cancels its running tasks and runs their `cancelled` and `finalize` cleanup. Whatever of it is still running once the sequence exits, or after ten seconds, is killed. Native Windows has no such request for a background process, so there the tree is killed at once.
@@ -818,6 +831,12 @@ A named maintainer approves every substantive change, and every initial baseline
 - **A run failed a check, or its sequence stopped** (a failed step, Ctrl+C, or no agent named): `messenger research prepare --resume RUN_ID` reruns it from the first incomplete stage, at most twice. Or reject it and prepare a new run. A platform has at most one open run: once a new run is prepared, resuming the failed one is refused (exit `1`, naming the other run's directory) until that run is no longer open.
 - **Runner killed:** the OS releases the fleet lock when the runner dies, leaving a launched `active` record that `messenger research runs` reports as stale. Recover it explicitly with `messenger research cleanup --recover RUN_ID` (marking it `interrupted`), then resume the run.
 - **Prepared but never started:** the run stays active until `messenger research run RUN_ID` executes it.
+- **Older exhausted record:** records with status `exhausted` remain readable
+  and can be resumed with `messenger research prepare --resume RUN_ID`, subject
+  to the same two-resumption limit. That status is not produced by the current
+  runner and is never eligible for promotion; the resumed run must complete
+  its checks and reach `awaiting_review` first. Historical `ledger_runs` data
+  does not grant more invocations or bypass the current runner's limits.
 - **Unreadable run record:** `prepare` blocks the platform and names the run directory; `messenger research runs` lists it with the error. Repair the record or remove the directory.
 - **Publication interrupted:** `generate` and `promote` refuse until `messenger research recover` completes or undoes it. The previous snapshot stays selected until then.
 

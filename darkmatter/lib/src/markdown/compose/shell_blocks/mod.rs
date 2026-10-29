@@ -28,21 +28,28 @@ use types::{ShellBlockCommandResult, SourceExcerpt};
 /// are read from.
 pub(crate) struct BlockTemplates<'a> {
     pub authored: &'a AuthoredBody,
+    /// The authored body's `::block when=` guards and `::map` / `::filter`
+    /// bodies; a command is typed inside those around it, as discovery typed
+    /// it.
+    pub scopes: super::collection_blocks::BodyScopes,
     pub scope: SiteScope<'a>,
     pub evaluator: &'a dyn HoleEvaluator,
+    /// Told which block or command is read, so a repeated body's placeholders
+    /// read the copy's frame and failures retain their authored site.
+    pub site: Option<&'a dyn super::site_scope::SiteHook>,
     /// The authored document, for template diagnostics.
     pub ctx: biscuit_terminal::errors::SourceContext,
 }
 
 impl BlockTemplates<'_> {
     /// The authored commands of the block `pair` of `content`, with the
-    /// authored 1-based line of the block's opener, or `None` when the block
-    /// cannot be traced back to its authored text.
+    /// current offset of each command and the authored 1-based line of the
+    /// block's opener, or `None` when those sites cannot be traced back.
     fn authored_commands(
         &self,
         content: &str,
         pair: &super::block_pairs::BlockPair,
-    ) -> Option<(Vec<body::RawShellCommand>, usize)> {
+    ) -> Option<(Vec<(body::RawShellCommand, usize)>, usize)> {
         let start = self.authored.project(content, &(pair.span.start..pair.span.start + 1))?.start;
         let text = self.authored.text();
         let authored = super::block_pairs::scan_block_pairs_in(text, None)
@@ -51,7 +58,28 @@ impl BlockTemplates<'_> {
             .find(|candidate| candidate.span.start == start)?;
         let (commands, dangling) =
             body::group_logical_commands(&text[authored.body_span.clone()], authored.start_line + 1);
-        dangling.is_none().then_some((commands, authored.start_line))
+        if dangling.is_some() {
+            return None;
+        }
+        // Interpolated arguments may contain newlines. Match each command's
+        // authored start rather than assuming its physical line stayed put.
+        let mut offsets = std::collections::BTreeMap::new();
+        let mut offset = pair.body_span.start;
+        for line in content[pair.body_span.clone()].split_inclusive('\n') {
+            let bare = super::parse_utils::strip_blockquote_prefix(line);
+            let start = offset + line.len() - bare.len();
+            if start < offset + line.len()
+                && let Some(span) = self.authored.project(content, &(start..start + 1))
+            {
+                offsets.insert(span.start, start);
+            }
+            offset += line.len();
+        }
+        let commands = commands.into_iter().map(|command| {
+            let offset = *offsets.get(&(authored.body_span.start + command.physical_span.start))?;
+            Some((command, offset))
+        }).collect::<Option<Vec<_>>>()?;
+        Some((commands, authored.start_line))
     }
 }
 
@@ -103,11 +131,7 @@ pub(crate) fn run_shell_blocks_stage_in(
     // Scan for block pairs (both page and shell)
     let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| {
         // Extract line number from BlockPairError
-        let line = match &e {
-            super::block_pairs::BlockPairError::UnmatchedEnd { line } => *line,
-            super::block_pairs::BlockPairError::UnterminatedBlock { line, .. } => *line,
-            super::block_pairs::BlockPairError::TrailingContent { line, .. } => *line,
-        };
+        let line = e.line();
         ShellBlockError::Parse {
             line,
             message: e.to_string(),
@@ -148,7 +172,18 @@ pub(crate) fn run_shell_blocks_stage_in(
     let mut replacements = Vec::new();
     let mut report = ComposeReport::new();
 
+    let site = templates.and_then(|templates| templates.site);
+    // The entered offset is where a failure is reported: the opener for a
+    // failure of the block itself, a command's own line once it is read or
+    // run (the command lies in the same copy, so the frame is unchanged).
+    let enter = |offset: usize| {
+        if let Some(site) = site {
+            site.enter(offset);
+        }
+    };
+
     for pair in shell_pairs {
+        enter(pair.span.start);
         let region = parser::parse_shell_block_region(content, &pair)?;
         let body_text = &content[pair.body_span.clone()];
         let resolved = body::split_logical_commands(body_text, pair.start_line + 1).and_then(|commands| {
@@ -192,9 +227,15 @@ pub(crate) fn run_shell_blocks_stage_in(
         };
 
         // Each command as resolved bytes and, when its authored text holds a
-        // placeholder, as a template site.
-        let mut commands: Vec<(Result<ShellDirective, ShellExpansionError>, Option<TemplateSite<'_>>, usize)> =
-            Vec::new();
+        // placeholder, as a template site, with its line and its offset in
+        // `content`.
+        #[allow(clippy::type_complexity)]
+        let mut commands: Vec<(
+            Result<ShellDirective, ShellExpansionError>,
+            Option<TemplateSite<'_>>,
+            usize,
+            usize,
+        )> = Vec::new();
         let authored = templates.and_then(|templates| {
             templates
                 .authored_commands(content, &pair)
@@ -202,24 +243,27 @@ pub(crate) fn run_shell_blocks_stage_in(
         });
         match (resolved, authored) {
             (Ok(resolved), Some((templates, authored, opener_line))) if resolved.len() == authored.len() => {
-                for (command, raw) in resolved.iter().zip(authored) {
+                for (command, (raw, offset)) in resolved.iter().zip(authored) {
+                    enter(offset);
                     let directive = directive_of(command);
                     let site = block_site(templates, &raw, opener_line, line_offset, frame(command.physical_span.clone()))?;
-                    commands.push((Ok(directive), site, command.start_line));
+                    commands.push((Ok(directive), site, command.start_line, offset));
                 }
             }
             (Ok(resolved), _) => {
                 for command in &resolved {
-                    commands.push((Ok(directive_of(command)), None, command.start_line));
+                    let offset = pair.body_span.start + command.physical_span.start;
+                    commands.push((Ok(directive_of(command)), None, command.start_line, offset));
                 }
             }
             // The block's interpolated text no longer reads as commands: run
             // it from its authored text, a command with a placeholder as a
             // template and any other as its own (uninterpolated) bytes.
             (Err(error), Some((templates, authored, opener_line))) => {
-                for raw in authored {
+                for (raw, offset) in authored {
+                    let command_line = content[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+                    enter(offset);
                     let site = block_site(templates, &raw, opener_line, line_offset, frame(raw.physical_span.clone()))?;
-                    let command_line = raw.start_line - opener_line + pair.start_line;
                     if site.is_some() {
                         let unread = ShellExpansionError::ParseDirective {
                             ctx: Box::new(ctx.clone()),
@@ -229,15 +273,18 @@ pub(crate) fn run_shell_blocks_stage_in(
                             },
                             message: "the block's interpolated text does not parse as commands".to_string(),
                         };
-                        commands.push((Err(unread), site, command_line));
+                        commands.push((Err(unread), site, command_line, offset));
                         continue;
                     }
                     if !super::expression::ExpressionFinder::scan_plain(&raw.raw_command).expressions.is_empty() {
+                        // The block's text does not parse: a failure of the
+                        // block, not of this command.
+                        enter(pair.span.start);
                         return Err(error);
                     }
                     let single = body::split_logical_commands(&raw.raw_command, command_line)?;
                     for command in &single {
-                        commands.push((Ok(directive_of(command)), None, command_line));
+                        commands.push((Ok(directive_of(command)), None, command_line, offset));
                     }
                 }
             }
@@ -253,9 +300,10 @@ pub(crate) fn run_shell_blocks_stage_in(
 
         // Prepare all commands before executing any
         let mut prepared = Vec::new();
-        for (directive, site, start_line) in commands {
+        for (directive, site, start_line, offset) in commands {
+            enter(offset);
             match prepare_site(directive, site.as_ref(), options, &policy_paths, runtime) {
-                Ok(p) => prepared.push((p, start_line)),
+                Ok(p) => prepared.push((p, start_line, offset)),
                 Err(e) => {
                     return Err(ShellBlockError::Command {
                         block_start_line,
@@ -277,7 +325,8 @@ pub(crate) fn run_shell_blocks_stage_in(
         // Execute sequentially
         let mut results = Vec::new();
 
-        for (prep, start_line) in prepared {
+        for (prep, start_line, offset) in prepared {
+            enter(offset);
             match execute_prepared_directive(&prep, options, runtime) {
                 Ok(execution) => {
                     results.push(ShellBlockCommandResult {
@@ -358,6 +407,7 @@ fn block_site<'a>(
             templates.ctx.clone(),
             templates.evaluator,
             frame,
+            &|types| templates.scopes.scope_at_line(types, raw.start_line),
         )
         .map_err(|error| ShellBlockError::Command {
             block_start_line: opener_line + line_offset,

@@ -1,0 +1,4505 @@
+[
+  {
+    "at": "lifecycle verb key",
+    "items": [
+      {
+        "label": "warn",
+        "kind": 5,
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 39,
+              "character": 12
+            },
+            "end": {
+              "line": 39,
+              "character": 14
+            }
+          },
+          "newText": "warn: "
+        }
+      }
+    ]
+  },
+  {
+    "at": "lifecycle guard value",
+    "items": [
+      {
+        "label": "description",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "description"
+        }
+      },
+      {
+        "label": "$schema",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "$schema"
+        }
+      },
+      {
+        "label": "yolo",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "yolo"
+        }
+      },
+      {
+        "label": "commit_message",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "commit_message"
+        }
+      },
+      {
+        "label": "plan",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "plan"
+        }
+      },
+      {
+        "label": "phase",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "phase"
+        }
+      },
+      {
+        "label": "area",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "area"
+        }
+      },
+      {
+        "label": "pass_icon",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "pass_icon"
+        }
+      },
+      {
+        "label": "total_phases",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "total_phases"
+        }
+      },
+      {
+        "label": "spec",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "spec"
+        }
+      },
+      {
+        "label": "log",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "log"
+        }
+      },
+      {
+        "label": "initialize",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "initialize"
+        }
+      },
+      {
+        "label": "start",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "start"
+        }
+      },
+      {
+        "label": "success",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "success"
+        }
+      },
+      {
+        "label": "blocked",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "blocked"
+        }
+      },
+      {
+        "label": "failure",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "failure"
+        }
+      },
+      {
+        "label": "loop",
+        "kind": 5,
+        "detail": "frontmatter key",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "loop"
+        }
+      },
+      {
+        "label": "fm",
+        "kind": 9,
+        "detail": "reserved root",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "fm"
+        }
+      },
+      {
+        "label": "ctx.cwd",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.cwd"
+        }
+      },
+      {
+        "label": "ctx.self",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.self"
+        }
+      },
+      {
+        "label": "ctx.last_updated",
+        "kind": 6,
+        "detail": "datetime",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.last_updated"
+        }
+      },
+      {
+        "label": "ctx.hash",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.hash"
+        }
+      },
+      {
+        "label": "ctx.id",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.id"
+        }
+      },
+      {
+        "label": "ctx.sid",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.sid"
+        }
+      },
+      {
+        "label": "ctx.now",
+        "kind": 6,
+        "detail": "datetime",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.now"
+        }
+      },
+      {
+        "label": "ctx.now_utc",
+        "kind": 6,
+        "detail": "datetime",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.now_utc"
+        }
+      },
+      {
+        "label": "ctx.today",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.today"
+        }
+      },
+      {
+        "label": "ctx.today_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.today_utc"
+        }
+      },
+      {
+        "label": "ctx.yesterday",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.yesterday"
+        }
+      },
+      {
+        "label": "ctx.yesterday_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.yesterday_utc"
+        }
+      },
+      {
+        "label": "ctx.tomorrow",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.tomorrow"
+        }
+      },
+      {
+        "label": "ctx.tomorrow_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.tomorrow_utc"
+        }
+      },
+      {
+        "label": "ctx.day",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.day"
+        }
+      },
+      {
+        "label": "ctx.day_utc",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.day_utc"
+        }
+      },
+      {
+        "label": "ctx.day_abbr",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.day_abbr"
+        }
+      },
+      {
+        "label": "ctx.day_abbr_utc",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.day_abbr_utc"
+        }
+      },
+      {
+        "label": "ctx.year",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.year"
+        }
+      },
+      {
+        "label": "ctx.year_utc",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.year_utc"
+        }
+      },
+      {
+        "label": "ctx.month",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.month"
+        }
+      },
+      {
+        "label": "ctx.month_name",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.month_name"
+        }
+      },
+      {
+        "label": "ctx.month_name_abbr",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.month_name_abbr"
+        }
+      },
+      {
+        "label": "ctx.day_of_month",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.day_of_month"
+        }
+      },
+      {
+        "label": "ctx.day_of_month_suffixed",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.day_of_month_suffixed"
+        }
+      },
+      {
+        "label": "ctx.time",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.time"
+        }
+      },
+      {
+        "label": "ctx.time_military",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.time_military"
+        }
+      },
+      {
+        "label": "ctx.time_utc",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.time_utc"
+        }
+      },
+      {
+        "label": "ctx.time_military_utc",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.time_military_utc"
+        }
+      },
+      {
+        "label": "ctx.timezone",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.timezone"
+        }
+      },
+      {
+        "label": "ctx.timezone_offset",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.timezone_offset"
+        }
+      },
+      {
+        "label": "ctx.timezone_iana",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.timezone_iana"
+        }
+      },
+      {
+        "label": "ctx.start_of_week_sun",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.start_of_week_sun"
+        }
+      },
+      {
+        "label": "ctx.end_of_week_sun",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.end_of_week_sun"
+        }
+      },
+      {
+        "label": "ctx.start_of_week_mon",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.start_of_week_mon"
+        }
+      },
+      {
+        "label": "ctx.end_of_week_mon",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.end_of_week_mon"
+        }
+      },
+      {
+        "label": "ctx.start_of_week_sun_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.start_of_week_sun_utc"
+        }
+      },
+      {
+        "label": "ctx.end_of_week_sun_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.end_of_week_sun_utc"
+        }
+      },
+      {
+        "label": "ctx.start_of_week_mon_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.start_of_week_mon_utc"
+        }
+      },
+      {
+        "label": "ctx.end_of_week_mon_utc",
+        "kind": 6,
+        "detail": "date",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.end_of_week_mon_utc"
+        }
+      },
+      {
+        "label": "ctx.season",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.season"
+        }
+      },
+      {
+        "label": "ctx.timestamp",
+        "kind": 6,
+        "detail": "number(integer)",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.timestamp"
+        }
+      },
+      {
+        "label": "ctx.timestamp_ms",
+        "kind": 6,
+        "detail": "number(integer)",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.timestamp_ms"
+        }
+      },
+      {
+        "label": "ctx.utc",
+        "kind": 6,
+        "detail": "datetime",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.utc"
+        }
+      },
+      {
+        "label": "ctx.dow",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.dow"
+        }
+      },
+      {
+        "label": "ctx.dow_abbr",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.dow_abbr"
+        }
+      },
+      {
+        "label": "ctx.repo",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.repo"
+        }
+      },
+      {
+        "label": "ctx.repo_root",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.repo_root"
+        }
+      },
+      {
+        "label": "ctx.branch",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.branch"
+        }
+      },
+      {
+        "label": "ctx.worktree",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.worktree"
+        }
+      },
+      {
+        "label": "ctx.recent_commits",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.recent_commits"
+        }
+      },
+      {
+        "label": "ctx.is_monorepo",
+        "kind": 6,
+        "detail": "boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.is_monorepo"
+        }
+      },
+      {
+        "label": "ctx.package_root",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.package_root"
+        }
+      },
+      {
+        "label": "ctx.package_area_root",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.package_area_root"
+        }
+      },
+      {
+        "label": "ctx.packages",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.packages"
+        }
+      },
+      {
+        "label": "ctx.package_areas",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.package_areas"
+        }
+      },
+      {
+        "label": "ctx.current_package",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_package"
+        }
+      },
+      {
+        "label": "ctx.current_package_area",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_package_area"
+        }
+      },
+      {
+        "label": "ctx.area",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.area"
+        }
+      },
+      {
+        "label": "ctx.area_description",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.area_description"
+        }
+      },
+      {
+        "label": "ctx.area_root",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.area_root"
+        }
+      },
+      {
+        "label": "ctx.current_packages",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_packages"
+        }
+      },
+      {
+        "label": "ctx.depends_on",
+        "kind": 6,
+        "detail": "object[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.depends_on"
+        }
+      },
+      {
+        "label": "ctx.used_by",
+        "kind": 6,
+        "detail": "object[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.used_by"
+        }
+      },
+      {
+        "label": "ctx.dirty_files",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.dirty_files"
+        }
+      },
+      {
+        "label": "ctx.merge_conflicts",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.merge_conflicts"
+        }
+      },
+      {
+        "label": "ctx.dirty_source_code_files",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.dirty_source_code_files"
+        }
+      },
+      {
+        "label": "ctx.staged_files",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.staged_files"
+        }
+      },
+      {
+        "label": "ctx.untracked_files",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.untracked_files"
+        }
+      },
+      {
+        "label": "ctx.dirty_packages",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.dirty_packages"
+        }
+      },
+      {
+        "label": "ctx.dirty_package_areas",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.dirty_package_areas"
+        }
+      },
+      {
+        "label": "ctx.staged_packages",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.staged_packages"
+        }
+      },
+      {
+        "label": "ctx.staged_package_areas",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.staged_package_areas"
+        }
+      },
+      {
+        "label": "ctx.current_package_has_staged_files",
+        "kind": 6,
+        "detail": "boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_package_has_staged_files"
+        }
+      },
+      {
+        "label": "ctx.current_package_area_has_staged_files",
+        "kind": 6,
+        "detail": "boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_package_area_has_staged_files"
+        }
+      },
+      {
+        "label": "ctx.current_package_has_dirty_files",
+        "kind": 6,
+        "detail": "boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_package_has_dirty_files"
+        }
+      },
+      {
+        "label": "ctx.current_package_area_has_dirty_files",
+        "kind": 6,
+        "detail": "boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.current_package_area_has_dirty_files"
+        }
+      },
+      {
+        "label": "ctx.programming_languages_in_repo",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.programming_languages_in_repo"
+        }
+      },
+      {
+        "label": "ctx.programming_language",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.programming_language"
+        }
+      },
+      {
+        "label": "ctx.package_manager",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.package_manager"
+        }
+      },
+      {
+        "label": "ctx.docs_readme",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.docs_readme"
+        }
+      },
+      {
+        "label": "ctx.docs_blast_radius",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.docs_blast_radius"
+        }
+      },
+      {
+        "label": "ctx.docs_drift",
+        "kind": 6,
+        "detail": "string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.docs_drift"
+        }
+      },
+      {
+        "label": "ctx.docs_skill",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.docs_skill"
+        }
+      },
+      {
+        "label": "ctx.os",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.os"
+        }
+      },
+      {
+        "label": "ctx.hostname",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.hostname"
+        }
+      },
+      {
+        "label": "ctx.os_distro",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.os_distro"
+        }
+      },
+      {
+        "label": "ctx.os_package_manager",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.os_package_manager"
+        }
+      },
+      {
+        "label": "ctx.os_version",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.os_version"
+        }
+      },
+      {
+        "label": "ctx.memory_total",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.memory_total"
+        }
+      },
+      {
+        "label": "ctx.memory_used",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.memory_used"
+        }
+      },
+      {
+        "label": "ctx.memory_avail",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.memory_avail"
+        }
+      },
+      {
+        "label": "ctx.cpu_cores",
+        "kind": 6,
+        "detail": "number(integer)",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.cpu_cores"
+        }
+      },
+      {
+        "label": "ctx.cpu_arch",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.cpu_arch"
+        }
+      },
+      {
+        "label": "ctx.gpu",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.gpu"
+        }
+      },
+      {
+        "label": "ctx.tailnet",
+        "kind": 6,
+        "detail": "boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.tailnet"
+        }
+      },
+      {
+        "label": "ctx.gateway",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.gateway"
+        }
+      },
+      {
+        "label": "ctx.gateway_v6",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.gateway_v6"
+        }
+      },
+      {
+        "label": "ctx.agent",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.agent"
+        }
+      },
+      {
+        "label": "ctx.model",
+        "kind": 6,
+        "detail": "string",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ctx.model"
+        }
+      },
+      {
+        "label": "is_array(x)",
+        "kind": 3,
+        "detail": "is_array(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_array"
+        }
+      },
+      {
+        "label": "is_empty(x)",
+        "kind": 3,
+        "detail": "is_empty(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_empty"
+        }
+      },
+      {
+        "label": "is_integer(val)",
+        "kind": 3,
+        "detail": "is_integer(val: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_integer"
+        }
+      },
+      {
+        "label": "is_negative(val)",
+        "kind": 3,
+        "detail": "is_negative(val: number | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_negative"
+        }
+      },
+      {
+        "label": "is_null(x)",
+        "kind": 3,
+        "detail": "is_null(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_null"
+        }
+      },
+      {
+        "label": "is_number(x)",
+        "kind": 3,
+        "detail": "is_number(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_number"
+        }
+      },
+      {
+        "label": "is_object(x)",
+        "kind": 3,
+        "detail": "is_object(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_object"
+        }
+      },
+      {
+        "label": "is_positive(val)",
+        "kind": 3,
+        "detail": "is_positive(val: number | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_positive"
+        }
+      },
+      {
+        "label": "is_string(x)",
+        "kind": 3,
+        "detail": "is_string(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_string"
+        }
+      },
+      {
+        "label": "abs(x)",
+        "kind": 3,
+        "detail": "abs(x: number) -> number",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "abs"
+        }
+      },
+      {
+        "label": "max(a, b)",
+        "kind": 3,
+        "detail": "max(a: number, b: number) -> number",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "max"
+        }
+      },
+      {
+        "label": "min(a, b)",
+        "kind": 3,
+        "detail": "min(a: number, b: number) -> number",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "min"
+        }
+      },
+      {
+        "label": "round(x, [fallback])",
+        "kind": 3,
+        "detail": "round(x: numberlike, [fallback: number]) -> number",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "round"
+        }
+      },
+      {
+        "label": "contains(haystack, needle)",
+        "kind": 3,
+        "detail": "contains(haystack: string | unknown[] | object | null, needle: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "contains"
+        }
+      },
+      {
+        "label": "filter(iterable, callback)",
+        "kind": 3,
+        "detail": "filter(iterable: unknown[] | object | null, callback: function(parameters(item: unknown | null); returns(unknown | null))) -> (unknown | null)[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "filter"
+        }
+      },
+      {
+        "label": "first(x)",
+        "kind": 3,
+        "detail": "first(x: unknown[] | null) -> unknown",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "first"
+        }
+      },
+      {
+        "label": "has_key(obj, key)",
+        "kind": 3,
+        "detail": "has_key(obj: object | null, key: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_key"
+        }
+      },
+      {
+        "label": "keys(obj)",
+        "kind": 3,
+        "detail": "keys(obj: object | null) -> string[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "keys"
+        }
+      },
+      {
+        "label": "last(x)",
+        "kind": 3,
+        "detail": "last(x: unknown[] | null) -> unknown",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "last"
+        }
+      },
+      {
+        "label": "length(val)",
+        "kind": 3,
+        "detail": "length(val: string | unknown[] | object) -> number",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "length"
+        }
+      },
+      {
+        "label": "map(iterable, callback)",
+        "kind": 3,
+        "detail": "map(iterable: unknown[] | object | null, callback: function(parameters(item: unknown | null); returns(unknown | null))) -> (unknown | null)[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "map"
+        }
+      },
+      {
+        "label": "values(obj)",
+        "kind": 3,
+        "detail": "values(obj: object | null) -> unknown[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "values"
+        }
+      },
+      {
+        "label": "ends_with(x, find)",
+        "kind": 3,
+        "detail": "ends_with(x: string | null, find: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ends_with"
+        }
+      },
+      {
+        "label": "starts_with(x, find)",
+        "kind": 3,
+        "detail": "starts_with(x: string | null, find: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "starts_with"
+        }
+      },
+      {
+        "label": "camel_case(x)",
+        "kind": 3,
+        "detail": "camel_case(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "camel_case"
+        }
+      },
+      {
+        "label": "capitalize(x)",
+        "kind": 3,
+        "detail": "capitalize(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "capitalize"
+        }
+      },
+      {
+        "label": "ensure_leading(var, prefix)",
+        "kind": 3,
+        "detail": "ensure_leading(var: string | number | null, prefix: string | number | null) -> string | number | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ensure_leading"
+        }
+      },
+      {
+        "label": "ensure_trailing(var, postfix)",
+        "kind": 3,
+        "detail": "ensure_trailing(var: string | number | null, postfix: string | number | null) -> string | number | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ensure_trailing"
+        }
+      },
+      {
+        "label": "kebab_case(x)",
+        "kind": 3,
+        "detail": "kebab_case(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "kebab_case"
+        }
+      },
+      {
+        "label": "lower(x)",
+        "kind": 3,
+        "detail": "lower(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "lower"
+        }
+      },
+      {
+        "label": "pascal_case(x)",
+        "kind": 3,
+        "detail": "pascal_case(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "pascal_case"
+        }
+      },
+      {
+        "label": "replace(x, find, replacement)",
+        "kind": 3,
+        "detail": "replace(x: string | null, find: string | null, replacement: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "replace"
+        }
+      },
+      {
+        "label": "replace_first(x, find, replacement)",
+        "kind": 3,
+        "detail": "replace_first(x: string | null, find: string | null, replacement: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "replace_first"
+        }
+      },
+      {
+        "label": "replace_last(x, find, replacement)",
+        "kind": 3,
+        "detail": "replace_last(x: string | null, find: string | null, replacement: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "replace_last"
+        }
+      },
+      {
+        "label": "snake_case(x)",
+        "kind": 3,
+        "detail": "snake_case(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "snake_case"
+        }
+      },
+      {
+        "label": "title_case(x)",
+        "kind": 3,
+        "detail": "title_case(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "title_case"
+        }
+      },
+      {
+        "label": "trim(text)",
+        "kind": 3,
+        "detail": "trim(text: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "trim"
+        }
+      },
+      {
+        "label": "upper(x)",
+        "kind": 3,
+        "detail": "upper(x: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "upper"
+        }
+      },
+      {
+        "label": "without_date(string)",
+        "kind": 3,
+        "detail": "without_date(string: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "without_date"
+        }
+      },
+      {
+        "label": "terminal(content)",
+        "kind": 3,
+        "detail": "terminal(content: string | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "terminal"
+        }
+      },
+      {
+        "label": "date(iso, fmt)",
+        "kind": 3,
+        "detail": "date(iso: date | datetime | null, fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long) | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "date"
+        }
+      },
+      {
+        "label": "is_date(x)",
+        "kind": 3,
+        "detail": "is_date(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_date"
+        }
+      },
+      {
+        "label": "is_date_time(x)",
+        "kind": 3,
+        "detail": "is_date_time(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_date_time"
+        }
+      },
+      {
+        "label": "is_date_time_utc(x)",
+        "kind": 3,
+        "detail": "is_date_time_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_date_time_utc"
+        }
+      },
+      {
+        "label": "is_date_utc(x)",
+        "kind": 3,
+        "detail": "is_date_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_date_utc"
+        }
+      },
+      {
+        "label": "is_this_month(x)",
+        "kind": 3,
+        "detail": "is_this_month(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_this_month"
+        }
+      },
+      {
+        "label": "is_this_month_utc(x)",
+        "kind": 3,
+        "detail": "is_this_month_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_this_month_utc"
+        }
+      },
+      {
+        "label": "is_this_year(x)",
+        "kind": 3,
+        "detail": "is_this_year(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_this_year"
+        }
+      },
+      {
+        "label": "is_this_year_utc(x)",
+        "kind": 3,
+        "detail": "is_this_year_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_this_year_utc"
+        }
+      },
+      {
+        "label": "is_today(x)",
+        "kind": 3,
+        "detail": "is_today(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_today"
+        }
+      },
+      {
+        "label": "is_today_utc(x)",
+        "kind": 3,
+        "detail": "is_today_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_today_utc"
+        }
+      },
+      {
+        "label": "is_tomorrow(x)",
+        "kind": 3,
+        "detail": "is_tomorrow(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_tomorrow"
+        }
+      },
+      {
+        "label": "is_tomorrow_utc(x)",
+        "kind": 3,
+        "detail": "is_tomorrow_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_tomorrow_utc"
+        }
+      },
+      {
+        "label": "is_yesterday(x)",
+        "kind": 3,
+        "detail": "is_yesterday(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_yesterday"
+        }
+      },
+      {
+        "label": "is_yesterday_utc(x)",
+        "kind": 3,
+        "detail": "is_yesterday_utc(x: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_yesterday_utc"
+        }
+      },
+      {
+        "label": "date_delta(date1, date2, diff)",
+        "kind": 3,
+        "detail": "date_delta(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$'))) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "date_delta"
+        }
+      },
+      {
+        "label": "newer_than(date1, date2, diff)",
+        "kind": 3,
+        "detail": "newer_than(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$'))) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "newer_than"
+        }
+      },
+      {
+        "label": "older_than(date1, date2, diff)",
+        "kind": 3,
+        "detail": "older_than(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$'))) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "older_than"
+        }
+      },
+      {
+        "label": "and(...)",
+        "kind": 3,
+        "detail": "and(...values: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "and"
+        }
+      },
+      {
+        "label": "or(...)",
+        "kind": 3,
+        "detail": "or(...values: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "or"
+        }
+      },
+      {
+        "label": "number(x, [fallback])",
+        "kind": 3,
+        "detail": "number(x: numberlike, [fallback: number]) -> number",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "number"
+        }
+      },
+      {
+        "label": "absolute(file)",
+        "kind": 3,
+        "detail": "absolute(file: file | null) -> file | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "absolute"
+        }
+      },
+      {
+        "label": "basename(file)",
+        "kind": 3,
+        "detail": "basename(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "basename"
+        }
+      },
+      {
+        "label": "basename_without_index(file)",
+        "kind": 3,
+        "detail": "basename_without_index(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "basename_without_index"
+        }
+      },
+      {
+        "label": "code_link(file)",
+        "kind": 3,
+        "detail": "code_link(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "code_link"
+        }
+      },
+      {
+        "label": "code_link(target, desc)",
+        "kind": 3,
+        "detail": "code_link(target: file | null, desc: string | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "code_link"
+        }
+      },
+      {
+        "label": "decrement_file_index(file)",
+        "kind": 3,
+        "detail": "decrement_file_index(file: file | null) -> file | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "decrement_file_index"
+        }
+      },
+      {
+        "label": "dir_leading(file)",
+        "kind": 3,
+        "detail": "dir_leading(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "dir_leading"
+        }
+      },
+      {
+        "label": "dirname(file)",
+        "kind": 3,
+        "detail": "dirname(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "dirname"
+        }
+      },
+      {
+        "label": "ext(file)",
+        "kind": 3,
+        "detail": "ext(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ext"
+        }
+      },
+      {
+        "label": "file_exists(value)",
+        "kind": 3,
+        "detail": "file_exists(value: unknown | null) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "file_exists"
+        }
+      },
+      {
+        "label": "file_index(file)",
+        "kind": 3,
+        "detail": "file_index(file: file | null) -> number | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "file_index"
+        }
+      },
+      {
+        "label": "file_trailing(file)",
+        "kind": 3,
+        "detail": "file_trailing(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "file_trailing"
+        }
+      },
+      {
+        "label": "find_files(pattern)",
+        "kind": 3,
+        "detail": "find_files(pattern: string | null) -> file[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "find_files"
+        }
+      },
+      {
+        "label": "find_first_index(file)",
+        "kind": 3,
+        "detail": "find_first_index(file: file | null) -> file | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "find_first_index"
+        }
+      },
+      {
+        "label": "find_last_index(file)",
+        "kind": 3,
+        "detail": "find_last_index(file: file | null) -> file | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "find_last_index"
+        }
+      },
+      {
+        "label": "frontmatter(file)",
+        "kind": 3,
+        "detail": "frontmatter(file: file | null) -> object | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "frontmatter"
+        }
+      },
+      {
+        "label": "frontmatter(file, prop)",
+        "kind": 3,
+        "detail": "frontmatter(file: file | null, prop: string) -> unknown | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "frontmatter"
+        }
+      },
+      {
+        "label": "has_binary(name_or_path)",
+        "kind": 3,
+        "detail": "has_binary(name_or_path: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_binary"
+        }
+      },
+      {
+        "label": "has_command(cmd)",
+        "kind": 3,
+        "detail": "has_command(cmd: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_command"
+        }
+      },
+      {
+        "label": "increment_file_index(file)",
+        "kind": 3,
+        "detail": "increment_file_index(file: file | null) -> file | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "increment_file_index"
+        }
+      },
+      {
+        "label": "is_file_type(value)",
+        "kind": 3,
+        "detail": "is_file_type(value: unknown | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_file_type"
+        }
+      },
+      {
+        "label": "is_indexed_file(file)",
+        "kind": 3,
+        "detail": "is_indexed_file(file: file | null) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "is_indexed_file"
+        }
+      },
+      {
+        "label": "join(left, right)",
+        "kind": 3,
+        "detail": "join(left: string | null, right: string | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "join"
+        }
+      },
+      {
+        "label": "link(file)",
+        "kind": 3,
+        "detail": "link(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "link"
+        }
+      },
+      {
+        "label": "link(target, desc)",
+        "kind": 3,
+        "detail": "link(target: file | null, desc: string | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "link"
+        }
+      },
+      {
+        "label": "markdown_body_empty(file)",
+        "kind": 3,
+        "detail": "markdown_body_empty(file: file | null) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "markdown_body_empty"
+        }
+      },
+      {
+        "label": "markdown_title(file)",
+        "kind": 3,
+        "detail": "markdown_title(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "markdown_title"
+        }
+      },
+      {
+        "label": "parent_dir(file)",
+        "kind": 3,
+        "detail": "parent_dir(file: file | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "parent_dir"
+        }
+      },
+      {
+        "label": "relative(file)",
+        "kind": 3,
+        "detail": "relative(file: file | null) -> file | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "relative"
+        }
+      },
+      {
+        "label": "try_frontmatter(file)",
+        "kind": 3,
+        "detail": "try_frontmatter(file: file | null) -> object | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "try_frontmatter"
+        }
+      },
+      {
+        "label": "validate_schema(file)",
+        "kind": 3,
+        "detail": "validate_schema(file: file | null) -> boolean | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "validate_schema"
+        }
+      },
+      {
+        "label": "validate_schema(file, obj)",
+        "kind": 3,
+        "detail": "validate_schema(file: file | null, obj: object) -> boolean | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "validate_schema"
+        }
+      },
+      {
+        "label": "has_local_skill(name)",
+        "kind": 3,
+        "detail": "has_local_skill(name: string | null) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_local_skill"
+        }
+      },
+      {
+        "label": "has_skill(name)",
+        "kind": 3,
+        "detail": "has_skill(name: string | null) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_skill"
+        }
+      },
+      {
+        "label": "as_csv(list)",
+        "kind": 3,
+        "detail": "as_csv(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_csv"
+        }
+      },
+      {
+        "label": "as_json(list)",
+        "kind": 3,
+        "detail": "as_json(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_json"
+        }
+      },
+      {
+        "label": "as_json5(list)",
+        "kind": 3,
+        "detail": "as_json5(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_json5"
+        }
+      },
+      {
+        "label": "as_line_separated(list)",
+        "kind": 3,
+        "detail": "as_line_separated(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_line_separated"
+        }
+      },
+      {
+        "label": "as_ordered_list(list)",
+        "kind": 3,
+        "detail": "as_ordered_list(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_ordered_list"
+        }
+      },
+      {
+        "label": "as_space_separated(list)",
+        "kind": 3,
+        "detail": "as_space_separated(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_space_separated"
+        }
+      },
+      {
+        "label": "as_tsv(list)",
+        "kind": 3,
+        "detail": "as_tsv(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_tsv"
+        }
+      },
+      {
+        "label": "as_unordered_list(list)",
+        "kind": 3,
+        "detail": "as_unordered_list(list: unknown[] | null) -> string | null",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_unordered_list"
+        }
+      },
+      {
+        "label": "branch_exists_on_remote()",
+        "kind": 3,
+        "detail": "branch_exists_on_remote() -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "branch_exists_on_remote"
+        }
+      },
+      {
+        "label": "branch_exists_on_remote(branch)",
+        "kind": 3,
+        "detail": "branch_exists_on_remote(branch: string) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "branch_exists_on_remote"
+        }
+      },
+      {
+        "label": "branch_exists_on_remote(branch, remote)",
+        "kind": 3,
+        "detail": "branch_exists_on_remote(branch: string, remote: string) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "branch_exists_on_remote"
+        }
+      },
+      {
+        "label": "predict_conflicts(branch)",
+        "kind": 3,
+        "detail": "predict_conflicts(branch: string | null) -> string[] | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "predict_conflicts"
+        }
+      },
+      {
+        "label": "recent_commits(count)",
+        "kind": 3,
+        "detail": "recent_commits(count: number(integer;min(1))) -> recent-commits | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "recent_commits"
+        }
+      },
+      {
+        "label": "remote_vendor([remote])",
+        "kind": 3,
+        "detail": "remote_vendor([remote: string]) -> enum('',github,gitlab,gitea,forgejo,bitbucket,azure_devops,aws_code_commit,source_hut) | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "remote_vendor"
+        }
+      },
+      {
+        "label": "pr(id)",
+        "kind": 3,
+        "detail": "pr(id: number(integer;min(1)) | string(min(1))) -> string | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "pr"
+        }
+      },
+      {
+        "label": "pr_list(query)",
+        "kind": 3,
+        "detail": "pr_list(query: object) -> string[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "pr_list"
+        }
+      },
+      {
+        "label": "pr_list(count)",
+        "kind": 3,
+        "detail": "pr_list(count: number(integer;min(1);max(100))) -> string[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "pr_list"
+        }
+      },
+      {
+        "label": "cicd(id)",
+        "kind": 3,
+        "detail": "cicd(id: number(integer;min(1)) | string(min(1))) -> string | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "cicd"
+        }
+      },
+      {
+        "label": "cicd_list(query)",
+        "kind": 3,
+        "detail": "cicd_list(query: object) -> string[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "cicd_list"
+        }
+      },
+      {
+        "label": "cicd_list(count)",
+        "kind": 3,
+        "detail": "cicd_list(count: number(integer;min(1);max(100))) -> string[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "cicd_list"
+        }
+      },
+      {
+        "label": "can_execute(name)",
+        "kind": 3,
+        "detail": "can_execute(name: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "can_execute"
+        }
+      },
+      {
+        "label": "has_alias(name)",
+        "kind": 3,
+        "detail": "has_alias(name: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_alias"
+        }
+      },
+      {
+        "label": "has_builtin_function(name)",
+        "kind": 3,
+        "detail": "has_builtin_function(name: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_builtin_function"
+        }
+      },
+      {
+        "label": "has_user_function(name)",
+        "kind": 3,
+        "detail": "has_user_function(name: string | null) -> boolean",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_user_function"
+        }
+      },
+      {
+        "label": "has_agentic_cli(agent)",
+        "kind": 3,
+        "detail": "has_agentic_cli(agent: agentic-cli | null) -> boolean | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "has_agentic_cli"
+        }
+      },
+      {
+        "label": "package(where)",
+        "kind": 3,
+        "detail": "package(where: file) -> string | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "package"
+        }
+      },
+      {
+        "label": "package_area(where)",
+        "kind": 3,
+        "detail": "package_area(where: file) -> string | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "package_area"
+        }
+      },
+      {
+        "label": "ipv4([filter])",
+        "kind": 3,
+        "detail": "ipv4([filter: string]) -> string[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ipv4"
+        }
+      },
+      {
+        "label": "ipv6([filter])",
+        "kind": 3,
+        "detail": "ipv6([filter: string]) -> string[] | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ipv6"
+        }
+      },
+      {
+        "label": "ping(address, [timeout])",
+        "kind": 3,
+        "detail": "ping(address: ip-address, [timeout: number]) -> boolean | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ping"
+        }
+      },
+      {
+        "label": "ping_under(address, timeout, [attempts])",
+        "kind": 3,
+        "detail": "ping_under(address: ip-address, timeout: number, [attempts: number(integer;min(1);max(100))]) -> boolean | enum(unstable) | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "ping_under"
+        }
+      },
+      {
+        "label": "as_markdown(content)",
+        "kind": 3,
+        "detail": "as_markdown(content: string | null) -> string | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "as_markdown"
+        }
+      },
+      {
+        "label": "timing",
+        "kind": 9,
+        "detail": "lifecycle global",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "timing"
+        }
+      },
+      {
+        "label": "seq",
+        "kind": 9,
+        "detail": "host global",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "seq"
+        }
+      },
+      {
+        "label": "group",
+        "kind": 9,
+        "detail": "host global",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "group"
+        }
+      }
+    ]
+  },
+  {
+    "at": "loop block key",
+    "items": []
+  },
+  {
+    "at": "top-level key",
+    "items": []
+  },
+  {
+    "at": "schema-typed value",
+    "items": []
+  }
+]

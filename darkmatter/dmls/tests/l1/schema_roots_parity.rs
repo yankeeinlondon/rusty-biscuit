@@ -44,7 +44,7 @@ fn init_repository(root: &Path) {
 }
 
 fn trigger(path_pattern: &str, payload: &str) -> String {
-    format!("kind: trigger-schema\nmatch:\n  $path: \"{path_pattern}\"\n$schema: {payload}\n")
+    format!("kind: schema-trigger\nmatch:\n  $path: \"{path_pattern}\"\n$schema: {payload}\n")
 }
 
 /// Writes a trigger named `{name}.trigger.yaml` with payload `{name}.yaml`
@@ -439,7 +439,11 @@ fn a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls() {
     let md_context = build_resolution_context(&fixture.snapshot(document.parent().unwrap()))
         .unwrap()
         .for_source(&document);
-    let md_error = scan(&md_context).expect_err("md's scan fails").to_string();
+    let md_registry = scan(&md_context).expect("md's scan skips the trigger");
+    let [finding] = md_registry.findings() else {
+        panic!("one finding expected: {:?}", md_registry.findings());
+    };
+    let md_error = finding.message();
     assert!(md_error.contains(&definition_error), "{md_error}");
 
     let mut session =

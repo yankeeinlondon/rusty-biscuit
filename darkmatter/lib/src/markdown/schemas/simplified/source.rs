@@ -4,15 +4,15 @@
 //!
 //! The locator covers the SimplifiedSchema authoring presentations exercised by
 //! the shipped schema corpus: plain, single-quoted, and double-quoted scalars,
-//! with a plain scalar allowed to continue onto more-indented lines; block
-//! sequences, including one aligned with its parent key, and flow sequences;
-//! implicit scalar-key block and flow mappings; explicit scalar-key block
-//! mapping pairs in mapping roots or compact sequence items; and the
-//! mapping-value anchors and scalar aliases used by that corpus. This is not a
-//! general YAML concrete-syntax tree. Other YAML presentations accepted by
-//! `serde_yaml_ng` (tags, block scalars, quoted scalars continued across lines)
-//! are outside the v1 source-map contract and return a projection error even
-//! when semantic parsing succeeds.
+//! with a plain scalar allowed to continue onto more-indented lines; literal
+//! and folded block scalars; block sequences, including one aligned with its
+//! parent key, and flow sequences; implicit scalar-key block and flow
+//! mappings; explicit scalar-key block mapping pairs in mapping roots or
+//! compact sequence items; and the mapping-value anchors and scalar aliases
+//! used by that corpus. This is not a general YAML concrete-syntax tree. Other
+//! YAML presentations accepted by `serde_yaml_ng` (tags, quoted scalars
+//! continued across lines) are outside the v1 source-map contract and return a
+//! projection error even when semantic parsing succeeds.
 
 use std::{collections::BTreeMap, ops::Range};
 
@@ -23,9 +23,9 @@ use crate::markdown::schemas::errors::SchemaError;
 use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape,
-    SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition, parse_schema_declaration,
-    parse_yaml_schema,
+    Constraint, DefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
+    SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition_located,
+    parse_schema_declaration, parse_schema_declaration_located, parse_yaml_schema,
 };
 
 /// One segment in a structural path through a schema declaration.
@@ -65,6 +65,15 @@ impl SchemaSourcePath {
     pub fn segments(&self) -> &[SchemaSourcePathSegment] {
         &self.0
     }
+
+    /// Returns `suffix` addressed from this path: a failure path recorded
+    /// relative to a definition becomes a path relative to its envelope by
+    /// prefixing (`root().property("types").join(&failure_path)`).
+    pub fn join(&self, suffix: &SchemaSourcePath) -> Self {
+        let mut path = self.clone();
+        path.0.extend(suffix.0.iter().cloned());
+        path
+    }
 }
 
 /// Renders properties joined by `.` and union arms as `[N]`; the root is
@@ -100,7 +109,7 @@ pub enum SchemaSourceId {
     /// A schema file, by the canonical path the resolver loaded it from.
     File(std::path::PathBuf),
     /// A schema document compiled into the binary, by its repository-relative
-    /// virtual path (`darkmatter/docs/schemas/darkmatter.yaml`). It names no
+    /// virtual path (`darkmatter/schemas/partials/fm.yaml`). It names no
     /// host file: never read, watched, or reported as one.
     Embedded(String),
 }
@@ -138,6 +147,81 @@ pub struct SchemaConstraintOrigin {
     /// Byte range of the complete constraint in `source`, when the producer
     /// held that source's text.
     pub span: Option<Range<usize>>,
+}
+
+/// One constraint taking part in a
+/// [`SchemaError::ConstraintConflict`]: where it was declared, and the value
+/// that took part in the failing merge.
+///
+/// `constraint` is the effective value at the merge, which need not be the
+/// text at `origin`: an inherited `scheme(...)` list is the intersection of
+/// every earlier successful merge, and a named type declared as bare
+/// `alphanumeric` takes part as `Constraint::Options(vec![])` at a synthetic
+/// origin naming its declaration (no constraint span).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaConstraintParticipant {
+    /// Where the constraint was declared.
+    pub origin: SchemaConstraintOrigin,
+    /// The complete constraint that took part in the conflict.
+    pub constraint: Constraint,
+}
+
+/// A semantic definition failure together with the authored location of the
+/// node it rejected.
+///
+/// `path` addresses the rejected node (or, for a structural failure with no
+/// scalar token, the nearest containing value) from the root of the supplied
+/// YAML: a property-definition call starts at that definition, a declaration
+/// call at the declaration, and a standalone schema document at its envelope,
+/// so its paths begin with `types` or `$schema`. Union arms, including
+/// root-union arms, are addressed by zero-based index.
+///
+/// Both ranges are UTF-8 byte offsets into the caller's document, with the
+/// caller's `source_offset` applied once. `authored_span` is the rejected
+/// scalar token; `value_span` is the whole rejected value, for fallback.
+/// Either is `None` when it cannot be projected trustworthily; `error` is
+/// returned regardless. `related` holds the error's
+/// [`GrammarRelated`](crate::markdown::schemas::GrammarRelated) locations
+/// projected the same way; one that cannot be projected is left out.
+#[derive(Debug)]
+pub struct LocatedDefinitionFailure {
+    /// Structural path of the rejected node.
+    pub path: SchemaSourcePath,
+    /// The semantic error the source-free parser returns for the same input.
+    /// Boxed to keep `Result<_, LocatedDefinitionFailure>` within clippy's
+    /// `result_large_err` budget.
+    pub error: Box<SchemaError>,
+    /// The rejected scalar token's byte range, when projectable.
+    pub authored_span: Option<Range<usize>>,
+    /// The rejected value's byte range, when locatable.
+    pub value_span: Option<Range<usize>>,
+    /// The error's secondary locations, as labelled byte ranges.
+    pub related: Vec<LocatedRelated>,
+}
+
+/// One projected secondary location of a [`LocatedDefinitionFailure`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedRelated {
+    pub message: String,
+    pub span: Range<usize>,
+}
+
+impl std::fmt::Display for LocatedDefinitionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&*self.error, f)
+    }
+}
+
+impl std::error::Error for LocatedDefinitionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.error)
+    }
+}
+
+impl From<LocatedDefinitionFailure> for SchemaError {
+    fn from(failure: LocatedDefinitionFailure) -> Self {
+        *failure.error
+    }
 }
 
 /// The consuming named-type reference a resolution diagnostic belongs to.
@@ -335,18 +419,23 @@ pub struct SourceAware<T> {
 ///
 /// ## Errors
 ///
-/// A grammar error from the semantic parser, or the projection error when the
-/// source is outside the strict presentation grammar or does not decode to
-/// `value`.
+/// A semantic failure returns the source-free parser's error, its path from
+/// this definition, and whatever authored ranges can be projected for the
+/// rejected node (see [`LocatedDefinitionFailure`]). When the semantic parse
+/// succeeds but the source is outside the strict presentation grammar or does
+/// not decode to `value`, the projection error is returned at the root path
+/// with no ranges.
 pub fn parse_property_definition_with_source(
     property: &str,
     value: &YamlValue,
     yaml_source: &str,
     source_offset: usize,
-) -> Result<SourceAware<PropertyDef>, SchemaError> {
-    let parsed = parse_property_definition(property, value)?;
-    let located = locate_yaml_value(yaml_source)?;
-    verify_located(&located, value)?;
+) -> Result<SourceAware<PropertyDef>, LocatedDefinitionFailure> {
+    let parsed = parse_property_definition_located(property, value).map_err(|failure| {
+        locate_definition_failure(failure, value, yaml_source, source_offset)
+    })?;
+    let located = locate_yaml_value(yaml_source).map_err(unlocated_failure)?;
+    verify_located(&located, value).map_err(unlocated_failure)?;
     let value = parsed;
     let mut source_map = SchemaSourceMap::default();
     project_property_source(
@@ -355,20 +444,28 @@ pub fn parse_property_definition_with_source(
         &SchemaSourcePath::root(),
         source_offset,
         &mut source_map,
-    )?;
+    )
+    .map_err(unlocated_failure)?;
     Ok(SourceAware { value, source_map })
 }
 
 /// Parses one complete schema declaration and projects its structure into
 /// authored source byte ranges without resolving references.
+///
+/// ## Errors
+///
+/// As [`parse_property_definition_with_source`], with failure paths starting
+/// at the declaration.
 pub fn parse_schema_declaration_with_source(
     value: &YamlValue,
     yaml_source: &str,
     source_offset: usize,
-) -> Result<SourceAware<SchemaDeclaration>, SchemaError> {
-    let parsed = parse_schema_declaration(value)?;
-    let located = locate_yaml_value(yaml_source)?;
-    verify_located(&located, value)?;
+) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
+    let parsed = parse_schema_declaration_located(value).map_err(|failure| {
+        locate_definition_failure(failure, value, yaml_source, source_offset)
+    })?;
+    let located = locate_yaml_value(yaml_source).map_err(unlocated_failure)?;
+    verify_located(&located, value).map_err(unlocated_failure)?;
     let value = parsed;
     let mut source_map = SchemaSourceMap::default();
     let root = SchemaSourcePath::root();
@@ -385,13 +482,216 @@ pub fn parse_schema_declaration_with_source(
                 SchemaSpanKind::FileReference,
                 source_offset,
                 &mut source_map,
-            )?;
+            )
+            .map_err(unlocated_failure)?;
         }
         SchemaDeclaration::Schema(schema) => {
-            project_schema_source(schema, &located, source_offset, &mut source_map)?;
+            project_schema_source(schema, &located, source_offset, &mut source_map)
+                .map_err(unlocated_failure)?;
         }
     }
     Ok(SourceAware { value, source_map })
+}
+
+/// Finds the first definition failure in a standalone schema document and
+/// locates it in `source`.
+///
+/// Recognition and number admission are the standalone classifier's own
+/// ([`parse_standalone_schema_document`](super::parse_standalone_schema_document)),
+/// and the payload is parsed by the same shared parser, so the failure is the
+/// semantic error that parser reports first. Its path starts at the envelope:
+/// `types` for a tagged document, `$schema` for a pure one (including root-union
+/// mapping arms, by index). Ranges are byte offsets into `source`.
+///
+/// ## Returns
+///
+/// `None` for a valid payload, an unrecognized document, invalid YAML, and
+/// every outer envelope or declaration-shape failure (a global catalog, a
+/// malformed envelope, a payload or root-union arm of the wrong type, an
+/// invalid whole-file reference), all of which the classifier reports. A
+/// recognized definition failure is returned even when neither range can be
+/// projected.
+///
+/// ## Notes
+///
+/// Passive: parses `source` once, parses the payload once, and locates the
+/// authored tree at most once; it reads no files, resolves no imports, and
+/// evaluates nothing.
+pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefinitionFailure> {
+    let recognized = super::standalone::recognize_standalone(source).ok()??;
+    let payload = recognized.payload();
+    let failure = parse_schema_declaration_located(payload).err()?;
+    // A failure on no property is the declaration's own shape, not a definition.
+    if !failure
+        .path
+        .segments()
+        .iter()
+        .any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_)))
+    {
+        return None;
+    }
+    let payload_key = recognized.payload_key();
+    let located = locate_yaml_value(source).ok();
+    let located_payload = located.as_ref().and_then(|located| match &located.kind {
+        LocatedKind::Mapping(pairs) => pairs
+            .iter()
+            .find(|pair| pair.key == payload_key)
+            .map(|pair| &pair.value),
+        _ => None,
+    });
+    Some(project_definition_failure(
+        failure,
+        located_payload.map(|located| (located, payload)),
+        &SchemaSourcePath::root().property(payload_key),
+        0,
+    ))
+}
+
+/// A projection error after a successful semantic parse: nothing was
+/// rejected, so there is no node to locate.
+fn unlocated_failure(error: SchemaError) -> LocatedDefinitionFailure {
+    LocatedDefinitionFailure {
+        path: SchemaSourcePath::root(),
+        error: Box::new(error),
+        authored_span: None,
+        value_span: None,
+        related: Vec::new(),
+    }
+}
+
+/// Locates `failure`, whose path is relative to `value`, in `yaml_source`
+/// (the authored text of `value`). An unlocatable source keeps the semantic
+/// error with no ranges.
+fn locate_definition_failure(
+    failure: DefinitionFailure,
+    value: &YamlValue,
+    yaml_source: &str,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let located = locate_yaml_value(yaml_source).ok();
+    project_definition_failure(
+        failure,
+        located.as_ref().map(|located| (located, value)),
+        &SchemaSourcePath::root(),
+        source_offset,
+    )
+}
+
+/// Projects `failure` through `root`, the located tree paired with the YAML
+/// value the semantic parser read, and prefixes its path with `prefix`.
+///
+/// Every step along the path must agree structurally with the parsed value,
+/// and a token is projected only through a scalar whose decoded text equals
+/// the string the parser rejected; anything less leaves the range `None`
+/// rather than pointing at another node.
+fn project_definition_failure(
+    failure: DefinitionFailure,
+    root: Option<(&LocatedValue, &YamlValue)>,
+    prefix: &SchemaSourcePath,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let rejected = root.and_then(|(located, value)| follow_path(located, value, &failure.path));
+    let value_span = rejected
+        .filter(|(located, value)| verify_located(located, value).is_ok())
+        .map(|(located, _)| offset_span(&located.span, source_offset));
+    let (authored_span, related) = match &*failure.error {
+        SchemaError::Grammar { span, related, .. } => {
+            let related = related
+                .iter()
+                .filter_map(|entry| {
+                    // `arm` names a sibling option of the rejected one.
+                    let node = match entry.arm {
+                        None => rejected,
+                        Some(arm) => root.and_then(|(located, value)| {
+                            follow_path(located, value, &sibling_arm(&failure.path, arm)?)
+                        }),
+                    };
+                    let span = project_token(node, &entry.span, source_offset)?;
+                    Some(LocatedRelated { message: entry.message.clone(), span })
+                })
+                .collect();
+            (project_token(rejected, span, source_offset), related)
+        }
+        _ => (None, Vec::new()),
+    };
+    LocatedDefinitionFailure {
+        path: prefix.join(&failure.path),
+        error: failure.error,
+        authored_span,
+        value_span,
+        related,
+    }
+}
+
+/// `span`, a range in the decoded text of the string scalar `node`, in
+/// authored bytes; `None` unless `node` is that scalar and the range
+/// projects to a non-empty one.
+fn project_token(
+    node: Option<(&LocatedValue, &YamlValue)>,
+    span: &Range<usize>,
+    source_offset: usize,
+) -> Option<Range<usize>> {
+    match node? {
+        (
+            LocatedValue {
+                kind: LocatedKind::Scalar(scalar),
+                ..
+            },
+            YamlValue::String(text),
+        ) if !span.is_empty() && scalar.decoded() == text => scalar
+            .project(span.clone())
+            .filter(|projected| !projected.is_empty())
+            .map(|projected| offset_span(&projected, source_offset)),
+        _ => None,
+    }
+}
+
+/// `path` with its final union-arm index replaced by `arm`; `None` when
+/// `path` does not end in a union arm.
+fn sibling_arm(path: &SchemaSourcePath, arm: usize) -> Option<SchemaSourcePath> {
+    let (last, parent) = path.0.split_last()?;
+    matches!(last, SchemaSourcePathSegment::UnionArm(_)).then(|| {
+        let mut segments = parent.to_vec();
+        segments.push(SchemaSourcePathSegment::UnionArm(arm));
+        SchemaSourcePath(segments)
+    })
+}
+
+/// The located node and parsed value `path` addresses, following both trees
+/// in lockstep. `None` as soon as they disagree in shape, size, or key.
+fn follow_path<'a>(
+    mut located: &'a LocatedValue,
+    mut value: &'a YamlValue,
+    path: &SchemaSourcePath,
+) -> Option<(&'a LocatedValue, &'a YamlValue)> {
+    for segment in path.segments() {
+        match (segment, &located.kind, value) {
+            (
+                SchemaSourcePathSegment::Property(key),
+                LocatedKind::Mapping(pairs),
+                YamlValue::Mapping(map),
+            ) if pairs.len() == map.len() => {
+                let (index, (_, child)) = map
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (candidate, _))| candidate.as_str() == Some(key.as_str()))?;
+                let pair = &pairs[index];
+                if pair.key != *key {
+                    return None;
+                }
+                (located, value) = (&pair.value, child);
+            }
+            (
+                SchemaSourcePathSegment::UnionArm(index),
+                LocatedKind::Sequence(items),
+                YamlValue::Sequence(values),
+            ) if items.len() == values.len() => {
+                (located, value) = (items.get(*index)?, values.get(*index)?);
+            }
+            _ => return None,
+        }
+    }
+    Some((located, value))
 }
 
 pub(super) fn parse_standalone_schema_payload_with_source(
@@ -512,6 +812,12 @@ fn project_located_property_suggestions(
     }
     match (definition, &located.kind) {
         (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located),
+        (PropertyDef::Union(atoms), LocatedKind::Scalar(scalar)) => {
+            for atom in atoms {
+                project_atom_suggestions(atom, scalar, 0)?;
+            }
+            Ok(())
+        }
         (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
             for (atom, item) in atoms.iter_mut().zip(items) {
                 project_located_atom_suggestions(atom, item)?;
@@ -613,10 +919,10 @@ pub struct SchemaValueEntry {
 /// be dedented as a whole. A slice starting at a block mapping's first key
 /// reads that key at column 0 and its siblings as continuation text.
 ///
-/// The grammar is strict: indentless block sequences and plain scalars
-/// continued onto more-indented lines are followed, and every non-comment
-/// line must belong to the value. Block scalars, tags, multi-line quoted
-/// scalars, and empty (null) values are not.
+/// The grammar is strict: indentless block sequences, literal and folded
+/// block scalars, and plain scalars continued onto more-indented lines are
+/// followed, and every non-comment line must belong to the value. Tags,
+/// multi-line quoted scalars, and empty (null) values are not.
 ///
 /// ## Returns
 ///
@@ -629,9 +935,8 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 }
 
 /// [`locate_schema_value`] for a document's frontmatter, which also follows a
-/// literal (`|`) or folded (`>`) block scalar, a multi-line quoted scalar, a
-/// tag, and an empty value instead of giving up, and does not require every
-/// line to belong to the value.
+/// multi-line quoted scalar, a tag, and an empty value instead of giving up,
+/// and does not require every line to belong to the value.
 ///
 /// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.
@@ -706,9 +1011,9 @@ enum LocatorGrammar {
     /// belong to the located node, so a presentation the locator does not
     /// model fails instead of leaving lines unread.
     Strict,
-    /// Frontmatter lookup, which also follows tags, block scalars, multi-line
-    /// quoted scalars, empty (null) values, and compact sequence items wider
-    /// than `- `.
+    /// Frontmatter lookup, which also follows tags, multi-line quoted
+    /// scalars, empty (null) values, and compact sequence items wider than
+    /// `- `.
     Tolerant,
 }
 
@@ -1048,12 +1353,13 @@ impl BlockLocator<'_> {
                 || raw.starts_with(['\'', '"'])
                 || (continues && !raw.starts_with(['[', '{']))
         } else {
-            // Only a plain scalar: a quoted, tagged, anchored, or aliased
-            // first line stays single-line here, so its continuation lines
-            // go unconsumed and the strict grammar rejects the document.
-            continues
-                && !is_block_scalar_header(raw)
-                && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*'])
+            // A literal or folded block scalar, the form multi-line type
+            // expressions such as `function(...)` signatures are written in,
+            // or a continued plain scalar: a quoted, tagged, anchored, or
+            // aliased first line stays single-line here, so its continuation
+            // lines go unconsumed and the strict grammar rejects the document.
+            is_block_scalar_header(raw)
+                || (continues && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*']))
         };
         if !multi_line {
             return locate_inline(self.source, range);
@@ -1633,6 +1939,14 @@ fn project_property_source(
             record_atom_span(located, path, source_offset, source_map)?;
             project_atom_source(atom, located, path, source_offset, source_map)
         }
+        (PropertyDef::Union(_), LocatedKind::Scalar(scalar)) => scan_definition_range(
+            definition,
+            scalar,
+            path,
+            0..scalar.decoded().len(),
+            source_offset,
+            source_map,
+        ),
         (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
             for (index, (atom, item)) in atoms.iter().zip(items).enumerate() {
                 let arm_path = path.union_arm(index);
@@ -1752,6 +2066,11 @@ fn scan_expression_range(
     if source.as_bytes().get(expression.start) == Some(&b'{') {
         return scan_constraint_groups(scalar, path, expression, source_offset, source_map);
     }
+    // A grouped union, `(A | B)[]`, names no single type and has no
+    // constraint list of its own.
+    if source.as_bytes().get(expression.start) == Some(&b'(') {
+        return Ok(());
+    }
 
     let name = leading_identifier(source, expression.clone()).ok_or_else(projection_error)?;
     if let Some(at) = find_top_level_byte(
@@ -1857,26 +2176,73 @@ fn project_inline_shape_range(
                     .map(|pattern| &pattern.def)
             })
         });
-        let PropertyDef::Single(atom) = definition.ok_or_else(projection_error)? else {
-            return Err(projection_error());
-        };
-        scan_expression_range(
+        scan_definition_range(
+            definition.ok_or_else(projection_error)?,
             scalar,
             &property_path,
-            definition_span.clone(),
+            definition_span,
             source_offset,
             source_map,
         )?;
-        if let TypeExpr::InlineObject(nested) = &atom.ty {
-            project_inline_shape_range(
-                nested,
-                scalar,
-                &property_path,
-                definition_span,
-                source_offset,
-                source_map,
-            )?;
+    }
+    Ok(())
+}
+
+/// Records the spans of the definition written in `range` of `scalar`: one
+/// type expression, or a `|` union whose options are recorded as union arms.
+/// A union whose written options do not line up with its parsed ones (a
+/// parenthesized group joins its options to the union) records only its
+/// whole span.
+fn scan_definition_range(
+    definition: &PropertyDef,
+    scalar: &DecodedScalar,
+    path: &SchemaSourcePath,
+    range: Range<usize>,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    let source = scalar.decoded();
+    let atoms = match definition {
+        PropertyDef::Single(atom) => {
+            return scan_atom_range(atom, scalar, path, range, source_offset, source_map);
         }
+        PropertyDef::Union(atoms) => atoms,
+    };
+    let arms = split_top_level(source, range.clone(), ExpressionContext::Expression, b'|');
+    if arms.len() != atoms.len() {
+        return insert_projected(
+            scalar,
+            path,
+            SchemaSpanKind::Atom,
+            trim_local(source, range),
+            source_offset,
+            source_map,
+        );
+    }
+    for (index, (atom, arm)) in atoms.iter().zip(arms).enumerate() {
+        let arm = trim_local(source, arm);
+        let arm_path = path.union_arm(index);
+        insert_projected(scalar, &arm_path, SchemaSpanKind::UnionArm, arm.clone(), source_offset, source_map)?;
+        insert_projected(scalar, &arm_path, SchemaSpanKind::Definition, arm.clone(), source_offset, source_map)?;
+        scan_atom_range(atom, scalar, &arm_path, arm, source_offset, source_map)?;
+    }
+    Ok(())
+}
+
+fn scan_atom_range(
+    atom: &PropertyAtom,
+    scalar: &DecodedScalar,
+    path: &SchemaSourcePath,
+    range: Range<usize>,
+    source_offset: usize,
+    source_map: &mut SchemaSourceMap,
+) -> Result<(), SchemaError> {
+    scan_expression_range(scalar, path, range.clone(), source_offset, source_map)?;
+    let source = scalar.decoded();
+    if let TypeExpr::InlineObject(nested) = &atom.ty
+        && source.as_bytes().get(trim_local(source, range.clone()).start) == Some(&b'{')
+    {
+        project_inline_shape_range(nested, scalar, path, range, source_offset, source_map)?;
     }
     Ok(())
 }
@@ -2331,7 +2697,11 @@ fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
             TypeExpr::Union(arms) => arms.iter().any(atom_has_suggestions),
-            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => false,
+            TypeExpr::Primitive(_)
+            | TypeExpr::Imported { .. }
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Function(_)
+            | TypeExpr::Ref(_) => false,
         }
 }
 
@@ -2396,6 +2766,7 @@ fn projection_error() -> SchemaError {
         property: "<source>".into(),
         message: "could not project SimplifiedSchema expression spans through YAML source".into(),
         span: 0..0,
+        related: Vec::new(),
     }
 }
 
@@ -2566,8 +2937,8 @@ mod tests {
         assert_eq!(SchemaSourceId::InlineDocument.to_string(), "the inline `$schema`");
         let file = std::path::PathBuf::from("types.yaml");
         assert_eq!(SchemaSourceId::File(file).to_string(), "`types.yaml`");
-        let embedded = SchemaSourceId::Embedded("darkmatter/docs/schemas/darkmatter.yaml".into());
-        assert_eq!(embedded.to_string(), "embedded `darkmatter/docs/schemas/darkmatter.yaml`");
+        let embedded = SchemaSourceId::Embedded("darkmatter/schemas/partials/fm.yaml".into());
+        assert_eq!(embedded.to_string(), "embedded `darkmatter/schemas/partials/fm.yaml`");
     }
 
     #[test]

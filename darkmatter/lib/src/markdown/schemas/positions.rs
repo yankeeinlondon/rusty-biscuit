@@ -1,9 +1,13 @@
 //! Authored source positions for frontmatter validation problems.
 //!
-//! A [`PositionMap`] is built once per validation source snapshot and shared
-//! by every problem that snapshot produces, including each root-union arm.
-//! Lookup is passive: it never parses, evaluates, or resolves anything.
+//! A [`PositionMap`] is built at most once per validation source snapshot and
+//! shared by every problem that snapshot reports, including each root-union
+//! arm. Problems are located only after a validation has decided its final
+//! problem list ([`ProblemPositions`]), so a document-level validation that
+//! reports nothing never builds a map. Lookup is passive: it never parses,
+//! evaluates, or resolves anything.
 
+use std::cell::OnceCell;
 use std::ops::Range;
 
 use biscuit_file::serde_yaml_ng;
@@ -13,7 +17,8 @@ use super::simplified::{
     SchemaValueKind, SchemaValueNode, locate_frontmatter_value, mapping_separator,
     yaml_scalar::alias_token,
 };
-use crate::markdown::MappingOrders;
+use super::{ValidationProblem, ValidationProblemCode};
+use crate::markdown::{Markdown, MappingOrders};
 
 /// Source coordinates for one frontmatter snapshot, used to annotate
 /// [`ValidationProblem`](super::ValidationProblem)s with a 1-based line and a
@@ -189,6 +194,60 @@ impl PositionMap {
             }
         }
     }
+
+    /// Sets `problem`'s line and column to the authored token its category
+    /// identifies at its instance path, or clears them when none is located.
+    fn locate_problem(&self, problem: &mut ValidationProblem) {
+        // An unknown key's pointer names the parent mapping, and a missing key
+        // has no node of its own, so the category picks the authored token to
+        // report.
+        let target = match (problem.code, problem.offending_property.as_deref()) {
+            (ValidationProblemCode::MissingRequired, _) => PositionTarget::Mapping,
+            (_, Some(key)) => PositionTarget::Key(key),
+            _ => PositionTarget::Value,
+        };
+        let located = self.locate(problem.instance_path.segments(), target);
+        problem.line = located.map(|(line, _)| line);
+        problem.column = located.map(|(_, column)| column);
+    }
+}
+
+/// The source positions one validation locates its final problems with.
+///
+/// Problems are built without coordinates and located together once the
+/// validation has settled which of them it reports: excused template
+/// problems, losing root-union arms, and replaced union reports are never
+/// located. A `Deferred` source builds its [`PositionMap`] from the document
+/// the first time a report holds a problem and reuses it for any later one, so
+/// a report with no problems builds none and one with many builds one.
+pub(super) enum ProblemPositions<'a> {
+    /// A map the caller already built (possibly the empty map).
+    Built(&'a PositionMap),
+    /// The map of `source`, built on first use.
+    Deferred { source: &'a Markdown, map: OnceCell<PositionMap> },
+}
+
+impl<'a> ProblemPositions<'a> {
+    /// Positions drawn from `source`'s authored frontmatter, built only if a
+    /// problem needs one (see [`super::positions_for`]).
+    pub(super) fn deferred(source: &'a Markdown) -> Self {
+        Self::Deferred { source, map: OnceCell::new() }
+    }
+
+    /// Locates every problem of a settled report; builds nothing when
+    /// `problems` is empty.
+    pub(super) fn locate_all(&self, problems: &mut [ValidationProblem]) {
+        if problems.is_empty() {
+            return;
+        }
+        let map = match self {
+            Self::Built(map) => *map,
+            Self::Deferred { source, map } => map.get_or_init(|| super::positions_for(source)),
+        };
+        for problem in problems {
+            map.locate_problem(problem);
+        }
+    }
 }
 
 /// The authored start selected for `target` at `segments` below `root`.
@@ -200,7 +259,10 @@ fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget
             SchemaValueKind::Scalar => return Some(node.span.start),
             SchemaValueKind::Mapping(entries) => entries
                 .iter()
-                .find(|entry| entry.key == *segment)
+                .find(|entry| {
+                    crate::note_work!(PositionKeyComparison);
+                    entry.key == *segment
+                })
                 .map(|entry| &entry.value),
             SchemaValueKind::Sequence(items) => {
                 segment.parse::<usize>().ok().and_then(|index| items.get(index))
@@ -217,7 +279,10 @@ fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget
     match (target, &node.kind) {
         (PositionTarget::Key(key), SchemaValueKind::Mapping(entries)) => entries
             .iter()
-            .find(|entry| entry.key == key)
+            .find(|entry| {
+                crate::note_work!(PositionKeyComparison);
+                entry.key == key
+            })
             .map(|entry| entry.key_span.start)
             .or(deepest_non_root),
         (PositionTarget::Key(_), SchemaValueKind::Scalar) => Some(node.span.start),

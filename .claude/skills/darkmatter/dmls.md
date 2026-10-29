@@ -10,6 +10,7 @@ workspace, completion, hover, and diagnostic work.
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
+- [Call diagnostics](#call-diagnostics)
 - [Rollout chronology](#rollout-chronology)
 - [Verification](#verification)
 
@@ -193,8 +194,8 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   use either as a barrier, and its response lists a `File` symbol per
   document beside each heading. `work_counters::registry_scan_threads`
   names every thread a registry scan ran on.
-  Startup's registry preparation publishes a failing trigger file's
-  (unversioned) diagnostic before any open; wait for the versioned one.
+  Startup's registry preparation publishes a skipped trigger file's
+  (unversioned) warning before any open; wait for the versioned one.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
   `arena::locate` takes the first planned candidate when it is a graph
   document (listed or open; no probe), else asks
@@ -371,11 +372,34 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   covered by the folder rule (its parent holds the payload), so a test of the
   folder-above-a-candidate rule needs a nested absent folder
   (`schemas/shared/deep/` under an existing `schemas/shared/`). Protocol tests:
-  `tests/l1/searched_candidates.rs`. Failure logging and trigger-file
-  diagnostics share one transition record per (workspace boundary,
-  document folder): `warn` when new, `debug` on a repeat, `info` on
-  recovery; a cold failure logs `trigger registry unavailable`. Root I/O
-  errors (including a non-UTF-8 root file) never serve last-good data.
+  `tests/l1/searched_candidates.rs`.
+- Skipped (invalid) triggers: a scan with findings is `Outcome::Ready` and
+  installs its valid subset, even an empty one; there is no last-good
+  retention for them, and `failed_scopes` never counts them (only
+  `failed_triggers`). `TriggerRegistries::reconcile_warnings` runs after
+  every install: it folds every scope's served findings (stale scopes
+  included, by sorted scope path, keyed by `InvalidTriggerFinding::identity`)
+  and diffs them with the published set, pushing a
+  `TriggerDiagnosticTransition { path, finding }` and one `warn` log
+  (`ignoring invalid schema trigger …`, `trigger=`, `code=`) only for a new
+  or changed finding, and a clear plus `info` (`invalid schema trigger no
+  longer reported`) when no scope reports it. Embedded findings are logged,
+  never published. Closed files get `diagnostics::frontmatter::invalid_trigger_diagnostic`
+  (warning, line of a YAML error, related information = `cause_path`); an
+  open trigger whose buffer envelope parses gets
+  `SuggestionState::TriggerWarning` from `finding_for`, while a malformed
+  buffer keeps the strict `TriggerError` (`dm.schema.prepare`) and wins;
+  `didClose` republishes the warning (`closed_file_diagnostics`). Triggered
+  schemas only produce document diagnostics in `[schema] strict = true`, so
+  a session test of trigger properties sets it. Tests:
+  `tests/l1/invalid_trigger_warnings.rs`, the registry unit tests.
+- Whole-scope failures (root I/O, a non-UTF-8 root file → `RootFailed`, never
+  last-good; a case-fold collision → `TriggerFailed`, last-good) log through
+  one record per (workspace boundary, document folder): `warn` when new,
+  `debug` on a repeat, `info` on recovery; a cold failure logs `trigger
+  registry unavailable`. They publish no trigger-file diagnostic. A
+  `TriggerFailed` case can't be built on a case-insensitive file system; the
+  unit test substitutes `Prepared::result`.
 - Request timing (`request_timing`): the router starts a `RequestTimings` on
   `ServerState` at each dequeue and emits exactly one `CompletionEvent` per
   request or notification (`slow request`/`slow notification` at `warn` from
@@ -386,6 +410,19 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   A request parked on a registry job uses `begin_registry_wait`; `proceed`
   and `answer_waiter` call `end_registry_wait`, so `trigger_registry_wait_ms`
   sums every parked interval (requeue, cancel, shutdown included).
+- Slow-validation log (`validation_timing`): `refresh_diagnostics` opens
+  `validation_timing::collect`; schema work inside it runs in
+  `validation_timing::part` (each a library `ValidationTimings::record`,
+  absorbed), so other providers never count. Parts today: the registry
+  freshness check and lookup (`ValidationStage::Discover.time`),
+  `schema::assemble` (DMLS extension merge and baseline setup timed as
+  `Resolve`), and the diagnostics `validate_with_options`. `schema_for`
+  calls `note_assembly`; a ready bundle served from the overlay cache is
+  reported as compile `hit`. One event per refresh that reached
+  `schema_for` (`slow schema validation` at `warn` when total >=
+  `schema.slow_validation_ms`, default 200, else `schema validation
+  complete` at `debug`). `schema_cache_key` excludes the threshold. Tests:
+  `tests/l1/validation_timing_log.rs`.
 - Payload memo (`triggers/assemble.rs::file_payload_memo`, process-wide,
   32-entry true LRU, successes only): keyed by what resolution reads, never
   the requester's folder — trigger path, payload value, schema roots, the
@@ -412,6 +449,12 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `RunOptions::with_clock` injects the clock. Never log text, frontmatter
   values, or payloads; `lsp_server`'s own debug trace already prints full
   payloads, so a leak test must scope to `dmls`/`darkmatter` records.
+- Log-assertion trap: `request_timing` logs a finished request as
+  `request complete` (DEBUG) below its threshold and `slow request` (WARN)
+  above it, and a loaded host crosses that threshold. A test that finds a
+  request's completion line must match both messages, never `matching("request
+  complete")` alone; likewise `validation_timing`'s `slow schema validation`
+  WARN appears only under load, so never compare a whole captured sequence.
 - Fixture traps: sniff recognizes a package only under a workspace manifest,
   and counts a declared member whose directory exists even without its own
   manifest. Inline `$schema` `file` is lazy (syntax only); use `file(eager)`
@@ -428,9 +471,14 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Named-type references (`overlay/named_types.rs`,
   `providers/frontmatter/named_references.rs`, `diagnostics/named_types.rs`):
   hover and go-to-definition on bare, `@this`, and cross-file spellings;
-  `UnknownNamedType`/`ConstraintConflict`/`ImportCycle` publish as
-  `dm.schema.invalid_type_definition` on the reference's `ImportName` span
-  with conflict origins as `relatedInformation`. Standalone schema files
+  `UnknownNamedType`/`ConstraintConflict`/`NonDescendingCycle`/`ImportCycle`
+  publish as `dm.schema.invalid_type_definition` on the reference's
+  `ImportName` span with each conflict participant as `relatedInformation`
+  carrying its value (`` `max(5)` is declared here ``; see
+  [schema.md](schema.md) for the scheme wording and located grammar
+  failures, never re-derived by reparsing) (a
+  non-descending cycle is ranged on the first cycle reference this document
+  wrote; the others are related information). Standalone schema files
   resolve their references through `resolve::expand_named_types`. Imported
   files are dependency edges, and a failed assembly records the files its
   error names so a fix clears it; local references add no edge.
@@ -440,21 +488,134 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Definition hover adds `schema_type_descriptor` text and, for
   `alphanumeric`, `PropertyAtom::alphanumeric_options()` with the
   `AsciiCharSet` `Display` rendering.
+- Frontmatter key hover on a stored definition (`$defs`, cyclic or shared
+  acyclic) whose body resolves to two or more alternatives lists them as the
+  inlined union did (`providers/frontmatter.rs::stored_union_type_line`);
+  any other stored reference renders "`X` is defined as". Hovering opens only
+  the top-level references of the hovered type.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.
+- Hover shows the local narrowed type ("Type here") at body sites and
+  inside expressions: `providers/dsl.rs::with_site_scope` builds
+  `BodyGuards::scope_at` over `DeclaredTypes`, and `overlay/expressions.rs`
+  `hover_markdown*` take a `site: &TypeScope` and refine it with
+  `branch_scope`. Lifecycle/task `when` guards do not narrow the hover of
+  frontmatter actions (call diagnostics in lifecycle stacks are narrowed;
+  task bodies are not); see `dmls/docs/hover.md`.
+- Lifecycle stacks: `overlay/event_views.rs::LifecycleHost::for_document`
+  selects the document's host: the first host catalog whose
+  `<stem>.lifecycle.json` loads
+  (`schemas::catalog::host_lifecycle_profiles` →
+  `lifecycle::host_profile::HostLifecycleProfile`; Claudine's
+  `claudine/schemas/globals.lifecycle.json`), else `md_host`. Its registry's
+  `resolve_key` (never a hand list) maps a root key to a `StackEvent`
+  (event plus registry) and gives every `{{ … }}` span, `when` condition, and
+  expression-typed value inside that stack the event's registry
+  `BindingView`; `diagnostics/frontmatter.rs::GuardedStackCalls` parses with
+  the host's parse options and calls the library's one walk,
+  `lifecycle_call_checks`, with the host's registry, for stack spans and
+  expression-typed stack values alike. Without a usable artifact the stacks
+  are md's and `dm.lifecycle.incomplete_analysis` names each catalog's
+  reason. Discovery is lazy and stops at the first usable profile. A
+  combined diagnostics pass (`ProviderRegistry::diagnostics`) discovers the
+  host once, in its own panic boundary, and hands it to providers whose
+  `reads_lifecycle_host()` is true via `diagnostics_with_host`; a discovery
+  panic is logged as each such provider's panic and drops their diagnostics.
+  Standalone `diagnostics(ctx)`, hover, and completion discover for
+  themselves. DMLS never depends on a host crate; `md_host::` appears only in
+  `event_views.rs` (the fallback and its tests). Completion offers only the
+  globals the event may read; `err` where the event has none is
+  `dm.expression.unavailable_global` (the view's reason, never `fm.err`).
+  Host-catalog globals (`seq`, `loop`, `group`) are `ExecutionDependent` in
+  every view (`validation_view`), and a host catalog that fails to load is the
+  warning `dm.schema.host_catalog`. A schema problem's diagnostic carries the
+  library's message without the declared description; guidance such as
+  "use `start`" on Claudine's `composed` shows in hover only.
 - Matching trigger payloads feed completion and hover as well as
   diagnostics. The editor's property shape is
   `EffectiveSchema::property_shape` (base → extensions → matching trigger
   payloads in registry order → authored `$schema`, whole top-level property
   replacement, as validation merges); `providers/frontmatter.rs::known_shape`
-  and `overlay/schema.rs::effective_shape` both call it. Trigger payload
+  (through the snapshot's `FrontmatterAnalysis::root`, assembled once per
+  snapshot) and `overlay/schema.rs::effective_shape` both call it.
+- **Shared frontmatter analysis.** `overlay/analysis.rs::FrontmatterAnalysis`
+  is one snapshot's shared schema state, kept per URI in `OverlayCache` and
+  handed as the same `Arc` to every `DocumentOverlay` (`overlay.analysis`)
+  while its `AnalysisIdentity` matches: buffer revision (threaded from the
+  router as `for_document_timed`'s `revision`), text hash, stale-tree state,
+  the schema-cache key, and the bundle and named-type `Arc`s by identity (an
+  imported-schema change reassembles the bundle, so it replaces the
+  snapshot). `forget` drops it. It holds the effective root, merged views of
+  several union arms, arm discriminant JSON, and synthesized array-item
+  definitions, keyed by schema-node address (a merged copy of a single arm's
+  property keeps its source's identity, so recursive depths converge). Never
+  key it by instance path. `ShapeMemo::new(ctx, crossing)` is the per-pass
+  instance-path memo over it; `memo.shape` / `memo.def_at` borrow `&'c`
+  values from the snapshot and clone nothing. Single admissible arms and
+  selected arms are borrowed, never copied. `work_counters` counts the
+  constructions (`root_assemblies`, `merged_shapes`, `item_syntheses`) and the
+  whole-document walks (`typing_walks`, `scalar_classifications`,
+  `stack_walks`).
+- **Point versus document typing.** The snapshot also stores each scalar
+  entry's `ScalarTyping` (file-typed; expression-typed with its decoded text
+  and projection, or undecodable; unresolved misses too) by entry index in its
+  own tree. `providers::frontmatter::scalar_typing(ctx, index)` (backed by
+  `FrontmatterAnalysis::scalar`) types one entry and never starts the walk;
+  `scalar_inventory` / `expression_values` / `nav_targets` read
+  `FrontmatterAnalysis::inventory`, built once per snapshot (one
+  `typing_walks`) reusing point results. Hover and definition locate the
+  cursor scalar (`cursor_scalar`) and use point typing plus
+  `event_views::scalar_stack_expressions` for that one scalar; only
+  diagnostics calls the whole-document `stack_expressions` (which delegates
+  per scalar to the same extractor). Never call `expression_values`,
+  `nav_targets`, or `stack_expressions` from a cursor request.
+  `ExpressionValue` borrows its text and projection from the snapshot.
+  Prove reuse and invalidation through fresh overlays from one long-lived
+  `OverlayState` and compare each answer with a fresh state's
+  (`providers/frontmatter/snapshot_tests.rs`); bounded cold work and
+  diagnostics scaling are in `sequence_tests.rs`. A cached schema failure
+  refreshes only through the files `overlay/mod.rs::error_dependencies`
+  names, so a new `SchemaError` variant that carries an imported file's path
+  must be listed there, or repairing that file leaves the failure cached
+  until the buffer changes.
+- **Work kept across snapshots.** Every edit re-assembles the schema, so
+  anything keyed by a snapshot's node addresses is rebuilt per edit. The two
+  costs that are megabytes on recursive lifecycle types live instead in
+  `analysis::CrossSnapshotSchema` (one per `OverlayState`, reached through
+  `FrontmatterAnalysis::shared()`), keyed by content: union-item matchers
+  (`shared().accepts(atom, definitions, value)`, keyed by the library's
+  `alternative_fingerprint`; never call `alternative_accepts_in` per request,
+  which lowers and validator-hashes the whole alternative each time) and
+  synthesized array-item definitions (keyed by a `Debug`-stream fingerprint
+  of the item atoms; the snapshot holds an `Arc`, so its address identity
+  stays valid). Bounded at 256 per kind. A fingerprint must cover exactly the
+  inputs the build reads: the item-definition key deliberately covers only
+  the atoms, because walking every reachable definition would open types the
+  cursor path never reaches (`recursive_schema_editor` laziness test).
+  Other per-request costs to avoid in hover: parsing the frontmatter
+  `$schema` declaration (`AuthoredDeclaration::frontmatter_at` parses only
+  for an offset inside it). The A3 bench (`benches/pipeline_work_a3.rs`,
+  `A3_PROVIDER_BREAKDOWN=1` per provider) is the allocation evidence; hovers
+  measured about 59 KB (verb) and 105 KB (expression) after this work.
+  Trigger payload
   shapes are retained at registry-scan time (`ResolvedPayload::shape`);
   `EffectiveSchema::simplified` stays the authored `$schema` alone, which is
   what "authored parameters" consumers (expression property-name completion,
   Claudine's prompt parameters) read. DMLS reads triggers from disk only; it
   registers no embedded bundle.
 - Workspace dependency tracking for referenced schemas and documents.
+- Recursive named types: every DMLS walk of a `PropertyDef` opens a
+  `TypeExpr::Ref` through `providers::frontmatter::definitions(ctx)`, the
+  bundle's `DefinitionLookup` (`overlay/schema.rs`: the effective schema's
+  tables, then `SchemaBundle::extension_definitions`), with
+  `query::resolved_alternatives` / `alternatives_for_def_in` /
+  `alternative_accepts_in`; never `flattened_alternatives` or a table-less
+  `alternative_accepts` on a shape that can hold a `Ref`. One definition per
+  path step; `work_counters::record_definition_lookups`/`definition_lookups`
+  record lookups for laziness tests (`tests/l1/recursive_schema_editor.rs`).
+  `NonDescendingCycle` failures record every cycle file as a dependency
+  (`overlay/mod.rs::error_dependencies`).
 
 Completion and validation must call the same schema-arm selection and parser
 authorities. A completion-only reconstruction is drift.
@@ -522,8 +683,8 @@ branch, even without frontmatter. It comes from the library's passive
 - **Walk.** Diagnostics use the library's
   `expression::static_variable_reads`. It yields every `Variable` with its own
   span, classified by the same `AbsenceScope` rules the runtime uses (fallback
-  primary, ternary condition plus its guarded root, direct `is_null`/`is_empty`
-  argument). Never re-derive those rules in DMLS. The only deliberate
+  primary, ternary condition plus its guarded root, direct argument to a
+  `| null` parameter of a call that is not another call's argument). Never re-derive those rules in DMLS. The only deliberate
   difference is that the static walk visits both ternary branches.
 - **`root_identifier` keeps its one-root contract.** Hover, definition, and
   graph indexing depend on it. Only the two diagnostic providers use the walk.
@@ -538,7 +699,7 @@ branch, even without frontmatter. It comes from the library's passive
   catalog. `undeclared_property.rs` fails on any root-name string literal, a
   host-global list, or an evaluation-session type in production `src/`.
   `providers::dsl::KnownRoots` adds frontmatter keys and schema properties. It
-  computes `known_shape` once per diagnostics pass, and it is `None` for a
+  borrows the snapshot's shared `known_shape`, and it is `None` for a
   frontmatter-less document, whose names are never reported undeclared.
 - **Dash-separated keys.** A subtraction of only variables (`foo--bar`, `a- b`)
   that contains an undeclared operand, and whose whitespace-free source is a
@@ -549,6 +710,50 @@ branch, even without frontmatter. It comes from the library's passive
   The fix rides in `Diagnostic.data` as `KeyReferenceFix`. The code action
   reads `data`, or recomputes the producing provider's diagnostics when a
   client drops `data`, and never parses the message.
+
+## Call diagnostics
+
+`dm.expression.incompatible_call` (**Error**) and
+`dm.expression.uncertain_call` (**Warning**) show Darkmatter's design-time
+argument categories. Darkmatter's library owns every rule, code, severity,
+and message: DMLS calls `expression::expression_call_diagnostics(expr,
+&TypeScope, strict)` (or `CallCheck::diagnostics` for lifecycle surfaces) and
+only ranges each `ExpressionDiagnostic` (`diagnostics/call_check.rs::lsp_diagnostic`,
+expected/actual types in `data`). Never add a conversion, union, category, or
+severity rule in DMLS; fix the
+library's `call_check.rs` instead, so composition's precheck and the editor
+keep agreeing. User docs:
+[`dmls/docs/diagnostics.md#call-diagnostics`](../../../darkmatter/dmls/docs/diagnostics.md#call-diagnostics).
+
+- **Types.** Every site's `TypeScope` is built over
+  `DeclaredTypes::new(effective.simplified)` (declaration-only), never the
+  static-frontmatter layer (which hover's `with_site_scope` uses): a set
+  `maybe: 3` does not remove `null`. Enclosing `::block` guards narrow
+  through `BodyGuards::scope_at`; ternary and `&&` branches narrow inside the
+  library walk.
+- **Sites.** `providers/dsl.rs` checks body `{{ … }}` and every directive
+  `when=` (false `::block` bodies included); `diagnostics/frontmatter.rs`
+  checks expression-typed values, lifecycle stacks and guards, and plain
+  frontmatter `{{ … }}` values. Fenced code and `{{{ … }}}` are skipped.
+  Composition finds its own expressions (`compose/call_precheck.rs`); the two
+  walks must cover the same surfaces.
+- **Ranges.** The argument's span, or the call's for arity, ambiguity, or no
+  matching overload. The message is the library's `CallFinding.message`.
+- **Setting.** `ExpressionsConfig { strict }` in `config/mod.rs`:
+  `[expressions] strict` in `.dmls.toml`, `dmls.expressions.strict` from
+  `didChangeConfiguration` (DMLS never pulls `workspace/configuration`).
+  Same serde validation and layering as `schema.strict`: editor over file
+  over default; an invalid merge falls back to the file layer, not the
+  previous effective config; a whole-settings `null` clears the overlay. It
+  is the only call setting; no function-specific setting exists.
+- **Tests.** `tests/l1/expression_call_diagnostics.rs` (worked-example rows
+  under both settings, from the file and the editor, reloaded at runtime;
+  ranges; verdicts), `tests/l1/call_check_agreement.rs` (a shared corpus
+  composed by `md` and diagnosed by DMLS must reject the same documents),
+  `config::tests::expressions_strict::*` (the input matrix), and the
+  in-source `diagnostics::call_check::tests::diagnostics_never_enter_a_handler`
+  (runs on the test thread because test function registration is
+  thread-local).
 
 ## Rollout chronology
 
@@ -587,3 +792,14 @@ Darkmatter library, so editor tests are not the only proof of grammar behavior.
   per-user directory and creates or repairs Zed's `installed/dmls` link.
 - `just zed-doctor` diagnoses the host's native binary, stable dev-extension
   registration, manifest, and recent Zed log evidence without launching Zed.
+
+## Map and filter projection
+
+DMLS consumes `collection_blocks::analyze_collection_blocks` and `BodyScopes`
+(no second grammar): `providers/collections.rs` and `overlay/collections.rs`
+supply semantic tokens (callback, options), hover, completion of locals, and
+the `dm.collection.*` / `dm.expression.invalid_callback` diagnostics. Untyped
+sources are always errors: the editor has no request policy, so the overlay
+never waives one and never produces a recovery warning. Not provided: member completion on `person.<field>` of a
+local. Diagnostics carry `span` and `iteration_path` (static findings have
+none).

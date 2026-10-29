@@ -10,6 +10,8 @@ and DMLS schema behavior.
 - [Runtime baseline](#runtime-baseline)
 - [Imports and dictionaries](#imports-and-dictionaries)
 - [Named union references](#named-union-references)
+- [Conversion engine](#conversion-engine)
+- [Tuples, functions, `|`, and categories](#tuples-functions--and-categories)
 - [Special types](#special-types)
 - [Core types](#core-types-unknown-null-alphanumeric-shell)
 - [Suggestions and DMLS](#suggestions-and-dmls)
@@ -42,9 +44,26 @@ interpretation. Remedy it by wrapping the properties under the sole root
 `$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
 it uses the already-parsed YAML value and performs no additional I/O.
 
-Schema-trigger documents use `kind: trigger-schema` (the envelope kind the
+Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
+`kind: trigger-schema` and `any:` were renamed with no alias
+(`SchemaError::TriggerRenamed { field, found, replacement }`); the old trigger
+flags are now `--disable schema-triggers`, and spelling one is a usage error
+raised by `md`'s argv pre-check (`main.rs::reject_removed_flags`, so
+completions never offer it). A null or
+non-string `kind` is a `TriggerMatch` error, not ordinary data; no `$schema` is
+a matcher-only trigger (`resolve_trigger_layers` skips it).
+
+Match grammar (`triggers/grammar.rs`): `TriggerEnvelope::conditions` is a
+`MatchConditions` list that ANDs (`MatchConditions::matches`; never `.any()`
+over it); a mapping `match:` is one condition. OR is `MatchExpr::Group` from an
+explicit `group:`; a list entry that is itself a list is rejected. The vacuity
+lint runs once over `MatchConditions::to_expr()`. Every `TriggerMatch` message
+starts with its field (`` `match[1].group[0]`: ``). The input matrix is
+`lib/tests/l1/trigger_input_matrix.rs`; selection parity for migrated files is
+`lib/tests/l1/trigger_selection_parity.rs` and Claudine's
+`claudine_trigger_selection_parity.rs`.
 
 ## Composition and validation
 
@@ -107,8 +126,18 @@ instance path, optional schema path, offending property, source position, and
 file-reference diagnostics. `ValidationOptions` controls pending values and
 excluded keys without executing anything.
 
-Problem positions (`schemas/positions.rs`, one `PositionMap` per validation
-source snapshot, shared by every problem and root-union arm):
+Problem positions (`schemas/positions.rs`, at most one `PositionMap` per
+validation report, shared by every problem and root-union arm):
+
+- Problems are built unlocated and located once the report is settled
+  (`ProblemPositions::locate_all` at the end of `validate_instance`; the
+  target is derived from the problem's code and offending property).
+  `validate_prepared` passes `ProblemPositions::deferred(source)`, so
+  `positions_for` runs only for a report that holds a problem: valid,
+  baseline-only, no-schema, and failed-preparation validations build none
+  (`Work::PositionMapBuild`). Public `&PositionMap` entry points wrap the
+  caller's map as `ProblemPositions::Built`. DMLS and Claudine pass the empty
+  map and range from their own ASTs, so they never build one.
 
 - `line` counts the complete file (opening `---` is line 1); `column` is a
   1-based UTF-8 byte column; LF and CRLF agree.
@@ -122,7 +151,7 @@ source snapshot, shared by every problem and root-union arm):
   node.
 - The alignment witness: `PositionMap::project` accepts the locator's tree
   only when its mappings match the parsed `MappingOrders` and it holds no
-  alias. Otherwise (aliases/anchors, `<<`, unquoted `{{ }}`, multi-line or
+  alias. Otherwise (aliases, `<<`, unquoted `{{ }}`, multi-line or
   commented flow collections) it falls back to top-level key line, column 1.
   Positions never change validity.
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
@@ -143,25 +172,60 @@ source snapshot, shared by every problem and root-union arm):
   a top-level property to collect. Never reduce a problem to its first
   pointer segment for display.
 
+**Stage timings.** `DarkmatterSchemas::validate_timed` returns `validate`'s
+result unchanged plus a `ValidationTimings` (`schemas/timings.rs`):
+non-overlapping `ValidationStage`s `discover`/`match`/`resolve`/`compile`/
+`validate`, `total()`, `unassigned()`, `compile_cache()` (`Hit`, `Miss`,
+`NotRequested`), and `matched_triggers()` (file names). A thread-local stack
+recorder attributes time to the innermost open stage, so a validator built
+while resolving counts once, as `compile`; the markers live in
+`build_validator_with` (compile, miss), `ValidatorCache::lookup` (requested),
+`scan_with_source` (discover), trigger evaluation (match), payload resolution
+and `effective_for`/phase projection (resolve), and
+`validate_with_positions`/`validate_raw_with_positions` (validate). Discovery
+runs in `with_trigger_discovery`, outside `validate`: wrap it in
+`ValidationTimings::record` and `absorb` the result; a host attributes its own
+work (a registry freshness check) with `ValidationStage::time`. Recordings
+nest (the innermost wins) and never carry values or schema bodies. A new
+validator build path must go through `build_validator_with` or open
+`timings::compiling()` itself. `md schema validate -vv` renders it; a
+host's request is every schema call it makes for the document, so record each
+one (`validate.rs::validate_one` records discovery, the pre-assignment
+`effective_for`, and validation plus its presence lookup) or the first build
+lands outside the report and a cold request reads as a `hit`.
+
 ## Runtime baseline
 
-`darkmatter/docs/schemas/darkmatter.yaml` is the runtime baseline. It declares
+The runtime baseline is the resolved `fm` declaration of the global catalog
+`darkmatter/schemas/darkmatter.yaml` (`schemas::catalog::GlobalCatalog::darkmatter()`),
+authored in `darkmatter/schemas/partials/fm.yaml`. That partial declares
 `content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"`
-(optional, no default). `schemas/embedded.rs` holds the compiled-in table:
-the baseline (`include_str!`) and `content_policy::EDITOR_SCHEMA`, keyed by
-the virtual repo-relative paths `darkmatter/docs/schemas/darkmatter.yaml` and
-`content-policy/schemas/content-policy.yaml`. Embedded imports resolve
+(optional, no default) and imports `style@./style.yaml` and
+`context@./context-variables.yaml`. `schemas/embedded.rs::SHIPPED` holds the
+compiled-in bundle (catalog, its partials including the expression-function
+catalog `functions.yaml`, `content_policy::EDITOR_SCHEMA`)
+keyed by repo-relative virtual paths. Embedded imports resolve
 lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
 root), never touch the disk or network, add no dependency edge (DMLS never
 watches them), and identify as `SchemaSourceId::Embedded`. One
-`BASELINE: OnceLock` prepares and lowers it once per process. Resolving the
-authored file from disk gives the same typed schema and JSON. Installed
-binaries therefore need no schema files.
+`BASELINE: OnceLock` lowers it once per process, with its shared definitions
+(`GlobalCatalog::baseline()` returns the shape and its `DefinitionTable`;
+lower with `to_json_schema_with_definitions`). Resolving the catalog from disk
+gives the same JSON. Installed binaries therefore need no schema files.
+`with_baseline_from_file` (and `BASELINE_SCHEMA`) pointing at a global catalog
+uses its `fm` with its table. Readers of the typed baseline carry the table
+(`ComposeOptions::baseline_definitions`, `darkmatter_shared_baseline()`); the
+public `darkmatter_base_schema()` and the editor's layered property shape
+(`frontmatter_shape::layered_property_shape`) read the definition-free
+projection, resolved once with `Sharing::Off` rather than rebuilt from the
+references. `merge_baseline` moves only the lower layer's definitions that a
+copied property reaches (`scope::retain_reached_definitions`), so a Claudine
+trigger overriding `loop` leaves no dead baseline `$defs`.
 
 `md schema validate` selection (`cli/src/commands/schema/validate.rs::load_api`),
 first match wins:
 
-1. `--no-baseline-schema` → none (clap conflict with `--schema`, exit 2);
+1. `--disable baseline-schema` → none (usage conflict with `--schema`, exit 2);
 2. `--schema <path>` → custom, even with the env opt-out;
 3. `DARKMATTER_NO_BASELINE_SCHEMA` exactly `1|true|TRUE|yes|YES`
    (`commands::compose::disables_baseline_schema`, read from the captured
@@ -171,15 +235,83 @@ first match wins:
 
 Custom paths resolve in the launch context (`crate::io::resolve_file_path`);
 a failed load is exit 2 with no fallback. Opting out keeps document `$schema`
-and triggers; `--no-trigger-schemas` is independent. JSON `schema` stays null
+and triggers; `--disable schema-triggers` is independent. JSON `schema` stays null
 for a document without `$schema`. Compatibility: `last_updated: not-a-date`
 with no `$schema` now fails validate as it fails compose. Compose keeps
-`--baseline-schema`/`--no-baseline-schema`/the env (live
+`--baseline-schema`/`--disable baseline-schema`/the env (live
 `env_disables_baseline_schema`); DMLS layers built-in → extensions →
 triggers → document. Each document with a distinct schema/context compiles the
 merged baseline (validator cache keys on the full resolution context), so
-tests that judge only document schemas pass `--no-baseline-schema` to stay in
+tests that judge only document schemas pass `--disable baseline-schema` to stay in
 the L1 budget.
+
+The baseline types Darkmatter's five lifecycle events (`initialize`,
+`composed`, `failed`, `cancelled`, `finalize`) with the md profile
+(`partials/md-lifecycle.yaml`): md verbs are typed and offered, and an open
+pattern-key arm that excludes every md verb lets another host's verb (`say`,
+`retry`) pass untyped and unoffered. md's profile is still a deliberately
+tolerant three-level unroll (`md-stack`, `md-item-1..3`, `md-loose-body`)
+whose side-effect and function arguments are untyped (one pattern key);
+host profiles built from `partials/lifecycle.yaml` (Claudine's) are
+recursive and typed. The neutral shape of every verb, Claudine's
+included, lives in `partials/lifecycle.yaml`. Its expression-function and
+side-effect verb types (`<verb>-short`/`<verb>-long`) and their category and
+bundle keys are generated from the typed catalogs by
+`lifecycle::schema_projection` between `# BEGIN GENERATED`/`# END GENERATED`
+markers: regenerate with `just regen-lifecycle-schema`, never by hand;
+`lib/tests/l1/lifecycle_schema_generation.rs` fails on drift. Side-effect
+parameter types come from `partials/mutations.yaml` (`effects::effect_function_catalog`,
+`effect_registration`; a coverage test fails when an `EFFECT_DESCRIPTORS`
+signature has no typed entry). Generated operands carry the `deferred`
+constraint (`x-darkmatter-deferred`, `Shape::Deferrable`): a `{{ }}` template
+there is accepted unjudged while literal siblings are judged, and
+`ValidationReport::deferred` lists what was accepted; an unmarked template is
+judged as text. A template is recognized only by
+`expression::is_deferred_template` (scanner + parser), never by a substring;
+`expression::is_malformed_template` names a span that fails to parse, which
+every caller setting template problems aside for later rendering judges as
+written: `EffectiveSchema::validate_with_options` (DMLS, `PendingPolicy::Defer`)
+keeps that problem, as `md schema validate` and Claudine's launch
+pre-validation do. The resolver stores cycle members, and any structured
+acyclic type with two or more authored uses, in `$defs`; it inlines
+everything else at each reference. A host should still write its stack
+families recursively (Claudine's are), never unrolled: Claudine's typed
+three-level unroll resolved to 11 MB before sharing.
+The passive operand check is `lifecycle::validate_operands` (runtime
+registration, `select_overload_with`), and schema validation runs it: every
+generated arm but `null` and `template-operand` carries `operands(<verb>-short|-long)`
+(`Constraint::Operands`, `x-darkmatter-operands`, kept on the typed node), and
+`EffectiveSchema::validate_instance` (the body every `validate*` path reaches)
+walks the authored instance beside the JSON Schema (`schemas/bound_operands.rs`),
+reads each marked value as the parser does (`lifecycle::action_call`), and binds
+it (`validate_action_operands_with`: effect registration, else the expression
+registration with test functions first), deferring a `{{ }}` operand only when
+its `stored` counterpart is not a literal token: a token's decoded text is
+data and is type-checked (`abs` refuses a token holding `{{ fm.count }}`).
+A caller that decodes before validating loses that origin, so hand Darkmatter
+the stored instance: `validate_with_options`, or `EffectiveSchema::validate_stored`
+(optional `SchemaPhase`), which Claudine's launch verdict uses. An accepted call's operands join
+`NestedTemplates` as settled paths (excused like templates, not in
+`ValidationReport::deferred`); a rejected one is a positioned problem. Every
+operand string (nested ones too) holding a span that fails to parse is a
+`malformed template` problem at that string (`BoundOperands::report_malformed`,
+message from `lifecycle::action_value_to_expr`), never settled, replacing any
+problem at or below it, whatever the type accepts; it scans the `stored`
+instance (literal tokens still encoded) so a decoded token stays data. The
+hand-written verb types in `partials/lifecycle.yaml` (communication, `shell`,
+the directives but `stop`/`skip`, `set`) carry the same marker; for them
+`lifecycle::template_operands` names exactly the strings the parser reads as
+templates (every `with:` and `set` value nested, not a `$( … )` `set` value,
+`no_error`, or `break.code`) and the walk only scans those, never binds. So
+`number: [pear, 7]` passes and `length: [true]` fails; never widen a generated
+type to fix a schema/binder disagreement. Bind from the authored value, not
+the converted working copy. `lib/tests/l1/lifecycle_generated_operands.rs`
+holds the parity table, whose `short`/`arm-<i>` probes strip the marker to
+judge the projected structure alone. `lib/tests/l1/lifecycle_schema_parity.rs`
+derives events, action types, the open arm's exclusions, and the bare-verb
+`suggest` list from the md registry and parser. The inlined stacks cost about
+70–90 ms per debug validation; the regex memo in `convert.rs` and the import
+engine's `expanded_cache` keep it there.
 
 User docs: `darkmatter/docs/topics/schemas/definition.md` (The Built-in
 Baseline, Selecting the Baseline); Content Policy's typing limits are in the
@@ -187,6 +319,13 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 
 ## Imports and dictionaries
 
+- `Name@darkmatter:<stem>` is reserved: it names type `Name` in the shipped
+  partial `darkmatter/schemas/partials/<stem>.yaml` from `SHIPPED`, whatever
+  the importer is (disk file, embedded document, host bundle), never reading
+  the disk (`DefNamespace::Shipped`; relative imports inside it stay in
+  `SHIPPED`). `named_type_reference_path` returns `None` for it, as for
+  `this`. Claudine's `action.yaml` uses it to reference Darkmatter's neutral
+  action types.
 - `Name@file` and `Name@this` import named types eagerly with dependency and
   cycle tracking. Dependencies (`imports`, `examples`, `referenced_files`)
   are canonical, existing, content-hashed files; `ResolvedSchema::searched`
@@ -215,8 +354,12 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 - `apply_import_postfix` (`resolve.rs`) merges use-site constraints: stricter
   bound wins per kind (string length, number, item count, keys), lower > upper
   is `SchemaError::ConstraintConflict` (`Bounds`/`Scheme`/`Default`, each
-  origin a `SchemaConstraintOrigin` with source, path, keyword, occurrence,
-  span), flags dedupe, every `pattern` and `match` group is kept, schemes
+  entry a `SchemaConstraintParticipant`: the `origin`
+  (`SchemaConstraintOrigin` with source, path, keyword, occurrence, span) and
+  the `constraint` value that took part — the strict surviving bound, the
+  inherited scheme list snapshotted before the failing intersection, each
+  default, or each canonical option set, `Options([])` for bare
+  `alphanumeric`), flags dedupe, every `pattern` and `match` group is kept, schemes
   intersect, defaults compare after number normalization, one `suggest` per
   property (checked after union flattening), examples keep their defining
   file. Bounds are read against the resolved target (`label(max(80))` is a
@@ -226,12 +369,115 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   other block keys are `Convert` errors, and the root accepts only
   `min-keys`/`max-keys`. One-atom contradictions are `Convert` errors. Several
   patterns lower to `allOf`; one keeps the single `pattern` keyword.
-- A missing name is `SchemaError::UnknownNamedType { name, namespace, site }`;
-  cycles stay `ImportCycle`. Both new errors are wrapped by `ReferencedSchema`
-  when raised inside a referenced schema.
+- A missing name is `SchemaError::UnknownNamedType { name, namespace, site }`.
+  Both it and `NonDescendingCycle` are wrapped by `ReferencedSchema` when
+  raised inside a referenced schema; `ImportCycle` now means only an acyclic
+  reference chain deeper than 32.
+- **Recursive named types.** `resolve/graph.rs` discovers the reachable
+  definitions once, classifies each reference edge as descending (object
+  property, dictionary value, list item, tuple slot; never inside a
+  `function(...)` signature), and rejects every cycle left after dropping
+  descending edges as `NonDescendingCycle { cycles }` (each `CycleReference`
+  carries a span for a file source). Members of a cyclic group are
+  `DefKey { namespace: DefNamespace, name }` (every independently
+  authored source has its own namespace: the document's inline `$schema`
+  is `InlineRoot`, a disk trigger's inline payload is
+  `TriggerPayload(trigger path)` via `resolve::InlineOwner`, because
+  `EffectiveSchema::definition` searches several tables by key); every use becomes
+  `TypeExpr::Ref(DefKey)` carrying the use site's markers (the definition's
+  `required`/`generated`/`eager`/`default`/`suggest`/`example`/`category` and
+  description merged with the postfix), and the presence-free body goes into
+  the `DefinitionTable` (`ResolvedSchema.definitions`,
+  `EffectiveSchema::definitions()`, `NamedTypeExpansion.definitions`).
+  Discovery also selects **shared** acyclic targets (`Discovery { cyclic,
+  shared }`): a structured type (object, dictionary, tuple, list of
+  structured items, union with a structured arm; aliases followed) with two
+  or more distinct authored value sites, keyed `(namespace, full path,
+  DefKey)`. Root and body revisits count once, callable-only reach does not
+  count, and layers never pool counts. A shared body expands at its first
+  use under that use's import stack, so the 32-level limit is unchanged. Each
+  use keeps a `Ref` only if `recursive.rs::use_is_representable` and the
+  union-arm and alias checks prove that inlining would give the same result.
+  Otherwise that one use inlines; errors are never retried as inlining. Only
+  definitions that a surviving reference reaches are published. Catalog
+  declarations share too (`GlobalDeclaration::definitions`); only the
+  definition-free projection `darkmatter_base_schema()` (`Sharing::Off`,
+  `catalog::darkmatter_inline_baseline`) inlines every acyclic use.
+  A `file(match(...))` in a body does not affect selection: the root-union
+  lowering keeps a shared acyclic body suggestion-only (next bullet), and
+  `file_match::file_alternatives` reads a reference to an acyclic definition
+  as its inlined body (`DefinitionTable::is_cyclic`). Structural identity in
+  `simplified/subtype.rs` opens references through the table, so a shared
+  use and its inlined copy compare equal. A schema with a cycle or a shared type expands twice
+  (`resolve/recursive.rs`: pass 1 learns each definition's `UseSummary`);
+  otherwise it takes the single pass. `lib/tests/l1/recursive_schema_golden.rs`
+  pins the output. Lower
+  with `to_json_schema_with_definitions` (`$ref` with use-site siblings, one
+  root `$defs` body per reachable definition, in allocation order); plain
+  `to_json_schema` errors on a `Ref`. Every typed and JSON walker follows a
+  `Ref` (see the reference-aware entry points under "Named union
+  references" and "Conversion engine"); none treats it as opaque. User docs:
+  `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
+  definition vs use site, errors, reach) and "Shared Named Types"
+  (eligibility, counting, per-use fallback, output) are the one description;
+  other pages link there. A stored union hovers in DMLS as its alternatives
+  (see `dmls.md`).
+- **Root-union `match()` through references** (`simplified/convert.rs`).
+  A root-union arm enforces `match` in exactly two places, so an acyclic
+  glob, inlined or shared, stays suggestion-only as it was before recursion:
+  (1) a property that is directly `file`/`file[]`
+  (`attach_direct_file_match`, via `file_match_groups`); (2) inside an arm
+  copy of a match-reaching recursive definition. Lowering carries
+  `Lowering { defs, matching }`; in `Matching::Enforce` a reference lowers
+  as its inlined value would at that place (`MatchCopies`, keyed by
+  definition, property, and mode): a reference to a cyclic definition, or
+  any reference inside an enforcing copy, points at the enforcing copy
+  `<key>@match:<property>`; a reference to a shared acyclic definition
+  outside a copy points at its shared body, or at a redirecting copy
+  `<key>@arm:<property>` (own files suggest, references redirected) when
+  the body reaches a match-reaching cyclic definition. Cyclicity is read
+  off the table (`DefinitionTable::is_cyclic`). `file_fragment` emits
+  `x-darkmatter-match` only while lowering an enforcing copy (`in_copy`).
+  Any other arm-level file (union alternative, acyclic name bound to a
+  union, inline object, dictionary value, tuple slot, list of a union)
+  stays suggestion-only. The four `resolve.rs` arm sites call
+  `attach_root_union_match(arm, shape, defs, root_defs)` (direct attach, then
+  graft the ref redirects and join the copies); `union_to_root_schema` lowers
+  in that mode and attaches the direct keyword. A copy names its property in
+  `x-darkmatter-match-property` because its `$defs` location cannot (the
+  keyword factory reads it for the caller origin). The eager-file rewrite
+  compiles a property-level union arm alone, so it judges the arm with
+  `CallerOrigins::whole_instance(<owning top-level property's origin>)`
+  (`rewrite.rs::ArmValidators::enter_property`) and retains validators by
+  arm address *and* that origin; never compile such an arm with the
+  property-keyed map or with no origins
+  (`schemas_rewrite_arm_validators::caller_origin_*`). Compatibility tests:
+  `schema_cache_validity::acyclic_match_*` (six shapes, five routes, phases).
+- **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
+  schema's root. A sub-schema compiled alone (a root-union arm, a
+  discriminated arm, a property union arm, an example target) goes through
+  `with_root_definitions` / `wrap_arm_as_root_schema(arm, root)`; never
+  compile a fragment of a schema that may carry `$defs` without its root.
+  `merge_baseline` moves the baseline's `$defs` into the document root with
+  `fold_definitions` (the document's keys never move; a colliding different
+  body is renamed `key-2` with only the joining side's references rewritten,
+  schema keywords only, never `const`/`default`/`examples`/`x-*` data).
+  `validate_simple_object_schema(schema, label)` admits a root `$defs` and runs
+  `check_joined_references` (a `#/$defs/…` ref must resolve in its own table:
+  `UnresolvedReference`; with `$defs`, `$id`/anchors/external/other local refs
+  are `UnsupportedMergeReference`, and the schema is meta-validated). A
+  SimplifiedSchema file arm of a root union joins through
+  `DefinitionTable::absorb`, so the union's typed table and JSON keys agree
+  (phase lowering depends on that); a raw arm is folded after every arm.
+  Phase projection projects definition bodies with `phase::project_definitions`
+  (same keys) and `merge_with_effective` replaces the document's own bodies
+  while keeping layer-only ones. Look a `Ref` up through
+  `EffectiveSchema::definition(&DefKey)`, which also searches trigger tables;
+  a table's `json_key`s are those of its own lowering.
 - `resolve::expand_named_types` expands an in-memory schema with it as
-  `this` (DMLS unsaved buffers); `resolve::named_type_reference_path` returns
-  the file an explicit `Name@target` selects. Neither adds a second resolver.
+  `this` (DMLS unsaved buffers) and returns `NamedTypeExpansion { schema,
+  imports, definitions }`; `resolve::named_type_reference_path` returns the
+  file an explicit `Name@target` selects. Neither adds a second resolver.
 - Root unions can compose schema arms without erasing each arm's origin.
 - `file(match(...))` only suggests files in a single schema. In a root union,
   each simplified arm's declared glob emits `x-darkmatter-match`, including
@@ -248,8 +494,27 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   group of a property and accepts a path only when each group does (positives
   and `!` exclusions stay inside their own group; groups are never flattened).
   `PreparedFileMatch` walks the first group's `roots()` and keeps a file when
-  every group `lists_file`s it. `root_union_match_groups`/`file_match_admits`
-  take the groups. `x-darkmatter-match` is a flat array for one group and an
+  every group `lists_file`s it. `file_match_admits` takes one alternative's
+  groups; `root_union_match_groups(arm, property, definitions)` returns the
+  file alternatives a top-level string value (or array item) is judged by,
+  agreeing with the lowering: a direct `file` property, or the files reached
+  through `TypeExpr::Ref` alternatives (through property unions) in the arm's
+  table (value admitted when some alternative's groups all admit it; `None`
+  when an alternative accepts a string without an enforced glob, including an
+  arm-level file alternative such as `file(match(..)) | number`). It projects
+  `file_match::file_alternatives(definition, definitions)`, the one walker of
+  a property's `file` alternatives (each with its atom, so
+  `is_eager()`/`match_groups()`, and its list shape; a definition entered once
+  per list depth; `None` when a string could be a non-file or the property
+  offers an acyclic file alternative beside others, which pre-recursion code
+  never read as a file). Claudine's caller
+  arm admission (`supplied.rs::admits_arm_files`) reads the groups; its eager
+  and late-verdict completion targets and its per-arm existence relaxation
+  read `file_alternatives` directly. Compose's caller-file classifier and
+  materializer (`schema_validation.rs::select_file_mode` and
+  `resolve_caller_file_value`) follow local `$ref` in the lowered JSON the
+  same way (`SchemaScope::resolve_text`, a reference cycle that consumes no
+  value ends unclassified). `x-darkmatter-match` is a flat array for one group and an
   array of arrays for several; its rejection still comes from the keyword
   itself (never wrapped in `allOf`), which `validate.rs` relies on. An empty
   intersection is accepted (no file search) and completes nothing.
@@ -259,7 +524,14 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `file_match::file_match_groups` is public for consumers such as Claudine.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
-- `min-keys` and `max-keys` constrain dictionaries.
+- `min-keys` and `max-keys` constrain dictionaries; `uncounted-keys(a, b)`
+  leaves named keys out of that count (lowered to one `allOf` `if`/`then`
+  per combination present, plus `x-darkmatter-uncounted-keys`, which
+  `json_shape` reads into `ObjectShape::uncounted` so the core models the
+  count instead of asserting it). The lifecycle categories use it for
+  `when`/`no_error` beside one verb. An `anyOf` arm that is itself a failed
+  union at the same path (a `$ref` to a recursive union) is flattened by
+  `validate::union_branch_errors`, so drill-down still reaches the verb.
 - Examples are documentation artifacts validated at schema-load time and
   emitted through `x-darkmatter-example`.
 
@@ -279,7 +551,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   value constraints without `[]` (`U(max(10))`), non-list constraints after
   `[]`, `[]` when a flattened arm's outer value is an array (looks through
   imports and nested postfixed unions; arrays inside object arms are fine),
-  and any arm `default` under `[]`. A list before `[]` parses into the atom's
+  and a scalar arm `default` under `[]`. A list before `[]` parses into the atom's
   `constraints` (the list after `[]` into `array_constraints`, as on a
   primitive); on a union only the markers are accepted there and join the
   container (`U(eager)[]` == `U[](eager)`), a value constraint is a
@@ -293,17 +565,21 @@ References; Choosing an Arm: Reporting versus Changing Data).
   property, on `U` and `U[]` alike (`phase.rs` counts arms under `[]` as
   `is_required` does). `eager` there is property timing and never makes a
   lazy `file` arm eager; only an arm declared `file(eager)` probes files.
-- Defaults: `default([...])` is a string in the grammar, so every arm default
-  under `[]` fails as `ScalarDefault`; do not document list defaults as
-  working. No default is ever inserted.
+- Defaults: `default([...])` is a string in the grammar, so every authored arm
+  default under `[]` fails as `ScalarDefault`. The Rust API can supply an
+  actual JSON-array arm default, which hoists to the list; inherited and
+  use-site defaults must agree under shared numeric normalization. This adds
+  no list-valued default spelling to the grammar. No default is ever inserted.
 - Representation: a bare `U` stays `PropertyDef::Union`. A postfixed reference
   is `PropertyDef::Single(atom)` with `atom.ty == TypeExpr::Union(arms)`
-  (resolver-only; never parsed) and `atom.is_array` for `U[]`. Helpers:
+  and `atom.is_array` for `U[]`; the parser produces the same atom for the
+  grouped spelling `(A | B)[]`, so there is no second encoding. Helpers:
   `PropertyAtom::union_arms()`, `PropertyDef::alternatives()` (`None` for a
   list of a union); the crate-private `is_required`/`is_generated`/
-  `has_default` read through arms. There is no anonymous `(A | B)[]` syntax and no second encoding.
+  `has_default` read through arms.
 - Lowering (`convert.rs`): `type: array` + `items.anyOf` of the flattened
-  arms; items get no null arm; the optional `anyOf: [null, …]` wrapper (and a
+  arms; items get no automatic null arm (an explicit `null`/`unknown` arm can
+  admit null); the optional `anyOf: [null, …]` wrapper (and a
   use-site description) goes on the property only. A nested postfixed arm
   flattens into the one `anyOf`, its markers hoisted to the property.
 - Consumers must not read `properties` off an `anyOf` wrapper. Use
@@ -311,12 +587,77 @@ References; Choosing an Arm: Reporting versus Changing Data).
   is_array }`) for typed-tree walks and `completion::alternative_accepts(atom,
   value)` to judge a present value (so `null` matches only a null-accepting
   arm). Editors use `completion::{for_list_item, for_property_value,
-  alternatives_for_def}`; never add a DMLS-local union interpretation.
+  alternatives_for_def}`, and below a recursive type `for_path`/`def_at_path`
+  (one definition opened per path step) and the `*_in` variants with a
+  `DefinitionLookup`; never add a DMLS-local union interpretation. A typed
+  walker meeting `TypeExpr::Ref` resolves it through
+  `query::resolved_alternatives(def, lookup)`, `is_subtype_with_definitions`,
+  or `DeclaredTypes::with_definitions`; a `Ref` judged without a table is a
+  defect (it fails closed).
 - Safety rule per consumer: validation accepts any arm; literal-tag narrowing
-  (and root-union closest arm) only shapes reports; coercion commits only
-  when exactly one candidate validates; eager-file rewriting needs exactly one
-  validating arm containing an eager `file`; cleanup never repairs inside a
-  union.
+  (and root-union closest arm) only shapes reports; conversion follows the
+  engine's union rule (exact match, one reachable option, number over
+  boolean, JSON over YAML, else an ambiguity error; order-independent);
+  eager-file rewriting needs exactly one validating arm containing an eager
+  `file`; cleanup never repairs inside a union.
+
+## Conversion engine
+
+- One rule core, `markdown::coercion` (`Shape`, `bind`, `bind_with`,
+  `check_exact`, `accepts_exactly`, `content_error`), serves frontmatter and
+  function calls. Translators only map syntax: `schemas::shape_from_json_schema`
+  (compiled/raw JSON Schema; unmodeled keywords become `Assert`s) and
+  `compose::expression::call_binding::shape_from_property_def` (grammar).
+  `tests/l1/coercion_translator_conformance.rs` requires identical outcomes;
+  a new construct needs both translators and a row there.
+- Recursion is `Shape::Ref(ShapeRef)`: the first use of a recursive target
+  owns it strongly, back-references are weak (dropping the root frees the
+  cycle). Both translators build it (`json_shape.rs` for a raw or generated
+  `$ref` cycle that descends, `translate.rs`'s `*_with_definitions` entry
+  points for `TypeExpr::Ref`), so conversion continues at any depth; the
+  value bound (`BindOptions.max_depth`, `MAX_DEPTH` 64) and
+  `MAX_REFERENCE_HOPS` (64 hops at one value) end in `ResourceLimit`, never
+  acceptance. A raw cycle that never descends stays validation-only; grammar
+  `TooDeep` (32) remains only for over-deep acyclic chains and loops that
+  never descend.
+- `schemas/coerce.rs` decides only what is committed: an instance the complete
+  schema accepts is kept; else the whole converted document if the complete
+  schema accepts it; else each top-level property that converts cleanly
+  (root unions keep the whole-document rule). Never reintroduce per-surface
+  conversion rules there (`coercion_engine_parity::old_frontmatter_rule_code_is_gone`).
+- Performance: `EffectiveSchema` keeps a `ConversionPlan` keyed by the digest
+  `ValidatorCache::shared_schema_hash` already records, and checks
+  `accepts_as_is` with its own compiled validators first. Never hash or
+  compile a large schema per call (`schema_content_hash` serializes the whole
+  schema); `Shape::describe` is capped at `DESCRIPTION_LIMIT`.
+- `number(integer)` lowers with `x-darkmatter-integer: true` (magnitude below
+  2^64, a custom keyword in `validate.rs`); raw `integer` has no ceiling.
+  `numberlike`/`boolish` lower to the `darkmatter-numberlike`/`-boolish`
+  formats and are kept as written.
+- User docs: the one rule list is `topics/schemas/definition.md` "Type
+  Coercion" (interfaces, actions, conversions, unions, containers, function
+  binding, type errors, changes for existing documents); other pages link
+  there. Change it there, not in a second copy.
+
+## Tuples, functions, `|`, and categories
+
+User docs: `darkmatter/docs/topics/schemas/definition.md` (Tuples; The `|`
+Operator and Grouping; Function Signatures; Categories).
+
+- `grammar::parse_type_definition` reads a `|` union into the same
+  `PropertyDef::Union` the YAML list produces; `parse_type_expr` is the
+  one-atom form and rejects a union. `[]` binds tighter than `|`.
+- `TypeExpr::Tuple(TupleType)` lowers to `prefixItems`/`minItems`/`items`;
+  positions get no optional-null wrapper. `TypeExpr::Function` is
+  description-only: `to_json_schema` fails on it with the property path, which
+  is the one choke point keeping functions out of document schemas (the
+  resolver inlines references first). Never emit JSON for a function.
+- `Constraint::Category` lowers to `x-darkmatter-category`; the tagged
+  envelope's `categories:` list (`StandaloneSchemaDocument::categories`)
+  limits names. Duplicate overloads are judged by
+  `signature::duplicate_overload` over canonical binding contracts.
+- Numbers in schema metadata go through `markdown::numeric` admission; an
+  inexact whole number, infinity, or underflow is a grammar error.
 
 ## Special types
 
@@ -350,8 +691,10 @@ needs `@this`.
 - `SimplifiedType::Unknown` is canonical; `any` parses to it
   (`SimplifiedType::aliases()`), and serialization, `md schema about`
   (`alias: any`), and DMLS say `unknown`. It lowers to `{}`, never coerces,
-  and keeps nested nulls. An undeclared expression variable is described as
-  unknown-typed; no static check follows from that.
+  and keeps nested nulls. An undeclared expression variable is unknown-typed;
+  call checking assigns an unknown argument category 4 (a warning only under
+  DMLS `expressions.strict`), rather than rejecting it as proven incompatible.
+  Runtime binding still validates its actual value.
 - `null` lowers to `{"type":"null"}`. YAML null scalars (`null`/`Null`/`NULL`/
   `~`, empty value, empty item) and the string `"null"` spell it at property,
   union-arm, nested, and named positions; a quoted `""` is still "expected a
@@ -380,9 +723,10 @@ needs `@this`.
   `PropertyAtom::alphanumeric_options()`, never from display strings. Lowering:
   `string` + canonical linear-time `pattern` (user patterns and `not-empty`
   as further `allOf` entries) + `x-darkmatter-type` /
-  `x-darkmatter-options`. `coerce.rs` skips fragments annotated
-  `x-darkmatter-type: alphanumeric`, so numbers and booleans stay mismatches
-  (other union arms keep their coercion). `default`/`suggest` values must
+  `x-darkmatter-options`. The JSON translator maps
+  `x-darkmatter-type: alphanumeric` to `TextShape { scalar_text: false }`, so
+  numbers and booleans stay mismatches (other union arms keep their
+  conversion). `default`/`suggest` values must
   validate, without coercion, or the load fails; other types' suggestions
   stay lint-only. `md schema validate` assignments force a string for a
   top-level `alphanumeric` (`assignment.rs::atom_prefers_string`), so
@@ -393,13 +737,17 @@ needs `@this`.
   pending deferral mirror `expression`. Exported-schema consumers must
   enforce the format. Excluding `shell` from an action union is authoring
   validation only; Claudine's runtime `initialize` shell ban stays.
-- `is_subtype(a, b)` (`simplified/subtype.rs`) is passive over resolved
-  atoms: identical identity (type, canonical options, enum member set,
-  literal value, structural inline objects/unions) is a subtype;
-  `alphanumeric` compares character sets and the `..` ban; always-text types
-  are subtypes of `string`; everything else, including unresolved references,
-  `unknown`, `null`, and arrays against `string`, is not. Constraints are
-  ignored.
+- `is_subtype(a, b)` (`simplified/subtype.rs`) is the one structural
+  relation, passive over resolved atoms: identical identity (type, canonical
+  options, enum member set, literal value, structural inline objects/unions)
+  is a subtype; `alphanumeric` compares character sets and the `..` ban;
+  always-text types are subtypes of `string`; a `literal` is a subtype of its
+  own family and a string literal of an `enum` listing it (`literal(4)` is
+  not one of `enum('4')`); `enum` subsets; a non-array union arm by arm on
+  either side, order-free. Everything else, including unresolved references,
+  `unknown`, `null`, and arrays against other arrays, is not. Constraints and
+  presence are ignored, so an optional atom is never a presence check.
+  `is_definition_subtype` lifts it to whole `PropertyDef`s.
 
 ## Suggestions and DMLS
 
@@ -413,7 +761,8 @@ completion offers all seven rules stored on the `Evergreen` arm. Never isolate
 the storing atom when linting (`suggestions_for_def` and `alternatives_for_def`
 lint the whole definition).
 DMLS validates with `PendingPolicy::Defer`, so it reports nothing for a
-`{{ … }}` value.
+`{{ … }}` value, unless the span is malformed (`{{ 1 + }}`): that problem
+stands, as it does for `md schema validate` and Claudine's launch verdict.
 
 Literal discriminants use one presentation-neutral union-arm selector shared
 by library validation and DMLS. Expression-typed values enable expression
@@ -421,9 +770,9 @@ completion, hover, and `dm.expression.*` diagnostics.
 
 Source spans come from one locator in `simplified/source.rs` with two
 grammars. Strict (schema documents) and tolerant (frontmatter) share
-indentless sequences and plain scalars continued onto more-indented lines;
-only tolerant follows tags, block scalars, quoted continuations, and empty
-values. Strict fails unless every non-comment line belongs to the value, and
+indentless sequences, plain scalars continued onto more-indented lines, and
+literal/folded block scalars; only tolerant follows tags, quoted
+continuations, and empty values. Strict fails unless every non-comment line belongs to the value, and
 checks each decoded scalar against `serde_yaml_ng` before projecting. A
 source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
@@ -431,6 +780,79 @@ mid-line value spans with `overlay::frontmatter::line_aligned_span`. Never add
 a third locator. The authored boundary is documented in
 `darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
 Boundary).
+
+Definition failures are located, never guessed (user-facing reference:
+`darkmatter/docs/topics/schemas/definition.md` § Source-Aware Parsing and
+Located Failures, and `dmls/docs/diagnostics.md` § Ranging). The shared parser
+(`simplified/mod.rs`, crate-private `DefinitionFailure`) records the
+`SchemaSourcePath` of the node it rejected: property keys literally, sequence
+members and root-union arms by index, `$constraints` entries by key, and
+cross-arm checks at the arm that introduced the violation
+(`second_suggestion_span` and `duplicate_overload_arm` return the arm index).
+`parse_property_definition_with_source` and
+`parse_schema_declaration_with_source` return `LocatedDefinitionFailure`
+(`path`, boxed `error`, `authored_span`, `value_span`, document bytes with
+`source_offset` applied once); `locate_standalone_definition_failure(source)`
+does the same for a standalone document, prefixing `types`/`$schema`, sharing
+`standalone::recognize_standalone` with the classifier, and returning `None`
+for outer envelope and declaration-shape failures (any failure path without a
+property segment). Projection follows the path through the strict located
+tree in lockstep with the parsed YAML and projects a grammar span only through
+a scalar whose decoded text equals the rejected string; a mismatch,
+unsupported presentation, or alias leaves the range `None` but always keeps
+the error. A projection-only failure after a successful parse is the
+projection error at the root path. Source-free parsers discard the path.
+
+A failure with two locations carries them structurally, never as offsets in
+message text: `SchemaError::Grammar.related: Vec<GrammarRelated>` (span in
+the same text, or `arm: Some(i)` for another option of a YAML-sequence
+union), projected by the same path into `LocatedDefinitionFailure.related`.
+Narrowing overload problems carry `NarrowsProblem.related` (the other
+overload; its span is `None` for an overload without a clause, which the
+grammar fills from `Parser::arm_spans` and the YAML-list parser from the
+option's scalar). Registration's text path keeps them on
+`RegistrationError::Grammar`; the programmatic path has no text and gives
+`InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
+located in the catalog source. A standalone file's payload failure is folded
+into `SchemaError::SchemaDocument`'s message, so DMLS locates it when the
+overlay is assembled (`overlay::file_failures`, keyed by the path the error
+names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
+request must never read or parse a file.
+
+`decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
+restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
+flow, alias, comment, empty, and later-line-property values are `None`, and
+so is a value whose start is a line break: content on later lines is another
+node); use it, not a prefix blacklist, to recognize a continuable plain
+holder. `locate_type_definition_cursor_in_scalar` /
+`locate_schema_declaration_cursor_in_scalar` (`cursor.rs`) read a completion
+cursor through that decoded map, so anchors and tags stay outside the edited
+token; a cursor is accepted inside the scalar, at its end, or after trailing
+spaces/tabs on its last line, and nowhere else.
+
+DMLS consumes located failures, never guesses (`dmls/src/diagnostics/frontmatter.rs`):
+standalone definitions use `locate_standalone_definition_failure`; inline
+`$schema` prepare errors and `schema`/`type-definition` meta-typed values use
+the source-aware parsers on the value re-parsed in place (first line padded
+with spaces, `source_offset` = line start). Range order: `authored_span`,
+`value_span`, the deepest frontmatter entry along the path's leading property
+keys, then the old fallback. Meta-type union acceptance stays with the
+source-free parsers; the source-aware call only locates the reported error
+(matched by message), and a `schema` failure with no property segment keeps
+the whole value. A referenced file's failure is never projected into the
+buffer. Conflict related information is `` `<excerpt>` is declared here ``
+(`` … is the effective constraint from this declaration `` for every scheme
+participant); an empty `Options` participant with no constraint span relates
+its origin's `Definition` span.
+
+Conflict messages render each participant with
+`Constraint::diagnostic_excerpt()` (`serialize.rs`): `to_schema_text(None)`
+with controls escaped (`\n`, `\t`, `\u{1b}`), then cut to 160 Unicode
+scalars including `…`. `Display` and `StatusBlock` both use it inside a code
+span; DMLS related information must use it too. Options render as canonical
+`alphanumeric(...)`/bare `alphanumeric`; string defaults that read as a
+number, `true`, `false`, or `null` are quoted; compound defaults render as
+compact JSON (diagnostic only, not grammar).
 
 ## Testing
 
@@ -461,18 +883,86 @@ For grammar or schema changes, cover:
   naming the folder, so `scan` never installs a registry missing that root
   and bare-name lookup never falls through to a less local root. DMLS turns
   that `Io` scan error into `SchemaOutcome::Failed` instead of keeping its
-  last-good registry (last-good is only for trigger-file load errors).
+  last-good registry (last-good is only for whole-scan failures such as a
+  case-fold collision; a skipped trigger installs the valid subset).
 - `parse_trigger_envelope_from_str` is the one envelope classifier (discovery,
   embedded bundles, DMLS authoring, payload-cycle checks); never add a
   caller-side pre-check. Unparseable YAML is `Ok(None)` unless a provable
-  column-0 `kind: trigger-schema` line claims it (`claims_envelope` skips lines
+  column-0 `kind: schema-trigger` (or renamed `trigger-schema`) line claims it (`claims_envelope` skips lines
   inside multi-line quoted or block scalars and open flow collections), then
   `SchemaError::TriggerEnvelopeYaml { message, line, column }` (column in
-  characters, BOM excluded) with a YAML hint, wrapped in `TriggerLoad` by
-  filesystem discovery and `EmbeddedTriggerLoad` for bundles; `TriggerMatch`
-  stays for grammar and shape errors. A malformed flow mapping is therefore unclaimed. BOM and
+  characters, BOM excluded) with a YAML hint; `TriggerMatch` stays for
+  grammar and shape errors. Discovery records either as the cause of an
+  `InvalidTriggerFinding` (below), never an `Err`. A malformed flow mapping is therefore unclaimed. BOM and
   CRLF are normalized before parsing (libyaml rejects BOM + CRLF as two
   documents). Tests: `lib/tests/l1/trigger_envelope_claim.rs`.
+- Discovery **recovers per trigger** (`triggers/finding.rs`,
+  `discovery.rs::scan_with_source`): an invalid envelope, or a payload that
+  fails to resolve, import, merge, or compile, is left out of
+  `TriggerRegistry::triggers` and recorded as an `InvalidTriggerFinding` on
+  `TriggerRegistry::findings` / `DarkmatterSchemas::discovery_findings()`
+  (discovery order; the first cause; `identity()` = normalized path or
+  `(bundle, name)`; code `SCHEMA_INVALID_TRIGGER_CODE` =
+  `dm.schema.invalid_trigger`, warning). A skipped file keeps its name
+  claimed, so shadowing is unchanged. Only infrastructure failures stay
+  `Err`: an unenumerable root, an enumerated file that cannot be read, a
+  case-fold collision, a bundle structure error. The library never prints a
+  finding: `ValidationReport::trigger_findings`, `CleanSchemaContext::
+  discovery_findings`/`SchemaCleanAnalysis::trigger_findings`, and compose
+  (`ComposeWarning::from_invalid_trigger`, added in `prepare_document` before
+  any effect, then `stop_if_blocked`, so `--deny` stops it) carry them.
+  `enforce_compiles` (`assemble.rs`) compiles every payload's structural
+  validator through `SHARED_VALIDATOR_CACHE` (`TriggerPayloadCompile`). A
+  failed payload keeps its observations through `resolve::observed::collect`
+  (files read, locations probed), which `dependencies()` /
+  `searched_locations()` report so a repair or creation refreshes.
+  Provenance: `finding.rs::related_path` classifies every `SchemaError`
+  variant (no wildcard) into `cause_path`, compared with the trigger on
+  canonical forms but kept in the cause's own spelling; a file payload's
+  gate errors (`TriggerPayloadNotMergeable`/`TriggerPayloadCompile`
+  `payload_path`) take `ResolvedSchema::origin.file()`, the last file of an
+  alias chain. `from_invalid_trigger` fills `ComposeWarning::diagnostic`
+  with the trigger file at `position()` (source-free otherwise and for
+  embedded), which `report-json` prints. The
+  passive parsers (`parse_trigger_envelope_from_str`, `resolve_trigger_payload`)
+  stay strict. `file_claims_trigger_envelope` counts a malformed claimed
+  envelope as a trigger file, so an authored `$schema` naming a skipped
+  trigger still fails with `TriggerSchemaReferenced`. Tests:
+  `tests/l1/trigger_discovery_recovery.rs`,
+  `compose/tests/invalid_triggers.rs`. User docs:
+  `darkmatter/docs/topics/schemas/schema-triggers.md` (Invalid discovered
+  triggers; per-command delivery, `--deny`, repair refresh).
+- The `md` commands other than compose deliver findings through
+  `cli/src/commands/trigger_findings.rs`: `emit_warnings` (stderr `Status`
+  warning rows, as compose prints them), `FindingRow` (`{source, code, path,
+  message}`, `path` null for embedded), and `DeliveredFindings` (one warning
+  per `identity()` per invocation; `schema validate` attaches a shared
+  trigger to the first file). `schema validate --format json` puts rows
+  first in a record's `warnings` on any outcome; `schema triggers` (no
+  report mode) writes the warning rows to stderr and lists only each
+  source and code in its stdout "Skipped invalid triggers" section; `md clean` reads
+  `CleanResult::trigger_findings` (stderr, or `--json`'s top-level
+  `warnings`), and a schema failure carries them on
+  `FrontmatterRepairError::Schema { trigger_findings, .. }`, which
+  `clean.rs::CleanFailure` hands back so the caller prints them on stderr
+  or, under `--json`, in `json::schema_failure_report`'s v1 envelope. Ordinary
+  `md compose` prints a failed run's trigger warnings before its error
+  (`report_failure_trigger_warnings`), except the ones a `--deny` block
+  already shows. Tests: `cli/tests/l1/invalid_trigger_warnings.rs`.
+- Claudine carries findings in an invocation-scoped
+  `composition::TriggerFindings` record (`InvocationContext::trigger_findings`;
+  one entry per `identity()`, first cause, discovery order, a delivery
+  cursor). `load_effective_schema` records discovery's findings before the
+  authored `$schema` resolves, so every preliminary check (`pre_validate_*`,
+  `drop_invalid_optionals`, status reports, the launch schema, retry legs)
+  takes the record and never turns a finding into a `CompositionError`;
+  preparation records compose-report warnings through
+  `ComposeWarning::invalid_trigger_source()`. The CLI shows each once:
+  `emit_compose_warnings` drains the record (loops and retries rediscover
+  silently), and `TriggerWarningDrain` drains the rest when the invocation
+  returns, ahead of the error `main` renders. A `prep` target is its own
+  invocation. Tests: Claudine `lib/tests/l1/invalid_trigger_findings.rs`,
+  `cli/tests/l1/invalid_trigger_warnings.rs`.
 - `ctx` must be the checked document's context (compose's
   `source_file_resolution_context`, the CLI's `request.document_context`,
   DMLS's per-document derivation). The registry keeps that context and
@@ -494,27 +984,38 @@ For grammar or schema changes, cover:
   (the registry's private `claimed_names`). Bundle documents are keyed
   `{bundle}/{name}`; `NamespaceSource::Embedded { documents, bundle }`
   confines imports with `embedded::resolve_bundle_path`. Identity is
-  `TriggerSource::{File, Embedded { bundle, name }}`; load failures are
-  `SchemaError::EmbeddedTriggerLoad` (never `TriggerLoad`, whose path DMLS
-  publishes on). `SchemaOrigin { kind, source: Option<SchemaSourceId> }`:
+  `TriggerSource::{File, Embedded { bundle, name }}`; an invalid bundle
+  trigger is a finding whose source is `Embedded` (never a file path, link,
+  or watch) and still claims its name from later bundles. `SchemaOrigin { kind, source: Option<SchemaSourceId> }`:
   read `file()` (real files only; DMLS links only `ReferencedFile` through
   it) or `trigger_source()`. Embedded triggers add no dependency edges.
   Tests: `tests/l1/schema_embedded_trigger_bundles.rs` (incl. the envelope
   input matrix for block YAML and JSON syntax).
-- Large host payloads (Claudine's resolves to ~2.5 MB) are kept affordable by
+- Large host payloads (Claudine's resolves to about 1.4 MB, its recursive
+  families stored once in `$defs`) are kept affordable by
   process-wide memos, each holding its inputs alive and keyed by `Arc`
   identity (plus value equality for small authored schemas): embedded
   trigger loads (`discovery.rs::load_embedded_trigger`, successes only),
-  trigger merges (`mod.rs::merged_trigger_schema`), phase schemas
-  (`phase_json_schema`), and wrapped root-union arms (`wrapped_root_arms`).
-  Payload and layer JSON are `Arc<Value>`; a lone trigger layer is shared,
-  never cloned. `ValidatorCache` compiles a schema that names no
+  trigger merges and document schemas with or without the baseline
+  (`mod.rs::merged_trigger_schema`, so an unchanged schema keeps one `Arc`
+  and its digest is computed once), phase schemas (`phase_json_schema`), and
+  wrapped root-union arms (`wrapped_root_arms`). Import namespaces are
+  parsed once per file revision (`resolve.rs::load_named_types`, keyed by
+  path and a hash of the bytes read on every use) and once per shipped
+  partial. Payload and layer JSON are `Arc<Value>`; a lone trigger layer is
+  shared, never cloned. `ValidatorCache` compiles a schema that names no
   `darkmatter-file*` format and no `x-darkmatter-match` once for every
-  context (structural slot); a root union compiles only its arms
+  context (structural slot), and conversion reuses that validator
+  (`ConversionPlan::validator`); a root union compiles only its arms
   (`CompiledValidators::RootUnion`, so `EffectiveSchema::validator()` is
   `None` for it). Coercion skips validating union arms when no arm changes
-  the value. Do not reintroduce a per-call clone, serialization, or
-  uncached compile of an effective schema.
+  the value. Lowering builds nested fragments by moving them
+  (`convert.rs::any_of_value`), never `json!` with an interpolated `Value`,
+  which re-serializes the subtree. Every trigger payload is still resolved
+  and lowered at discovery, matched or not, because its load errors are
+  reported there (`tests/l1/trigger_payload_load_errors.rs`). Do not
+  reintroduce a per-call clone, serialization, or uncached compile of an
+  effective schema.
 - A test fixture for roots builds its context with `build_resolution_context`
   from a `RequestSnapshot` carrying a fixture home and env, never
   `FileResolutionContext::new` (ambient `HOME` would add a real `~/schemas`).
@@ -525,10 +1026,33 @@ For grammar or schema changes, cover:
 
 ## Authored global catalog
 
-The authored replacement schema entry point is `darkmatter/schemas/darkmatter.yaml`.
-It declares all globals, including `fm` (typed by `partials/fm.yaml`), and imports types from `partials/`.
-Runtime migration is pending: do not confuse the existing embedded document
-baseline with this global catalog. The planned document baseline is its resolved
-`fm` definition; `ctx` and `current` share a context type, and there is no
-`current_env`. Register the global catalog explicitly rather than auto-applying
-its root as frontmatter properties.
+`darkmatter/schemas/darkmatter.yaml` is the one declaration of every global's
+shape: `kind: schema`, `description`, and a `$schema` mapping of `fm`, `ctx`,
+`current`, `env`, `err`, `timing`, mostly named imports from the types-only
+`partials/`. `schemas/catalog.rs` loads it strictly (`GlobalCatalog`,
+`CatalogError { field, reason }`; `DARKMATTER_GLOBALS`): every global
+required, null/empty/wrong kinds rejected, `current` must equal `ctx`,
+duplicate keys and trailing YAML are errors. The `ctx.*` descriptors project
+its `ctx`; `err` and `timing` members equal the runtime
+`LifecycleErrorInfo`/`LifecycleTiming` values. A catalog (`kind: schema` with
+a `$schema` mapping and no `types`) is never a document schema: the
+standalone loader refuses it by content, wherever a `$schema` reaches it.
+Hosts declare their own globals in a catalog of the same format
+(`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
+and the host's requirements). DMLS hovers and completes host globals from the
+catalogs in a document's schema roots (`catalog::host_catalogs`), treating
+each as `ExecutionDependent` (DMLS cannot know loop/group membership); a
+catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
+md event's stack DMLS uses that event's registry `BindingView`
+(`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
+`dm.expression.unavailable_global`.
+
+- **`function(...)` narrowing clause.** `narrows(param: T; true-implies |
+  true-iff | false-implies)` (or presence-only `narrows(param; kind)`, which
+  lowers to `FactType::NonNull`) is an optional, at-most-one clause after
+  `returns(...)`; it is description-only and a document schema reaching it
+  fails to load. Validation lives with the signature grammar
+  (`simplified/signature.rs`): boolean returns, a declared non-rest parameter,
+  a self-contained single-type target (no union or named reference), `true-iff`
+  only for `null` and bare families, and all overloads agreeing. Docs:
+  `docs/topics/schemas/definition.md#narrowing-facts`.

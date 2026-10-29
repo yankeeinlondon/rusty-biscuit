@@ -101,7 +101,7 @@ fn schema_validate_no_schema_with_baseline_opt_out_is_vacuous_success() {
 
     process
         .command()
-        .args(["schema", "validate", "--no-baseline-schema"])
+        .args(["schema", "validate", "--disable", "baseline-schema"])
         .arg(&doc)
         .assert()
         .success()
@@ -867,7 +867,7 @@ fn schema_validate_contested_file_match_selects_and_rejects_union_arms() {
     let validate = |doc: &Path, spec: &str| {
         let output = process
             .command()
-            .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+            .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
             .arg(doc)
             .arg(format!("spec={spec}"))
             .output()
@@ -933,7 +933,7 @@ fn schema_validate_enforces_each_root_union_arm_match() {
         for (spec, accepted) in [(matching, true), (outside, false)] {
             let output = process
                 .command()
-                .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+                .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
                 .arg(&doc)
                 .arg(format!("spec={spec}"))
                 .output()
@@ -984,7 +984,7 @@ fn assert_spelling_applied(schema: &str, instances: &[(&str, Expected)]) {
         );
         let output = process
             .command()
-            .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+            .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
             .arg(&doc)
             .output()
             .unwrap();
@@ -1044,7 +1044,7 @@ fn schema_validate_reports_folded_description_of_continued_scalar() {
 
     process
         .command()
-        .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+        .args(["schema", "validate", "--disable", "schema-triggers", "--format", "json"])
         .arg(&doc)
         .assert()
         .code(1)
@@ -1080,7 +1080,7 @@ fn schema_validate_rejects_indentless_types_sequence() {
 
     process
         .command()
-        .args(["schema", "validate", "--no-trigger-schemas"])
+        .args(["schema", "validate", "--disable", "schema-triggers"])
         .arg(&doc)
         .assert()
         .code(2)
@@ -1149,7 +1149,7 @@ fn validate_json(
         .args([
             "schema",
             "validate",
-            "--no-trigger-schemas",
+            "--disable", "schema-triggers",
             "--format",
             "json",
         ])
@@ -1342,8 +1342,8 @@ fn schema_validate_multi_hop_bound_contradiction_names_both_origins() {
     let message = report["message"].as_str().unwrap();
     for fragment in [
         "heading: contradictory bounds on named type `title_base`".to_owned(),
-        format!("`min` in `{}`", resolved_display(&types)),
-        "`max` in the inline `$schema`".to_owned(),
+        format!("`min(10)` in `{}`", resolved_display(&types)),
+        "`max(5)` in the inline `$schema`".to_owned(),
     ] {
         assert!(
             message.contains(&fragment),
@@ -1501,9 +1501,10 @@ fn schema_validate_grouped_match_is_passive_in_a_single_schema() {
 }
 
 /// Claudine's complete schema bundle.
-const CLAUDINE_BUNDLE: [(&str, &str); 5] = [
+const CLAUDINE_BUNDLE: [(&str, &str); 6] = [
     ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
     ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+    ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
     ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
     ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
     ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
@@ -1587,4 +1588,225 @@ fn schema_validate_shipped_claudine_schema_rejects_values_inside_a_reused_loop_e
     // problem's description names both arms.
     assert_eq!(found[1].1, "0 is not valid under any of the schemas listed in the 'anyOf' keyword", "{report}");
     assert!(report.to_string().contains("the most iterations to run | a cap such as {{ cap }}"), "{report}");
+}
+
+/// Like [`shipped_claudine_document`], with one edit applied to the copy of
+/// the bundle file `file`: its first `from` becomes `to`.
+fn edited_claudine_document(
+    process: &CliProcessFixture,
+    values: &str,
+    (file, from, to): (&str, &str, &str),
+) -> PathBuf {
+    let doc = shipped_claudine_document(process, values);
+    let path = process.cwd().join("schemas").join(file);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains(from), "{file} no longer holds {from:?}");
+    std::fs::write(&path, text.replacen(from, to, 1)).unwrap();
+    doc
+}
+
+/// Runs plain `md schema validate` on `doc` and returns its exit code and
+/// stdout as prose: ANSI styling and the report gutter are removed and
+/// whitespace runs collapsed, so a fragment the renderer wrapped still
+/// matches. Asserts the run left nothing beside its inputs.
+fn validate_rendered(process: &CliProcessFixture, doc: &Path) -> (Option<i32>, String) {
+    let output = process
+        .command()
+        .args(["schema", "validate"])
+        .arg(doc)
+        .output()
+        .unwrap();
+    let mut entries: Vec<String> = std::fs::read_dir(process.cwd())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+    assert_eq!(entries, [".git", "doc.md", "schemas"], "validation wrote an output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut plain = String::new();
+    let mut chars = stdout.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            chars.by_ref().find(|ch| ch.is_ascii_alphabetic());
+        } else if ch != '┃' {
+            plain.push(ch);
+        }
+    }
+    (
+        output.status.code(),
+        plain.split_whitespace().collect::<Vec<_>>().join(" "),
+    )
+}
+
+#[test]
+fn schema_validate_grammar_error_in_one_shipped_definition_names_its_location() {
+    let process = CliProcessFixture::new();
+    let doc = edited_claudine_document(
+        &process,
+        "$schema:\n  loop: loop@./schemas/lifecycle.yaml\nloop:\n  max: 3\n",
+        (
+            "lifecycle.yaml",
+            "\"number(integer; min(1)) -> the most iterations to run\"",
+            "\"number(integer; min(one)) -> the most iterations to run\"",
+        ),
+    );
+
+    let (code, rendered) = validate_rendered(&process, &doc);
+
+    assert_eq!(code, Some(2), "{rendered}");
+    for fragment in [
+        "has a schema definition error",
+        "lifecycle.yaml as a standalone SimplifiedSchema",
+        "for property `max`: `min` requires a numeric argument, got `one`",
+    ] {
+        assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");
+    }
+    assert!(!rendered.contains("is valid"), "{rendered}");
+}
+
+#[test]
+fn schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_values() {
+    let process = CliProcessFixture::new();
+    let doc = edited_claudine_document(
+        &process,
+        "$schema:\n  tag: slug(max(5))@./schemas/lifecycle.yaml\ntag: abc\n",
+        ("lifecycle.yaml", "types:\n", "types:\n    slug: string(min(10))\n"),
+    );
+
+    let (code, rendered) = validate_rendered(&process, &doc);
+
+    assert_eq!(code, Some(2), "{rendered}");
+    for fragment in [
+        "has a schema definition error",
+        "tag reuses slug with contradictory bounds",
+        "`min(10)` at slug in",
+        "lifecycle.yaml`",
+        "`max(5)` at tag in the inline `$schema`",
+    ] {
+        assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");
+    }
+    assert!(!rendered.contains("is valid"), "{rendered}");
+}
+
+/// `entry`, declared in `types.yaml` and aliased there as `item`, is named
+/// at three sites (`first`, `second`, and `items`' list item through the
+/// alias), so the resolver stores it once and references it at each use.
+const SHARED_ENTRY_TYPES: &str = concat!(
+    "kind: schema\n",
+    "types:\n",
+    "  entry: \"{ name: string(required), size: number(min(0)) }\"\n",
+    "  item: entry\n",
+);
+
+const SHARED_ENTRY_SCHEMA: &str = concat!(
+    "$schema:\n",
+    "  first: \"entry@./types.yaml\"\n",
+    "  second: \"entry@./types.yaml\"\n",
+    "  items: \"item[]@./types.yaml\"\n",
+);
+
+fn shared_entry_document(process: &CliProcessFixture, values: &str) -> PathBuf {
+    write_file(process.cwd(), "types.yaml", SHARED_ENTRY_TYPES);
+    write_file(
+        process.cwd(),
+        "doc.md",
+        &format!("---\n{SHARED_ENTRY_SCHEMA}{values}---\nBody\n"),
+    )
+}
+
+/// Every `$ref` below `value`.
+fn refs_below(value: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(pointer)) = map.get("$ref") {
+                    found.push(pointer.clone());
+                }
+                pending.extend(map.values());
+            }
+            serde_json::Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    found
+}
+
+#[test]
+fn schema_validate_accepts_a_shared_type_at_every_use() {
+    let process = CliProcessFixture::new();
+    let doc = shared_entry_document(
+        &process,
+        "first:\n  name: a\n  size: 1\nsecond:\n  name: b\n  size: 2\nitems:\n  - name: c\n    size: 3\n",
+    );
+    // The fixture is shared, not three inlined copies: one `$ref` at each use.
+    let schema: serde_yaml_ng::Value = serde_yaml_ng::from_str(SHARED_ENTRY_SCHEMA).unwrap();
+    let context = biscuit_file::FileResolutionContext::new(process.cwd());
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_yaml_schema(
+        &schema["$schema"],
+        process.cwd(),
+        &context,
+    )
+    .unwrap();
+    let properties = &resolved.json_schema["properties"];
+    let pointer = refs_below(&properties["first"]);
+    assert_eq!(pointer.len(), 1, "{:#}", resolved.json_schema);
+    assert_eq!(refs_below(&properties["second"]), pointer, "{:#}", resolved.json_schema);
+    assert_eq!(refs_below(&properties["items"]), pointer, "{:#}", resolved.json_schema);
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], true, "{report}");
+}
+
+#[test]
+fn schema_validate_reports_a_failure_through_each_shared_use_at_its_location() {
+    let process = CliProcessFixture::new();
+    // Line 1 is the opening `---`; the values start on line 6. A missing
+    // property is located at the object that lacks it (`second`'s first key).
+    let doc = shared_entry_document(
+        &process,
+        concat!(
+            "first:\n",
+            "  name: a\n",
+            "  size: -1\n",
+            "second:\n",
+            "  size: 2\n",
+            "items:\n",
+            "  - name: c\n",
+            "    size: 3\n",
+            "  - name: [1]\n",
+            "    size: 4\n",
+        ),
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(1), "{report}");
+    let found: Vec<serde_json::Value> = report["problems"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no problems array: {report}"))
+        .iter()
+        .map(|problem| {
+            serde_json::json!([
+                problem["path"],
+                problem["property"],
+                problem["kind"],
+                problem["message"],
+                problem["line"],
+                problem["column"],
+            ])
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            serde_json::json!(["/first/size", null, "invalid", "-1 is less than the minimum of 0", 8, 9]),
+            serde_json::json!(["/second", "name", "missing", "\"name\" is a required property", 10, 3]),
+            serde_json::json!(["/items/1/name", null, "type", "[1] is not of type \"string\"", 14, 11]),
+        ],
+        "{report}"
+    );
 }

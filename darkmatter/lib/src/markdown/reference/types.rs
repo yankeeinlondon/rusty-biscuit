@@ -467,6 +467,9 @@ pub struct ReferenceGraph {
     /// validation via [`prepared_headings`](Self::prepared_headings) so a
     /// post-build heading edit cannot leak into a validation report.
     prepared_headings: PreparedHeadingSnapshot,
+    /// The skipped-trigger warnings (`dm.schema.invalid_trigger`) the build's
+    /// node preparations reported, once per trigger, in discovery order.
+    trigger_warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 impl std::fmt::Debug for ReferenceGraph {
@@ -628,7 +631,21 @@ impl ReferenceGraph {
             nodes,
             provenance,
             prepared_headings,
+            trigger_warnings: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_trigger_warnings(
+        mut self,
+        warnings: Vec<crate::markdown::compose::ComposeWarning>,
+    ) -> Self {
+        self.trigger_warnings = warnings;
+        self
+    }
+
+    /// The skipped-trigger warnings the build's node preparations reported.
+    pub(crate) fn trigger_warnings(&self) -> &[crate::markdown::compose::ComposeWarning] {
+        &self.trigger_warnings
     }
 
     /// The root document node.

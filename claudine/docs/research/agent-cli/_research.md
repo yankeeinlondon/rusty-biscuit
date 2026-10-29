@@ -64,7 +64,7 @@ success:
           - warn: "{{ link(file) }} records a different agent or model than the one assigned ({{agent}} / {{model}})"
           - error: "the research document records the wrong agent or model"
     - set:
-          contract: "$(md schema validate '{{file}}' --no-trigger-schemas --format json)::result"
+          contract: "$(md schema validate '{{file}}' --disable schema-triggers --format json)::result"
     - when: "!contract.ok"
       then:
           - warn: "{{topic}} research for **{{seq.name}}** does not satisfy its contract"
@@ -158,7 +158,7 @@ either. The second also runs the provider-catalog generator over your switch
 records. Run both yourself before you finish:
 
 ```sh
-md schema validate '{{file}}' --no-trigger-schemas
+md schema validate '{{file}}' --disable schema-triggers
 python3 '{{ctx.repo_root}}/claudine/docs/research/agent-cli/_relations.py' '{{file}}'
 ```
 

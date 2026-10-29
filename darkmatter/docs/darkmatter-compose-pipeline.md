@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Darkmatter Compose Pipeline
 
 ## High Level Flow
@@ -11,6 +15,7 @@ block-beta
         columns 1
         preTitle["<b>1. Inline Pre</b> (<i>serial</i>)"]
         preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
+        callCheck("<a href='./inline/call-check.md'>0b. Call Check 🏁</a>")
         fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation — pass 1 🏁</a>")
         schemaValidation("<a href='./inline/schema-validation.md'>2. Schema Validation 🏁</a>")
         shellExp("<a href='./inline/fm-shell-expansion.md'>3. Frontmatter Shell Expansion 🏁</a>")
@@ -193,12 +198,34 @@ been removed.
 >
 > **Note:** approval and execution are deliberately separate. Pre-flight builds the **approval set** _condition-blind_ — it walks every branch (false page blocks, false-condition transclusions, both sides of a `$(...)` ternary) and approves every command that **could** run under any state, exactly once, up front. **Execution** is _condition-aware_: a command runs only when its branch is actually reached. So in the example above the dead-branch command is still approved (vetted once), but never executes while the condition is false. The governing invariant is `execution_set ⊆ approval_set`, which makes the execution-time gate a pure membership check that never prompts — see [pre-flight checks](./inline/preflight-checks.md).
 
+Before any stage evaluates anything, the [call check](./inline/call-check.md) rejects a document that makes a call its schema's declared types prove can never bind, in any branch, so a sibling expression or command never runs first.
+
 Each stage acts only on **authored** text, and each piece of authored text is scanned once. What a stage produces (an expression's value, shell output, a `{{{ … }}}` literal's braces, a file read) is data to every later stage, and to transcluded children: it is never evaluated, run, or parsed as a directive. The pipeline tracks this as origin beside the value (frontmatter paths and body byte ranges) rather than by escaping the text, and it fails closed if that tracking is ever lost. A frontmatter value that is a whole-value `$( … )` runs only when the author wrote it that way. See [Inserted Text Is Data](./inline/interpolation.md#inserted-text-is-data).
 
 ```mermaid
 flowchart LR
     A["authored {{ x }}"] -->|Interpolation| B["value of x (data)"]
     B -->|"shell, directive, and transclusion stages:<br/>carried as text, never scanned"| O["composed output"]
+```
+
+#### Structural preparation of `::map` and `::filter`
+
+[Map](./inline/map.md) and [filter](./inline/filter.md) regions are prepared in
+one structural traversal together with [page blocks](./inline/page-blocks.md),
+between text replacement and interpolation. Gates, sources, and every callback
+(selection, sort key, prefix, mapping) finish for all reached items before the
+region bodies reach ordinary interpolation, shell, and transclusion stages.
+Each repeated body keeps its own local bindings, so those later stages read the
+right item. `--disable collection-blocks` skips this stage without affecting
+page blocks.
+
+```mermaid
+flowchart LR
+    G[Gate and source] --> C[Callbacks per reached item]
+    C --> B[Scoped body copies]
+    B --> I[Interpolation]
+    I --> S[Shell and links]
+    S --> T[Transclusion]
 ```
 
 ### 2. Transclusion

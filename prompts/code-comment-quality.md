@@ -12,7 +12,7 @@ Code comments are super useful for both agents and humans and are encouraged but
 
 You will be evaluating code commenting in the "{{ ctx.area }}" package area's code base and suggesting improvements to be made. Your review findings will be saved to "{{review}}".
 
-::block when="ctx.area == ctx.package || null"
+::block when="!is_empty(ctx.current_packages)"
 - this package area has the following Rust packages in it which should be analyzed:
 
     {{ as_unordered_list(ctx.current_packages) }}

@@ -5,6 +5,7 @@
 //! and a chained target proxy alike — there is no per-route resolution or
 //! cycle semantics left to test separately.
 
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use super::*;
 
 use claudine::composition::{

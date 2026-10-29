@@ -128,6 +128,31 @@ Widening to recursion later is additive if it is ever ratified.
 field). A new facet value, detail key, or code is additive by construction,
 because both sides already tolerate values they do not know.
 
+### Who owns what
+
+The snapshot is plain data, so Darkmatter owns it: `DiagnosticSnapshot`,
+`DiagnosticCause`, and the `err`/`timing` values built on them
+(`LifecycleErrorInfo`, `LifecycleTiming`) live in `darkmatter::lifecycle` and
+are re-exported at their Claudine paths. Everything that reads Claudine's
+catalog stays in Claudine as extension traits, so call sites keep their syntax
+once the trait is imported:
+
+```rust
+use claudine::composition::{CompositionError, LifecycleErrorInfo, LifecycleErrorInfoExt};
+use claudine::diagnostics::{DiagnosticSnapshot, DiagnosticSnapshotExt};
+
+let err = CompositionError::FileNotFound("missing.md".to_string());
+let snapshot = DiagnosticSnapshot::from_diagnostic(&err);
+let info = LifecycleErrorInfo::from_composition_error(&err);
+assert_eq!(info.snapshot.as_deref(), Some(&snapshot));
+```
+
+Darkmatter's own constructors take the catalog as a `DiagnosticCatalog`
+service; Claudine passes `ClaudineDiagnostics`, whose selection is
+`select_effective_diagnostic`. The frontmatter excerpt rides on the snapshot as
+an opaque, never-serialized `SourceExcerpt`, which Claudine's
+`FrontmatterExcerpt` renders.
+
 ### Projecting from an erased boundary
 
 A boundary that holds a `color_eyre::eyre::Report` rather than a concrete type is
@@ -135,7 +160,8 @@ A boundary that holds a `color_eyre::eyre::Report` rather than a concrete type i
 (it does not implement `std::error::Error`), but it *boxes* its source rather
 than discarding it, so the typed diagnostic is still reachable by downcast.
 
-`DiagnosticSnapshot::select(report.as_ref())` is the seam: it runs the same
+`DiagnosticSnapshot::select(report.as_ref())` (with `DiagnosticSnapshotExt`
+in scope) is the seam: it runs the same
 `select_effective_diagnostic` walk the CLI renders through and returns the
 projection, or `None` when the chain genuinely only ever held prose. A record at
 such a boundary stores that projection **beside** its existing prose field —

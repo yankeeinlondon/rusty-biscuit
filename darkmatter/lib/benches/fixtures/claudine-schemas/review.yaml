@@ -1,0 +1,5 @@
+$schema:
+    ready: boolean -> whether the review deemed the spec to production ready
+    agent: string -> the `{agent}/{model}` used to perform the review
+    created: datetime -> the date and time the review was performed
+    implemented: boolean -> whether the review's suggestions have been _implemented_ yet

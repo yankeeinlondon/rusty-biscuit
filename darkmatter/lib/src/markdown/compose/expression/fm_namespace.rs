@@ -80,6 +80,26 @@ pub(crate) fn resolve_fm_namespace(path: &str, root: &Value) -> Option<Value> {
     }
 }
 
+/// Variant of [`resolve_fm_namespace`] that resolves against a frontmatter
+/// view directly.
+///
+/// A `fm.<path>` traversal borrows into the view and clones only the resolved
+/// leaf instead of deep-cloning the entire state per lookup (F30). Bare `fm`
+/// still materializes the whole object snapshot.
+pub(crate) fn resolve_fm_namespace_in_map(
+    path: &str,
+    data: &crate::markdown::compose::SharedFrontmatter,
+) -> Option<Value> {
+    match fm_namespace_path(path)? {
+        FmPath::Member(rest) => {
+            let mut segments = rest.split('.');
+            let first = data.get(segments.next()?)?;
+            descend(first, segments)
+        }
+        FmPath::Whole => Some(Value::Object(data.to_map())),
+    }
+}
+
 /// Resolves an `fm`-namespace `path` against a frontmatter mapping, cloning
 /// only the selected value for a dotted read. `None` when `path` is outside the
 /// namespace or the member is absent.
@@ -164,11 +184,13 @@ mod tests {
     }
 
     #[test]
-    fn object_variant_agrees_with_value_variant() {
+    fn object_and_map_variants_agree_with_value_variant() {
         let object = root().as_object().cloned().unwrap();
+        let map = crate::markdown::compose::SharedFrontmatter::from(object.clone());
         for path in ["fm", "fm.build", "fm.config.retries", "fm.fm.child", "fm.missing", "fm.build.nope"] {
             let expected = resolve_fm_namespace(path, &root());
             assert_eq!(resolve_fm_namespace_in_object(path, &object), expected, "{path}");
+            assert_eq!(resolve_fm_namespace_in_map(path, &map), expected, "{path}");
         }
         assert_eq!(resolve_fm_namespace_in_object("doc.build", &object), None);
     }

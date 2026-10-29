@@ -1,0 +1,540 @@
+# The recursive-schema golden corpus: every entry names one frozen input under
+# `inputs/` and how it is resolved; `golden/<id>.json` (or `<id>.digest`) holds
+# its lowered JSON Schema. Read by `darkmatter/lib/tests/l1/recursive_schema_golden.rs`.
+#
+# kind:
+#   schema-file           `$schema: ./<file>` from the file's own directory (a `kind: schema` document)
+#   pure-schema-document  the same, for a non-kinded `$schema` envelope or a raw JSON Schema file
+#   inline-root           the `key` (default `$schema`) mapping of a YAML file or Markdown frontmatter
+#   root-union            the `key` (default `$schema`) sequence of a YAML file or Markdown frontmatter
+#   trigger-payload       a `kind: schema-trigger` file's `$schema` payload, from its own directory,
+#                         with that directory as the only schema root
+#   embedded-baseline     Darkmatter's compiled-in baseline; no input
+#   effective             the document's effective schema (`DarkmatterSchemas::effective_for`)
+#                         with the `baseline` and the `bundle` of embedded trigger files
+#
+# `group` gives an entry that lowers to megabytes a test of its own (`GROUP_TESTS`),
+# keeping each test inside the L1 time budget.
+#
+# `source` is the repository path the input was copied from, byte for byte, on
+# 2026-10-23 at e5976e3f0, and equals `input`; `authored` marks an input written
+# for this corpus.
+entries:
+    - id: darkmatter-docs-schemas-env
+      kind: schema-file
+      input: "darkmatter/docs/schemas/env.yaml"
+      source: "darkmatter/docs/schemas/env.yaml"
+    - id: darkmatter-schemas-partials-context-variables
+      kind: schema-file
+      input: "darkmatter/schemas/partials/context-variables.yaml"
+      source: "darkmatter/schemas/partials/context-variables.yaml"
+    - id: darkmatter-schemas-partials-error
+      kind: schema-file
+      input: "darkmatter/schemas/partials/error.yaml"
+      source: "darkmatter/schemas/partials/error.yaml"
+    - id: darkmatter-schemas-partials-fm
+      kind: schema-file
+      input: "darkmatter/schemas/partials/fm.yaml"
+      source: "darkmatter/schemas/partials/fm.yaml"
+    - id: darkmatter-schemas-partials-lifecycle
+      kind: schema-file
+      input: "darkmatter/schemas/partials/lifecycle.yaml"
+      source: "darkmatter/schemas/partials/lifecycle.yaml"
+    - id: darkmatter-schemas-partials-md-lifecycle
+      kind: schema-file
+      input: "darkmatter/schemas/partials/md-lifecycle.yaml"
+      source: "darkmatter/schemas/partials/md-lifecycle.yaml"
+    - id: darkmatter-schemas-partials-style
+      kind: schema-file
+      input: "darkmatter/schemas/partials/style.yaml"
+      source: "darkmatter/schemas/partials/style.yaml"
+    - id: darkmatter-schemas-partials-timing
+      kind: schema-file
+      input: "darkmatter/schemas/partials/timing.yaml"
+      source: "darkmatter/schemas/partials/timing.yaml"
+    - id: content-policy-schemas-content-policy
+      kind: schema-file
+      input: "content-policy/schemas/content-policy.yaml"
+      source: "content-policy/schemas/content-policy.yaml"
+    - id: claudine-schemas-action
+      kind: schema-file
+      input: "claudine/schemas/action.yaml"
+      source: "claudine/schemas/action.yaml"
+    - id: claudine-schemas-lifecycle
+      kind: schema-file
+      group: claudine-lifecycle
+      input: "claudine/schemas/lifecycle.yaml"
+      source: "claudine/schemas/lifecycle.yaml"
+    - id: claudine-schemas-linking
+      kind: schema-file
+      input: "claudine/schemas/linking.yaml"
+      source: "claudine/schemas/linking.yaml"
+    - id: claudine-schemas-sequence-types
+      kind: schema-file
+      group: claudine-sequence-types
+      input: "claudine/schemas/sequence-types.yaml"
+      source: "claudine/schemas/sequence-types.yaml"
+    - id: claudine-docs-schemas-partials-side-effect
+      kind: schema-file
+      input: "claudine/docs/schemas/partials/side-effect.yaml"
+      source: "claudine/docs/schemas/partials/side-effect.yaml"
+    - id: schema-enhancements-matrix-timing-shipped
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/timing.shipped.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/timing.shipped.yaml"
+    - id: schema-yaml-spellings-anchors-conventional
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.conventional.yaml"
+    - id: schema-yaml-spellings-anchors-indentless
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.indentless.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.indentless.yaml"
+    - id: schema-yaml-spellings-spec-continued-continued
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.continued.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.continued.yaml"
+    - id: schema-yaml-spellings-spec-continued-conventional
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.conventional.yaml"
+    - id: schema-yaml-spellings-spec-indentless-conventional
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.conventional.yaml"
+    - id: schema-yaml-spellings-spec-indentless-indentless
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.indentless.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.indentless.yaml"
+    - id: schema-yaml-spellings-tagged-conventional
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.conventional.yaml"
+    - id: schema-yaml-spellings-tagged-serialized
+      kind: schema-file
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.serialized.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.serialized.yaml"
+    - id: schemas-feature-review
+      kind: pure-schema-document
+      input: "schemas/feature-review.yaml"
+      source: "schemas/feature-review.yaml"
+    - id: schemas-suggestion-review
+      kind: pure-schema-document
+      input: "schemas/suggestion-review.yaml"
+      source: "schemas/suggestion-review.yaml"
+    - id: claudine-schemas-review
+      kind: pure-schema-document
+      input: "claudine/schemas/review.yaml"
+      source: "claudine/schemas/review.yaml"
+    - id: dot-claudine-schemas-review
+      kind: pure-schema-document
+      input: ".claudine/schemas/review.yaml"
+      source: ".claudine/schemas/review.yaml"
+    - id: darkmatter-example-docs-schemas-external
+      kind: pure-schema-document
+      input: "darkmatter/example-docs/schemas/external.yaml"
+      source: "darkmatter/example-docs/schemas/external.yaml"
+    - id: darkmatter-tests-schema-triggers-schemas-claudine
+      kind: pure-schema-document
+      input: "darkmatter/tests/fixtures/schema-triggers/schemas/claudine.yaml"
+      source: "darkmatter/tests/fixtures/schema-triggers/schemas/claudine.yaml"
+    - id: darkmatter-tests-schema-triggers-schemas-inline-compose
+      kind: pure-schema-document
+      input: "darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.yaml"
+      source: "darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.yaml"
+    - id: darkmatter-tests-schema-triggers-schemas-sequence
+      kind: pure-schema-document
+      input: "darkmatter/tests/fixtures/schema-triggers/schemas/sequence.yaml"
+      source: "darkmatter/tests/fixtures/schema-triggers/schemas/sequence.yaml"
+    - id: schema-enhancements-matrix-slash-commands-shipped
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/slash-commands.shipped.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/slash-commands.shipped.yaml"
+    - id: schema-enhancements-matrix-frontmatter-schema
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.schema.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.schema.yaml"
+    - id: schema-enhancements-matrix-frontmatter-conversion-schema
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.conversion.schema.yaml"
+    - id: schema-enhancements-matrix-detected-schema-json
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json"
+    - id: schema-enhancements-matrix-detected-schema
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml"
+    - id: schema-enhancements-matrix-keywords-schema-json
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json"
+    - id: schema-enhancements-matrix-keywords-schema
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml"
+    - id: schema-yaml-spellings-blank-line-continued
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml"
+    - id: schema-yaml-spellings-blank-line-conventional
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.conventional.yaml"
+    - id: schema-yaml-spellings-continued-continued
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.continued.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.continued.yaml"
+    - id: schema-yaml-spellings-continued-conventional
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.conventional.yaml"
+    - id: schema-yaml-spellings-nested-conventional
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.conventional.yaml"
+    - id: schema-yaml-spellings-nested-serialized
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.serialized.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.serialized.yaml"
+    - id: validate-json-schema-ref-schema-json
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/validate/json_schema_ref/schema.json"
+      source: "darkmatter/lib/tests/fixtures/validate/json_schema_ref/schema.json"
+    - id: validate-missing-required-schema
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/validate/missing_required/schema.yaml"
+      source: "darkmatter/lib/tests/fixtures/validate/missing_required/schema.yaml"
+    - id: validate-simple-required-present-schema
+      kind: pure-schema-document
+      input: "darkmatter/lib/tests/fixtures/validate/simple_required_present/schema.yaml"
+      source: "darkmatter/lib/tests/fixtures/validate/simple_required_present/schema.yaml"
+    - id: claudine-schemas-claudine
+      kind: trigger-payload
+      group: claudine-claudine
+      input: "claudine/schemas/claudine.yaml"
+      source: "claudine/schemas/claudine.yaml"
+    - id: claudine-schemas-inline-compose
+      kind: trigger-payload
+      input: "claudine/schemas/inline-compose.yaml"
+      source: "claudine/schemas/inline-compose.yaml"
+    - id: claudine-schemas-sequence
+      kind: trigger-payload
+      group: claudine-sequence
+      input: "claudine/schemas/sequence.yaml"
+      source: "claudine/schemas/sequence.yaml"
+    - id: darkmatter-tests-schema-triggers-schemas-claudine-trigger
+      kind: trigger-payload
+      input: "darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml"
+      source: "darkmatter/tests/fixtures/schema-triggers/schemas/claudine.trigger.yaml"
+    - id: darkmatter-tests-schema-triggers-schemas-inline-compose-trigger
+      kind: trigger-payload
+      input: "darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml"
+      source: "darkmatter/tests/fixtures/schema-triggers/schemas/inline-compose.trigger.yaml"
+    - id: darkmatter-tests-schema-triggers-schemas-sequence-trigger
+      kind: trigger-payload
+      input: "darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml"
+      source: "darkmatter/tests/fixtures/schema-triggers/schemas/sequence.trigger.yaml"
+    - id: darkmatter-schemas-darkmatter-schema-body
+      kind: inline-root
+      input: "darkmatter/schemas/darkmatter.yaml"
+      key: "$schema"
+      source: "darkmatter/schemas/darkmatter.yaml"
+    - id: claudine-schemas-globals-schema-body
+      kind: inline-root
+      input: "claudine/schemas/globals.yaml"
+      key: "$schema"
+      source: "claudine/schemas/globals.yaml"
+    - id: darkmatter-docs-schemas-err-types-body
+      kind: inline-root
+      input: "darkmatter/docs/schemas/err.yaml"
+      key: "types"
+      source: "darkmatter/docs/schemas/err.yaml"
+    - id: claudine-docs-schemas-partials-communication-types-body
+      kind: inline-root
+      input: "claudine/docs/schemas/partials/communication.yaml"
+      key: "types"
+      source: "claudine/docs/schemas/partials/communication.yaml"
+    - id: messenger-probe-p15-one-line
+      kind: inline-root
+      input: "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_one_line.md"
+      source: "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_one_line.md"
+    - id: validate-boolish-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/boolish_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/boolish_valid/doc.md"
+    - id: validate-date-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/date_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/date_invalid/doc.md"
+    - id: validate-date-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/date_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/date_valid/doc.md"
+    - id: validate-datetime-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/datetime_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/datetime_invalid/doc.md"
+    - id: validate-email-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/email_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/email_invalid/doc.md"
+    - id: validate-email-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/email_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/email_valid/doc.md"
+    - id: validate-enum-member-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/enum_member_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/enum_member_invalid/doc.md"
+    - id: validate-file-eager-match-nonmatching-still-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/file_eager_match_nonmatching_still_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/file_eager_match_nonmatching_still_valid/doc.md"
+    - id: validate-file-match-nonmatching-still-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/file_match_nonmatching_still_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/file_match_nonmatching_still_valid/doc.md"
+    - id: validate-file-match-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/file_match_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/file_match_valid/doc.md"
+    - id: validate-inline-object-array-extra-property-rejected
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/inline_object_array_extra_property_rejected/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/inline_object_array_extra_property_rejected/doc.md"
+    - id: validate-inline-object-array-missing-required
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/inline_object_array_missing_required/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/inline_object_array_missing_required/doc.md"
+    - id: validate-inline-object-array-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/inline_object_array_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/inline_object_array_valid/doc.md"
+    - id: validate-inline-object-array-wrong-type
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/inline_object_array_wrong_type/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/inline_object_array_wrong_type/doc.md"
+    - id: validate-inline-schema
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/inline_schema/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/inline_schema/doc.md"
+    - id: validate-not-empty-violation
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/not_empty_violation/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/not_empty_violation/doc.md"
+    - id: validate-numberlike-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/numberlike_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/numberlike_invalid/doc.md"
+    - id: validate-numberlike-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/numberlike_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/numberlike_valid/doc.md"
+    - id: validate-opaque-object-array-accepts-extra-property
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/opaque_object_array_accepts_extra_property/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/opaque_object_array_accepts_extra_property/doc.md"
+    - id: validate-pattern-violation
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/pattern_violation/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/pattern_violation/doc.md"
+    - id: validate-property-union-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/property_union_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/property_union_invalid/doc.md"
+    - id: validate-property-union-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/property_union_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/property_union_valid/doc.md"
+    - id: validate-range-violation
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/range_violation/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/range_violation/doc.md"
+    - id: validate-root-union
+      kind: root-union
+      input: "darkmatter/lib/tests/fixtures/validate/root_union/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/root_union/doc.md"
+    - id: validate-root-union-fileref
+      kind: root-union
+      input: "darkmatter/lib/tests/fixtures/validate/root_union_fileref/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/root_union_fileref/doc.md"
+    - id: validate-root-union-none-match
+      kind: root-union
+      input: "darkmatter/lib/tests/fixtures/validate/root_union_none_match/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/root_union_none_match/doc.md"
+    - id: validate-time-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/time_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/time_invalid/doc.md"
+    - id: validate-unique-violation
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/unique_violation/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/unique_violation/doc.md"
+    - id: validate-url-scheme-invalid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/url_scheme_invalid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/url_scheme_invalid/doc.md"
+    - id: validate-url-scheme-valid
+      kind: inline-root
+      input: "darkmatter/lib/tests/fixtures/validate/url_scheme_valid/doc.md"
+      source: "darkmatter/lib/tests/fixtures/validate/url_scheme_valid/doc.md"
+    - id: authored-local-names-doc
+      kind: inline-root
+      input: "authored/local-names/doc.md"
+      source: "authored"
+      note: "the inline root of darkmatter/lib/tests/l1/schemas_named_type_merge.rs multi_hop_chains_inherit_presence_locally_and_across_files: bare local names, @this, and a cross-file import"
+    - id: authored-union-tagged
+      kind: inline-root
+      input: "authored/union/tagged.md"
+      source: "authored"
+      note: "references the union types of darkmatter/lib/tests/union_fixtures/mod.rs TAGGED_TYPES"
+    - id: authored-union-overlapping
+      kind: inline-root
+      input: "authored/union/overlapping.md"
+      source: "authored"
+      note: "references the union types of darkmatter/lib/tests/union_fixtures/mod.rs OVERLAPPING_TYPES"
+    - id: authored-union-files
+      kind: inline-root
+      input: "authored/union/files.md"
+      source: "authored"
+      note: "references the union types of darkmatter/lib/tests/union_fixtures/mod.rs FILE_TYPES"
+    - id: authored-union-nested
+      kind: inline-root
+      input: "authored/union/nested.md"
+      source: "authored"
+      note: "references the union types of darkmatter/lib/tests/union_fixtures/mod.rs NESTED_UNION_TYPES"
+    - id: authored-union-multi-hop
+      kind: inline-root
+      input: "authored/union/multi-hop.md"
+      source: "authored"
+      note: "references the union types of darkmatter/lib/tests/union_fixtures/mod.rs MULTI_HOP_FILES"
+    - id: authored-union-content-policy
+      kind: inline-root
+      input: "authored/union/content-policy.md"
+      source: "authored"
+      note: "references the union types of darkmatter/lib/tests/union_fixtures/mod.rs CONTENT_POLICY_LIST over the frozen content-policy.yaml"
+    - id: schema-yaml-spellings-root-union-conventional-schema-body
+      kind: root-union
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.conventional.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.conventional.yaml"
+    - id: schema-yaml-spellings-root-union-serialized-schema-body
+      kind: root-union
+      input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.serialized.yaml"
+      source: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.serialized.yaml"
+    - id: embedded-darkmatter-base
+      kind: embedded-baseline
+      source: "compiled-in darkmatter/schemas/darkmatter.yaml `fm` (darkmatter_base_json_schema)"
+    - id: effective-baseline-inline
+      kind: effective
+      input: "authored/effective/baseline-inline.md"
+      source: "authored"
+      baseline: darkmatter
+    - id: effective-baseline-schema-file
+      kind: effective
+      input: "authored/effective/baseline-schema-file.md"
+      source: "authored"
+      baseline: darkmatter
+    - id: effective-baseline-root-union
+      kind: effective
+      input: "authored/effective/baseline-root-union.md"
+      source: "authored"
+      baseline: darkmatter
+    - id: effective-trigger-inline-compose
+      kind: effective
+      group: claudine-inline-compose
+      input: "authored/effective/trigger-inline-compose.md"
+      source: "authored"
+      baseline: darkmatter
+      bundle:
+          - claudine/schemas/action.yaml
+          - claudine/schemas/claudine.yaml
+          - claudine/schemas/inline-compose.yaml
+          - claudine/schemas/lifecycle.yaml
+          - claudine/schemas/linking.yaml
+          - claudine/schemas/sequence.yaml
+          - claudine/schemas/sequence-types.yaml
+    - id: effective-trigger-sequence
+      kind: effective
+      group: claudine-sequence
+      input: "authored/effective/trigger-sequence.md"
+      source: "authored"
+      baseline: none
+      bundle:
+          - claudine/schemas/action.yaml
+          - claudine/schemas/claudine.yaml
+          - claudine/schemas/inline-compose.yaml
+          - claudine/schemas/lifecycle.yaml
+          - claudine/schemas/linking.yaml
+          - claudine/schemas/sequence.yaml
+          - claudine/schemas/sequence-types.yaml
+    - id: effective-trigger-with-document-schema
+      kind: effective
+      group: claudine-document-schema
+      input: "authored/effective/trigger-with-document-schema.md"
+      source: "authored"
+      baseline: darkmatter
+      bundle:
+          - claudine/schemas/action.yaml
+          - claudine/schemas/claudine.yaml
+          - claudine/schemas/inline-compose.yaml
+          - claudine/schemas/lifecycle.yaml
+          - claudine/schemas/linking.yaml
+          - claudine/schemas/sequence.yaml
+          - claudine/schemas/sequence-types.yaml
+
+# Inputs no entry names but an entry reads: imported types and referenced
+# root-union arm files.
+imports_only:
+    - path: darkmatter/lib/tests/fixtures/validate/root_union_fileref/arm-a.yaml
+      by: validate-root-union-fileref
+    - path: messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_one_line_types.yaml
+      by: messenger-probe-p15-one-line
+    - path: authored/local-names/types.yaml
+      by: authored-local-names-doc
+    - path: authored/union/tagged.yaml
+      by: authored-union-tagged
+    - path: authored/union/overlapping.yaml
+      by: authored-union-overlapping
+    - path: authored/union/files.yaml
+      by: authored-union-files
+    - path: authored/union/types.yaml
+      by: authored-union-nested
+    - path: authored/union/outer.yaml
+      by: authored-union-multi-hop
+    - path: authored/union/middle.yaml
+      by: authored-union-multi-hop
+
+# Shipped or fixture inputs deliberately left out, with the reason.
+skipped:
+    - source: darkmatter/schemas/partials/functions.yaml
+      reason: function catalog; a document schema can never hold a function type
+    - source: darkmatter/schemas/partials/mutations.yaml
+      reason: function catalog; a document schema can never hold a function type
+    - source: darkmatter/lib/tests/fixtures/schema_enhancements_matrix/categories.documented.yaml
+      reason: function catalog; a document schema can never hold a function type
+    - source: darkmatter/schemas/partials/function-examples/
+      reason: "`kind: example` artifacts with no schema body"
+    - source: darkmatter/docs/schemas/schema-definition.yaml
+      reason: empty placeholder
+    - source: darkmatter/docs/schemas/err.yaml `$schema`
+      reason: names the empty placeholder `./schema-definition.yaml`; its `types` body is an entry
+    - source: claudine/docs/schemas/claudine.yaml, compose.yaml, inline-compose.yaml, partials/sequence.yaml
+      reason: empty placeholders
+    - source: claudine/docs/schemas/partials/loop.yaml
+      reason: draft spelling its catalog `typed:`; it has no `$schema` or `types` body
+    - source: claudine/docs/schemas/action.yaml, partials/flow-control.yaml, partials/stack.yaml, partials/lifecycle.yaml
+      reason: drafts whose definitions do not parse
+    - source: darkmatter/docs/research/parsing/_fleet_future.md
+      reason: its inline `$schema` names `crate`, which the document defines only under `$types:`, so it fails with an unknown named type
+    - source: darkmatter/lib/tests/fixtures/schema_enhancements_matrix/frontmatter.md-get.yaml
+      reason: a document whose `$schema` is the string `./frontmatter.schema.yaml`, which is an entry
+    - source: darkmatter/lib/tests/fixtures/validate/{json_schema_ref,missing_required,simple_required_present}/doc.md
+      reason: each `$schema` is a string naming its sibling schema file, which is an entry
+    - source: messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p14_multiline_import.md
+      reason: "a parser probe: its types file spans one expression over several YAML lines, which resolution rejects (could not project SimplifiedSchema expression spans through YAML source)"
+    - source: messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p15_single_quoted.md
+      reason: "a parser probe: its types file single-quotes an expression, which resolution rejects (could not project SimplifiedSchema expression spans through YAML source)"
+    - source: darkmatter/lib/tests/fixtures/triggers/feature-review-incident.yaml
+      reason: "not valid YAML to the schema loader: an unquoted `: ` inside a plain scalar on line 17 (mapping values are not allowed in this context)"

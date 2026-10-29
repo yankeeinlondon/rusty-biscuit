@@ -168,7 +168,7 @@ Error: Shell command timed out after 10s at line 4: 'just ci-local --plan'
 ```
 
 - `md compose --timeout <seconds>` changes the limit for every command in the run. In the library, use `ComposeOptions::with_shell_timeout()`.
-- `md compose --allow-shell-timeout` turns a timeout into an empty insertion and a warning instead of an error. In the library, use `ComposeOptions::with_allow_shell_timeout(true)`.
+- `md compose --allow shell-timeout` turns a timeout into an empty insertion and a warning instead of an error (see [Policy Flags](../cli/policy.md)). In the library, use `ComposeOptions::with_allow_shell_timeout(true)`.
 - A single `::shell` line cannot set its own limit. A [shell block](./shell-blocks.md) can (`timeout=60`), and so can a [frontmatter expression](./fm-shell-expansion.md) (`::timeout:60`).
 
 ## Caching
@@ -186,6 +186,17 @@ When a cached command is one that is known to vary (`uuidgen`, `date`, `openssl`
 
 The opt-out is spelled to suit each directive: `--no-cache` here, `::no-cache` in a frontmatter expression, and `no_cache=true` on a shell block.
 
+## Inside `::map` and `::filter`
+
+A `::shell` line inside a [`::map`](./map.md) or [`::filter`](./filter.md) body
+may read the iteration's local bindings, such as `::shell echo {{ i.name }}`.
+Because the value is unknown until the item is reached, approval is by
+`template` shape rather than `exact` bytes, and a local that holds a number is
+still checked as a number. Approval discovers the line even when the region is
+empty or its gate is false. Null and container values are rejected when the
+command is built. Identical commands may reuse the request-wide result cache;
+use `--no-cache` to launch each occurrence.
+
 ## Approval
 
 A command runs only if it is approved: whitelisted, or approved interactively when the composition starts. A few commands can never be approved. Both checks happen before anything runs, and both cover every `::shell` line in the document and in every file it transcludes, including lines inside a `::block` whose condition is false.
@@ -199,7 +210,26 @@ Reason: 'rm' is a dangerous command
 Error: Approval required for 'just ci-local --plan'.
 To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
   exact just ci-local --plan
+  prefix just
 ```
+
+Each suggested line is a whitelist rule that approves the command as it is
+now, and the list holds only the choices an interactive approval would
+offer. A command with a placeholder also gets its shape, and its `exact` line
+holds the resolved bytes, never the `{{ }}` text:
+
+```text
+Error: Approval required for 'git commit -m "{{ msg }}"'.
+To allow in non-interactive mode, add one of these to <repo>/.darkmatter-shell-whitelist:
+  exact git commit -m ""
+  template git commit -m {{ string }}
+  prefix git
+```
+
+A command whose value is not known yet, or whose value holds command syntax,
+gets no `exact` line. A chain needs one `exact` or `prefix` line per command,
+so each alternative is then headed by a `# all of:` or `# or all of:`
+comment, which the whitelist loader ignores.
 
 An approved program that is not installed is reported separately, so the two are easy to tell apart:
 

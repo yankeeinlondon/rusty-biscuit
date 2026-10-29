@@ -625,31 +625,52 @@ index. `validate.rs::walk_stack` is the one recursive walker (both branches)
 for nested-span, `err`-availability, retired-loop-read, and shell-collection
 checks, and DMLS's `nested_span.rs` mirrors its path spelling.
 
-- **Lift-ready slice.** `parse`, `action_shape`, `actions`, `validate`,
-  `signatures`, and `source_map` name no Claudine runtime type
-  (`lib/tests/l1/lifecycle_lift_ready_guard.rs`); the caller injects the effect
-  catalog through `LifecycleParseOptions`. The public `parse_lifecycle_config`
-  lives in `lifecycle/mod.rs` and supplies `audio.rs::is_known_effect`.
+- **Moved slice.** `parse`, `action_shape`, `actions`, `validate`,
+  `signatures`, `source_map`, and `shell_template` live in
+  `darkmatter/lib/src/lifecycle/` and name no Claudine runtime type
+  (`lib/tests/l1/lifecycle_lift_ready_guard.rs` reads them there); the caller
+  injects the effect catalog through `LifecycleParseOptions`. Claudine's
+  public `parse_lifecycle_config` wrapper lives in `lifecycle/mod.rs`, supplies
+  `audio.rs::is_known_effect` and `UnknownVerbPolicy::Reject`, and maps
+  `LifecycleError` to `CompositionError`.
 - **Removed grammar.** `stack`, the `action` aggregator or discriminator map,
   the speech-ordering flag, communication `message`/`sound`/`route` parameters, and
   `_loop_*` reads are `CompositionError::RemovedGrammar { path, removed,
   replacement }`, checked before any other shape error; loop-root
   `action`/`actions` stay iteration controls.
-- **Execution.** `executor.rs::execute_nodes` runs nodes serially, evaluates a
+- **Execution.** Darkmatter's `lifecycle/executor.rs::execute_nodes` runs
+  nodes serially (Claudine's `lifecycle/executor.rs` is the `LifecycleHost`
+  adapter: bindings, `set` commits, loop `break`, `prep`, shell policy,
+  failure classification), evaluates a
   reached guard once, runs only the selected body, and the first directive
   ends the whole event. Audio is published in list position (no
-  `audio_phases`). `LifecycleRunGuard::emit_signal` (the drop safety net) emits
-  only root, unguarded, literal communication.
+  `audio_phases`). Darkmatter's `run_guard.rs::LifecycleRunGuard::emit_signal`
+  (the drop safety net) emits only root, unguarded, literal communication.
+- **Run guard and runtime.** `LifecycleRunGuard` (the one terminal slot,
+  `finalize` once, the shell lock until `start`, proxy and iteration resets),
+  the catch protocol, `decide_lifecycle_transition`, `ContainerRunner`, and
+  control admission (`control.rs`) are Darkmatter's
+  (`darkmatter::lifecycle::{run_guard, runtime, control}`). Claudine's
+  `LifecycleRunGuard<'a>` is an alias over `ClaudineRunHost` (the runtime
+  context, emitter, one `ClaudineLifecycleEffects` per run, `ClaudineDiagnostics`,
+  `TerminalLifecycleScope`, and `classify_run_failure`), constructed with
+  `LifecycleRunGuardExt::new`; `LifecycleCatchProtocolExt::new` classifies with
+  `ClaudineDiagnostics`. `StackExecutionContext` is the guard's
+  `GuardedEventStack`. `resolve_proxy_target` and `IterationSummarySignals`
+  stay in Claudine. The guard keeps its accounting in
+  `run_guard::RunAccounting`, which Darkmatter's request/reply
+  `lifecycle::run::Run` shares; no Claudine driver uses `Run` yet.
 - **Shell modes.** A `shell` command or `set` `$( … )` with a placeholder
   carries a `shell_template::LifecycleShellTemplate` (stamped by
-  `preflight::resolve_lifecycle_shell_commands`); the lifecycle audit settles
+  `preflight::resolve_lifecycle_shell_commands`, which delegates to
+  Darkmatter's `lifecycle::preflight::LifecycleShellSites`); the lifecycle audit settles
   it to resolved bytes or template, or leaves it refusing. Template mode fills
   from the live state, checks the filled chain, and dispatches through
   `ShellRunner::run_structured` (`structured_shell.rs`); a host that approves a
   container stack elsewhere builds one with
   `LifecycleShellTemplate::approved`.
 - **`with` overlays.** `proxy` and `retry` share `WithOverlay` and
-  `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
+  Darkmatter's `executor.rs::resolve_with_overlay`; errors are the `LifecycleWith*` family
   (`LifecycleWithUnsupported` elsewhere). A retry overlay travels as
   `StackControl::Retry.overlay` into `HarnessPromptState.pending_retry_overlay`
   and applies to one transition (see [cli-commands.md](cli-commands.md)).
@@ -695,7 +716,8 @@ Claudine enforces this at two boundaries:
     ending the frontmatter is stored as compose reads it (trimmed).
   - `persisted_data` applies the same gate to the lifecycle
     `set_`/`merge_`/`append_`/`prepend_frontmatter` writes
-    (`lifecycle/executor.rs::dispatch_side_effect`, also the sequence
+    (Darkmatter's `executor.rs::dispatch_side_effect` through
+    `LifecycleHost::persisted_data`, also the sequence
     `side_effect:` path); the in-memory mirror stays raw.
   - Readers use `stored_text` / `opens_stored_token`: schema validation and
     status (`schema/mod.rs`, `classify.rs`; `pre_validate_layered_for_mode`
@@ -745,14 +767,55 @@ and primitive execution; `cli/src/commands/wrap/sequence/` owns orchestration.
   later placeholders and container terminal-event placeholders require shape
   approval. Late roots are `seq`, `loop`, and `group`. The graph's audited
   root lifecycle is installed on the root guard; rereads settle only against
-  original approval membership.
+  original approval membership. A walk decodes and scans the document's
+  frontmatter (with its `sequence:` list) once into a shared seed
+  (`Loader::step_seed`, a Darkmatter `SharedFrontmatter`); each step's view
+  is the seed plus its `seq` overlay, its late keys come from
+  `overlay_derived` (overlay-only scan, whole-view fallback when the overlay
+  shadows or adds a late key), and a `with` hint is classified over its read
+  closure (`providers::classify_reads`); a ternary shell `set` value's
+  branches read the step view itself (`record_resolved_bytes`). Never clone, decode, or rescan the
+  whole document per step: that per-step cost times S steps is the quadratic
+  growth `preflight/tests/scaling.rs` guards with work counters.
 - `sequence/task/` executes primitives and concurrent named group legs.
   Group workers clone runtime snapshots, preserving isolated mutations and
-  proxy ancestry. Only groups accept `fail_fast`: atomic failed groups publish
+  proxy ancestry. Each leg's live document cell is a clone of the group-start
+  `SharedFrontmatter` view: it shares that view's base and owns only the
+  leg's own writes, which are dropped with the group (the file write already
+  happened; the next root step rereads it). `StackExecutionContext::frontmatter`
+  is `&SharedFrontmatter`; never materialize a `Map` just to borrow it.
+  `task/tests/leg_views.rs` counts cells (`LiveFrontmatterView`) and the nodes
+  each copies (`LiveFrontmatterCopy`). The same holds per container start and
+  loop pass: `open_loop`'s templated cap, `finish_container_pass`'s condition
+  and staged action (`ActionStaging` over an `ActionTarget`, here a view
+  clone), and a container's pre-warm (`PrewarmInputs::shared`) read the view
+  in place; `task/tests/container_state.rs` counts them
+  (`ContainerStateNodes`, `PrewarmStateNodes`). Only groups accept `fail_fast`: atomic failed groups publish
   no leg state; tolerant groups merge completed legs in declaration order.
 - `lifecycle/runtime::ContainerRunner` and `LifecycleRunGuard` own container
   events. Root initialize precedes preflight; nested preparation is just in
-  time. Retry retains mutations but clears child results and defers finalize
+  time. It reads the container's source on every start but parses it only
+  when the text differs from the invocation's last parse
+  (`PreflightGraph::nested_sources`, content-compared, successes only);
+  `task/tests/nested_source.rs` counts parses (`NestedSourceParse`). The same
+  memo holds referenced data documents (`ReferencedDocument`: group files and
+  catalogs, `kind: task` files, referenced sequence files) for every walk,
+  keyed by the walk's own `capture_source` bytes, which a data format parses
+  itself (`data::load_document_from_text`; Markdown keys by the text its own
+  read parsed), so an entry never holds a parse of other bytes; a `Loader` shares them by
+  `Arc`, a reference borrows its entry (`select_catalog_group`, lazy name
+  index), and the retired-read check is memoized per retired-name presence
+  set. Never clone a whole referenced document per reference;
+  `task/tests/referenced_documents.rs` counts parses and nodes
+  (`ReferencedDocumentParse`, `ReferencedDocumentNodes`). A group start
+  re-prepares only when one of its own files changed
+  (`PreflightGroup::sources`: its authoring document and every file its
+  subtree referenced in the audit walk; `PreflightGraph::sources_unchanged`
+  rereads only those), so another group's file never affects it;
+  `task/tests/group_freshness.rs` counts the reads (`FreshnessSourceReads`).
+  The graph's prompt-document, command, and template lookups are indexed
+  (`prompt_document`, `contains_shell_command`, `candidates_authored`);
+  only the walk appends to those `pub` vectors. Retry retains mutations but clears child results and defers finalize
   until the final attempt. Unhandled failures propagate outward. Cancellation
   settles descendants before `cancelled` and `finalize`, without recovery.
 - `composition/runtime_state.rs` holds invocation-local mutations and lexical
@@ -913,7 +976,8 @@ re-prepares the resolved target canonically. A direct provider wrapper
 `surface_or_adopt_terminal_proxy` refuses an otherwise unowned handoff with a
 typed diagnostic rather than adopting it under the invocation's own bundle.
 
-`LifecycleCatchProtocol` in `lib/src/composition/lifecycle/runtime.rs` is the
+`LifecycleCatchProtocol` (Darkmatter's `lifecycle/runtime.rs`, re-exported at
+`claudine::composition::lifecycle::runtime`) is the
 single provider-neutral owner of setup catch routing, terminal-slot
 redesignation, finalize eligibility, active-error threading, and evaluation
 error precedence. Every initialize/start/blocked catch and every

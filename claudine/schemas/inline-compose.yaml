@@ -1,11 +1,12 @@
 # Inline-compose's document metadata, applied to a document that sets a
 # non-null `prompt` and no non-null `sequence`. Hand-maintained; see README.md.
 #
-# Every property here is declared with the same type as in claudine.yaml.
-kind: trigger-schema
+# Every property here is imported from document.yaml, as claudine.yaml
+# imports it, so both triggers declare the same metadata.
+kind: schema-trigger
 match:
     all:
-        - any:
+        - group:
               - prompt: string(required)
               - prompt: number(required)
               - prompt: boolean(required)
@@ -18,10 +19,6 @@ match:
               - sequence: object(required)
               - sequence: "unknown[](required)"
 $schema:
-    prompt: "string -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
-    hash:
-        - "string -> stored shorthand hash; managed by Darkmatter and Claudine's completion"
-        - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> hash resolution stored in longhand form"
-          value: "unknown -> stored hash payload"
-          ignored: "string[] -> extra frontmatter keys ignored during hash computation"
-    last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
+    prompt: prompt@./document.yaml
+    hash: hash@./document.yaml
+    last_updated: last_updated@./document.yaml

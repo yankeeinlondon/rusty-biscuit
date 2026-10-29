@@ -872,14 +872,22 @@ fn attach_performance_from_result(
 /// (as a sibling field for objects, or wrapped as `{ data, performance }`
 /// for non-objects), matching the behavior of [`attach_performance`].
 pub fn print_json_value(value: serde_json::Value, performance: Option<&PerformanceReport>) {
-    let output = match performance {
+    let mut output = match performance {
         Some(perf) => attach_performance(value, perf),
         None => value,
     };
+    sort_json_keys(&mut output);
     println!(
         "{}",
         serde_json::to_string_pretty(&output).unwrap_or_default()
     );
+}
+
+/// Sorts every object's keys so JSON output is identical whether or not
+/// `serde_json/preserve_order` is unified into the build (it is whenever
+/// `darkmatter` is linked).
+pub fn sort_json_keys(value: &mut serde_json::Value) {
+    value.sort_all_objects();
 }
 
 /// Print a filtered JSON view of `result` to stdout.
@@ -906,7 +914,8 @@ pub fn print_json(
         repo_action,
         base_dir,
     );
-    let with_perf = attach_performance_from_result(filtered, result);
+    let mut with_perf = attach_performance_from_result(filtered, result);
+    sort_json_keys(&mut with_perf);
     println!("{}", serde_json::to_string_pretty(&with_perf)?);
     Ok(exit_code)
 }

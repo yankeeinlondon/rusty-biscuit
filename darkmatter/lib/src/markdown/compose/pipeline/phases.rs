@@ -19,7 +19,8 @@ use super::super::{
 use tracing::{debug, info};
 
 use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
-use super::super::body_origin::BodyProvenance;
+use super::super::body_origin::{BodyProvenance, EditOrigin};
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::value_origin::DataPaths;
 
 impl Markdown {
@@ -59,55 +60,21 @@ impl Markdown {
                 Ok(())
             }
             ComposeOperation::PageBlocks => {
-                inline::page_blocks::run_stage(self, state, options, runtime, report, body)
+                inline::page_blocks::run_stage(self, state, options, runtime, report, body, schemas)
+            }
+            ComposeOperation::CollectionBlocks => {
+                inline::collection_blocks::run_stage(self, state, options, runtime, report, body, schemas)
             }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
-                    inline::interpolation::run_stage(self, state, options, runtime, report, body)
+                    inline::interpolation::run_stage(self, state, options, runtime, report, body, schemas)
                         .map_err(|e| e.with_on_disk_source(&self.full_source_context_for_errors()))?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
                 inline::shell_expansion::run_stage(self, state, schemas, options, runtime, report, perf, body)
             }
-            ComposeOperation::ShellBlocks => {
-                let sb_ctx = self.full_source_context_for_errors();
-                let line_offset = self.frontmatter_line_count();
-                body.data.ensure_describes(&self.content)?;
-                let lookup = super::super::context::effective_state::ResolvingLookup::new(
-                    state,
-                    options.expression_resolution_context(&runtime.remote_fetch),
-                );
-                let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
-                let templates = body
-                    .authored
-                    .as_ref()
-                    .filter(|authored| authored.text().contains("::shell-block"))
-                    .map(|authored| shell_blocks::BlockTemplates {
-                        authored,
-                        scope: shell_expansion::site::SiteScope::new(
-                            options,
-                            schemas.effective_for(self).and_then(|effective| effective.simplified),
-                        ),
-                        evaluator: &evaluator,
-                        ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
-                    });
-                let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
-                    &self.content,
-                    Some(&body.data),
-                    templates.as_ref(),
-                    options,
-                    &mut runtime.shell,
-                    &sb_ctx,
-                    line_offset,
-                )?;
-                body.advance(&self.content, &edits, &new_content)?;
-                self.content = new_content;
-                report.shell_blocks_applied += stage_report.shell_blocks_applied;
-                report.shell_approvals_used += stage_report.shell_approvals_used;
-                report.warnings.extend(stage_report.warnings);
-                Ok(())
-            }
+            ComposeOperation::ShellBlocks => self.run_shell_blocks_operation(state, options, runtime, report, body, schemas),
             ComposeOperation::LinkResolve => {
                 let before = self.content.clone();
                 let edits = link_resolve::link_resolve_with_edits(self, options, report)?;
@@ -115,6 +82,81 @@ impl Markdown {
             }
             _ => Ok(()),
         }
+    }
+
+    /// The [`ComposeOperation::ShellBlocks`] arm of
+    /// [`run_inline_pre_operation`](Self::run_inline_pre_operation).
+    ///
+    /// Out of line so its evaluator and templates stay out of the dispatch
+    /// frame, which the interpolation stage's nested compositions recur
+    /// through.
+    #[inline(never)]
+    fn run_shell_blocks_operation(
+        &mut self,
+        state: &EffectiveState,
+        options: &crate::markdown::compose::ComposeRequest,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut ComposeReport,
+        body: &mut BodyProvenance,
+        schemas: &super::super::schema_validation::PreparedSchemas,
+    ) -> MarkdownResult<()> {
+        let sb_ctx = self.full_source_context_for_errors();
+        let line_offset = self.frontmatter_line_count();
+        body.data.ensure_describes(&self.content)?;
+        let document = super::super::context::effective_state::ResolvingLookup::new(
+            state,
+            options.expression_resolution_context(&runtime.remote_fetch),
+        );
+        let lookup = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
+        let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
+        let templates = body
+            .authored
+            .as_ref()
+            .filter(|authored| authored.text().contains("::shell-block"))
+            .map(|authored| shell_blocks::BlockTemplates {
+                authored,
+                scopes: crate::markdown::compose::collection_blocks::BodyScopes::scan_body(
+                    authored.text(),
+                    line_offset,
+                    &options.enabled_operations,
+                ),
+                scope: shell_expansion::site::SiteScope::new(
+                    options,
+                    schemas.effective_for(self),
+                ),
+                evaluator: &evaluator,
+                site: Some(&lookup),
+                ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
+            });
+        let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
+            &self.content,
+            Some(&body.data),
+            templates.as_ref(),
+            options,
+            &mut runtime.shell,
+            &sb_ctx,
+            line_offset,
+        )
+        .map_err(|error| match lookup.entered() {
+            // The stage entered the failing command's line, or the block's
+            // opener when the block itself failed.
+            Some(offset) => {
+                let end = self.content[offset..].find('\n').map_or(self.content.len(), |at| offset + at);
+                body.scope_failure(self, offset..end, error)
+            }
+            None => error.into(),
+        })?;
+        for edit in edits.iter().filter(|edit| edit.origin == EditOrigin::Data) {
+            lookup.charge(edit.range.start, edit.replacement_len).map_err(|error| {
+                body.scope_failure(self, edit.range.clone(), inline::shell_expansion::collection_budget(error))
+            })?;
+        }
+        body.advance(&self.content, &edits, &new_content)?;
+        self.content = new_content;
+        report.shell_blocks_applied += stage_report.shell_blocks_applied;
+        report.shell_approvals_used += stage_report.shell_approvals_used;
+        report.warnings.extend(stage_report.warnings);
+        Ok(())
     }
 
     pub(crate) fn run_inline_post_operation(
@@ -199,6 +241,7 @@ impl Markdown {
         &mut self,
         operations: &[ComposeOperation],
         state: &EffectiveState,
+        schemas: &super::super::schema_validation::PreparedSchemas,
         options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
@@ -215,6 +258,7 @@ impl Markdown {
         let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
         body.data.ensure_describes(&self.content)?;
         let data = Some(&body.data);
+        let iteration = runtime.iteration.clone();
 
         let parsed_directives = if operations.iter().any(|op| {
             matches!(
@@ -261,11 +305,22 @@ impl Markdown {
 
         let mut prepared = Vec::new();
         let mut next_order = 0usize;
+        // The authored site and original items of each directive a
+        // collection body repeated.
+        let content_now = self.content.clone();
+        let line_offset = self.frontmatter_line_count();
+        let sites: Vec<Option<super::super::preflight::ScopedSite>> = parsed_directives
+            .iter()
+            .flatten()
+            .map(|directive| body.site_at(&content_now, &directive.span, line_offset))
+            .collect();
 
         // Borrow the document into a transclusion engine for the prepare and
         // resolve stages. The borrow ends before the apply stage mutates
         // `self.content` below.
-        let engine = TransclusionEngine::new(self);
+        let markdown: &Markdown = self;
+        let engine = TransclusionEngine::new(markdown);
+        let mut watch = super::ReportWatch::new(report, options, super::FinalVerdict { markdown, state, schemas });
 
         for operation in operations {
             match operation {
@@ -290,6 +345,10 @@ impl Markdown {
                             &mut prepared,
                             &mut next_order,
                             resolved_cache.as_ref(),
+                            watch.as_mut(),
+                            &body.scopes,
+                            body.origin.as_ref().filter(|origin| origin.describes(&content_now)),
+                            &sites,
                         )?;
                     }
                 }
@@ -321,6 +380,10 @@ impl Markdown {
                             &mut prepared,
                             &mut next_order,
                             None,
+                            watch.as_mut(),
+                            &body.scopes,
+                            body.origin.as_ref().filter(|origin| origin.describes(&content_now)),
+                            &sites,
                         )?;
                     }
                 }
@@ -350,6 +413,14 @@ impl Markdown {
         if let Some(start) = prepare_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionPrepare, start.elapsed());
         }
+
+        // Preparing evaluated every directive's `when=`; a blocking warning
+        // it reported stops the document before any child composes.
+        super::stop_if_blocked(
+            report,
+            options,
+            Some(super::FinalVerdict { markdown: self, state, schemas }),
+        )?;
 
         if prepared.is_empty() {
             return Ok(());
@@ -412,7 +483,10 @@ impl Markdown {
                 Err(failure) => {
                     let (anchor, error) = *failure;
                     if transclusion_failure_is_fatal(&error) || options.fail_fast {
-                        return Err(error);
+                        return Err(match &anchor.target {
+                            ApplyTarget::Replace(span) => body.scope_failure(self, span.clone(), error),
+                            ApplyTarget::Section(_) => error,
+                        });
                     }
                     // Tolerating the failure is a promise that the output stays
                     // usable, and a document that silently omits a transcluded
@@ -423,10 +497,7 @@ impl Markdown {
                     // that the span is filled rather than emptied.
                     let mut skipped = ComposeReport::new();
                     skipped.transclusions_skipped = 1;
-                    skipped.add_warning(
-                        ComposeWarning::new("transclusion", error.to_string())
-                            .with_resolution_failure(error.resolution_failure()),
-                    );
+                    skipped.add_warning(tolerated_failure_warning(&error));
                     ResolvedTransclusion {
                         order: anchor.order,
                         content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),
@@ -457,6 +528,11 @@ impl Markdown {
             }
         }
 
+        for (_, span, replacement, _) in &replacements {
+            body.scopes.charge(&iteration, span.start, replacement.len()).map_err(|error| {
+                body.scope_failure(self, span.clone(), inline::shell_expansion::collection_budget(error))
+            })?;
+        }
         if !replacements.is_empty() {
             replacements.sort_by(|left, right| {
                 right
@@ -554,12 +630,25 @@ impl Markdown {
 ///
 /// A child that cannot read its runtime context would leave the partially
 /// composed document the missing-capture contract forbids, and a child that
-/// reads a host global declared unavailable broke the host's scope rule. A child command
+/// reads a host global declared unavailable broke the host's scope rule. A
+/// child the design-time call check rejected makes a call no runtime value can
+/// bind, which is the document's rejection, not a resolution failure. A child command
 /// missing from the approval set is a broken pre-flight invariant, not a
 /// failure an author can tolerate.
+/// The warning of a tolerated transclusion failure. A target that does not
+/// exist is the missing transclusion its recovery governs. Out of line: the
+/// caller's frame recurs once per nested composition.
+#[inline(never)]
+fn tolerated_failure_warning(error: &MarkdownError) -> ComposeWarning {
+    let failure = error.resolution_failure();
+    let code = (failure == Some(biscuit_file::ResolutionFailure::NoMatch))
+        .then(|| super::super::policy::MISSING_TRANSCLUSION_CODE.to_string());
+    ComposeWarning { code, ..ComposeWarning::new("transclusion", error.to_string()) }.with_resolution_failure(failure)
+}
+
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     matches!(
-        error,
+        error.without_iteration(),
         MarkdownError::Transclusion(inner)
             if matches!(
                 inner.as_ref(),
@@ -569,9 +658,15 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
             )
     ) || error.missing_runtime_context().is_some()
         || error.unavailable_binding().is_some()
+        || error.rejected_call().is_some()
+        // A policy that blocks the child's warning blocks the document.
+        || error.blocked_diagnostics().is_some()
+        || error.iteration_failure().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()
+        // A collection failure never becomes a successful notice.
+        || matches!(error.without_iteration(), MarkdownError::Collection(_))
 }
 
 #[cfg(test)]

@@ -595,3 +595,23 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
         }
     }
 }
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::*;
+
+    /// A callback's free `ctx` capture is an eager requirement; a path that
+    /// merely contains the spelling below a local is not.
+    #[test]
+    fn locals_never_create_a_context_requirement_and_free_captures_still_do() {
+        let requirements = ContextRequirements::for_content(
+            r#"::map people "p -> p.ctx.branch || local.ctx.gpu || ctx.os"
+- {{ local.ctx.cpu_cores }}
+::end-map"#,
+        );
+        assert!(requirements.contains(ContextGroup::Os));
+        assert!(!requirements.contains(ContextGroup::Git));
+        assert!(!requirements.contains(ContextGroup::Gpu));
+        assert!(!requirements.contains(ContextGroup::Hardware));
+    }
+}

@@ -1,0 +1,20 @@
+# scenario: loop-break
+# doc: loop-break.md
+# given: invoked as `claudine compose --claude loop-break.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: loop: until false, max 3
+# given: success breaks when loop.count == 2
+event initialize
+event start
+state loop.count=1
+work fresh 0
+event success
+event finalize
+err none
+event start
+state loop.count=2
+work fresh 0
+event success
+event finalize
+err none
+exit 0

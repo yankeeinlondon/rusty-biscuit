@@ -1,0 +1,29 @@
+# scenario: cancelled-without-handler
+# doc: cancelled-without-handler.md
+# given: invoked as `claudine sequence --claude --yolo cancelled-without-handler.md` from the directory holding the fixture documents
+# given: group checks has fail_fast true; leg opted declares cancelled: [] (opt-in, no actions); its nested sequence inner declares no cancelled and its shell waits until bad has failed
+# given: leg bad's shell exits 1 after inner's shell started
+# given: no provider launches
+event seq:initialize
+event seq:start
+event checks:initialize
+event checks:start
+event opted:initialize
+event opted:start
+event inner:initialize
+event inner:start
+task inner waiting
+task bad
+event inner:finalize
+err composition.cancelled
+event opted:finalize
+err composition.cancelled
+event checks:failure
+err composition.failed
+event checks:finalize
+err composition.failed
+event seq:failure
+err composition.failed
+event seq:finalize
+err composition.failed
+exit 1

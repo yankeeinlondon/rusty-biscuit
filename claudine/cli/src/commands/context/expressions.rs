@@ -4,6 +4,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent};
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::catalog::Described;
 use darkmatter::markdown::compose::expression::semantics::{
     arithmetic_operator_descriptors, comparison_operator_descriptors, mode_descriptors,
     null_propagation_descriptors, operator_descriptors, truthiness_descriptors,
@@ -17,7 +18,7 @@ use crate::commands::context_render::{
 };
 use crate::log;
 
-use super::format::format_example;
+use super::format::{format_example, format_function_examples};
 
 /// Whether the metadata reports should render their optional `Example` column at
 /// `term`'s width.
@@ -54,7 +55,8 @@ pub(super) fn render_expression_table(
     // distribution. See `example_column_floor`.
     let example_strings: Vec<String> =
         rows.iter().map(|(_, _, example)| example.to_string()).collect();
-    let example_width = example_column_floor(example_strings.iter().map(String::as_str));
+    let example_width =
+        example_column_floor(example_strings.iter().flat_map(|example| example.lines()));
 
     render_table_resilient(term, |layout| {
         let mut first = report_column(first_header.clone());
@@ -98,7 +100,7 @@ pub(super) fn render_expressions_precedence(term: &Terminal) {
             (
                 format!("{}", i + 1).into(),
                 inline_code_text(desc.operators, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -122,7 +124,7 @@ pub(super) fn render_expressions_truthiness(term: &Terminal) {
             (
                 inline_code_text(desc.form, term).into(),
                 (if desc.is_falsy { "yes" } else { "no" }).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -146,7 +148,7 @@ pub(super) fn render_expressions_unary(term: &Terminal) {
             (
                 inline_code_text(desc.syntax, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -170,7 +172,7 @@ pub(super) fn render_expressions_comparison(term: &Terminal) {
             (
                 inline_code_text(desc.syntax, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -194,7 +196,7 @@ pub(super) fn render_expressions_arithmetic(term: &Terminal) {
             (
                 inline_code_text(desc.syntax, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -218,7 +220,7 @@ pub(super) fn render_expressions_variable_access(term: &Terminal) {
             (
                 inline_code_text(desc.form, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -248,7 +250,7 @@ pub(super) fn render_expressions_modes(term: &Terminal) {
             (
                 inline_code_text(desc.surface, term).into(),
                 desc.pipe_meaning.into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -292,7 +294,7 @@ pub(super) fn render_expressions_null_propagation(term: &Terminal) {
             (
                 inline_code_text(desc.operation, term).into(),
                 inline_code_text(desc.behavior, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -324,9 +326,9 @@ pub(super) fn render_expressions_functions(term: &Terminal) {
             .iter()
             .map(|func| {
                 (
-                    inline_code_text(func.signature, term).into(),
-                    inline_code_text(func.description, term).into(),
-                    format_example(func.example.as_ref(), term).into(),
+                    inline_code_text(&func.signature, term).into(),
+                    inline_code_text(&func.description, term).into(),
+                    format_function_examples(func, term).into(),
                 )
             })
             .collect();

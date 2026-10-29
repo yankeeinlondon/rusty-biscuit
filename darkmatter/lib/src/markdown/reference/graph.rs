@@ -24,7 +24,7 @@ use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{
-    ComposeOperation, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
+    ComposeOperation, ComposeSource, ComposeWarning, EffectiveStateBuilder, ResolvingLookup,
 };
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
@@ -36,6 +36,10 @@ use crate::markdown::types::MarkdownResult;
 struct ReferenceAnalysisRuntime {
     transclusion: TransclusionRuntime,
     cache: RunLocalCache,
+    /// The skipped-trigger warnings each node's preparation reported, once
+    /// per trigger, in discovery order: a child prepares in its own context,
+    /// whose schema roots may hold triggers the root's never see.
+    trigger_warnings: Vec<ComposeWarning>,
 }
 
 fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
@@ -84,6 +88,7 @@ fn build_graph_inner(
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
         cache: make_cache(options),
+        trigger_warnings: Vec::new(),
     };
 
     // Seed the runtime with the root node so child documents that
@@ -117,7 +122,8 @@ fn build_graph_inner(
         all_nodes,
         dependencies,
         prepared_headings,
-    ))
+    )
+    .with_trigger_warnings(runtime.trigger_warnings))
 }
 
 /// Build a transclusion-only graph (no link/image extraction at leaf nodes).
@@ -291,8 +297,18 @@ fn build_node(
     // Always run InlinePre preparation (rec #2): page blocks, interpolation,
     // shell expansion, and text replacement can affect references even in
     // leaf documents with no transclusions.
-    let (prepared_content, body_data) = prepare_content(md, options)?;
+    let (prepared_content, body_data, warnings) = prepare_content(md, options)?;
     let body_data = body_data.as_ref();
+    for warning in warnings {
+        if let Some(trigger) = warning.invalid_trigger_source()
+            && !runtime
+                .trigger_warnings
+                .iter()
+                .any(|kept| kept.invalid_trigger_source().as_ref() == Some(&trigger))
+        {
+            runtime.trigger_warnings.push(warning);
+        }
+    }
 
     let ctx = {
         let base = md.source_context_for_errors();
@@ -909,33 +925,56 @@ pub(super) fn prepare_content_for_validation(
         }
         _ => options.clone(),
     };
-    prepare_content(md, &node_options).map(|(content, _)| content)
+    prepare_content(md, &node_options).map(|(content, _, _)| content)
 }
 
 /// Prepare content by running only InlinePre operations.
 ///
 /// Starts from the caller's `ComposeOptions` (rec #3) to preserve
 /// external state, overrides, cache settings, shell settings, and per-node
-/// source provenance, then restricts to InlinePre-only operations.
+/// source provenance, then restricts it to the InlinePre operations it
+/// enables.
 ///
 /// ## Returns
 ///
-/// The prepared body and which of its bytes are data.
+/// The prepared body, which of its bytes are data, and the preparation's
+/// warnings.
 fn prepare_content(
     md: &Markdown,
     options: &ReferenceGraphOptions,
-) -> MarkdownResult<(String, Option<crate::markdown::compose::body_origin::DataRanges>)> {
+) -> MarkdownResult<(
+    String,
+    Option<crate::markdown::compose::body_origin::DataRanges>,
+    Vec<ComposeWarning>,
+)> {
+    // Restricted, never widened: an operation the request disabled (the
+    // passive `md compose` reference check's `ShellExpansion`) stays off.
+    // A `::map` / `::filter` body is repeated per item at composition and read
+    // through the frame of each copy. This preparation never executes it: a
+    // second run of the callbacks would precede the real one, and a shell
+    // command in a repeated body has no single value to run with. So shell
+    // expansion is left to the composition that owns the copies.
+    let repeats_bodies = md.content().contains("::map") || md.content().contains("::filter");
     let inline_pre_options = options.compose.clone().derive(|compose| {
-        compose.only(&[
+        let enabled: Vec<ComposeOperation> = [
             ComposeOperation::TextReplacement,
             ComposeOperation::PageBlocks,
             ComposeOperation::Interpolation,
             ComposeOperation::ShellExpansion,
-        ])
+        ]
+        .into_iter()
+        .filter(|operation| compose.is_enabled(*operation))
+        .filter(|operation| {
+            !(repeats_bodies
+                && compose.is_enabled(ComposeOperation::CollectionBlocks)
+                && *operation == ComposeOperation::ShellExpansion)
+        })
+        .collect();
+        compose.only(&enabled)
     });
 
     let (result, report) = md.compose_with_options(inline_pre_options)?;
-    Ok((result.content().to_string(), report.body_data))
+    Ok((result.content().to_string(), report.body_data, report.warnings))
 }
 
 /// The attribute that marks a reference found in data (text an expression

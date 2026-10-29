@@ -628,6 +628,9 @@ pub enum ShellExpansionError {
         /// Boxed for the same size reason as `whitelist_path`.
         blacklist_path: Box<PathBuf>,
         origin: ShellCommandOrigin,
+        /// The whitelist rules that would approve this command, from the
+        /// choices its approval prompt would offer. Boxed for size.
+        suggested_rules: Box<super::template::SuggestedRules>,
     },
 
     #[error("Command denied: '{command}' at {origin}")]
@@ -896,6 +899,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 whitelist_path,
                 blacklist_path,
                 origin,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
                 .body(vec![
@@ -1057,7 +1061,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
-                .hint("Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."),
+                .hint("Raise the timeout, or pass <cyan>--allow shell-timeout</cyan> to warn instead of fail."),
 
             ShellExpansionError::ExecutionFailed {
                 ctx,
@@ -1644,6 +1648,9 @@ pub(crate) struct PipelineRuntime {
     pub shell: ShellExpansionRuntime,
     pub cache: crate::markdown::compose::cache::RunLocalCache,
     pub remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    /// The request's visit and expansion-byte counters, shared by every
+    /// nested collection, child, and explicit nested composition.
+    pub iteration: crate::markdown::compose::expression::iteration::IterationBudget,
     /// The request's shared runtime context, grown as sources name groups.
     pub context_epoch: crate::markdown::compose::context::authority::SharedRequestContextEpoch,
     /// Every context group read by a source composed under this runtime — the
@@ -1661,6 +1668,10 @@ pub(crate) struct PipelineRuntime {
     /// children so frontmatter `as_markdown` content, which composes before
     /// the root reaches its gate, triggers the gate first instead.
     preflight_validated: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The warnings each failed document had reported, shared with children
+    /// so the root can return them beside the failure
+    /// ([`Markdown::compose_with_warnings`](crate::markdown::Markdown::compose_with_warnings)).
+    failed_warnings: std::sync::Arc<std::sync::Mutex<Vec<crate::markdown::compose::ComposeWarning>>>,
 }
 
 impl PipelineRuntime {
@@ -1684,11 +1695,13 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             remote_fetch,
+            iteration: crate::markdown::compose::expression::iteration::IterationBudget::new(Default::default()),
             context_epoch: Default::default(),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
             root_source: None,
             is_child: false,
             preflight_validated: Default::default(),
+            failed_warnings: Default::default(),
         }
     }
 
@@ -1710,12 +1723,24 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             remote_fetch,
+            iteration: crate::markdown::compose::expression::iteration::IterationBudget::new(Default::default()),
             context_epoch: Default::default(),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
             root_source: None,
             is_child: false,
             preflight_validated: Default::default(),
+            failed_warnings: Default::default(),
         }
+    }
+
+    /// This runtime counting against a fresh budget of `limits`.
+    #[must_use]
+    pub fn with_iteration_limits(
+        mut self,
+        limits: crate::markdown::compose::expression::iteration::IterationLimits,
+    ) -> Self {
+        self.iteration = crate::markdown::compose::expression::iteration::IterationBudget::new(limits);
+        self
     }
 
     /// Creates a child runtime sharing cycle detection and inheriting
@@ -1726,12 +1751,52 @@ impl PipelineRuntime {
             shell: self.shell.clone_for_child(),
             cache: self.cache.clone(),
             remote_fetch: self.remote_fetch.clone(),
+            iteration: self.iteration.clone(),
             context_epoch: std::sync::Arc::clone(&self.context_epoch),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
             root_source: self.root_source.clone(),
             is_child: true,
             preflight_validated: std::sync::Arc::clone(&self.preflight_validated),
+            failed_warnings: std::sync::Arc::clone(&self.failed_warnings),
         }
+    }
+
+    /// Keeps the warnings a document reported before it failed. A parent
+    /// fails after its child, and its warnings came first, so they lead.
+    #[inline(never)]
+    pub(crate) fn record_failed_document(&self, warnings: Vec<crate::markdown::compose::ComposeWarning>) {
+        let mut failed = self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        failed.splice(0..0, warnings);
+    }
+
+    /// Keeps, after those already kept, the skipped-trigger warnings among
+    /// `warnings`: what a failed document's nested compositions found.
+    pub(crate) fn record_failed_triggers(
+        &self,
+        warnings: impl IntoIterator<Item = crate::markdown::compose::ComposeWarning>,
+    ) {
+        let mut failed = self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        failed.extend(warnings.into_iter().filter(|warning| warning.invalid_trigger_source().is_some()));
+    }
+
+    /// The warnings [`Self::record_failed_document`] and
+    /// [`Self::record_failed_triggers`] kept, in report order, each skipped
+    /// trigger once (its first report).
+    pub(crate) fn take_failed_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        let failed =
+            std::mem::take(&mut *self.failed_warnings.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        let mut triggers = Vec::new();
+        failed
+            .into_iter()
+            .filter(|warning| match warning.invalid_trigger_source() {
+                Some(trigger) if triggers.contains(&trigger) => false,
+                Some(trigger) => {
+                    triggers.push(trigger);
+                    true
+                }
+                None => true,
+            })
+            .collect()
     }
 
     /// Whether this runtime composes the request root rather than a child.

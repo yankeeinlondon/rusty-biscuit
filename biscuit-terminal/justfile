@@ -57,24 +57,20 @@ install *args="":
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
-# `--features image` on the library throughout: biscuit-terminal declares no
-# `default` feature set, and `image` gates 137 of its 3004 tests (the resvg
-# rasterization path plus the mermaid / graph-expression / horizontal-rule
-# parity suites). Every consumer that renders artifacts enables it —
-# biscuit-terminal-cli, darkmatter, git-wt-cli, sniff-detection-cli — so the
-# no-feature build is a configuration nobody ships.
-#
-# NOT `--all-features`: the `serde` feature's test module does not compile
-# (its `renderable::tree::graphics::horizontal_rule_svg` calls are one
-# argument behind that function's signature), and `clap` gates no tests.
+# `--features image,serde` on the library throughout: biscuit-terminal
+# declares no `default` feature set. `image` gates the resvg rasterization
+# tests, and `serde` gates the horizontal-rule serialization tests. Every
+# consumer that renders artifacts enables `image` — biscuit-terminal-cli,
+# darkmatter, git-wt-cli, sniff-detection-cli — so the no-feature build is a
+# configuration nobody ships.
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity_all "{{ LIBRARY }} --features image; {{ CLI }}"
+    @just _sanity_all "{{ LIBRARY }} --features image,serde; {{ CLI }}"
 
 # Test both library and CLI (Level-1 only — `test-l2` runs real-terminal tests).
 test *args="":
-    @just _test_all "{{ LIBRARY }} --features image; {{ CLI }}" {{ args }}
+    @just _test_all "{{ LIBRARY }} --features image,serde; {{ CLI }}" {{ args }}
 
 # List every test Nextest marks SLOW (see the shared `_slow_tests`).
 slow-tests *args="":
@@ -105,12 +101,12 @@ lint:
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
-    @just _coverage {{ LIBRARY }} --features image {{ args }}
+    @just _coverage {{ LIBRARY }} --features image,serde {{ args }}
     @just _coverage {{ CLI }} {{ args }}
 
 # Doctests for the library and CLI.
 doctest *args="":
-    @just _doctest {{ LIBRARY }} --features image {{ args }}
+    @just _doctest {{ LIBRARY }} --features image,serde {{ args }}
     @just _doctest {{ CLI }} {{ args }}
 
 # not applicable: biscuit-terminal has no cargo-fuzz targets (Phase 5 scope)

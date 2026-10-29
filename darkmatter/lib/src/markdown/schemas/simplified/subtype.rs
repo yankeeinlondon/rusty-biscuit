@@ -1,18 +1,33 @@
-//! The passive subtype relation among string-like SimplifiedSchema types.
+//! The passive structural subtype relation among SimplifiedSchema types.
 //!
 //! [`is_subtype`] answers "does every non-null value the underlying type A
 //! accepts also satisfy the underlying type B?" from typed, **resolved** atoms.
 //! Only a type and its identity (`alphanumeric` options, `enum` members, a
 //! `literal` value) count; ordinary constraints, presence and timing markers,
-//! defaults, and descriptions are ignored. The relation is bounded reasoning
+//! defaults, and descriptions are ignored, including inside structured types.
+//! Structured identity retains property names, positional optionality, and
+//! nested type identities; it does not widen object or array shapes.
+//! The relation is bounded reasoning
 //! over the listed types: it never inspects user regexes, converts scalars,
-//! reads files, or resolves references, and it is no substitute for runtime
-//! value checks or shell quoting.
+//! reads files, or resolves imports, and it is no substitute for runtime
+//! value checks or shell quoting. Because it ignores presence, passing an
+//! optional atom to it is not a presence check; a caller that needs
+//! nullability compares it separately.
+//!
+//! A reference ([`TypeExpr::Ref`]) to a recursive or a shared definition is
+//! unfolded only through the [`DefinitionTable`] a caller passes to
+//! [`is_subtype_with_definitions`]. Two uses of one definition are the same
+//! type; anywhere else, structural identity included, a reference is its
+//! definition's value, so a shared definition compares as the inlined copy
+//! it replaced did. The comparison is coinductive, so it terminates on self-
+//! and mutually recursive definitions.
 
 use std::collections::BTreeSet;
 
 use super::alphanumeric::AlphanumericOptions;
-use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
+use super::definitions::{DefKey, DefinitionTable};
+use super::query::flattened_alternatives;
+use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr};
 
 /// Whether every non-null value accepted by the underlying type of `a` is
 /// accepted by the underlying type of `b`.
@@ -23,7 +38,18 @@ use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 ///   allowed first characters are subsets of Y's, and X guarantees any
 ///   prohibition of `..` that Y makes.
 /// - Every always-text type is a subtype of `string`.
+/// - A `literal` is a subtype of its scalar family (`string`, `number`, or
+///   `boolean`), and a string `literal` of an `enum` that has it as a member.
+///   A numeric `literal(4)` is not a subtype of `enum('4')`, although the
+///   evaluator compares the two equal.
+/// - `enum(X)` ⊆ `enum(Y)` when X's members are a subset of Y's.
+/// - A non-array union is a subtype when every arm is; a non-array union is a
+///   supertype when one of its arms covers the source, so arm order never
+///   matters. `unknown` is never a subtype of a concrete type.
 /// - Every other pair, including an unresolved reference, is not.
+///
+/// A recursive reference is compared only by identity here; use
+/// [`is_subtype_with_definitions`] to compare it through its definition.
 ///
 /// ## Examples
 ///
@@ -36,20 +62,237 @@ use super::types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 /// assert!(is_subtype(&atom("alphanumeric(min(3))"), &rule));
 /// assert!(!is_subtype(&atom("string"), &rule));
 /// assert!(is_subtype(&atom("email"), &atom("string")));
+/// assert!(is_subtype(&atom("literal(4)"), &atom("number")));
+/// assert!(is_subtype(&atom("literal('a')"), &atom("enum(a, b, c)")));
 /// ```
 pub fn is_subtype(a: &PropertyAtom, b: &PropertyAtom) -> bool {
-    if a.is_array || b.is_array {
-        return a.is_array && b.is_array && identity(a) == identity(b);
+    is_subtype_with_definitions(a, b, &DefinitionTable::default())
+}
+
+/// [`is_subtype`] for resolved atoms whose [`TypeExpr::Ref`]s point into
+/// `definitions` (`ResolvedSchema::definitions`, `EffectiveSchema::definitions`).
+///
+/// Two references to the same definition are the same type whatever their
+/// use-site constraints, which are ordinary constraints. Any other pair with
+/// a reference on either side compares the definition's body alternatives in
+/// its place: every alternative of a source reference must be a subtype, and
+/// one alternative of a destination reference must cover the source. The
+/// comparison is coinductive: a `(source, destination)` pair met again while
+/// its own comparison is in progress holds, so each pair descends into a body
+/// at most once on a path and mutual recursion terminates. A reference
+/// `definitions` does not hold proves nothing.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+/// use darkmatter::markdown::schemas::{PropertyDef, SimplifiedSchema, is_subtype_with_definitions};
+///
+/// let dir = std::env::temp_dir();
+/// let context = biscuit_file::FileResolutionContext::new(&dir);
+/// let yaml = "data: [string, number, '{ items: data[] }']\nvalue: data\ntext: string\n";
+/// let yaml = serde_yaml_ng::from_str(yaml).unwrap();
+/// let resolved = resolve_yaml_schema(&yaml, &dir, &context).unwrap();
+/// let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else { unreachable!() };
+/// let atom = |name: &str| match &shape.properties[name] {
+///     PropertyDef::Single(atom) => atom.clone(),
+///     PropertyDef::Union(_) => unreachable!(),
+/// };
+/// assert!(is_subtype_with_definitions(&atom("text"), &atom("value"), &resolved.definitions));
+/// assert!(!is_subtype_with_definitions(&atom("value"), &atom("text"), &resolved.definitions));
+/// ```
+pub fn is_subtype_with_definitions(a: &PropertyAtom, b: &PropertyAtom, definitions: &DefinitionTable) -> bool {
+    Comparison::new(definitions).subtype(a, b)
+}
+
+/// One subtype question and the reference pairs whose comparison is in
+/// progress on the current path.
+struct Comparison<'t> {
+    definitions: &'t DefinitionTable,
+    in_progress: Vec<(Operand, Operand)>,
+}
+
+/// One side of a pair in progress: a definition by identity (use-site
+/// constraints are ordinary constraints, so they never tell two uses apart),
+/// or any other atom by address. Addresses are stable because every atom
+/// compared is borrowed from the inputs or from the table for the whole
+/// comparison.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Operand {
+    Definition(*const DefKey),
+    Atom(*const PropertyAtom),
+}
+
+impl<'t> Comparison<'t> {
+    fn new(definitions: &'t DefinitionTable) -> Self {
+        Self { definitions, in_progress: Vec::new() }
     }
-    match (&a.ty, &b.ty) {
-        (TypeExpr::Primitive(SimplifiedType::Alphanumeric), TypeExpr::Primitive(SimplifiedType::Alphanumeric)) => {
-            alphanumeric_subset(options(a), options(b))
+
+    fn subtype(&mut self, a: &PropertyAtom, b: &PropertyAtom) -> bool {
+        if Identities::new(self.definitions).same_atom(a, b) {
+            return true;
         }
-        (TypeExpr::Primitive(_), TypeExpr::Primitive(SimplifiedType::String)) => {
-            identity(a) == identity(b) || is_always_text(a)
+        if let Some(arms) = scalar_union_arms(a) {
+            return arms.iter().all(|arm| self.subtype(arm, b));
         }
-        _ => identity(a) == identity(b),
+        if let Some(key) = scalar_reference(a) {
+            return self.unfolding(a, b, |this| match this.body(key) {
+                Some(arms) => arms.iter().all(|arm| this.subtype(arm, b)),
+                None => false,
+            });
+        }
+        if let Some(arms) = scalar_union_arms(b) {
+            return arms.iter().any(|arm| self.subtype(a, arm));
+        }
+        if let Some(key) = scalar_reference(b) {
+            return self.unfolding(a, b, |this| match this.body(key) {
+                Some(arms) => arms.iter().any(|arm| this.subtype(a, arm)),
+                None => false,
+            });
+        }
+        if a.is_array || b.is_array {
+            return false;
+        }
+        match (&a.ty, &b.ty) {
+            (TypeExpr::Primitive(SimplifiedType::Alphanumeric), TypeExpr::Primitive(SimplifiedType::Alphanumeric)) => {
+                alphanumeric_subset(options(a), options(b))
+            }
+            (TypeExpr::Primitive(SimplifiedType::Enum), TypeExpr::Primitive(SimplifiedType::Enum)) => {
+                match (members(a), members(b)) {
+                    (Some(source), Some(destination)) => source.is_subset(&destination),
+                    _ => false,
+                }
+            }
+            (TypeExpr::Primitive(SimplifiedType::Literal), TypeExpr::Primitive(destination)) => {
+                literal_within(a.literal_value(), *destination, b)
+            }
+            (TypeExpr::Primitive(_), TypeExpr::Primitive(SimplifiedType::String)) => is_always_text(a),
+            _ => false,
+        }
     }
+
+    /// Runs `compare` for the pair `(a, b)` unless that pair is already in
+    /// progress, which holds coinductively.
+    fn unfolding(&mut self, a: &PropertyAtom, b: &PropertyAtom, compare: impl FnOnce(&mut Self) -> bool) -> bool {
+        let pair = (operand(a), operand(b));
+        if self.in_progress.contains(&pair) {
+            return true;
+        }
+        self.in_progress.push(pair);
+        let holds = compare(self);
+        self.in_progress.pop();
+        holds
+    }
+
+    /// The alternatives a definition's body is written as.
+    fn body(&self, key: &DefKey) -> Option<&'t [PropertyAtom]> {
+        Some(match &self.definitions.get(key)?.body {
+            PropertyDef::Single(atom) => std::slice::from_ref(atom),
+            PropertyDef::Union(atoms) => atoms,
+        })
+    }
+
+    /// `def`'s leaf alternatives with each scalar reference replaced by its
+    /// definition's leaves, every definition expanded at most once. A list of
+    /// a reference to a union is a list of each of its leaves, as the
+    /// inlined list of that union flattens (`(A | B)[]` is `A[]` and `B[]`).
+    fn leaves(&self, def: &PropertyDef) -> Vec<PropertyAtom> {
+        let mut out = Vec::new();
+        let mut expanded = Vec::new();
+        self.push_leaves(def, &mut expanded, &mut out);
+        out
+    }
+
+    fn push_leaves(&self, def: &PropertyDef, expanded: &mut Vec<DefKey>, out: &mut Vec<PropertyAtom>) {
+        for alternative in flattened_alternatives(def) {
+            let mut atom = alternative.atom.clone();
+            atom.is_array |= alternative.is_array;
+            if let Some((key, body)) = list_of_union_reference(&atom, self.definitions)
+                && !expanded.contains(key)
+            {
+                expanded.push(key.clone());
+                let start = out.len();
+                self.push_leaves(body, expanded, out);
+                out[start..].iter_mut().for_each(|leaf| leaf.is_array = true);
+                continue;
+            }
+            let body = scalar_reference(&atom)
+                .filter(|key| !expanded.contains(key))
+                .and_then(|key| Some((key.clone(), &self.definitions.get(key)?.body)));
+            match body {
+                Some((key, body)) => {
+                    expanded.push(key);
+                    self.push_leaves(body, expanded, out);
+                }
+                None => out.push(atom),
+            }
+        }
+    }
+}
+
+fn operand(atom: &PropertyAtom) -> Operand {
+    match scalar_reference(atom) {
+        Some(key) => Operand::Definition(key),
+        None => Operand::Atom(atom),
+    }
+}
+
+/// The definition a list of a reference names, with its body, when that body
+/// is a union whose alternatives are not lists themselves.
+fn list_of_union_reference<'a>(atom: &'a PropertyAtom, definitions: &'a DefinitionTable) -> Option<(&'a DefKey, &'a PropertyDef)> {
+    let TypeExpr::Ref(key) = &atom.ty else {
+        return None;
+    };
+    let body = &definitions.get(key)?.body;
+    let arms = match body {
+        PropertyDef::Union(arms) => arms.as_slice(),
+        PropertyDef::Single(single) if !single.is_array => single.union_arms()?,
+        PropertyDef::Single(_) => return None,
+    };
+    (atom.is_array && arms.iter().all(|arm| !arm.is_array)).then_some((key, body))
+}
+
+/// The definition a non-array reference names; `K[]` is a list and compares
+/// by identity like every other array.
+fn scalar_reference(atom: &PropertyAtom) -> Option<&DefKey> {
+    match &atom.ty {
+        TypeExpr::Ref(key) if !atom.is_array => Some(key),
+        _ => None,
+    }
+}
+
+/// [`is_subtype`] over whole property definitions: every leaf alternative of
+/// `a` is covered by some leaf alternative of `b`. Presence is ignored, as it
+/// is by [`is_subtype`]; a `null` or `unknown` alternative of `a` is covered
+/// only by an identical one.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+/// use darkmatter::markdown::schemas::{PropertyDef, is_definition_subtype};
+///
+/// let atom = |text| parse_type_expr("p", text).unwrap();
+/// let source = PropertyDef::Union(vec![atom("string"), atom("number")]);
+/// let destination = PropertyDef::Union(vec![atom("boolean"), atom("number"), atom("string")]);
+/// assert!(is_definition_subtype(&source, &destination));
+/// assert!(!is_definition_subtype(&destination, &source));
+/// ```
+pub fn is_definition_subtype(a: &PropertyDef, b: &PropertyDef) -> bool {
+    is_definition_subtype_with_definitions(a, b, &DefinitionTable::default())
+}
+
+/// [`is_definition_subtype`] for resolved definitions whose
+/// [`TypeExpr::Ref`]s point into `definitions`: a reference alternative on
+/// either side contributes its definition's leaf alternatives, and the leaves
+/// compare by [`is_subtype_with_definitions`].
+pub fn is_definition_subtype_with_definitions(a: &PropertyDef, b: &PropertyDef, definitions: &DefinitionTable) -> bool {
+    let mut comparison = Comparison::new(definitions);
+    let destination = comparison.leaves(b);
+    let source = comparison.leaves(a);
+    source
+        .iter()
+        .all(|source| destination.iter().any(|arm| comparison.subtype(source, arm)))
 }
 
 /// Whether `atom` is a single string-like type: not an array, and every value
@@ -69,6 +312,33 @@ pub fn is_subtype(a: &PropertyAtom, b: &PropertyAtom) -> bool {
 /// ```
 pub fn is_string_like(atom: &PropertyAtom) -> bool {
     !atom.is_array && is_always_text(atom)
+}
+
+/// The arms of a non-array union type; an array of a union compares by
+/// identity like every other array.
+fn scalar_union_arms(atom: &PropertyAtom) -> Option<&[PropertyAtom]> {
+    (!atom.is_array).then(|| atom.union_arms()).flatten()
+}
+
+fn members(atom: &PropertyAtom) -> Option<BTreeSet<&str>> {
+    atom.constraints.iter().find_map(|constraint| match constraint {
+        Constraint::Members(members) => Some(members.iter().map(String::as_str).collect()),
+        _ => None,
+    })
+}
+
+/// Whether a `literal` with `value` is accepted by the destination type: its
+/// own scalar family, or an `enum` with the same string member.
+fn literal_within(value: Option<&serde_json::Value>, destination: SimplifiedType, atom: &PropertyAtom) -> bool {
+    match (value, destination) {
+        (Some(serde_json::Value::String(_)), SimplifiedType::String)
+        | (Some(serde_json::Value::Number(_)), SimplifiedType::Number)
+        | (Some(serde_json::Value::Bool(_)), SimplifiedType::Boolean) => true,
+        (Some(serde_json::Value::String(text)), SimplifiedType::Enum) => {
+            members(atom).is_some_and(|members| members.contains(text.as_str()))
+        }
+        _ => false,
+    }
 }
 
 fn alphanumeric_subset(x: AlphanumericOptions, y: AlphanumericOptions) -> bool {
@@ -109,12 +379,18 @@ fn is_always_text(atom: &PropertyAtom) -> bool {
             | SimplifiedType::Unknown
             | SimplifiedType::Null => false,
         },
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => false,
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => false,
     }
 }
 
-/// The parts of an atom that name its type, with ordinary constraints left
-/// out. An unresolved reference has no identity, so it equals nothing.
+/// The parts of a non-reference atom that name its type, with ordinary
+/// constraints left out. An unresolved reference has no identity, so it
+/// equals nothing.
 enum Identity<'a> {
     Primitive {
         ty: SimplifiedType,
@@ -131,27 +407,193 @@ fn identity(atom: &PropertyAtom) -> Identity<'_> {
         TypeExpr::Primitive(ty) => Identity::Primitive {
             ty: *ty,
             options: atom.alphanumeric_options(),
-            members: atom.constraints.iter().find_map(|constraint| match constraint {
-                Constraint::Members(members) => Some(members.iter().map(String::as_str).collect()),
-                _ => None,
-            }),
+            members: members(atom),
             literal: atom.literal_value(),
         },
         TypeExpr::Imported { .. } => Identity::Unresolved,
-        ty @ (TypeExpr::InlineObject(_) | TypeExpr::Union(_)) => Identity::Structured(ty),
+        ty @ (TypeExpr::InlineObject(_)
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_)) => Identity::Structured(ty),
     }
 }
 
-impl PartialEq for Identity<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Primitive { ty, options, members, literal },
-                Self::Primitive { ty: other_ty, options: other_options, members: other_members, literal: other_literal },
-            ) => ty == other_ty && options == other_options && members == other_members && literal == other_literal,
-            (Self::Structured(left), Self::Structured(right)) => left == right,
+/// One side of an identity comparison: an atom's type, or a union's
+/// alternatives, and whether the value is a list of it. A reference opens to
+/// its definition's value, so the list flag can come from the use while the
+/// type comes from the body.
+#[derive(Clone, Copy)]
+enum Side<'a> {
+    Atom { is_array: bool, atom: &'a PropertyAtom },
+    Arms { is_array: bool, arms: &'a [PropertyAtom] },
+}
+
+impl<'a> Side<'a> {
+    fn of(atom: &'a PropertyAtom) -> Self {
+        Self::Atom { is_array: atom.is_array, atom }
+    }
+
+    fn is_array(self) -> bool {
+        match self {
+            Self::Atom { is_array, .. } | Self::Arms { is_array, .. } => is_array,
+        }
+    }
+
+    fn reference(self) -> Option<&'a DefKey> {
+        match self {
+            Self::Atom { atom: PropertyAtom { ty: TypeExpr::Ref(key), .. }, .. } => Some(key),
+            _ => None,
+        }
+    }
+}
+
+/// Structural type identity, with references opened through `definitions`.
+///
+/// A reference is the same type as its definition's value, so a stored
+/// definition is identical to the inlined copy it stands for (`entry[]` and
+/// `{ n: number }[]`). Two references to one definition are identical without
+/// opening it. A pair of different references met again while its own
+/// comparison is in progress holds, so recursive bodies terminate. A
+/// reference `definitions` does not hold is identical only to itself.
+struct Identities<'t> {
+    definitions: &'t DefinitionTable,
+    assumed: Vec<(DefKey, DefKey, bool, bool)>,
+}
+
+impl<'t> Identities<'t> {
+    fn new(definitions: &'t DefinitionTable) -> Self {
+        Self { definitions, assumed: Vec::new() }
+    }
+
+    fn same_atom(&mut self, left: &PropertyAtom, right: &PropertyAtom) -> bool {
+        self.same(Side::of(left), Side::of(right))
+    }
+
+    fn same(&mut self, left: Side<'_>, right: Side<'_>) -> bool {
+        match (left.reference(), right.reference()) {
+            (Some(left_key), Some(right_key)) if left_key == right_key => return left.is_array() == right.is_array(),
+            (Some(left_key), Some(right_key)) => {
+                let pair = (left_key.clone(), right_key.clone(), left.is_array(), right.is_array());
+                if self.assumed.contains(&pair) {
+                    return true;
+                }
+                self.assumed.push(pair);
+                let same = self.open(left).is_some_and(|opened| self.same(opened, right));
+                self.assumed.pop();
+                return same;
+            }
+            (Some(_), None) => return self.open(left).is_some_and(|opened| self.same(opened, right)),
+            (None, Some(_)) => return self.open(right).is_some_and(|opened| self.same(left, opened)),
+            (None, None) => {}
+        }
+        match (as_arms(left), as_arms(right)) {
+            (Side::Arms { is_array, arms: left }, Side::Arms { is_array: right_array, arms: right }) => {
+                is_array == right_array && self.same_alternatives(left, right)
+            }
+            (Side::Atom { is_array, atom: left }, Side::Atom { is_array: right_array, atom: right }) => {
+                is_array == right_array
+                    && match (identity(left), identity(right)) {
+                        (
+                            Identity::Primitive { ty, options, members, literal },
+                            Identity::Primitive {
+                                ty: other_ty,
+                                options: other_options,
+                                members: other_members,
+                                literal: other_literal,
+                            },
+                        ) => {
+                            ty == other_ty && options == other_options && members == other_members && literal == other_literal
+                        }
+                        (Identity::Structured(left), Identity::Structured(right)) => self.same_structured(left, right),
+                        _ => false,
+                    }
+            }
             _ => false,
         }
+    }
+
+    /// The value a reference side stands for: its definition's body, as a
+    /// list when the use is one. `None` when the table does not hold the
+    /// definition, or for a list of a list, which no inlined atom spells.
+    fn open<'s>(&self, side: Side<'s>) -> Option<Side<'s>>
+    where
+        't: 's,
+    {
+        let key = side.reference()?;
+        let use_is_array = side.is_array();
+        match &self.definitions.get(key)?.body {
+            PropertyDef::Single(atom) if use_is_array && atom.is_array => None,
+            PropertyDef::Single(atom) => Some(Side::Atom { is_array: use_is_array || atom.is_array, atom }),
+            PropertyDef::Union(arms) => Some(Side::Arms { is_array: use_is_array, arms }),
+        }
+    }
+
+    fn same_alternatives(&mut self, left: &[PropertyAtom], right: &[PropertyAtom]) -> bool {
+        left.iter().all(|left| right.iter().any(|right| self.same_atom(left, right)))
+            && right.iter().all(|right| left.iter().any(|left| self.same_atom(left, right)))
+    }
+
+    fn same_definition(&mut self, left: &PropertyDef, right: &PropertyDef) -> bool {
+        fn arms(def: &PropertyDef) -> &[PropertyAtom] {
+            match def {
+                PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                PropertyDef::Union(arms) => arms,
+            }
+        }
+        self.same_alternatives(arms(left), arms(right))
+    }
+
+    fn same_shape(&mut self, left: &SchemaShape, right: &SchemaShape) -> bool {
+        left.properties.len() == right.properties.len()
+            && left.properties.iter().all(|(key, def)| {
+                right.properties.get(key).is_some_and(|other| self.same_definition(def, other))
+            })
+            && left.pattern_keys.len() == right.pattern_keys.len()
+            && left.pattern_keys.iter().zip(&right.pattern_keys).all(|(left, right)| {
+                left.key == right.key && self.same_definition(&left.def, &right.def)
+            })
+    }
+
+    fn same_structured(&mut self, left: &TypeExpr, right: &TypeExpr) -> bool {
+        match (left, right) {
+            (TypeExpr::InlineObject(left), TypeExpr::InlineObject(right)) => self.same_shape(left, right),
+            (TypeExpr::Tuple(left), TypeExpr::Tuple(right)) => {
+                left.elements.len() == right.elements.len()
+                    && left.elements.iter().zip(&right.elements).all(|(left, right)| {
+                        left.optional == right.optional && self.same_definition(&left.def, &right.def)
+                    })
+                    && match (left.spread.as_deref(), right.spread.as_deref()) {
+                        (Some(left), Some(right)) => self.same_atom(left, right),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            }
+            (TypeExpr::Function(left), TypeExpr::Function(right)) => {
+                let left_parameters = left.parameters.as_slice();
+                let right_parameters = right.parameters.as_slice();
+                // `narrows` is analysis metadata, like examples and categories:
+                // subtyping compares accepted inputs and outputs only.
+                left.fallible == right.fallible
+                    && self.same_definition(&left.returns, &right.returns)
+                    && left_parameters.len() == right_parameters.len()
+                    && left_parameters.iter().zip(right_parameters).all(|(left, right)| {
+                        left.optional == right.optional
+                            && left.rest == right.rest
+                            && self.same_definition(&left.def, &right.def)
+                    })
+            }
+            _ => false,
+        }
+    }
+}
+
+/// A union-typed atom as its alternatives, so it compares with a reference
+/// whose definition is a union.
+fn as_arms(side: Side<'_>) -> Side<'_> {
+    match side {
+        Side::Atom { is_array, atom: PropertyAtom { ty: TypeExpr::Union(arms), .. } } => Side::Arms { is_array, arms },
+        other => other,
     }
 }
 
@@ -201,6 +643,62 @@ mod tests {
         assert_subtype("number(min(1); required)", "number(max(2))", true);
         assert_subtype("string(pattern('^a'))", "string(min(9))", true);
         assert_subtype("string[](min(1))", "string(eager)[](max(3))", true);
+    }
+
+    #[test]
+    fn nested_identity_ignores_ordinary_constraints_and_annotations() {
+        for (left, right) in [
+            ("{ p: string(min(1); required) }", "{ p: string }"),
+            ("{ p: enum(a, b) }[]", "{ p: enum(b, a) }[]"),
+            ("{ p: alphanumeric(block-leading-dash) }", "{ p: alphanumeric }"),
+            ("{ <string>: string(min(1)) }", "{ <string>: string }"),
+            ("(string(min(1)) | number)[]", "(number | string)[]"),
+            ("tuple([string(min(1)), number?])", "tuple([string, number?])"),
+            ("tuple([string, ...number(min(1))[]])", "tuple([string, ...number[]])"),
+            (
+                "function(parameters(value: string(min(1))); returns(number))",
+                "function(parameters(input: string); returns(number(min(3))))",
+            ),
+        ] {
+            assert_subtype(left, right, true);
+            assert_subtype(right, left, true);
+        }
+    }
+
+    #[test]
+    fn nested_identity_retains_type_and_container_boundaries() {
+        for (left, right) in [
+            ("{ p: literal(3) }", "{ p: literal(4) }"),
+            ("{ p: enum(a, b) }", "{ p: enum(a) }"),
+            ("{ p: alphanumeric(allow-dashes) }", "{ p: alphanumeric }"),
+            ("{ p: string[] }", "{ p: string }"),
+            ("{ p: string }", "{ q: string }"),
+            ("{ <string>: string }", "{ <string>: number }"),
+            ("{ <starting::a>: string }", "{ <starting::b>: string }"),
+            ("(string | number)[]", "string[]"),
+            ("tuple([string?])", "tuple([string])"),
+            ("tuple([string, ...number[]])", "tuple([string])"),
+            (
+                "function(parameters(value?: string); returns(number))",
+                "function(parameters(value: string); returns(number))",
+            ),
+            (
+                "function(parameters(value: string); returns(number))",
+                "function(parameters(value: string); returns(boolean))",
+            ),
+            (
+                "function(parameters(...values: string); returns(number))",
+                "function(parameters(value: string); returns(number))",
+            ),
+            (
+                "function(parameters(void); returns(number); fallible)",
+                "function(parameters(void); returns(number))",
+            ),
+            ("{ p: unresolved }", "{ p: unresolved }"),
+        ] {
+            assert_subtype(left, right, false);
+            assert_subtype(right, left, false);
+        }
     }
 
     #[test]
@@ -289,6 +787,82 @@ mod tests {
     }
 
     #[test]
+    fn literals_are_subtypes_of_their_scalar_family_only() {
+        assert_subtype("literal('release')", "string", true);
+        assert_subtype("literal(4)", "number", true);
+        assert_subtype("literal(4.5)", "number", true);
+        assert_subtype("literal(true)", "boolean", true);
+        assert_subtype("literal(4)", "string", false);
+        assert_subtype("literal('4')", "number", false);
+        assert_subtype("literal(true)", "string", false);
+        assert_subtype("literal('true')", "boolean", false);
+        // No family promotion beyond the literal's own JSON kind.
+        assert_subtype("literal(4)", "numberlike", false);
+        assert_subtype("literal('x')", "email", false);
+        assert_subtype("literal('x')", "alphanumeric", false);
+    }
+
+    #[test]
+    fn string_literals_are_subtypes_of_enums_that_list_them() {
+        assert_subtype("literal('a')", "enum(a, b, c)", true);
+        assert_subtype("literal('z')", "enum(a, b, c)", false);
+        // The evaluator compares `4 == '4'` equal; the structure differs.
+        assert_subtype("literal(4)", "enum('4')", false);
+        assert_subtype("literal(true)", "enum('true')", false);
+    }
+
+    #[test]
+    fn enum_subsets_are_subtypes() {
+        assert_subtype("enum(a, b)", "enum(a, b, c)", true);
+        assert_subtype("enum(b, a)", "enum(c, a, b)", true);
+        assert_subtype("enum(a, d)", "enum(a, b, c)", false);
+        assert_subtype("enum(a, b, c)", "enum(a, b)", false);
+        assert_subtype("enum(a)[]", "enum(a, b)[]", false);
+    }
+
+    fn union(arms: &[&str]) -> PropertyAtom {
+        let mut atom = PropertyAtom::bare(SimplifiedType::Unknown);
+        atom.ty = TypeExpr::Union(arms.iter().map(|text| self::atom(text)).collect());
+        atom
+    }
+
+    #[test]
+    fn unions_compare_arm_by_arm_independent_of_order() {
+        let literals = union(&["literal('a')", "literal('b')"]);
+        assert!(is_subtype(&literals, &atom("enum(a, b, c)")));
+        assert!(!is_subtype(&union(&["literal('a')", "literal('z')"]), &atom("enum(a, b, c)")));
+
+        let source = union(&["string", "number"]);
+        assert!(is_subtype(&source, &union(&["string", "number", "boolean"])));
+        assert!(is_subtype(&source, &union(&["boolean", "number", "string"])));
+        assert!(is_subtype(&union(&["number", "string"]), &source));
+        assert!(!is_subtype(&union(&["string", "number", "boolean"]), &source));
+        assert!(is_subtype(&atom("email"), &union(&["number", "string"])));
+        assert!(!is_subtype(&atom("number"), &union(&["string", "boolean"])));
+    }
+
+    #[test]
+    fn unknown_is_never_proof_of_a_concrete_type() {
+        assert_subtype("unknown", "string", false);
+        assert_subtype("unknown", "number", false);
+        assert!(!is_subtype(&atom("unknown"), &union(&["string", "number", "boolean"])));
+        assert!(!is_subtype(&union(&["string", "unknown"]), &atom("string")));
+    }
+
+    #[test]
+    fn definitions_compare_every_leaf_alternative() {
+        let def = |arms: &[&str]| match arms {
+            [single] => PropertyDef::Single(atom(single)),
+            arms => PropertyDef::Union(arms.iter().map(|text| atom(text)).collect()),
+        };
+        assert!(is_definition_subtype(&def(&["literal('a')", "literal('b')"]), &def(&["enum(a, b, c)"])));
+        assert!(is_definition_subtype(&def(&["string", "number"]), &def(&["boolean", "number", "string"])));
+        assert!(!is_definition_subtype(&def(&["string", "null"]), &def(&["string"])));
+        assert!(is_definition_subtype(&def(&["string", "null"]), &def(&["null", "string"])));
+        assert!(!is_definition_subtype(&def(&["string[]"]), &def(&["string"])));
+    }
+
+    #[test]
     fn containers_are_never_promoted_and_other_pairs_are_not_subtypes() {
         assert_subtype("alphanumeric[]", "string[]", false);
         assert_subtype("string", "string[]", false);
@@ -299,5 +873,23 @@ mod tests {
         assert_subtype("number", "numberlike", false);
         assert_subtype("slug", "slug", false);
         assert_subtype("slug", "string", false);
+    }
+}
+
+#[cfg(test)]
+mod narrows_subtype_tests {
+    use super::*;
+    use crate::markdown::schemas::simplified::grammar::parse_type_expr;
+
+    #[test]
+    fn functions_differing_only_in_narrows_are_mutual_subtypes() {
+        let plain = parse_type_expr("p", "function(parameters(x: unknown); returns(boolean))").expect("plain");
+        let narrowing = parse_type_expr(
+            "p",
+            "function(parameters(x: unknown); returns(boolean); narrows(x: string; true-iff))",
+        )
+        .expect("narrowing");
+        assert!(is_subtype(&plain, &narrowing));
+        assert!(is_subtype(&narrowing, &plain));
     }
 }

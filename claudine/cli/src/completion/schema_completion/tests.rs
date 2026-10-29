@@ -1134,10 +1134,16 @@ fn shipped_container_schema_resolves_for_authored_parameter_completion() {
         write(&tmp.path().join(name), text);
     }
     write(&tmp.path().join("nested.md"), "---\n$schema:\n  nested: task@./sequence-types.yaml\n---\n");
-    let ctx = ScopeContext::discover_from(tmp.path());
+    fs::create_dir_all(tmp.path().join("home")).unwrap();
+    let mut ctx = ScopeContext::discover_from(tmp.path());
+    ctx.home = Some(tmp.path().join("home"));
     let effective = load_effective_schema("./nested.md", &ctx).expect("shipped task schema loads");
     let names = property_names(&effective, "", &HashSet::new(), &[]);
     assert_eq!(names, ["nested="]);
-    assert!(effective.validate_raw(&serde_json::json!({"nested": {"name": "child", "sequence": [], "cancelled": []}})).valid);
-    assert!(!effective.validate_raw(&serde_json::json!({"nested": {"sequence": [], "cancelled": 123}})).valid);
+    let validator = effective.validator().expect("a structural validator");
+    assert!(validator.is_valid(&serde_json::json!({"nested": {"name": "child", "sequence": [], "cancelled": []}})));
+    assert!(!validator.is_valid(&serde_json::json!({"nested": {"sequence": [], "cancelled": 123}})));
 }
+
+#[cfg(test)]
+mod x2_spike;

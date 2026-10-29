@@ -23,19 +23,24 @@ pub fn render_page_blocks<L: EvaluationLookup>(
     report: &mut ComposeReport,
     ctx: SourceContext,
 ) -> Result<String, PageBlockError> {
-    render_page_blocks_with_edits(content, regions, state, report, ctx).map(|(output, _)| output)
+    render_page_blocks_with_edits(content, regions, state, report, ctx, &mut |_| false)
+        .map(|rendered| rendered.map_or_else(String::new, |(output, _)| output))
 }
 
 /// [`render_page_blocks`], also returning the edits the rendering made to
 /// `content` in source order: a false block's whole region and a true block's
 /// opening and closing directive lines, each replaced by nothing.
+///
+/// `stop` is asked before each condition is evaluated, given the report so
+/// far; `Ok(None)` means it answered `true` and no later condition ran.
 pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
     content: &str,
     regions: &[PageBlockRegion],
     state: &L,
     report: &mut ComposeReport,
     ctx: SourceContext,
-) -> Result<(String, Vec<TextEdit>), PageBlockError> {
+    stop: &mut dyn FnMut(&ComposeReport) -> bool,
+) -> Result<Option<(String, Vec<TextEdit>)>, PageBlockError> {
     debug!(region_count = regions.len(), "page_blocks: rendering");
 
     let mut edits = Vec::new();
@@ -52,6 +57,9 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
                     conditions::collect_condition_context_warnings(expr, state, "condition")
                 {
                     report.add_warning(warning.at_line(region.start_line));
+                }
+                if stop(report) {
+                    return Ok(None);
                 }
                 let mut missing = Vec::new();
                 let condition = conditions::evaluate_condition_observed(
@@ -72,7 +80,7 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
         if condition {
             // Render body, recursively processing nested children
             removed(&mut edits, region.span.start..region.body_span.start);
-            let body = render_body(
+            let Some(body) = render_body(
                 content,
                 &region.body_span,
                 &region.children,
@@ -80,7 +88,11 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
                 report,
                 &ctx,
                 &mut edits,
-            )?;
+                stop,
+            )?
+            else {
+                return Ok(None);
+            };
             removed(&mut edits, region.body_span.end..region.span.end);
             output.push_str(&body);
             report.page_blocks_rendered += 1;
@@ -96,7 +108,7 @@ pub(crate) fn render_page_blocks_with_edits<L: EvaluationLookup>(
     // Append trailing content after the last block
     output.push_str(&content[cursor..]);
 
-    Ok((output, edits))
+    Ok(Some((output, edits)))
 }
 
 fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {
@@ -105,7 +117,9 @@ fn removed(edits: &mut Vec<TextEdit>, range: Range<usize>) {
     }
 }
 
-/// Renders the body of a block, recursively processing nested child blocks.
+/// Renders the body of a block, recursively processing nested child blocks;
+/// `None` when `stop` ended the rendering.
+#[allow(clippy::too_many_arguments)]
 fn render_body<L: EvaluationLookup>(
     content: &str,
     body_span: &Range<usize>,
@@ -114,9 +128,10 @@ fn render_body<L: EvaluationLookup>(
     report: &mut ComposeReport,
     ctx: &SourceContext,
     edits: &mut Vec<TextEdit>,
-) -> Result<String, PageBlockError> {
+    stop: &mut dyn FnMut(&ComposeReport) -> bool,
+) -> Result<Option<String>, PageBlockError> {
     if children.is_empty() {
-        return Ok(content[body_span.clone()].to_string());
+        return Ok(Some(content[body_span.clone()].to_string()));
     }
 
     let mut output = String::new();
@@ -132,6 +147,9 @@ fn render_body<L: EvaluationLookup>(
                     conditions::collect_condition_context_warnings(expr, state, "condition")
                 {
                     report.add_warning(warning.at_line(child.start_line));
+                }
+                if stop(report) {
+                    return Ok(None);
                 }
                 let mut missing = Vec::new();
                 let condition = conditions::evaluate_condition_observed(
@@ -151,7 +169,7 @@ fn render_body<L: EvaluationLookup>(
 
         if condition {
             removed(edits, child.span.start..child.body_span.start);
-            let body = render_body(
+            let Some(body) = render_body(
                 content,
                 &child.body_span,
                 &child.children,
@@ -159,7 +177,11 @@ fn render_body<L: EvaluationLookup>(
                 report,
                 ctx,
                 edits,
-            )?;
+                stop,
+            )?
+            else {
+                return Ok(None);
+            };
             removed(edits, child.body_span.end..child.span.end);
             output.push_str(&body);
             report.page_blocks_rendered += 1;
@@ -174,7 +196,7 @@ fn render_body<L: EvaluationLookup>(
     // Append remaining body content after the last child
     output.push_str(&content[cursor..body_span.end]);
 
-    Ok(output)
+    Ok(Some(output))
 }
 
 #[cfg(test)]
@@ -372,7 +394,9 @@ mod tests {
         let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
         let (output, edits) =
-            render_page_blocks_with_edits(content, &regions, &state, &mut report, source).unwrap();
+            render_page_blocks_with_edits(content, &regions, &state, &mut report, source, &mut |_| false)
+                .unwrap()
+                .expect("nothing stops the rendering");
 
         let mut replayed = String::new();
         let mut cursor = 0;

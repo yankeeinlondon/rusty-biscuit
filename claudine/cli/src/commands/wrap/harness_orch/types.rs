@@ -187,7 +187,10 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// late-binding spec's "current effective document state at the moment the
     /// event fires" contract. Re-created each loop iteration (a retry
     /// re-materializes from disk), giving the correct per-attempt lifetime.
-    pub(crate) live_frontmatter: std::sync::Mutex<serde_json::Map<String, serde_json::Value>>,
+    pub(crate) live_frontmatter: std::sync::Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
+    /// [`Self::frontmatter`] as the view every event's stack reads as its base:
+    /// built with, and sharing its values with, [`Self::live_frontmatter`].
+    pub(crate) frontmatter_view: darkmatter::markdown::compose::SharedFrontmatter,
     /// Handle to the invocation-local runtime cell owned by
     /// [`HarnessPromptState`]. Threaded into every lifecycle event so a `set`
     /// accumulates across attempts instead of dying with `live_frontmatter`.
@@ -228,10 +231,17 @@ impl MaterializedHarnessPrompt {
     /// A non-object frontmatter (e.g. the synthesized `Null` used when
     /// materialization failed) seeds an empty map, matching the stack-context
     /// builder's empty-frontmatter fallback.
+    /// The base view of a fresh live cell, sharing its values.
+    pub(crate) fn view_of(
+        live: &std::sync::Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
+    ) -> darkmatter::markdown::compose::SharedFrontmatter {
+        live.lock().expect("a fresh live cell").clone()
+    }
+
     pub(crate) fn live_cell_from(
         frontmatter: &serde_json::Value,
-    ) -> std::sync::Mutex<serde_json::Map<String, serde_json::Value>> {
-        std::sync::Mutex::new(frontmatter.as_object().cloned().unwrap_or_default())
+    ) -> std::sync::Mutex<darkmatter::markdown::compose::SharedFrontmatter> {
+        std::sync::Mutex::new(frontmatter.as_object().cloned().unwrap_or_default().into())
     }
 }
 

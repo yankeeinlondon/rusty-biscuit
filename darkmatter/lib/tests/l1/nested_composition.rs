@@ -162,24 +162,21 @@ fn frontmatter_and_body_calls_return_composed_markdown_with_authored_frontmatter
     assert!(!text.contains("leaked:"), "request state must not serialize: {text}");
 }
 
-/// Adversarial arguments: an empty string composes to nothing, while a
-/// non-string or null argument is the usual argument-type error, fatal in a
-/// document body.
+/// Adversarial arguments: an empty string composes to nothing. Ledger row
+/// 111 (`as_markdown(content: string | null)`): a number composes as its text,
+/// and a list is a binding type error, fatal in a document body.
 #[test]
 fn empty_and_non_string_arguments() {
     let (composed, _) = compose(&Markdown::from("empty=[{{ as_markdown(\"\") }}]\n"), probe_options());
     assert!(composed.content().contains("empty=[]"), "{}", composed.content());
 
-    for (actual, body) in [
-        ("number", "number={{ as_markdown(42) }}\n"),
-        ("null", "null={{ as_markdown(missing) }}\n"),
-    ] {
-        let error = Markdown::from(body)
-            .compose_with(&crate::request_support::request(probe_options()))
-            .expect_err("a non-string argument fails the document");
-        let expected = format!("as_markdown() argument 0: expected string, got {actual}");
-        assert!(error.to_string().contains(&expected), "{expected}: {error}");
-    }
+    let (composed, _) = compose(&Markdown::from("number=[{{ as_markdown(42) }}]\n"), probe_options());
+    assert!(composed.content().contains("number=[42]"), "{}", composed.content());
+
+    let error = Markdown::from("list={{ as_markdown([\"a\"]) }}\n")
+        .compose_with(&crate::request_support::request(probe_options()))
+        .expect_err("a list argument fails the document");
+    assert!(error.to_string().contains("as_markdown: invalid arguments"), "{error}");
 }
 
 /// Nested diagnostics are tagged with their nested stage, and a nested
@@ -531,3 +528,130 @@ async fn nested_content_never_introduces_remote_transclusion() {
     }
     assert_eq!(server.received_requests().await.unwrap().len(), 0);
 }
+
+fn assert_callback_preflight_scope(frontmatter: &str, body: &str, commands: &[&str], rejected: bool) {
+    let temp = tempfile::tempdir().unwrap();
+    let marker = temp.path().join("preflight-ran");
+    let marker_text = biscuit_file::to_portable_string(&marker);
+    let (path, document) = root_document(
+        temp.path(),
+        "root.md",
+        &format!("---\nran: \"$(touch {marker_text})\"\n{frontmatter}---\n{body}\n"),
+    );
+    let request = crate::request_support::request_at(
+        temp.path(),
+        ComposeOptions::new().with_source_file(&path),
+    );
+    let result = document.compose_preflight(&request);
+    if rejected {
+        let error = result.expect_err("document-dependent nested content must remain unapprovable");
+        let MarkdownError::ShellExpansion(inner) = error else {
+            panic!("expected a typed shape error, got {error:?}");
+        };
+        assert!(matches!(inner.as_ref(), ShellExpansionError::UnevaluatedDependencyShape { dependency, .. }
+            if dependency.contains("frontmatter.part")), "{inner:?}");
+    } else {
+        let actual: HashSet<_> = result.expect("literal local content is discoverable").approval_set().into_iter().collect();
+        let mut expected: HashSet<_> = commands.iter().map(|command| (*command).to_string()).collect();
+        expected.insert(format!("touch {marker_text}"));
+        assert_eq!(actual, expected, "preflight must discover every required command and no extra commands");
+    }
+    assert!(!marker.exists(), "preflight must never execute the discovered commands");
+}
+
+macro_rules! callback_preflight_scope {
+    ($name:ident, $frontmatter:expr, $body:expr, $commands:expr, $rejected:expr) => {
+        #[test]
+        fn $name() {
+            assert_callback_preflight_scope($frontmatter, $body, $commands, $rejected);
+        }
+    };
+}
+
+callback_preflight_scope!(callback_preflight_scope_01_body_map,
+    "part: '$(echo pending)'\n", "{{ map(['::shell echo local'], part => as_markdown(part)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_02_body_filter,
+    "part: '$(echo pending)'\n", "{{ filter(['::shell echo local'], part => as_markdown(part)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_03_map_fields,
+    "part: '$(echo pending)'\n", "{{ map([{part: '::shell echo local'}], {part} -> as_markdown(part)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_04_filter_fields,
+    "part: '$(echo pending)'\n", "{{ filter([{part: '::shell echo local'}], {part} -> as_markdown(part)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_05_outer_capture,
+    "part: '$(echo pending)'\n", "{{ map(['::shell echo local'], part => map([1], n => as_markdown(part))) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_06_frontmatter_map,
+    "part: '$(echo pending)'\nresult: \"{{ map(['::shell echo local'], part => as_markdown(part)) }}\"\n", "{{ result }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_07_frontmatter_filter,
+    "part: '$(echo pending)'\nresult: \"{{ filter(['::shell echo local'], part => as_markdown(part)) }}\"\n", "{{ result }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_08_unobserved,
+    "part: \"{{ can_execute('git') }}\"\n", "{{ map(['::shell echo local'], part => as_markdown(part)) }}",
+    &["echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_09_explicit_map,
+    "part: '$(echo pending)'\n", "{{ map(['::shell echo local'], part => as_markdown(local.part)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_10_explicit_filter,
+    "part: '$(echo pending)'\n", "{{ filter(['::shell echo local'], part => as_markdown(local.part)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_11_explicit_capture,
+    "part: '$(echo pending)'\n", "{{ map(['::shell echo local'], part => map([1], n => as_markdown(local.part))) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_12_explicit_unobserved,
+    "part: \"{{ can_execute('git') }}\"\n", "{{ map(['::shell echo local'], part => as_markdown(local.part)) }}",
+    &["echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_13_document_pending,
+    "part: '$(echo pending)'\n", "{{ map(['::shell echo local'], part => as_markdown(fm.part)) }}",
+    &[], true);
+
+callback_preflight_scope!(callback_preflight_scope_14_document_unobserved,
+    "part: \"{{ can_execute('git') }}\"\n", "{{ map(['::shell echo local'], part => as_markdown(fm.part)) }}",
+    &[], true);
+
+callback_preflight_scope!(callback_preflight_scope_15_nonshadowing,
+    "part: '$(echo pending)'\n", "{{ map(['::shell echo local'], item => as_markdown(item)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_16_frontmatter_inventory,
+    "part: '$(echo pending)'\nresult: \"{{ map(['hello'], part => part) }}\"\n", "{{ result }}",
+    &["echo pending"], false);
+
+callback_preflight_scope!(callback_preflight_scope_17_shell_inventory,
+    "part: '$(echo pending)'\n", "::shell echo {{ as_csv(map(['hello'], part => part)) }}",
+    &["echo pending", "echo hello"], false);
+
+callback_preflight_scope!(callback_preflight_scope_18_sibling_restoration,
+    "part: '$(echo pending)'\n", "{{ [map(['hello'], part => part), as_markdown(part)] }}",
+    &[], true);
+
+callback_preflight_scope!(callback_preflight_scope_19_source_before_binding,
+    "part: '$(echo pending)'\n", "{{ map([as_markdown(part)], part => part) }}",
+    &[], true);
+
+callback_preflight_scope!(callback_preflight_scope_20_local_member,
+    "part: '$(echo pending)'\n", "{{ map([{content: '::shell echo local'}], part => as_markdown(part.content)) }}",
+    &["echo pending", "echo local"], false);
+
+callback_preflight_scope!(callback_preflight_scope_21_document_index,
+    "part: '$(echo pending)'\n", "{{ map(['hello'], part => as_markdown(fm['part'])) }}",
+    &[], true);
+
+callback_preflight_scope!(callback_preflight_scope_22_unobserved_filter,
+    "part: \"{{ can_execute('git') }}\"\n", "{{ filter(['::shell echo local'], part => as_markdown(part)) }}",
+    &["echo local"], false);

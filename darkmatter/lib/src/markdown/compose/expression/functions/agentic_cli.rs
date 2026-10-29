@@ -5,32 +5,20 @@ use serde_json::Value;
 use sniff::programs::AiCli;
 
 use super::agentic_cli_generated::AGENTIC_CLI_NAMES;
-use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
+use super::{BoundCall, FunctionBinding, ResolutionContext};
 use crate::markdown::compose::context::ContextGroup;
 use crate::markdown::compose::expression::ExpressionError;
 
 const FUNCTION: &str = "has_agentic_cli";
 
-pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding {
-    canonical: FUNCTION,
-    aliases: &[],
-    evaluation: EvaluationMode::Context,
-    handler: Some(FunctionHandler::Context(has_agentic_cli_fn)),
-}];
+pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding::context(FUNCTION, &[], has_agentic_cli_fn)];
 
-/// The name is checked before the capture, so an unknown name is a compose
-/// error even in a request that never captured the `Agent` group.
-fn has_agentic_cli_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    let name = match args.first() {
-        Some(Value::String(name)) => name,
-        other => {
-            return Err(ExpressionError::ArgType {
-                function: FUNCTION,
-                index: 0,
-                expected: "string",
-                actual_type: super::git::value_type(other.unwrap_or(&Value::Null)),
-            });
-        }
+/// The `agentic-cli` type admits only roster names, so an unknown name is a
+/// binding error even in a request that never captured the `Agent` group;
+/// `null` is `false` without reading the capture.
+fn has_agentic_cli_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let Some(name) = call.args().text(0) else {
+        return Ok(Value::Bool(false));
     };
     let cli = agentic_cli(name)?;
     let installed = context.observations.agentic_clis().ok_or_else(|| {
@@ -42,13 +30,14 @@ fn has_agentic_cli_fn(args: &[Value], context: &ResolutionContext) -> Result<Val
     Ok(Value::Bool(installed.is_installed(cli)))
 }
 
-/// The sniff variant a generated roster name or alias binds to.
+/// The sniff variant a generated roster name or alias binds to. A name the
+/// `agentic-cli` enum admitted but the generated table lacks is a catalog
+/// parity defect, reported as a contract violation.
 fn agentic_cli(name: &str) -> Result<AiCli, ExpressionError> {
     let Some((_, variant)) = AGENTIC_CLI_NAMES.iter().find(|(accepted, _)| *accepted == name) else {
-        let accepted = AGENTIC_CLI_NAMES.iter().map(|(accepted, _)| *accepted).collect::<Vec<_>>();
         return Err(ExpressionError::ContractViolation {
             function: FUNCTION.to_string(),
-            message: format!("unknown agentic CLI {name:?}; expected one of: {}", accepted.join(", ")),
+            message: format!("agentic CLI {name:?} has no generated roster binding"),
         });
     };
     serde_json::from_value(Value::String((*variant).to_string())).map_err(|error| {
@@ -66,7 +55,7 @@ mod tests {
     use serde_json::{Value, json};
     use sniff::programs::{AiCli, ExecutableSource, InstalledAiClients};
 
-    use super::super::dispatch_fs;
+    use super::super::call_function;
     use crate::markdown::compose::context::ContextGroup;
     use crate::markdown::compose::context::capture::CapturedObservations;
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
@@ -77,7 +66,7 @@ mod tests {
     }
 
     fn call(argument: Value, context: &ResolutionContext) -> Result<Value, ExpressionError> {
-        dispatch_fs("has_agentic_cli", &[argument], context).expect("registered context function")
+        call_function("has_agentic_cli", &[argument], Some(context)).expect("registered context function")
     }
 
     /// AC18: provider aliases agree with their slug in both outcomes.
@@ -99,23 +88,28 @@ mod tests {
         }
     }
 
-    /// AC18: an unknown name is a compose error, never `false`, whether or not
-    /// the group was captured; only generated spellings resolve.
+    /// AC18: an unknown name is an error, never `false`, whether or not the
+    /// group was captured; only generated spellings resolve. The `agentic-cli`
+    /// enum now rejects it at binding (ledger row 103), so the handler is
+    /// never entered.
     #[test]
-    fn unknown_names_are_contract_violations() {
+    fn unknown_names_are_binding_errors() {
+        use crate::markdown::compose::expression::functions::test_hooks::{handler_entries, reset_handler_entries};
+
         let captured = context_with(InstalledAiClients::default());
         let uncaptured = ResolutionContext::default();
+        reset_handler_entries();
         for name in ["not_a_provider", "Kimi", "kimi_cli", "KimiCli", " kimi", "", "aider"] {
             for context in [&captured, &uncaptured] {
                 let error = call(json!(name), context).unwrap_err();
-                assert!(matches!(error, ExpressionError::ContractViolation { .. }), "{name}: {error:?}");
-                assert!(error.is_authoring_fatal(), "{name}");
+                assert!(matches!(error, ExpressionError::Call(_)), "{name}: {error:?}");
             }
         }
+        assert_eq!(handler_entries("has_agentic_cli"), 0);
     }
 
     #[test]
-    fn uncaptured_agent_group_is_fatal_and_non_strings_are_type_errors() {
+    fn uncaptured_agent_group_is_fatal_and_null_is_false() {
         let error = call(json!("claude"), &ResolutionContext::default()).unwrap_err();
         assert!(matches!(
             error,
@@ -123,12 +117,13 @@ mod tests {
         ));
         assert!(error.is_authoring_fatal());
 
+        // Ledger row 103: `null` is `false` (a predicate), even uncaptured;
+        // a number converts to text that names no roster CLI, and a list
+        // does not bind.
+        assert_eq!(call(Value::Null, &ResolutionContext::default()).unwrap(), json!(false));
         let captured = context_with(InstalledAiClients::default());
-        for argument in [Value::Null, json!(1), json!(["claude"])] {
-            assert!(matches!(
-                call(argument, &captured),
-                Err(ExpressionError::ArgType { function: "has_agentic_cli", index: 0, .. })
-            ));
+        for argument in [json!(1), json!(["claude"])] {
+            assert!(matches!(call(argument.clone(), &captured), Err(ExpressionError::Call(_))), "{argument}");
         }
     }
 

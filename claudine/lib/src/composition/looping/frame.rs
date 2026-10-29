@@ -9,13 +9,14 @@
 //! frame owns only what the loop decides.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::EvaluationLookup;
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::types::{LoopCondition, LoopConfig};
-use super::actions::ActionStaging;
+use super::actions::{ActionStaging, ActionTarget};
 use super::engine::DEFAULT_MAX_ITERATIONS;
 use super::expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 
@@ -155,11 +156,13 @@ pub struct LoopFrame {
     config: LoopConfig,
     max: usize,
     count: usize,
-    last_output: Value,
+    /// Shared with every [`LoopAmbient`] this frame hands out, so building
+    /// the `loop` global never copies the result.
+    last_output: Arc<Value>,
     last_exit_code: i32,
     /// The previous pass's result while the current pass's is recorded, so
     /// a retried attempt of the pass reads what the pass started with.
-    previous: Option<(Value, i32)>,
+    previous: Option<(Arc<Value>, i32)>,
     breaks: LoopBreakSlot,
     source_path: PathBuf,
     property: String,
@@ -199,7 +202,7 @@ impl LoopFrame {
                 .or(config.max_iterations)
                 .unwrap_or(DEFAULT_MAX_ITERATIONS),
             count: 1,
-            last_output: kind.empty(),
+            last_output: Arc::new(kind.empty()),
             last_exit_code: 0,
             previous: None,
             breaks: LoopBreakSlot::default(),
@@ -227,14 +230,12 @@ impl LoopFrame {
     /// permits; it never predicts the condition.
     pub fn ambient(&self) -> LoopAmbient {
         LoopAmbient {
+            iteration: self.count,
+            is_first: self.count == 1,
+            is_last: self.count == self.max,
+            last_output: Arc::clone(&self.last_output),
+            last_exit_code: self.last_exit_code,
             breaks: self.breaks.clone(),
-            ..LoopAmbient::new(
-                self.count,
-                self.count == 1,
-                self.count == self.max,
-                self.last_output.clone(),
-                self.last_exit_code,
-            )
         }
     }
 
@@ -254,7 +255,7 @@ impl LoopFrame {
     /// read it.
     pub fn record_pass(&mut self, output: Value, exit_code: i32) {
         let previous = (
-            std::mem::replace(&mut self.last_output, output),
+            std::mem::replace(&mut self.last_output, Arc::new(output)),
             std::mem::replace(&mut self.last_exit_code, exit_code),
         );
         self.previous.get_or_insert(previous);
@@ -271,7 +272,7 @@ impl LoopFrame {
 
     /// The result the most recent pass reported.
     pub fn last_output(&self) -> &Value {
-        &self.last_output
+        self.last_output.as_ref()
     }
 
     /// Read the condition after the gate, then classify the cap.
@@ -301,24 +302,27 @@ impl LoopFrame {
 
     /// Stage the loop's action against `frontmatter`, all or nothing.
     ///
+    /// A shared view stages into a clone of it, so only the values the
+    /// action writes are copied; an owned map is copied whole.
+    ///
     /// Call only after [`Self::decide`] returned [`LoopDecision::Continue`].
     ///
     /// ## Errors
     ///
     /// [`CompositionError::LoopEvaluationFailed`] wrapping the first failing
     /// action; nothing is committed.
-    pub fn stage_actions(
+    pub fn stage_actions<F: ActionTarget>(
         &self,
-        frontmatter: &Map<String, Value>,
+        frontmatter: &F,
         lookup: &dyn EvaluationLookup,
-    ) -> Result<Map<String, Value>, CompositionError> {
+    ) -> Result<F, CompositionError> {
         let mut stage = ActionStaging::new(frontmatter, self.count, self.config.actions.len());
         for (index, action) in self.config.actions.iter().enumerate() {
             stage
                 .apply_action(action, index + 1, Some(lookup))
                 .map_err(|source| self.evaluation_failed("action", source))?;
         }
-        Ok(stage.commit_map())
+        Ok(stage.into_staged())
     }
 
     /// Move to the next pass.

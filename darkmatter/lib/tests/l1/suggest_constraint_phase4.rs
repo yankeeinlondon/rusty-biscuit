@@ -201,7 +201,13 @@ fn import_cycles_remain_bounded_across_envelope_forms() {
     );
     let context = biscuit_file::FileResolutionContext::new(dir.path());
     let error = resolve_schema(&json!(pure.to_string_lossy()), dir.path(), &context).unwrap_err();
-    assert!(matches!(error, SchemaError::ImportCycle { .. }));
+    // `node` aliases itself across the two files, which never descends; the
+    // error names the referenced schema file, as other named-type errors do.
+    assert!(
+        matches!(&error, SchemaError::ReferencedSchema { source, .. }
+            if matches!(**source, SchemaError::NonDescendingCycle { .. })),
+        "{error:?}"
+    );
 }
 
 #[test]

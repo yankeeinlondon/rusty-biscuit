@@ -153,6 +153,9 @@
 //! refuse instead — assembling a plan from empty slices would silently drop the
 //! MCP injection or system prompt the invocation performed.
 
+use claudine::composition::preflight::checks::{AGENT_RESOLUTION, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -210,9 +213,8 @@ pub(crate) struct LaunchRebuildIntent {
     /// document's own `model:` names one and the rebuild keeps
     /// [`Self::fallback_provider`] — the model counterpart of that field.
     ///
-    /// A sequence task carries its planned target's model here (a review-screen
-    /// choice, or the model preflight planned from the task's hints or the
-    /// sequence document's), which the launched document cannot re-derive. It must never hold a model the
+    /// A sequence task carries a review-screen or enclosing-document model
+    /// here, which the launched document cannot re-derive. It must never hold a model the
     /// launched document's own frontmatter chose: that one is re-derived from
     /// each refreshed read, so a retry after `model:` is removed drops it.
     pub(crate) fallback_model: Option<(String, ModelResolutionReason)>,
@@ -334,7 +336,10 @@ pub(crate) fn rebuild_launch_identity(
     document: &MaterializedHarnessPrompt,
     source_path: Option<&Path>,
 ) -> Result<RebuiltLaunchIdentity, crate::commands::wrap::launch_plan::LaunchPlanError> {
-    let provider = select_rebuilt_provider(intent, document, source_path)?;
+    // Each attempt's launch rebuild re-resolves the agent inside the run.
+    let provider = run_check(claudine_preflight(), AGENT_RESOLUTION, CheckStage::InRun, EntryReason::Initial, || {
+        select_rebuilt_provider(intent, document, source_path)
+    })?;
     let profile = profile_for_provider(provider)
         .or_else(|| profile_for_provider(intent.fallback_provider))
         .expect("the invocation's own provider always has a wrapper profile");
@@ -361,7 +366,7 @@ pub(crate) fn rebuild_launch_identity(
         Vec::new()
     };
 
-    let (model, model_reason) = resolve_launch_model(intent, provider, cli_model, repo_root, document);
+    let (model, model_reason) = resolve_launch_model(intent, provider, cli_model, repo_root, &document.selection_hints);
 
     // The single re-entrant rebuild. `--yolo` is a request; whether it *applies*
     // is the profile's decision in this mode, and the plan is what makes it —
@@ -526,10 +531,20 @@ fn select_rebuilt_provider(
     document: &MaterializedHarnessPrompt,
     source_path: Option<&Path>,
 ) -> Result<Provider, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    provider_from_hints(intent, &document.selection_hints, source_path).map_err(|error| {
+        crate::commands::wrap::launch_plan::LaunchPlanError::ProviderUnavailable(Box::new(error))
+    })
+}
+
+#[allow(clippy::result_large_err)]
+fn provider_from_hints(
+    intent: &LaunchRebuildIntent,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    source_path: Option<&Path>,
+) -> Result<Provider, claudine::composition::CompositionError> {
     if let Some(provider) = intent.explicit_provider {
         return Ok(provider);
     }
-    let hints = &document.selection_hints;
     let Some(hint) = hints.agent.as_ref() else {
         return Ok(intent.fallback_provider);
     };
@@ -548,9 +563,24 @@ fn select_rebuilt_provider(
         snapshot,
         source_path.unwrap_or_else(|| Path::new("")),
     )
-    .map_err(|error| {
-        crate::commands::wrap::launch_plan::LaunchPlanError::ProviderUnavailable(Box::new(error))
-    })
+}
+
+#[allow(clippy::result_large_err)]
+pub(super) fn refreshed_identity_env(
+    intent: &LaunchRebuildIntent,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    cli_model: Option<&str>,
+    repo_root: Option<&Path>,
+    source_path: &Path,
+    installed: &std::collections::BTreeMap<String, String>,
+) -> Result<std::collections::BTreeMap<String, String>, claudine::composition::CompositionError> {
+    let provider = provider_from_hints(intent, hints, Some(source_path))?;
+    let (model, _) = resolve_launch_model(intent, provider, cli_model, repo_root, hints);
+    let mut overrides = installed.clone();
+    overrides.remove("AGENT");
+    overrides.remove("MODEL");
+    overrides.extend(launch_env_overrides(provider, model.as_deref(), hints.yolo_enabled(intent.cli_yolo)));
+    Ok(overrides)
 }
 
 /// The binary the rebuilt provider launches.
@@ -612,10 +642,10 @@ fn resolve_launch_model(
     provider: Provider,
     cli_model: Option<&str>,
     repo_root: Option<&Path>,
-    document: &MaterializedHarnessPrompt,
+    hints: &claudine::composition::EffectiveSelectionHints,
 ) -> (Option<String>, ModelResolutionReason) {
     if cli_model.is_none()
-        && document.selection_hints.model.is_none()
+        && hints.model.is_none()
         && provider == intent.fallback_provider
         && let Some((model, reason)) = &intent.fallback_model
     {
@@ -630,7 +660,7 @@ fn resolve_launch_model(
     crate::commands::wrap::composition::resolve_document_model(
         &catalog,
         provider,
-        &document.selection_hints,
+        hints,
         cli_model,
         crate::commands::wrap::composition::ModelResolveMode::REBUILD,
         &intent.environment,
@@ -640,23 +670,19 @@ fn resolve_launch_model(
 /// The [`LaunchRebuildIntent::fallback_model`] for a composition launching
 /// under `target`.
 ///
-/// A sequence task's target was planned before the document it launches was
-/// read (from the review screen, or by preflight from the task's hints or the
-/// sequence document's), its model re-selected under the task's own map when
-/// it entered, so its model is carried whatever its reason. Outside a sequence
-/// the target was resolved from the launched document itself, so a model its
-/// frontmatter chose is left to each refreshed read; a model from `--model`
-/// or the environment is carried, which the rebuild would re-derive
-/// identically anyway.
+/// A model present in the launched document is re-derived on each fresh read.
+/// A sequence's enclosing-document fallback is retained when the launched
+/// document supplied no model, as are review choices and caller/environment
+/// decisions. Preflight predictions are never an immutable document model.
 pub(crate) fn planned_fallback_model(
     target: &claudine::composition::ResolvedExecutionTarget,
-    sequence: bool,
+    document_hints: &claudine::composition::EffectiveSelectionHints,
 ) -> Option<(String, ModelResolutionReason)> {
     let from_launched_document = matches!(
         target.model_reason,
         ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::FrontmatterList
     );
-    if !sequence && from_launched_document {
+    if from_launched_document && document_hints.model.is_some() {
         return None;
     }
     target

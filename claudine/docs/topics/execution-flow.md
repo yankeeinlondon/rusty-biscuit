@@ -1,22 +1,8 @@
 ---
-prompt: |-
-  Review the execution flow of the 'claudine compose', 'claudine inline-compose', 'claudine sequence'.
-
-  - identify the precise steps that each command takes to produce it's results
-  - describe each step in the process
-  - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
-
-  After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-09-17
-hash: 7738d51f4cfa73e2-a4d63f95f040887d
+kind: canonical-documentation
 ---
-Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
-The existing `composition.md` file is 540 lines. The user wants me to return the replacement Markdown body content only (no frontmatter delimiters). I'll produce the complete replacement body with the detailed execution flows and a Future Improvements section.
-
-Here is the replacement Markdown body content:
-
----
+# Composition Execution Flow
 
 Claudine supports the ability to _compose_ content by leveraging the Darkmatter library's powerful composition features and routing the result through a wrapper-grade execution pipeline.
 
@@ -256,8 +242,16 @@ schemas and any other matching trigger, under the authored `$schema` (see
    *Claudine control* (a property whose winning declaration is a Claudine
    trigger) is never dropped: an invalid one is a hard `SchemaValidation`
    abort, like a required value.
-5. **`$schema` or a discovered trigger schema unresolvable / uncompilable** —
-   return `CompositionError::SchemaLoad`.
+5. **Authored `$schema` unresolvable / uncompilable** (including a `$schema`
+   that names a trigger file) — return `CompositionError::SchemaLoad`.
+6. **A discovered trigger schema is invalid** (bad envelope, or a payload or
+   import that fails to load) — skip that trigger and continue with the valid
+   ones. The skip is recorded in the invocation's `TriggerFindings`
+   (`InvocationContext::trigger_findings()`) before the authored `$schema`
+   resolves, so it survives cases 2–5; it is never a `CompositionError`. The
+   CLI prints each trigger once per invocation, before the launch, or before
+   the error when the run fails (see
+   [When a trigger is invalid](schemas.md#when-a-trigger-is-invalid)).
 
 This stage runs before provider/model selection so a schema failure aborts
 without launching anything.
@@ -268,6 +262,7 @@ without launching anything.
 |------------------------------------|---------------------------------------------------------------------------------------------------------|
 | Frontmatter `$schema`              | Activates schema validation; controls required vs optional classification and Interactive Mode mapping  |
 | Claudine controls (lifecycle events, `loop`, `agent`, `model`, …) | Select Claudine's trigger schemas, which type them even without a `$schema`; an invalid one aborts |
+| Schema trigger files               | A matching valid trigger adds its payload; an invalid one is skipped with one warning per invocation    |
 | `--set` / `key=value` setters      | Applied before validation so users can satisfy required values without entering the interactive prompt  |
 | Config `prompt_for_missing`        | Required (along with TTY/silent checks) to enable Interactive Mode for missing-required collection      |
 | `--silent`                         | Forces Interactive Mode off; missing required values surface as `MissingProperties` instead of prompts  |
@@ -528,7 +523,8 @@ guard, the same typed translation as direct compose applies — `SchemaLoad`,
 `SchemaValidation`, `MissingProperties`, and automatic drop-and-retry for
 invalid optional values of the authored `$schema`, against the same effective
 schema (Claudine's trigger schemas under the authored `$schema`). An invalid
-Claudine control fails the launch instead of being dropped. The original
+Claudine control fails the launch instead of being dropped, while an invalid
+trigger file is skipped with the same once-per-invocation warning. The original
 `$schema` declaration is preserved byte-for-byte by
 the inline rewrite, and interactive values collected during the run are never
 persisted to the source file.
@@ -725,7 +721,10 @@ name. An unhandled child failure stops its sequence and propagates outward;
 only groups accept `fail_fast` (default `true`). A failed atomic group
 publishes neither results nor leg mutations. File edits are never rolled back.
 Container `retry` restarts children with empty accumulators and retained
-runtime writes; `proxy` hands off without finalizing the source container.
+runtime writes when the container has no loop. In a looping container it
+restores the current pass's runtime writes and outputs to pass entry, retaining
+completed passes; the count does not advance. A retry overlay applies after
+restoration. `proxy` hands off without finalizing the source container.
 
 Ctrl-C stops admission and interrupts every active descendant. Cleanup finishes
 from children to parents (`cancelled`, then `finalize`) before exit `130`.
@@ -1040,7 +1039,7 @@ When a sequence step fails in non-fail-fast mode, the only information preserved
 
 ### 9. Deeper Schema Coverage for Claudine Controls
 
-Claudine's trigger schemas now type its frontmatter in the launch verdict, but event stacks other than `cancelled` only within three conditional levels (`cancelled` is typed at every depth the parser accepts), with untyped values for the generated verbs and untyped sequence tasks; the parser alone judges the rest (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is also reported as an `anyOf` mismatch that echoes the value rather than naming the key. Recursive lifecycle types, typed generated-verb arguments, and narrower union diagnostics would surface these errors earlier and with better messages.
+Claudine's trigger schemas type its frontmatter in the launch verdict at every conditional and container depth, including the generated verbs' arguments; the parser alone judges what the schema cannot express (see [Schemas](schemas.md#what-only-the-parser-checks)). A misspelled long-form key is still reported as an `anyOf` mismatch that echoes the value rather than naming the key; narrower union diagnostics would give better messages.
 
 ### 10. Unified Telemetry Span Across All Three Commands
 

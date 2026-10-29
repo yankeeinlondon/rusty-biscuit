@@ -833,7 +833,9 @@ Set-Content -Path "\$lock\\owner" -Value '${owner}'
 \$script:code = 1
 function Invoke-CrossCheck {
     if (-not (Test-Path "\$repo\\.git")) {
-        git clone --quiet '${origin_url}' \$repo
+        # The clone's own checkout needs long paths too; the config below
+        # comes too late for it.
+        git clone --quiet -c core.longpaths=true '${origin_url}' \$repo
         if (\$LASTEXITCODE -ne 0) { \$script:code = \$LASTEXITCODE; return }
     }
     Set-Location \$repo

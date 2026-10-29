@@ -98,7 +98,7 @@ Supported keys are the same five `CommonStyle` mutations used by other component
 | `color` | Tailwind, hex, or web named color |
 | `bg-color` | Tailwind, hex, or web named color |
 
-Multi-word keys use kebab-case (`max-width`, `bg-color`). Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--strict-style` rejects them.
+Multi-word keys use kebab-case (`max-width`, `bg-color`). Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--deny style` rejects them.
 
 ### Precedence
 

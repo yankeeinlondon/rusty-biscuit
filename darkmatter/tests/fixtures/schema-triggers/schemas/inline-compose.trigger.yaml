@@ -1,4 +1,4 @@
-kind: trigger-schema
+kind: schema-trigger
 match:
   all:
     - prompt: string(required)

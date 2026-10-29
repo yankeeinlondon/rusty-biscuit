@@ -1,0 +1,12 @@
+# scenario: catch-finalize
+# doc: catch-finalize.md
+# given: invoked as `claudine compose --claude catch-finalize.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: the finalize guard raises an evaluation error (frontmatter() of a missing file)
+event initialize
+event start
+work fresh 0
+event success
+event finalize
+err none
+exit 1

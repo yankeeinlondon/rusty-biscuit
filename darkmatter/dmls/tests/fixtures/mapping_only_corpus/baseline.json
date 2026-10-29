@@ -1,204 +1,188 @@
 {
   "_agent-skills.md": [
     {
-      "code": "dm.directive.unknown",
-      "message": "unknown directive `::loop`",
       "range": {
-        "end": {
-          "character": 6,
-          "line": 21
-        },
         "start": {
-          "character": 0,
-          "line": 21
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
-      "code": "dm.directive.unknown",
-      "message": "unknown directive `::end-loop`",
-      "range": {
-        "end": {
-          "character": 10,
-          "line": 26
+          "line": 21,
+          "character": 16
         },
-        "start": {
-          "character": 0,
-          "line": 26
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
-      "code": "dm.expression.undeclared_property",
-      "message": "`i` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
-      "range": {
         "end": {
-          "character": 6,
-          "line": 22
-        },
-        "start": {
-          "character": 5,
-          "line": 22
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
-      "code": "dm.expression.unknown_function",
-      "message": "`skill_description` is not a Darkmatter expression function",
-      "range": {
-        "end": {
-          "character": 24,
-          "line": 24
-        },
-        "start": {
-          "character": 7,
-          "line": 24
+          "line": 21,
+          "character": 21
         }
       },
       "severity": 1,
-      "source": "darkmatter.compose"
+      "code": "dm.collection.malformed",
+      "source": "darkmatter.compose",
+      "message": "unknown option `where`"
     },
     {
-      "code": "dm.expression.undeclared_property",
-      "message": "`i` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
-        "end": {
-          "character": 26,
-          "line": 24
-        },
         "start": {
-          "character": 25,
-          "line": 24
+          "line": 22,
+          "character": 5
+        },
+        "end": {
+          "line": 22,
+          "character": 6
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`i` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 24,
+          "character": 7
+        },
+        "end": {
+          "line": 24,
+          "character": 24
+        }
+      },
+      "severity": 1,
+      "code": "dm.expression.unknown_function",
+      "source": "darkmatter.compose",
+      "message": "`skill_description` is not a Darkmatter expression function"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 24,
+          "character": 25
+        },
+        "end": {
+          "line": 24,
+          "character": 26
+        }
+      },
+      "severity": 2,
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`i` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
     }
   ],
   "_docs.md": [],
   "_implement___fm.md": [
     {
-      "code": "dm.schema.prepare",
-      "message": "could not resolve $schema reference `./implement.yaml`",
       "range": {
-        "end": {
-          "character": 25,
-          "line": 1
-        },
         "start": {
-          "character": 9,
-          "line": 1
+          "line": 1,
+          "character": 9
+        },
+        "end": {
+          "line": 1,
+          "character": 25
         }
       },
       "severity": 1,
-      "source": "darkmatter.schema"
+      "code": "dm.schema.prepare",
+      "source": "darkmatter.schema",
+      "message": "could not resolve $schema reference `./implement.yaml`"
     },
     {
-      "code": "dm.expression.undeclared_property",
-      "message": "`log` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
-        "end": {
-          "character": 36,
-          "line": 8
-        },
         "start": {
-          "character": 33,
-          "line": 8
+          "line": 8,
+          "character": 33
+        },
+        "end": {
+          "line": 8,
+          "character": 36
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`log` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
     },
     {
-      "code": "dm.expression.undeclared_property",
-      "message": "`spec` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
-        "end": {
-          "character": 23,
-          "line": 12
-        },
         "start": {
-          "character": 19,
-          "line": 12
+          "line": 12,
+          "character": 19
+        },
+        "end": {
+          "line": 12,
+          "character": 23
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`spec` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
     },
     {
-      "code": "dm.expression.undeclared_property",
-      "message": "`design` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
-        "end": {
-          "character": 27,
-          "line": 15
-        },
         "start": {
-          "character": 21,
-          "line": 15
+          "line": 15,
+          "character": 21
+        },
+        "end": {
+          "line": 15,
+          "character": 27
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`design` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
     },
     {
-      "code": "dm.expression.undeclared_property",
-      "message": "`review` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
-        "end": {
-          "character": 27,
-          "line": 18
-        },
         "start": {
-          "character": 21,
-          "line": 18
+          "line": 18,
+          "character": 21
+        },
+        "end": {
+          "line": 18,
+          "character": 27
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`review` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
     }
   ],
   "_interactive-prompting.md": [
     {
-      "code": "dm.directive.malformed_option",
-      "message": "`actor` is not a recognized option for `::file`",
       "range": {
-        "end": {
-          "character": 34,
-          "line": 16
-        },
         "start": {
-          "character": 29,
-          "line": 16
+          "line": 16,
+          "character": 29
+        },
+        "end": {
+          "line": 16,
+          "character": 34
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.directive.malformed_option",
+      "source": "darkmatter.compose",
+      "message": "`actor` is not a recognized option for `::file`"
     },
     {
-      "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
-      "message": "broken transclusion: no file matches `./_writing_clearly.md`",
       "range": {
-        "end": {
-          "character": 28,
-          "line": 16
-        },
         "start": {
-          "character": 7,
-          "line": 16
+          "line": 16,
+          "character": 7
+        },
+        "end": {
+          "line": 16,
+          "character": 28
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `./_writing_clearly.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
     }
   ],
   "_repo-context.md": [],
@@ -207,62 +191,62 @@
   "_reviews__review-implementation.md": [],
   "_reviews__review-spec-inline.md": [
     {
-      "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
-      "message": "broken transclusion: no file matches `_writing_clearly.md`",
       "range": {
-        "end": {
-          "character": 26,
-          "line": 38
-        },
         "start": {
-          "character": 7,
-          "line": 38
+          "line": 38,
+          "character": 7
+        },
+        "end": {
+          "line": 38,
+          "character": 26
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `_writing_clearly.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
     },
     {
-      "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
-      "message": "broken transclusion: no file matches `./_set_spec_schema.md`",
       "range": {
-        "end": {
-          "character": 28,
-          "line": 89
-        },
         "start": {
-          "character": 7,
-          "line": 89
+          "line": 89,
+          "character": 7
+        },
+        "end": {
+          "line": 89,
+          "character": 28
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `./_set_spec_schema.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
     }
   ],
   "_reviews__suggestion-review.md": [],
   "_writing-clearly.md": [],
   "brainstorm.md": [
     {
-      "code": "dm.expression.undeclared_property",
-      "message": "`context` is an undeclared document property (unknown type; `null` unless supplied at runtime)",
       "range": {
-        "end": {
-          "character": 9,
-          "line": 14
-        },
         "start": {
-          "character": 2,
-          "line": 14
+          "line": 14,
+          "character": 2
+        },
+        "end": {
+          "line": 14,
+          "character": 9
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.compose",
+      "message": "`context` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
     }
   ],
   "daily.md": [],
@@ -271,156 +255,156 @@
   "dream.md": [],
   "feature.md": [
     {
-      "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
+      "range": {
+        "start": {
+          "line": 35,
+          "character": 7
+        },
+        "end": {
+          "line": 35,
+          "character": 46
+        }
       },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/tech-design.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 46,
-          "line": 35
-        },
         "start": {
-          "character": 7,
-          "line": 35
+          "line": 36,
+          "character": 7
+        },
+        "end": {
+          "line": 36,
+          "character": 39
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
       "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/plan.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 39,
-          "line": 36
-        },
         "start": {
-          "character": 7,
-          "line": 36
+          "line": 37,
+          "character": 7
+        },
+        "end": {
+          "line": 37,
+          "character": 44
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
       "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/implement.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 44,
-          "line": 37
-        },
         "start": {
-          "character": 7,
-          "line": 37
+          "line": 38,
+          "character": 7
+        },
+        "end": {
+          "line": 38,
+          "character": 56
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
       "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/commit-implementation.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 56,
-          "line": 38
-        },
         "start": {
-          "character": 7,
-          "line": 38
+          "line": 39,
+          "character": 7
+        },
+        "end": {
+          "line": 39,
+          "character": 41
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
       "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/review.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 41,
-          "line": 39
-        },
         "start": {
-          "character": 7,
-          "line": 39
+          "line": 40,
+          "character": 7
+        },
+        "end": {
+          "line": 40,
+          "character": 46
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
       "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/suggestions.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 46,
-          "line": 40
-        },
         "start": {
-          "character": 7,
-          "line": 40
+          "line": 41,
+          "character": 7
+        },
+        "end": {
+          "line": 41,
+          "character": 48
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
       "code": "dm.transclusion.broken_path",
-      "data": {
-        "resolution_failure": "NoMatch"
-      },
+      "source": "darkmatter.compose",
       "message": "broken transclusion: no file matches `@prompts/feature-prompts/commit-review.md`",
-      "range": {
-        "end": {
-          "character": 48,
-          "line": 41
-        },
-        "start": {
-          "character": 7,
-          "line": 41
-        }
-      },
-      "severity": 2,
-      "source": "darkmatter.compose"
-    },
-    {
-      "code": "dm.transclusion.broken_path",
       "data": {
         "resolution_failure": "NoMatch"
-      },
-      "message": "broken transclusion: no file matches `@prompts/feature-prompts/update-documents.md`",
+      }
+    },
+    {
       "range": {
-        "end": {
-          "character": 51,
-          "line": 42
-        },
         "start": {
-          "character": 7,
-          "line": 42
+          "line": 42,
+          "character": 7
+        },
+        "end": {
+          "line": 42,
+          "character": 51
         }
       },
       "severity": 2,
-      "source": "darkmatter.compose"
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `@prompts/feature-prompts/update-documents.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
     }
   ],
   "lineage.md": [],
@@ -429,20 +413,20 @@
   "snippets__test-rigor.md": [],
   "suggest_constraint/inline.md": [
     {
-      "code": "dm.schema.invalid_suggestion",
-      "message": "suggestion `many` is not a valid simple decimal number",
       "range": {
-        "end": {
-          "character": 39,
-          "line": 2
-        },
         "start": {
-          "character": 35,
-          "line": 2
+          "line": 2,
+          "character": 35
+        },
+        "end": {
+          "line": 2,
+          "character": 39
         }
       },
       "severity": 2,
-      "source": "darkmatter.schema"
+      "code": "dm.schema.invalid_suggestion",
+      "source": "darkmatter.schema",
+      "message": "suggestion `many` is not a valid simple decimal number"
     }
   ],
   "suggest_constraint/raw-consumer.md": [],

@@ -3,8 +3,9 @@
 //! A single passive entry point over every Darkmatter block/inline directive
 //! family — transclusion (`::file`, `::code`, `::url`), file links
 //! (`::file-links`), TOC linking (`::toc-linking`), shell (`::shell`), page and
-//! shell blocks (`::block` / `::shell-block` / `::end-block`), and disclosures
-//! (`::disclosure` / `::details` / `::end-disclosure`). It reports each
+//! shell blocks (`::block` / `::shell-block` / `::end-block`), collection
+//! regions (`::map` / `::end-map` / `::filter` / `::end-filter`), and
+//! disclosures (`::disclosure` / `::details` / `::end-disclosure`). It reports each
 //! directive's byte spans (keyword, target, and per-option key/value) without
 //! executing anything, so a language server can offer navigation, hover, and
 //! completion over directive source.
@@ -18,6 +19,7 @@
 //! error, because the consumer is a passive analyzer.
 
 use super::block_pairs::{BlockOpenKind, BlockPairError, scan_block_pairs};
+use super::collection_blocks::parser::{RawValue, read_raw_header};
 use super::parse_utils::{Cursor, find_code_regions, is_in_code_region};
 use super::shell_blocks::body::group_logical_commands;
 use crate::markdown::span::{SourceSpan, Spanned};
@@ -49,6 +51,14 @@ pub enum DirectiveKind {
     Details,
     /// `::end-disclosure` disclosure closer.
     EndDisclosure,
+    /// `::map` collection opener.
+    Map,
+    /// `::end-map` collection closer.
+    EndMap,
+    /// `::filter` collection opener.
+    Filter,
+    /// `::end-filter` collection closer.
+    EndFilter,
 }
 
 impl DirectiveKind {
@@ -67,6 +77,10 @@ impl DirectiveKind {
             DirectiveKind::Disclosure => "::disclosure",
             DirectiveKind::Details => "::details",
             DirectiveKind::EndDisclosure => "::end-disclosure",
+            DirectiveKind::Map => "::map",
+            DirectiveKind::EndMap => "::end-map",
+            DirectiveKind::Filter => "::filter",
+            DirectiveKind::EndFilter => "::end-filter",
         }
     }
 }
@@ -102,22 +116,33 @@ pub struct ParsedDirective {
     /// family carries one. Absent for closers (`::end-block`,
     /// `::end-disclosure`) and the `::details` divider.
     pub target: Option<Spanned<String>>,
+    /// The optional quoted positional callback of `::map` / `::filter`
+    /// (`"pattern => expression"`). `value` is the decoded text and `span`
+    /// covers the authored value including its quotes. Always `None` for other
+    /// families.
+    pub callback: Option<Spanned<String>>,
     /// Parsed `key=value` / flag options in source order.
     pub options: Vec<DirectiveOption>,
 }
 
 /// Keyword table, longest keyword first so `::file-links` is matched before
-/// `::file` and `::end-block` before `::block`.
+/// `::file`, `::end-block` before `::block`, and `::end-map` before `::map`.
+/// `::filter` needs no ordering against `::file`: matching also requires a word
+/// boundary, which `::file` does not have inside `::filter`.
 const KEYWORDS: &[(&str, DirectiveKind)] = &[
     ("::end-disclosure", DirectiveKind::EndDisclosure),
+    ("::end-filter", DirectiveKind::EndFilter),
     ("::end-block", DirectiveKind::EndBlock),
+    ("::end-map", DirectiveKind::EndMap),
     ("::file-links", DirectiveKind::FileLinks),
     ("::toc-linking", DirectiveKind::TocLinking),
     ("::shell-block", DirectiveKind::ShellBlock),
     ("::disclosure", DirectiveKind::Disclosure),
     ("::details", DirectiveKind::Details),
+    ("::filter", DirectiveKind::Filter),
     ("::shell", DirectiveKind::Shell),
     ("::block", DirectiveKind::Block),
+    ("::map", DirectiveKind::Map),
     ("::code", DirectiveKind::Code),
     ("::file", DirectiveKind::File),
     ("::url", DirectiveKind::Url),
@@ -147,6 +172,11 @@ fn match_keyword(trimmed: &str) -> Option<(DirectiveKind, usize)> {
 /// contributes a best-effort [`ParsedDirective`] carrying at least its keyword
 /// span. Block openers and closers are reported as individual directives here;
 /// use [`scan_darkmatter_blocks`] to pair them with body spans.
+///
+/// `::map` / `::filter` and their closers are also recognized behind
+/// block-quote markers (`> ::map ...`), matching the structural scanner, which
+/// treats a quoted collection as active. The `::map` / `::filter` header is read
+/// by the same grammar the strict collection parser uses.
 pub fn scan_darkmatter_directives(source: &str) -> Vec<ParsedDirective> {
     scan_darkmatter_directives_in(source, None)
 }
@@ -192,15 +222,29 @@ pub(crate) fn scan_darkmatter_directives_with_code_regions(
         let trimmed = line.trim_start();
         let trimmed = trimmed.trim_end();
 
-        if let Some((kind, kw_len)) = match_keyword(trimmed)
+        // Collection directives are active behind block-quote markers; every
+        // other family starts at the first non-whitespace byte.
+        let matched = match_keyword(trimmed)
+            .map(|(kind, kw_len)| (kind, kw_len, trimmed, trimmed_start))
+            .or_else(|| {
+                let stripped = super::parse_utils::strip_blockquote_prefix(trimmed);
+                let (kind, kw_len) = match_keyword(stripped)?;
+                matches!(
+                    kind,
+                    DirectiveKind::Map | DirectiveKind::EndMap | DirectiveKind::Filter | DirectiveKind::EndFilter
+                )
+                .then_some((kind, kw_len, stripped, trimmed_start + trimmed.len() - stripped.len()))
+            });
+
+        if let Some((kind, kw_len, text, text_start)) = matched
             && !is_in_code_region(trimmed_start, code_regions)
-            && super::parse_utils::authored_directive(data, line_start, trimmed_start + kw_len)
+            && super::parse_utils::authored_directive(data, line_start, text_start + kw_len)
         {
             directives.push(parse_directive_line(
                 kind,
                 kw_len,
-                trimmed,
-                trimmed_start,
+                text,
+                text_start,
                 text_line_end,
                 line_number,
             ));
@@ -239,6 +283,7 @@ fn parse_directive_line(
     cursor.skip_ws();
 
     let mut target = None;
+    let mut callback = None;
     let mut options = Vec::new();
 
     match kind {
@@ -267,8 +312,29 @@ fn parse_directive_line(
         DirectiveKind::Block => {
             options = read_options(&mut cursor, trimmed, base, line_number);
         }
+        DirectiveKind::Map | DirectiveKind::Filter => {
+            // The collection grammar has one reader, shared with the strict
+            // parser; this projects its recovered tokens.
+            let raw = read_raw_header(trimmed, kw_len, base, line_number);
+            target = raw.source;
+            callback = raw.callback.map(|quoted| Spanned::new(quoted.text, quoted.span));
+            options = raw
+                .options
+                .into_iter()
+                .map(|option| DirectiveOption {
+                    key: option.key,
+                    value: option.value.and_then(|value| match value {
+                        RawValue::Quoted(quoted) => Some(Spanned::new(quoted.text, quoted.span)),
+                        RawValue::Bare(value) => Some(value),
+                        RawValue::Empty(_) => None,
+                    }),
+                })
+                .collect();
+        }
         DirectiveKind::ShellBlock
         | DirectiveKind::EndBlock
+        | DirectiveKind::EndMap
+        | DirectiveKind::EndFilter
         | DirectiveKind::Details
         | DirectiveKind::EndDisclosure => {
             // Keyword-only forms carry no target or options.
@@ -281,6 +347,7 @@ fn parse_directive_line(
         line: line_number,
         keyword_span,
         target,
+        callback,
         options,
     }
 }
@@ -364,7 +431,7 @@ fn read_options(
 }
 
 /// Reads a bare key token — every character up to `=` or ASCII whitespace.
-fn read_key_token(cursor: &mut Cursor<'_>) {
+pub(super) fn read_key_token(cursor: &mut Cursor<'_>) {
     while let Some(ch) = cursor.current() {
         if ch == '=' || ch.is_whitespace() {
             break;
@@ -472,12 +539,25 @@ impl From<BlockPairError> for BlockScanError {
             BlockPairError::TrailingContent { line, content } => {
                 BlockScanError::TrailingContent { line, content }
             }
+            // Collection pairing errors have no variant of their own here (the
+            // enum is matched exhaustively by consumers); the collection parser
+            // reports them precisely, so this keeps the closest existing shape.
+            BlockPairError::TrailingCollectionContent { line, content, .. } => {
+                BlockScanError::TrailingContent { line, content }
+            }
+            other => BlockScanError::UnmatchedEnd { line: other.line() },
         }
     }
 }
 
 /// Scans `source` for paired `::block` / `::shell-block` regions and returns
 /// them in document order with opener/closer/body byte spans.
+///
+/// Collection regions (`::map` / `::filter`) share the pairing pass, so a
+/// misplaced collection closer still fails the scan, but they are not reported
+/// here: use
+/// [`parse_collection_regions`](super::collection_blocks::parse_collection_regions)
+/// or its lenient counterpart for them.
 ///
 /// Shares the crate-private block-pair scanner — page and shell blocks live on
 /// one stack, so interleaved nesting is paired unambiguously. Directives inside
@@ -491,11 +571,16 @@ pub fn scan_darkmatter_blocks(source: &str) -> Result<Vec<DarkmatterBlock>, Bloc
     let pairs = scan_block_pairs(source)?;
     Ok(pairs
         .into_iter()
-        .map(|pair| DarkmatterBlock {
-            kind: match pair.kind {
+        .filter_map(|pair| {
+            let kind = match pair.kind {
                 BlockOpenKind::Page => BlockKind::Page,
                 BlockOpenKind::Shell => BlockKind::Shell,
-            },
+                BlockOpenKind::Map | BlockOpenKind::Filter => return None,
+            };
+            Some((kind, pair))
+        })
+        .map(|(kind, pair)| DarkmatterBlock {
+            kind,
             span: pair.span,
             body_span: pair.body_span,
             opening_text: pair.opening_text,
@@ -576,6 +661,65 @@ mod tests {
             .into_iter()
             .map(|d| d.kind)
             .collect()
+    }
+
+    #[test]
+    fn scans_map_and_filter_with_callback_and_closers() {
+        let source = "::map team.members \"p => p.name\" sort=\"p => p.age\" sort-order=desc\nb\n::end-map\n::filter xs\n::end-filter\n";
+        let directives = scan_darkmatter_directives(source);
+
+        assert_eq!(
+            directives.iter().map(|d| d.kind).collect::<Vec<_>>(),
+            [DirectiveKind::Map, DirectiveKind::EndMap, DirectiveKind::Filter, DirectiveKind::EndFilter]
+        );
+        let map = &directives[0];
+        assert_eq!(&source[map.keyword_span.clone()], "::map");
+        assert_eq!(map.target.as_ref().unwrap().value, "team.members");
+        let callback = map.callback.as_ref().unwrap();
+        assert_eq!(callback.value, "p => p.name");
+        assert_eq!(&source[callback.span.clone()], "\"p => p.name\"");
+        assert_eq!(map.options.len(), 2);
+        assert_eq!(map.options[1].value.as_ref().unwrap().value, "desc");
+        assert!(directives[2].callback.is_none());
+        assert!(directives[1].target.is_none());
+    }
+
+    #[test]
+    fn filter_keyword_does_not_collide_with_file_or_file_links() {
+        assert_eq!(
+            kinds("::file a\n::file-links *.md\n::filter xs\n::filters\n::map-ish\n::end-filter\n"),
+            [DirectiveKind::File, DirectiveKind::FileLinks, DirectiveKind::Filter, DirectiveKind::EndFilter]
+        );
+        assert_eq!(DirectiveKind::EndMap.keyword(), "::end-map");
+    }
+
+    #[test]
+    fn quoted_collection_directives_are_scanned_but_quoted_blocks_are_not() {
+        let source = "> ::map xs\n> ::end-map\n> ::block\n> ::end-block\n";
+        let directives = scan_darkmatter_directives(source);
+        assert_eq!(
+            directives.iter().map(|d| d.kind).collect::<Vec<_>>(),
+            [DirectiveKind::Map, DirectiveKind::EndMap]
+        );
+        assert_eq!(&source[directives[0].keyword_span.clone()], "::map");
+    }
+
+    #[test]
+    fn public_block_scan_stays_page_and_shell_only() {
+        let source = "::map xs\n::block\nb\n::end-block\n::end-map\n";
+        let blocks = scan_darkmatter_blocks(source).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, BlockKind::Page);
+        assert!(scan_darkmatter_blocks("::map xs\n").is_err());
+    }
+
+    #[test]
+    fn shell_commands_scan_skips_blocks_that_contain_a_collection() {
+        assert!(scan_shell_block_commands("::shell-block\necho hi\n::map xs\n::end-map\n::end-block\n").is_empty());
+        assert_eq!(
+            scan_shell_block_commands("::map xs\n::shell-block\necho hi\n::end-block\n::end-map\n").len(),
+            1
+        );
     }
 
     #[test]

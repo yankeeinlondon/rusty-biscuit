@@ -14,6 +14,9 @@
 //! The rule this seam exists to hold: no new `eyre!` stringification of an
 //! already-typed error on any transition path.
 
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::composition::LifecycleCatchProtocolExt;
+use claudine::composition::lifecycle::cancellation::CancellationCauseExt;
 use super::*;
 
 #[allow(clippy::too_many_arguments)]
@@ -105,10 +108,10 @@ pub(super) fn render_catch_evaluation(
 /// Route a pre-launch setup failure through the stack-aware terminal +
 /// `Finalize` events carrying an `err` payload.
 ///
-/// Uses [`LifecycleRunGuard::emit_blocked_or_failure`]'s signal contract
-/// (`Failure` once the provider launched, `Blocked` before) but, unlike the
-/// legacy `emit_blocked_or_err`, runs the typed stack and the `finalize` event
-/// so user-authored `blocked.stack`/`failure.stack`/`finalize.stack` fire with
+/// The policy kernel's `failure_event` selects the terminal event for a setup
+/// failure (`Failure` once the provider launched, `Blocked` before). Unlike
+/// the legacy `emit_blocked_or_err`, this runs the typed stack and the
+/// `finalize` event so user-authored `blocked.stack`/`failure.stack`/`finalize.stack` fire with
 /// `err.kind`/`err.variant`/`err.msg` available. Used by the harness-loop
 /// setup-failure sites (materialize / target-lifecycle parse / harness-plan
 /// parse) that occur after the lifecycle has already started.
@@ -146,11 +149,10 @@ pub(super) fn emit_blocked_finalize_with_err(
         );
         return None;
     }
-    let terminal = if guard.provider_launched() {
-        LifecycleSignal::Failure
-    } else {
-        LifecycleSignal::Blocked
-    };
+    let terminal = claudine::composition::lifecycle::policy::failure_event(
+        darkmatter::lifecycle::run::FailureStage::Setup,
+        guard.provider_launched(),
+    );
     // NOTE: these are rare internal setup-failure paths (materialize /
     // target-lifecycle parse) reached inside `inspect_err`/`Err` arms that
     // propagate their own error. A `blocked.stack` flow-control action here is
@@ -591,21 +593,17 @@ pub(super) fn run_cancelled_prompt_cleanup(
                 reason.clone().unwrap_or_else(|| "cancellation cleanup failed".into()));
             guard.emitter().emit_warn(&info.msg, term);
         }
-        if let Some(control) = &cleanup.control {
-            let action = match control {
-                StackControl::Retry { .. } => Some("retry"),
-                StackControl::Resume { .. } => Some("resume"),
-                StackControl::Proxy { .. } => Some("proxy"),
-                StackControl::Defer { .. } => Some("defer"),
-                _ => None,
+        if let Some(control) = &cleanup.control
+            && let Some(action) = claudine::composition::lifecycle::policy::refused_recovery(
+                claudine::composition::lifecycle::runtime::EvaluationMode::CancellationCleanup,
+                control,
+            )
+        {
+            let error = CompositionError::LifecycleCancellationRecovery {
+                source_path: source_path.to_path_buf(), action: action.into(),
             };
-            if let Some(action) = action {
-                let error = CompositionError::LifecycleCancellationRecovery {
-                    source_path: source_path.to_path_buf(), action: action.into(),
-                };
-                let info = LifecycleErrorInfo::from_composition_error(&error);
-                guard.emitter().emit_warn(&info.msg, term);
-            }
+            let info = LifecycleErrorInfo::from_composition_error(&error);
+            guard.emitter().emit_warn(&info.msg, term);
         }
     }
 }

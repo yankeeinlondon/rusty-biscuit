@@ -9,12 +9,13 @@
 //! the caller reports them to the frame before the gate.
 
 use indexmap::IndexMap;
-use serde_json::{Map, Value};
+use darkmatter::markdown::compose::SharedFrontmatter;
+use serde_json::Value;
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleRunGuard;
 use super::super::lifecycle_executor::StackExecutionContext;
-use super::super::runtime_state::{RuntimeSnapshot, RuntimeState};
+use super::super::runtime_state::RuntimeState;
 use super::engine::{LoopGateOutcome, run_loop_gate};
 use super::expression::LoopExpressionLookup;
 use super::frame::{LoopDecision, LoopFrame};
@@ -63,8 +64,11 @@ pub fn finish_container_pass(
     if let Some(broken) = frame.pending_break() {
         return Ok(ContainerPassEnd::Broken(broken));
     }
+    // The gate's view is read in place: a pass copies only what its action
+    // writes, never the container's definitions.
+    let frontmatter = gate.frontmatter;
     let lookup = LoopExpressionLookup::new(
-        gate.frontmatter,
+        frontmatter,
         ambient,
         gate.file_resolution_context,
         gate.source_path,
@@ -76,14 +80,19 @@ pub fn finish_container_pass(
         LoopDecision::Complete => Ok(ContainerPassEnd::Complete),
         LoopDecision::Exhausted(error) => Err(error),
         LoopDecision::Continue => {
-            let staged = frame.stage_actions(gate.frontmatter, &lookup)?;
+            let staged = frame.stage_actions(frontmatter, &lookup)?;
+            crate::note_work!(ContainerStateNodes, crate::work_counters::value_nodes(staged.owned()));
+            // The keys the action wrote, in document order.
             let changed: IndexMap<String, Value> = staged
-                .into_iter()
-                .filter(|(key, value)| gate.frontmatter.get(key) != Some(value))
+                .iter()
+                .filter(|(key, value)| {
+                    staged.owned().any(|(owned, _)| owned == *key) && frontmatter.get(key) != Some(*value)
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
             if !changed.is_empty() {
                 runtime
-                    .set_batch(gate.effect_engine, &changed, gate.frontmatter)
+                    .set_batch(gate.effect_engine, &changed, frontmatter)
                     .map_err(|source| CompositionError::LoopActionWriteRefused {
                         source_path: gate.source_path.to_path_buf(),
                         property: frame.action_property(),
@@ -111,8 +120,8 @@ pub struct PassCheckpoint {
 impl PassCheckpoint {
     /// Record the pass entry state of `runtime`.
     pub fn take(runtime: &RuntimeState) -> Self {
-        let RuntimeSnapshot { mutations, outputs, .. } = runtime.snapshot();
-        Self { mutations, outputs: outputs.len() }
+        let (mutations, outputs) = runtime.mutations_and_output_count();
+        Self { mutations, outputs }
     }
 
     /// How many output entries earlier passes committed.
@@ -127,8 +136,8 @@ impl PassCheckpoint {
 }
 
 /// The current state of a container: `base` under the runtime mutations.
-pub fn container_state(base: &Map<String, Value>, runtime: &RuntimeState) -> Map<String, Value> {
+pub fn container_state(base: &SharedFrontmatter, runtime: &RuntimeState) -> SharedFrontmatter {
     let mut state = base.clone();
-    state.extend(runtime.snapshot().mutations);
+    state.extend(runtime.mutations());
     state
 }

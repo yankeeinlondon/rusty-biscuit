@@ -1,84 +1,9 @@
 /// Whether `name` is an embedded Playa sound effect.
 ///
 /// The parser checks literal `effect` names through this predicate, which its
-/// caller supplies, so the lift-ready parser slice names no Playa type.
+/// caller supplies, so Darkmatter's lifecycle parser names no Playa type.
 pub(super) fn is_known_effect(name: &str) -> bool {
     playa::SoundEffect::from_name(name).is_some()
-}
-
-impl LifecycleSignal {
-    /// Returns the frontmatter property name for this signal.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// # use claudine::composition::LifecycleSignal;
-    /// assert_eq!(LifecycleSignal::Start.property_name(), "start");
-    /// assert_eq!(LifecycleSignal::Loop.property_name(), "loop");
-    /// ```
-    pub fn property_name(&self) -> &'static str {
-        match self {
-            Self::Initialize => "initialize",
-            Self::Start => "start",
-            Self::Success => "success",
-            Self::Blocked => "blocked",
-            Self::Failure => "failure",
-            Self::Finalize => "finalize",
-            Self::Loop => "loop",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
-    /// Returns the status state for this signal.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// # use claudine::composition::LifecycleSignal;
-    /// # use biscuit_terminal::components::status::StatusState;
-    /// assert_eq!(LifecycleSignal::Start.status_state(), StatusState::Info);
-    /// assert_eq!(LifecycleSignal::Success.status_state(), StatusState::Success);
-    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
-    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
-    /// ```
-    pub fn status_state(&self) -> StatusState {
-        match self {
-            Self::Initialize => StatusState::Info,
-            Self::Start => StatusState::Info,
-            Self::Success => StatusState::Success,
-            Self::Blocked | Self::Failure | Self::Cancelled => StatusState::Error,
-            Self::Finalize => StatusState::Info,
-            Self::Loop => StatusState::Info,
-        }
-    }
-
-    /// Whether this event can ever observe an error and therefore may
-    /// legitimately reference the lifecycle-stack-only `err` global.
-    ///
-    /// Per the spec's `err` static-scan rule:
-    /// - `blocked`, `failure`, and `cancelled` always carry an error.
-    /// - `finalize` *optionally* carries an error (success path: no error;
-    ///   failure path: error present).
-    /// - `initialize`, `start`, `success`, `loop` never carry an error.
-    pub const fn can_carry_error(self) -> bool {
-        matches!(self, Self::Blocked | Self::Failure | Self::Cancelled | Self::Finalize)
-    }
-
-    /// Whether an *unintentional* action error during this event's stack
-    /// must route the run to the `failure` event.
-    ///
-    /// Per the spec's action error-propagation table, setup-phase events
-    /// (`initialize`, `start`, `blocked`) propagate an errored action to
-    /// `failure` so the agent is never invoked with a broken environment.
-    /// Terminal-phase events (`success`, `failure`, `cancelled`, `finalize`, `loop`) log
-    /// the error but leave the composition outcome unchanged.
-    ///
-    /// This governs only unintentional action errors. The explicit `Error`
-    /// lifecycle action is a deliberate author choice and follows the
-    /// separate "Where valid" transition table.
-    pub const fn routes_action_error_to_failure(self) -> bool {
-        matches!(self, Self::Initialize | Self::Start | Self::Blocked)
-    }
 }
 
 /// Build the TTS configuration lifecycle speech uses from global settings.

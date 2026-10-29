@@ -1,0 +1,8 @@
+kind: schema-trigger
+match:
+  all:
+    - prompt: string(required)
+    - none:
+        - kind: enum(claudine; required)
+        - steps: unknown[](required)
+$schema: inline-compose.yaml

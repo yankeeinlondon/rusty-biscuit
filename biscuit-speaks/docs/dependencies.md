@@ -44,6 +44,12 @@ the library itself declares no HTTP client. `reqwest` remains a dev dependency
 for the ignored live diagnostic that prints the raw `/v2/voices` JSON when a
 response stops deserializing.
 
+The library's production `tokio` dependency enables `rt` because ElevenLabs
+publishes its audio and default-voice record with `tokio::task::spawn_blocking`
+(see [TTS caching](tts-caching.md#atomic-writes)). It is declared there, not
+inherited from the dev dependency's broader features, so a build without dev
+dependencies still compiles.
+
 The `wiremock` dev dependency serves the provider's HTTP tests
 (`lib/tests/elevenlabs_http.rs`) from a local mock server, so the speech,
 sound-effect, model, and paginated voice paths are covered without network

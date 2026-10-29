@@ -66,9 +66,9 @@
 //! [`CompositionError`]: crate::composition::CompositionError
 //! [`ClaudineError`]: crate::error::ClaudineError
 //! [`HarnessError`]: crate::harness::error::HarnessError
-//! [`LifecycleErrorInfo::from_claudine_error`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_claudine_error
-//! [`from_harness_error`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_harness_error
-//! [`LifecycleErrorInfo::from_action_failure`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure
+//! [`LifecycleErrorInfo::from_claudine_error`]: crate::composition::lifecycle_context::LifecycleErrorInfoExt::from_claudine_error
+//! [`from_harness_error`]: crate::composition::lifecycle_context::LifecycleErrorInfoExt::from_harness_error
+//! [`LifecycleErrorInfo::from_action_failure`]: crate::composition::lifecycle_context::LifecycleErrorInfoExt::from_action_failure
 
 mod discovery;
 mod error_kind;
@@ -85,7 +85,10 @@ pub use error_kind::code_for_error_kind;
 pub use facets::{Category, Disposition, Origin, Severity};
 pub use registry::{CODES, CodeSpec, code_spec};
 pub use restored::RestoredDiagnostic;
-pub use snapshot::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticCause, DiagnosticSnapshot};
+pub use snapshot::{
+    ClaudineDiagnostics, DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticCause, DiagnosticCauseExt,
+    DiagnosticSnapshot, DiagnosticSnapshotExt,
+};
 
 use std::error::Error as StdError;
 

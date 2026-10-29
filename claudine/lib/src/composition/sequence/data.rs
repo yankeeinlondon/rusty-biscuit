@@ -80,6 +80,10 @@ pub struct LoadedDocument {
 
 /// Load a data file into the common value model.
 ///
+/// A Markdown file is parsed by Darkmatter's own read of it; every other
+/// format reads the file once and parses that text through
+/// [`load_document_from_text`].
+///
 /// ## Errors
 ///
 /// Returns [`CompositionError::SequenceExternalLoad`] carrying the typed
@@ -87,24 +91,37 @@ pub struct LoadedDocument {
 /// a JSON, JSON5, JSONL, or NDJSON object that repeats a key (YAML and
 /// frontmatter reject one in their own parser).
 pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
-    if path.extension().and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
-    {
-        let markdown = darkmatter::markdown::Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
-            path: path.to_path_buf(),
-            source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
-        })?;
-        return Ok(LoadedDocument {
-            value: super::super::prepare::frontmatter_to_value(markdown.frontmatter()),
-            orders: markdown.frontmatter().mapping_orders().clone(),
-        });
+    if is_markdown(path) {
+        return load_markdown_document(path).map(|(document, _)| document);
     }
-    let format = SourceFormat::for_path(path);
     let context = || biscuit_file::to_portable_string(path);
+    let text = std::fs::read_to_string(path).map_err(|error| CompositionError::SequenceExternalLoad {
+        context: context(),
+        source: match SourceFormat::for_path(path) {
+            SourceFormat::Yaml => SequenceLoadCause::Yaml(error.into()),
+            SourceFormat::Json | SourceFormat::Json5 => SequenceLoadCause::Json5(error.into()),
+            SourceFormat::LineDelimited => SequenceLoadCause::Read(error),
+        },
+    })?;
+    load_document_from_text(path, &text)
+}
 
-    match format {
+/// [`load_document`] over `text`, the content of the YAML, JSON, JSON5,
+/// JSONL, or NDJSON file at `path`, which is not read: a caller that already
+/// holds the file's bytes parses exactly those. `path` selects the format and
+/// names the file in errors.
+///
+/// A Markdown path is not a data format here: its frontmatter parser takes
+/// its own read ([`load_markdown_document`]).
+///
+/// ## Errors
+///
+/// As [`load_document`], with the same text for the same content.
+pub fn load_document_from_text(path: &Path, text: &str) -> Result<LoadedDocument, CompositionError> {
+    let context = || biscuit_file::to_portable_string(path);
+    match SourceFormat::for_path(path) {
         SourceFormat::Yaml => {
-            let yaml = biscuit_file::Yaml::new(path).map_err(|e| {
+            let yaml = biscuit_file::Yaml::from_str(text).map_err(|e| {
                 CompositionError::SequenceExternalLoad {
                     context: context(),
                     source: SequenceLoadCause::Yaml(e),
@@ -120,16 +137,11 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
             Ok(LoadedDocument { value, orders })
         }
         SourceFormat::Json | SourceFormat::Json5 => {
-            let json5 = biscuit_file::Json5::new(path).map_err(|e| {
-                CompositionError::SequenceExternalLoad {
-                    context: context(),
-                    source: SequenceLoadCause::Json5(e),
-                }
-            })?;
             let json5_failure = |e| CompositionError::SequenceExternalLoad {
                 context: context(),
                 source: SequenceLoadCause::Json5(e),
             };
+            let json5 = biscuit_file::Json5::from_str(text).map_err(json5_failure)?;
             // `serde_json::Value` keeps the last of two equal keys, so the
             // raw text is checked before that conversion is trusted.
             if let DuplicateScan(Some(duplicate)) = json5.deserialize_raw::<DuplicateScan>().map_err(json5_failure)? {
@@ -142,20 +154,34 @@ pub fn load_document(path: &Path) -> Result<LoadedDocument, CompositionError> {
             })
         }
         SourceFormat::LineDelimited => Ok(LoadedDocument {
-            value: load_line_delimited(path)?,
+            value: parse_line_delimited(path, text)?,
             orders: MappingOrders::default(),
         }),
     }
 }
 
-/// Parse a JSONL/NDJSON file into an array, one entry per non-blank line.
-fn load_line_delimited(path: &Path) -> Result<Value, CompositionError> {
-    let text =
-        std::fs::read_to_string(path).map_err(|e| CompositionError::SequenceExternalLoad {
-            context: biscuit_file::to_portable_string(path),
-            source: SequenceLoadCause::Read(e),
-        })?;
+/// `true` for a `.md`/`.markdown` path, whose data is its frontmatter.
+pub(crate) fn is_markdown(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
+}
 
+/// A Markdown file's frontmatter in the common value model, with the text
+/// Darkmatter's read parsed (`None` only if it retained none).
+pub(crate) fn load_markdown_document(path: &Path) -> Result<(LoadedDocument, Option<String>), CompositionError> {
+    let markdown = darkmatter::markdown::Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
+        path: path.to_path_buf(),
+        source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
+    })?;
+    let document = LoadedDocument {
+        value: super::super::prepare::frontmatter_to_value(markdown.frontmatter()),
+        orders: markdown.frontmatter().mapping_orders().clone(),
+    };
+    Ok((document, markdown.loaded_text().map(str::to_owned)))
+}
+
+/// Parse JSONL/NDJSON `text` into an array, one entry per non-blank line.
+fn parse_line_delimited(path: &Path, text: &str) -> Result<Value, CompositionError> {
     let mut items = Vec::new();
     for (offset, line) in text.lines().enumerate() {
         let line = line.trim();

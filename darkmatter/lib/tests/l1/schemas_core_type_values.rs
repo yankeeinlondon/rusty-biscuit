@@ -158,6 +158,52 @@ fn exported_schema_and_typed_options_agree() {
 }
 
 #[test]
+fn exported_alphanumeric_patterns_preserve_interacting_restrictions() {
+    use AlphanumericOption::*;
+
+    let allowed = [AllowDashes, AllowUnderscores, AllowSlashes, AllowPeriods, AllowWhitespace];
+    let restrictions = [BlockDoublePeriods, BlockLeadingDash, BlockLeadingSlash, LeadingAlpha];
+    let alphabet = ['a', '1', '-', '/', '.', ' ', '\n', 'é'];
+    let mut samples = vec![String::new()];
+    let mut previous = vec![String::new()];
+    for _ in 0..3 {
+        let next: Vec<String> = previous
+            .iter()
+            .flat_map(|prefix| alphabet.map(|ch| format!("{prefix}{ch}")))
+            .collect();
+        samples.extend(next.iter().cloned());
+        previous = next;
+    }
+
+    for mask in 0..(1 << restrictions.len()) {
+        let mut options: AlphanumericOptions = allowed.into_iter().collect();
+        for (index, restriction) in restrictions.into_iter().enumerate() {
+            if mask & (1 << index) != 0 {
+                options = options.with(restriction);
+            }
+        }
+        let keywords = options.canonical().keywords().collect::<Vec<_>>().join(", ");
+        let exported = json_schema(&format!("p: 'alphanumeric({keywords}; required)'\n"));
+        let validator = jsonschema::validator_for(&exported).expect("exported pattern compiles");
+        for sample in &samples {
+            let expected = sample.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_/ .".contains(ch))
+                && (!options.contains(BlockDoublePeriods) || !sample.contains(".."))
+                && sample.chars().next().is_none_or(|first| {
+                    (!options.contains(LeadingAlpha) || first.is_ascii_alphabetic())
+                        && (!options.contains(BlockLeadingDash) || first != '-')
+                        && (!options.contains(BlockLeadingSlash) || first != '/')
+                });
+            assert_eq!(options.accepts(sample), expected, "typed {keywords}: {sample:?}");
+            assert_eq!(
+                validator.is_valid(&json!({ "p": sample })),
+                expected,
+                "exported {keywords}: {sample:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn alphanumeric_never_coerces_numbers_or_booleans() {
     let schema = json_schema(
         "scalar: alphanumeric\nitems: alphanumeric[]\nflag: alphanumeric\n\
@@ -169,7 +215,7 @@ fn alphanumeric_never_coerces_numbers_or_booleans() {
     assert_eq!(coerced["items"], json!(["a", 12]));
     assert_eq!(coerced["flag"], json!(true));
     // Other arms keep their own conversions: only `string` turns `3` into
-    // text, so it is the one valid candidate.
+    // text, so it is the one reachable option.
     assert_eq!(coerced["either"], json!("3"));
     assert_eq!(coerced["choice"], json!(7));
 
@@ -305,4 +351,32 @@ fn subtype_relation_is_reachable_through_the_public_schema_api() {
     assert!(!is_subtype(&atom("email"), &rule));
     assert!(is_subtype(&atom("alphanumeric(block-leading-dash)"), &atom("alphanumeric")));
     assert!(is_subtype(&atom("alphanumeric"), &atom("alphanumeric(block-leading-dash)")));
+}
+
+/// The shared structural relation accepts a narrowed type where its family,
+/// enum, or union admits it (`2026-10-16-type-narrowing` acceptance 5).
+#[test]
+fn narrowed_literals_and_unions_satisfy_their_parameter_types_structurally() {
+    use darkmatter::markdown::schemas::{PropertyDef, SimplifiedSchema, is_definition_subtype, is_subtype};
+    let atom = |text: &str| parse_type_expr("p", text).expect("parses");
+    let declared = |body: &str| -> PropertyDef {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(body).expect("schema YAML");
+        match parse_yaml_schema(&yaml).expect("schema parses") {
+            SimplifiedSchema::Single(shape) => shape.properties["p"].clone(),
+            SimplifiedSchema::Union(_) => panic!("a single shape"),
+        }
+    };
+
+    assert!(is_subtype(&atom("literal('release')"), &atom("string")));
+    assert!(is_subtype(&atom("literal(4)"), &atom("number")));
+    assert!(is_subtype(&atom("literal(true)"), &atom("boolean")));
+    let literals = declared("p: [\"literal('a')\", \"literal('b')\"]\n");
+    assert!(is_definition_subtype(&literals, &PropertyDef::Single(atom("enum(a, b, c)"))));
+
+    // Controls: the relation stays structural and bounded.
+    assert!(!is_subtype(&atom("literal(4)"), &atom("enum('4')")));
+    assert!(!is_definition_subtype(&declared("p: [\"literal('a')\", \"literal('z')\"]\n"), &PropertyDef::Single(atom("enum(a, b, c)"))));
+    let scalars = declared("p: [string, number]\n");
+    assert!(is_definition_subtype(&scalars, &declared("p: [boolean, number, string]\n")));
+    assert!(!is_definition_subtype(&declared("p: [boolean, number, string]\n"), &scalars));
 }

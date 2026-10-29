@@ -360,7 +360,18 @@ fn sibling_failure_cancels_opted_container_descendants_and_preserves_other_legs(
     let runtime = Arc::new(RuntimeState::new());
     let mut wiring = Wiring::new(&recorder, &fake);
     wiring.shell = &shell; wiring.runtime = Some(&runtime);
+    #[cfg(feature = "work-counters")]
+    let before = crate::work_counters::snapshot();
     let outcome = fixture.execute(&wiring);
+    // Branches exist only for admitted legs: `opted`, `plain`, `bad`, and the
+    // nested group's `a` and `b`; `unadmitted` builds none, and every branch
+    // is released once the group settles.
+    #[cfg(feature = "work-counters")]
+    {
+        use crate::work_counters::{Gauge, Work, live, snapshot};
+        assert_eq!(snapshot().since(&before).get(Work::RuntimeStateBranch), 5);
+        assert_eq!(live(Gauge::RuntimeStateBranch), 0);
+    }
     assert_eq!(outcome.status, TaskStatus::Failed, "{}", failure_message(&outcome));
     assert_eq!(runtime.outputs_value(), json!([]));
     let events = recorder.events();
@@ -438,4 +449,47 @@ fn cleanup_shell_timeout_stays_secondary_to_cancellation() {
     assert!(outcome.secondary_errors[0].info.msg.contains("cleanup deadline exceeded"));
     assert_eq!(recorder.events(), ["info:finalized"]);
     assert_eq!(runtime.outputs_value(), json!([]));
+}
+
+/// Each leg's live view is the group-start state plus only that leg's writes:
+/// four concurrent legs write the same document key, every leg reads its own
+/// value back in a later stage, and the authored definition (which holds the
+/// group, its 40 legs, and their padding) stays readable and on disk.
+#[test]
+fn small_leg_writes_stay_private_over_a_large_inline_definition() {
+    const LEGS: usize = 40;
+    let dir = TempDir::new().unwrap();
+    let padding = "x".repeat(2_048);
+    let document = dir.path().join("seq.md").to_string_lossy().into_owned();
+    let tasks: Vec<Value> = (0..LEGS).map(|index| json!({
+        "name": format!("leg-{index}"), "shell": format!("work-{index}"),
+        "setup": [{ "set_frontmatter": [document, "own", format!("leg-{index}")] }],
+        "teardown": [{ "set": { format!("seen_{index}"): "{{ own }}|{{ title }}" } }],
+    })).collect();
+    let variables: Map<String, Value> = (0..LEGS).map(|index| (format!("pad_{index}"), json!(padding))).collect();
+    let sequence = json!([{ "name": "fan-out", "group": { "name": "legs", "max_parallel": 4,
+        "variables": variables, "tasks": tasks } }]);
+    let source = write_source(dir.path(), "seq.md",
+        &[("title", json!("T")), ("own", json!("initial")), ("sequence", sequence.clone())], "Body.\n");
+    let fixture = Fixture::build(dir, &source).unwrap().mutating_its_directory();
+    let recorder = Recorder::default();
+    let shell = FakeTaskShell::default();
+    let runtime = Arc::new(RuntimeState::new());
+    let mut wiring = Wiring::new(&recorder, &shell);
+    wiring.runtime = Some(&runtime);
+
+    let outcome = fixture.execute(&wiring);
+
+    assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+    assert_eq!(shell.commands().len(), LEGS, "every leg ran");
+    let mutations = runtime.snapshot().mutations;
+    for index in 0..LEGS {
+        assert_eq!(mutations.get(&format!("seen_{index}")), Some(&json!(format!("leg-{index}|T"))),
+            "leg {index} must read its own write and the authored values, never a sibling's write");
+    }
+    let written = darkmatter::markdown::Markdown::try_from(Path::new(&source)).unwrap();
+    let on_disk = written.frontmatter().as_map();
+    let own = on_disk.get("own").and_then(Value::as_str).unwrap_or_default();
+    assert!(own.starts_with("leg-"), "a leg's write reached the file: {own:?}");
+    assert_eq!(on_disk.get("sequence"), Some(&sequence), "the authored definition is untouched");
 }

@@ -178,7 +178,7 @@ fn a_mixed_frontmatter_evaluation_failure_is_fatal_whatever_fail_fast_says() {
     let content = "---\nnote: \"x {{ min(1) }} y\"\n---\nbody\n";
     for error in failures(content) {
         let cause = assert_frontmatter_failure(&error, content, "note", "min(1)", 13..25, (2, 10));
-        assert!(cause.to_string().contains("min() requires 2 arguments"), "{cause}");
+        assert!(cause.to_string().contains("min: no signature takes 1 argument"), "{cause}");
     }
 }
 
@@ -224,7 +224,7 @@ fn a_folded_block_scalar_evaluation_failure_after_multibyte_text_spans_the_autho
     let content = "---\nnote: >-\n  intro\n  café — {{ min(1) }} y\n\n  tail\n---\nbody\n";
     for error in failures(content) {
         let cause = assert_frontmatter_failure(&error, content, "note", "min(1)", 33..45, (4, 10));
-        assert!(cause.to_string().contains("min() requires 2 arguments"), "{cause}");
+        assert!(cause.to_string().contains("min: no signature takes 1 argument"), "{cause}");
     }
 }
 
@@ -288,7 +288,7 @@ fn a_verbose_tagged_plain_evaluation_failure_spans_the_authored_bytes_after_the_
     let content = "---\nnote: !<tag:yaml.org,2002:str> naïve {{ min(1) }} tail\n---\nbody\n";
     for error in failures(content) {
         let cause = assert_frontmatter_failure(&error, content, "note", "min(1)", 42..54, (2, 38));
-        assert!(cause.to_string().contains("min() requires 2 arguments"), "{cause}");
+        assert!(cause.to_string().contains("min: no signature takes 1 argument"), "{cause}");
     }
 }
 
@@ -337,7 +337,7 @@ fn an_alias_failure_spans_the_scalar_defining_its_anchor() {
     }
     for error in failures_with(content, |options| options.with_exclude_keys(["defaults"])) {
         let cause = assert_frontmatter_failure(&error, content, "title", "min(1)", 41..53, (3, 25));
-        assert!(cause.to_string().contains("min() requires 2 arguments"), "{cause}");
+        assert!(cause.to_string().contains("min: no signature takes 1 argument"), "{cause}");
     }
 
     let crlf = "---\r\nzeta: &shared |\r\n  café\r\n  {{ 1 + }}\r\nalpha: *shared\r\n---\r\nbody\r\n";
@@ -362,7 +362,7 @@ fn an_alias_of_an_unprovable_anchor_spans_the_alias_token() {
                 panic!("expected a typed interpolation error, got {error:?}");
             };
             assert_eq!((key.as_deref(), expression.as_str()), (Some("café"), "min(1)"));
-            assert!(cause.to_string().contains("min() requires 2 arguments"), "{cause}");
+            assert!(cause.to_string().contains("min: no signature takes 1 argument"), "{cause}");
             assert_authored_span(source, content, "*shared", range.clone(), position.0, position.1);
         }
     }
@@ -539,15 +539,16 @@ fn preflight_discovery_tolerates_what_composition_rejects() {
 }
 
 /// Discovery composes without page blocks, so it evaluates a region a false
-/// `::block` removes. A failure there must not reject a document whose real
-/// composition never reaches it.
+/// `::block` removes. A runtime failure there must not reject a document whose
+/// real composition never reaches it. (A call proven wrong at design time,
+/// such as `min(1)`, rejects the document in any region.)
 #[test]
 fn preflight_discovery_does_not_fail_on_a_region_composition_removes() {
     let dir = TempDir::new().unwrap();
     let path = write(
         dir.path(),
         "doc.md",
-        "---\nrev: \"$(git rev-parse HEAD)\"\n---\nkept\n\n::block when=\"false\"\n{{ min(1) }}\n::end-block\n",
+        "---\nrev: \"$(git rev-parse HEAD)\"\n---\nkept\n\n::block when=\"false\"\n{{ min(missing, 5) }}\n::end-block\n",
     );
     let markdown = Markdown::try_from(path.as_path()).unwrap();
     let shell = ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() };

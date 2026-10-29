@@ -1,0 +1,4 @@
+kind: schema
+types:
+  t: [string, number]
+  next: boolean

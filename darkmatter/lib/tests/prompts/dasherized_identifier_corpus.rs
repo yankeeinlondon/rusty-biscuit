@@ -87,8 +87,8 @@ impl fmt::Display for CorpusExpression {
 }
 
 /// Frontmatter keys Claudine evaluates as Darkmatter conditions at lifecycle
-/// time, per `claudine/schemas/lifecycle.yaml` (`conditional-1.when` and its
-/// deeper levels, `loop.while`, `loop.until`) and `claudine/schemas/action.yaml`
+/// time, per `claudine/schemas/lifecycle.yaml` (the recursive conditional
+/// families and loop arms) and `claudine/schemas/action.yaml`
 /// (`bundle.when`).
 ///
 /// This is not schema-typed discovery: those schemas apply by trigger, which
@@ -387,11 +387,13 @@ fn condition_keys_match_the_shipped_claudine_schema() {
     let lifecycle = read(repo_root().join("claudine/schemas/lifecycle.yaml"));
     let action = read(repo_root().join("claudine/schemas/action.yaml"));
     for (file, types, type_name, key) in [
-        ("lifecycle.yaml", &lifecycle, "conditional-1", "when"),
-        ("lifecycle.yaml", &lifecycle, "conditional-2", "when"),
-        ("lifecycle.yaml", &lifecycle, "conditional-3", "when"),
-        ("lifecycle.yaml", &lifecycle, "loop", "while"),
-        ("lifecycle.yaml", &lifecycle, "loop", "until"),
+        ("lifecycle.yaml", &lifecycle, "conditional", "when"),
+        ("lifecycle.yaml", &lifecycle, "initialize-conditional", "when"),
+        ("lifecycle.yaml", &lifecycle, "cancelled-conditional", "when"),
+        ("lifecycle.yaml", &lifecycle, "loop-bundle", "while"),
+        ("lifecycle.yaml", &lifecycle, "loop-bundle", "until"),
+        ("lifecycle.yaml", &lifecycle, "loop-single", "while"),
+        ("lifecycle.yaml", &lifecycle, "loop-single", "until"),
         ("action.yaml", &action, "bundle", "when"),
     ] {
         let definition = types["types"][type_name][key]

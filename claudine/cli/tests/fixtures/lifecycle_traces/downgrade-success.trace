@@ -1,0 +1,14 @@
+# scenario: downgrade-success
+# doc: downgrade-success.md
+# given: invoked as `claudine compose --claude downgrade-success.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: success raises an explicit error
+event initialize
+event start
+work fresh 0
+event success
+event failure
+err uncoded: success downgraded
+event finalize
+err uncoded: success downgraded
+exit 1

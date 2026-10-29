@@ -1,0 +1,29 @@
+# Throwaway spike crate (2026-10-21). Standalone: NOT a workspace member.
+# Build: cargo run --offline --manifest-path <this file> (target dir under /tmp).
+# Versions pinned to the workspace Cargo.lock; serde_json features match the
+# target-side serde_json instance Darkmatter links today (float_roundtrip via
+# jsonschema, raw_value via axum/schematic).
+[package]
+name = "numeric-ingress-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "numeric-ingress-spike"
+path = "main.rs"
+
+[features]
+# Opt-in probe of serde_json's arbitrary_precision interactions.
+ap = ["serde_json/arbitrary_precision"]
+# Opt-in probe of the planned preserve_order feature (spike ruling 4).
+po = ["serde_json/preserve_order"]
+
+[dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = { version = "=1.0.149", features = ["float_roundtrip", "raw_value"] }
+serde_yaml_ng = "=0.10.0"
+json-five = "=0.3.1"
+rlsp-yaml-parser = "=0.11.1"

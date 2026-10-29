@@ -188,6 +188,27 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "See the sequence and lifecycle documentation for the current grammar.",
                 )
         }
+        CompositionError::LifecycleCallRejected {
+            source_path,
+            property,
+            expression,
+            source,
+            ..
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle <cyan>`{property}`</cyan> in {file_link} evaluates <cyan>{}</cyan>, \
+                 which makes a call no value of its argument's type can satisfy.\n\n{source}",
+                code_span(expression),
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "incompatible lifecycle call"))
+                .body(body)
+                .hint(
+                    "The document is rejected before any lifecycle event runs, in every branch, \
+                     exactly as the same call in the body is. Fix the argument's type or the call.",
+                )
+        }
         CompositionError::LifecycleStackInvalidShape {
             source_path,
             property,
@@ -703,6 +724,21 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                     "Check the \"Where valid\" matrix in the lifecycle spec: only certain \
                      control actions are allowed in each event."
                 })
+        }
+        CompositionError::LifecycleRenamedEvent {
+            source_path,
+            authored,
+            replacement,
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = format!(
+                "Lifecycle event <cyan>`{authored}`</cyan> in {file_link} is Darkmatter's name \
+                 for the event Claudine calls <cyan>`{replacement}`</cyan>."
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "renamed lifecycle event"))
+                .body(body)
+                .hint(format!("Rename the `{authored}:` key to `{replacement}:`."))
         }
         CompositionError::LifecycleMultipleLifecycleActions {
             source_path, property, ..

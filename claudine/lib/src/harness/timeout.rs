@@ -72,70 +72,18 @@ pub fn parse_timeout_allow_zero(input: &str, source_path: &Path) -> Result<Durat
     Ok(Duration::from_secs_f64(total_secs.max(0.0)))
 }
 
-/// Shared grammar for [`parse_timeout`] and [`parse_timeout_allow_zero`].
-///
-/// Splits `input` into a numeric prefix (digits and a decimal point) and a
-/// unit suffix, parses the number as `f64`, and multiplies by the unit's
-/// per-second factor. Returns the total seconds. Rejects empty input, an
-/// empty/non-numeric numeric component, a missing unit, and an unknown unit,
-/// exactly as the original `parse_timeout`. Does **not** enforce any sign
-/// constraint — the public wrappers decide whether zero is permitted.
+/// Shared grammar for [`parse_timeout`] and [`parse_timeout_allow_zero`]:
+/// Darkmatter's [`darkmatter::lifecycle::duration::parse_duration_secs`], which
+/// lifecycle delays parse with too. Returns the total seconds, with its
+/// rejection reported as [`HarnessError::InvalidTimeout`] for `source_path`.
+/// Does **not** enforce any sign constraint — the public wrappers decide
+/// whether zero is permitted.
 fn parse_duration_secs(input: &str, source_path: &Path) -> Result<f64, HarnessError> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err(HarnessError::InvalidTimeout {
-            source_path: source_path.to_path_buf(),
-            raw: input.to_string(),
-            detail: "timeout string is empty".to_string(),
-        });
-    }
-
-    // Split into numeric prefix and unit suffix.
-    let num_end = trimmed
-        .find(|c: char| !c.is_ascii_digit() && c != '.')
-        .unwrap_or(trimmed.len());
-
-    let num_str = trimmed[..num_end].trim();
-    let unit_str = trimmed[num_end..].trim();
-
-    if num_str.is_empty() {
-        return Err(HarnessError::InvalidTimeout {
-            source_path: source_path.to_path_buf(),
-            raw: input.to_string(),
-            detail: "no numeric value found".to_string(),
-        });
-    }
-
-    if unit_str.is_empty() {
-        return Err(HarnessError::InvalidTimeout {
-            source_path: source_path.to_path_buf(),
-            raw: input.to_string(),
-            detail: "missing unit; expected one of: s, sec, second, seconds, m, min, minute, minutes, h, hr, hour, hours".to_string(),
-        });
-    }
-
-    let value: f64 = num_str.parse().map_err(|_| HarnessError::InvalidTimeout {
+    darkmatter::lifecycle::duration::parse_duration_secs(input).map_err(|error| HarnessError::InvalidTimeout {
         source_path: source_path.to_path_buf(),
         raw: input.to_string(),
-        detail: format!("\"{num_str}\" is not a valid number"),
-    })?;
-
-    let multiplier: f64 = match unit_str {
-        "s" | "sec" | "second" | "seconds" => 1.0,
-        "m" | "min" | "minute" | "minutes" => 60.0,
-        "h" | "hr" | "hour" | "hours" => 3600.0,
-        _ => {
-            return Err(HarnessError::InvalidTimeout {
-                source_path: source_path.to_path_buf(),
-                raw: input.to_string(),
-                detail: format!(
-                    "unknown unit \"{unit_str}\"; expected one of: s, sec, second, seconds, m, min, minute, minutes, h, hr, hour, hours"
-                ),
-            });
-        }
-    };
-
-    Ok(value * multiplier)
+        detail: error.detail,
+    })
 }
 
 /// Render a [`Duration`] in the same grammar that [`parse_timeout`] accepts,

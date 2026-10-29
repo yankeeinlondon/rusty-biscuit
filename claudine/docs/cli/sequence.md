@@ -1,4 +1,5 @@
 ---
+kind: canonical-documentation
 blast_radius:
   - claudine/cli/src/commands/sequence.rs
   - claudine/cli/src/commands/compose/mod.rs
@@ -15,7 +16,7 @@ prompt document, a shell command, or a group of tasks. Later steps can read
 what earlier steps produced.
 
 This page covers the command: how to call it, how it chooses providers, and
-its flags. How steps, tasks, state, groups, and `outputs` behave is in
+its flags. How steps, tasks, state, groups, and `seq.outputs` behave is in
 [Sequences](../topics/flow-control/sequences.md).
 
 ## Usage
@@ -174,16 +175,39 @@ later value, so `with: { agent: "{{ no_such_function() }}" }` on the second
 task stops the run before the first launches, naming `tasks[1].with.agent`.
 A document hint reading a `with` entry that fails is located at that entry. Prediction runs no shell,
 lifecycle event, or `prep` target, composes no prompt body, and refreshes no
-model catalog. A graph of only `shell:` and `side_effect:` tasks needs no
+model catalog.
+
+A hint written as a plain value, with no `{{ … }}` and no `$( … )`, is
+taken as written: `agent: codex` in any layer is predicted without
+evaluating anything. Only a hint that reads another value is evaluated, and
+only against what is known before the run: the prompt document's
+frontmatter under the task's evaluated `with:` and the caller's setters. A
+plain value is still decided at launch when a lifecycle `set` writes that
+key, and a hint that reads a plain-text key a lifecycle `set` writes is
+decided at launch too, whatever that key holds now. That second rule covers
+the task as a whole: once either hint reads a key a lifecycle `set` writes,
+both `agent` and `model` are decided at launch, plain values included:
+
+```yaml
+# prompts/review.md
+pick: codex
+agent: "{{ pick }}"   # decided at launch if any lifecycle `set` writes `pick`
+model: big            # predicted as written, unless `agent` is decided at launch
+```
+
+A graph of only `shell:` and `side_effect:` tasks needs no
 provider at all.
 
 A body step composes the sequence document itself, so its `agent` is the
 document's. A group has no `agent`: each task in it chooses its own.
 
-**The model** follows its own order: `--model` first, then a `MODEL` or
-provider-specific model variable in the environment, then the task's own
-`model`, then the enclosing document's `model`, then the provider's
-default. An inherited model goes only with the provider it belongs to: a
+**The model** follows its own order: `--model` first, then the selected
+provider's model environment variable (for example, `CLAUDE_MODEL`), then
+the generic `MODEL`, then the task's own `model`, then a compatible inherited
+or review-selected model, and finally the provider's default. Environment
+values come from the map captured for that document, so a later task can see
+a file-backed environment change without changing an earlier task's choice.
+An inherited model goes only with the provider it belongs to: a
 task that switches provider gets that provider's own default, and its
 process gets no stale `MODEL`.
 

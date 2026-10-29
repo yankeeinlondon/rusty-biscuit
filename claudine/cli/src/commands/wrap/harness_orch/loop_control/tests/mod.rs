@@ -2,7 +2,7 @@
 
 use super::*;
 use claudine::composition::{
-    LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext,
+    LifecycleConfig, LifecycleEmitter, LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext,
     parse_lifecycle_config,
 };
 use claudine::events::GlobalSettings;
@@ -126,6 +126,7 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         file_resolution_context: crate::request::test_context(),
         compose_context: None,
         document_epoch: None,
+        frontmatter_view: MaterializedHarnessPrompt::view_of(&live_frontmatter),
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,

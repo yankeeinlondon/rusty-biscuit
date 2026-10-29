@@ -609,9 +609,20 @@ pub struct FileReference {
 impl FileReference {
     /// Parse a file reference string.
     ///
+    /// This is the passive structural validator for every reference kind: it
+    /// reads no filesystem, environment, configuration, or network, and its
+    /// verdict is the same on every host OS. `Ok` means the string is
+    /// well-formed, not that it resolves (a Windows path parses on macOS, and
+    /// an unset `{{NAME}}` variable fails only at resolution).
+    ///
     /// ## Errors
     ///
-    /// Returns `FileReferenceError::InvalidSyntax` if the string cannot be parsed.
+    /// Returns `FileReferenceError::InvalidSyntax` for malformed syntax: an
+    /// empty string, a NUL character, a malformed sigil or template, a URL
+    /// without a host (`https://`), a recursive URL (`%https://…`), or an
+    /// empty or rooted vault path (`vault:`, `vault:/etc/hosts`).
+    /// `UnsupportedScheme` and `UnsupportedUserHome` reject the other
+    /// unsupported forms.
     pub fn new(raw: &str) -> Result<Self, FileReferenceError> {
         let parsed = parse::parse(raw)?;
         Ok(Self {

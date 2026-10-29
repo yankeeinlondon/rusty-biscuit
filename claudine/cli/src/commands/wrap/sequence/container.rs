@@ -1,11 +1,13 @@
 //! Root sequence lifecycle. Child results stay in the invocation cell until cleanup settles.
 
+use claudine::composition::LifecycleErrorInfoExt;
 use std::sync::Arc;
 use claudine::composition::{CompositionError, RuntimeState};
-use claudine::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use claudine::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use claudine::composition::lifecycle::context::LifecycleErrorInfo;
 use claudine::composition::lifecycle::executor::StackExecutionContext;
-use claudine::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};
+use claudine::composition::lifecycle::policy::{RefusalRoute, SubjectKind};
+use claudine::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner};
 use claudine::composition::looping::{ContainerPassEnd, LoopFrame, PassCheckpoint, container_state, finish_container_pass};
 use color_eyre::eyre::Result;
 
@@ -25,6 +27,7 @@ pub(super) struct RootRun<'a> {
     /// The runtime state the current pass entered `start` with; `None`
     /// until a pass enters. A retry of the pass returns to it.
     pub(super) checkpoint: Option<PassCheckpoint>,
+    prewarm: claudine::composition::lifecycle::prewarm::PrewarmHandle,
 }
 
 impl<'a> RootRun<'a> {
@@ -34,10 +37,11 @@ impl<'a> RootRun<'a> {
         stack: StackExecutionContext<'a>,
         runtime: Arc<RuntimeState>,
         frame: Option<LoopFrame>,
+        prewarm: claudine::composition::lifecycle::prewarm::PrewarmHandle,
     ) -> Self {
-        Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)),
+        Self { runner: ContainerRunner::new(LifecycleRunGuard::new(config, context, stack.emitter)).with_subject(SubjectKind::RootSequence),
             stack, runtime, started: false, approved: None, graph: None, pending: None, child_error: None, proxy_location: None,
-            frame, checkpoint: None }
+            frame, checkpoint: None, prewarm }
     }
 
     /// The `loop` values of the pass being run, when the root loops.
@@ -49,9 +53,8 @@ impl<'a> RootRun<'a> {
     /// outputs, before the pass's terminal event reads it.
     pub(super) fn record_pass(&mut self, exit_code: i32) {
         let Some(frame) = self.frame.as_mut() else { return };
-        let outputs = self.runtime.snapshot().outputs;
-        let start = self.checkpoint.as_ref().map_or(0, PassCheckpoint::outputs).min(outputs.len());
-        frame.record_pass(serde_json::Value::Array(outputs[start..].to_vec()), exit_code);
+        let start = self.checkpoint.as_ref().map_or(0, PassCheckpoint::outputs);
+        frame.record_pass(serde_json::Value::Array(self.runtime.outputs_from(start)), exit_code);
     }
 
     /// The process exit code of a root loop a `break` ended, with its
@@ -117,12 +120,22 @@ impl<'a> RootRun<'a> {
         loop {
             if let Some(live) = self.stack.live_frontmatter {
                 let mut live = live.lock().expect("root frontmatter poisoned");
-                live.extend(self.runtime.snapshot().mutations);
+                live.extend(self.runtime.mutations());
             }
             let disabled = claudine::composition::lifecycle::executor::DisabledShellRunner;
             let ambient = self.loop_values();
             let stack = StackExecutionContext { signal, err: error.as_ref(), shell_runner: if self.started { self.stack.shell_runner } else { &disabled },
                 loop_values: ambient.as_ref().or(self.stack.loop_values), ..self.stack.with_signal(signal) };
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
+                claudine::composition::lifecycle::prewarm::collect_and_submit(
+                    &self.prewarm, stack.settings, self.runner.guard_mut().config(), || {
+                        claudine::composition::lifecycle::prewarm::PrewarmInputs::shared(
+                            stack.live_frontmatter_snapshot().unwrap_or_else(|| stack.frontmatter.clone()),
+                            stack.prepared_context.expect("root sequence has a captured context").clone(),
+                        )
+                    },
+                );
+            }
             let result = self.runner.execute_event(signal, &stack);
             if let Some(claudine::composition::lifecycle::executor::StackControl::Proxy { location, .. }) = &result.outcome.control {
                 self.proxy_location = Some(location.clone());
@@ -136,24 +149,15 @@ impl<'a> RootRun<'a> {
                     error = error.or(raised);
                     signal = LifecycleSignal::Finalize;
                 }
-                ContainerEventDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
-                    // Invalid recovery is a failure and still owes cleanup.
-                    let typed = CompositionError::LifecycleResumeWithoutSession { source_path: self.stack.source_path.to_path_buf() };
-                    self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
-                    let stack = stack.with_signal(LifecycleSignal::Finalize);
-                    self.runner.execute_event(LifecycleSignal::Finalize, &stack);
-                    return Err(typed.into());
-                }
-                ContainerEventDecision::Abort(_) => {
-                    let typed = CompositionError::LifecycleDeferNotImplemented { source_path: self.stack.source_path.to_path_buf() };
-                    self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
-                    self.runner.execute_event(LifecycleSignal::Finalize, &stack.with_signal(LifecycleSignal::Finalize));
-                    return Err(typed.into());
-                }
-                ContainerEventDecision::SetupRecoveryUnsupported { event, action } => {
-                    let typed = CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                        source_path: self.stack.source_path.to_path_buf(), event: format!("{event:?}").to_lowercase(), action: action.to_string(),
+                decision @ (ContainerEventDecision::Abort(_) | ContainerEventDecision::SetupRecoveryUnsupported { .. }) => {
+                    let (Some(refusal), Some(RefusalRoute::FinalizeIfOwed)) = (decision.refusal(), self.runner.refusal_route(&decision)) else {
+                        unreachable!("a root sequence finalizes only what a refusal leaves owed: {decision:?}");
                     };
+                    let Some(typed) = CompositionError::from_lifecycle_refusal(&refusal, self.stack.source_path) else {
+                        unreachable!("a container refuses only a setup recovery, a resume, or a defer: {refusal:?}");
+                    };
+                    // A refused recovery is a failure: the error is recorded,
+                    // and a `finalize` the run already owes still runs.
                     self.runner.set_error(LifecycleErrorInfo::from_composition_error(&typed));
                     self.runner.execute_event(LifecycleSignal::Finalize, &stack.with_signal(LifecycleSignal::Finalize));
                     return Err(typed.into());
@@ -204,11 +208,11 @@ pub(super) fn mask_body_events(
     overrides: &mut claudine::composition::LayeredOverrides,
     source: &claudine::composition::ResolvedCompositionSource,
 ) {
-    for key in claudine::composition::LIFECYCLE_EVENT_KEYS {
-        if *key == "loop" { continue; }
-        let present = source.markdown.frontmatter().as_map().contains_key(*key) || overrides.values().contains_key(*key);
+    for key in claudine::composition::claudine_registry().authored_event_keys() {
+        if key == "loop" { continue; }
+        let present = source.markdown.frontmatter().as_map().contains_key(key) || overrides.values().contains_key(key);
         if present {
-            overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, (*key).to_string(), serde_json::json!([]));
+            overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, key.to_string(), serde_json::json!([]));
         }
     }
 }

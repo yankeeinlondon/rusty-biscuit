@@ -1,0 +1,15 @@
+# scenario: cancelled-root-sequence
+# doc: cancelled-root-sequence.md
+# given: invoked as `claudine sequence --claude --yolo cancelled-root-sequence.md` from the directory holding the fixture documents
+# given: the root sequence authors a cancelled stack
+# given: task interrupt sends SIGINT to claudine (a Ctrl+C) and is then cancelled; task later never runs
+# given: the interrupt is reported to the cleanup events as provider.interrupted
+# given: no provider launches
+event seq:initialize
+event seq:start
+task interrupt
+event seq:cancelled
+err provider.interrupted
+event seq:finalize
+err provider.interrupted
+exit 130

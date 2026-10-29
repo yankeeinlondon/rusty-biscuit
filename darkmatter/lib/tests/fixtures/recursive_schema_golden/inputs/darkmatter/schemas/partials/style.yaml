@@ -1,0 +1,146 @@
+# The `style` property of the `fm` global: Darkmatter's canonical kebab-case
+# style surface. Anchors keep the repeated component shapes identical; the
+# runtime parser remains authoritative for deprecated snake_case aliases and
+# cross-field constraints such as width/max-width.
+kind: schema
+types:
+    style:
+        page:
+            left-margin: &style-length
+                - "string -> Horizontal length such as 2ch or 10%."
+                - "number(integer; min(0)) -> Character-cell length."
+            right-margin: *style-length
+            top-margin: &style-rows "number(integer; min(0); max(65535)) -> Terminal row count."
+            bottom-margin: *style-rows
+            left-padding: *style-length
+            right-padding: *style-length
+            top-padding: *style-rows
+            bottom-padding: *style-rows
+            max-width: *style-length
+            alignment: &style-alignment "enum(left, center, right) -> Horizontal alignment."
+            color: &style-color "string -> Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
+            bg-color: *style-color
+            background: "enum(transparent, subtle, pronounced) -> Page background fill strategy."
+            stylesheet: "file -> CSS file reference or URL used for browser rendering."
+            meta: "object -> Browser metadata passed through to generated HTML."
+            code:
+                theme: "string -> Syntax-highlighting theme pair for code blocks."
+
+        table: &style-common
+            width: &style-width
+                - "enum(auto, fit-content) -> Intrinsic component width mode."
+                - "string -> Fixed width such as 40ch or 50%."
+                - "number(integer; min(0)) -> Fixed character-cell width."
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            margin: *style-length
+            padding: *style-length
+            border: &style-border
+                - "boolean -> Enables or disables a thin border on all sides."
+                - "enum(thin, medium, thick, none) -> Border weight on all sides."
+                - left: "boolean -> Whether to draw the left border."
+                  right: "boolean -> Whether to draw the right border."
+                  top: "boolean -> Whether to draw the top border."
+                  bottom: "boolean -> Whether to draw the bottom border."
+                  weight: "enum(thin, medium, thick) -> Border weight."
+                  color: *style-color
+                  style: "enum(solid, dashed, dotted, double) -> Border line style."
+                  radius: *style-length
+            emphasis: &style-emphasis
+                bold: boolean
+                dim: boolean
+                italic: boolean
+                strikethrough: boolean
+                underline: "enum(straight, double, curly, dotted, dashed) -> Underline style."
+                inverse: boolean
+                blink: boolean
+            word-wrap: &style-word-wrap "enum(none, wrap, truncate, wrap-prose) -> Component wrapping policy."
+
+        block-quote: *style-common
+
+        ul:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            left-margin: *style-length
+            margin: *style-length
+            padding: *style-length
+            border: *style-border
+            emphasis: *style-emphasis
+            word-wrap: *style-word-wrap
+
+        ol: *style-common
+        li: *style-common
+
+        hyperlinks:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            local-style: *style-common
+
+        images:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            local-style: *style-common
+
+        hr:
+            width: *style-length
+            max-width: *style-length
+            alignment: "enum(full, left, center, right) -> Horizontal-rule alignment."
+            color: *style-color
+            bg-color: *style-color
+            kind: "enum(dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod) -> Horizontal-rule glyph style."
+            weight: "enum(thin, medium, thick) -> Horizontal-rule weight."
+            margin: *style-length
+            padding: *style-length
+            border: *style-border
+            emphasis: *style-emphasis
+            word-wrap: *style-word-wrap
+
+        disclosure: *style-common
+        code-block: *style-common
+
+        # Cleanup formatting rules (`md clean`, DMLS formatting). Defaults are
+        # runtime rule defaults, never written into frontmatter; the runtime
+        # validator (`markdown::cleanup::rules`) is authoritative. It binds
+        # each value against these declarations through the same conversion
+        # engine as schema validation (so `"80"` reads as `80`), which keeps
+        # validation and cleanup in agreement.
+        markdown:
+            frontmatter:
+                - "literal(true; default(true)) -> Apply non-destructive frontmatter repairs (the default)."
+                - "literal(false) -> Leave the frontmatter block byte-for-byte."
+            table-layout:
+                - "literal(true; default(true)) -> Pad table cells so columns line up (the default)."
+                - "literal(false) -> Leave table cells as authored."
+            fixed-width:
+                - "number(integer; min(1); max(1000)) -> Unwrap, then re-wrap prose to this display width."
+                - "boolean(default(false)) -> false: never re-wrap; true: re-wrap to 120."
+            unwrap:
+                - "literal(true) -> Join single line breaks inside paragraphs."
+                - "literal(false; default(false)) -> Keep authored line breaks (the default)."
+            indentation:
+                - "literal(preserve) -> Leave list indentation as authored."
+                - "literal(2) -> Two spaces per nested-list level."
+                - "literal(4; default(4)) -> Four spaces per nested-list level (the default)."
+                - "literal(8) -> Eight spaces per nested-list level."
+            ordered-lists:
+                - "literal(true; default(true)) -> Renumber ordered lists that are neither uniform nor sequential (the default)."
+                - "literal(false) -> Leave list numbers as authored."
+            list-padding:
+                - "literal(true; default(true)) -> Ensure one blank line before and after every list (the default)."
+                - "literal(false) -> Leave blank lines around lists as authored."
+            list-item-padding: "enum(preserve, none, one; default(preserve)) -> Blank lines between sibling items of the same list."
+            list-interior-padding: "enum(preserve, none, except-nested-lists, all; default(preserve)) -> Blank lines between an item's first line and the blocks nested inside it."
+            default-language:
+                - "string(not-empty; default(text); suggest(text, plain)) -> Language added to unlabeled code fences."
+                - "literal('') -> Add no language."

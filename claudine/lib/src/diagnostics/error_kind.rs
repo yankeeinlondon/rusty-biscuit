@@ -16,7 +16,7 @@
 //!
 //! [`ClaudineError`]: crate::error::ClaudineError
 //! [`HarnessError`]: crate::harness::error::HarnessError
-//! [`LifecycleErrorInfo::from_action_failure`]: crate::composition::lifecycle_context::LifecycleErrorInfo::from_action_failure
+//! [`LifecycleErrorInfo::from_action_failure`]: crate::composition::lifecycle_context::LifecycleErrorInfoExt::from_action_failure
 //! [`Diagnostic`]: super::Diagnostic
 
 use crate::stream::badges::{BadgeCategory, badge_category_for_kind};

@@ -1,20 +1,24 @@
 //! Shared descriptor framework for runtime-accessible metadata catalogs.
 //!
-//! The [`Described`] trait lets Darkmatter's static catalogs (context variables,
+//! The [`Described`] trait lets Darkmatter's catalogs (context variables,
 //! expression functions, side-effect capabilities) expose a uniform lookup and
 //! suggestion surface. Consumers can perform exact lookups, fuzzy nearest-match
 //! suggestions, and plain-text error enrichment without depending on any
 //! specific catalog type.
 
 /// One verified example for a described item.
+///
+/// A borrowed view: static tables store `Example<'static>`, and a catalog that
+/// owns its example text (such as a loaded expression-function catalog) lends
+/// a view borrowed from itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Example {
+pub struct Example<'a> {
     /// Literal invocation shown to the user (e.g. `upper("hello")`).
-    pub invocation: &'static str,
+    pub invocation: &'a str,
     /// Expected rendered result of the invocation.
-    pub result: &'static str,
+    pub result: &'a str,
     /// Declares whether the example is machine-auditable, and if not, why.
-    pub verification: ExampleVerification,
+    pub verification: ExampleVerification<'a>,
 }
 
 /// The verification intent of an [`Example`].
@@ -24,7 +28,7 @@ pub struct Example {
 /// silent: it must carry a non-empty reason, so the opt-out is runtime-readable
 /// metadata rather than a source comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExampleVerification {
+pub enum ExampleVerification<'a> {
     /// The invocation is executed and its rendered result is asserted to equal
     /// [`Example::result`].
     Executable,
@@ -33,21 +37,24 @@ pub enum ExampleVerification {
     TypeShapeOnly,
     /// The example is for display only and is never executed. The payload is a
     /// non-empty reason explaining why it cannot be machine-audited.
-    DisplayOnly(&'static str),
+    DisplayOnly(&'a str),
 }
 
-/// Trait implemented by every static descriptor catalog in Darkmatter.
+/// Trait implemented by every descriptor catalog in Darkmatter.
+///
+/// Every view borrows from the descriptor. A caller that needs a permanent
+/// borrow gets it from a concrete static catalog, not from this trait.
 pub trait Described {
     /// Canonical lookup key (e.g. variable name or function signature).
-    fn key(&self) -> &'static str;
+    fn key(&self) -> &str;
     /// Short human-readable description.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
     /// Logical grouping category.
-    fn category(&self) -> &'static str;
+    fn category(&self) -> &str;
     /// Stable display order within the category.
     fn order(&self) -> usize;
     /// Optional verified example.
-    fn example(&self) -> Option<&Example>;
+    fn example(&self) -> Option<Example<'_>>;
 }
 
 /// Exact lookup of a descriptor by key.
@@ -93,8 +100,8 @@ pub fn suggest<'a, D: Described>(catalog: &'a [D], key: &str, max: usize) -> Vec
 ///
 /// The string sibling of [`suggest`]: it ranks plain `candidates` (e.g. sibling
 /// filenames listed at render time) against `key` and returns up to `max` of
-/// them, closest first. [`suggest`] cannot be reused for this because
-/// [`Described::key`] is `&'static str` while filenames are runtime values.
+/// them, closest first. [`suggest`] cannot be reused for this because it
+/// ranks [`Described`] records, while these candidates are plain strings.
 ///
 /// The **same quality gate** as [`suggest`] applies — candidates whose distance
 /// to `key` exceeds `max(2, key_char_len / 3)` are dropped — so the returned
@@ -180,28 +187,28 @@ mod tests {
         description: &'static str,
         category: &'static str,
         order: usize,
-        example: Option<Example>,
+        example: Option<Example<'static>>,
     }
 
     impl Described for TestDescriptor {
-        fn key(&self) -> &'static str {
+        fn key(&self) -> &str {
             self.key
         }
-        fn description(&self) -> &'static str {
+        fn description(&self) -> &str {
             self.description
         }
-        fn category(&self) -> &'static str {
+        fn category(&self) -> &str {
             self.category
         }
         fn order(&self) -> usize {
             self.order
         }
-        fn example(&self) -> Option<&Example> {
-            self.example.as_ref()
+        fn example(&self) -> Option<Example<'_>> {
+            self.example
         }
     }
 
-    const UPPER_EXAMPLE: Example = Example {
+    const UPPER_EXAMPLE: Example<'static> = Example {
         invocation: r#"upper("hello")"#,
         result: "HELLO",
         verification: ExampleVerification::Executable,

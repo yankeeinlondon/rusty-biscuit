@@ -6002,7 +6002,7 @@ class RealWorkspaceDocumentationOnlyTests(unittest.TestCase):
     #: read by any test, which a document like `docs/topics/ci-cd.md` is.
     LEVELS = (
         "docs/comment-quality.md",
-        "darkmatter/README.md",
+        "biscuit-hash/README.md",
         "biscuit-file/README.md",
     )
 
@@ -8840,7 +8840,7 @@ class SourceInputSelectionTests(unittest.TestCase):
 
 
 class RealWorkspaceTestInputTests(unittest.TestCase):
-    """The shipped tree: the live instance is caught and a typo stays free."""
+    """The shipped tree: read documents select their tests; unread ones do not."""
 
     LIVE_TEST = (
         "binary_id(darkmatter::l1) & "
@@ -8899,13 +8899,27 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
         self.assertEqual([], plan["cells"])
         self.assertEqual([], plan["builds"])
 
-    def test_readme_typos_schedule_nothing(self) -> None:
-        for readme in ("README.md", "darkmatter/README.md", "biscuit-file/README.md"):
+    def test_unread_readme_typos_schedule_nothing(self) -> None:
+        for readme in ("README.md", "biscuit-hash/README.md", "biscuit-file/README.md"):
             with self.subTest(readme=readme):
                 self.assertTrue((ROOT / readme).is_file(), f"{readme} is no longer tracked")
                 plan = self.plan(readme)
                 self.assertEqual([], plan["cells"])
                 self.assertEqual([], plan["builds"])
+
+    def test_the_darkmatter_readme_selects_only_its_trigger_spelling_guard(self) -> None:
+        plan = self.plan("darkmatter/README.md")
+        self.assertEqual(1, len(plan["cells"]))
+        cell = plan["cells"][0]
+        self.assertEqual(
+            ("darkmatter", "ubuntu-latest", "L1"),
+            (cell["package"], cell["environment"], cell["gate"]),
+        )
+        self.assertEqual(
+            "(binary_id(darkmatter::l1) & "
+            "test(=trigger_spelling_guard::no_active_file_spells_a_renamed_trigger_form))",
+            cell["test_filter"],
+        )
 
     def narrowed_toolkit_filter(self, changed: str) -> str:
         plan = self.plan(changed)

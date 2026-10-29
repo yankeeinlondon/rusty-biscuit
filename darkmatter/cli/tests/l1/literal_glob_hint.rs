@@ -21,7 +21,7 @@ fn repository(name: &str) -> CliProcessFixture {
 fn compose(fixture: &CliProcessFixture, argument: &str) -> (bool, String) {
     let output = fixture
         .command()
-        .args(["compose", argument, "--no-baseline-schema"])
+        .args(["compose", argument, "--disable", "baseline-schema"])
         .output()
         .expect("md must run");
     (output.status.success(), unwrapped(&String::from_utf8_lossy(&output.stderr)))

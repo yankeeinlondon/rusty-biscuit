@@ -99,6 +99,32 @@ fn a_missing_field_reports_the_mapping_that_lacks_it() {
 }
 
 #[test]
+fn missing_fields_in_empty_flow_mappings_report_the_opening_brace() {
+    let api = api("m: '{ id: number(required) }'\nitems: '{ id: number(required) }[]'\n");
+    for line_end in ["\n", "\r\n"] {
+        let text = "---\nm: {}\nitems: [{id: 1}, {}]\n---\n".replace('\n', line_end);
+        let report = validate(&api, &doc(&text));
+        assert_eq!(report.problems.len(), 2, "{:#?}", report.problems);
+        for (path, expected) in [("/m", (2, 4)), ("/items/1", (3, 18))] {
+            let missing = problem(&report, path);
+            assert_eq!(missing.code, ValidationProblemCode::MissingRequired);
+            assert_eq!(missing.property.as_deref(), Some("id"));
+            assert_eq!(position(missing), (Some(expected.0), Some(expected.1)));
+        }
+    }
+}
+
+#[test]
+fn an_anchor_without_an_alias_keeps_precise_nested_positions() {
+    let api = api("m: '{ value: number }'\n");
+    let report = validate(&api, &doc("---\nm: &entry\n  value: oops\n---\n"));
+    assert_eq!(report.problems.len(), 1, "{:#?}", report.problems);
+    let wrong = problem(&report, "/m/value");
+    assert_eq!(wrong.code, ValidationProblemCode::TypeMismatch);
+    assert_eq!(position(wrong), (Some(3), Some(10)));
+}
+
+#[test]
 fn flow_collections_distinguish_same_line_keys_and_values() {
     let md = doc("---\ntitle: x\nm: {a: 1, b: x}\ns: [1, two, 3]\n---\n");
     let unknown = validate(&api("m: \"{ a: number }\"\n"), &md);

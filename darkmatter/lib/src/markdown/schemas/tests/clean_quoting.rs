@@ -20,7 +20,7 @@ fn sourceless_context() -> biscuit_file::FileResolutionContext {
 }
 
 /// The request context a caller builds for a document under `dir`: it
-/// discovers the repository, which anchors trigger-schema discovery.
+/// discovers the repository, which anchors schema-trigger discovery.
 fn document_context(dir: &std::path::Path) -> biscuit_file::FileResolutionContext {
     crate::markdown::compose::build_resolution_context(
         &crate::markdown::compose::RequestSnapshot::new(dir),
@@ -261,7 +261,7 @@ fn test_null_value_is_never_quoted() {
 
 #[test]
 fn test_default_baseline_keys_are_constrained() {
-    // The real shipped baseline (`docs/schemas/darkmatter.yaml`) constrains
+    // The real shipped baseline (the catalog's `fm`, `schemas/partials/fm.yaml`) constrains
     // `title` to a string through the normal config-resolution path.
     let analysis = analyze_with(
         &CleanSchemaConfig::new(sourceless_context()),
@@ -359,7 +359,7 @@ fn trigger_fixture(dir: &TempDir, trigger: &str, payload: &str, doc: &str) -> st
     doc_path
 }
 
-const TRIGGER: &str = "kind: trigger-schema\nmatch:\n  layout: string(required)\n$schema: payload.yaml\n";
+const TRIGGER: &str = "kind: schema-trigger\nmatch:\n  layout: string(required)\n$schema: payload.yaml\n";
 const PAYLOAD: &str = "$schema:\n  release: string\n";
 
 #[test]

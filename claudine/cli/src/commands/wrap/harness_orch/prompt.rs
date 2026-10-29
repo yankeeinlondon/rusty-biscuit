@@ -37,6 +37,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         compose_context: Some(prepared.compose_context.clone()),
         document_epoch: prepared.document_epoch.clone(),
         lifecycle: Some(prepared.lifecycle.clone()),
+        frontmatter_view: MaterializedHarnessPrompt::view_of(&live_frontmatter),
         live_frontmatter,
         runtime_state,
         loop_values: prepared.input_layers.loop_values.clone(),
@@ -284,6 +285,7 @@ pub(crate) fn preflight_harness_document(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn materialize_harness_prompt(
     state: &mut HarnessPromptState,
     _repo_root: Option<&Path>,
@@ -297,6 +299,17 @@ pub(crate) fn materialize_harness_prompt(
     // bootstrap read defers it to the stabilized reread taken after
     // `initialize` has had its chance to add or repair the property (R4).
     schema: claudine::composition::SchemaStage,
+) -> Result<MaterializedHarnessPrompt> {
+    materialize_harness_prompt_selecting(state, _repo_root, child_cwd, resume_followup, schema, None)
+}
+
+pub(super) fn materialize_harness_prompt_selecting(
+    state: &mut HarnessPromptState,
+    _repo_root: Option<&Path>,
+    child_cwd: &Path,
+    resume_followup: Option<&str>,
+    schema: claudine::composition::SchemaStage,
+    select: Option<&claudine::composition::ResolvedIdentitySelector<'_>>,
 ) -> Result<MaterializedHarnessPrompt> {
     let loaded = load_overlaid_source(state).map(|source| {
         let options = harness_prepare_options(state, &source, child_cwd);
@@ -333,14 +346,14 @@ pub(crate) fn materialize_harness_prompt(
         }
     };
 
-    let prepared = claudine::composition::prepare_document(claudine::composition::DocumentPreparation {
+    let prepared = claudine::composition::prepare_document_selecting(claudine::composition::DocumentPreparation {
         entry: state.entry,
         mode,
         source: &source,
         prompt_source,
         schema,
         options,
-    })?;
+    }, select)?;
 
     let inline_closure_plan = match prepared.closure {
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
@@ -394,6 +407,7 @@ pub(crate) fn materialize_harness_prompt(
         compose_context: Some(compose_context),
         document_epoch,
         lifecycle: Some(lifecycle),
+        frontmatter_view: MaterializedHarnessPrompt::view_of(&live_frontmatter),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
         loop_values,
@@ -455,6 +469,7 @@ pub(crate) fn bootstrap_harness_prompt(
         compose_context: Some(bootstrap.compose_context),
         document_epoch: bootstrap.document_epoch,
         lifecycle: Some(bootstrap.lifecycle),
+        frontmatter_view: MaterializedHarnessPrompt::view_of(&live_frontmatter),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
         loop_values: bootstrap.input_layers.loop_values,

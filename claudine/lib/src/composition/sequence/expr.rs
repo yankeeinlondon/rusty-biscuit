@@ -25,6 +25,7 @@ use darkmatter::markdown::compose::expression::{
     FmPath, fm_namespace_path, is_reserved_namespace, prepare_value,
 };
 use darkmatter::markdown::MarkdownError;
+use darkmatter::markdown::compose::SharedFrontmatter;
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, SequenceExpressionCause};
@@ -38,7 +39,7 @@ use super::super::error::{CompositionError, SequenceExpressionCause};
 /// `current` has no event here and reads as `null`.
 pub struct SourceExpressionLookup<'a> {
     item: Option<&'a Map<String, Value>>,
-    frontmatter: &'a Map<String, Value>,
+    frontmatter: &'a dyn DocumentFrontmatter,
     ctx: CtxLookup<'a>,
     file_resolution_context: &'a biscuit_file::FileResolutionContext,
     source_path: &'a Path,
@@ -51,7 +52,7 @@ impl<'a> SourceExpressionLookup<'a> {
     /// resolve document-relative. `env.NAME` and `ctx.*` read that context's
     /// environment.
     pub fn new(
-        frontmatter: &'a Map<String, Value>,
+        frontmatter: &'a dyn DocumentFrontmatter,
         file_resolution_context: &'a biscuit_file::FileResolutionContext,
         source_path: &'a Path,
     ) -> Self {
@@ -82,18 +83,22 @@ impl<'a> SourceExpressionLookup<'a> {
     /// replaces the frontmatter's `config` whole, and `config.b` is absent
     /// when the item's `config` has no `b`.
     fn document(&self, path: &str) -> Option<Value> {
-        let root = path.split('.').next().unwrap_or(path);
-        let layer = match self.item {
-            Some(item) if item.contains_key(root) => item,
-            _ => self.frontmatter,
-        };
-        resolve_path(layer, path)
+        let mut segments = path.split('.');
+        let root = segments.next()?;
+        let mut current = match self.item {
+            Some(item) if item.contains_key(root) => item.get(root),
+            _ => self.frontmatter.top_level(root),
+        }?;
+        for segment in segments {
+            current = current.get(segment)?;
+        }
+        Some(current.clone())
     }
 
     /// The whole document layer, for a bare `fm`: the item's top-level keys
     /// replace the frontmatter's.
     fn document_object(&self) -> Value {
-        let mut merged = self.frontmatter.clone();
+        let mut merged = self.frontmatter.to_object();
         if let Some(item) = self.item {
             merged.extend(item.iter().map(|(key, value)| (key.clone(), value.clone())));
         }
@@ -139,13 +144,35 @@ impl EvaluationLookup for SourceExpressionLookup<'_> {
 }
 
 /// Walk a dotted path into a map.
-fn resolve_path(map: &Map<String, Value>, path: &str) -> Option<Value> {
-    let mut segments = path.split('.');
-    let mut current = map.get(segments.next()?)?;
-    for segment in segments {
-        current = current.get(segment)?;
+/// The invoking document's frontmatter as a sequence-source expression reads
+/// it: by top-level key, or whole for a bare `fm`.
+///
+/// Sequence preflight passes its step view, so a referenced sequence's source
+/// expressions read the enclosing step's values without copying the
+/// document, its `sequence:` list included.
+pub trait DocumentFrontmatter: std::fmt::Debug {
+    fn top_level(&self, key: &str) -> Option<&Value>;
+    fn to_object(&self) -> Map<String, Value>;
+}
+
+impl DocumentFrontmatter for Map<String, Value> {
+    fn top_level(&self, key: &str) -> Option<&Value> {
+        self.get(key)
     }
-    Some(current.clone())
+
+    fn to_object(&self) -> Map<String, Value> {
+        self.clone()
+    }
+}
+
+impl DocumentFrontmatter for SharedFrontmatter {
+    fn top_level(&self, key: &str) -> Option<&Value> {
+        self.get(key)
+    }
+
+    fn to_object(&self) -> Map<String, Value> {
+        self.to_map()
+    }
 }
 
 /// Evaluate one whole expression, preserving its typed result.

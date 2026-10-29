@@ -243,7 +243,8 @@ fn roster_alias_rename_drifts_the_darkmatter_name_table() {
     assert!(stdout.contains("darkmatter agentic_cli_generated.rs: DRIFT"), "{stdout}");
 }
 
-/// `generate --yes` writes the renamed alias back and `check` then converges.
+/// `generate --yes` writes the renamed alias back and the name-table check
+/// then converges without regenerating unrelated provider artifacts.
 #[test]
 fn roster_alias_rename_is_regenerated_until_check_converges() {
     let fixture = fixture_with_renamed_roster_alias();
@@ -251,7 +252,7 @@ fn roster_alias_rename_is_regenerated_until_check_converges() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let table = fs::read_to_string(claudine_gen::agentic_clis_path(fixture.path())).unwrap();
     assert!(table.contains("(\"kimi_cli\", \"KimiCli\")") && !table.contains("\"kimi_code\""));
-    assert!(run_gen(fixture.path(), &["check"]).status.success());
+    assert!(matches!(claudine_gen::check_agentic_clis(fixture.path()).unwrap(), CheckOutcome::Clean));
 }
 
 const PI_ADAPTER: &str = "adapters:\n  - { id: pi-rpc, revision: 1, provider: pi, mechanism_ids: [rpc-steer] }\n";
@@ -287,9 +288,9 @@ fn steering_activation_policy_refuses_an_expected_loss_grant() {
 
 /// A grant over the passing fixture record drifts the committed table, is
 /// written by `generate`, and then checks clean (read → write → read). The
-/// drift and convergence reads call the library `check_steering_catalog`
-/// (the same function `check` reports `steering generated.rs` from), so the
-/// test pays for one ten-provider binary run instead of three.
+/// expected bytes come from the same builder used by the steering check;
+/// comparing the written artifact with those bytes proves convergence without
+/// generating the same steering catalog again.
 #[test]
 fn steering_activation_policy_grant_is_written_and_checks_clean() {
     let fixture = full_fixture();
@@ -298,16 +299,15 @@ fn steering_activation_policy_grant_is_written_and_checks_clean() {
     let snapshot = RequestSnapshot::new(fixture.path());
 
     fs::write(&policy, pi_grant("pi-rpc-steer-active-0844")).unwrap();
-    let before = claudine_gen::check_steering_catalog(fixture.path(), &snapshot).unwrap();
-    assert!(matches!(before, CheckOutcome::Drift { .. }), "{before:?}");
+    let expected = claudine_gen::build_steering_catalog(fixture.path(), &snapshot).unwrap();
+    assert_ne!(fs::read_to_string(&generated).unwrap(), expected, "the grant must drift the committed table");
 
     let output = run_gen(fixture.path(), &["generate", "--yes"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let written = fs::read_to_string(&generated).unwrap();
     assert!(written.contains("AdapterRef { id: \"pi-rpc\", revision: 1 }"), "{written}");
     assert!(written.contains("verification_ids: &[\"pi-rpc-steer-active-0844\"]"), "{written}");
-    let after = claudine_gen::check_steering_catalog(fixture.path(), &snapshot).unwrap();
-    assert!(matches!(after, CheckOutcome::Clean), "{after:?}");
+    assert_eq!(written, expected, "the generated steering table must converge exactly");
 }
 
 /// The `mapping` mode is machine-facing: pure JSON on stdout, never routed
@@ -417,7 +417,8 @@ fn dry_run_reports_and_writes_nothing() {
 }
 
 /// `--yes` writes every drifted file (data.rs + catalog.json) and the area
-/// re-converges: a follow-up `check` is clean and exits zero.
+/// re-converges under the same library checks the `check` command reports.
+/// The command's output and exit wiring have their own clean-report test.
 #[test]
 fn yes_writes_all_drift_and_check_reconverges() {
     let fixture = full_fixture();
@@ -433,10 +434,23 @@ fn yes_writes_all_drift_and_check_reconverges() {
             .contains("DOCTORED_MODEL")
     );
 
-    let check = run_gen(fixture.path(), &["check"]);
-    let check_stdout = String::from_utf8_lossy(&check.stdout);
-    assert!(check.status.success(), "{check_stdout}");
-    assert!(check_stdout.contains("catalog.json: clean"), "{check_stdout}");
+    let snapshot = RequestSnapshot::new(fixture.path());
+    let checked = claudine_gen::check_all(fixture.path(), &snapshot).unwrap();
+    let generations: Vec<_> = checked.into_iter().map(|(generation, outcome)| {
+        assert!(matches!(outcome, CheckOutcome::Clean), "{outcome:?}");
+        generation
+    }).collect();
+    for outcome in [
+        claudine_gen::check_catalog(fixture.path(), &generations).unwrap(),
+        claudine_gen::check_signals(fixture.path(), &snapshot).unwrap(),
+        claudine_gen::check_vocabulary(fixture.path(), &snapshot).unwrap(),
+        claudine_gen::check_steering_catalog(fixture.path(), &snapshot).unwrap(),
+        claudine_gen::check_agentic_clis(fixture.path()).unwrap(),
+        claudine_gen::check_families(fixture.path(), &generations).unwrap(),
+    ] {
+        assert!(matches!(outcome, CheckOutcome::Clean), "{outcome:?}");
+    }
+    claudine_gen::cross_validate_roster(fixture.path()).unwrap();
 }
 
 /// `--scaffold` on a slug with no wired `Provider` variant (kilo, whose

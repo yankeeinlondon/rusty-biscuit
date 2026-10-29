@@ -62,7 +62,7 @@ pub use bootstrap::BootstrapPreparation;
 pub use entry::{DocumentEntryReason, LoopOwnership, PreparationStages, SourceBasis};
 pub use service::{
     BootstrapRequest, DocumentPreparation, PromptSource, SchemaStage, prepare_bootstrap,
-    prepare_document,
+    prepare_document, prepare_document_selecting,
 };
 
 /// Options for composition preparation.
@@ -201,6 +201,15 @@ pub struct PrepareOptions {
 }
 
 impl PrepareOptions {
+    /// Where this preparation records the schema triggers discovery skipped:
+    /// the invocation's record, or a record of this call alone without one.
+    pub(crate) fn trigger_findings(&self) -> super::TriggerFindings {
+        self.invocation_context
+            .as_ref()
+            .map(|invocation| invocation.trigger_findings().clone())
+            .unwrap_or_default()
+    }
+
     /// The caller records the schema stage judges `match()` globs by: the
     /// captured records, else every override supplied in the launch area,
     /// as composition derives them.
@@ -458,7 +467,7 @@ fn canonical_compose_options(
         // variable *values* (`phase`, `pass_icon`, …) are composed before
         // launch and may still be mutated by lifecycle/loop side effects
         // during the run.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied().chain(["sequence"]))
+        .with_exclude_keys(claudine_registry().authored_event_keys().into_iter().chain(["sequence"]))
         // The composed body is delivered verbatim to the agent and reported as the
         // user prompt. Darkmatter's default strips incidental single newlines, which
         // would collapse an author's line-structured prompt into one paragraph —
@@ -520,6 +529,7 @@ fn resolve_launch_schema(
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
         &options.schema_caller_records(),
+        &options.trigger_findings(),
     ) {
         Ok(effective) => Ok(effective.map(|effective| LaunchSchema {
             effective,
@@ -634,7 +644,7 @@ pub fn approve_document_shell(
 use super::error::CompositionError;
 use super::guardrails::{load_or_create_guardrails, retired_custom_guardrails_path};
 use super::lifecycle::{
-    LIFECYCLE_EVENT_KEYS, validate_no_err_in_no_error_events,
+    claudine_registry, validate_no_err_in_no_error_events,
     validate_no_nested_spans_in_literals,
 };
 use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint, parse_yolo_hint};
@@ -734,9 +744,7 @@ fn compose_selecting(
     select: Option<&ResolvedIdentitySelector<'_>>,
 ) -> Result<(Markdown, darkmatter::markdown::compose::ComposeReport, Option<SelectedIdentity>), CompositionError> {
     let Some(select) = select else {
-        let (composed, report) = markdown
-            .compose_with(request)
-            .map_err(|e| map_compose_error(source_path, e))?;
+        let (composed, report) = recording_triggers(markdown.compose_with_warnings(request), source_path, options)?;
         return Ok((composed, report, None));
     };
     let captured = options
@@ -765,7 +773,28 @@ fn compose_selecting(
         return Err(error);
     }
     let (composed, report) = result.map_err(|e| map_compose_error(source_path, e))?;
+    options.trigger_findings().record_compose_warnings(&report.warnings);
     Ok((composed, report, selected))
+}
+
+/// A composition's outcome, after recording the invalid schema triggers it
+/// reported (a transcluded child's included) in the preparation's trigger
+/// record, also when the composition failed.
+fn recording_triggers(
+    outcome: Result<(Markdown, darkmatter::markdown::compose::ComposeReport), Box<darkmatter::markdown::compose::ComposeFailure>>,
+    source_path: &std::path::Path,
+    options: &PrepareOptions,
+) -> Result<(Markdown, darkmatter::markdown::compose::ComposeReport), CompositionError> {
+    match outcome {
+        Ok((composed, report)) => {
+            options.trigger_findings().record_compose_warnings(&report.warnings);
+            Ok((composed, report))
+        }
+        Err(failure) => {
+            options.trigger_findings().record_compose_warnings(&failure.warnings);
+            Err(map_compose_error(source_path, failure.error))
+        }
+    }
 }
 
 /// Whether a preparation runs the body's `::shell` and `::shell-block`
@@ -965,6 +994,13 @@ fn prepare_direct_on(
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
     let launch_schema = resolve_launch_schema(source, &effective_frontmatter, &options, None)?;
+    let lifecycle_warnings = super::lifecycle::reject_incompatible_calls(
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+        Some(&source.original_text),
+        launch_schema.as_ref().map(|schema| &schema.effective),
+    )?;
     let source_repo_root = options.source_repo_root.clone();
 
     Ok(PreparedComposition {
@@ -982,7 +1018,7 @@ fn prepare_direct_on(
         deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
-        warnings: report.warnings.clone(),
+        warnings: lifecycle_warnings.into_iter().chain(report.warnings.iter().cloned()).collect(),
         input_layers,
         compose_context: ctx,
         document_epoch: options.document_epoch,
@@ -1097,6 +1133,13 @@ fn prepare_inline_on(
 
     let launch_schema =
         resolve_launch_schema(source, &effective_frontmatter, &options, Some(SchemaPhase::Launch))?;
+    let lifecycle_warnings = super::lifecycle::reject_incompatible_calls(
+        &effective_frontmatter,
+        &lifecycle,
+        &source.resolved_path,
+        Some(&source.original_text),
+        launch_schema.as_ref().map(|schema| &schema.effective),
+    )?;
     let source_repo_root = options.source_repo_root.clone();
 
     // The agent works on the file: it is told which file, what the schema
@@ -1118,7 +1161,8 @@ fn prepare_inline_on(
         &super::closure::inline_hash_options(),
     );
 
-    let mut warnings = report.warnings.clone();
+    let mut warnings = lifecycle_warnings;
+    warnings.extend(report.warnings.iter().cloned());
     if let Some(path) = retired_guardrails {
         warnings.push(darkmatter::markdown::compose::ComposeWarning::new(
             "inline_guardrails",
@@ -1231,7 +1275,6 @@ fn effective_surface(
             )
             .ok()
             .flatten()
-            .and_then(|effective| effective.simplified)
         })
         .flatten();
     let mut lifecycle_options = options.clone();
@@ -1353,10 +1396,8 @@ pub(super) fn compose_bootstrap(
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
-    let (composed, report) = source
-        .markdown
-        .compose_with(&compose_request)
-        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
+    let (composed, report) =
+        recording_triggers(source.markdown.compose_with_warnings(&compose_request), &source.resolved_path, &options)?;
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let (selection_hints, lifecycle) =
         effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;

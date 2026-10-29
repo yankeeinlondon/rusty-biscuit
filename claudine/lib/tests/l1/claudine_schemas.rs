@@ -1,10 +1,8 @@
 //! Claudine's schema bundle under `claudine/schemas/` (`2026-10-21-claudine-schemas`,
 //! criteria 1–5): the bundle's files load through Darkmatter's loader, the action
 //! types agree with the lifecycle parser's verb inventory and Darkmatter's
-//! catalogs, the bundles copy the category short forms, the ordinary and
-//! `initialize` lifecycle stacks are typed three conditional levels deep and
-//! the `cancelled` stack at every depth the parser accepts, and the fixture
-//! corpus under
+//! catalogs, the bundles copy the category short forms, all three lifecycle
+//! stack families are typed recursively, and the fixture corpus under
 //! `tests/fixtures/claudine-schemas/` gets its decided verdicts through the
 //! same trigger-discovery path DMLS uses.
 //!
@@ -21,10 +19,12 @@ use biscuit_file::FileResolutionContext;
 use claudine::composition::lifecycle::actions::all_lifecycle_verbs;
 use claudine::composition::parse_lifecycle_config;
 use darkmatter::effects::effect_descriptors;
+use darkmatter::lifecycle::schema_projection::LifecycleSchemaProjection;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::triggers::{PathSubject, matches, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::validate::build_position_map;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError, ValidationReport};
 use serde_json::{Value, json};
 
@@ -35,7 +35,6 @@ pub(crate) type BundleFile = (&'static str, String);
 /// a fixture home beside it.
 pub(crate) struct SchemaRepo {
     _dir: tempfile::TempDir,
-    schemas: PathBuf,
     docs: PathBuf,
     home: PathBuf,
 }
@@ -55,27 +54,14 @@ impl SchemaRepo {
             .expect("git config");
         let schemas = repo.join("schemas");
         std::fs::create_dir_all(&schemas).expect("schemas dir");
+        for (name, text) in files {
+            std::fs::write(schemas.join(name), text).expect("write schema");
+        }
         let docs = repo.join("docs");
         std::fs::create_dir_all(&docs).expect("docs dir");
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).expect("home dir");
-        let repo = Self { _dir: dir, schemas, docs, home };
-        repo.write_bundle(files);
-        repo
-    }
-
-    /// Writes `files` into `schemas/`, replacing any file of the same name.
-    ///
-    /// Rewriting one repository between matrix cells (rather than building a
-    /// fresh one per cell) keeps every trigger path stable, so Darkmatter's
-    /// process-wide payload memo reuses a trigger whose payload inputs are
-    /// byte-identical to an earlier cell's and resolves the rest afresh: the
-    /// memo is keyed by the trigger's path and payload and fingerprinted on
-    /// every file the payload read.
-    pub(crate) fn write_bundle(&self, files: &[BundleFile]) {
-        for (name, text) in files {
-            std::fs::write(self.schemas.join(name), text).expect("write schema");
-        }
+        Self { _dir: dir, docs, home }
     }
 
     /// Writes a document into the repository's `docs/` folder.
@@ -112,13 +98,10 @@ impl SchemaRepo {
 
 /// `files` as an embedded bundle named like Claudine's.
 ///
-/// Darkmatter memoizes a loaded embedded trigger for the process by the
-/// address of its `'static` text, so reusing an address skips resolving the
-/// 2.5 MB `claudine.yaml` payload again. A trigger text is leaked once per
-/// (trigger text, every library text) combination and reused only for that
-/// same combination: a cell that edits a library always gets fresh trigger
-/// addresses, and an unedited trigger beside an edited sibling trigger keeps
-/// its memoized load.
+/// Interns trigger text per (trigger text, every library text) combination
+/// to avoid leaking duplicate fixture strings. Darkmatter's process memo
+/// compares the trigger's content and every imported library's content, so
+/// edited libraries invalidate a load while unrelated trigger edits do not.
 pub(crate) fn embedded_bundle(files: &[BundleFile]) -> EmbeddedSchemaBundle {
     use claudine::composition::schema::bundle::CLAUDINE_TRIGGER_FILES;
     static TRIGGER_TEXTS: std::sync::Mutex<BTreeMap<(String, String), &'static str>> =
@@ -161,6 +144,9 @@ pub(crate) struct Judged {
     pub(crate) properties: BTreeSet<String>,
     /// The validation verdict.
     pub(crate) report: ValidationReport,
+    /// The frontmatter as the validated document holds it: converted by the
+    /// one conversion engine, as Claudine's preparation reads it.
+    pub(crate) held: Value,
 }
 
 impl Discovered {
@@ -179,7 +165,7 @@ impl Discovered {
             .triggers
             .iter()
             .filter(|discovered| discovered.envelope == envelope)
-            .any(|discovered| discovered.envelope.match_arms.0.iter().any(|arm| matches(arm, &frontmatter, &subject)))
+            .any(|discovered| discovered.envelope.conditions.matches(&frontmatter, &subject))
     }
 
     /// Judges the document at `path`: which shipped triggers its frontmatter
@@ -198,12 +184,7 @@ impl Discovered {
         let mut claudine = false;
         let mut inline = false;
         for trigger in &self.schemas.trigger_registry().expect("discovery installed a registry").triggers {
-            let selected = trigger
-                .envelope
-                .match_arms
-                .0
-                .iter()
-                .any(|arm| matches(arm, &frontmatter, &subject));
+            let selected = trigger.envelope.conditions.matches(&frontmatter, &subject);
             if claudine_envelope.as_ref() == Some(&trigger.envelope) {
                 claudine |= selected;
             } else if inline_envelope.as_ref() == Some(&trigger.envelope) {
@@ -228,14 +209,21 @@ impl Discovered {
                 valid: true,
                 problems: Vec::new(),
                 pending: Vec::new(),
+                deferred: Vec::new(),
                 advisories: Vec::new(),
+                trigger_findings: Vec::new(),
             },
+        };
+        let held = match &effective {
+            Some(effective) => effective.coerce_frontmatter_with_pending(&data, &Default::default()).value,
+            None => data,
         };
         Ok(Judged {
             claudine,
             inline,
             properties,
             report,
+            held,
         })
     }
 }
@@ -281,12 +269,56 @@ fn resolved_exports(repo: &SchemaRepo, file: &str, exports: &[&str]) -> BTreeMap
     exports
         .iter()
         .map(|export| {
-            let mut fragment = effective.json_schema["properties"][format!("t_{export}")].clone();
+            let fragment = &effective.json_schema["properties"][format!("t_{export}")];
             assert!(!fragment.is_null(), "{file} exports `{export}`");
+            let mut fragment = dereferenced(fragment, &effective.json_schema["$defs"], &mut Vec::new());
             strip_optional_null(&mut fragment);
             (export.to_string(), fragment)
         })
         .collect()
+}
+
+/// `fragment` with every acyclic local `$ref` replaced by the definition it
+/// names, so a test reads an export the same way whether the resolver stored a
+/// repeated type once or inlined it. A reference back into a definition being
+/// replaced stays a reference.
+fn dereferenced(fragment: &Value, defs: &Value, open: &mut Vec<String>) -> Value {
+    match fragment {
+        Value::Object(map) => {
+            if let Some(key) = map.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/"))
+                && !open.iter().any(|name| name == key)
+                && let Some(Value::Object(body)) = defs.get(key)
+            {
+                open.push(key.to_string());
+                let mut merged = match dereferenced(&Value::Object(body.clone()), defs, open) {
+                    Value::Object(merged) => merged,
+                    _ => unreachable!("an object dereferences to an object"),
+                };
+                open.pop();
+                for (name, value) in map.iter().filter(|(name, _)| name.as_str() != "$ref") {
+                    merged.insert(name.clone(), dereferenced(value, defs, open));
+                }
+                return Value::Object(merged);
+            }
+            Value::Object(map.iter().map(|(name, value)| (name.clone(), dereferenced(value, defs, open))).collect())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(|item| dereferenced(item, defs, open)).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Every `$ref` in `fragment`, in document order.
+pub(crate) fn collect_references(fragment: &Value, found: &mut Vec<String>) {
+    match fragment {
+        Value::Object(map) => {
+            if let Some(Value::String(reference)) = map.get("$ref") {
+                found.push(reference.clone());
+            }
+            map.values().for_each(|value| collect_references(value, found));
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_references(item, found)),
+        _ => {}
+    }
 }
 
 /// An optional property lowers to `anyOf: [null, …]`; this returns the
@@ -306,7 +338,16 @@ fn strip_optional_null(fragment: &mut Value) {
 /// the fragment itself.
 fn arms_of(fragment: &Value) -> Vec<Value> {
     match fragment.get("anyOf").and_then(Value::as_array) {
-        Some(arms) => arms.iter().filter(|arm| *arm != &json!({ "type": "null" })).cloned().collect(),
+        // An arm that is only another union is a stored union reached by
+        // reference; its alternatives are this union's.
+        Some(arms) => arms
+            .iter()
+            .filter(|arm| *arm != &json!({ "type": "null" }))
+            .flat_map(|arm| match arm.as_object() {
+                Some(map) if map.len() == 1 && map.contains_key("anyOf") => arms_of(arm),
+                _ => vec![arm.clone()],
+            })
+            .collect(),
         None => vec![fragment.clone()],
     }
 }
@@ -356,6 +397,15 @@ fn property_names(object: &Value) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
+/// The keys beside a single action that `uncounted-keys` leaves out of a
+/// category's one-verb count.
+const SIBLINGS: &[&str] = &["when", "no_error"];
+
+/// A category's verbs: its keys without the sibling keys.
+fn verb_names(object: &Value) -> BTreeSet<String> {
+    property_names(object).into_iter().filter(|key| !SIBLINGS.contains(&key.as_str())).collect()
+}
+
 fn is_closed_object(fragment: &Value) -> bool {
     fragment["type"] == "object" && fragment["additionalProperties"] == json!(false)
 }
@@ -376,12 +426,12 @@ fn parser_hand_verbs() -> BTreeSet<String> {
 
 /// Darkmatter's side-effect and expression-function names, without `set`,
 /// which is typed once as the hand verb.
-fn generated_verbs() -> BTreeSet<String> {
+pub(crate) fn generated_verbs() -> BTreeSet<String> {
     let name_of = |signature: &str| signature.split('(').next().expect("a name").trim().to_string();
     effect_descriptors()
         .iter()
         .map(|descriptor| name_of(descriptor.signature))
-        .chain(expression_function_descriptors().iter().map(|descriptor| name_of(descriptor.signature)))
+        .chain(expression_function_descriptors().iter().filter(|descriptor| descriptor.accepts_value_arguments()).map(|descriptor| name_of(&descriptor.signature)))
         .filter(|name| name != "set")
         .collect()
 }
@@ -408,6 +458,7 @@ macro_rules! shipped_bundle {
             ("action.yaml", include_str!("../../../schemas/action.yaml").to_string()),
             ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml").to_string()),
             ("linking.yaml", include_str!("../../../schemas/linking.yaml").to_string()),
+            ("document.yaml", include_str!("../../../schemas/document.yaml").to_string()),
             ("claudine.yaml", include_str!("../../../schemas/claudine.yaml").to_string()),
             ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml").to_string()),
             ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml").to_string()),
@@ -427,7 +478,7 @@ fn hand_verbs_equal_the_parser_inventory() {
     let generated = generated_verbs();
     let hand: BTreeSet<String> = CATEGORIES
         .iter()
-        .flat_map(|category| property_names(&types[*category]))
+        .flat_map(|category| verb_names(&types[*category]))
         .filter(|verb| !generated.contains(verb))
         .collect();
     let parser = parser_hand_verbs();
@@ -440,7 +491,7 @@ fn hand_verbs_equal_the_parser_inventory() {
     // Every verb sits in exactly one category.
     let mut seen = BTreeMap::new();
     for category in CATEGORIES {
-        for verb in property_names(&types[*category]) {
+        for verb in verb_names(&types[*category]) {
             if let Some(previous) = seen.insert(verb.clone(), *category) {
                 panic!("`{verb}` is in both `{previous}` and `{category}`");
             }
@@ -485,33 +536,64 @@ fn generated_verb_keys_equal_the_darkmatter_catalogs() {
             .collect();
         assert_eq!(&generated, expected_generated, "`{export}` lists every catalog verb once");
         for verb in &generated {
-            assert!(
-                types[export]["properties"][verb.as_str()]["description"].is_string(),
-                "`{export}.{verb}` is described"
-            );
-            let mut value = types[export]["properties"][verb.as_str()].clone();
-            if let Some(object) = value.as_object_mut() {
-                object.remove("description");
-            }
-            assert_eq!(value, json!({}), "`{export}.{verb}` is untyped");
+            let value = without_descriptions(&types[export]["properties"][verb.as_str()]);
+            assert_ne!(value, json!({}), "`{export}.{verb}` is typed");
+        }
+    }
+
+    // Each generated key names the projected per-verb types by reference: a
+    // category takes the short and (when the verb has one) the long form, a
+    // bundle and the loop's loose bundle the short form only, and the loop's
+    // single-action arm the category's forms.
+    let projection = LifecycleSchemaProjection::shipped().expect("the shipped catalogs project");
+    let projected: BTreeSet<String> = projection.verbs.iter().map(|(_, verb)| verb.name.clone()).collect();
+    assert_eq!(projected, catalogs, "the projection covers the catalog verbs");
+    let authored = |file: &str| -> biscuit_file::serde_yaml_ng::Value {
+        let text = match file {
+            "action.yaml" => include_str!("../../../schemas/action.yaml"),
+            _ => include_str!("../../../schemas/lifecycle.yaml"),
+        };
+        biscuit_file::serde_yaml_ng::from_str(text).expect("the file parses")
+    };
+    let action = authored("action.yaml");
+    let lifecycle = authored("lifecycle.yaml");
+    let reference = |name: String| biscuit_file::serde_yaml_ng::Value::String(format!("{name}@darkmatter:lifecycle"));
+    for (_, verb) in &projection.verbs {
+        let short = reference(verb.short_type_name());
+        let category = match verb.long_type_name() {
+            Some(long) => biscuit_file::serde_yaml_ng::Value::Sequence(vec![short.clone(), reference(long)]),
+            None => short.clone(),
+        };
+        assert_eq!(action["types"]["expression"][verb.name.as_str()], category, "`expression.{}`", verb.name);
+        for bundle in ["bundle", "initialize-bundle", "cancelled-bundle"] {
+            assert_eq!(action["types"][bundle][verb.name.as_str()], short, "`{bundle}.{}`", verb.name);
+        }
+        if verb.name != "max" {
+            assert_eq!(lifecycle["types"]["loop-bundle"][verb.name.as_str()], short, "`loop-bundle.{}`", verb.name);
+            assert_eq!(lifecycle["types"]["loop-single"][verb.name.as_str()], category, "`loop-single.{}`", verb.name);
         }
     }
 
     // The loop declares `max` once, as its iteration control, and every
-    // other catalog verb as a loose key.
-    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &["loop"]);
-    let loop_keys = property_names(&lifecycle["loop"]);
+    // other catalog verb as a loose key, in both arms.
+    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &["loop-bundle", "loop-single"]);
+    let loop_keys = property_names(&lifecycle["loop-bundle"]);
+    let single_keys = property_names(&lifecycle["loop-single"]);
     for verb in &catalogs {
-        assert!(loop_keys.contains(verb), "`loop` lists `{verb}`");
+        assert!(loop_keys.contains(verb) && single_keys.contains(verb), "both loop arms list `{verb}`");
     }
-    let max_arms = arms_of(&lifecycle["loop"]["properties"]["max"]);
-    assert_eq!(max_arms.len(), 2, "`loop.max` is a count or a template: {max_arms:?}");
-    assert!(max_arms.iter().any(|arm| arm["type"] == "integer"), "`loop.max` is the iteration count");
-    assert!(
-        max_arms.iter().any(|arm| arm["type"] == "string" && arm["pattern"].is_string()),
-        "`loop.max` may be a whole-value interpolation"
-    );
-    assert!(!loop_keys.contains("fail_fast"), "a loop has no `fail_fast`");
+    assert_eq!(single_keys, &loop_keys - &BTreeSet::from(["gate".to_string()]), "the arms differ only by `gate`");
+    for arm in ["loop-bundle", "loop-single"] {
+        let max_arms = arms_of(&lifecycle[arm]["properties"]["max"]);
+        assert_eq!(max_arms.len(), 2, "`{arm}.max` is a count or a template: {max_arms:?}");
+        assert!(max_arms.iter().any(|arm| arm["type"] == "integer"), "`{arm}.max` is the iteration count");
+        assert!(
+            max_arms.iter().any(|arm| arm["type"] == "string" && arm["pattern"].is_string()),
+            "`{arm}.max` may be a whole-value interpolation"
+        );
+        assert!(!property_names(&lifecycle[arm]).contains("fail_fast"), "a loop has no `fail_fast`");
+    }
+    assert!(!single_keys.contains("gate"), "a `gate` never sits beside a loose verb");
 }
 
 #[test]
@@ -555,6 +637,16 @@ fn bundle_keys_are_the_union_of_their_categories_plus_when_and_no_error() {
         assert_eq!(present(&types[export]["properties"]["when"])["format"], "darkmatter-expression");
         assert_eq!(present(&types[export]["properties"]["no_error"])["type"], "boolean");
     }
+    // A category is a single-action dictionary: one verb, with `when` and
+    // `no_error` beside it and left out of the one-key count.
+    for category in CATEGORIES {
+        let object = &types[*category];
+        assert!(SIBLINGS.iter().all(|key| property_names(object).contains(*key)), "`{category}` takes `when` and `no_error`");
+        assert_eq!(present(&object["properties"]["when"])["format"], "darkmatter-expression");
+        assert_eq!(present(&object["properties"]["no_error"])["type"], "boolean");
+        assert!(object.get("maxProperties").is_none(), "`{category}` counts its verb apart from its siblings: {object}");
+        assert_eq!(object["allOf"].as_array().map(Vec::len), Some(4), "`{category}` bounds each sibling combination");
+    }
     assert!(
         !property_names(&types["initialize-bundle"]).contains("shell"),
         "the initialize bundle has no shell verb"
@@ -566,14 +658,25 @@ fn bundle_values_are_the_category_short_forms() {
     let bundle = [("action.yaml", include_str!("../../../schemas/action.yaml").to_string())];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
+    let generated = generated_verbs();
     let mut long_forms = 0;
     for category in CATEGORIES {
-        for verb in property_names(&types[*category]) {
+        for verb in verb_names(&types[*category]) {
             let declared = &types[*category]["properties"][verb.as_str()];
             let arms: Vec<Value> = arms_of(declared).iter().map(without_descriptions).collect();
-            // A long form is the one closed-object arm; `set` and the
-            // generated verbs have none.
+            // A long form is a closed-object arm. A hand verb has at most one
+            // and `set` none; a generated verb has one per overload and
+            // optional-parameter subset, whose shapes
+            // `generated_verb_keys_equal_the_darkmatter_catalogs` pins.
             let (long, short): (Vec<Value>, Vec<Value>) = arms.into_iter().partition(is_closed_object);
+            if generated.contains(&verb) {
+                for export in ["bundle", "initialize-bundle"] {
+                    let copied: Vec<Value> =
+                        arms_of(&types[export]["properties"][verb.as_str()]).iter().map(without_descriptions).collect();
+                    assert_eq!(copied, short, "`{export}.{verb}` is `{category}.{verb}`'s short form");
+                }
+                continue;
+            }
             assert!(long.len() <= 1, "`{verb}` has at most one long form: {declared}");
             if let Some(long) = long.first() {
                 long_forms += 1;
@@ -608,6 +711,9 @@ fn action_objects_are_closed_and_data_maps_stay_open() {
     ];
     let repo = SchemaRepo::new(&bundle);
     let types = resolved_exports(&repo, "action.yaml", ACTION_EXPORTS);
+    // A generated verb's object-typed parameter (`merge_frontmatter`'s `obj`,
+    // `append_line`'s structured `text`) is data, typed by its catalog.
+    let generated = generated_verbs();
     for export in ACTION_EXPORTS {
         let fragment = &types[*export];
         assert!(is_closed_object(fragment), "`{export}` is a closed object: {fragment}");
@@ -624,7 +730,7 @@ fn action_objects_are_closed_and_data_maps_stay_open() {
                 assert!(is_closed_object(&arm), "`{export}.{verb}`'s long form is closed: {arm}");
                 for (parameter, value) in arm["properties"].as_object().expect("parameters") {
                     for parameter_arm in arms_of(value) {
-                        if parameter_arm["type"] == "object" {
+                        if parameter_arm["type"] == "object" && !generated.contains(verb) {
                             assert_eq!(parameter, "with", "`{export}.{verb}.{parameter}` is a scalar parameter");
                             assert!(parameter_arm.get("additionalProperties").is_none(), "`with` stays open");
                         }
@@ -670,81 +776,49 @@ fn required_long_form_fields_survive_every_reference() {
 
 // ── AC1 / AC3: loading and typed levels ────────────────────────────────────
 
-/// Every bundle file loads. The libraries are loaded by resolving each of
-/// their exports and the triggers by discovery; the work is split across
-/// tests because each resolution is expensive in a debug build (the
-/// first-level sequence types alone inline to megabytes of JSON Schema).
-mod every_file_loads {
-    use super::*;
+#[test]
+fn every_file_loads_and_every_export_resolves() {
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let action = resolved_exports(&repo, "action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"]);
+    assert_eq!(action.len(), 8);
+    let lifecycle_exports = [
+        "bare-verb", "stack", "item", "conditional", "initialize-stack", "initialize-item", "initialize-conditional",
+        "cancelled-stack", "cancelled-item", "cancelled-conditional", "loop-action", "loop-action-entry", "loop",
+    ];
+    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
+    assert_eq!(lifecycle.len(), lifecycle_exports.len());
+    let linking_exports = [
+        "name", "allowed-tools", "tools", "skills", "license", "compatibility", "metadata",
+        "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
+    ];
+    assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
+    let document_exports = ["prompt", "hash", "last_updated"];
+    assert_eq!(resolved_exports(&repo, "document.yaml", &document_exports).len(), document_exports.len());
+    let sequence_exports = ["steps", "step", "task", "group"];
+    assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
 
-    #[test]
-    fn action_lifecycle_and_linking_exports_resolve() {
-        let repo = SchemaRepo::new(&shipped_bundle!());
-        let action = resolved_exports(&repo, "action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"]);
-        assert_eq!(action.len(), 8);
-        let lifecycle_exports = [
-            "bare-verb", "loose-body", "stack", "item-1", "conditional-1", "stack-2", "item-2", "conditional-2",
-            "stack-3", "item-3", "conditional-3", "initialize-stack", "initialize-item-1", "initialize-conditional-1",
-            "initialize-stack-2", "initialize-item-2", "initialize-conditional-2", "initialize-stack-3",
-            "initialize-item-3", "initialize-conditional-3", "cancelled-conditional-5", "cancelled-item-6",
-            "loop-action", "loop-action-entry", "loop",
-        ];
-        let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
-        assert_eq!(lifecycle.len(), lifecycle_exports.len());
-        let linking_exports = [
-            "name", "allowed-tools", "tools", "skills", "license", "compatibility", "metadata",
-            "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
-        ];
-        assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
+    // The three triggers load, and each payload resolves: a document
+    // selecting claudine.yaml and inline-compose.yaml gets every payload
+    // property of both.
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 3);
+    let path = repo.write_document("both.md", "---\nprompt: hi\n---\n");
+    let judged = discovered
+        .judge(
+            &path,
+            include_str!("../../../schemas/claudine.yaml"),
+            include_str!("../../../schemas/inline-compose.yaml"),
+        )
+        .expect("both payloads resolve");
+    assert!(judged.claudine && judged.inline);
+    for property in ["initialize", "start", "loop", "agent", "hash", "last_updated", "max_turns", "verbosity"] {
+        assert!(judged.properties.contains(property), "the effective schema declares `{property}`");
     }
-
-    #[test]
-    fn sequence_types_level_1_steps_exports_resolve() {
-        let repo = SchemaRepo::new(&shipped_bundle!());
-        let sequence_exports = ["steps", "step"];
-        assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
-    }
-
-    #[test]
-    fn sequence_types_level_1_task_and_group_exports_resolve() {
-        let repo = SchemaRepo::new(&shipped_bundle!());
-        let sequence_exports = ["task", "group"];
-        assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
-    }
-
-    #[test]
-    fn sequence_types_levels_2_and_3_exports_resolve() {
-        let repo = SchemaRepo::new(&shipped_bundle!());
-        let sequence_exports = ["steps-2", "step-2", "task-2", "group-2", "steps-3", "step-3", "task-3", "group-3"];
-        assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
-    }
-
-    /// The three triggers load, and each payload resolves: a document
-    /// selecting claudine.yaml and inline-compose.yaml gets every payload
-    /// property of both.
-    #[test]
-    fn triggers_load_and_their_payloads_resolve() {
-        let repo = SchemaRepo::new(&shipped_bundle!());
-        let discovered = repo.discover().expect("the shipped bundle loads");
-        assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 3);
-        let path = repo.write_document("both.md", "---\nprompt: hi\n---\n");
-        let judged = discovered
-            .judge(
-                &path,
-                include_str!("../../../schemas/claudine.yaml"),
-                include_str!("../../../schemas/inline-compose.yaml"),
-            )
-            .expect("both payloads resolve");
-        assert!(judged.claudine && judged.inline);
-        for property in ["initialize", "start", "loop", "agent", "hash", "last_updated", "max_turns", "verbosity"] {
-            assert!(judged.properties.contains(property), "the effective schema declares `{property}`");
-        }
-        assert!(judged.report.valid, "{:?}", problems(&judged.report));
-    }
+    assert!(judged.report.valid, "{:?}", problems(&judged.report));
 }
 
 /// A stack whose innermost conditional is `depth` levels deep and holds
-/// `leaf` as its only action.
+/// `leaf` as its only `then` action.
 fn nested(depth: usize, leaf: &str) -> String {
     let mut body = format!("[{leaf}]");
     for level in (1..=depth).rev() {
@@ -753,12 +827,28 @@ fn nested(depth: usize, leaf: &str) -> String {
     body
 }
 
+/// A stack whose innermost conditional is `depth` levels deep and holds
+/// `leaf` as its only `else` action: an unselected branch when the guards
+/// are false.
+fn nested_else(depth: usize, leaf: &str) -> String {
+    let mut body = format!("[{leaf}]");
+    for level in (1..=depth).rev() {
+        let (then, otherwise) = if level == depth {
+            ("[{ warn: \"no\" }]".to_string(), body)
+        } else {
+            (body, "[{ warn: \"no\" }]".to_string())
+        };
+        body = format!("[{{ when: \"ctx.level == {level}\", then: {then}, else: {otherwise} }}]");
+    }
+    body
+}
+
 /// Judges stacks placed by `holder` (an event, or the loop's gate) at depths
-/// 1, 2, 3, 5, and 6: a good leaf is valid at every depth, a bad leaf is
-/// rejected only within the three typed levels (a leaf inside a level-3
-/// conditional's body is not typed), and a level-3 conditional is itself
-/// typed.
-fn assert_typed_levels(bundle: &[BundleFile], claudine: &str, inline: &str, holder: &str, leaf_bad: &str) {
+/// 1, 3, 5, 6, and 8: the recursive family types every level, so a good leaf
+/// is valid and a bad leaf or a malformed long form is rejected at every
+/// depth, in `then` and in `else`. The schema encodes no depth limit, so depths past the parser's
+/// five levels are judged by type alone.
+fn assert_typed_at_every_depth(bundle: &[BundleFile], claudine: &str, inline: &str, holder: &str, leaf_bad: &str) {
     let repo = SchemaRepo::new(bundle);
     let discovered = repo.discover().expect("the shipped bundle loads");
     let close = if holder.starts_with("loop") { " }" } else { "" };
@@ -766,24 +856,33 @@ fn assert_typed_levels(bundle: &[BundleFile], claudine: &str, inline: &str, hold
         let path = repo.write_document(&format!("{name}.md"), &format!("---\n{holder}{stack}{close}\n---\n"));
         discovered.judge(&path, claudine, inline).expect("judged").report
     };
-    for depth in [1, 2, 3, 5, 6] {
-        let typed = depth < 3;
-        let valid = judge("ok", nested(depth, "{ info: hi }"));
-        assert!(valid.valid, "{holder}depth {depth}: {:?}", problems(&valid));
-        let invalid = judge("bad", nested(depth, leaf_bad));
-        assert_eq!(
-            invalid.valid, !typed,
-            "{holder}depth {depth}: a bad leaf is rejected only within the typed levels: {:?}",
-            problems(&invalid)
-        );
+    for depth in [1, 3, 5, 6, 8] {
+        for (branch, build) in [("then", nested as fn(usize, &str) -> String), ("else", nested_else)] {
+            let valid = judge("ok", build(depth, "{ info: hi }"));
+            assert!(valid.valid, "{holder}depth {depth} {branch}: {:?}", problems(&valid));
+            let invalid = judge("bad", build(depth, leaf_bad));
+            assert!(!invalid.valid, "{holder}depth {depth} {branch}: a bad leaf is rejected");
+            let long = judge("long", build(depth, "{ warn: { txet: careful } }"));
+            assert!(!long.valid, "{holder}depth {depth} {branch}: a malformed long form is rejected");
+        }
     }
-    let mixed = judge("mixed", nested(2, "{ when: \"ctx.x\", then: [stop], info: hi }"));
-    assert!(!mixed.valid, "{holder}a level-3 conditional is typed");
+    for depth in [1, 4] {
+        let mixed = judge("mixed", nested(depth, "{ when: \"ctx.x\", then: [stop], info: hi }"));
+        assert!(!mixed.valid, "{holder}a conditional beside a sibling verb is rejected below level {depth}");
+        let orphan = judge("orphan", nested(depth, "{ when: \"ctx.x\", else: [stop] }"));
+        assert!(!orphan.valid, "{holder}an `else` without `then` is rejected below level {depth}");
+        let sibling_no_error = judge("no-error", nested(depth, "{ when: \"ctx.x\", then: [stop], no_error: true }"));
+        assert!(!sibling_no_error.valid, "{holder}a conditional's sibling `no_error` is rejected below level {depth}");
+        let bundle = judge("bundle", nested(depth, "{ when: \"ctx.x\", info: hi, warn: careful }"));
+        assert!(bundle.valid, "{holder}a guarded bundle below level {depth}: {:?}", problems(&bundle));
+        let bare = judge("bare", nested(depth, "stop"));
+        assert!(bare.valid, "{holder}a bare verb below level {depth}: {:?}", problems(&bare));
+    }
 }
 
 #[test]
-fn event_stacks_are_typed_three_levels_deep_and_loose_below() {
-    assert_typed_levels(
+fn event_stacks_are_typed_at_every_depth() {
+    assert_typed_at_every_depth(
         &shipped_bundle!(),
         include_str!("../../../schemas/claudine.yaml"),
         include_str!("../../../schemas/inline-compose.yaml"),
@@ -793,8 +892,8 @@ fn event_stacks_are_typed_three_levels_deep_and_loose_below() {
 }
 
 #[test]
-fn initialize_stacks_are_typed_three_levels_deep_without_shell() {
-    assert_typed_levels(
+fn initialize_stacks_exclude_shell_at_every_depth() {
+    assert_typed_at_every_depth(
         &shipped_bundle!(),
         include_str!("../../../schemas/claudine.yaml"),
         include_str!("../../../schemas/inline-compose.yaml"),
@@ -804,8 +903,8 @@ fn initialize_stacks_are_typed_three_levels_deep_without_shell() {
 }
 
 #[test]
-fn loop_gate_is_typed_three_levels_deep_and_loose_below() {
-    assert_typed_levels(
+fn loop_gate_is_typed_at_every_depth() {
+    assert_typed_at_every_depth(
         &shipped_bundle!(),
         include_str!("../../../schemas/claudine.yaml"),
         include_str!("../../../schemas/inline-compose.yaml"),
@@ -848,12 +947,25 @@ type Case = (&'static str, &'static str, (bool, bool), Verdict, Parser);
 /// The AC5 rows, split by subject so each test stays small; together they
 /// name every file in `tests/fixtures/claudine-schemas/`.
 pub(crate) const AC5_GROUPS: &[&[&str]] = &[
-    &["depth1", "depth3", "depth5", "depth6", "root-dictionary", "bundle-in-then", "loop-gate", "long-forms", "bare-stop"],
+    &[
+        "depth1",
+        "depth3",
+        "depth5",
+        "depth6",
+        "depth6-wrong-verb",
+        "depth5-guarded-bundle",
+        "depth4-completion",
+        "root-dictionary",
+        "bundle-in-then",
+        "loop-gate",
+        "long-forms",
+        "bare-stop",
+    ],
     &[
         "shell-in-initialize-list",
         "shell-in-initialize-then",
         "shell-in-initialize-root-dictionary",
-        "shell-in-initialize-below-typed-levels",
+        "shell-in-initialize-depth3-then",
         "shell-expansion-in-initialize-set",
         "shell-in-start",
         "message-shell-bundle-with-when",
@@ -865,12 +977,33 @@ pub(crate) const AC5_GROUPS: &[&[&str]] = &[
         "misspelled-verb-in-then",
         "long-form-in-bundle",
         "long-form-in-root-dictionary",
-        "generated-verb-arbitrary-value",
+    ],
+    &["start-number", "agent-empty-list", "loop-number"],
+    &[
+        "generated-verb-typed-value",
+        "generated-verb-wrong-type",
+        "generated-verb-convertible-text",
+        "generated-verb-deferred",
+        "generated-verb-deferred-beside-unknown-parameter",
+        "generated-verb-deferred-beside-extra-argument",
+        "generated-verb-deferred-beside-bad-sibling",
+        "generated-verb-malformed-template",
+        "generated-verb-malformed-string-template",
+        "handwritten-action-malformed-template",
+        "optional-nonnullable-null",
+        "ensure-file-overloads",
+        "variadic-and-or",
+        "generated-verb-numeric-recovery",
+        "generated-verb-excluded-source",
     ],
     &[
-        "start-number",
-        "agent-empty-list",
-        "loop-number",
+        "single-action-root-dictionary",
+        "single-action-branch-dictionaries",
+        "single-action-loop-loose",
+        "long-forms-in-loop-bundle",
+        "conditional-root-dictionary",
+    ],
+    &[
         "empty-frontmatter",
         "unrelated-ticket",
         "null-identifiers",
@@ -951,7 +1084,8 @@ fn ac5_groups_name_every_fixture_once() {
     assert_eq!(named.into_iter().collect::<BTreeSet<_>>(), fixtures);
 }
 
-/// Depth 1, 3, and 5 are valid and depth 6 is the parser's to refuse; root
+/// Depth 1, 3, and 5 are valid and depth 6 is the parser's to refuse (the
+/// schema encodes no depth limit but types a misspelled verb at any depth); root
 /// dictionaries, bundles as bodies, the loop gate, long forms, and a bare
 /// `- stop` are valid.
 #[test]
@@ -972,6 +1106,34 @@ fn ac5_depths_and_stack_shapes() {
                 Valid,
                 Rejects("conditionals nest at most 5 levels"),
             ),
+            (
+                // The schema reports the misspelled verb; the parser reports
+                // the sixth level or the verb, whichever it meets first, and
+                // both lie on this path.
+                "depth6-wrong-verb",
+                include_str!("../fixtures/claudine-schemas/depth6-wrong-verb.md"),
+                CLAUDINE,
+                Invalid(&[("/success/0/then/0/then/0/then/0/then/0/then/0/then/0", "sya")]),
+                Rejects("success[0].then[0].then[0].then[0].then[0]"),
+            ),
+            (
+                // A guarded bundle inside a level-5 conditional is level 6.
+                "depth5-guarded-bundle",
+                include_str!("../fixtures/claudine-schemas/depth5-guarded-bundle.md"),
+                CLAUDINE,
+                Valid,
+                Rejects("conditionals nest at most 5 levels"),
+            ),
+            (
+                // Four conditionals in `initialize`, `start`, `cancelled`, and
+                // the loop gate, with generated long forms in the leaves: the
+                // DMLS completion/hover document.
+                "depth4-completion",
+                include_str!("../fixtures/claudine-schemas/depth4-completion.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
             ("root-dictionary", include_str!("../fixtures/claudine-schemas/root-dictionary.md"), CLAUDINE, Valid, Accepts),
             ("bundle-in-then", include_str!("../fixtures/claudine-schemas/bundle-in-then.md"), CLAUDINE, Valid, Accepts),
             ("loop-gate", include_str!("../fixtures/claudine-schemas/loop-gate.md"), CLAUDINE, Valid, Accepts),
@@ -981,8 +1143,31 @@ fn ac5_depths_and_stack_shapes() {
     );
 }
 
-/// `shell` in `initialize` is a schema error at every typed site, the
-/// parser's to refuse below them or inside `set`, and valid in `start`.
+/// `depth6-wrong-verb`'s problem carries the source position of the
+/// misspelled verb's item, which the CLI and DMLS report.
+#[test]
+fn depth6_wrong_verb_is_positioned_at_the_verb() {
+    let text = include_str!("../fixtures/claudine-schemas/depth6-wrong-verb.md");
+    let repo = SchemaRepo::new(&shipped_bundle!());
+    let discovered = repo.discover().expect("the shipped bundle loads");
+    let path = repo.write_document("depth6-wrong-verb.md", text);
+    let markdown = Markdown::try_from(path.as_path()).expect("document loads").with_source(ComposeSource::File(path.clone()));
+    let effective = discovered.schemas.effective_for(&markdown).expect("resolves").expect("a trigger applies");
+    let yaml = text.split("---\n").nth(1).expect("the frontmatter");
+    let report = effective.validate_with_positions(&frontmatter_json(&markdown), &build_position_map(yaml));
+    let line = u32::try_from(yaml.lines().position(|line| line.contains("sya:")).expect("the verb's line") + 1)
+        .expect("a small line");
+    let problem = report
+        .problems
+        .iter()
+        .find(|problem| problem.path == "/success/0/then/0/then/0/then/0/then/0/then/0/then/0")
+        .unwrap_or_else(|| panic!("a problem at the sixth-level item: {:?}", problems(&report)));
+    assert_eq!(problem.line, Some(line), "{problem:?}");
+    assert!(problem.column.is_some(), "{problem:?}");
+}
+
+/// `shell` in `initialize` is a schema error at every depth and the parser's
+/// alone to refuse inside `set`; it is valid in `start`.
 #[test]
 fn ac5_shell_placement() {
     assert_ac5(
@@ -1013,10 +1198,10 @@ fn ac5_shell_placement() {
                 Rejects("shell"),
             ),
             (
-                "shell-in-initialize-below-typed-levels",
-                include_str!("../fixtures/claudine-schemas/shell-in-initialize-below-typed-levels.md"),
+                "shell-in-initialize-depth3-then",
+                include_str!("../fixtures/claudine-schemas/shell-in-initialize-depth3-then.md"),
                 CLAUDINE,
-                Valid,
+                Invalid(&[("/initialize/0/then/0/then/0/then/0", "\"shell\"")]),
                 Rejects("initialize[0].then[0].then[0].then[0].shell"),
             ),
             (
@@ -1039,8 +1224,7 @@ fn ac5_shell_placement() {
 }
 
 /// Mixed conditionals, misspelled verbs and parameters, and long forms in
-/// bundles are schema errors naming the offending key; a generated verb's
-/// value is left to the parser.
+/// bundles are schema errors naming the offending key.
 #[test]
 fn ac5_malformed_actions() {
     assert_ac5(
@@ -1091,21 +1275,207 @@ fn ac5_malformed_actions() {
                 Invalid(&[("/success/say", "text")]),
                 Rejects("long form"),
             ),
+        ],
+    );
+}
+
+/// A single-action dictionary takes its verb's long form at a stack root, in
+/// either branch, beside `when` in a list item, and as a loop's one loose
+/// verb, as the parser does; several loose verbs beside a long form, and a
+/// conditional written as a stack's root dictionary, are refused by both.
+#[test]
+fn ac5_single_action_dictionaries() {
+    assert_ac5(
+        5,
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        &[
             (
-                "generated-verb-arbitrary-value",
-                include_str!("../fixtures/claudine-schemas/generated-verb-arbitrary-value.md"),
+                "single-action-root-dictionary",
+                include_str!("../fixtures/claudine-schemas/single-action-root-dictionary.md"),
                 CLAUDINE,
                 Valid,
+                Accepts,
+            ),
+            (
+                "single-action-branch-dictionaries",
+                include_str!("../fixtures/claudine-schemas/single-action-branch-dictionaries.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "single-action-loop-loose",
+                include_str!("../fixtures/claudine-schemas/single-action-loop-loose.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "long-forms-in-loop-bundle",
+                include_str!("../fixtures/claudine-schemas/long-forms-in-loop-bundle.md"),
+                CLAUDINE,
+                Invalid(&[("/loop/ensure_file", "file")]),
+                Rejects("long form"),
+            ),
+            (
+                "conditional-root-dictionary",
+                include_str!("../fixtures/claudine-schemas/conditional-root-dictionary.md"),
+                CLAUDINE,
+                Invalid(&[("/start", "anyOf")]),
+                Rejects("never carries `when`"),
+            ),
+        ],
+    );
+}
+
+/// A generated verb's value is typed by its catalog signature: convertible
+/// text and deferred templates pass, and a deferred operand never hides a
+/// mistake beside it (an unknown parameter, an extra argument, an invalid
+/// literal sibling). The verb's runtime registration decides its literal
+/// operands where the types alone cannot (a numeric recovery fallback, a
+/// refused source type). The parser's own operand rules are judged
+/// separately.
+#[test]
+fn ac5_generated_operands() {
+    assert_ac5(
+        4,
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        &[
+            (
+                "generated-verb-typed-value",
+                include_str!("../fixtures/claudine-schemas/generated-verb-typed-value.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "generated-verb-wrong-type",
+                include_str!("../fixtures/claudine-schemas/generated-verb-wrong-type.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/pr_list", "three")]),
+                Accepts,
+            ),
+            (
+                "generated-verb-convertible-text",
+                include_str!("../fixtures/claudine-schemas/generated-verb-convertible-text.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "generated-verb-deferred",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "generated-verb-deferred-beside-unknown-parameter",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-unknown-parameter.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/pr_list", "limit")]),
+                Rejects("limit"),
+            ),
+            (
+                "generated-verb-deferred-beside-extra-argument",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-extra-argument.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/min/2", "does not allow 3")]),
+                Rejects("min"),
+            ),
+            (
+                "generated-verb-deferred-beside-bad-sibling",
+                include_str!("../fixtures/claudine-schemas/generated-verb-deferred-beside-bad-sibling.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/min/0", "three")]),
+                Accepts,
+            ),
+            (
+                "generated-verb-malformed-template",
+                include_str!("../fixtures/claudine-schemas/generated-verb-malformed-template.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/pr_list", "{{ 1 + }}")]),
+                Rejects("pr_list"),
+            ),
+            (
+                "generated-verb-malformed-string-template",
+                include_str!("../fixtures/claudine-schemas/generated-verb-malformed-string-template.md"),
+                CLAUDINE,
+                Invalid(&[
+                    ("/start/0/ensure_file", "malformed template `{{ 1 + }}`"),
+                    ("/start/1/trim/text", "malformed template `hello {{ 1 + }}`"),
+                    ("/start/2/ensure_file/1", "malformed template `out/{{ 1 + }}.md`"),
+                ]),
+                Rejects("ensure_file"),
+            ),
+            (
+                // The same syntax problem wherever a hand-written verb's
+                // value is read as a template; the `$( … )` `set` value is
+                // a command, not one.
+                "handwritten-action-malformed-template",
+                include_str!("../fixtures/claudine-schemas/handwritten-action-malformed-template.md"),
+                CLAUDINE,
+                Invalid(&[
+                    ("/start/0/say", "malformed template `{{ 1 + }}`"),
+                    ("/start/1/info/text", "malformed template `hello {{ 1 + }}`"),
+                    ("/start/2/set/round", "malformed template `{{ fm.round + }}`"),
+                    ("/start/3/shell", "malformed template `echo {{ 2 * }}`"),
+                    ("/start/4/then/0/error/reason", "malformed template `failed {{ 3 - }}`"),
+                    ("/start/4/else/0/proxy/with/note", "malformed template `next {{ 4 / }}`"),
+                ]),
+                Rejects("say"),
+            ),
+            (
+                "optional-nonnullable-null",
+                include_str!("../fixtures/claudine-schemas/optional-nonnullable-null.md"),
+                CLAUDINE,
+                Invalid(&[("/start/0/ping/1", "null"), ("/start/1/ping/timeout", "null")]),
+                Rejects("{{ null }}"),
+            ),
+            (
+                "ensure-file-overloads",
+                include_str!("../fixtures/claudine-schemas/ensure-file-overloads.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                "variadic-and-or",
+                include_str!("../fixtures/claudine-schemas/variadic-and-or.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                // The runtime registration decides: a fallback recovers a
+                // subject the projected type rejects.
+                "generated-verb-numeric-recovery",
+                include_str!("../fixtures/claudine-schemas/generated-verb-numeric-recovery.md"),
+                CLAUDINE,
+                Valid,
+                Accepts,
+            ),
+            (
+                // `length` refuses a boolean its projected `string` converts,
+                // at every depth.
+                "generated-verb-excluded-source",
+                include_str!("../fixtures/claudine-schemas/generated-verb-excluded-source.md"),
+                CLAUDINE,
+                Invalid(&[
+                    ("/start/0/length/0", "does not accept a boolean"),
+                    ("/start/1/then/0/length/val", "does not accept a boolean"),
+                ]),
                 Accepts,
             ),
         ],
     );
 }
 
-/// Malformed identifying values select `claudine.yaml`, which rejects them;
-/// missing, null, and unrelated values select nothing; a malformed
-/// non-null `sequence` defeats the inline trigger; application data and
-/// every linking key are kept.
+/// Malformed identifying values select `claudine.yaml`, which rejects them.
 #[test]
 fn ac5_trigger_selection() {
     assert_ac5(
@@ -1135,6 +1505,21 @@ fn ac5_trigger_selection() {
                 Invalid(&[("/loop", "42")]),
                 Rejects("loop"),
             ),
+        ],
+    );
+}
+
+/// Missing, null, and unrelated values select nothing; a malformed non-null
+/// `sequence` defeats the inline trigger, while application and linking data
+/// remain accepted.
+#[test]
+fn ac5_trigger_selection_controls() {
+    assert_ac5(
+        6,
+        &shipped_bundle!(),
+        include_str!("../../../schemas/claudine.yaml"),
+        include_str!("../../../schemas/inline-compose.yaml"),
+        &[
             ("empty-frontmatter", include_str!("../fixtures/claudine-schemas/empty-frontmatter.md"), NEITHER, Valid, NotJudged),
             ("unrelated-ticket", include_str!("../fixtures/claudine-schemas/unrelated-ticket.md"), NEITHER, Valid, NotJudged),
             ("null-identifiers", include_str!("../fixtures/claudine-schemas/null-identifiers.md"), NEITHER, Valid, Accepts),
@@ -1185,39 +1570,298 @@ fn linked_prompt_declares_every_linking_key_and_keeps_the_root_open() {
     assert!(effective.validate(&frontmatter_json(&markdown)).valid, "`ticket: 123` is accepted beside the controls");
 }
 
+/// The metadata properties `document.yaml` declares and both metadata
+/// triggers import.
+const DOCUMENT_METADATA: [&str; 3] = ["prompt", "hash", "last_updated"];
+
+/// Compares two resolved JSON Schema graphs, each fragment read against the
+/// schema root whose `$defs` its references name.
+///
+/// Generated definition keys are not compared: a local `$ref` on each side is
+/// followed into its root, and the pair of references joins a bijective
+/// mapping, so two spellings of the same definition agree and one spelling
+/// never stands for two definitions. A visited pair is compared once, so a
+/// recursive graph terminates. A reference on one side only is compared by
+/// its target (with its sibling annotations), so an inlined and a shared
+/// definition of one type agree.
+struct GraphParity<'a> {
+    left_root: &'a Value,
+    right_root: &'a Value,
+    forward: BTreeMap<String, String>,
+    backward: BTreeMap<String, String>,
+    visited: BTreeSet<(String, String)>,
+}
+
+impl<'a> GraphParity<'a> {
+    fn new(left_root: &'a Value, right_root: &'a Value) -> Self {
+        Self { left_root, right_root, forward: BTreeMap::new(), backward: BTreeMap::new(), visited: BTreeSet::new() }
+    }
+
+    /// The local reference of `fragment`, when it has one.
+    fn local_ref(fragment: &Value) -> Option<&str> {
+        fragment.get("$ref").and_then(Value::as_str).filter(|reference| reference.starts_with("#/"))
+    }
+
+    /// The definition `reference` names in `root`, with `fragment`'s other
+    /// keys laid over it.
+    fn dereferenced(root: &Value, fragment: &Value, reference: &str, at: &str) -> Value {
+        let target = root
+            .pointer(&reference[1..])
+            .unwrap_or_else(|| panic!("{at}: `{reference}` names a definition of its root"));
+        let siblings = fragment.as_object().expect("a reference is an object").iter().filter(|(key, _)| *key != "$ref");
+        match target {
+            Value::Object(map) => {
+                let mut merged = map.clone();
+                merged.extend(siblings.map(|(key, value)| (key.clone(), value.clone())));
+                Value::Object(merged)
+            }
+            other => {
+                assert!(siblings.count() == 0, "{at}: `{reference}` names a boolean schema beside annotations");
+                other.clone()
+            }
+        }
+    }
+
+    fn assert_same(&mut self, left: &Value, right: &Value, at: &str) {
+        self.compare(left, right, at, 0);
+    }
+
+    fn compare(&mut self, left: &Value, right: &Value, at: &str, depth: usize) {
+        assert!(depth < 512, "{at}: the comparison does not terminate");
+        match (Self::local_ref(left), Self::local_ref(right)) {
+            (Some(left_ref), Some(right_ref)) => {
+                let mapped = self.forward.entry(left_ref.to_string()).or_insert_with(|| right_ref.to_string());
+                assert_eq!(mapped, right_ref, "{at}: `{left_ref}` is already paired with another definition");
+                let mapped = self.backward.entry(right_ref.to_string()).or_insert_with(|| left_ref.to_string());
+                assert_eq!(mapped, left_ref, "{at}: `{right_ref}` is already paired with another definition");
+                let without_ref = |fragment: &Value| -> Value {
+                    let mut map = fragment.as_object().expect("an object").clone();
+                    map.remove("$ref");
+                    Value::Object(map)
+                };
+                self.compare(&without_ref(left), &without_ref(right), &format!("{at} (beside $ref)"), depth + 1);
+                if self.visited.insert((left_ref.to_string(), right_ref.to_string())) {
+                    let left_target = self.left_root.pointer(&left_ref[1..]).cloned();
+                    let right_target = self.right_root.pointer(&right_ref[1..]).cloned();
+                    let left_target = left_target.unwrap_or_else(|| panic!("{at}: `{left_ref}` resolves"));
+                    let right_target = right_target.unwrap_or_else(|| panic!("{at}: `{right_ref}` resolves"));
+                    self.compare(&left_target, &right_target, &format!("{at} -> {left_ref}"), depth + 1);
+                }
+                return;
+            }
+            (Some(reference), None) => {
+                let target = Self::dereferenced(self.left_root, left, reference, at);
+                return self.compare(&target, right, &format!("{at} -> {reference}"), depth + 1);
+            }
+            (None, Some(reference)) => {
+                let target = Self::dereferenced(self.right_root, right, reference, at);
+                return self.compare(left, &target, &format!("{at} -> {reference}"), depth + 1);
+            }
+            (None, None) => {}
+        }
+        match (left, right) {
+            (Value::Object(left_map), Value::Object(right_map)) => {
+                let left_keys: BTreeSet<&String> = left_map.keys().collect();
+                let right_keys: BTreeSet<&String> = right_map.keys().collect();
+                assert_eq!(left_keys, right_keys, "{at}: the same keywords");
+                for (key, value) in left_map {
+                    self.compare(value, &right_map[key], &format!("{at}/{key}"), depth + 1);
+                }
+            }
+            (Value::Array(left_items), Value::Array(right_items)) => {
+                assert_eq!(left_items.len(), right_items.len(), "{at}: the same number of items");
+                for (index, (left_item, right_item)) in left_items.iter().zip(right_items).enumerate() {
+                    self.compare(left_item, right_item, &format!("{at}/{index}"), depth + 1);
+                }
+            }
+            _ => assert_eq!(left, right, "{at}"),
+        }
+    }
+}
+
+/// The comparison follows references into `$defs` whatever their keys,
+/// agrees an inlined definition with a shared one, terminates on a recursive
+/// graph, and rejects a key that would stand for two definitions.
+#[test]
+fn graph_parity_compares_definitions_through_a_bijective_reference_mapping() {
+    let recursive = |key: &str| {
+        let reference = format!("#/$defs/{key}");
+        json!({
+            "$defs": { key: { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "$ref": reference }] } } },
+            "properties": { "tree": { "$ref": reference } }
+        })
+    };
+    let (left, right) = (recursive("node"), recursive("node-2"));
+    GraphParity::new(&left, &right).assert_same(&left["properties"]["tree"], &right["properties"]["tree"], "recursive");
+
+    let shared = json!({ "$defs": { "h": { "type": "string" } }, "properties": { "a": { "$ref": "#/$defs/h" } } });
+    let inlined = json!({ "properties": { "a": { "type": "string" } } });
+    GraphParity::new(&shared, &inlined).assert_same(&shared["properties"]["a"], &inlined["properties"]["a"], "inlined");
+
+    let one = json!({ "$defs": { "h": { "type": "string" } }, "a": { "$ref": "#/$defs/h" }, "b": { "$ref": "#/$defs/h" } });
+    let two = json!({
+        "$defs": { "x": { "type": "string" }, "y": { "type": "string" } },
+        "a": { "$ref": "#/$defs/x" },
+        "b": { "$ref": "#/$defs/y" }
+    });
+    let merged = std::panic::catch_unwind(|| {
+        GraphParity::new(&one, &two).assert_same(&json!([one["a"], one["b"]]), &json!([two["a"], two["b"]]), "bijection");
+    });
+    assert!(merged.is_err(), "one definition must not pair with two");
+    let differs = std::panic::catch_unwind(|| {
+        let other = json!({ "$defs": { "h": { "type": "number" } }, "a": { "$ref": "#/$defs/h" } });
+        GraphParity::new(&one, &other).assert_same(&one["a"], &other["a"], "target");
+    });
+    assert!(differs.is_err(), "different definitions behind equal keys differ");
+}
+
+/// `prompt`, `hash`, and `last_updated` resolve to one type graph through
+/// the library itself, through each metadata trigger alone, and through the
+/// effective schema that merges them, on disk and embedded. Each comparison
+/// follows every definition the property reaches, so this holds whether a
+/// definition is inlined or shared, and however its key is spelled.
 #[test]
 fn shared_payload_properties_have_identical_types() {
-    let repo = SchemaRepo::new(&shipped_bundle!());
-    let discovered = repo.discover().expect("the shipped bundle loads");
-    let lowered = |name: &str, frontmatter: &str| {
+    let shipped = shipped_bundle!();
+    let without = |dropped: &[&str]| -> Vec<BundleFile> {
+        shipped.iter().filter(|(name, _)| !dropped.contains(name)).cloned().collect()
+    };
+    let effective_of = |discovered: &Discovered, repo: &SchemaRepo, name: &str, frontmatter: &str| {
         let path = repo.write_document(name, frontmatter);
         let markdown = Markdown::try_from(path.as_path())
             .expect("document loads")
             .with_source(ComposeSource::File(path.clone()));
-        let effective = discovered.schemas.effective_for(&markdown).expect("effective").expect("schema");
-        ["prompt", "hash", "last_updated"]
-            .iter()
-            .map(|key| (key.to_string(), effective.json_schema["properties"][*key].clone()))
-            .collect::<BTreeMap<_, _>>()
+        discovered.schemas.effective_for(&markdown).expect("effective").expect("schema")
     };
-    // Only `claudine.yaml` matches the first document. `prompt` selects both
-    // triggers, and `inline-compose.yaml` is applied after `claudine.yaml`,
-    // so the second shows the inline declarations.
-    let claudine_only = lowered("claudine-only.md", "---\nstart: [stop]\n---\n");
-    let inline_last = lowered("inline.md", "---\nprompt: hi\n---\n");
-    assert!(claudine_only.values().all(|fragment| !fragment.is_null()));
-    assert_eq!(claudine_only, inline_last);
 
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
-    let claudine = include_str!("../../../schemas/claudine.yaml");
-    let payload_lines = |text: &'static str| -> BTreeSet<&'static str> {
-        text.split("\n$schema:\n").nth(1).expect("a payload").lines().collect()
-    };
-    let shared: BTreeSet<&str> = payload_lines(inline);
-    assert!(
-        shared.is_subset(&payload_lines(claudine)),
-        "every inline-compose declaration is spelled exactly as in claudine.yaml"
+    // The library's own types, imported by a document's `$schema`.
+    let library_repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../schemas/document.yaml").to_string())]);
+    let mut imports = String::from("---\n$schema:\n");
+    for property in DOCUMENT_METADATA {
+        imports.push_str(&format!("    {property}: {property}@../schemas/document.yaml\n"));
+    }
+    imports.push_str("---\n");
+    let library = effective_of(&library_repo.discover().expect("discovery"), &library_repo, "library.md", &imports);
+    let library: &Value = &library.json_schema;
+
+    // (label, bundle, frontmatter, embedded): each trigger alone, then the
+    // normal merge, where `inline-compose.yaml` is applied after
+    // `claudine.yaml` and its declarations win.
+    let paths: [(&str, Vec<BundleFile>, &str, bool); 6] = [
+        ("claudine.yaml alone", without(&["inline-compose.yaml"]), "---\nprompt: hi\n---\n", false),
+        ("inline-compose.yaml alone", without(&["claudine.yaml"]), "---\nprompt: hi\n---\n", false),
+        ("the shipped bundle, claudine.yaml only", shipped.to_vec(), "---\nstart: [stop]\n---\n", false),
+        ("the shipped bundle, both triggers", shipped.to_vec(), "---\nprompt: hi\n---\n", false),
+        ("the embedded bundle, claudine.yaml only", shipped.to_vec(), "---\nstart: [stop]\n---\n", true),
+        ("the embedded bundle, both triggers", shipped.to_vec(), "---\nprompt: hi\n---\n", true),
+    ];
+    let mut payloads = Vec::new();
+    for (label, bundle, frontmatter, embedded) in paths {
+        let (repo, discovered) = if embedded {
+            let repo = SchemaRepo::new(&[]);
+            let discovered = repo.discover_embedded(embedded_bundle(&bundle)).expect("the embedded bundle loads");
+            (repo, discovered)
+        } else {
+            let repo = SchemaRepo::new(&bundle);
+            let discovered = repo.discover().expect("the bundle loads");
+            (repo, discovered)
+        };
+        payloads.push((label, effective_of(&discovered, &repo, "metadata.md", frontmatter)));
+    }
+
+    let (first_label, first) = &payloads[0];
+    let first: &Value = &first.json_schema;
+    for property in DOCUMENT_METADATA {
+        let first_fragment = &first["properties"][property];
+        assert!(!first_fragment.is_null(), "{first_label} declares `{property}`");
+
+        // Every payload declaration, optional presence included, is one graph.
+        for (label, payload) in &payloads[1..] {
+            let payload: &Value = &payload.json_schema;
+            let fragment = &payload["properties"][property];
+            assert!(!fragment.is_null(), "{label} declares `{property}`");
+            GraphParity::new(first, payload).assert_same(
+                first_fragment,
+                fragment,
+                &format!("`{property}`: {first_label} vs {label}"),
+            );
+        }
+
+        // And it is the library's type, apart from the optional null arm.
+        let mut declared = first_fragment.clone();
+        strip_optional_null(&mut declared);
+        let mut exported = library["properties"][property].clone();
+        strip_optional_null(&mut exported);
+        GraphParity::new(first, library).assert_same(
+            &declared,
+            &exported,
+            &format!("`{property}`: {first_label} vs document.yaml"),
+        );
+    }
+
+    // Behavioral parity: each payload accepts and rejects the same values.
+    for (value, valid) in [
+        (json!({ "prompt": "hi", "hash": "abc", "last_updated": "2026-10-26" }), true),
+        (json!({ "prompt": "hi", "hash": { "kind": "detailed", "value": [1, { "a": "b" }], "ignored": ["x"] } }), true),
+        (json!({ "prompt": "hi", "hash": [1] }), false),
+        (json!({ "prompt": "hi", "hash": { "kind": "bogus" } }), false),
+        (json!({ "prompt": ["hi"] }), false),
+    ] {
+        for (label, payload) in &payloads {
+            let report = payload.validate(&value);
+            assert_eq!(report.valid, valid, "{label}: {value}: {:?}", problems(&report));
+        }
+    }
+}
+
+/// One library type imported into two properties of the same schema keeps
+/// both stored hash forms valid at each use, and an invalid value at either
+/// use is reported at that property's instance path.
+#[test]
+fn hash_imported_twice_accepts_both_stored_forms_at_each_use() {
+    let repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../schemas/document.yaml").to_string())]);
+    let discovered = repo.discover().expect("discovery");
+    let path = repo.write_document(
+        "two-hashes.md",
+        "---\n$schema:\n    first: hash@../schemas/document.yaml\n    second: hash@../schemas/document.yaml\n---\n",
     );
+    let markdown = Markdown::try_from(path.as_path())
+        .expect("document loads")
+        .with_source(ComposeSource::File(path.clone()));
+    let effective = discovered.schemas.effective_for(&markdown).expect("resolves").expect("an inline schema");
+
+    // Two uses in one schema store `hash` once; each property refers to it.
+    let references = |property: &str| {
+        let mut found = Vec::new();
+        collect_references(&effective.json_schema["properties"][property], &mut found);
+        found
+    };
+    let (first_refs, second_refs) = (references("first"), references("second"));
+    assert_eq!(first_refs.len(), 1, "`first` refers to one definition: {first_refs:?}");
+    assert_eq!(first_refs, second_refs, "both uses refer to the same definition");
+    let defs = effective.json_schema["$defs"].as_object().expect("the shared body is a definition");
+    let key = first_refs[0].strip_prefix("#/$defs/").expect("a local definition");
+    assert!(defs.contains_key(key), "`{key}` is stored: {defs:?}");
+    assert_eq!(defs.len(), 1, "only `hash` is stored: {:?}", defs.keys().collect::<Vec<_>>());
+
+    let shorthand = json!("0123456789abcdef");
+    let longhand = json!({ "kind": "structured", "value": { "mixed": [1, true] }, "ignored": ["title"] });
+    for (first, second) in [(&shorthand, &longhand), (&longhand, &shorthand), (&shorthand, &shorthand), (&longhand, &longhand)] {
+        let report = effective.validate(&json!({ "first": first, "second": second }));
+        assert!(report.valid, "first: {first}, second: {second}: {:?}", problems(&report));
+    }
+    for property in ["first", "second"] {
+        for invalid in [json!([1]), json!({ "kind": "bogus" }), json!({ "ignored": "title" })] {
+            let other = if property == "first" { "second" } else { "first" };
+            let report = effective.validate(&json!({ property: invalid, other: shorthand }));
+            assert!(!report.valid, "`{property}: {invalid}` is rejected");
+            let found = problems(&report);
+            assert!(
+                found.iter().all(|(pointer, _)| pointer == &format!("/{property}") || pointer.starts_with(&format!("/{property}/"))),
+                "`{property}: {invalid}` is reported at /{property} alone: {found:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1280,10 +1924,9 @@ fn sequence_container_schema_contract() {
     }
 }
 
-/// A task guard is typed by shape only: non-empty text. A first-level
-/// container's loop (on a group object, or beside an inline nested
-/// sequence) uses the shared `loop` type; a deeper container's loop is an
-/// object. The task and loop parsers judge the rest.
+/// A task guard is typed by shape only: non-empty text. A container's loop
+/// (on a group object, or beside an inline nested sequence) uses the shared
+/// `loop` type at every depth. The task and loop parsers judge the rest.
 #[test]
 fn task_when_and_container_loop_schema_shapes() {
     let files = shipped_bundle!();
@@ -1303,9 +1946,8 @@ fn task_when_and_container_loop_schema_shapes() {
         ("nested-loop-list", "cancelled: []\nsequence: [{name: child, sequence: [], loop: [until]}]", false),
         ("group-loop-max-zero", "cancelled: []\nsequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true', max: 0}}}]", false),
         ("nested-loop-unknown-key", "cancelled: []\nsequence: [{name: child, sequence: [], loop: {until: 'true', maxx: 2}}]", false),
-        // Below the first container level the loop is an object; the loop
-        // parser rejects `max: 0` before anything runs.
-        ("deeper-loop-max-zero", "cancelled: []\nsequence: [{name: a, sequence: [{name: b, sequence: [], loop: {until: 'true', max: 0}}]}]", true),
+        ("deeper-loop-max-zero", "cancelled: []\nsequence: [{name: a, sequence: [{name: b, sequence: [], loop: {until: 'true', max: 0}}]}]", false),
+        ("deeper-group-loop-gate", "cancelled: []\nsequence: [{name: a, sequence: [{group: {tasks: [{name: leg, shell: x}], loop: {until: 'true', gate: [{inf0: hi}]}}}]}]", false),
         ("root-loop", "loop: {until: 'true'}\nsequence: [{name: a, shell: x, when: ready}]", true),
     ] {
         let path = repo.write_document(&format!("shape-{name}.md"), &format!("---\n{yaml}\n---\n"));
@@ -1391,7 +2033,10 @@ fn forbidden_cancelled_items_are_well_formed_start_actions() {
 }
 
 /// The schema and the lifecycle parser agree on every `break` and `prep`
-/// shape in a `start` stack: what one accepts, the other accepts. An explicit
+/// shape in a `start` stack: what one accepts, the other accepts. The parser
+/// reads the frontmatter the validated document holds, after the conversion
+/// engine (`code: '2'` is `2` to it), exactly as Claudine's preparation
+/// does. An explicit
 /// `null` on an optional key reads as absent to the schema, so `prep: null`
 /// is the parser's alone to reject (its unit tests cover it).
 #[test]
@@ -1407,10 +2052,11 @@ fn break_and_prep_shapes_agree_between_schema_and_parser() {
         ("[{break: {code: 256}}]", false),
         ("[{break: {code: -1}}]", false),
         ("[{break: {code: 1.5}}]", false),
-        ("[{break: {code: '2'}}]", false),
+        ("[{break: {code: '2'}}]", true),
+        ("[{break: {code: 'two'}}]", false),
         ("[{break: {reason: [a]}}]", false),
         ("[{break: {exit: 2}}]", false),
-        ("[{break: 5}]", false),
+        ("[{break: 5}]", true),
         ("[{prep: '@a.md'}, {info: after}]", true),
         ("[{prep: {target: '@a.md', with: {}}}]", true),
         ("[{prep: {target: '@a.md', with: {stage: all}, no_error: true}}]", true),
@@ -1425,17 +2071,16 @@ fn break_and_prep_shapes_agree_between_schema_and_parser() {
     let discovered = repo.discover().expect("the shipped bundle loads");
     for (index, (items, valid)) in SHAPES.iter().enumerate() {
         let path = repo.write_document(&format!("directive-{index}.md"), &format!("---\nstart: {items}\n---\n"));
-        let report = discovered
+        let judged = discovered
             .judge(
                 &path,
                 include_str!("../../../schemas/claudine.yaml"),
                 include_str!("../../../schemas/inline-compose.yaml"),
             )
-            .expect("judged")
-            .report;
-        assert_eq!(report.valid, *valid, "schema verdict for `start: {items}`: {:?}", problems(&report));
-        let markdown = Markdown::try_from(path.as_path()).expect("document loads");
-        let parsed = parse_lifecycle_config(&frontmatter_json(&markdown), &path);
+            .expect("judged");
+        let report = &judged.report;
+        assert_eq!(report.valid, *valid, "schema verdict for `start: {items}`: {:?}", problems(report));
+        let parsed = parse_lifecycle_config(&judged.held, &path);
         assert_eq!(parsed.is_ok(), *valid, "parser verdict for `start: {items}`: {parsed:?}");
     }
 }
@@ -1567,7 +2212,7 @@ fn imported_group_leg_cancelled_rejects_forbidden_actions() {
 // ── Cancellation stacks at every conditional depth ─────────────────────────
 
 /// The deepest conditional level Claudine's lifecycle parser accepts
-/// (`MAX_CONDITIONAL_DEPTH` in `composition/lifecycle/parse.rs`).
+/// (`MAX_CONDITIONAL_DEPTH` in `darkmatter/lib/src/lifecycle/parse.rs`).
 const PARSER_MAX_CONDITIONAL_DEPTH: usize = 5;
 
 /// A cancellation stack's site: the frontmatter, with `ITEMS` standing for
@@ -1691,32 +2336,37 @@ cancelled_conditional_tests! {
         (GROUP_2_CANCELLED, PARSER_MAX_CONDITIONAL_DEPTH, &FORBIDDEN_IN_CANCELLED);
 }
 
-/// The cancellation stack ends where the parser does: a conditional one level
-/// deeper than it accepts is a schema error at that conditional, on a document
-/// and on a nested container, and the lifecycle parser refuses the document's
-/// stack.
+/// The schema encodes no conditional depth limit: a conditional one level
+/// deeper than the parser accepts is schema-valid on a document and on a
+/// nested container, while a forbidden action there is still a schema error,
+/// and the lifecycle parser alone refuses the sixth level.
 #[test]
-fn cancelled_rejects_a_conditional_deeper_than_the_parser_accepts() {
+fn cancelled_conditional_depth_is_the_parsers_alone_to_limit() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
     let level = PARSER_MAX_CONDITIONAL_DEPTH + 1;
-    for site in [DOCUMENT_CANCELLED, TASK_2_CANCELLED] {
-        let (items, _) = in_conditional(level, "then", "stop");
-        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", &items));
+    let judge = |site: &StackSite, items: &str| {
+        let text = format!("---\n{}\n---\n", site.frontmatter.replace("ITEMS", items));
         let path = repo.write_document("too-deep.md", &text);
-        let report = discovered
+        discovered
             .judge(
                 &path,
                 include_str!("../../../schemas/claudine.yaml"),
                 include_str!("../../../schemas/inline-compose.yaml"),
             )
             .expect("judged")
-            .report;
-        let pointer = format!("{}{}", site.stack, "/0/then".repeat(level - 1) + "/0");
-        let found = problems(&report);
+            .report
+    };
+    for site in [DOCUMENT_CANCELLED, TASK_2_CANCELLED] {
+        let (items, _) = in_conditional(level, "then", "stop");
+        let report = judge(&site, &items);
+        assert!(report.valid, "{}: a level-{level} conditional is schema-valid: {:?}", site.name, problems(&report));
+        let (items, below) = in_conditional(level, "else", "{ retry: 2 }");
+        let pointer = format!("{}{below}", site.stack);
+        let found = problems(&judge(&site, &items));
         assert!(
             found.iter().any(|(path, _)| *path == pointer),
-            "{}: a level-{level} conditional is rejected at `{pointer}`: {found:?}",
+            "{}: `retry` in a level-{level} `else` is rejected at `{pointer}`: {found:?}",
             site.name
         );
     }
@@ -1762,15 +2412,11 @@ fn cancelled_dictionaries_reject_forbidden_actions() {
     assert!(report.valid, "a dictionary of permitted verbs: {:?}", problems(&report));
 }
 
-/// Pins the documented `cancelled` bound: SimplifiedSchema inlines named
-/// types and cannot recurse, and each container level inlines the next one
-/// twice, so `cancelled` is typed on the first two container levels only (a
-/// task or group, and its direct children). A third-level container is typed,
-/// but its `cancelled` stack is checked by the task parser before anything
-/// runs, not by the schema. Deepening this bound is a deliberate change: each
-/// level multiplies the compiled schema of every Claudine launch.
+/// Containers recurse, so a third-level container's `cancelled` stack is
+/// typed like every other: a forbidden action there is a schema error at its
+/// path.
 #[test]
-fn grandchild_cancelled_is_left_to_the_task_parser() {
+fn grandchild_cancelled_is_typed() {
     let repo = SchemaRepo::new(&shipped_bundle!());
     let discovered = repo.discover().expect("the shipped bundle loads");
     let path = repo.write_document(
@@ -1785,5 +2431,239 @@ fn grandchild_cancelled_is_left_to_the_task_parser() {
         )
         .expect("judged")
         .report;
-    assert!(report.valid, "below the typed levels: {:?}", problems(&report));
+    let found = problems(&report);
+    assert!(
+        found.iter().any(|(path, _)| path == "/sequence/0/sequence/0/sequence/0/cancelled/0"),
+        "a grandchild's forbidden `cancelled` action is rejected at its path: {found:?}"
+    );
 }
+
+// ── Single-action dictionaries (review 1, R1-F2) ───────────────────────────
+
+/// The schema's and the lifecycle parser's verdicts on one frontmatter, with
+/// the schema's problems.
+struct SingleActionJudge {
+    repo: SchemaRepo,
+    discovered: Discovered,
+}
+
+impl SingleActionJudge {
+    fn new() -> Self {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let discovered = repo.discover().expect("the shipped bundle loads");
+        Self { repo, discovered }
+    }
+
+    fn verdicts(&self, frontmatter: &str) -> (bool, Vec<(String, String)>, Result<(), String>) {
+        let path = self.repo.write_document("single.md", &format!("---\n{frontmatter}\n---\n"));
+        let judged = self
+            .discovered
+            .judge(&path, include_str!("../../../schemas/claudine.yaml"), include_str!("../../../schemas/inline-compose.yaml"))
+            .expect("judged");
+        let markdown = Markdown::try_from(path.as_path()).expect("document loads");
+        let parsed = parse_lifecycle_config(&frontmatter_json(&markdown), &path).map(|_| ()).map_err(|error| format!("{error} {error:?}"));
+        (judged.report.valid, problems(&judged.report), parsed)
+    }
+
+    /// Both the schema and the parser accept `frontmatter`.
+    fn assert_both_accept(&self, frontmatter: &str) {
+        let (valid, found, parsed) = self.verdicts(frontmatter);
+        assert!(valid, "the schema accepts `{frontmatter}`: {found:?}");
+        assert!(parsed.is_ok(), "the parser accepts `{frontmatter}`: {parsed:?}");
+    }
+
+    /// Both reject `frontmatter`: the schema at or below `pointer`, the
+    /// parser naming `needle`.
+    fn assert_both_reject(&self, frontmatter: &str, pointer: &str, needle: &str) {
+        let (valid, found, parsed) = self.verdicts(frontmatter);
+        assert!(!valid, "the schema rejects `{frontmatter}`");
+        assert!(
+            found.iter().any(|(path, _)| path == pointer || path.starts_with(&format!("{pointer}/"))),
+            "`{frontmatter}` is rejected at `{pointer}`: {found:?}"
+        );
+        let error = parsed.expect_err(&format!("the parser rejects `{frontmatter}`"));
+        assert!(error.contains(needle), "`{frontmatter}`: `{needle}` in {error}");
+    }
+}
+
+/// A single-action dictionary `body` as the root of `event`'s stack, as the
+/// `then` body of a guarded item, and as its `else` body, with the instance
+/// pointer of the dictionary in each.
+fn single_action_positions(event: &str, body: &str) -> [(String, String); 3] {
+    [
+        (format!("{event}: {body}"), format!("/{event}")),
+        (format!("{event}: [{{ when: \"fm.ready\", then: {body} }}]"), format!("/{event}/0/then")),
+        (format!("{event}: [{{ when: \"fm.ready\", then: [{{ info: hi }}], else: {body} }}]"), format!("/{event}/0/else")),
+    ]
+}
+
+/// Every event family accepts a single-action dictionary in long form at its
+/// root and in both branches, as the lifecycle parser does (R1-F2.1–R1-F2.3),
+/// and still refuses there what the family refuses as a list item.
+#[test]
+fn single_action_dictionaries_take_long_forms_at_every_stack_position() {
+    let judge = SingleActionJudge::new();
+    let ordinary = [
+        "{ ensure_file: { file: notes.md } }",
+        "{ say: { text: done } }",
+        "{ shell: { command: \"git status\" } }",
+        "{ error: { reason: failed } }",
+    ];
+    for event in ["start", "blocked", "success", "failure", "finalize"] {
+        for body in ordinary {
+            for (frontmatter, _) in single_action_positions(event, body) {
+                judge.assert_both_accept(&frontmatter);
+            }
+        }
+    }
+    for body in ["{ info: { text: preparing } }", "{ ensure_file: { file: notes.md } }", "{ skip: { no_error: true } }"] {
+        for (frontmatter, _) in single_action_positions("initialize", body) {
+            judge.assert_both_accept(&frontmatter);
+        }
+    }
+    for body in ["{ stop: { no_error: true } }", "{ shell: { command: \"git stash\" } }", "{ warn: { text: cancelled } }"] {
+        for (frontmatter, _) in single_action_positions("cancelled", body) {
+            judge.assert_both_accept(&frontmatter);
+        }
+    }
+
+    // Event restrictions hold in the new form: no shell in `initialize`, no
+    // recovery directive in `cancelled`.
+    for (frontmatter, pointer) in single_action_positions("initialize", "{ shell: { command: ls } }") {
+        judge.assert_both_reject(&frontmatter, &pointer, "shell");
+    }
+    for (frontmatter, pointer) in single_action_positions("cancelled", "{ retry: { max_attempts: 2 } }") {
+        judge.assert_both_reject(&frontmatter, &pointer, "retry");
+    }
+}
+
+/// Short dictionaries, one-element lists holding a long form, and bundles of
+/// short forms keep passing (R1-F2.6); several verbs beside a long form keep
+/// failing (R1-F2.7).
+#[test]
+fn single_action_controls_keep_their_verdicts() {
+    let judge = SingleActionJudge::new();
+    for event in ["initialize", "start", "blocked", "success", "failure", "cancelled", "finalize"] {
+        judge.assert_both_accept(&format!("{event}: {{ info: hi }}"));
+        judge.assert_both_accept(&format!("{event}: [{{ info: {{ text: hi }} }}]"));
+        judge.assert_both_accept(&format!("{event}: {{ info: hi, warn: careful }}"));
+    }
+    judge.assert_both_accept("loop: { until: \"{{ true }}\", info: hi, warn: careful }");
+    judge.assert_both_accept("loop: { until: \"{{ true }}\", gate: [{ ensure_file: { file: review.txt } }] }");
+
+    for (frontmatter, pointer) in [
+        ("start: { ensure_file: { file: a.md }, info: hi }", "/start"),
+        ("start: { ensure_file: { file: a.md }, ensure_dir: { dir: logs } }", "/start"),
+        ("start: { ensure_file: { file: a.md }, info: hi, no_error: true }", "/start"),
+        ("start: [{ when: \"fm.ready\", ensure_file: { file: a.md }, info: hi }]", "/start/0"),
+        ("start: [{ when: \"fm.ready\", then: { ensure_file: { file: a.md }, info: hi } }]", "/start/0/then"),
+        ("loop: { until: \"{{ true }}\", ensure_file: { file: a.md }, info: hi }", "/loop"),
+        ("loop: { until: \"{{ true }}\", ensure_file: { file: a.md }, ensure_dir: { dir: logs } }", "/loop"),
+    ] {
+        judge.assert_both_reject(frontmatter, pointer, "long form");
+    }
+}
+
+/// `no_error` beside a single long form, and `when` beside one in a list
+/// item, are the parser's single-action dictionaries too.
+#[test]
+fn single_action_dictionaries_take_their_sibling_keys() {
+    let judge = SingleActionJudge::new();
+    for frontmatter in [
+        "start: { ensure_file: { file: notes.md }, no_error: true }",
+        "success: [{ when: \"fm.ready\", then: { say: { text: done }, no_error: true } }]",
+        "failure: [{ when: \"fm.ready\", ensure_file: { file: failure.md } }]",
+        "failure: [{ when: \"fm.ready\", info: { text: failed }, no_error: true }]",
+        "finalize: [{ no_error: true, shell: { command: \"git status\" } }]",
+        "initialize: [{ when: \"fm.ready\", info: { text: ready } }]",
+        "cancelled: [{ when: \"fm.ready\", stop: { no_error: true } }]",
+    ] {
+        judge.assert_both_accept(frontmatter);
+    }
+}
+
+/// A loop's single loose verb takes its long form (R1-F2.4), and its gate is
+/// an ordinary stack whose root and branch dictionaries take long forms
+/// (R1-F2.5).
+#[test]
+fn loops_take_a_single_loose_long_form_and_gate_dictionaries() {
+    let judge = SingleActionJudge::new();
+    for frontmatter in [
+        "loop: { until: \"{{ true }}\", ensure_file: { file: review.txt } }",
+        "loop: { until: \"{{ true }}\", ensure_file: { file: review.txt }, no_error: true }",
+        "loop: { while: \"iteration < 3\", action: increment(iteration), max: 3, on_rate_limit: pause, say: { text: next } }",
+        "loop: { while: \"iteration < 3\", gate: { ensure_file: { file: pass.txt } } }",
+        "loop: { while: \"iteration < 3\", gate: [{ when: \"iteration == 3\", then: { warn: { text: cap } }, else: { ensure_file: { file: pass.txt } } }] }",
+    ] {
+        judge.assert_both_accept(frontmatter);
+    }
+    judge.assert_both_reject(
+        "loop: { until: \"{{ true }}\", gate: [stop], ensure_file: { file: review.txt } }",
+        "/loop/ensure_file",
+        "gate",
+    );
+}
+
+/// What the schema leaves to the parser at a dictionary: `when` beside the
+/// actions of a stack root or body, which a bundle admitted before
+/// single-action dictionaries were typed and a category admits now;
+/// `no_error` written both beside and inside a long form; and a guarded item
+/// holding no action, which the bundle type admits.
+#[test]
+fn single_action_placement_rules_stay_the_parsers() {
+    let judge = SingleActionJudge::new();
+    for (frontmatter, needle) in [
+        ("start: { when: \"fm.ready\", info: hi }", "never carries `when`"),
+        ("start: { when: \"fm.ready\", ensure_file: { file: a.md } }", "never carries `when`"),
+        ("start: { ensure_file: { file: a.md, no_error: true }, no_error: true }", "both beside"),
+        ("start: [{ when: \"fm.ready\", no_error: true }]", "needs `then` or sibling actions"),
+    ] {
+        let (valid, found, parsed) = judge.verdicts(frontmatter);
+        assert!(valid, "the schema leaves `{frontmatter}` to the parser: {found:?}");
+        let error = parsed.expect_err(frontmatter);
+        assert!(error.contains(needle), "`{frontmatter}`: `{needle}` in {error}");
+    }
+}
+
+
+/// A conditional is a list item only: in every family, a stack root or a
+/// `then`/`else` body written as a dictionary holding `then` is refused by
+/// the schema as by the parser, whose message names the misplaced `when`.
+#[test]
+fn a_conditional_is_never_a_stack_dictionary() {
+    let judge = SingleActionJudge::new();
+    for event in ["initialize", "start", "finalize", "cancelled"] {
+        for (frontmatter, pointer) in single_action_positions(event, "{ when: \"fm.ready\", then: [stop] }") {
+            judge.assert_both_reject(&frontmatter, &pointer, "when");
+        }
+    }
+    judge.assert_both_reject("loop: { until: \"{{ true }}\", gate: { when: \"fm.ready\", then: [stop] } }", "/loop", "when");
+}
+
+/// A single-action dictionary's long form is bound through the verb's
+/// runtime registration like a list item's: `number`'s numeric recovery binds
+/// a subject its types reject, and `length` refuses a boolean its types
+/// accept, at the root, in a branch, and as a loop's loose verb. The parser
+/// does not type-check literal operands, so it accepts all of them.
+#[test]
+fn single_action_long_forms_bind_through_the_registration() {
+    let judge = SingleActionJudge::new();
+    for frontmatter in [
+        "start: { number: { x: pear, fallback: 7 } }",
+        "success: [{ when: \"fm.ready\", then: { number: { x: pear, fallback: 7 } } }]",
+        "loop: { until: \"{{ true }}\", number: { x: pear, fallback: 7 } }",
+    ] {
+        judge.assert_both_accept(frontmatter);
+    }
+    for (frontmatter, pointer) in [
+        ("start: { length: { val: true } }", "/start/length/val"),
+        ("success: [{ when: \"fm.ready\", then: [{ info: hi }], else: { length: { val: true } } }]", "/success/0/else/length/val"),
+        ("loop: { until: \"{{ true }}\", length: { val: true } }", "/loop/length/val"),
+    ] {
+        let (valid, found, parsed) = judge.verdicts(frontmatter);
+        assert!(!valid, "the registration refuses `{frontmatter}`");
+        assert!(found.iter().any(|(path, _)| path == pointer), "`{frontmatter}` at `{pointer}`: {found:?}");
+        assert!(parsed.is_ok(), "the parser accepts `{frontmatter}`: {parsed:?}");
+    }
+}
+

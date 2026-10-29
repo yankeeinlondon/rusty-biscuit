@@ -31,7 +31,7 @@ fn fixture(process: &CliProcessFixture, document_frontmatter: &str) -> PathBuf {
     write(
         root,
         "schemas/prompt.trigger.yaml",
-        "kind: trigger-schema\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n",
+        "kind: schema-trigger\nmatch:\n  kind: enum(prompt; required)\n$schema: prompt.yaml\n",
     );
     write(
         root,
@@ -74,7 +74,7 @@ fn schema_validate_honors_triggers_and_raw_mode() {
         .stdout(predicate::str::contains("owner"));
     process
         .command()
-        .args(["schema", "validate", "--no-trigger-schemas"])
+        .args(["schema", "validate", "--disable", "schema-triggers"])
         .arg(&document)
         .assert()
         .success();
@@ -107,7 +107,7 @@ fn compose_honors_triggers_and_raw_mode() {
         .stderr(predicate::str::contains("owner"));
     process
         .command()
-        .args(["compose", "--no-trigger-schemas"])
+        .args(["compose", "--disable", "schema-triggers"])
         .arg(&document)
         .assert()
         .success();
@@ -147,7 +147,7 @@ fn triggers_command_prints_shared_trace() {
         .success()
         .stdout(predicate::str::contains("Schema roots"))
         .stdout(predicate::str::contains("prompt.trigger.yaml"))
-        .stdout(predicate::str::contains("arm 1"))
+        .stdout(predicate::str::contains("condition 1"))
         .stdout(predicate::str::contains("defeated"));
 }
 
@@ -245,7 +245,7 @@ fn monorepo(process: &CliProcessFixture) {
 }
 
 fn path_trigger(pattern: &str, payload: &str) -> String {
-    format!("kind: trigger-schema\nmatch:\n  $path: \"{pattern}\"\n$schema: {payload}\n")
+    format!("kind: schema-trigger\nmatch:\n  $path: \"{pattern}\"\n$schema: {payload}\n")
 }
 
 fn stdout_of(output: &std::process::Output) -> String {
@@ -470,7 +470,7 @@ fn an_inaccessible_schema_root_fails_validate_and_triggers() {
 }
 
 #[test]
-fn schema_validate_reports_a_forbidden_path_prefix_naming_the_pattern() {
+fn schema_validate_skips_a_trigger_with_a_forbidden_path_prefix() {
     let process = CliProcessFixture::new();
     monorepo(&process);
     write(process.cwd(), "schemas/bad.trigger.yaml", &path_trigger("@prompts/**", "payload.yaml"));
@@ -485,10 +485,14 @@ fn schema_validate_reports_a_forbidden_path_prefix_naming_the_pattern() {
         .arg(&document)
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    let text = format!("{}{}", stdout_of(&output), String::from_utf8_lossy(&output.stderr));
-    assert!(text.contains("bad.trigger.yaml"), "{text}");
-    assert!(text.contains("`@prompts/**`"), "{text}");
+    // The trigger is skipped as invalid, so the document validates without
+    // its payload, and the warning names the trigger and its pattern.
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(stdout_of(&output).contains("is valid"), "{output:?}");
+    let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
+    for expected in ["ignoring invalid schema trigger", "bad.trigger.yaml", "@prompts/**"] {
+        assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
+    }
 }
 
 #[test]
@@ -608,7 +612,7 @@ fn duplicate_steps_key_is_a_load_error_not_a_last_wins_selection() {
 }
 
 /// The 2026-10-17 incident end to end: an ordinary schema-root file that is
-/// mid-edit (invalid YAML, no `kind: trigger-schema` claim) leaves composition
+/// mid-edit (invalid YAML, no `kind: schema-trigger` claim) leaves composition
 /// and trigger tracing working, with the neighboring trigger still applied.
 #[test]
 fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working() {
@@ -639,24 +643,47 @@ fn an_unparseable_unclaimed_schema_root_file_leaves_compose_and_triggers_working
         .stderr(predicate::str::contains("owner"));
 }
 
-/// A schema-root file that claims the envelope but is not valid YAML fails
-/// with the YAML location and the YAML help, never the match-grammar help.
+/// A schema-root file that claims the envelope but is not valid YAML is
+/// skipped: composition succeeds and warns with the file and its YAML
+/// location, never the match-grammar help; the trigger trace writes the
+/// same warning to stderr and lists the file as skipped on stdout beside the
+/// neighboring trigger it still matches.
 #[test]
-fn an_unparseable_claimed_schema_root_file_reports_its_yaml_error() {
+fn an_unparseable_claimed_schema_root_file_is_skipped_with_its_yaml_location() {
     let process = CliProcessFixture::new();
     let document = fixture(&process, "kind: prompt\nowner: me");
-    write(process.cwd(), "schemas/broken.yaml", "kind: trigger-schema\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
-    for args in [&["compose"][..], &["schema", "triggers"][..]] {
-        let output = process.command().args(args).arg(&document).output().unwrap();
-        assert!(!output.status.success(), "{args:?}: {output:?}");
-        let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
-        for expected in [
-            "is not valid YAML at line 4, column 9",
-            "mapping values are not allowed",
-            "must be quoted",
-        ] {
-            assert!(stderr.contains(&compact(expected)), "{args:?}: `{expected}` not in {stderr}");
-        }
-        assert!(!stderr.contains("combinators"), "{args:?}: {stderr}");
+    write(process.cwd(), "schemas/broken.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\nnotes: a: b\n");
+    let expected = [
+        "ignoring invalid schema trigger",
+        "broken.yaml",
+        "not valid YAML at line 4, column 9",
+        "mapping values are not allowed",
+    ];
+    let output = process.command().arg("compose").arg(&document).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = compact(&common::unwrapped(&String::from_utf8_lossy(&output.stderr)));
+    for expected in expected {
+        assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
     }
+    assert!(!stderr.contains("combinators"), "{stderr}");
+
+    let output = process
+        .command_builder()
+        .plain_terminal(1000, 50)
+        .build()
+        .args(["schema", "triggers"])
+        .arg(&document)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = compact(&common::unwrapped(&strip_ansi(&String::from_utf8_lossy(&output.stderr))));
+    for expected in expected {
+        assert!(stderr.contains(&compact(expected)), "`{expected}` not in {stderr}");
+    }
+    assert!(!stderr.contains("combinators"), "{stderr}");
+    let stdout = compact(&strip_ansi(&stdout_of(&output)));
+    for expected in ["broken.yaml", "dm.schema.invalid_trigger", "prompt.trigger.yaml — matched"] {
+        assert!(stdout.contains(&compact(expected)), "`{expected}` not in {stdout}");
+    }
+    assert!(!stdout.contains(&compact("ignoring invalid schema trigger")), "warning repeated on stdout: {stdout}");
 }

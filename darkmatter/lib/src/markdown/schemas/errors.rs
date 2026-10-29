@@ -25,11 +25,49 @@ use std::{ops::Range, path::PathBuf};
 
 use thiserror::Error;
 
+/// A secondary location of a [`SchemaError::Grammar`] failure: the earlier
+/// declaration a duplicate or a disagreeing overload conflicts with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrammarRelated {
+    /// What the location is, as an editor would label it.
+    pub message: String,
+    /// Byte range in the same type-expression text as the primary `span`,
+    /// unless `arm` names another option.
+    pub span: Range<usize>,
+    /// Set only when the failing definition is a YAML sequence union, whose
+    /// options are separate scalars: the zero-based option whose text `span`
+    /// is in. The primary failure is then located at a sibling option.
+    pub arm: Option<usize>,
+}
+
+/// One reference of a rejected [`SchemaError::NonDescendingCycle`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleReference {
+    /// The authored reference: the source and path of the named type or
+    /// property that writes it.
+    pub site: SchemaReferenceSite,
+    /// The named type it refers to.
+    pub target: String,
+    /// The source whose named types declare `target`.
+    pub target_source: SchemaSourceId,
+    /// Byte range of the reference's name in `site.source`, when the
+    /// resolver held that source's text (a schema file). A reference in the
+    /// inline `$schema` is projected by the consumer that holds the document,
+    /// as for [`SchemaError::UnknownNamedType`].
+    pub span: Option<Range<usize>>,
+}
+
 use super::simplified::{
-    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
-    SchemaUnionRejection,
+    SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaReferenceSite,
+    SchemaSourceId, SchemaUnionRejection,
 };
 
+
+/// A conflict participant's diagnostic excerpt as a Markdown code span,
+/// fenced so a backtick in the value cannot close it early.
+fn participant_code_span(participant: &SchemaConstraintParticipant) -> String {
+    renderable::markdown::code_span(&participant.constraint.diagnostic_excerpt())
+}
 
 /// Errors produced by the schemas subsystem.
 #[derive(Debug, Error)]
@@ -59,12 +97,15 @@ pub enum SchemaError {
     /// `property` identifies the offending property (or a synthetic name like
     /// `"<root>"` / `"<arm[N]>"` when the failure is structural).
     /// `message` is a short description; `span` is the byte range within the
-    /// originating type-and-constraint string.
+    /// originating type-and-constraint string. `related` holds the earlier
+    /// declarations a duplicate or disagreeing overload conflicts with;
+    /// empty for a failure with one location.
     #[error("invalid SimplifiedSchema for property `{property}`: {message}")]
     Grammar {
         property: String,
         message: String,
         span: Range<usize>,
+        related: Vec<GrammarRelated>,
     },
 
     /// A parsed SimplifiedSchema failed to convert to JSON Schema.
@@ -147,13 +188,60 @@ pub enum SchemaError {
     #[error("$schema frontmatter value has an unsupported shape: {message}")]
     FrontmatterShape { message: String },
 
-    /// A cross-file named-type import (`Name@file`) forms a direct or
-    /// transitive cycle. Named types must form a DAG in v1 — a type that
-    /// (transitively) references itself is a structural recursion error,
-    /// mirroring the inline-object depth cap. `chain` describes the offending
-    /// import path.
+    /// A chain of acyclic named-type references is deeper than the resolver
+    /// expands (32 levels). Recursion is not this error: a cycle that
+    /// descends into a child value is supported, and one that does not is
+    /// [`SchemaError::NonDescendingCycle`]. `chain` describes the reference
+    /// path where expansion stopped.
     #[error("named-type import cycle detected: {chain}")]
     ImportCycle { chain: String },
+
+    /// Named types form a cycle that never descends into a child value: an
+    /// alias cycle (`a: b`, `b: a`), a self-union (`a: [a, string]`), or a
+    /// cycle through a `function(...)` signature. Such a type revisits the
+    /// same value without progress, so no document can satisfy it.
+    ///
+    /// Each entry of `cycles` is one rejected cycle and lists every
+    /// reference in it; a recursive group that also holds descending cycles
+    /// reports only the non-descending ones.
+    #[error(
+        "named types form a cycle that never descends into a child value: {}",
+        cycles
+            .iter()
+            .map(|cycle| cycle
+                .iter()
+                .map(|reference| format!("{} -> `{}`", reference.site.path, reference.target))
+                .collect::<Vec<_>>()
+                .join(", "))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )]
+    NonDescendingCycle { cycles: Vec<Vec<CycleReference>> },
+
+    /// A local `$ref` names no target in the schema it was written in: a
+    /// `#/$defs/…` pointer whose definition is absent, or a reference chain
+    /// that never reaches a schema. `location` is the JSON Pointer of the
+    /// schema holding the reference, in the schema that carried it
+    /// (`schema`, for example `the baseline` or a trigger file).
+    #[error("{schema} has a `$ref` `{reference}` at `{location}` that names no definition")]
+    UnresolvedReference {
+        schema: String,
+        reference: String,
+        location: String,
+    },
+
+    /// A schema joined to another at a merge boundary (a baseline, a trigger
+    /// payload, a root-union arm) uses a reference form whose meaning would
+    /// change once its definitions move to the merged root: a `$id`, an
+    /// anchor, a dynamic reference, an external target, or a local reference
+    /// outside `#/$defs/…`. `schema` names the joined schema and `location`
+    /// is the JSON Pointer of the offending keyword's schema.
+    #[error("{schema} cannot be merged: {reason} at `{location}`")]
+    UnsupportedMergeReference {
+        schema: String,
+        location: String,
+        reason: String,
+    },
 
     /// A named-type reference (bare `Name` or explicit `Name@file`) names a
     /// type its namespace does not define.
@@ -171,16 +259,23 @@ pub enum SchemaError {
 
     /// Constraints merged onto one reused named type contradict each other.
     ///
-    /// `site` is the consuming reference; `constraints` lists every authored
+    /// `site` is the consuming reference; `constraints` lists every
     /// constraint taking part, in merge order (inherited first), each with
-    /// its own source and span so the conflict can point at all of them,
-    /// including declarations reached through multi-hop references.
+    /// the value that took part and its own source and span, so the conflict
+    /// can point at all of them, including declarations reached through
+    /// multi-hop references. Messages show each value as its
+    /// [`Constraint::diagnostic_excerpt`](super::Constraint::diagnostic_excerpt)
+    /// in a code span; the structured `constraint` keeps the full value.
     #[error(
         "{}: contradictory {kind} on named type `{name}`: {}",
         site.path,
         constraints
             .iter()
-            .map(|origin| format!("`{}` in {}", origin.keyword, origin.source))
+            .map(|participant| format!(
+                "{} in {}",
+                participant_code_span(participant),
+                participant.origin.source
+            ))
             .collect::<Vec<_>>()
             .join(" and ")
     )]
@@ -188,7 +283,7 @@ pub enum SchemaError {
         name: String,
         kind: SchemaConstraintConflictKind,
         site: SchemaReferenceSite,
-        constraints: Vec<SchemaConstraintOrigin>,
+        constraints: Vec<SchemaConstraintParticipant>,
     },
 
     /// A use-site postfix asks for an operation a union-typed named type
@@ -235,43 +330,55 @@ pub enum SchemaError {
     #[error("invalid example artifact `{reference}`: {message}")]
     InvalidExample { reference: String, message: String },
 
-    /// A trigger-schema match expression is malformed (bad combinator shape,
-    /// unknown key, or an otherwise unparseable `match:` payload). `message`
-    /// describes the structural failure; the trigger grammar is documented in
-    /// the "Repository Trigger Schemas" section of
+    /// A schema-trigger envelope or match expression is malformed (a field of
+    /// the wrong shape, an unknown key, or an otherwise unparseable `match:`
+    /// payload). `message` starts with the field it is about (for example
+    /// `` `match[1].group[0]`: ``) and describes the failure; the trigger
+    /// grammar is documented in the "Repository Trigger Schemas" section of
     /// `darkmatter/docs/topics/schemas/definition.md`. A `$path` pattern that
     /// is not an allowed glob reference is reported here too.
-    #[error("invalid trigger-schema match expression: {message}")]
+    #[error("invalid schema-trigger: {message}")]
     TriggerMatch { message: String },
 
-    /// A file claims `kind: trigger-schema` but is not valid YAML, so it never
+    /// A schema-trigger file uses a spelling that was renamed without an
+    /// alias: `kind: trigger-schema` (now `schema-trigger`) or the `any:`
+    /// combinator (now `group:`). `field` is where the spelling appears,
+    /// `found` the rejected spelling, and `replacement` the one to use.
+    #[error("`{field}`: `{found}` was renamed; use `{replacement}`")]
+    TriggerRenamed {
+        field: String,
+        found: String,
+        replacement: String,
+    },
+
+    /// A file claims `kind: schema-trigger` but is not valid YAML, so it never
     /// reached the match grammar. `message` is the YAML parser's reason without
     /// its location; `line` and `column` are one-based (the column counts
     /// characters, not bytes) and present when the parser reported them.
-    #[error("trigger-schema envelope is not valid YAML{}: {message}", yaml_location(*.line, *.column))]
+    #[error("schema-trigger envelope is not valid YAML{}: {message}", yaml_location(*.line, *.column))]
     TriggerEnvelopeYaml {
         message: String,
         line: Option<usize>,
         column: Option<usize>,
     },
 
-    /// A trigger-schema match condition used a constraint outside the
+    /// A schema-trigger match condition used a constraint outside the
     /// match-safe subset (constraints that resolve files, import types, load
     /// examples, provide defaults, mark generated values, or eager-existence-
     /// check `file`). `property` names the offending property; `constraint`
     /// names the forbidden constraint keyword.
     #[error(
-        "trigger-schema match condition for `{property}` uses a forbidden constraint: {constraint}"
+        "schema-trigger match condition for `{property}` uses a forbidden constraint: {constraint}"
     )]
     TriggerForbiddenConstraint { property: String, constraint: String },
 
-    /// A trigger-schema match arm mapping mixes structural keys (combinators
-    /// `all`/`any`/`none`/`min-match` or the `$path` predicate) with
+    /// A schema-trigger match mapping mixes structural keys (combinators
+    /// `all`/`group`/`none`/`min-match` or the `$path` predicate) with
     /// property-condition keys. Mixing is a load error — never a guess about
     /// the author's intent. `structural` and `properties` list the offending
     /// keys.
     #[error(
-        "trigger-schema match arm mixes structural keys ({structural:?}) with property keys \
+        "schema-trigger match mapping mixes structural keys ({structural:?}) with property keys \
          ({properties:?}); use `all:` to combine them"
     )]
     TriggerMixedMapping {
@@ -279,13 +386,13 @@ pub enum SchemaError {
         properties: Vec<String>,
     },
 
-    /// A trigger-schema match arm is vacuous: no satisfiable path through the
-    /// boolean tree contains a presence-requiring condition (a `required` gate
-    /// or `$path` predicate inside `all`/`any`, not under `none`). Because
-    /// arms OR together, one vacuous arm makes the whole trigger match every
-    /// document — almost always an authoring mistake.
-    #[error("trigger-schema match arm is vacuous (no presence-requiring condition)")]
-    TriggerVacuousArm,
+    /// A schema-trigger's whole match expression is vacuous: some way of
+    /// satisfying it includes no presence-requiring condition (a `required`
+    /// gate or `$path` predicate inside `all`/`group`/`min-match`, not under
+    /// `none`), so the trigger can match a document that has none of its
+    /// keys — almost always an authoring mistake.
+    #[error("schema-trigger match is vacuous (no presence-requiring condition)")]
+    TriggerVacuousMatch,
 
     /// Two trigger filenames in the same `schemas/` root collide after
     /// case-folding (e.g. `Foo.yaml` and `foo.yaml`), which would activate
@@ -301,10 +408,10 @@ pub enum SchemaError {
         files: Vec<String>,
     },
 
-    /// A trigger-schema envelope file claimed `kind: trigger-schema` but could
+    /// A schema-trigger envelope file claimed `kind: schema-trigger` but could
     /// not be parsed. The underlying YAML, grammar, or envelope error is on
     /// `source`; `path` is the offending file.
-    #[error("trigger-schema file `{}` {}", path.display(), load_failure(source))]
+    #[error("schema-trigger file `{}` {}", path.display(), load_failure(source))]
     TriggerLoad {
         path: PathBuf,
         #[source]
@@ -312,11 +419,11 @@ pub enum SchemaError {
     },
 
     /// A trigger in a host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle)
-    /// claimed `kind: trigger-schema` but could not be loaded: a malformed
+    /// claimed `kind: schema-trigger` but could not be loaded: a malformed
     /// envelope, or a payload that failed to resolve inside its bundle.
     /// `bundle` and `name` identify the embedded document; it has no host
     /// path, so this is never a [`SchemaError::TriggerLoad`].
-    #[error("embedded trigger-schema `{bundle}/{name}` {}", load_failure(source))]
+    #[error("embedded schema-trigger `{bundle}/{name}` {}", load_failure(source))]
     EmbeddedTriggerLoad {
         bundle: String,
         name: String,
@@ -342,30 +449,51 @@ pub enum SchemaError {
     )]
     BareNameSiblingExists { reference: String, suggestion: String },
 
-    /// A trigger-schema payload did not resolve to a merge-compatible object
+    /// A schema-trigger payload did not resolve to a merge-compatible object
     /// schema. Trigger payloads must be SimplifiedSchema single objects or
     /// raw JSON Schemas satisfying the simple-object baseline contract; root
     /// unions and non-object schemas are rejected because the property-keyed
     /// merge has no sound "later wins" meaning for them. `path` is the
     /// trigger envelope file; `payload` is the authored `$schema:` reference
-    /// (or `<inline>` for an inline payload); `reason` explains the rejection.
+    /// (or `<inline>` for an inline payload); `payload_path` is the file
+    /// that authored the rejected schema when the payload is a file
+    /// reference (the last file of an alias chain); `reason` explains the
+    /// rejection.
     #[error(
-        "trigger-schema payload in `{}` is not merge-compatible: {reason}",
+        "schema-trigger payload in `{}` is not merge-compatible: {reason}",
         path.display()
     )]
     TriggerPayloadNotMergeable {
         path: PathBuf,
         payload: String,
+        payload_path: Option<PathBuf>,
         reason: String,
     },
 
-    /// A trigger-schema payload resolved to a trigger envelope file (directly
+    /// A schema-trigger payload passed the merge-compatibility gate but its
+    /// JSON Schema could not be compiled into a validator. `path` is the
+    /// trigger envelope; `payload` is the authored `$schema:` reference (or
+    /// `<inline>`); `payload_path` is the file that authored the schema when
+    /// the payload is a file reference (the last file of an alias chain);
+    /// `message` is the compiler's reason.
+    #[error(
+        "schema-trigger payload in `{}` failed to compile: {message}",
+        path.display()
+    )]
+    TriggerPayloadCompile {
+        path: PathBuf,
+        payload: String,
+        payload_path: Option<PathBuf>,
+        message: String,
+    },
+
+    /// A schema-trigger payload resolved to a trigger envelope file (directly
     /// or through an import cycle), rather than to an ordinary schema file.
     /// `trigger` is the originating envelope; `payload_path` is the file the
     /// payload resolved to; `chain` describes the resolution path for the
     /// indirect case.
     #[error(
-        "trigger-schema payload in `{}` resolved to a trigger-schema envelope `{}`",
+        "schema-trigger payload in `{}` resolved to a schema-trigger envelope `{}`",
         trigger.display(),
         payload_path.display()
     )]
@@ -380,7 +508,7 @@ pub enum SchemaError {
     /// the error names the payload (`suggestion`) as the file to reference
     /// instead.
     #[error(
-        "document `$schema` referenced a trigger-schema file `{reference}`; trigger schemas \
+        "document `$schema` referenced a schema-trigger file `{reference}`; trigger schemas \
          activate by placement and match — reference the payload `{suggestion}` instead"
     )]
     TriggerSchemaReferenced {
@@ -476,6 +604,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 property,
                 message,
                 span,
+                ..
             } => {
                 let body = vec![
                     Prose::new(format!(
@@ -683,9 +812,58 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::escape_text(chain)
                 )))
                 .hint(
-                    "Named-type imports (<cyan>Name@file</cyan>) must form a DAG. Break the \
-                     self-reference; recursive types are not supported in v1.",
+                    "A chain of named-type references (<cyan>Name@file</cyan>) that never repeats \
+                     a type is limited to 32 levels. Shorten the chain.",
                 ),
+
+            SchemaError::NonDescendingCycle { cycles } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "non-descending type cycle"))
+                .body(cycles.iter().flatten().map(|reference| {
+                    Prose::new(format!(
+                        "<cyan>{}</cyan> in {} refers to <cyan>{}</cyan> from {}",
+                        Prose::escape_text(&reference.site.path.to_string()),
+                        Prose::escape_text_outside_code_spans(&reference.site.source.to_string()),
+                        Prose::escape_text(&reference.target),
+                        Prose::escape_text_outside_code_spans(&reference.target_source.to_string())
+                    ))
+                }).collect::<Vec<_>>())
+                .hint(
+                    "A recursive type must reach itself again only through a child value: an \
+                     object property, a dictionary value, a list item, or a tuple position \
+                     (<cyan>item: \"{ children: item[] }\"</cyan>). An alias, a union arm, or a \
+                     function signature does not count.",
+                ),
+
+            SchemaError::UnresolvedReference { schema, reference, location } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "unresolved schema reference"))
+                    .body(Prose::new(format!(
+                        "{} refers to <cyan>{}</cyan> at <cyan>{}</cyan>, which names no definition.",
+                        Prose::escape_text_outside_code_spans(schema),
+                        Prose::escape_text(reference),
+                        Prose::escape_text(location)
+                    )))
+                    .hint(
+                        "A <cyan>#/$defs/…</cyan> reference resolves only in the schema that \
+                         declares it; add the definition to that schema's root <cyan>$defs</cyan>.",
+                    )
+            }
+
+            SchemaError::UnsupportedMergeReference { schema, location, reason } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "unsupported reference at a merge"))
+                    .body(Prose::new(format!(
+                        "{} at <cyan>{}</cyan>: {}",
+                        Prose::escape_text_outside_code_spans(schema),
+                        Prose::escape_text(location),
+                        Prose::escape_text_outside_code_spans(reason)
+                    )))
+                    .hint(
+                        "A schema merged into another (a baseline, a trigger payload, a root-union \
+                         arm) may refer only to its own root <cyan>$defs</cyan> with \
+                         <cyan>#/$defs/name</cyan>, and may not change scope with <cyan>$id</cyan>.",
+                    )
+            }
 
             SchemaError::UnknownNamedType { name, namespace, site } => {
                 StatusBlock::new(StatusState::Error)
@@ -711,10 +889,13 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                             Prose::escape_text(&site.path.to_string()),
                             Prose::escape_text(name)
                         )))
-                        .chain(constraints.iter().map(|origin| {
+                        .chain(constraints.iter().map(|participant| {
+                            let origin = &participant.origin;
+                            // A code span's contents are literal Prose, so
+                            // the excerpt is fenced rather than escaped.
                             Prose::new(format!(
-                                "<cyan>{}</cyan> at {} in {}",
-                                Prose::escape_text(&origin.keyword),
+                                "{} at {} in {}",
+                                participant_code_span(participant),
                                 Prose::escape_text(&origin.path.to_string()),
                                 Prose::escape_text_outside_code_spans(&origin.source.to_string())
                             ))
@@ -806,23 +987,32 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             SchemaError::TriggerMatch { message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema match expression invalid",
+                    "schema-trigger invalid",
                 ))
                 .body(Prose::new(format!(
                     "<dim>Reason:</dim> {}",
                     Prose::escape_text_outside_code_spans(message)
                 )))
                 .hint(
-                    "See the trigger grammar: combinators (<cyan>all</cyan>/<cyan>any</cyan>/\
+                    "See the trigger grammar: combinators (<cyan>all</cyan>/<cyan>group</cyan>/\
                      <cyan>none</cyan>/<cyan>min-match</cyan>), property conditions, and the \
                      <cyan>$path</cyan> predicate.",
                 ),
+
+            SchemaError::TriggerRenamed { field, found, replacement } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema-trigger spelling renamed"))
+                .body(Prose::new(format!(
+                    "<cyan>{}</cyan> uses <cyan>{}</cyan>, which was renamed with no alias.",
+                    Prose::escape_text(field),
+                    Prose::escape_text(found)
+                )))
+                .hint(format!("Write <cyan>{}</cyan> instead.", Prose::escape_text(replacement))),
 
             SchemaError::TriggerEnvelopeYaml { message, line, column } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        "trigger-schema envelope is not valid YAML",
+                        "schema-trigger envelope is not valid YAML",
                     ))
                     .body(Prose::new(format!(
                         "<dim>Reason:</dim> {}{}",
@@ -836,7 +1026,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        "trigger-schema forbidden constraint",
+                        "schema-trigger forbidden constraint",
                     ))
                     .body(vec![
                         Prose::new(format!(
@@ -859,10 +1049,10 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema mixed mapping",
+                    "schema-trigger mixed mapping",
                 ))
                 .body(Prose::new(format!(
-                    "A match arm mapping cannot mix structural keys ({:?}) with property keys \
+                    "A match mapping cannot mix structural keys ({:?}) with property keys \
                      ({:?}).",
                     structural, properties
                 )))
@@ -871,22 +1061,22 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      structural key with property conditions.",
                 ),
 
-            SchemaError::TriggerVacuousArm => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("SchemaError", "trigger-schema vacuous arm"))
+            SchemaError::TriggerVacuousMatch => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema-trigger vacuous match"))
                 .body(Prose::new(
-                    "A match arm has no presence-requiring condition (a <cyan>required</cyan> \
+                    "A way of satisfying the match has no presence-requiring condition (a <cyan>required</cyan> \
                      gate or <cyan>$path</cyan> predicate), so it matches every document.",
                 ))
                 .hint(
                     "Add a <cyan>required</cyan> constraint or a <cyan>$path</cyan> predicate so \
-                     the arm only fires on matching documents.",
+                     the trigger only fires on matching documents.",
                 ),
 
             SchemaError::TriggerCaseFoldCollision { root, files } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        "trigger-schema case-fold collision",
+                        "schema-trigger case-fold collision",
                     ))
                     .body(vec![
                         Prose::new(format!(
@@ -914,7 +1104,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new(
                         "SchemaError",
-                        if yaml { "trigger-schema file is not valid YAML" } else { "trigger-schema file malformed" },
+                        if yaml { "schema-trigger file is not valid YAML" } else { "schema-trigger file malformed" },
                     ))
                     .body(vec![
                         Prose::new(format!(
@@ -938,7 +1128,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
 
             SchemaError::EmbeddedTriggerLoad { bundle, name, source } => {
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("SchemaError", "embedded trigger-schema malformed"))
+                    .error_header(ErrorHeader::new("SchemaError", "embedded schema-trigger malformed"))
                     .body(vec![
                         Prose::new(format!(
                             "Embedded trigger <cyan>{}</cyan> could not be loaded:",
@@ -992,10 +1182,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 path,
                 payload,
                 reason,
+                ..
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema payload not merge-compatible",
+                    "schema-trigger payload not merge-compatible",
                 ))
                 .body(vec![
                     Prose::new(format!(
@@ -1022,11 +1213,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema payload cycle",
+                    "schema-trigger payload cycle",
                 ))
                 .body(vec![
                     Prose::new(format!(
-                        "Trigger file <cyan>{}</cyan> payload resolved to a trigger-schema \
+                        "Trigger file <cyan>{}</cyan> payload resolved to a schema-trigger \
                          envelope <cyan>{}</cyan>:",
                         Prose::escape_text(&trigger.display().to_string()),
                         Prose::escape_text(&payload_path.display().to_string())
@@ -1034,9 +1225,32 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     Prose::new(format!("<dim>Chain:</dim> {}", Prose::escape_text(chain))),
                 ])
                 .hint(
-                    "A trigger payload must not resolve to a trigger-schema envelope, directly or \
+                    "A trigger payload must not resolve to a schema-trigger envelope, directly or \
                      through an import cycle. Reference an ordinary schema file instead.",
                 ),
+
+            SchemaError::TriggerPayloadCompile {
+                path,
+                payload,
+                message,
+                ..
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "SchemaError",
+                    "schema-trigger payload failed to compile",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "Trigger file <cyan>{}</cyan> payload <cyan>{}</cyan> could not be \
+                         compiled into a validator:",
+                        Prose::escape_text(&path.display().to_string()),
+                        Prose::escape_text(payload)
+                    )),
+                    Prose::new(format!(
+                        "<dim>Reason:</dim> {}",
+                        Prose::escape_text_outside_code_spans(message)
+                    )),
+                ]),
 
             SchemaError::TriggerSchemaReferenced {
                 reference,
@@ -1044,11 +1258,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
-                    "trigger-schema file referenced as document schema",
+                    "schema-trigger file referenced as document schema",
                 ))
                 .body(vec![
                     Prose::new(format!(
-                        "Document <cyan>$schema</cyan> referenced a trigger-schema file \
+                        "Document <cyan>$schema</cyan> referenced a schema-trigger file \
                          <cyan>{}</cyan>. Trigger schemas activate by placement and match, never \
                          by reference.",
                         Prose::escape_text(reference)
@@ -1086,6 +1300,7 @@ mod tests {
             property: "title".into(),
             message: "unexpected `(`".into(),
             span: 6..7,
+            related: Vec::new(),
         };
         let rendered = err.to_string();
         assert!(rendered.contains("title"));
@@ -1114,6 +1329,7 @@ mod tests {
             property: "title".into(),
             message: "unexpected `(`".into(),
             span: 6..7,
+            related: Vec::new(),
         };
         let out = render(&err);
         assert!(out.contains("SchemaError"), "missing header type: {out}");
@@ -1166,7 +1382,7 @@ mod tests {
 
     #[test]
     fn constraint_conflict_lists_every_origin_in_merge_order() {
-        let origin = |source: SchemaSourceId, path: &str, keyword: &str| SchemaConstraintOrigin {
+        let origin = |source: SchemaSourceId, path: &str, keyword: &str| crate::markdown::schemas::SchemaConstraintOrigin {
             source,
             path: crate::markdown::schemas::SchemaSourcePath::root().property(path),
             keyword: keyword.into(),
@@ -1178,18 +1394,121 @@ mod tests {
             kind: SchemaConstraintConflictKind::Bounds,
             site: site("title"),
             constraints: vec![
-                origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "label", "min"),
-                origin(SchemaSourceId::InlineDocument, "title", "max"),
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "label", "min"),
+                    constraint: crate::markdown::schemas::Constraint::MinLen(10),
+                },
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::InlineDocument, "title", "max"),
+                    constraint: crate::markdown::schemas::Constraint::MaxLen(5),
+                },
             ],
         };
         assert_eq!(
             err.to_string(),
-            "title: contradictory bounds on named type `title_base`: `min` in `types.yaml` and \
-             `max` in the inline `$schema`"
+            "title: contradictory bounds on named type `title_base`: `min(10)` in `types.yaml` and \
+             `max(5)` in the inline `$schema`"
         );
         let out = render(&err);
         assert!(out.contains("contradictory constraints"), "missing summary: {out}");
-        assert!(out.contains("label") && out.contains("types.yaml"), "{out}");
+        assert!(out.contains("min(10) at label in types.yaml"), "{out}");
+        assert!(out.contains("max(5) at title in the inline $schema"), "{out}");
+    }
+
+    /// A bounds conflict between `participant` (inherited, from a file) and
+    /// a plain use-site `max(5)`.
+    fn conflict_with(participant: crate::markdown::schemas::Constraint) -> SchemaError {
+        let origin = |source: SchemaSourceId, path: &str| crate::markdown::schemas::SchemaConstraintOrigin {
+            source,
+            path: crate::markdown::schemas::SchemaSourcePath::root().property(path),
+            keyword: "default".into(),
+            occurrence: 0,
+            span: None,
+        };
+        SchemaError::ConstraintConflict {
+            name: "slug".into(),
+            kind: SchemaConstraintConflictKind::Default,
+            site: site("tags"),
+            constraints: vec![
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "slug"),
+                    constraint: participant,
+                },
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::InlineDocument, "tags"),
+                    constraint: crate::markdown::schemas::Constraint::Default(serde_json::json!(5)),
+                },
+            ],
+        }
+    }
+
+    /// Asserts `Display` and the terminal block both show `excerpt` for the
+    /// first participant, and that the structured value is `constraint`.
+    fn assert_excerpt_everywhere(constraint: crate::markdown::schemas::Constraint, excerpt: &str) {
+        let err = conflict_with(constraint.clone());
+        let fenced = renderable::markdown::code_span(excerpt);
+        let display = err.to_string();
+        assert!(
+            display.contains(&format!("{fenced} in `types.yaml` and `default(5)` in the inline")),
+            "Display lacks {fenced}: {display}"
+        );
+        let term = biscuit_terminal::terminal::Terminal::default();
+        let out = strip_escape_codes(err.status_block(&term).render_optimistic(Some(1000)));
+        assert!(out.contains(&format!("{excerpt} at slug in types.yaml")), "terminal lacks {excerpt}: {out}");
+        let SchemaError::ConstraintConflict { constraints, .. } = err else {
+            unreachable!("built as a conflict");
+        };
+        assert_eq!(constraints[0].constraint, constraint, "the structured value is the full constraint");
+    }
+
+    #[test]
+    fn conflict_excerpts_escape_control_characters_identically() {
+        let constraint = crate::markdown::schemas::Constraint::Default(serde_json::json!("a\nb\tc\u{1b}[31md"));
+        assert_excerpt_everywhere(constraint, r"default('a\nb\tc\u{1b}[31md')");
+    }
+
+    #[test]
+    fn conflict_excerpts_keep_terminal_markup_literal() {
+        let constraint = crate::markdown::schemas::Constraint::Default(serde_json::json!("<red>**x**</red>[y]"));
+        let excerpt = "default(<red>**x**</red>[y])";
+        assert_excerpt_everywhere(constraint.clone(), excerpt);
+        let term = biscuit_terminal::terminal::Terminal::default();
+        let raw = conflict_with(constraint).status_block(&term).render_optimistic(Some(1000));
+        assert!(!raw.contains("\u{1b}[31m"), "markup must not become color: {raw:?}");
+    }
+
+    #[test]
+    fn conflict_excerpts_shorten_long_unicode_values_to_160_scalars() {
+        let value = "é".repeat(200);
+        let constraint = crate::markdown::schemas::Constraint::Default(serde_json::json!(value));
+        let excerpt = constraint.diagnostic_excerpt();
+        assert_eq!(excerpt.chars().count(), 160);
+        assert!(excerpt.starts_with("default(é") && excerpt.ends_with("é…"), "{excerpt}");
+        assert_excerpt_everywhere(constraint, &excerpt);
+    }
+
+    #[test]
+    fn conflict_excerpts_render_option_sets_without_panicking() {
+        use crate::markdown::schemas::{AlphanumericOption, Constraint};
+        assert_excerpt_everywhere(Constraint::Options(vec![]), "alphanumeric");
+        assert_excerpt_everywhere(
+            Constraint::Options(vec![AlphanumericOption::AllowPeriods, AlphanumericOption::AllowDashes]),
+            "alphanumeric(allow-dashes,allow-periods)",
+        );
+    }
+
+    #[test]
+    fn conflict_excerpts_render_compound_defaults_as_compact_json() {
+        let compound = serde_json::json!({"tags": ["a`b", "c"], "n": 1});
+        let constraint = crate::markdown::schemas::Constraint::Default(compound);
+        assert_excerpt_everywhere(constraint, r#"default({"tags":["a`b","c"],"n":1})"#);
+
+        let long = serde_json::json!((0..100).collect::<Vec<_>>());
+        let constraint = crate::markdown::schemas::Constraint::Default(long.clone());
+        let excerpt = constraint.diagnostic_excerpt();
+        assert_eq!(excerpt.chars().count(), 160);
+        assert!(excerpt.starts_with("default([0,1,2,") && excerpt.ends_with('…'), "{excerpt}");
+        assert_excerpt_everywhere(constraint, &excerpt);
     }
 
     #[test]

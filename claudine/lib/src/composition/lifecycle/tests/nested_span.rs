@@ -340,8 +340,10 @@ fn single_pass_inventory_matches_the_authored_claudine_schema() {
     let signals: BTreeSet<&str> = LifecycleSignal::ALL.iter().map(|s| s.property_name()).collect();
     assert_eq!(schema_events, signals);
 
-    for predicate in ["while", "until"] {
-        let ty = lifecycle["types"]["loop"][predicate].as_str().unwrap();
-        assert!(ty.starts_with("expression "), "loop.{predicate}: {ty}");
+    for arm in ["loop-bundle", "loop-single"] {
+        for predicate in ["while", "until"] {
+            let ty = lifecycle["types"][arm][predicate].as_str().unwrap();
+            assert!(ty.starts_with("expression "), "{arm}.{predicate}: {ty}");
+        }
     }
 }

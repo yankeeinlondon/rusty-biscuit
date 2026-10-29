@@ -84,7 +84,7 @@ pub const FRONTMATTER_SHELL_SUFFIXES: [ShellSuffixDescriptor; 5] = [
     ShellSuffixDescriptor {
         label: "::exit-code",
         insert_text: "::exit-code",
-        summary: "The value is the exit status as a number, or `null` for a timeout allowed by `--allow-shell-timeout`. A non-zero exit is a value, not a failure.",
+        summary: "The value is the exit status as a number, or `null` for a timeout allowed by `--allow shell-timeout`. A non-zero exit is a value, not a failure.",
     },
     ShellSuffixDescriptor {
         label: "::result",

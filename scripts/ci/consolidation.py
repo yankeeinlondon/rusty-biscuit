@@ -97,7 +97,7 @@ PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
     "darkmatter-cli": ((), ("terminal-tests",)),
     "biscuit-terminal": ((), ("image",), ("terminal-tests",), ("browser-tests",), ("image", "terminal-tests", "browser-tests")),
     "tree-hugger": ((),),
-    "claudine": ((),),
+    "claudine": ((), ("work-counters",)),
     # `remote` implies `network`, but `test-real` builds `network` alone.
     "sniff": ((), ("remote",), ("network",)),
     "sniff-detection-cli": ((), ("test-fixtures",)),

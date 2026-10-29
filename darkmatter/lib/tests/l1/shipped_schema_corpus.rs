@@ -7,7 +7,11 @@
 //! matches its file (the file disappeared, gained content, or became
 //! loadable) fails, so the list cannot rot. Inline `$schema` blocks in
 //! shipped Markdown are parsed passively too, and those carrying named-type
-//! references are resolved.
+//! references are resolved. The source-aware parsers of
+//! `2026-10-25-schema-diagnostic-provenance` locate no failure in a valid
+//! standalone artifact and return the source-free value for an inline one.
+//! Every lowered artifact's local `$ref`s resolve in its root `$defs`, and a
+//! loadable artifact that stores definitions resolves to the same bytes twice.
 //!
 //! The same walk accounts for the core types of `2026-10-16-core-schema-types`:
 //! [`CORE_TYPE_USERS`] names every artifact declaring `unknown`/`any`, `null`,
@@ -29,10 +33,11 @@ use std::time::SystemTime;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
     Constraint, MatchExpr, PathSubject, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError,
-    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr, parse_property_definition,
-    parse_schema_declaration, parse_standalone_schema_document, parse_trigger_envelope_from_str,
+    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr,
+    locate_standalone_definition_failure, parse_property_definition, parse_schema_declaration,
+    parse_schema_declaration_with_source, parse_standalone_schema_document,
+    parse_trigger_envelope_from_str,
     resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema},
-    triggers::matches,
 };
 use serde_yaml_ng::Value as YamlValue;
 
@@ -56,9 +61,18 @@ enum Class {
     EnvelopeRejected,
     /// A definition does not parse; `error` is part of the expected message.
     Draft { error: &'static str },
-    /// A `kind: trigger-schema` envelope: never a standalone schema, and its
+    /// A `kind: schema-trigger` envelope: never a standalone schema, and its
     /// `$schema` payload parses and resolves inline from its own directory.
     Trigger,
+    /// A global catalog (`kind: schema` with `$schema` declarations): refused
+    /// as a document schema by any path, while its declarations parse and
+    /// resolve inline from its own directory.
+    GlobalCatalog,
+    /// A function catalog (`kind: schema` with `categories:` and `function`
+    /// types): it parses as a standalone schema, but a document schema can
+    /// never hold a function, so applying it through `$schema: ./file` fails;
+    /// each of its other named types imports and lowers.
+    FunctionCatalog,
 }
 
 struct Exception {
@@ -96,64 +110,60 @@ const EXCEPTIONS: &[Exception] = &[
     ),
     exception(
         "darkmatter/docs/schemas",
-        "expression-functions.yaml",
-        Class::NotASchema,
-        "`kind: expression-function-catalog`; its `$schema` describes the catalog",
-    ),
-    exception(
-        "darkmatter/docs/schemas",
         "err.yaml",
         Class::EnvelopeRejected,
         "tagged envelope carries `$schema`, `name`, and `description` header keys",
     ),
-    // darkmatter/schemas: authored with a `description`/`name` header the
-    // standalone loader does not accept; no reader loads this tree today.
+    // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
         "darkmatter.yaml",
-        Class::EnvelopeRejected,
-        "`description` and `$schema` beside `kind`",
+        Class::GlobalCatalog,
+        "Darkmatter's global catalog, registered explicitly",
     ),
     exception(
         "darkmatter/schemas",
-        "partials/context-variables.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
+        "partials/functions.yaml",
+        Class::FunctionCatalog,
+        "the expression-function catalog, embedded by Darkmatter's catalog loader",
     ),
     exception(
         "darkmatter/schemas",
-        "partials/fm.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
+        "partials/mutations.yaml",
+        Class::FunctionCatalog,
+        "the mutation-function catalog",
     ),
     exception(
         "darkmatter/schemas",
-        "partials/error.yaml",
-        Class::EnvelopeRejected,
-        "`name` and `description` header keys",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/tracking.yaml",
-        Class::EnvelopeRejected,
-        "`description` header key",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "partials/style.yaml",
-        Class::Draft {
-            error: "`suggest` requires at least one candidate",
-        },
-        "`style.color` declares `suggest()` with no candidates",
-    ),
-    // repo-root schemas/
-    exception(
-        "schemas",
-        "memory.yaml",
+        "partials/function-examples/as_line_separated.yaml",
         Class::NotASchema,
-        "stub `kind: schema-trigger` with an empty `match:`; the trigger parser claims only `kind: trigger-schema`",
+        "a `kind: example` artifact embedded by the expression-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_ordered_list.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_tsv.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "partials/function-examples/as_unordered_list.yaml",
+        Class::NotASchema,
+        "a `kind: example` artifact embedded by the expression-function catalog",
     ),
     // claudine/schemas
+    exception(
+        "claudine/schemas",
+        "globals.yaml",
+        Class::GlobalCatalog,
+        "Claudine's host catalog of `seq`, `loop`, and `group`, registered explicitly",
+    ),
     exception(
         "claudine/schemas",
         "claudine.yaml",
@@ -241,35 +251,29 @@ const EXCEPTIONS: &[Exception] = &[
         },
         "empty `types:`; the event placeholders are `unknown` and load",
     ),
-    exception(
-        "claudine/docs/schemas",
-        "partials/mutations.yaml",
-        Class::Draft {
-            error: "unknown constraint `parameters(...)`",
-        },
-        "draft `parameters(...)` constraint",
-    ),
-    exception(
-        "claudine/docs/schemas",
-        "partials/functions.yaml",
-        Class::Draft {
-            error: "unknown constraint `parameters(...)`",
-        },
-        "draft `parameters(...)` constraint; local `number`/`date` collide with built-ins",
-    ),
 ];
 
 /// Every shipped artifact (of any class whose definitions parse) that declares
 /// one of the core types, with the canonical keywords it uses; `any` parses as
 /// `unknown`. Native YAML null declarations parse as `null`.
 const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
-    // Zero-argument verbs take `null` or an empty `unknown[]`, generated verbs
-    // and loose bodies are `unknown`, and `shell` types the shell command.
-    ("claudine/schemas/action.yaml", &["null", "shell", "unknown"]),
-    ("claudine/schemas/lifecycle.yaml", &["null", "shell", "unknown"]),
-    // The hash payload.
-    ("claudine/schemas/claudine.yaml", &["unknown"]),
-    ("claudine/schemas/inline-compose.yaml", &["unknown"]),
+    // Zero-argument verbs take `null` or an empty `unknown[]`, a generated
+    // operand is `unknown` (or `null`) where its catalog parameter is, the
+    // deprecated untyped verb values are `unknown`, and `shell` types the
+    // shell command.
+    ("darkmatter/schemas/partials/lifecycle.yaml", &["null", "shell", "unknown"]),
+    // The md profile's open keys and loose bodies.
+    ("darkmatter/schemas/partials/md-lifecycle.yaml", &["unknown"]),
+    // `cancelled-stop`'s short forms; the rest is referenced from Darkmatter.
+    ("claudine/schemas/action.yaml", &["null", "unknown"]),
+    // Loose bodies and loop-action values.
+    ("claudine/schemas/lifecycle.yaml", &["unknown"]),
+    // The `null`-typed Darkmatter event names.
+    ("claudine/schemas/claudine.yaml", &["null"]),
+    // The hash payload, which both metadata triggers import.
+    ("claudine/schemas/document.yaml", &["unknown"]),
+    // Step outputs, loop results, and leg payloads are any value.
+    ("claudine/schemas/globals.yaml", &["unknown"]),
     // Removed root `fail_fast`, and the parser-checked task and step fields.
     ("claudine/schemas/sequence.yaml", &["null"]),
     ("claudine/schemas/sequence-types.yaml", &["unknown"]),
@@ -279,7 +283,6 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
         "claudine/docs/schemas/partials/side-effect.yaml",
         &["null", "unknown"],
     ),
-    ("darkmatter/docs/schemas/darkmatter.yaml", &["unknown"]),
     ("darkmatter/schemas/partials/fm.yaml", &["unknown"]),
 ];
 
@@ -457,6 +460,20 @@ fn standalone_outcome(
     }
 }
 
+/// Whether a catalog entry is a function: a `function(...)` type or a union
+/// of them (an overload set).
+fn is_function_definition(definition: &PropertyDef) -> bool {
+    let is_function = |atom: &PropertyAtom| match &atom.ty {
+        TypeExpr::Function(_) => true,
+        TypeExpr::Union(arms) => arms.iter().all(|arm| matches!(arm.ty, TypeExpr::Function(_))),
+        _ => false,
+    };
+    match definition {
+        PropertyDef::Single(atom) => is_function(atom),
+        PropertyDef::Union(atoms) => atoms.iter().all(is_function),
+    }
+}
+
 fn is_named_type_error(error: &SchemaError) -> bool {
     match error {
         SchemaError::UnknownNamedType { .. }
@@ -474,6 +491,33 @@ fn assert_lowered(resolved: &ResolvedSchema, label: &str) {
         "{label} must lower to a JSON Schema object: {}",
         resolved.json_schema
     );
+    assert_references_resolve(&resolved.json_schema, label);
+}
+
+/// Every local `$ref` of a lowered schema names an entry of its root
+/// `$defs`, so each use of a stored definition, recursive or shared, reaches
+/// its body. Data keywords are skipped: their values are never references.
+fn assert_references_resolve(schema: &serde_json::Value, label: &str) {
+    fn walk(node: &serde_json::Value, defs: Option<&serde_json::Map<String, serde_json::Value>>, label: &str) {
+        match node {
+            serde_json::Value::Object(map) => {
+                if let Some(pointer) = map.get("$ref").and_then(serde_json::Value::as_str)
+                    && let Some(key) = pointer.strip_prefix("#/$defs/")
+                {
+                    let key = key.replace("~1", "/").replace("~0", "~");
+                    assert!(defs.is_some_and(|defs| defs.contains_key(&key)), "{label}: `{pointer}` must resolve");
+                }
+                for (key, value) in map {
+                    if !matches!(key.as_str(), "const" | "default" | "examples" | "enum") && !key.starts_with("x-") {
+                        walk(value, defs, label);
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|item| walk(item, defs, label)),
+            _ => {}
+        }
+    }
+    walk(schema, schema.get("$defs").and_then(serde_json::Value::as_object), label);
 }
 
 /// The core types whose meaning or presence changed: `unknown` (alias `any`),
@@ -591,7 +635,6 @@ fn shipped_schema_artifacts_parse_passively() {
     for file in [
         "schemas/feature-review.yaml",
         "schemas/suggestion-review.yaml",
-        "schemas/memory.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
     }
@@ -622,6 +665,19 @@ fn shipped_schema_artifacts_parse_passively() {
             "{label}: the passive parse must not depend on files near the artifact",
         );
         let bodies = parse_bodies(&document);
+        let located = locate_standalone_definition_failure(&artifact.source);
+        match (&artifact.class, located) {
+            (Class::Draft { error }, Some(failure)) => assert!(
+                failure.error.to_string().contains(error),
+                "{label}: expected a located failure containing `{error}`, got {failure}",
+            ),
+            (Class::Draft { .. }, None) => {}
+            (_, Some(failure)) => panic!(
+                "{label}: a shipped definition is located as invalid at {:?}: {failure}",
+                failure.path,
+            ),
+            (_, None) => {}
+        }
         match artifact.class {
             Class::Loadable => {
                 assert!(
@@ -632,6 +688,19 @@ fn shipped_schema_artifacts_parse_passively() {
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
                 loadable += 1;
+            }
+            Class::FunctionCatalog => {
+                let Ok(Some(parsed_document)) = &outcome else {
+                    panic!("{label} must parse as a standalone schema: {outcome:?}");
+                };
+                assert!(parsed_document.categories.is_some(), "{label} declares `categories:`");
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                assert!(
+                    parsed.iter().any(is_function_definition),
+                    "{label} holds no function type; reclassify it",
+                );
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
             }
             Class::Placeholder => {
                 assert!(
@@ -658,6 +727,13 @@ fn shipped_schema_artifacts_parse_passively() {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
                 assert!(message.contains("unsupported keys"), "{label}: {message}");
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
+            Class::GlobalCatalog => {
+                let message = outcome.expect_err(&format!("{label} now loads as a document schema"));
+                assert!(message.contains("global catalog"), "{label}: {message}");
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
@@ -745,7 +821,6 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     for file in [
         "schemas/feature-review.yaml",
         "schemas/suggestion-review.yaml",
-        "schemas/memory.yaml",
     ] {
         assert!(root.join(file).is_file(), "{file} is part of the corpus");
     }
@@ -755,6 +830,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     let context = FileResolutionContext::new(scratch.path());
 
     let mut resolved_files = 0usize;
+    let mut with_definitions = 0usize;
     let mut inline_bodies = 0usize;
     for artifact in &artifacts {
         let label = artifact.label();
@@ -778,9 +854,19 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                 );
                 assert_lowered(&resolved, &label);
                 resolved_files += 1;
+                if resolved.json_schema.get("$defs").is_some() {
+                    let again = resolve_schema_with_roots(&reference, dir, &[], &context)
+                        .unwrap_or_else(|error| panic!("{label} must resolve again: {error}"));
+                    assert_eq!(
+                        again.json_schema.to_string(),
+                        resolved.json_schema.to_string(),
+                        "{label}: stored definitions resolve to the same bytes"
+                    );
+                    with_definitions += 1;
+                }
             }
-            Class::EnvelopeRejected | Class::NotASchema | Class::Trigger => {
-                if artifact.class == Class::EnvelopeRejected {
+            Class::EnvelopeRejected | Class::NotASchema | Class::Trigger | Class::GlobalCatalog => {
+                if matches!(artifact.class, Class::EnvelopeRejected | Class::GlobalCatalog) {
                     let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                         .expect_err(&format!("{label} now loads; remove its exception"));
                     assert!(
@@ -802,6 +888,34 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     inline_bodies += 1;
                 }
             }
+            Class::FunctionCatalog => {
+                let error = resolve_schema_with_roots(&reference, dir, &[], &context)
+                    .expect_err(&format!("{label} must never apply as a document schema"));
+                assert!(
+                    format!("{error:?}").contains("a `function` type is description-only"),
+                    "{label} must be refused for its function types: {error}"
+                );
+                let types = yaml_key(&document, "types")
+                    .and_then(YamlValue::as_mapping)
+                    .unwrap_or_else(|| panic!("{label} declares `types:`"));
+                for (name, value) in types {
+                    let name = name.as_str().expect("a type name");
+                    let definition = parse_property_definition(name, value)
+                        .unwrap_or_else(|error| panic!("{label} `{name}`: {error}"));
+                    if is_function_definition(&definition) {
+                        continue;
+                    }
+                    let import = serde_yaml_ng::from_str::<YamlValue>(&format!(
+                        "probe: \"{name}@./{}\"",
+                        artifact.path.file_name().and_then(|file| file.to_str()).expect("UTF-8 file name")
+                    ))
+                    .expect("YAML");
+                    let resolved = resolve_yaml_schema(&import, dir, &context)
+                        .unwrap_or_else(|error| panic!("{label} `{name}` must import: {error}"));
+                    assert_lowered(&resolved, &format!("{label} `{name}`"));
+                    inline_bodies += 1;
+                }
+            }
             Class::Placeholder | Class::Draft { .. } => {}
         }
     }
@@ -809,8 +923,12 @@ fn loadable_shipped_schemas_resolve_and_lower() {
         resolved_files >= 10,
         "only {resolved_files} shipped schemas resolved"
     );
+    // Claudine's lifecycle and sequence schemas store their repeated helpers.
+    assert!(with_definitions >= 2, "only {with_definitions} shipped schemas store definitions");
+    // The global catalog's partials became loadable libraries, so they count
+    // among `resolved_files` rather than here.
     assert!(
-        inline_bodies >= 10,
+        inline_bodies >= 9,
         "only {inline_bodies} rejected-envelope bodies resolved inline"
     );
 }
@@ -819,6 +937,39 @@ struct InlineSchema {
     label: String,
     path: PathBuf,
     declaration: YamlValue,
+    /// The authored `$schema` value, laid out for the source-aware parser;
+    /// `None` when the key is not written as a plain column-0 `$schema:`.
+    authored: Option<String>,
+}
+
+/// The authored text of the column-0 `$schema:` entry's value in
+/// `frontmatter`, in the form the source-aware parser requires: a value on
+/// the key's line keeps its column (the key is blanked to spaces), a block
+/// value starts at its first line, and the value runs to the next column-0
+/// entry.
+fn authored_schema_value(frontmatter: &str) -> Option<String> {
+    let mut lines = frontmatter.split_inclusive('\n');
+    let first = lines.find(|line| line.starts_with("$schema:"))?;
+    let rest = &first["$schema:".len()..];
+    let mut authored = if rest.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{}{rest}", " ".repeat("$schema:".len()))
+    };
+    for line in lines {
+        let continues = line.trim().is_empty()
+            || line.starts_with([' ', '\t'])
+            || line.starts_with("- ")
+            || line.trim_end() == "-";
+        if !continues {
+            break;
+        }
+        authored.push_str(line);
+    }
+    let trimmed = authored.trim_end().len();
+    authored.truncate(trimmed);
+    authored.push('\n');
+    Some(authored)
 }
 
 /// The `$schema` value of every Markdown file below `dirs` whose frontmatter
@@ -833,13 +984,13 @@ fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
             if !text.contains("$schema") {
                 continue;
             }
-            let Some(frontmatter) = text
+            let Some(frontmatter_text) = text
                 .strip_prefix("---\n")
                 .and_then(|rest| rest.find("\n---").map(|end| &rest[..end]))
             else {
                 continue;
             };
-            let Ok(frontmatter) = serde_yaml_ng::from_str::<YamlValue>(frontmatter) else {
+            let Ok(frontmatter) = serde_yaml_ng::from_str::<YamlValue>(frontmatter_text) else {
                 continue;
             };
             let Some(declaration) = yaml_key(&frontmatter, "$schema") else {
@@ -848,6 +999,7 @@ fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
             found.push(InlineSchema {
                 label: relative(&path, root),
                 declaration: declaration.clone(),
+                authored: authored_schema_value(frontmatter_text),
                 path,
             });
         }
@@ -862,8 +1014,9 @@ fn has_named_reference(declaration: &SchemaDeclaration) -> bool {
 
 /// Every inline `$schema` in shipped documentation, and in the darkmatter,
 /// claudine, and messenger planning trees (where every inline named-type
-/// reference lives), parses passively. The internal `prompts/` folders and
-/// fixture directories are outside the scope.
+/// reference lives), parses passively, and the source-aware declaration parser
+/// returns the same declaration or the same error. The internal `prompts/`
+/// folders and fixture directories are outside the scope.
 #[test]
 fn shipped_markdown_inline_schemas_parse_passively() {
     let root = repo_root();
@@ -891,14 +1044,59 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p12_pattern_parens.md",
         "expected `,` or `)` in argument list",
     )];
+    // A multi-line quoted scalar is outside the source-aware parser's strict
+    // presentation grammar, so it parses but cannot be projected.
+    let unprojectable = [
+        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p14_multiline_inline.md",
+    ];
     let schemas = inline_schemas(&root, &dirs);
     let before = fingerprint(schemas.iter().map(|schema| schema.path.as_path()));
     let counters = effect_counters();
 
     let mut named = Vec::new();
     let mut failed = Vec::new();
+    let mut source_aware = 0usize;
+    let mut unprojected = Vec::new();
     for schema in &schemas {
-        match parse_schema_declaration(&schema.declaration) {
+        let parsed = parse_schema_declaration(&schema.declaration);
+        // The source-aware parser keeps the source-free value, and on failure
+        // its semantic error.
+        if let Some(authored) = &schema.authored {
+            source_aware += 1;
+            match (
+                &parsed,
+                parse_schema_declaration_with_source(&schema.declaration, authored, 0),
+            ) {
+                (Ok(declaration), Ok(aware)) => assert_eq!(
+                    &aware.value, declaration,
+                    "{}: the source-aware parse changed the declaration",
+                    schema.label
+                ),
+                (Err(error), Err(failure)) => assert_eq!(
+                    failure.error.to_string(),
+                    error.to_string(),
+                    "{}: the source-aware parse changed the error",
+                    schema.label
+                ),
+                (Ok(_), Err(failure)) if unprojectable.contains(&schema.label.as_str()) => {
+                    assert!(
+                        failure.path.segments().is_empty()
+                            && failure.authored_span.is_none()
+                            && failure.value_span.is_none()
+                            && failure.to_string().contains("could not project"),
+                        "{}: expected an unlocated projection error, got {failure:?}",
+                        schema.label
+                    );
+                    unprojected.push(schema.label.as_str());
+                }
+                (parsed, aware) => panic!(
+                    "{}: the source-free parse gave {parsed:?} but the source-aware parse gave {:?}",
+                    schema.label,
+                    aware.map(|aware| aware.value),
+                ),
+            }
+        }
+        match parsed {
             Ok(declaration) => {
                 if has_named_reference(&declaration) {
                     named.push(schema.label.as_str());
@@ -950,6 +1148,14 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         schemas.len() >= 500,
         "the inline-schema corpus shrank to {}",
         schemas.len()
+    );
+    assert_eq!(
+        unprojected, unprojectable,
+        "an unprojectable inline schema now projects; remove it"
+    );
+    assert!(
+        source_aware >= 500,
+        "only {source_aware} inline schemas were parsed source-aware"
     );
 }
 
@@ -1181,11 +1387,58 @@ fn migrated_shipped_definitions_declare_their_presence() {
     );
 }
 
+/// Every shipped catalog entry carrying `narrows(...)` compiles a fact
+/// through the public registration path, and doing so runs nothing: the
+/// effect counters stay put and the catalog file is untouched.
+#[test]
+fn shipped_catalog_narrows_clauses_compile_facts_passively() {
+    use darkmatter::markdown::compose::expression::call_binding::{FactKind, FactType, FunctionRegistration};
+    use darkmatter::markdown::compose::expression::expression_function_descriptors;
+
+    let path = repo_root().join("darkmatter/schemas/partials/functions.yaml");
+    let before = fingerprint([path.as_path()]);
+    let counters = effect_counters();
+
+    let mut declared: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    for descriptor in expression_function_descriptors() {
+        declared.entry(descriptor.name.to_string()).or_default().push(descriptor.function_type.clone());
+    }
+    let mut facts = BTreeMap::new();
+    for (name, overloads) in declared {
+        if overloads.iter().all(|overload| overload.narrows.is_none()) {
+            continue;
+        }
+        let registration = FunctionRegistration::builder_from_types(name.clone(), overloads)
+            .build()
+            .unwrap_or_else(|error| panic!("`{name}` registers: {error}"));
+        let fact = registration.narrowing_fact().unwrap_or_else(|| panic!("`{name}` compiles a fact")).clone();
+        facts.insert(name, (fact.kind(), fact.fact_type().clone()));
+    }
+
+    let ty = |text: &'static str| FactType::Type(text.into());
+    assert_eq!(
+        facts,
+        BTreeMap::from([
+            ("file_exists".to_string(), (FactKind::TrueImplies, ty("file"))),
+            ("is_array".to_string(), (FactKind::TrueIff, ty("unknown[]"))),
+            ("is_empty".to_string(), (FactKind::FalseImplies, FactType::NonNull)),
+            ("is_file_type".to_string(), (FactKind::TrueImplies, ty("file"))),
+            ("is_null".to_string(), (FactKind::TrueIff, ty("null"))),
+            ("is_number".to_string(), (FactKind::TrueIff, ty("number"))),
+            ("is_object".to_string(), (FactKind::TrueIff, ty("object"))),
+            ("is_string".to_string(), (FactKind::TrueIff, ty("string"))),
+        ]),
+    );
+
+    assert_eq!(effect_counters(), counters, "compiling a shipped fact ran an effect");
+    assert!(before == fingerprint([path.as_path()]), "compiling a shipped fact mutated the catalog");
+}
+
 /// The first `steps` property condition anywhere in `expr`.
 fn steps_condition(expr: &MatchExpr) -> Option<&PropertyAtom> {
     match expr {
         MatchExpr::Property { name, atom } if name == "steps" => Some(atom),
-        MatchExpr::All(children) | MatchExpr::Any(children) | MatchExpr::None(children) => {
+        MatchExpr::All(children) | MatchExpr::Group(children) | MatchExpr::None(children) => {
             children.iter().find_map(steps_condition)
         }
         MatchExpr::MinMatch { of, .. } => of.iter().find_map(steps_condition),
@@ -1255,7 +1508,7 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
             .unwrap_or_else(|| panic!("{dialect} must be claimed as a trigger"));
 
         let steps = envelope
-            .match_arms
+            .conditions
             .0
             .iter()
             .find_map(steps_condition)
@@ -1288,7 +1541,7 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
     for (frontmatter, expected) in &decisions {
         let matched: Vec<&str> = envelopes
             .iter()
-            .filter(|(_, envelope)| envelope.match_arms.0.iter().any(|arm| matches(arm, frontmatter, &subject)))
+            .filter(|(_, envelope)| envelope.conditions.matches(frontmatter, &subject))
             .map(|(dialect, _)| *dialect)
             .collect();
         assert_eq!(&matched, expected, "registry decision for {frontmatter}");

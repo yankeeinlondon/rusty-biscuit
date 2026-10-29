@@ -14,8 +14,11 @@
 //! [`DocumentContext`](crate::providers::DocumentContext); no provider ever
 //! touches the YAML parser or the schema library directly.
 
+pub mod analysis;
+pub mod collections;
 pub mod directives;
 pub mod doc_links;
+pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
 pub mod named_types;
@@ -32,14 +35,18 @@ use biscuit_hash::xx_hash_bytes;
 
 use crate::context::DocumentResolution;
 use crate::request_timing::{RequestTimings, Stage};
+use crate::validation_timing;
 use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::resolve::expand_named_types;
+use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::markdown::schemas::{
     SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
+    ValidationStage,
     StandaloneSchemaEnvelope,
-    SuggestionLintProblem, parse_standalone_schema_document,
+    LocatedDefinitionFailure, SuggestionLintProblem, locate_standalone_definition_failure,
+    parse_standalone_schema_document,
 };
 use lsp_types::Uri;
 
@@ -49,6 +56,7 @@ pub use frontmatter::{
     FmEntry, FmEntryRole, FmPathSegment, FmScalarStyle, FmValueKind, FrontmatterAst,
     YamlParseError, format_dotted,
 };
+pub use analysis::FrontmatterAnalysis;
 pub use named_types::NamedTypeCatalog;
 pub use registry::{RegistrySummary, RootFileClass};
 pub use schema::{
@@ -94,10 +102,63 @@ pub enum SuggestionState {
         /// unsupported tagged-envelope keys, invalid payload).
         error: Option<Arc<SchemaError>>,
     },
-    /// A YAML file in a `schemas/` root claims `kind: trigger-schema` but its
-    /// envelope is malformed. The registry remains last-good while this error
-    /// is published on the authoring file.
+    /// A YAML file in a `schemas/` root claims `kind: schema-trigger` but its
+    /// envelope is malformed: the strict authoring check's error on the open
+    /// buffer. Discovery skips the saved trigger and its warning is published
+    /// once the file closes.
     TriggerError(Arc<SchemaError>),
+    /// The open buffer's envelope loads, but discovery skipped the saved
+    /// trigger (its payload failed, or the saved envelope does not load):
+    /// the warning the registry publishes on that file.
+    TriggerWarning(Arc<InvalidTriggerFinding>),
+}
+
+/// A definition failure inside a schema file a failed resolution names,
+/// located in the text that file had when the failure was assembled.
+///
+/// A resolver error names such a file only by path (a referenced schema, or
+/// a standalone document's payload failure folded into its message), and a
+/// request may not read it; this keeps what its diagnostics need to range
+/// into that file.
+pub struct FileFailure {
+    pub text: Arc<str>,
+    pub failure: LocatedDefinitionFailure,
+}
+
+/// Each schema file a failed resolution names whose definition failure
+/// could be located, keyed by the path the error names it by.
+pub type FileFailures = Arc<HashMap<PathBuf, FileFailure>>;
+
+/// The located definition failures of the schema files `error` names. Reads
+/// each such file once; a file that no longer reads or holds no definition
+/// failure is left out.
+fn file_failures(error: &SchemaError) -> FileFailures {
+    fn walk(error: &SchemaError, out: &mut HashMap<PathBuf, FileFailure>) {
+        let path = match error {
+            SchemaError::Aggregate { errors } => {
+                errors.iter().for_each(|error| walk(error, out));
+                return;
+            }
+            SchemaError::ReferencedSchema { path, source } => {
+                walk(source, out);
+                path
+            }
+            SchemaError::SchemaDocument { path, .. } => path,
+            _ => return,
+        };
+        if out.contains_key(path) {
+            return;
+        }
+        let Ok(text) = work_counters::read_to_string(path) else {
+            return;
+        };
+        if let Some(failure) = locate_standalone_definition_failure(&text) {
+            out.insert(path.clone(), FileFailure { text: Arc::from(text), failure });
+        }
+    }
+    let mut out = HashMap::new();
+    walk(error, &mut out);
+    Arc::new(out)
 }
 
 /// The per-request overlay snapshot for one open document.
@@ -122,6 +183,14 @@ pub struct DocumentOverlay {
     /// Why a standalone schema document's own named-type references do not
     /// resolve (an unknown name, contradictory reuse, or an import cycle).
     pub standalone_resolution: Option<Arc<SchemaError>>,
+    /// The located definition failures of the schema files
+    /// [`schema`](Self::schema)'s or
+    /// [`standalone_resolution`](Self::standalone_resolution)'s failure names.
+    pub file_failures: FileFailures,
+    /// The shared analysis of this snapshot, the same `Arc` for every overlay
+    /// built while the document's buffer and prepared schema inputs are
+    /// unchanged. Its tree is [`ast`](Self::ast).
+    pub analysis: Arc<FrontmatterAnalysis>,
 }
 
 impl DocumentOverlay {
@@ -169,6 +238,12 @@ struct OverlayCache {
     /// invalidated by content hash, the document's context, or a change to
     /// any file it imports.
     standalone_resolution: HashMap<String, CachedStandalone>,
+    /// The current frontmatter analysis per document URI, replaced whenever
+    /// any input it was built from changes.
+    analysis: HashMap<String, Arc<FrontmatterAnalysis>>,
+    /// Schema work shared by every document's analysis and kept across
+    /// edits (see [`analysis::CrossSnapshotSchema`]).
+    shared_schema: Arc<analysis::CrossSnapshotSchema>,
 }
 
 /// A document's trigger registry that is not fresh: what
@@ -181,12 +256,12 @@ pub struct RegistryNeed {
     pub context: FileResolutionContext,
 }
 
-/// A trigger-load diagnostic that must be published or cleared.
+/// A skipped-trigger warning that must be published or cleared.
 pub struct TriggerDiagnosticTransition {
-    /// Trigger envelope owning the diagnostic.
+    /// The skipped trigger file the warning is published on.
     pub path: PathBuf,
-    /// The current load error, or `None` when a prior diagnostic must clear.
-    pub error: Option<Arc<SchemaError>>,
+    /// The current finding, or `None` when a prior warning must clear.
+    pub finding: Option<InvalidTriggerFinding>,
 }
 
 struct CachedSchema {
@@ -209,6 +284,7 @@ struct CachedSchema {
     /// Invalid `suggest(...)` candidates written on the inline `$schema`'s
     /// references, judged against the resolved targets.
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+    file_failures: FileFailures,
 }
 
 /// What [`OverlayCache::schema_for`] assembled for a Markdown document.
@@ -216,6 +292,10 @@ struct FrontmatterSchema {
     outcome: SchemaOutcome,
     named_types: Arc<NamedTypeCatalog>,
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+    file_failures: FileFailures,
+    /// The cache key the outcome was assembled under, or `None` when
+    /// assembly was skipped.
+    key: Option<u64>,
 }
 
 impl FrontmatterSchema {
@@ -224,6 +304,8 @@ impl FrontmatterSchema {
             outcome,
             named_types: Arc::default(),
             reference_suggestions: Arc::default(),
+            file_failures: FileFailures::default(),
+            key: None,
         }
     }
 }
@@ -241,6 +323,7 @@ struct CachedStandalone {
 struct StandaloneNamedTypes {
     named_types: Arc<NamedTypeCatalog>,
     error: Option<Arc<SchemaError>>,
+    file_failures: FileFailures,
     /// Invalid `suggest(...)` candidates written on references, judged
     /// against the resolved targets.
     suggestions: Vec<SuggestionLintProblem>,
@@ -274,7 +357,7 @@ impl OverlayState {
     ) -> Option<DocumentOverlay> {
         self.prepare_for_document(text, path, workspace_roots, resolution);
         let timings = RequestTimings::untimed();
-        self.for_document_timed(uri, text, path, config, workspace_roots, resolution, &timings)
+        self.for_document_timed(uri, None, text, path, config, workspace_roots, resolution, &timings)
     }
 
     /// Builds the overlay for one open document from the installed trigger
@@ -286,10 +369,16 @@ impl OverlayState {
     /// installed state (none, for a document never prepared). The server
     /// therefore builds an overlay only once the registry the document needs
     /// is prepared.
+    ///
+    /// `revision` is the client's version of the buffer, which the shared
+    /// [`FrontmatterAnalysis`] is keyed on with the text: a new version starts
+    /// a new analysis even when its text is unchanged. `None` (a caller with
+    /// no versioned buffer) keys it on the text alone.
     #[allow(clippy::too_many_arguments)]
     pub fn for_document_timed(
         &self,
         uri: &Uri,
+        revision: Option<i32>,
         text: &str,
         path: &Path,
         config: &DmlsConfig,
@@ -305,7 +394,6 @@ impl OverlayState {
             let (ast, stale, parse_error) = match parse.ast {
                 Some(fresh) => {
                     let fresh = Arc::new(fresh);
-                    cache.last_good.insert(uri_key.clone(), Arc::clone(&fresh));
                     cache.last_good_text.insert(uri_key.clone(), text.to_string());
                     (Some(fresh), false, None)
                 }
@@ -321,7 +409,7 @@ impl OverlayState {
                 text
             };
             let schema_text = schema_text.to_string();
-            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions } =
+            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions, file_failures, key: schema_key } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
                         &uri_key,
@@ -333,6 +421,34 @@ impl OverlayState {
                         timings,
                     )
                 });
+            let text_hash = xx_hash_bytes(text.as_bytes());
+            let identity = analysis::AnalysisIdentity {
+                revision,
+                text_hash,
+                stale,
+                tree_text_hash: if stale { xx_hash_bytes(schema_text.as_bytes()) } else { text_hash },
+                schema_key,
+                bundle: match &schema {
+                    SchemaOutcome::Ready(Some(bundle)) => Some(Arc::clone(bundle)),
+                    _ => None,
+                },
+                named_types: Arc::clone(&named_types),
+            };
+            let analysis = match cache.analysis.get(&uri_key) {
+                Some(current) if current.matches(&identity) => Arc::clone(current),
+                _ => {
+                    let fresh = Arc::new(FrontmatterAnalysis::new(identity, ast, Arc::clone(&cache.shared_schema)));
+                    cache.analysis.insert(uri_key.clone(), Arc::clone(&fresh));
+                    fresh
+                }
+            };
+            // A reused analysis keeps the tree it was built over, so entry
+            // indices its caches hold address the tree every consumer reads.
+            let ast = analysis.ast().cloned();
+            if !stale && let Some(tree) = &ast {
+                cache.last_good.insert(uri_key.clone(), Arc::clone(tree));
+            }
+            drop(cache);
             let mut suggestions = suggestions::inline_lints(text, ast.as_deref());
             // A stale outcome was assembled from the last-good text, whose
             // spans do not describe the current buffer.
@@ -351,11 +467,14 @@ impl OverlayState {
                 schema_authoring,
                 named_types,
                 standalone_resolution: None,
+                file_failures,
+                analysis,
             });
         }
 
-        // Trigger-schema authoring path. Only claimed, malformed envelopes are
-        // diagnostics; ordinary schema-root YAML remains silent.
+        // Trigger-schema authoring path. A claimed, malformed envelope is an
+        // error and a trigger discovery skipped is a warning; ordinary
+        // schema-root YAML remains silent.
         if path
             .parent()
             .and_then(Path::file_name)
@@ -373,6 +492,8 @@ impl OverlayState {
                         schema_authoring: SchemaAuthoringState::Inactive,
                         named_types: Arc::default(),
                         standalone_resolution: None,
+                        file_failures: FileFailures::default(),
+                        analysis: Arc::new(FrontmatterAnalysis::detached()),
                     });
                 }
                 Ok(Some(_)) => {
@@ -385,16 +506,18 @@ impl OverlayState {
                             cache.trigger_registry(path, workspace_roots)
                         });
                     }
-                    if let Some(error) = cache.triggers.load_error_for(path) {
+                    if let Some(finding) = cache.triggers.finding_for(path) {
                         return Some(DocumentOverlay {
                             ast: None,
                             stale: false,
                             parse_error: None,
                             schema: SchemaOutcome::Ready(None),
-                            suggestions: SuggestionState::TriggerError(error),
+                            suggestions: SuggestionState::TriggerWarning(Arc::new(finding.clone())),
                             schema_authoring: SchemaAuthoringState::Inactive,
                             named_types: Arc::default(),
                             standalone_resolution: None,
+                            file_failures: FileFailures::default(),
+                            analysis: Arc::new(FrontmatterAnalysis::detached()),
                         });
                     }
                 }
@@ -443,6 +566,8 @@ impl OverlayState {
                     },
                     named_types: resolved.named_types,
                     standalone_resolution: resolved.error,
+                    file_failures: resolved.file_failures,
+                    analysis: Arc::new(FrontmatterAnalysis::detached()),
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -491,6 +616,8 @@ impl OverlayState {
                     },
                     named_types: Arc::default(),
                     standalone_resolution: None,
+                    file_failures: FileFailures::default(),
+                    analysis: Arc::new(FrontmatterAnalysis::detached()),
                 });
             }
         }
@@ -506,9 +633,17 @@ impl OverlayState {
         cache.standalone_last_good.remove(uri.as_str());
         cache.schema.remove(uri.as_str());
         cache.standalone_resolution.remove(uri.as_str());
+        cache.analysis.remove(uri.as_str());
     }
 
-    /// Takes trigger-load diagnostic ownership changes since the last refresh.
+    /// The published warning for trigger file `path`, when a prepared
+    /// registry skipped it.
+    pub fn trigger_finding(&self, path: &Path) -> Option<InvalidTriggerFinding> {
+        let cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.finding_for(path).cloned()
+    }
+
+    /// Takes skipped-trigger warning changes since the last refresh.
     pub fn take_trigger_diagnostic_transitions(&self) -> Vec<TriggerDiagnosticTransition> {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.take_transitions()
@@ -749,6 +884,7 @@ impl OverlayCache {
         resolution: &DocumentResolution,
         timings: &RequestTimings,
     ) -> FrontmatterSchema {
+        validation_timing::note_assembly(false);
         // A document whose context failed resolves no `$schema` reference or
         // trigger payload; its context-failure diagnostic says why.
         let Ok(context) = resolution.context() else {
@@ -756,7 +892,9 @@ impl OverlayCache {
             return FrontmatterSchema::new(SchemaOutcome::Ready(None));
         };
         let registry = match timings.time(Stage::TriggerRegistry, || {
-            self.trigger_registry(path, workspace_roots)
+            validation_timing::part(|| {
+                ValidationStage::Discover.time(|| self.trigger_registry(path, workspace_roots))
+            })
         }) {
             Ok(registry) => registry,
             Err(error) => {
@@ -778,10 +916,15 @@ impl OverlayCache {
             && cached.key == key
             && deps_unchanged(&cached.deps)
         {
+            if matches!(cached.outcome, SchemaOutcome::Ready(Some(_))) {
+                validation_timing::note_assembly(true);
+            }
             return FrontmatterSchema {
                 outcome: cached.outcome.clone(),
                 named_types: Arc::clone(&cached.named_types),
                 reference_suggestions: Arc::clone(&cached.reference_suggestions),
+                file_failures: Arc::clone(&cached.file_failures),
+                key: Some(key),
             };
         }
         let schema_roots: Vec<PathBuf> = registry
@@ -792,14 +935,10 @@ impl OverlayCache {
             .as_ref()
             .map(|registry| registry.dependencies().map(Path::to_path_buf).collect())
             .unwrap_or_default();
-        let outcome = match schema::assemble(
-            path,
-            text,
-            config,
-            workspace_roots,
-            registry,
-            context,
-        ) {
+        let assembled = validation_timing::part(|| {
+            schema::assemble(path, text, config, workspace_roots, registry, context)
+        });
+        let outcome = match assembled {
             Ok(bundle) => SchemaOutcome::Ready(bundle.map(Arc::new)),
             Err(error) => SchemaOutcome::Failed(Arc::new(error)),
         };
@@ -819,10 +958,16 @@ impl OverlayCache {
         let registry_files: std::collections::HashSet<&Path> =
             registry_files.iter().map(PathBuf::as_path).collect();
         let deps = collect_dep_hashes(&outcome, &named_types, &registry_files);
+        let file_failures = match &outcome {
+            SchemaOutcome::Failed(error) => file_failures(error),
+            SchemaOutcome::Ready(_) => FileFailures::default(),
+        };
         let schema = FrontmatterSchema {
             outcome,
             named_types,
             reference_suggestions,
+            file_failures,
+            key: Some(key),
         };
         self.schema.insert(
             uri_key.to_string(),
@@ -832,6 +977,7 @@ impl OverlayCache {
                 outcome: schema.outcome.clone(),
                 named_types: Arc::clone(&schema.named_types),
                 reference_suggestions: Arc::clone(&schema.reference_suggestions),
+                file_failures: Arc::clone(&schema.file_failures),
             },
         );
         schema
@@ -884,7 +1030,7 @@ impl OverlayCache {
         let expanded = match model.schema() {
             Some(schema) => {
                 expand_named_types(schema, base_dir, Some(path), &schema_roots, context)
-                    .map(|(_, imports)| imports)
+                    .map(|expansion| expansion.imports)
             }
             None => Ok(Vec::new()),
         };
@@ -896,7 +1042,8 @@ impl OverlayCache {
             suggestions::reference_lints(schema, base_dir, Some(path), &schema_roots, context)
         });
         let deps = hash_files(imports.iter().chain(named_types.dependencies()));
-        let resolved = StandaloneNamedTypes { named_types, error, suggestions };
+        let file_failures = error.as_deref().map(file_failures).unwrap_or_default();
+        let resolved = StandaloneNamedTypes { named_types, error, file_failures, suggestions };
         self.standalone_resolution.insert(
             uri_key.to_string(),
             CachedStandalone { key, deps, resolved: resolved.clone() },
@@ -1044,11 +1191,14 @@ fn fallback_areas(
 
 /// Content-and-config identity for the schema cache: the document text plus a
 /// signature of the schema configuration (extensions + strict mode).
+/// `schema.slow_validation_ms` only chooses a log level, so changing it
+/// keeps the cached bundle.
 ///
-/// The config bytes are already key-order-insensitive: `SchemaConfig` holds
-/// only a `bool` and a `BTreeMap`, which serializes sorted.
+/// The config bytes are already key-order-insensitive: the tuple holds only a
+/// `bool` and a `BTreeMap`, which serializes sorted.
 fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
-    let config_bytes = serde_json::to_vec(&config.schema).unwrap_or_default();
+    let config_bytes =
+        serde_json::to_vec(&(config.schema.strict, &config.schema.extensions)).unwrap_or_default();
     xx_hash_bytes(text.as_bytes()) ^ xx_hash_bytes(&config_bytes)
 }
 
@@ -1099,9 +1249,11 @@ fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<(PathBuf, u64
 }
 
 /// The schema files a resolution error names: the referenced schema that
-/// failed, the namespace searched for an unknown name, the file defining a
-/// union a reference misuses, and every file that authored a reference or a
-/// conflicting constraint.
+/// failed, an imported file that is malformed or unreadable, the namespace
+/// searched for an unknown name, the file defining a
+/// union a reference misuses, every file that authored a reference or a
+/// conflicting constraint, and every file holding a reference of a cycle
+/// that never descends or the type it names.
 fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
     fn file(source: &SchemaSourceId, out: &mut Vec<PathBuf>) {
         if let SchemaSourceId::File(path) = source {
@@ -1115,17 +1267,24 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
                 out.push(path.clone());
                 walk(source, out);
             }
+            SchemaError::SchemaDocument { path, .. } | SchemaError::Io { path, .. } => out.push(path.clone()),
             SchemaError::UnknownNamedType { namespace, site, .. } => {
                 file(namespace, out);
                 file(&site.source, out);
             }
             SchemaError::ConstraintConflict { site, constraints, .. } => {
                 file(&site.source, out);
-                constraints.iter().for_each(|origin| file(&origin.source, out));
+                constraints.iter().for_each(|participant| file(&participant.origin.source, out));
             }
             SchemaError::UnionReference { site, definition, .. } => {
                 file(&site.source, out);
                 file(&definition.source, out);
+            }
+            SchemaError::NonDescendingCycle { cycles } => {
+                for reference in cycles.iter().flatten() {
+                    file(&reference.site.source, out);
+                    file(&reference.target_source, out);
+                }
             }
             _ => {}
         }
@@ -1871,10 +2030,8 @@ mod tests {
     fn shipped_schema_corpus_uses_content_classification() {
         let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
         let expected = std::collections::BTreeMap::from([
-            ("darkmatter.yaml".to_string(), "ready"),
             ("env.yaml".to_string(), "ready"),
             ("err.yaml".to_string(), "error"),
-            ("expression-functions.yaml".to_string(), "inactive"),
             ("schema-definition.yaml".to_string(), "inactive"),
         ]);
         let state = OverlayState::default();
@@ -1904,14 +2061,9 @@ mod tests {
                 }) => "ready",
                 Some(DocumentOverlay {
                     schema_authoring:
-                        SchemaAuthoringState::Standalone { error: Some(error), .. },
+                        SchemaAuthoringState::Standalone { error: Some(_), .. },
                     ..
-                }) => {
-                    if name == "darkmatter.yaml" {
-                        panic!("shipped Darkmatter schema failed passive parsing: {error}");
-                    }
-                    "error"
-                }
+                }) => "error",
                 None => "inactive",
                 Some(_) => "other",
             };
@@ -1929,7 +2081,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("schemas/prompt.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n",
         )
         .unwrap();
     }
@@ -2014,19 +2166,19 @@ mod tests {
 
         std::fs::write(
             root.join("schemas/prompt.trigger.yaml"),
-            "kind: trigger-schema\nmatch: {}\n",
+            "kind: schema-trigger\nmatch: {}\n",
         )
         .unwrap();
         state.invalidate_trigger_inputs(&[root.join("schemas/prompt.trigger.yaml")]);
-        let retained = state
+        let skipped = state
             .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         assert!(
-            !ready_bundle(&retained)
+            ready_bundle(&skipped)
                 .effective
-                .validate(&ready_bundle(&retained).frontmatter_json)
+                .validate(&ready_bundle(&skipped).frontmatter_json)
                 .valid,
-            "a malformed envelope edit must retain the last-good registry"
+            "a saved malformed envelope is skipped: its trigger no longer applies"
         );
     }
 
@@ -2096,7 +2248,7 @@ mod tests {
         let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
         let build = || {
             state
-                .for_document_timed(&doc, text, &path, &DmlsConfig::default(), &roots, &resolution, &RequestTimings::untimed())
+                .for_document_timed(&doc, None, text, &path, &DmlsConfig::default(), &roots, &resolution, &RequestTimings::untimed())
                 .unwrap()
         };
         let triggered = |overlay: &DocumentOverlay| {
@@ -2116,7 +2268,7 @@ mod tests {
     }
 
     #[test]
-    fn trigger_payload_edit_retains_last_good_registry() {
+    fn trigger_payload_edit_skips_the_trigger_without_failing_the_document() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_trigger_fixture(root);
@@ -2140,9 +2292,9 @@ mod tests {
         );
 
         // Edit the PAYLOAD file to an invalid shape (root union). The envelope
-        // is untouched; only the payload becomes non-mergeable. `scan` must now
-        // fail, so the last-good registry is retained — the document must NOT
-        // flap to `SchemaOutcome::Failed` and must keep the prior activation.
+        // is untouched; only the payload becomes non-mergeable, so discovery
+        // skips the trigger: the document must NOT flap to
+        // `SchemaOutcome::Failed`, and the skipped trigger's property is gone.
         std::fs::write(
             root.join("schemas/prompt.yaml"),
             "$schema:\n  - model: string(required)\n  - title: string(required)\n",
@@ -2150,21 +2302,24 @@ mod tests {
         .unwrap();
         state.invalidate_trigger_inputs(&[root.join("schemas/prompt.yaml")]);
 
-        let retained = state
+        let skipped = state
             .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
-        let retained_report = ready_bundle(&retained)
+        let skipped_report = ready_bundle(&skipped)
             .effective
-            .validate(&ready_bundle(&retained).frontmatter_json);
+            .validate(&ready_bundle(&skipped).frontmatter_json);
         assert!(
-            retained_report.problems.iter().any(|p| p.message.contains("model")),
-            "a payload edit must retain the last-good registry and activation: {:?}",
-            retained_report.problems
+            !skipped_report.problems.iter().any(|p| p.message.contains("model")),
+            "a skipped trigger contributes nothing: {:?}",
+            skipped_report.problems
         );
+        let transitions = state.take_trigger_diagnostic_transitions();
+        assert_eq!(transitions.len(), 1);
+        assert!(transitions[0].finding.is_some(), "the skipped trigger's warning is published");
     }
 
     #[test]
-    fn consecutive_failed_scans_transfer_diagnostic_ownership() {
+    fn each_skipped_trigger_publishes_and_clears_its_own_warning() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let schemas = root.join("schemas");
@@ -2175,13 +2330,13 @@ mod tests {
         let b_payload = schemas.join("b.yaml");
         std::fs::write(
             &a_envelope,
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n",
         )
         .unwrap();
         std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
         std::fs::write(
             &b_envelope,
-            "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: b.yaml\n",
+            "kind: schema-trigger\nmatch:\n  task: string(required)\n$schema: b.yaml\n",
         )
         .unwrap();
         std::fs::write(&b_payload, "$schema:\n  provider: string(required)\n").unwrap();
@@ -2199,39 +2354,42 @@ mod tests {
             ready_bundle(&initial).effective.validate(&ready_bundle(&initial).frontmatter_json);
         assert!(
             initial_report.problems.iter().any(|problem| problem.message.contains("model")),
-            "the matching trigger must contribute to the last-good schema: {:?}",
+            "the matching trigger must contribute to the schema: {:?}",
             initial_report.problems
         );
 
         std::fs::remove_file(&a_payload).unwrap();
         state.invalidate_trigger_inputs(std::slice::from_ref(&a_payload));
-        let failed_a = state
+        let skipped_a = state
             .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let transitions = state.take_trigger_diagnostic_transitions();
         assert_eq!(transitions.len(), 1);
         assert_eq!(transitions[0].path, a_envelope);
-        assert!(transitions[0].error.is_some());
+        assert!(transitions[0].finding.is_some());
 
         std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
         std::fs::remove_file(&b_payload).unwrap();
         state.invalidate_trigger_inputs(&[a_payload.clone(), b_payload.clone()]);
-        let failed_b = state
+        let skipped_b = state
             .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let transitions = state.take_trigger_diagnostic_transitions();
         assert_eq!(transitions.len(), 2);
         assert_eq!(transitions[0].path, a_envelope);
-        assert!(transitions[0].error.is_none(), "A's obsolete diagnostic must clear");
+        assert!(transitions[0].finding.is_none(), "A's repaired warning must clear");
         assert_eq!(transitions[1].path, b_envelope);
-        assert!(transitions[1].error.is_some(), "B must own the current diagnostic");
+        assert!(transitions[1].finding.is_some(), "B's warning must publish");
 
-        for overlay in [&failed_a, &failed_b] {
+        // Each overlay serves the current valid subset: A's `model` only
+        // while A loads.
+        for (overlay, has_model) in [(&skipped_a, false), (&skipped_b, true)] {
             let bundle = ready_bundle(overlay);
             let report = bundle.effective.validate(&bundle.frontmatter_json);
-            assert!(
+            assert_eq!(
                 report.problems.iter().any(|problem| problem.message.contains("model")),
-                "a failed replacement scan must retain the last-good consumer schema: {:?}",
+                has_model,
+                "{:?}",
                 report.problems
             );
         }
@@ -2303,5 +2461,96 @@ mod tests {
             panic!("sibling-only bare reference must fail schema preparation");
         };
         assert!(error.to_string().contains("./local.yaml"));
+    }
+
+    #[test]
+    fn repairing_a_malformed_imported_schema_reassembles_an_unchanged_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let shape = root.join("shape.yaml");
+        std::fs::write(&shape, "$schema:\n  title: [\n").unwrap();
+        let path = root.join("doc.md");
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let text = "---\n$schema: ./shape.yaml\ntitle: one\n---\n\nbody\n";
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let build = || {
+            state
+                .for_document_timed(&doc, Some(1), text, &path, &DmlsConfig::default(), std::slice::from_ref(&root), &resolution, &RequestTimings::untimed())
+                .expect("frontmatter overlay")
+        };
+        let failed = build();
+        assert!(matches!(&failed.schema, SchemaOutcome::Failed(error) if matches!(**error, SchemaError::SchemaDocument { .. })));
+        assert!(matches!(build().schema, SchemaOutcome::Failed(_)), "an unchanged failure stays cached");
+
+        std::fs::write(&shape, "$schema:\n  title: string\n").unwrap();
+        let repaired = build();
+        assert!(ready_bundle(&repaired).effective.validate(&ready_bundle(&repaired).frontmatter_json).valid);
+        assert!(!Arc::ptr_eq(&failed.analysis, &repaired.analysis), "the repair starts a new analysis");
+        assert!(repaired.analysis.root().properties.contains_key("title"));
+    }
+
+    #[test]
+    fn frontmatter_analysis_is_shared_until_an_input_changes() {
+        use crate::work_counters::work_counts;
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::write(root.join("shape.yaml"), "$schema:\n  title: string\n").unwrap();
+        let path = root.join("doc.md");
+        let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
+        let text = "---\n$schema: ./shape.yaml\ntitle: one\n---\n\nbody\n";
+        let roots = [root.clone()];
+        let in_repository = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let build = |revision: i32, text: &str, config: &DmlsConfig, resolution: &DocumentResolution| {
+            let overlay = state
+                .for_document_timed(&doc, Some(revision), text, &path, config, &roots, resolution, &RequestTimings::untimed())
+                .expect("frontmatter overlay");
+            assert!(
+                overlay.ast.as_ref().zip(overlay.analysis.ast()).is_some_and(|(own, shared)| Arc::ptr_eq(own, shared)),
+                "the overlay reads the analysis's tree"
+            );
+            overlay.analysis
+        };
+        let config = DmlsConfig::default();
+        let shared = |left: &Arc<FrontmatterAnalysis>, right: &Arc<FrontmatterAnalysis>| Arc::ptr_eq(left, right);
+
+        let first = build(1, text, &config, &in_repository);
+        assert!(first.root().properties.contains_key("title"));
+        let before = work_counts();
+        assert!(shared(&first, &build(1, text, &config, &in_repository)), "a fresh overlay shares the snapshot");
+        assert_eq!(work_counts().since(before).root_assemblies, 0);
+
+        let revised = build(2, text, &config, &in_repository);
+        assert!(!shared(&first, &revised), "a new revision with the same text replaces it");
+        let edited = build(3, &text.replace("one", "two"), &config, &in_repository);
+        assert!(!shared(&revised, &edited), "an edit replaces it");
+
+        std::fs::write(root.join("shape.yaml"), "$schema:\n  title: string\n  added: string\n").unwrap();
+        let reimported = build(3, &text.replace("one", "two"), &config, &in_repository);
+        assert!(!shared(&edited, &reimported), "an imported-schema change replaces it");
+        assert!(reimported.root().properties.contains_key("added"));
+        assert!(!edited.root().properties.contains_key("added"), "a retained snapshot keeps its own inputs");
+
+        let mut strict = DmlsConfig::default();
+        strict.schema.strict = !config.schema.strict;
+        let reconfigured = build(3, &text.replace("one", "two"), &strict, &in_repository);
+        assert!(!shared(&reimported, &reconfigured), "a configuration change replaces it");
+        let other_context = crate::context::test_support::resolution_in(&root, &path);
+        let recontexted = build(3, &text.replace("one", "two"), &strict, &other_context);
+        assert!(!shared(&reconfigured, &recontexted), "a context change replaces it");
+
+        let malformed = build(4, "---\n$schema: ./shape.yaml\ntitle: [\n---\n\nbody\n", &strict, &other_context);
+        assert!(!shared(&recontexted, &malformed), "a malformed buffer is its own snapshot");
+        assert!(
+            Arc::ptr_eq(malformed.ast().unwrap(), recontexted.ast().unwrap()),
+            "over the last-good tree"
+        );
+        let repaired = build(5, &text.replace("one", "two"), &strict, &other_context);
+        assert!(!shared(&malformed, &repaired), "a repair replaces it");
+
+        state.forget(&doc);
+        assert_eq!(Arc::strong_count(&repaired), 1, "closing drops the cache's snapshot");
+        assert!(!shared(&repaired, &build(5, &text.replace("one", "two"), &strict, &other_context)));
     }
 }

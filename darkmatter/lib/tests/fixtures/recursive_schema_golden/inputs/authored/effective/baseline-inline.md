@@ -1,0 +1,6 @@
+---
+$schema:
+  title: string(required)
+  tags: string[]
+---
+body

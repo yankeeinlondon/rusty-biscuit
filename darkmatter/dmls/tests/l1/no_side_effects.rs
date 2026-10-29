@@ -379,3 +379,89 @@ fn fm_root_completion_and_hover_observe_nothing() {
         "fm completion and hover must build no effect engine and attempt no network access",
     );
 }
+
+/// Spec acceptance criterion 12, the DMLS part: lifecycle stacks that would
+/// create files, run a shell, write frontmatter, and speak if they ran are
+/// analyzed by hover, completion, diagnostics, and document symbols without
+/// running any of it. No sentinel appears, no effect engine or network
+/// access is built, and the document's bytes are unchanged.
+#[test]
+fn lifecycle_stacks_are_analyzed_and_never_run() {
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
+    let workspace = LspWorkspace::new();
+    let spelled = |name: &str| workspace.path().join(name).to_string_lossy().replace('\\', "/");
+    let (ensured, touched) = (spelled("ENSURED_BY_INITIALIZE"), spelled("TOUCHED_BY_COMPOSED"));
+    let text = format!(
+        "---\n\
+         title: Stacks\n\
+         initialize:\n  - ensure_file: {ensured}\n\
+         composed:\n  - shell: \"touch {touched}\"\n  - stdout: hi\n  - when: err\n    then:\n      - info: \"{{{{ err.msg }}}}\"\n\
+         finalize:\n  - set:\n      x: 1\n\
+         failed:\n  - say: hi\n  - info: \"{{{{ err.msg }}}} {{{{ timing.document_ms }}}}\"\n\
+         ---\n\n\
+         # Stacks\n\n{{{{ title }}}}\n"
+    );
+    let doc_path = workspace.path().join("stacks.md");
+    std::fs::write(&doc_path, &text).unwrap();
+    let doc_uri = url::Url::from_file_path(&doc_path).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(passive_initialize_params(workspace.path()));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str(), "languageId": "markdown", "version": 1, "text": text }
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(doc_uri.as_str());
+    // Analysis ran: the `composed` guard's `err` read is diagnosed.
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic["code"] == json!("dm.expression.unavailable_global")),
+        "{diagnostics:#?}"
+    );
+
+    let mut positions = Vec::new();
+    for needle in ["ensure_file", "touch", "stdout", "when: err", "{{ err.msg", "x: 1", "say: hi", "{{ timing.doc"] {
+        let mut start = 0;
+        while let Some(found) = text[start..].find(needle) {
+            let offset = start + found + needle.len();
+            let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+            positions.push((text[..offset].matches('\n').count() as u32, (offset - line_start) as u32));
+            start = offset;
+        }
+    }
+    assert!(positions.len() >= 9, "{positions:?}");
+    for (line, character) in positions {
+        for method in ["textDocument/hover", "textDocument/completion"] {
+            let response = fixture.request(
+                method,
+                json!({ "textDocument": { "uri": doc_uri.as_str() }, "position": { "line": line, "character": character } }),
+            );
+            assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+        }
+    }
+    let symbols =
+        fixture.request("textDocument/documentSymbol", json!({ "textDocument": { "uri": doc_uri.as_str() } }));
+    assert!(symbols.error.is_none(), "{:?}", symbols.error);
+    fixture.shutdown();
+
+    for sentinel in [&ensured, &touched] {
+        assert!(!std::path::Path::new(sentinel).exists(), "{sentinel} was created: a lifecycle action ran");
+    }
+    assert_eq!(std::fs::read(&doc_path).unwrap(), text.as_bytes(), "a lifecycle action wrote the document");
+
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "editor requests over lifecycle stacks must build no effect engine and attempt no network access",
+    );
+}

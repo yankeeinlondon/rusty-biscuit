@@ -2,13 +2,19 @@
 //!
 //! A variable root is exactly one of:
 //!
-//! - a **reserved namespace** (`fm`, `ctx`, `env`, `current`; the set is
-//!   [`reserved_root_descriptors`]);
+//! - a **reserved namespace** (`fm`, `ctx`, `env`, `current`, `local`; the set
+//!   is [`reserved_root_descriptors`]);
 //! - a **global** a host registered for the current scope, available (its
 //!   value may be `null`) or unavailable (reading it is a typed
 //!   [`BindingError::Unavailable`]);
 //! - otherwise a **document property**, present or absent (absent evaluates to
 //!   `null`).
+//!
+//! Callback and iteration parameters are **locals**, held in an immutable
+//! [`LexicalScope`] and read through [`ScopedLookup`]. A local shadows a
+//! document property but never a reserved namespace or a registered global;
+//! `local.<name>` names the nearest local explicitly and never reaches the
+//! document, so a frontmatter key `local` is read as `fm.local`.
 //!
 //! A host declares its globals once, in an immutable, provider-free
 //! [`BindingView`]. Before anything is evaluated it supplies one
@@ -25,6 +31,7 @@ use serde_json::Value;
 
 use super::catalog::reserved_root_descriptors;
 use super::{EvaluationLookup, ExpressionError, ResolutionContext};
+use crate::markdown::compose::value_origin::OverrideOrigin;
 use crate::markdown::span::SourceSpan;
 
 /// How one variable path resolved.
@@ -50,6 +57,19 @@ pub enum ResolvedBinding {
         /// The selected value; `null` for a `null` global or a missing member.
         value: Value,
     },
+    /// A path under a lexical local (a callback or iteration parameter).
+    ///
+    /// Like a `Global`, a present local always has a value: a `null` local, or
+    /// a missing member of a present local, stays a `Local` holding `null`
+    /// and never falls through to the document.
+    Local {
+        /// The selected value.
+        value: Value,
+        /// The binding the read resolved to, never just its spelling.
+        id: LocalId,
+        /// Whether the bound value is authored template text or inert data.
+        origin: OverrideOrigin,
+    },
 }
 
 impl ResolvedBinding {
@@ -67,7 +87,7 @@ impl ResolvedBinding {
     pub fn value(&self) -> Option<&Value> {
         match self {
             Self::Document { value } | Self::Namespace { value } => value.as_ref(),
-            Self::Global { value } => Some(value),
+            Self::Global { value } | Self::Local { value, .. } => Some(value),
         }
     }
 
@@ -75,7 +95,7 @@ impl ResolvedBinding {
     pub fn into_value(self) -> Option<Value> {
         match self {
             Self::Document { value } | Self::Namespace { value } => value,
-            Self::Global { value } => Some(value),
+            Self::Global { value } | Self::Local { value, .. } => Some(value),
         }
     }
 }
@@ -394,6 +414,14 @@ fn check_reason(root: &str, reason: &UnavailabilityReason) -> Result<(), Binding
 /// only when the root is first read.
 pub type LazyProvider<'a> = Arc<dyn Fn() -> Value + Send + Sync + 'a>;
 
+/// A member-aware global's resolver: the value of one top-level member, or
+/// `None` when the whole value has no such member.
+///
+/// It must agree with the binding's whole-root provider: for every `name`,
+/// `member(name)` equals `whole().get(name).cloned()`. Unlike the whole
+/// provider it is not cached, so it may run once per read.
+pub type MemberProvider<'a> = Arc<dyn Fn(&str) -> Option<Value> + Send + Sync + 'a>;
+
 /// The runtime entry a host supplies for one declared global.
 #[derive(Clone)]
 pub enum RuntimeBinding<'a> {
@@ -401,6 +429,21 @@ pub enum RuntimeBinding<'a> {
     Eager(Value),
     /// A value computed on first read and cached for the session.
     Lazy(LazyProvider<'a>),
+    /// An object global whose dotted reads resolve one member without
+    /// building the whole value.
+    ///
+    /// `root.<name>.<rest>` asks `member` for `<name>` and selects `<rest>`
+    /// from its result, exactly as the same path selects from `whole()`. A
+    /// bare root read, and any read the evaluator does not spell as a dotted
+    /// path (bracket access such as `root['name']`), runs `whole` instead,
+    /// at most once per session like [`Self::Lazy`]; once it has run, member
+    /// reads in that session select from its value.
+    Members {
+        /// Resolves one top-level member.
+        member: MemberProvider<'a>,
+        /// Builds the whole value.
+        whole: LazyProvider<'a>,
+    },
     /// Reading the global fails with this reason.
     Unavailable(UnavailabilityReason),
 }
@@ -417,6 +460,19 @@ impl<'a> RuntimeBinding<'a> {
         Self::Lazy(Arc::new(provider))
     }
 
+    /// A [`Self::Members`] binding. `member` must agree with `whole`: see
+    /// [`MemberProvider`].
+    pub fn members<M, W>(member: M, whole: W) -> Self
+    where
+        M: Fn(&str) -> Option<Value> + Send + Sync + 'a,
+        W: Fn() -> Value + Send + Sync + 'a,
+    {
+        Self::Members {
+            member: Arc::new(member),
+            whole: Arc::new(whole),
+        }
+    }
+
     pub fn unavailable(reason: UnavailabilityReason) -> Self {
         Self::Unavailable(reason)
     }
@@ -425,6 +481,7 @@ impl<'a> RuntimeBinding<'a> {
         match self {
             Self::Eager(_) => "eager",
             Self::Lazy(_) => "lazy",
+            Self::Members { .. } => "members",
             Self::Unavailable(_) => "unavailable",
         }
     }
@@ -435,6 +492,11 @@ impl fmt::Debug for RuntimeBinding<'_> {
         match self {
             Self::Eager(value) => f.debug_tuple("Eager").field(value).finish(),
             Self::Lazy(_) => f.debug_tuple("Lazy").field(&"Fn(..)").finish(),
+            Self::Members { .. } => f
+                .debug_struct("Members")
+                .field("member", &"Fn(&str)")
+                .field("whole", &"Fn(..)")
+                .finish(),
             Self::Unavailable(reason) => f.debug_tuple("Unavailable").field(reason).finish(),
         }
     }
@@ -549,6 +611,7 @@ pub struct EvaluationSession<'a> {
     runtime: HashMap<String, RuntimeBinding<'a>>,
     cache: Mutex<HashMap<String, Value>>,
     resolution_context: Option<ResolutionContext>,
+    iteration: super::iteration::IterationBudget,
 }
 
 impl fmt::Debug for EvaluationSession<'_> {
@@ -580,12 +643,17 @@ impl<'a> EvaluationSession<'a> {
         I: IntoIterator<Item = (String, RuntimeBinding<'a>)>,
     {
         let entries = check_registration(&view, runtime)?;
+        let iteration = document.iteration_budget().cloned()
+            .or_else(|| document.resolution_context_ref().map(|context| context.iteration.clone()))
+            .or_else(|| document.resolution_context().map(|context| context.iteration))
+            .unwrap_or_else(|| super::iteration::IterationBudget::new(Default::default()));
         Ok(Self {
             view,
             document,
             runtime: entries,
             cache: Mutex::new(HashMap::new()),
             resolution_context: None,
+            iteration,
         })
     }
 
@@ -595,6 +663,20 @@ impl<'a> EvaluationSession<'a> {
     pub fn with_resolution_context(mut self, resolution_context: ResolutionContext) -> Self {
         self.resolution_context = Some(resolution_context);
         self
+    }
+
+    /// Counts this session's iteration against a fresh budget of `limits`
+    /// instead of the defaults.
+    #[must_use]
+    pub fn with_iteration_limits(mut self, limits: super::iteration::IterationLimits) -> Self {
+        self.iteration = super::iteration::IterationBudget::new(limits);
+        self
+    }
+
+    /// The session's visit and expansion counters, inherited from its enclosing
+    /// lookup when one already owns an allowance.
+    pub fn iteration_budget(&self) -> &super::iteration::IterationBudget {
+        &self.iteration
     }
 
     /// The view this session was associated against.
@@ -640,7 +722,7 @@ where
 }
 
 /// Reads an available global's `root`, running a lazy provider on first read.
-/// The cache lock is never held while the provider runs.
+/// The cache lock is never held while a provider runs.
 fn read_global(
     cache: &Mutex<HashMap<String, Value>>,
     root: &str,
@@ -649,19 +731,41 @@ fn read_global(
 ) -> Value {
     match binding {
         RuntimeBinding::Eager(value) => project(value, rest),
-        RuntimeBinding::Lazy(provider) => {
+        RuntimeBinding::Lazy(provider) => read_cached(cache, root, provider, rest),
+        RuntimeBinding::Members { member, whole } => {
+            let mut segments = path_segments(rest);
+            let Some(name) = segments.next() else {
+                return read_cached(cache, root, whole, rest);
+            };
             if let Some(cached) = lock_cache(cache).get(root) {
                 return project(cached, rest);
             }
-            let value = provider();
-            let mut cache = lock_cache(cache);
-            // A re-entrant provider may have filled the slot first; the
-            // first value wins so every read agrees.
-            let cached = cache.entry(root.to_string()).or_insert(value);
-            project(cached, rest)
+            match member(name) {
+                Some(value) => select(&value, segments).cloned().unwrap_or(Value::Null),
+                None => Value::Null,
+            }
         }
         RuntimeBinding::Unavailable(_) => Value::Null,
     }
+}
+
+/// `rest` from the session's cached value for `root`, computing it with
+/// `provider` on the first read.
+fn read_cached(
+    cache: &Mutex<HashMap<String, Value>>,
+    root: &str,
+    provider: &LazyProvider<'_>,
+    rest: &str,
+) -> Value {
+    if let Some(cached) = lock_cache(cache).get(root) {
+        return project(cached, rest);
+    }
+    let value = provider();
+    let mut cache = lock_cache(cache);
+    // A re-entrant provider may have filled the slot first; the first value
+    // wins so every read agrees.
+    let cached = cache.entry(root.to_string()).or_insert(value);
+    project(cached, rest)
 }
 
 /// The cache only ever gains complete entries, so a poisoned lock still
@@ -770,6 +874,7 @@ impl HostGlobals {
             let entry = match &self.runtime[root] {
                 RuntimeBinding::Eager(value) => format!("eager:{}", canonical_json(value)),
                 RuntimeBinding::Lazy(_) => format!("lazy:{:p}", Arc::as_ptr(&self.cache)),
+                RuntimeBinding::Members { .. } => format!("members:{:p}", Arc::as_ptr(&self.cache)),
                 RuntimeBinding::Unavailable(reason) => format!("unavailable:{reason}"),
             };
             identity.push_str(&format!(";{root}={entry}"));
@@ -812,7 +917,10 @@ fn check_agreement(
 ) -> Result<(), BindingError> {
     let agrees = match (&declaration.availability, binding) {
         (Availability::ExecutionDependent, _) => true,
-        (Availability::Available, RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_)) => true,
+        (
+            Availability::Available,
+            RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_) | RuntimeBinding::Members { .. },
+        ) => true,
         (Availability::Unavailable(declared), RuntimeBinding::Unavailable(supplied)) => {
             declared.code == supplied.code
         }
@@ -836,17 +944,22 @@ fn check_agreement(
 /// Selects `rest` (`a.b`, or empty for the root) from `value`; a missing
 /// member is `null`, never a fall-through.
 fn project(value: &Value, rest: &str) -> Value {
+    select(value, path_segments(rest)).cloned().unwrap_or(Value::Null)
+}
+
+fn path_segments(rest: &str) -> impl Iterator<Item = &str> {
+    rest.split('.').filter(|segment| !segment.is_empty())
+}
+
+fn select<'v, 's>(value: &'v Value, segments: impl Iterator<Item = &'s str>) -> Option<&'v Value> {
     let mut current = value;
-    for segment in rest.split('.').filter(|segment| !segment.is_empty()) {
+    for segment in segments {
         match current {
-            Value::Object(map) => match map.get(segment) {
-                Some(next) => current = next,
-                None => return Value::Null,
-            },
-            _ => return Value::Null,
+            Value::Object(map) => current = map.get(segment)?,
+            _ => return None,
         }
     }
-    current.clone()
+    Some(current)
 }
 
 impl EvaluationLookup for EvaluationSession<'_> {
@@ -903,5 +1016,625 @@ impl EvaluationLookup for EvaluationSession<'_> {
 
     fn begin_expression_scope(&self) {
         self.document.begin_expression_scope();
+    }
+
+    fn lexical_scope(&self) -> Option<&Arc<LexicalScope>> {
+        self.document.lexical_scope()
+    }
+
+    fn iteration_budget(&self) -> Option<&super::iteration::IterationBudget> {
+        Some(&self.iteration)
+    }
+}
+
+/// Identity of one local binding: the frame that owns it and its slot there.
+///
+/// Two reads of the same spelling in different frames, or of different
+/// spellings of one slot (`x` and `local.x`), are told apart by this id, not
+/// by their text. Runtime frames ([`LexicalScope`]) and passive declared-type
+/// layers ([`LexicalTypes`](super::scope::LexicalTypes)) both mint ids from
+/// one counter, so an id never names two bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocalId {
+    frame: u64,
+    slot: usize,
+}
+
+impl LocalId {
+    /// The owning frame's process-unique identity.
+    pub const fn frame(&self) -> u64 {
+        self.frame
+    }
+
+    /// The binding's position within its frame.
+    pub const fn slot(&self) -> usize {
+        self.slot
+    }
+
+    /// The id of slot `slot` in a frame minted by [`next_frame_id`].
+    pub(crate) const fn new(frame: u64, slot: usize) -> Self {
+        Self { frame, slot }
+    }
+}
+
+/// A process-unique frame identity shared by runtime frames and declared-type
+/// layers.
+pub(crate) fn next_frame_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+#[derive(Debug)]
+struct LocalSlot {
+    name: String,
+    value: Value,
+    origin: OverrideOrigin,
+}
+
+/// One local found by [`LexicalScope::resolve`].
+#[derive(Debug, Clone, Copy)]
+pub struct LocalBinding<'s> {
+    /// The binding's identity.
+    pub id: LocalId,
+    /// The bound value; `null` is a present value.
+    pub value: &'s Value,
+    /// Whether the value is authored template text or inert data. Origin
+    /// travels beside the value, as for every other composed value.
+    pub origin: OverrideOrigin,
+}
+
+/// One immutable frame of lexical locals, retaining its parent.
+///
+/// Frames are shared through [`Arc`], so a body copy can keep the frame of
+/// its iteration alive after the callback that created it has returned.
+/// A frame never changes after construction; a nested scope is a new frame
+/// whose bindings shadow its parents'. A frame copies no document state:
+/// it holds only its own bindings and a reference to its parent.
+#[derive(Debug)]
+pub struct LexicalScope {
+    id: u64,
+    slots: Vec<LocalSlot>,
+    parent: Option<Arc<LexicalScope>>,
+}
+
+impl LexicalScope {
+    /// An outermost frame holding `bindings` in order, each [`Data`](OverrideOrigin::Data).
+    pub fn new(bindings: Vec<(String, Value)>) -> Arc<Self> {
+        Self::build(None, with_data_origin(bindings))
+    }
+
+    /// A nested frame holding `bindings`, shadowing this frame's, each
+    /// [`Data`](OverrideOrigin::Data).
+    pub fn child(self: &Arc<Self>, bindings: Vec<(String, Value)>) -> Arc<Self> {
+        Self::build(Some(Arc::clone(self)), with_data_origin(bindings))
+    }
+
+    /// [`Self::new`] with an explicit origin per binding.
+    pub fn with_origins(bindings: Vec<(String, Value, OverrideOrigin)>) -> Arc<Self> {
+        Self::build(None, bindings)
+    }
+
+    /// [`Self::child`] with an explicit origin per binding.
+    pub fn child_with_origins(self: &Arc<Self>, bindings: Vec<(String, Value, OverrideOrigin)>) -> Arc<Self> {
+        Self::build(Some(Arc::clone(self)), bindings)
+    }
+
+    fn build(parent: Option<Arc<Self>>, bindings: Vec<(String, Value, OverrideOrigin)>) -> Arc<Self> {
+        Arc::new(Self {
+            id: next_frame_id(),
+            slots: bindings
+                .into_iter()
+                .map(|(name, value, origin)| LocalSlot { name, value, origin })
+                .collect(),
+            parent,
+        })
+    }
+
+    /// This frame's process-unique identity.
+    pub fn frame_id(&self) -> u64 {
+        self.id
+    }
+
+    /// The enclosing frame, if any.
+    pub fn parent(&self) -> Option<&Arc<Self>> {
+        self.parent.as_ref()
+    }
+
+    /// The nearest binding named `name`, searching this frame then its
+    /// parents. A binding whose value is `null` is still found.
+    pub fn resolve(&self, name: &str) -> Option<LocalBinding<'_>> {
+        let mut frame = self;
+        loop {
+            if let Some((slot, found)) = frame.slots.iter().enumerate().find(|(_, slot)| slot.name == name) {
+                return Some(LocalBinding {
+                    id: LocalId::new(frame.id, slot),
+                    value: &found.value,
+                    origin: found.origin,
+                });
+            }
+            frame = frame.parent.as_deref()?;
+        }
+    }
+
+    /// [`Self::resolve`] without the origin.
+    pub fn lookup(&self, name: &str) -> Option<(LocalId, &Value)> {
+        self.resolve(name).map(|found| (found.id, found.value))
+    }
+
+    /// Every visible name, nearest binding first, shadowed names once.
+    /// Reads names only: no value is projected and nothing is observed.
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = Vec::new();
+        let mut frame = Some(self);
+        while let Some(current) = frame {
+            for slot in &current.slots {
+                if !names.contains(&slot.name.as_str()) {
+                    names.push(&slot.name);
+                }
+            }
+            frame = current.parent.as_deref();
+        }
+        names
+    }
+}
+
+fn with_data_origin(bindings: Vec<(String, Value)>) -> Vec<(String, Value, OverrideOrigin)> {
+    bindings
+        .into_iter()
+        .map(|(name, value)| (name, value, OverrideOrigin::Data))
+        .collect()
+}
+
+/// Why a name cannot be bound as a local.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectedNameKind {
+    /// A reserved root (`fm`, `ctx`, `env`, `current`, `local`).
+    ReservedRoot,
+    /// The `null` literal's spelling.
+    NullLiteral,
+    /// A global the host declared in the actual [`BindingView`].
+    HostGlobal,
+}
+
+impl fmt::Display for ProtectedNameKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::ReservedRoot => "a reserved root",
+            Self::NullLiteral => "the `null` literal",
+            Self::HostGlobal => "a registered host global",
+        })
+    }
+}
+
+/// A pattern name that collides with a protected name.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("`{name}` cannot be bound as a local name: it is {kind}")]
+pub struct ProtectedLocalName {
+    /// The offending name.
+    pub name: String,
+    /// What it collides with.
+    pub kind: ProtectedNameKind,
+}
+
+fn protected_kind(view: Option<&BindingView>, name: &str) -> Option<ProtectedNameKind> {
+    if is_reserved_namespace(name) {
+        Some(ProtectedNameKind::ReservedRoot)
+    } else if name == NULL_ROOT {
+        Some(ProtectedNameKind::NullLiteral)
+    } else if view.is_some_and(|view| view.global(name).is_some()) {
+        Some(ProtectedNameKind::HostGlobal)
+    } else {
+        None
+    }
+}
+
+/// Rejects the first of `names` that a pattern may not bind.
+///
+/// `view` is the [`BindingView`] actually in force (`None` declares no
+/// globals). Ordinary shadowing of a document property or an outer local is
+/// allowed and silent.
+///
+/// ## Errors
+///
+/// [`ProtectedLocalName`] for a reserved root, `null`, or a declared global.
+pub fn check_local_names<'n>(
+    names: impl IntoIterator<Item = &'n str>,
+    view: Option<&BindingView>,
+) -> Result<(), ProtectedLocalName> {
+    for name in names {
+        if let Some(kind) = protected_kind(view, name) {
+            return Err(ProtectedLocalName {
+                name: name.to_string(),
+                kind,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// An [`EvaluationLookup`] that reads locals from a [`LexicalScope`] and
+/// delegates everything else to an inner lookup.
+///
+/// A read resolves in this order: a reserved namespace or declared global (so
+/// a local can never shadow one), then the nearest local named by the bare
+/// root or by `local.<name>`, then the inner lookup. A present local answers
+/// even when null, and a missing member of it is `null`, never a fall-through.
+/// `local.<name>` with no such local is absent and never reaches the
+/// document. Every other hook forwards to the inner lookup.
+pub struct ScopedLookup<'a> {
+    inner: &'a dyn EvaluationLookup,
+    scope: Arc<LexicalScope>,
+}
+
+impl<'a> ScopedLookup<'a> {
+    /// Layers `scope` over `inner`.
+    pub fn new(inner: &'a dyn EvaluationLookup, scope: Arc<LexicalScope>) -> Self {
+        Self { inner, scope }
+    }
+
+    fn protected(&self, root: &str) -> bool {
+        is_reserved_namespace(root)
+            || self
+                .inner
+                .binding_view()
+                .is_some_and(|view| matches!(view.classify_root(root), RootClass::Global(_) | RootClass::Namespace))
+    }
+
+    fn local(&self, path: &str) -> Option<ResolvedBinding> {
+        let root = root_of(path);
+        let (name, rest) = if root == LOCAL_ROOT {
+            let absent = || Some(ResolvedBinding::Namespace { value: None });
+            let Some(tail) = path[root.len()..].strip_prefix('.') else {
+                return absent();
+            };
+            let name = root_of(tail);
+            (name, &tail[name.len()..])
+        } else if self.protected(root) {
+            return None;
+        } else {
+            (root, &path[root.len()..])
+        };
+        match self.scope.resolve(name) {
+            Some(found) => Some(ResolvedBinding::Local {
+                value: project(found.value, rest),
+                id: found.id,
+                origin: found.origin,
+            }),
+            None if root == LOCAL_ROOT => Some(ResolvedBinding::Namespace { value: None }),
+            None => None,
+        }
+    }
+}
+
+/// The reserved root that names the innermost locals explicitly.
+pub const LOCAL_ROOT: &str = "local";
+
+/// Whether `path` is `local` or reads below it.
+///
+/// Document lookups use this to answer absent: the `local` namespace is
+/// populated only by a [`ScopedLookup`], never by frontmatter.
+pub fn is_local_path(path: &str) -> bool {
+    root_of(path) == LOCAL_ROOT
+}
+
+impl EvaluationLookup for ScopedLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.resolve(path).ok().and_then(ResolvedBinding::into_value)
+    }
+
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        match self.local(path) {
+            Some(binding) => Ok(binding),
+            None => self.inner.resolve(path),
+        }
+    }
+
+    fn binding_view(&self) -> Option<&BindingView> {
+        self.inner.binding_view()
+    }
+
+    /// A local is formatted without the inner lookup's name coercion, which is
+    /// keyed by document path spelling.
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        match self.local(path) {
+            Some(ResolvedBinding::Local { .. }) => super::default_format(value),
+            _ => self.inner.format_resolved(path, value),
+        }
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        match self.local(path) {
+            Some(ResolvedBinding::Local { value, .. }) => super::default_format(&value),
+            Some(_) => String::new(),
+            None => self.inner.get_string(path),
+        }
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.inner.resolution_context()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        self.inner.resolution_context_ref()
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.inner.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.inner.context_variable_names()
+    }
+
+    fn begin_expression_scope(&self) {
+        self.inner.begin_expression_scope();
+    }
+
+    fn lexical_scope(&self) -> Option<&Arc<LexicalScope>> {
+        Some(&self.scope)
+    }
+
+    fn iteration_budget(&self) -> Option<&super::iteration::IterationBudget> {
+        self.inner.iteration_budget()
+    }
+}
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::*;
+    use crate::markdown::compose::expression::reserved_root_descriptors;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    struct Doc(HashMap<String, Value>);
+
+    impl EvaluationLookup for Doc {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.0.get(path).cloned()
+        }
+    }
+
+    fn doc() -> Doc {
+        Doc([("x".to_string(), json!("document")), ("y".to_string(), json!(1))].into())
+    }
+
+    #[test]
+    fn implicit_and_explicit_reads_share_one_identity() {
+        let doc = doc();
+        let scope = LexicalScope::new(vec![("x".into(), json!({ "a": 1 }))]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        let implicit = lookup.resolve("x.a").unwrap();
+        let explicit = lookup.resolve("local.x.a").unwrap();
+        assert_eq!(implicit, explicit);
+        assert!(matches!(implicit, ResolvedBinding::Local { ref value, .. } if *value == json!(1)));
+    }
+
+    #[test]
+    fn a_null_local_shadows_the_document_and_missing_members_do_not_fall_through() {
+        let doc = doc();
+        let scope = LexicalScope::new(vec![("x".into(), Value::Null)]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        assert_eq!(lookup.get("x"), Some(Value::Null));
+        assert_eq!(lookup.get("x.missing"), Some(Value::Null));
+        assert_eq!(lookup.get("y"), Some(json!(1)));
+        assert_eq!(lookup.resolve("fm.x").unwrap().into_value(), None);
+    }
+
+    #[test]
+    fn nested_frames_shadow_and_siblings_stay_isolated() {
+        let doc = doc();
+        let outer = LexicalScope::new(vec![("x".into(), json!("outer"))]);
+        let inner = outer.child(vec![("x".into(), json!("inner"))]);
+        let sibling = outer.child(vec![("z".into(), json!(true))]);
+        let inner_lookup = ScopedLookup::new(&doc, Arc::clone(&inner));
+        assert_eq!(inner_lookup.get("x"), Some(json!("inner")));
+        let sibling_lookup = ScopedLookup::new(&doc, sibling);
+        assert_eq!(sibling_lookup.get("x"), Some(json!("outer")));
+        assert_eq!(sibling_lookup.get("z"), Some(json!(true)));
+        assert_ne!(inner.lookup("x").unwrap().0, outer.lookup("x").unwrap().0);
+    }
+
+    #[test]
+    fn explicit_and_implicit_reads_share_an_id_and_fm_stays_a_document_read() {
+        let doc = Doc([("fm.x".to_string(), json!("fm-value"))].into());
+        let scope = LexicalScope::new(vec![("x".into(), json!(1))]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        let (implicit, explicit) = (lookup.resolve("x").unwrap(), lookup.resolve("local.x").unwrap());
+        let (ResolvedBinding::Local { id: left, .. }, ResolvedBinding::Local { id: right, .. }) = (&implicit, &explicit)
+        else {
+            panic!("both are locals: {implicit:?} {explicit:?}");
+        };
+        assert_eq!(left, right);
+        assert_eq!(lookup.resolve("fm.x").unwrap().into_value(), Some(json!("fm-value")));
+    }
+
+    #[test]
+    fn local_with_no_such_binding_is_absent_and_never_reads_the_document() {
+        let doc = Doc([("local".to_string(), json!("doc")), ("local.y".to_string(), json!("doc-y"))].into());
+        let scope = LexicalScope::new(vec![("x".into(), json!(1))]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        for path in ["local", "local.y", "local.x.missing.deeper"] {
+            let value = lookup.resolve(path).unwrap().into_value();
+            assert!(matches!(value, None | Some(Value::Null)), "{path}: {value:?}");
+        }
+        assert_eq!(lookup.get("local.y"), None);
+    }
+
+    #[test]
+    fn a_missing_member_of_a_present_local_does_not_read_the_document() {
+        let doc = Doc([("x.a".to_string(), json!("doc-a"))].into());
+        let scope = LexicalScope::new(vec![("x".into(), json!({ "b": 1 }))]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        assert_eq!(lookup.get("x.a"), Some(Value::Null));
+        assert_eq!(lookup.get("local.x.a"), Some(Value::Null));
+    }
+
+    #[test]
+    fn nested_scopes_restore_the_outer_meaning_when_left() {
+        let doc = doc();
+        let outer = LexicalScope::new(vec![("x".into(), json!("outer")), ("keep".into(), json!(7))]);
+        {
+            let inner = outer.child(vec![("x".into(), json!("inner"))]);
+            let inner_lookup = ScopedLookup::new(&doc, inner);
+            assert_eq!(inner_lookup.get("x"), Some(json!("inner")));
+            assert_eq!(inner_lookup.get("local.x"), Some(json!("inner")));
+            assert_eq!(inner_lookup.get("keep"), Some(json!(7)), "an unshadowed outer local stays visible");
+        }
+        let outer_lookup = ScopedLookup::new(&doc, outer);
+        assert_eq!(outer_lookup.get("x"), Some(json!("outer")));
+    }
+
+    #[test]
+    fn a_retained_frame_outlives_its_creator() {
+        let parent = LexicalScope::new(vec![("p".into(), json!("parent"))]);
+        let retained = {
+            let creator = parent.child_with_origins(vec![("item".into(), json!("kept"), OverrideOrigin::Authored)]);
+            drop(parent);
+            creator.child(vec![("i".into(), json!(0))])
+        };
+        let found = retained.resolve("item").expect("the grandparent frame is still alive");
+        assert_eq!((found.value, found.origin), (&json!("kept"), OverrideOrigin::Authored));
+        assert_eq!(retained.resolve("p").unwrap().value, &json!("parent"));
+        assert_eq!(retained.names(), ["i", "item", "p"]);
+        let doc = doc();
+        assert_eq!(ScopedLookup::new(&doc, retained).get("p"), Some(json!("parent")));
+    }
+
+    #[test]
+    fn a_local_read_carries_its_origin_and_formats_without_name_coercion() {
+        let doc = doc();
+        let scope = LexicalScope::with_origins(vec![("x".into(), json!({ "a": "t" }), OverrideOrigin::Authored)]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        assert!(matches!(
+            lookup.resolve("x.a").unwrap(),
+            ResolvedBinding::Local { origin: OverrideOrigin::Authored, .. }
+        ));
+        assert_eq!(lookup.get_string("x.a"), "t");
+        assert_eq!(lookup.get_string("local.missing"), "");
+    }
+
+    #[test]
+    fn locals_never_shadow_a_reserved_root_or_a_registered_global() {
+        let view = Arc::new(
+            BindingView::builder(ScopeId::new("lexical"))
+                .declare("seq", "sequence", Availability::Available)
+                .build()
+                .unwrap(),
+        );
+        let mut data: HashMap<String, Value> = HashMap::new();
+        for descriptor in reserved_root_descriptors() {
+            data.insert(format!("{}.k", descriptor.name), json!(format!("namespace-{}", descriptor.name)));
+        }
+        let document = Doc(data);
+        let session = EvaluationSession::associate(
+            view,
+            &document,
+            [("seq".to_string(), RuntimeBinding::eager(json!({ "k": "global" })))],
+        )
+        .unwrap();
+        let mut bindings: Vec<(String, Value)> = reserved_root_descriptors()
+            .iter()
+            .filter(|descriptor| descriptor.name != LOCAL_ROOT)
+            .map(|descriptor| (descriptor.name.to_string(), json!({ "k": "local" })))
+            .collect();
+        bindings.push(("seq".into(), json!({ "k": "local" })));
+        let lookup = ScopedLookup::new(&session, LexicalScope::new(bindings));
+
+        for descriptor in reserved_root_descriptors().iter().filter(|descriptor| descriptor.name != LOCAL_ROOT) {
+            let read = lookup.resolve(&format!("{}.k", descriptor.name)).unwrap();
+            assert!(
+                matches!(&read, ResolvedBinding::Namespace { .. }),
+                "{}: a local shadowed the reserved root: {read:?}",
+                descriptor.name
+            );
+            assert_eq!(read.into_value(), Some(json!(format!("namespace-{}", descriptor.name))));
+        }
+        assert!(matches!(lookup.resolve("seq.k").unwrap(), ResolvedBinding::Global { .. }));
+        assert_eq!(lookup.get("seq.k"), Some(json!("global")));
+    }
+
+    #[test]
+    fn pattern_names_that_collide_with_protected_names_are_rejected() {
+        let view = BindingView::builder(ScopeId::new("lexical"))
+            .declare("seq", "sequence", Availability::Available)
+            .build()
+            .unwrap();
+        for descriptor in reserved_root_descriptors() {
+            let error = check_local_names([descriptor.name], None).unwrap_err();
+            assert_eq!((error.name.as_str(), error.kind), (descriptor.name, ProtectedNameKind::ReservedRoot));
+        }
+        assert_eq!(check_local_names(["a", "null"], None).unwrap_err().kind, ProtectedNameKind::NullLiteral);
+        assert_eq!(check_local_names(["seq"], Some(&view)).unwrap_err().kind, ProtectedNameKind::HostGlobal);
+        // Only the actual view's globals are protected; shadowing a document key is fine.
+        assert!(check_local_names(["seq", "title", "item"], None).is_ok());
+        assert!(check_local_names(["title", "item"], Some(&view)).is_ok());
+    }
+
+    #[test]
+    fn a_host_cannot_register_local_and_other_globals_are_unchanged() {
+        let rejected = BindingView::builder(ScopeId::new("lexical"))
+            .declare("local", "shadow", Availability::Available)
+            .build()
+            .unwrap_err();
+        assert_eq!(rejected, BindingError::ReservedName { root: "local".into() });
+
+        let view = Arc::new(
+            BindingView::builder(ScopeId::new("lexical"))
+                .declare("seq", "sequence", Availability::Available)
+                .declare("gone", "unavailable", Availability::Unavailable(UnavailabilityReason::new("host.gone")))
+                .build()
+                .unwrap(),
+        );
+        let document = doc();
+        let association = EvaluationSession::associate(
+            Arc::clone(&view),
+            &document,
+            [("local".to_string(), RuntimeBinding::eager(json!(1)))],
+        );
+        assert_eq!(association.unwrap_err(), BindingError::ReservedName { root: "local".into() });
+
+        let session = EvaluationSession::associate(
+            view,
+            &document,
+            [
+                ("seq".to_string(), RuntimeBinding::eager(json!(3))),
+                ("gone".to_string(), RuntimeBinding::unavailable(UnavailabilityReason::new("host.gone"))),
+            ],
+        )
+        .unwrap();
+        assert_eq!(session.get("seq"), Some(json!(3)));
+        assert!(matches!(session.resolve("gone"), Err(ExpressionError::Binding(_))));
+        let scoped = ScopedLookup::new(&session, LexicalScope::new(vec![("gone".into(), json!("local"))]));
+        assert!(matches!(scoped.resolve("gone"), Err(ExpressionError::Binding(_))));
+    }
+
+    #[test]
+    fn callback_sessions_and_scopes_share_the_enclosing_budget() {
+        use super::super::iteration::{IterationLimits, IterationPath};
+        use std::num::NonZeroU64;
+
+        let document = doc();
+        let view = Arc::new(BindingView::builder(ScopeId::new("budget")).build().unwrap());
+        let outer = EvaluationSession::associate(Arc::clone(&view), &document, [])
+            .unwrap()
+            .with_iteration_limits(IterationLimits::default().with_max_visits(NonZeroU64::new(1).unwrap()));
+        let scoped = ScopedLookup::new(&outer, LexicalScope::new(vec![("x".into(), json!(1))]));
+        let inner = EvaluationSession::associate(view, &scoped, []).unwrap();
+        let path = IterationPath::empty();
+        inner.iteration_budget().reserve_visit(&path).unwrap();
+        assert_eq!(outer.iteration_budget().usage().visits, 1);
+        let failure = outer.iteration_budget().reserve_visit(&path).unwrap_err();
+        assert_eq!(failure.used, 1);
+        assert_eq!(inner.iteration_budget().reserve_visit(&path).unwrap_err(), failure);
+    }
+
+    #[test]
+    fn a_session_forwards_the_scope_of_the_lookup_it_wraps() {
+        let document = doc();
+        let scoped = ScopedLookup::new(&document, LexicalScope::new(vec![("x".into(), json!(1))]));
+        let view = Arc::new(BindingView::builder(ScopeId::new("lexical")).build().unwrap());
+        let session = EvaluationSession::associate(view, &scoped, []).unwrap();
+        assert!(session.lexical_scope().is_some());
+        assert_eq!(session.get("local.x"), Some(json!(1)));
     }
 }

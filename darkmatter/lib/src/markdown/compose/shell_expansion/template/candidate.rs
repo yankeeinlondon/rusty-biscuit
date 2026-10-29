@@ -7,10 +7,12 @@
 //! documents with different schemas and so have different template types.
 
 use super::{
-    ApprovalKey, ArgPart, CommandTemplate, HoleTiming, OfferedChoices, ShellPreApprovals,
-    TemplateApprovalView, TemplateGrammarError, TemplateShape,
+    ApprovalKey, CommandTemplate, HoleTiming, OfferedChoices, ShellPreApprovals, TemplateApprovalView,
+    TemplateGrammarError, TemplateShape,
 };
-use crate::markdown::compose::expression::{Expr, ExpressionFinder, fm_namespace, parse};
+use crate::markdown::compose::expression::{
+    Expr, ExpressionFinder, GuardOrigin, TypeScope, parse, static_access_reads,
+};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
@@ -85,8 +87,17 @@ impl DeferredShellRoots {
             return None;
         }
         let expr = parse(expression).ok()?;
+        self.late_roots_of_expr(&expr, derived)
+    }
+
+    /// [`late_roots_of`](Self::late_roots_of) for an expression already
+    /// parsed; roots keep traversal order and only adjacent repeats collapse.
+    pub fn late_roots_of_expr(&self, expr: &Expr, derived: &HashSet<String>) -> Option<Vec<String>> {
+        if self.is_empty() && derived.is_empty() {
+            return None;
+        }
         let mut roots = Vec::new();
-        read_roots(&expr, &mut roots);
+        read_roots(expr, &mut roots);
         let mut late: Vec<String> = roots
             .into_iter()
             .filter(|read| read.is_late(self, derived))
@@ -255,10 +266,10 @@ impl ShellCandidate {
     }
 }
 
-/// What discovery knows about the document that owns a command site.
+/// What discovery knows about the document that owns a command site. The
+/// site's types (the owner's schema and host roots, narrowed by its enclosing
+/// guards) are the [`TypeScope`] each [`build`](Self::build) call requires.
 pub(crate) struct CandidateScope<'a> {
-    pub schema: Option<&'a crate::markdown::schemas::SimplifiedSchema>,
-    pub host_globals: Vec<String>,
     pub deferred: &'a DeferredShellRoots,
     /// Frontmatter keys whose value reads a late root, directly or through
     /// another such key.
@@ -275,38 +286,51 @@ impl CandidateScope<'_> {
         self.deferred.late_roots_of(expression, self.derived)
     }
 
-    /// Builds the candidate for one authored command.
+    /// Builds the candidate for one authored command at a site whose types
+    /// are `types`.
     ///
     /// `evaluate` reads an approval-time placeholder against the document's
     /// discovery state; it returns `None` when the expression cannot be read
     /// there, which leaves the verdict to the compose pass.
     ///
+    /// A placeholder whose value is `null` here waits for its command only
+    /// when a guard in `types` proves that very expression present at this
+    /// site: it becomes [`HoleTiming::Guarded`] and the command template
+    /// required. A declaration never excuses a `null`, and a guard on one
+    /// expression never excuses another. A late placeholder the guards prove
+    /// present is [`HoleTiming::Guarded`] too, so no unconditional barrier
+    /// reads it.
+    ///
     /// ## Errors
     ///
     /// - [`ShellExpansionError::MissingValue`] for an approval-time
-    ///   placeholder whose value is `null`.
-    /// - [`ShellExpansionError::TemplateGrammar`] when a late placeholder, or
-    ///   [`DeferredShellRoots::placeholders_template_required`], requires
-    ///   template mode and the authored command is not a valid template.
+    ///   placeholder whose value is `null` and that no guard proves present.
+    /// - [`ShellExpansionError::TemplateGrammar`] when a late or guarded
+    ///   placeholder, or [`DeferredShellRoots::placeholders_template_required`],
+    ///   requires template mode and the authored command is not a valid
+    ///   template.
     pub(crate) fn build(
         &self,
         authored: &str,
         template: Result<CommandTemplate, TemplateGrammarError>,
         origin: ShellCommandOrigin,
+        types: &TypeScope<'_>,
         evaluate: &dyn Fn(&Expr) -> Option<Value>,
     ) -> Result<ShellCandidate, ShellExpansionError> {
-        let host_globals: Vec<&str> = self.host_globals.iter().map(String::as_str).collect();
-        let template = template.map(|mut template| {
-            template.project_types(self.schema, &host_globals);
-            for segment in &mut template.segments {
-                for arg in &mut segment.args {
-                    for part in &mut arg.parts {
-                        if let ArgPart::Hole(placeholder) = part
-                            && let Some(roots) = self.deferred_roots(&placeholder.expression)
-                        {
-                            placeholder.timing = HoleTiming::Deferred { roots };
-                        }
-                    }
+        let guard_of = |expression: &str| -> Option<GuardOrigin> {
+            let expr = parse(expression).ok()?;
+            types.type_of_expr(&expr)?.guard_presence().cloned()
+        };
+        let mut template = template.map(|mut template| {
+            template.project_types(types);
+            for placeholder in template.placeholders_mut() {
+                if let Some(roots) = self.deferred_roots(&placeholder.expression) {
+                    placeholder.timing = match guard_of(&placeholder.expression) {
+                        Some(guard) => HoleTiming::Guarded { guard, roots },
+                        None => HoleTiming::Deferred { roots },
+                    };
+                } else if reads_local(&placeholder.expression, types) {
+                    placeholder.timing = HoleTiming::Local;
                 }
             }
             template
@@ -317,24 +341,21 @@ impl CandidateScope<'_> {
         let holes: Vec<(String, bool)> = match &template {
             Ok(template) => template
                 .placeholders()
-                .map(|placeholder| {
-                    (
-                        placeholder.expression.clone(),
-                        matches!(placeholder.timing, HoleTiming::Deferred { .. }),
-                    )
-                })
+                .map(|placeholder| (placeholder.expression.clone(), placeholder.timing.is_late()))
                 .collect(),
             Err(_) => ExpressionFinder::scan_plain(authored)
                 .expressions
                 .into_iter()
                 .map(|location| {
-                    let late = self.deferred_roots(&location.expression).is_some();
+                    let late = self.deferred_roots(&location.expression).is_some()
+                        || reads_local(&location.expression, types);
                     (location.expression, late)
                 })
                 .collect(),
         };
 
-        let any_late = holes.iter().any(|(_, late)| *late);
+        let mut any_late = holes.iter().any(|(_, late)| *late);
+        let mut guarded: Vec<(&str, GuardOrigin)> = Vec::new();
         for (expression, late) in &holes {
             if *late {
                 continue;
@@ -343,12 +364,28 @@ impl CandidateScope<'_> {
                 continue;
             };
             if matches!(evaluate(&expr), Some(Value::Null)) {
-                return Err(ShellExpansionError::MissingValue {
-                    ctx: Box::new(self.ctx.clone()),
-                    command: authored.to_string(),
-                    expression: expression.clone(),
-                    origin,
-                });
+                let Some(guard) = guard_of(expression) else {
+                    return Err(ShellExpansionError::MissingValue {
+                        ctx: Box::new(self.ctx.clone()),
+                        command: authored.to_string(),
+                        expression: expression.clone(),
+                        origin,
+                    });
+                };
+                guarded.push((expression, guard));
+                any_late = true;
+            }
+        }
+        // Discovery keeps the authored expression; nothing it resolved for a
+        // guarded hole stands in for the value read when the command runs.
+        if let Ok(template) = &mut template {
+            for placeholder in template.placeholders_mut() {
+                if let Some((_, guard)) = guarded.iter().find(|(expression, _)| *expression == placeholder.expression) {
+                    placeholder.timing = HoleTiming::Guarded {
+                        guard: guard.clone(),
+                        roots: Vec::new(),
+                    };
+                }
             }
         }
 
@@ -381,6 +418,18 @@ impl CandidateScope<'_> {
             requirement,
         })
     }
+}
+
+/// Whether `expression` reads a lexical local at a site typed by `types`,
+/// explicitly (`local.x`) or by name, anywhere inside a larger expression.
+/// Static: nothing is evaluated.
+fn reads_local(expression: &str, types: &TypeScope<'_>) -> bool {
+    let Ok(expr) = parse(expression) else {
+        return false;
+    };
+    static_access_reads(&expr)
+        .iter()
+        .any(|read| types.resolves_to_local(read.variable))
 }
 
 /// The frontmatter keys of `frontmatter` that read a late root, directly or
@@ -420,6 +469,17 @@ pub fn derived_deferred_keys<'a>(
     }
 }
 
+/// The first path segment of every variable `value`'s expressions read, with
+/// an `fm.` prefix removed: the keys [`derived_deferred_keys`] follows from
+/// `value`, in authored order and with repeats.
+///
+/// Static, as [`derived_deferred_keys`] is.
+pub fn value_read_roots(value: &Value) -> Vec<String> {
+    let mut roots = Vec::new();
+    value_roots(value, &mut roots);
+    roots.into_iter().map(|read| read.root).collect()
+}
+
 /// Whether `expr` reads any of `roots` as a global, not through `fm.`.
 pub(crate) fn reads_global_root(expr: &Expr, roots: &[&str]) -> bool {
     let mut reads = Vec::new();
@@ -449,6 +509,7 @@ fn value_roots(value: &Value, roots: &mut Vec<RootRead>) {
     match value {
         Value::String(text) => {
             for location in ExpressionFinder::find_all_plain(text) {
+                crate::note_work!(DeferredRootScanParse);
                 if let Ok(expr) = parse(&location.expression) {
                     read_roots(&expr, roots);
                 }
@@ -463,52 +524,43 @@ fn value_roots(value: &Value, roots: &mut Vec<RootRead>) {
 /// The first path segment of every variable `expr` reads, with an `fm.`
 /// prefix removed so `fm.out` and `out` name the same key.
 fn read_roots(expr: &Expr, roots: &mut Vec<RootRead>) {
-    match expr {
-        Expr::Variable(path) => {
-            let effective = fm_namespace::strip_fm_prefix(path);
-            let root = effective.split('.').next().unwrap_or(effective);
-            if !root.is_empty() {
-                roots.push(RootRead {
-                    root: root.to_string(),
-                    frontmatter: effective.len() != path.len(),
-                });
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads};
+    for read in static_access_reads(expr) {
+        let path = read.variable;
+        let explicit = path.starts_with("fm.") || path == "fm";
+        let root = if path == "fm" {
+            match read.steps.first() {
+                Some(AccessStep::Key(key) | AccessStep::Member(key)) => *key,
+                _ => continue,
             }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => read_roots(inner, roots),
-        Expr::Fallback { primary, fallback } => {
-            read_roots(primary, roots);
-            read_roots(fallback, roots);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            read_roots(condition, roots);
-            read_roots(then_branch, roots);
-            read_roots(else_branch, roots);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            read_roots(left, roots);
-            read_roots(right, roots);
-        }
-        Expr::Index { base, index } => {
-            if let Some(key) = fm_namespace::literal_index_key(base, index) {
-                roots.push(RootRead {
-                    root: key.to_string(),
-                    frontmatter: true,
-                });
-                return;
-            }
-            read_roots(base, roots);
-            read_roots(index, roots);
-        }
-        Expr::FunctionCall { args, .. } => args.iter().for_each(|arg| read_roots(arg, roots)),
-        Expr::ArrayLiteral(items) => items.iter().for_each(|item| read_roots(item, roots)),
-        Expr::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| read_roots(value, roots)),
+        } else {
+            path.strip_prefix("fm.").unwrap_or(path).split('.').next().unwrap_or(path)
+        };
+        if root.is_empty() { continue; }
+        roots.push(RootRead { root: root.to_string(), frontmatter: explicit });
+    }
+}
+
+#[cfg(test)]
+mod read_root_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn callback_dependencies_keep_explicit_frontmatter_and_exclude_locals() {
+        let value = json!("{{ map(items, p => [p.name, local.p, fm.p, fm['p.name'], outer]) }}");
+        assert_eq!(value_read_roots(&value), ["items", "p", "p.name", "outer"]);
+    }
+
+    #[test]
+    fn read_roots_follow_every_expression_at_any_depth_and_strip_fm() {
+        let value = json!({
+            "a": "{{ first.x }} and {{ fm.second }}",
+            "b": ["plain", "{{ third + fm['fourth'] }}"],
+            "c": 3,
+        });
+
+        assert_eq!(value_read_roots(&value), ["first", "second", "third", "fourth"]);
+        assert!(value_read_roots(&json!("no expression")).is_empty());
     }
 }

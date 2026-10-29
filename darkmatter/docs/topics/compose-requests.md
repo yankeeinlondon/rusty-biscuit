@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Compose Requests
 
 Every Darkmatter call that resolves a file reference runs inside a **compose
@@ -123,6 +127,26 @@ not the repository, bounds nothing. Its schema `file` values resolve the
 same way. A document opened through `~` (`::file ~/notes/doc.md`) instead
 keeps `HOME` as its tree root, so the same `../../outside.md` is refused.
 
+## Limits for `::map` and `::filter`
+
+Two positive limits bound a request's collection work across nested regions,
+child compositions, and cache reuse. Both take `NonZeroU64`, so zero cannot be
+expressed:
+
+```rust
+# use darkmatter::markdown::compose::ComposeOptions;
+# use std::num::NonZeroU64;
+let options = ComposeOptions::default()
+    .with_max_iteration_visits(NonZeroU64::new(200_000).unwrap())
+    .with_max_expansion_bytes(NonZeroU64::new(33_554_432).unwrap());
+assert_eq!(options.iteration_limits().max_visits().get(), 200_000);
+```
+
+Defaults are 100,000 visits and 16,777,216 bytes. Exhaustion fails the request.
+`with_allow_untyped_map_variables(true)` and
+`with_allow_untyped_filter_variables(true)` turn a missing iterable
+declaration into a warning. See [map](../inline/map.md#failures-limits-and-diagnostics).
+
 ## Reading a failure's class
 
 Every failed file reference keeps biscuit-file's `ResolutionFailure` class
@@ -143,6 +167,28 @@ transclusions, `::toc-linking` chains (which report the first target's
 class), and schema `file` values. `md` prints the class as a
 `failure: <class>` row, in kebab case, on every error block and warning for
 a failed reference.
+
+## Keeping the warnings of a failed composition
+
+`compose_with` returns only the error when composition fails, so warnings
+reported before the failure (an uncertain call, an undeclared property) are
+lost. `compose_with_warnings` takes the same request and, on failure, returns
+a boxed `ComposeFailure` holding both:
+
+```rust,ignore
+match markdown.compose_with_warnings(&request) {
+    Ok((composed, report)) => { /* report.warnings as with compose_with */ }
+    Err(failure) => {
+        // The outer document's warnings come first; a child that had
+        // already succeeded reported into its parent.
+        for warning in &failure.warnings { eprintln!("warning: {}", warning.message); }
+        return Err(failure.error);
+    }
+}
+```
+
+`md compose --output report-json` uses it to list every diagnostic of a
+failed run (see [`report-json` output](../cli/report-json.md)).
 
 ## When a request cannot be built
 

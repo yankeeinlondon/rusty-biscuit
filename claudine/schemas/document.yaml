@@ -1,0 +1,13 @@
+# The document metadata Claudine manages on a prompt: the prompt itself, its
+# stored hash, and its content-change date. Hand-maintained; see README.md.
+# claudine.yaml and inline-compose.yaml both import these types, so the two
+# triggers declare the same metadata.
+kind: schema
+types:
+    prompt: "string -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
+    hash:
+        - "string -> stored shorthand hash; managed by Darkmatter and Claudine's completion"
+        - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> hash resolution stored in longhand form"
+          value: "unknown -> stored hash payload"
+          ignored: "string[] -> extra frontmatter keys ignored during hash computation"
+    last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"

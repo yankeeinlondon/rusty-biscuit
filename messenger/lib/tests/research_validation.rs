@@ -308,40 +308,71 @@ fn eligibility(name: &str) -> Vec<ConstraintEligibility> {
 
 /// Criterion 5: each counting unit and stage reaches the projection exactly
 /// as researched; nothing collapses to "characters".
-#[test]
-fn executable_constraints_keep_their_researched_unit_and_stage() {
-    let cases = [
-        ("contract/units-utf8-bytes.md", Unit::Utf8Bytes, Stage::FieldValue),
-        ("contract/units-unicode-scalars.md", Unit::UnicodeScalars, Stage::FieldValue),
-        ("contract/units-utf16.md", Unit::Utf16CodeUnits, Stage::FieldValue),
-        ("contract/units-graphemes.md", Unit::GraphemeClusters, Stage::FieldValue),
-        ("contract/units-parsed-text.md", Unit::UnicodeScalars, Stage::ParsedText),
-        ("contract/units-serialized.md", Unit::Utf8Bytes, Stage::SerializedPayload),
-    ];
-    for (name, unit, stage) in cases {
-        let entries = eligibility(name);
-        assert_eq!(entries.len(), 1, "{name}");
-        let executable = entries[0].executable().unwrap_or_else(|| panic!("{name}: {:?}", entries[0].reasons()));
-        assert_eq!((executable.unit, executable.stage), (unit, stage), "{name}");
-    }
+macro_rules! executable_constraint_cases {
+    ($($name:ident => ($fixture:literal, $unit:expr, $stage:expr)),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                let entries = eligibility($fixture);
+                assert_eq!(entries.len(), 1, "{}", $fixture);
+                let executable = entries[0]
+                    .executable()
+                    .unwrap_or_else(|| panic!("{}: {:?}", $fixture, entries[0].reasons()));
+                assert_eq!((executable.unit, executable.stage), ($unit, $stage), "{}", $fixture);
+            }
+        )+
+
+        #[test]
+        fn executable_constraint_cases_cover_distinct_units_and_stages() {
+            let cases = [$(($fixture, $unit, $stage)),+];
+            assert_eq!(cases.len(), 6);
+            assert_eq!(cases.iter().map(|case| case.0).collect::<std::collections::HashSet<_>>().len(), cases.len());
+        }
+    };
+}
+
+executable_constraint_cases! {
+    executable_constraints_keep_their_researched_unit_and_stage => ("contract/units-utf8-bytes.md", Unit::Utf8Bytes, Stage::FieldValue),
+    executable_unicode_scalar_constraints_keep_their_unit => ("contract/units-unicode-scalars.md", Unit::UnicodeScalars, Stage::FieldValue),
+    executable_utf16_constraints_keep_their_unit => ("contract/units-utf16.md", Unit::Utf16CodeUnits, Stage::FieldValue),
+    executable_grapheme_constraints_keep_their_unit => ("contract/units-graphemes.md", Unit::GraphemeClusters, Stage::FieldValue),
+    executable_parsed_text_constraints_keep_their_stage => ("contract/units-parsed-text.md", Unit::UnicodeScalars, Stage::ParsedText),
+    executable_serialized_constraints_keep_their_stage => ("contract/units-serialized.md", Unit::Utf8Bytes, Stage::SerializedPayload),
 }
 
 #[test]
 fn ambiguous_unknown_and_advisory_constraints_never_become_executable() {
-    let reasons = |name: &str, id: &str| -> Vec<IneligibleReason> {
-        let entries = eligibility(name);
-        let entry = entries.iter().find(|e| e.id() == id).unwrap_or_else(|| panic!("{name}: no {id}"));
-        assert!(entry.executable().is_none(), "{name}: {id} is executable");
-        entry.reasons().to_vec()
+    let entries = eligibility("contract/units-ambiguous.md");
+    let reasons = |id: &str| {
+        let entry = entries.iter().find(|e| e.id() == id).unwrap_or_else(|| panic!("no {id}"));
+        assert!(entry.executable().is_none(), "{id} is executable");
+        entry.reasons()
     };
-    assert!(reasons("contract/units-ambiguous.md", "c.fx.unspecified")
+    assert!(reasons("c.fx.unspecified")
         .contains(&IneligibleReason::UnresolvedUnit { unit: Unit::UnspecifiedCharacters }));
-    assert_eq!(reasons("contract/units-ambiguous.md", "c.fx.unknown_stage"), vec![IneligibleReason::UnknownStage]);
-    assert!(reasons("contract/constraints-recommended.md", "c.fx.text.recommended").contains(&IneligibleReason::Advisory));
+    assert_eq!(reasons("c.fx.unknown_stage"), [IneligibleReason::UnknownStage]);
+}
+
+#[test]
+fn advisory_constraints_never_become_executable() {
+    let entries = eligibility("contract/constraints-recommended.md");
+    let entry = entries.iter().find(|e| e.id() == "c.fx.text.recommended").expect("recommended constraint");
+    assert!(entry.executable().is_none());
+    assert!(entry.reasons().contains(&IneligibleReason::Advisory));
+}
+
+#[test]
+fn non_known_constraints_never_become_executable() {
+    let entries = eligibility("contract/knowledge-states.md");
     for (id, state) in [("c.fx.unknown", "unknown"), ("c.fx.conflict", "conflicting"), ("c.fx.na", "not_applicable")] {
-        let found = reasons("contract/knowledge-states.md", id);
-        assert!(found.iter().any(|r| r.code() == "not_known"), "{id} ({state}): {found:?}");
+        let entry = entries.iter().find(|e| e.id() == id).unwrap_or_else(|| panic!("no {id}"));
+        assert!(entry.executable().is_none(), "{id} is executable");
+        assert!(entry.reasons().iter().any(|r| r.code() == "not_known"), "{id} ({state}): {:?}", entry.reasons());
     }
+}
+
+#[test]
+fn unresolved_conditions_never_become_executable() {
     let signal = eligibility("contract/pilot-signal.md");
     assert!(signal.iter().any(|e| e
         .reasons()

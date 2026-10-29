@@ -45,6 +45,9 @@ mod compose_initialize_acceptance;
 mod compose_initialize_staged_boot;
 #[cfg(unix)]
 mod compose_interactive_timeout_cli;
+// Copies the compiled fake goose, built only with `test-fixtures`.
+#[cfg(feature = "test-fixtures")]
+mod compose_named_type_import;
 #[cfg(unix)]
 mod compose_removed_grammar;
 #[cfg(unix)]
@@ -78,6 +81,10 @@ mod entry_point_parity;
 mod error_guards;
 mod errors_command;
 mod exit_site_guard;
+// Reads the `CLAUDINE_TEST_GROUP_BRANCHES` seam, which only `test-fixtures`
+// builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
+mod group_branch_lifetime;
 #[cfg(unix)]
 mod handle_blocking_output;
 mod handle_deadline;
@@ -86,6 +93,10 @@ mod handle_repo_config;
 mod handoff_owners;
 mod home_lookup_round_trip;
 mod hooks_cli;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod implement_plan_commit_message;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
 #[cfg(unix)]
@@ -96,10 +107,16 @@ mod inline_compose_hash;
 #[cfg(feature = "test-fixtures")]
 mod inline_compose_indented_frontmatter;
 mod inline_compose_sequence_mismatch;
-#[cfg(unix)]
+// Installs the `claudine-fake-goose` fixture binary, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod invalid_trigger_warnings;
+#[cfg(feature = "test-fixtures")]
 mod launch_trigger_schemas;
 #[cfg(unix)]
 mod level1_compose_autocomplete_failure_pty;
+#[cfg(unix)]
+mod level1_approval_order_pty;
 #[cfg(unix)]
 mod level1_dry_run_pty;
 #[cfg(unix)]
@@ -128,12 +145,28 @@ mod lifecycle_directive_matrix;
 // Records prompts with the Unix-only `launch_recorder`.
 #[cfg(unix)]
 mod lifecycle_prep;
+// Records launches with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_initialize_zero_attempts;
+mod lifecycle_renamed_events;
+// Records launches with the Unix-only `launch_recorder`.
+#[cfg(unix)]
+mod lifecycle_root_preparation;
 mod lifecycle_downgrade_outcome;
 mod lifecycle_literal_escapes;
+// Records launches with the Unix-only `launch_recorder`; its fixture shells are
+// POSIX `sh`.
+#[cfg(unix)]
+mod lifecycle_traces;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
+mod lifecycle_one_implementation_guard;
+// Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
+// binaries, which only `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+mod guarded_shell_values;
 // Installs the `claudine-argv-recorder` and `claudine-fake-goose` fixture
 // binaries, which only `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]

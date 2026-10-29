@@ -465,3 +465,39 @@ macro_rules! native_lifecycle_redirect_case {
 
 native_lifecycle_redirect_case!(native_lifecycle_merge_then_null_keeps_the_original_stdout_destination, "2>&1 > /dev/null", true, false);
 native_lifecycle_redirect_case!(native_lifecycle_route_then_null_keeps_the_original_stderr_destination, ">&2 2> /dev/null", false, true);
+
+const QUOTED_EMPTY_LIFECYCLE: &str = r#"---
+commit_message: ""
+start:
+    - shell: "argv-recorder -m \"{{ commit_message }}\" -s ''"
+---
+Body.
+"#;
+
+/// A lifecycle `shell` with a quoted empty word, authored (`''`) or a quoted
+/// hole filled with an empty string, runs as resolved bytes with each one an
+/// empty argument, approved by the key that spells them `""`.
+#[test]
+fn a_lifecycle_exact_key_keeps_a_quoted_empty_argument() {
+    let document = Document::new(QUOTED_EMPTY_LIFECYCLE);
+    document.whitelist("exact argv-recorder -m \"\" -s \"\"\n");
+
+    let outcome = document.run(&[]);
+
+    assert!(outcome.success, "{}", outcome.stderr);
+    assert_eq!(document.runs(), vec![argv(&["-m", "", "-s", ""])]);
+}
+
+/// The key without the empty arguments names other bytes: pre-flight refuses,
+/// showing the exact command with its empty arguments, and nothing runs.
+#[test]
+fn a_lifecycle_exact_key_without_the_empty_argument_approves_nothing() {
+    let document = Document::new(QUOTED_EMPTY_LIFECYCLE);
+    document.whitelist("exact argv-recorder -m -s\n");
+
+    let outcome = document.run(&[]);
+
+    assert!(!outcome.success, "{}", outcome.stderr);
+    assert!(outcome.names(r#"argv-recorder -m "" -s """#), "{}", outcome.stderr);
+    assert!(document.runs().is_empty());
+}

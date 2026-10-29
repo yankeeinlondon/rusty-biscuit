@@ -1,0 +1,6385 @@
+{
+  "diagnostics": [
+    {
+      "range": {
+        "start": {
+          "line": 13,
+          "character": 6
+        },
+        "end": {
+          "line": 13,
+          "character": 11
+        }
+      },
+      "severity": 1,
+      "code": "dm.schema.type_mismatch",
+      "source": "darkmatter.schema",
+      "message": "\"maybe\" is not of type \"boolean\"",
+      "data": {
+        "instance_path": "/yolo"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 39,
+          "character": 6
+        },
+        "end": {
+          "line": 40,
+          "character": 0
+        }
+      },
+      "severity": 1,
+      "code": "dm.schema.constraint",
+      "source": "darkmatter.schema",
+      "message": "{\"nope_verb\":\"x\"} is not valid under any of the schemas listed in the 'anyOf' keyword",
+      "data": {
+        "instance_path": "/initialize/1"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 48,
+          "character": 0
+        },
+        "end": {
+          "line": 48,
+          "character": 0
+        }
+      },
+      "severity": 1,
+      "code": "dm.schema.constraint",
+      "source": "darkmatter.schema",
+      "message": "null is not valid under any of the schemas listed in the 'anyOf' keyword",
+      "data": {
+        "instance_path": "/initialize/6"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 37,
+          "character": 13
+        },
+        "end": {
+          "line": 37,
+          "character": 16
+        }
+      },
+      "severity": 1,
+      "code": "dm.expression.malformed",
+      "source": "darkmatter.frontmatter",
+      "message": "malformed expression: Expected expression, found '<EOF>'"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 41,
+          "character": 12
+        },
+        "end": {
+          "line": 41,
+          "character": 20
+        }
+      },
+      "severity": 1,
+      "code": "dm.expression.unavailable_global",
+      "source": "darkmatter.frontmatter",
+      "message": "`err.kind` reads the global `err`, which is unavailable in scope `claudine.lifecycle.initialize` (claudine.event-has-no-error)"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 44,
+          "character": 12
+        },
+        "end": {
+          "line": 44,
+          "character": 22
+        }
+      },
+      "severity": 2,
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.frontmatter",
+      "message": "`ready_flag` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 40,
+          "character": 16
+        },
+        "end": {
+          "line": 40,
+          "character": 25
+        }
+      },
+      "severity": 2,
+      "code": "dm.expression.undeclared_property",
+      "source": "darkmatter.frontmatter",
+      "message": "`nope_root` is an undeclared document property (unknown type; `null` unless supplied at runtime)"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 166,
+          "character": 7
+        },
+        "end": {
+          "line": 166,
+          "character": 29
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_no_formatting.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 168,
+          "character": 7
+        },
+        "end": {
+          "line": 168,
+          "character": 33
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_frontmatter_edits.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 180,
+          "character": 7
+        },
+        "end": {
+          "line": 180,
+          "character": 38
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_headless-orchestration.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 215,
+          "character": 7
+        },
+        "end": {
+          "line": 215,
+          "character": 25
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_decisions.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 250,
+          "character": 7
+        },
+        "end": {
+          "line": 250,
+          "character": 32
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_input-robustness.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 257,
+          "character": 7
+        },
+        "end": {
+          "line": 257,
+          "character": 26
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_test-tiers.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 334,
+          "character": 7
+        },
+        "end": {
+          "line": 334,
+          "character": 29
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_set_spec_schema.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 399,
+          "character": 7
+        },
+        "end": {
+          "line": 399,
+          "character": 34
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_finish-before-exit.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 401,
+          "character": 7
+        },
+        "end": {
+          "line": 401,
+          "character": 26
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_test-scope.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    },
+    {
+      "range": {
+        "start": {
+          "line": 403,
+          "character": 7
+        },
+        "end": {
+          "line": 403,
+          "character": 18
+        }
+      },
+      "severity": 2,
+      "code": "dm.transclusion.broken_path",
+      "source": "darkmatter.compose",
+      "message": "broken transclusion: no file matches `../_os.md`",
+      "data": {
+        "resolution_failure": "NoMatch"
+      }
+    }
+  ],
+  "completions": [
+    {
+      "at": "blank key inside a guard item",
+      "items": [
+        {
+          "label": "say",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "say: "
+          }
+        },
+        {
+          "label": "speak",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "speak: "
+          }
+        },
+        {
+          "label": "effect",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "effect: "
+          }
+        },
+        {
+          "label": "message",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "message: "
+          }
+        },
+        {
+          "label": "notify",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "notify: "
+          }
+        },
+        {
+          "label": "stderr",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "stderr: "
+          }
+        },
+        {
+          "label": "stdout",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "stdout: "
+          }
+        },
+        {
+          "label": "info",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "info: "
+          }
+        },
+        {
+          "label": "warn",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "warn: "
+          }
+        },
+        {
+          "label": "success",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "success: "
+          }
+        },
+        {
+          "label": "stop",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "stop: "
+          }
+        },
+        {
+          "label": "skip",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "skip: "
+          }
+        },
+        {
+          "label": "error",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "error: "
+          }
+        },
+        {
+          "label": "proxy",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "proxy: "
+          }
+        },
+        {
+          "label": "retry",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "retry: "
+          }
+        },
+        {
+          "label": "resume",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "resume: "
+          }
+        },
+        {
+          "label": "defer",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "defer: "
+          }
+        },
+        {
+          "label": "break",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "break: "
+          }
+        },
+        {
+          "label": "prep",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "prep: "
+          }
+        },
+        {
+          "label": "set",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "set: "
+          }
+        },
+        {
+          "label": "append_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "append_frontmatter: "
+          }
+        },
+        {
+          "label": "append_jsonl",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "append_jsonl: "
+          }
+        },
+        {
+          "label": "append_line",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "append_line: "
+          }
+        },
+        {
+          "label": "decrement_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "decrement_frontmatter: "
+          }
+        },
+        {
+          "label": "delete_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "delete_frontmatter: "
+          }
+        },
+        {
+          "label": "ensure_dir",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ensure_dir: "
+          }
+        },
+        {
+          "label": "ensure_file",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ensure_file: "
+          }
+        },
+        {
+          "label": "http_post",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "http_post: "
+          }
+        },
+        {
+          "label": "increment_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "increment_frontmatter: "
+          }
+        },
+        {
+          "label": "merge_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "merge_frontmatter: "
+          }
+        },
+        {
+          "label": "prepend_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "prepend_frontmatter: "
+          }
+        },
+        {
+          "label": "set_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "set_frontmatter: "
+          }
+        },
+        {
+          "label": "abs",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "abs: "
+          }
+        },
+        {
+          "label": "absolute",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "absolute: "
+          }
+        },
+        {
+          "label": "and",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "and: "
+          }
+        },
+        {
+          "label": "as_csv",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_csv: "
+          }
+        },
+        {
+          "label": "as_json",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_json: "
+          }
+        },
+        {
+          "label": "as_json5",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_json5: "
+          }
+        },
+        {
+          "label": "as_line_separated",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_line_separated: "
+          }
+        },
+        {
+          "label": "as_markdown",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_markdown: "
+          }
+        },
+        {
+          "label": "as_ordered_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_ordered_list: "
+          }
+        },
+        {
+          "label": "as_space_separated",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_space_separated: "
+          }
+        },
+        {
+          "label": "as_tsv",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_tsv: "
+          }
+        },
+        {
+          "label": "as_unordered_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "as_unordered_list: "
+          }
+        },
+        {
+          "label": "basename",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "basename: "
+          }
+        },
+        {
+          "label": "basename_without_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "basename_without_index: "
+          }
+        },
+        {
+          "label": "branch_exists_on_remote",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "branch_exists_on_remote: "
+          }
+        },
+        {
+          "label": "camel_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "camel_case: "
+          }
+        },
+        {
+          "label": "can_execute",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "can_execute: "
+          }
+        },
+        {
+          "label": "capitalize",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "capitalize: "
+          }
+        },
+        {
+          "label": "cicd",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "cicd: "
+          }
+        },
+        {
+          "label": "cicd_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "cicd_list: "
+          }
+        },
+        {
+          "label": "code_link",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "code_link: "
+          }
+        },
+        {
+          "label": "contains",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "contains: "
+          }
+        },
+        {
+          "label": "date",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "date: "
+          }
+        },
+        {
+          "label": "date_delta",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "date_delta: "
+          }
+        },
+        {
+          "label": "decrement_file_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "decrement_file_index: "
+          }
+        },
+        {
+          "label": "dir_leading",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "dir_leading: "
+          }
+        },
+        {
+          "label": "dirname",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "dirname: "
+          }
+        },
+        {
+          "label": "ends_with",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ends_with: "
+          }
+        },
+        {
+          "label": "ensure_leading",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ensure_leading: "
+          }
+        },
+        {
+          "label": "ensure_trailing",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ensure_trailing: "
+          }
+        },
+        {
+          "label": "ext",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ext: "
+          }
+        },
+        {
+          "label": "file_exists",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "file_exists: "
+          }
+        },
+        {
+          "label": "file_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "file_index: "
+          }
+        },
+        {
+          "label": "file_trailing",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "file_trailing: "
+          }
+        },
+        {
+          "label": "find_files",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "find_files: "
+          }
+        },
+        {
+          "label": "find_first_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "find_first_index: "
+          }
+        },
+        {
+          "label": "find_last_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "find_last_index: "
+          }
+        },
+        {
+          "label": "first",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "first: "
+          }
+        },
+        {
+          "label": "frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "frontmatter: "
+          }
+        },
+        {
+          "label": "has_agentic_cli",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_agentic_cli: "
+          }
+        },
+        {
+          "label": "has_alias",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_alias: "
+          }
+        },
+        {
+          "label": "has_binary",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_binary: "
+          }
+        },
+        {
+          "label": "has_builtin_function",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_builtin_function: "
+          }
+        },
+        {
+          "label": "has_command",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_command: "
+          }
+        },
+        {
+          "label": "has_key",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_key: "
+          }
+        },
+        {
+          "label": "has_local_skill",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_local_skill: "
+          }
+        },
+        {
+          "label": "has_skill",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_skill: "
+          }
+        },
+        {
+          "label": "has_user_function",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "has_user_function: "
+          }
+        },
+        {
+          "label": "increment_file_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "increment_file_index: "
+          }
+        },
+        {
+          "label": "ipv4",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ipv4: "
+          }
+        },
+        {
+          "label": "ipv6",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ipv6: "
+          }
+        },
+        {
+          "label": "is_array",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_array: "
+          }
+        },
+        {
+          "label": "is_date",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_date: "
+          }
+        },
+        {
+          "label": "is_date_time",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_date_time: "
+          }
+        },
+        {
+          "label": "is_date_time_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_date_time_utc: "
+          }
+        },
+        {
+          "label": "is_date_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_date_utc: "
+          }
+        },
+        {
+          "label": "is_empty",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_empty: "
+          }
+        },
+        {
+          "label": "is_indexed_file",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_indexed_file: "
+          }
+        },
+        {
+          "label": "is_integer",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_integer: "
+          }
+        },
+        {
+          "label": "is_negative",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_negative: "
+          }
+        },
+        {
+          "label": "is_null",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_null: "
+          }
+        },
+        {
+          "label": "is_number",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_number: "
+          }
+        },
+        {
+          "label": "is_object",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_object: "
+          }
+        },
+        {
+          "label": "is_positive",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_positive: "
+          }
+        },
+        {
+          "label": "is_string",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_string: "
+          }
+        },
+        {
+          "label": "is_this_month",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_this_month: "
+          }
+        },
+        {
+          "label": "is_this_month_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_this_month_utc: "
+          }
+        },
+        {
+          "label": "is_this_year",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_this_year: "
+          }
+        },
+        {
+          "label": "is_this_year_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_this_year_utc: "
+          }
+        },
+        {
+          "label": "is_today",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_today: "
+          }
+        },
+        {
+          "label": "is_today_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_today_utc: "
+          }
+        },
+        {
+          "label": "is_tomorrow",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_tomorrow: "
+          }
+        },
+        {
+          "label": "is_tomorrow_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_tomorrow_utc: "
+          }
+        },
+        {
+          "label": "is_yesterday",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_yesterday: "
+          }
+        },
+        {
+          "label": "is_yesterday_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "is_yesterday_utc: "
+          }
+        },
+        {
+          "label": "join",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "join: "
+          }
+        },
+        {
+          "label": "kebab_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "kebab_case: "
+          }
+        },
+        {
+          "label": "keys",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "keys: "
+          }
+        },
+        {
+          "label": "last",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "last: "
+          }
+        },
+        {
+          "label": "length",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "length: "
+          }
+        },
+        {
+          "label": "link",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "link: "
+          }
+        },
+        {
+          "label": "lower",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "lower: "
+          }
+        },
+        {
+          "label": "markdown_body_empty",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "markdown_body_empty: "
+          }
+        },
+        {
+          "label": "markdown_title",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "markdown_title: "
+          }
+        },
+        {
+          "label": "max",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "max: "
+          }
+        },
+        {
+          "label": "min",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "min: "
+          }
+        },
+        {
+          "label": "newer_than",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "newer_than: "
+          }
+        },
+        {
+          "label": "number",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "number: "
+          }
+        },
+        {
+          "label": "older_than",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "older_than: "
+          }
+        },
+        {
+          "label": "or",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "or: "
+          }
+        },
+        {
+          "label": "package",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "package: "
+          }
+        },
+        {
+          "label": "package_area",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "package_area: "
+          }
+        },
+        {
+          "label": "parent_dir",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "parent_dir: "
+          }
+        },
+        {
+          "label": "pascal_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "pascal_case: "
+          }
+        },
+        {
+          "label": "ping",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ping: "
+          }
+        },
+        {
+          "label": "ping_under",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "ping_under: "
+          }
+        },
+        {
+          "label": "pr",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "pr: "
+          }
+        },
+        {
+          "label": "pr_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "pr_list: "
+          }
+        },
+        {
+          "label": "predict_conflicts",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "predict_conflicts: "
+          }
+        },
+        {
+          "label": "recent_commits",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "recent_commits: "
+          }
+        },
+        {
+          "label": "relative",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "relative: "
+          }
+        },
+        {
+          "label": "remote_vendor",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "remote_vendor: "
+          }
+        },
+        {
+          "label": "replace",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "replace: "
+          }
+        },
+        {
+          "label": "replace_first",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "replace_first: "
+          }
+        },
+        {
+          "label": "replace_last",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "replace_last: "
+          }
+        },
+        {
+          "label": "round",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "round: "
+          }
+        },
+        {
+          "label": "snake_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "snake_case: "
+          }
+        },
+        {
+          "label": "starts_with",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "starts_with: "
+          }
+        },
+        {
+          "label": "terminal",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "terminal: "
+          }
+        },
+        {
+          "label": "title_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "title_case: "
+          }
+        },
+        {
+          "label": "trim",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "trim: "
+          }
+        },
+        {
+          "label": "try_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "try_frontmatter: "
+          }
+        },
+        {
+          "label": "upper",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "upper: "
+          }
+        },
+        {
+          "label": "validate_schema",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "validate_schema: "
+          }
+        },
+        {
+          "label": "values",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "values: "
+          }
+        },
+        {
+          "label": "without_date",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "without_date: "
+          }
+        },
+        {
+          "label": "no_error",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "no_error: "
+          }
+        },
+        {
+          "label": "else",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 45,
+                "character": 6
+              },
+              "end": {
+                "line": 45,
+                "character": 6
+              }
+            },
+            "newText": "else: "
+          }
+        }
+      ]
+    },
+    {
+      "at": "blank stack item",
+      "items": [
+        {
+          "label": "stop",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"stop\""
+          }
+        },
+        {
+          "label": "skip",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"skip\""
+          }
+        },
+        {
+          "label": "error",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"error\""
+          }
+        },
+        {
+          "label": "retry",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"retry\""
+          }
+        },
+        {
+          "label": "break",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"break\""
+          }
+        },
+        {
+          "label": "and",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"and\""
+          }
+        },
+        {
+          "label": "or",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"or\""
+          }
+        },
+        {
+          "label": "branch_exists_on_remote",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"branch_exists_on_remote\""
+          }
+        },
+        {
+          "label": "ipv4",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"ipv4\""
+          }
+        },
+        {
+          "label": "ipv6",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"ipv6\""
+          }
+        },
+        {
+          "label": "remote_vendor",
+          "kind": 12,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "\"remote_vendor\""
+          }
+        },
+        {
+          "label": "say",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "say: "
+          }
+        },
+        {
+          "label": "speak",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "speak: "
+          }
+        },
+        {
+          "label": "effect",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "effect: "
+          }
+        },
+        {
+          "label": "message",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "message: "
+          }
+        },
+        {
+          "label": "notify",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "notify: "
+          }
+        },
+        {
+          "label": "stderr",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "stderr: "
+          }
+        },
+        {
+          "label": "stdout",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "stdout: "
+          }
+        },
+        {
+          "label": "info",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "info: "
+          }
+        },
+        {
+          "label": "warn",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "warn: "
+          }
+        },
+        {
+          "label": "success",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "success: "
+          }
+        },
+        {
+          "label": "stop",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "stop: "
+          }
+        },
+        {
+          "label": "skip",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "skip: "
+          }
+        },
+        {
+          "label": "error",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "error: "
+          }
+        },
+        {
+          "label": "proxy",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "proxy: "
+          }
+        },
+        {
+          "label": "retry",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "retry: "
+          }
+        },
+        {
+          "label": "resume",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "resume: "
+          }
+        },
+        {
+          "label": "defer",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "defer: "
+          }
+        },
+        {
+          "label": "break",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "break: "
+          }
+        },
+        {
+          "label": "prep",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "prep: "
+          }
+        },
+        {
+          "label": "set",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "set: "
+          }
+        },
+        {
+          "label": "append_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "append_frontmatter: "
+          }
+        },
+        {
+          "label": "append_jsonl",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "append_jsonl: "
+          }
+        },
+        {
+          "label": "append_line",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "append_line: "
+          }
+        },
+        {
+          "label": "decrement_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "decrement_frontmatter: "
+          }
+        },
+        {
+          "label": "delete_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "delete_frontmatter: "
+          }
+        },
+        {
+          "label": "ensure_dir",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ensure_dir: "
+          }
+        },
+        {
+          "label": "ensure_file",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ensure_file: "
+          }
+        },
+        {
+          "label": "http_post",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "http_post: "
+          }
+        },
+        {
+          "label": "increment_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "increment_frontmatter: "
+          }
+        },
+        {
+          "label": "merge_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "merge_frontmatter: "
+          }
+        },
+        {
+          "label": "prepend_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "prepend_frontmatter: "
+          }
+        },
+        {
+          "label": "set_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "set_frontmatter: "
+          }
+        },
+        {
+          "label": "abs",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "abs: "
+          }
+        },
+        {
+          "label": "absolute",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "absolute: "
+          }
+        },
+        {
+          "label": "and",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "and: "
+          }
+        },
+        {
+          "label": "as_csv",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_csv: "
+          }
+        },
+        {
+          "label": "as_json",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_json: "
+          }
+        },
+        {
+          "label": "as_json5",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_json5: "
+          }
+        },
+        {
+          "label": "as_line_separated",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_line_separated: "
+          }
+        },
+        {
+          "label": "as_markdown",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_markdown: "
+          }
+        },
+        {
+          "label": "as_ordered_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_ordered_list: "
+          }
+        },
+        {
+          "label": "as_space_separated",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_space_separated: "
+          }
+        },
+        {
+          "label": "as_tsv",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_tsv: "
+          }
+        },
+        {
+          "label": "as_unordered_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "as_unordered_list: "
+          }
+        },
+        {
+          "label": "basename",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "basename: "
+          }
+        },
+        {
+          "label": "basename_without_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "basename_without_index: "
+          }
+        },
+        {
+          "label": "branch_exists_on_remote",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "branch_exists_on_remote: "
+          }
+        },
+        {
+          "label": "camel_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "camel_case: "
+          }
+        },
+        {
+          "label": "can_execute",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "can_execute: "
+          }
+        },
+        {
+          "label": "capitalize",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "capitalize: "
+          }
+        },
+        {
+          "label": "cicd",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "cicd: "
+          }
+        },
+        {
+          "label": "cicd_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "cicd_list: "
+          }
+        },
+        {
+          "label": "code_link",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "code_link: "
+          }
+        },
+        {
+          "label": "contains",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "contains: "
+          }
+        },
+        {
+          "label": "date",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "date: "
+          }
+        },
+        {
+          "label": "date_delta",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "date_delta: "
+          }
+        },
+        {
+          "label": "decrement_file_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "decrement_file_index: "
+          }
+        },
+        {
+          "label": "dir_leading",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "dir_leading: "
+          }
+        },
+        {
+          "label": "dirname",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "dirname: "
+          }
+        },
+        {
+          "label": "ends_with",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ends_with: "
+          }
+        },
+        {
+          "label": "ensure_leading",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ensure_leading: "
+          }
+        },
+        {
+          "label": "ensure_trailing",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ensure_trailing: "
+          }
+        },
+        {
+          "label": "ext",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ext: "
+          }
+        },
+        {
+          "label": "file_exists",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "file_exists: "
+          }
+        },
+        {
+          "label": "file_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "file_index: "
+          }
+        },
+        {
+          "label": "file_trailing",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "file_trailing: "
+          }
+        },
+        {
+          "label": "find_files",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "find_files: "
+          }
+        },
+        {
+          "label": "find_first_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "find_first_index: "
+          }
+        },
+        {
+          "label": "find_last_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "find_last_index: "
+          }
+        },
+        {
+          "label": "first",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "first: "
+          }
+        },
+        {
+          "label": "frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "frontmatter: "
+          }
+        },
+        {
+          "label": "has_agentic_cli",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_agentic_cli: "
+          }
+        },
+        {
+          "label": "has_alias",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_alias: "
+          }
+        },
+        {
+          "label": "has_binary",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_binary: "
+          }
+        },
+        {
+          "label": "has_builtin_function",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_builtin_function: "
+          }
+        },
+        {
+          "label": "has_command",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_command: "
+          }
+        },
+        {
+          "label": "has_key",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_key: "
+          }
+        },
+        {
+          "label": "has_local_skill",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_local_skill: "
+          }
+        },
+        {
+          "label": "has_skill",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_skill: "
+          }
+        },
+        {
+          "label": "has_user_function",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "has_user_function: "
+          }
+        },
+        {
+          "label": "increment_file_index",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "increment_file_index: "
+          }
+        },
+        {
+          "label": "ipv4",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ipv4: "
+          }
+        },
+        {
+          "label": "ipv6",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ipv6: "
+          }
+        },
+        {
+          "label": "is_array",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_array: "
+          }
+        },
+        {
+          "label": "is_date",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_date: "
+          }
+        },
+        {
+          "label": "is_date_time",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_date_time: "
+          }
+        },
+        {
+          "label": "is_date_time_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_date_time_utc: "
+          }
+        },
+        {
+          "label": "is_date_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_date_utc: "
+          }
+        },
+        {
+          "label": "is_empty",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_empty: "
+          }
+        },
+        {
+          "label": "is_indexed_file",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_indexed_file: "
+          }
+        },
+        {
+          "label": "is_integer",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_integer: "
+          }
+        },
+        {
+          "label": "is_negative",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_negative: "
+          }
+        },
+        {
+          "label": "is_null",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_null: "
+          }
+        },
+        {
+          "label": "is_number",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_number: "
+          }
+        },
+        {
+          "label": "is_object",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_object: "
+          }
+        },
+        {
+          "label": "is_positive",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_positive: "
+          }
+        },
+        {
+          "label": "is_string",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_string: "
+          }
+        },
+        {
+          "label": "is_this_month",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_this_month: "
+          }
+        },
+        {
+          "label": "is_this_month_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_this_month_utc: "
+          }
+        },
+        {
+          "label": "is_this_year",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_this_year: "
+          }
+        },
+        {
+          "label": "is_this_year_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_this_year_utc: "
+          }
+        },
+        {
+          "label": "is_today",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_today: "
+          }
+        },
+        {
+          "label": "is_today_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_today_utc: "
+          }
+        },
+        {
+          "label": "is_tomorrow",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_tomorrow: "
+          }
+        },
+        {
+          "label": "is_tomorrow_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_tomorrow_utc: "
+          }
+        },
+        {
+          "label": "is_yesterday",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_yesterday: "
+          }
+        },
+        {
+          "label": "is_yesterday_utc",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "is_yesterday_utc: "
+          }
+        },
+        {
+          "label": "join",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "join: "
+          }
+        },
+        {
+          "label": "kebab_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "kebab_case: "
+          }
+        },
+        {
+          "label": "keys",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "keys: "
+          }
+        },
+        {
+          "label": "last",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "last: "
+          }
+        },
+        {
+          "label": "length",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "length: "
+          }
+        },
+        {
+          "label": "link",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "link: "
+          }
+        },
+        {
+          "label": "lower",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "lower: "
+          }
+        },
+        {
+          "label": "markdown_body_empty",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "markdown_body_empty: "
+          }
+        },
+        {
+          "label": "markdown_title",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "markdown_title: "
+          }
+        },
+        {
+          "label": "max",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "max: "
+          }
+        },
+        {
+          "label": "min",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "min: "
+          }
+        },
+        {
+          "label": "newer_than",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "newer_than: "
+          }
+        },
+        {
+          "label": "number",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "number: "
+          }
+        },
+        {
+          "label": "older_than",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "older_than: "
+          }
+        },
+        {
+          "label": "or",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "or: "
+          }
+        },
+        {
+          "label": "package",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "package: "
+          }
+        },
+        {
+          "label": "package_area",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "package_area: "
+          }
+        },
+        {
+          "label": "parent_dir",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "parent_dir: "
+          }
+        },
+        {
+          "label": "pascal_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "pascal_case: "
+          }
+        },
+        {
+          "label": "ping",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ping: "
+          }
+        },
+        {
+          "label": "ping_under",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "ping_under: "
+          }
+        },
+        {
+          "label": "pr",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "pr: "
+          }
+        },
+        {
+          "label": "pr_list",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "pr_list: "
+          }
+        },
+        {
+          "label": "predict_conflicts",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "predict_conflicts: "
+          }
+        },
+        {
+          "label": "recent_commits",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "recent_commits: "
+          }
+        },
+        {
+          "label": "relative",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "relative: "
+          }
+        },
+        {
+          "label": "remote_vendor",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "remote_vendor: "
+          }
+        },
+        {
+          "label": "replace",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "replace: "
+          }
+        },
+        {
+          "label": "replace_first",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "replace_first: "
+          }
+        },
+        {
+          "label": "replace_last",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "replace_last: "
+          }
+        },
+        {
+          "label": "round",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "round: "
+          }
+        },
+        {
+          "label": "snake_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "snake_case: "
+          }
+        },
+        {
+          "label": "starts_with",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "starts_with: "
+          }
+        },
+        {
+          "label": "terminal",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "terminal: "
+          }
+        },
+        {
+          "label": "title_case",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "title_case: "
+          }
+        },
+        {
+          "label": "trim",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "trim: "
+          }
+        },
+        {
+          "label": "try_frontmatter",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "try_frontmatter: "
+          }
+        },
+        {
+          "label": "upper",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "upper: "
+          }
+        },
+        {
+          "label": "validate_schema",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "validate_schema: "
+          }
+        },
+        {
+          "label": "values",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "values: "
+          }
+        },
+        {
+          "label": "without_date",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "without_date: "
+          }
+        },
+        {
+          "label": "when",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "when: "
+          }
+        },
+        {
+          "label": "no_error",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "no_error: "
+          }
+        },
+        {
+          "label": "then",
+          "kind": 5,
+          "detail": "(required)",
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "then: "
+          }
+        },
+        {
+          "label": "else",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 47,
+                "character": 6
+              },
+              "end": {
+                "line": 47,
+                "character": 6
+              }
+            },
+            "newText": "else: "
+          }
+        }
+      ]
+    },
+    {
+      "at": "blank top-level line",
+      "items": [
+        {
+          "label": "title",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "title: "
+          }
+        },
+        {
+          "label": "tags",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "tags: "
+          }
+        },
+        {
+          "label": "draft",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "draft: "
+          }
+        },
+        {
+          "label": "last_updated",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "last_updated: "
+          }
+        },
+        {
+          "label": "content_policy",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "content_policy: "
+          }
+        },
+        {
+          "label": "metadata",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "metadata: "
+          }
+        },
+        {
+          "label": "hash",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "hash: "
+          }
+        },
+        {
+          "label": "style",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "style: "
+          }
+        },
+        {
+          "label": "change",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "change: "
+          }
+        },
+        {
+          "label": "replace",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "replace: "
+          }
+        },
+        {
+          "label": "ctx",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "ctx: "
+          }
+        },
+        {
+          "label": "prologue",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "prologue: "
+          }
+        },
+        {
+          "label": "epilogue",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "epilogue: "
+          }
+        },
+        {
+          "label": "ignore_invalid",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "ignore_invalid: "
+          }
+        },
+        {
+          "label": "interpolate_code_blocks",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "interpolate_code_blocks: "
+          }
+        },
+        {
+          "label": "composed",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "composed: "
+          }
+        },
+        {
+          "label": "failed",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "failed: "
+          }
+        },
+        {
+          "label": "cancelled",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "cancelled: "
+          }
+        },
+        {
+          "label": "finalize",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "finalize: "
+          }
+        },
+        {
+          "label": "prompt",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "prompt: "
+          }
+        },
+        {
+          "label": "agent",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "agent: "
+          }
+        },
+        {
+          "label": "model",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "model: "
+          }
+        },
+        {
+          "label": "interactive",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "interactive: "
+          }
+        },
+        {
+          "label": "argv",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "argv: "
+          }
+        },
+        {
+          "label": "timeout",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "timeout: "
+          }
+        },
+        {
+          "label": "step_timeout",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "step_timeout: "
+          }
+        },
+        {
+          "label": "timeout_warn",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "timeout_warn: "
+          }
+        },
+        {
+          "label": "step_timeout_warn",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "step_timeout_warn: "
+          }
+        },
+        {
+          "label": "exit_expressions",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "exit_expressions: "
+          }
+        },
+        {
+          "label": "guard_settings",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "guard_settings: "
+          }
+        },
+        {
+          "label": "operation",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "operation: "
+          }
+        },
+        {
+          "label": "verbosity",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "verbosity: "
+          }
+        },
+        {
+          "label": "mode",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "mode: "
+          }
+        },
+        {
+          "label": "name",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "name: "
+          }
+        },
+        {
+          "label": "allowed-tools",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "allowed-tools: "
+          }
+        },
+        {
+          "label": "tools",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "tools: "
+          }
+        },
+        {
+          "label": "skills",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "skills: "
+          }
+        },
+        {
+          "label": "license",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "license: "
+          }
+        },
+        {
+          "label": "compatibility",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "compatibility: "
+          }
+        },
+        {
+          "label": "user-invocable",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "user-invocable: "
+          }
+        },
+        {
+          "label": "disable-model-invocation",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "disable-model-invocation: "
+          }
+        },
+        {
+          "label": "argument-hint",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "argument-hint: "
+          }
+        },
+        {
+          "label": "max_turns",
+          "kind": 5,
+          "textEdit": {
+            "range": {
+              "start": {
+                "line": 14,
+                "character": 0
+              },
+              "end": {
+                "line": 14,
+                "character": 0
+              }
+            },
+            "newText": "max_turns: "
+          }
+        }
+      ]
+    }
+  ]
+}

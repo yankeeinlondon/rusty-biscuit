@@ -1267,10 +1267,20 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
+    #[serial_test::serial]
     async fn real_say_provider_speaks_muted() {
-        let config = TtsConfig::default().with_volume(crate::types::VolumeLevel::Explicit(0.0));
+        let cache = tempfile::tempdir().unwrap();
+        let _cache = [
+            test_toolkit::EnvGuard::set_safe("TMPDIR", cache.path()),
+            test_toolkit::EnvGuard::set_safe("TMP", cache.path()),
+            test_toolkit::EnvGuard::set_safe("TEMP", cache.path()),
+        ];
+        let config = TtsConfig::default()
+            .with_voice("Samantha")
+            .with_speed(SpeedLevel::Fast)
+            .with_volume(crate::types::VolumeLevel::Explicit(0.0));
         let resolution = SayProvider::resolve(&config, &OsSpeechDefaults).await;
-        let audio = SayProvider::synthesize("This is a test message.", &resolution).await.unwrap();
+        let audio = SayProvider::synthesize("This is a test.", &resolution).await.unwrap();
         let report = SayProvider::play_report(audio.path(), &config).await.unwrap();
         #[cfg(feature = "playa")]
         {

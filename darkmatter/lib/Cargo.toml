@@ -22,13 +22,21 @@ bench = false
 default = []
 # Test-only instrumentation. Enables process-wide counters that let downstream
 # test suites assert a documentation-only code path constructs no `EffectEngine`
-# and attempts no network access. Off by default; production builds carry no
-# counter state and expose none of the instrumentation API.
+# and attempts no network access. Also exposes
+# `markdown::compose::expression::function_test_hooks`: thread-local test
+# functions that dispatch consults before the built-in registry, and
+# thread-local counters of expression-function handler entries. Off by
+# default; production builds carry no counter state and expose none of the
+# instrumentation API.
 effects-instrumentation = []
-# Test-only instrumentation. Exposes the thread-local work counters that
-# complexity regressions in downstream crates (DMLS) read across the crate
-# boundary, where `cfg(test)` does not reach. Off by default; without it the
-# counters and their accessors are not compiled.
+# Test-only instrumentation. Exposes the work counters that complexity
+# regressions and measurement benches in this and downstream crates (DMLS,
+# Claudine) read across the crate boundary, where `cfg(test)` does not reach:
+# the thread-local alias-search counter, the process-wide `work_counters`
+# module, and `markdown::schemas::catalog::discovery_probe` (thread-local
+# observation of lifecycle discovery's reads and builds, and injected read
+# errors). Off by default; without it the counters and their accessors are
+# not compiled.
 work-counters = []
 # Test-only seam. Exposes `markdown::cleanup::test_hooks`, which corrupts the
 # body-cleanup candidate before the fidelity check so consumer suites (the CLI,
@@ -50,7 +58,9 @@ serde = { version = "1.0", features = ["derive"] }
 # `preserve_order` is a contract: frontmatter, `md frontmatter` edits, and
 # composition merges keep the author's key order at every depth. Hashes that
 # must ignore order render through `biscuit_hash::canonical_json` instead.
-serde_json = { version = "1.0", features = ["preserve_order"] }
+# `raw_value` and `float_roundtrip` back lossless numeric admission. All three
+# are declared here rather than relied on through feature unification.
+serde_json = { version = "1.0", features = ["preserve_order", "raw_value", "float_roundtrip"] }
 indexmap = { version = "2", features = ["serde"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5", "file-reference", "fetch"] }
 # `EDITOR_SCHEMA`, which the embedded runtime baseline imports for its
@@ -299,6 +309,19 @@ harness = false
 name = "clean_hot_paths"
 harness = false
 
+# Timings for the 2026-10-25-pipeline-work-reduction spike scenarios
+# (system allocator); counts and allocations are `pipeline_work_alloc`'s.
+[[bench]]
+name = "pipeline_work"
+harness = false
+
+# Work counts, allocations, and peak live bytes for the same scenarios,
+# under the counting allocator.
+[[bench]]
+name = "pipeline_work_alloc"
+harness = false
+required-features = ["work-counters"]
+
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and the library owns
 # L2 (render-tree terminal) and browser (headless) tier tests. Its L2 suite
 # drives WezTerm only (tmux is the CLI's backend); a backend declared here
@@ -309,9 +332,12 @@ harness = false
 # spells the other packages' files it allowlists, so a changed count runs it.
 # The serialized-code-neighbors suite includes renderable's neighboring-code
 # fixture matrix by `#[path]` and spells it with `include_str!`.
+# The frozen recursive-schema fixture suite embeds the lifecycle-grammar spike's
+# generator with `include_str!` and runs it.
 source-inputs = [
     "biscuit-file/lib/src/file_reference/glob/parse.rs",
     "biscuit-file/lib/src/file_reference/glob/roots.rs",
+    "claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py",
     "darkmatter/cli/tests/common/context_guard.rs",
     "darkmatter/cli/tests/common/path_lookup_guard.rs",
     "darkmatter/cli/tests/common/source_scan.rs",
@@ -320,7 +346,9 @@ source-inputs = [
     "renderable/tests/support/adjacent_code_matrix.rs",
 ]
 tiers = ["L1", "L2", "browser"]
-features = ["terminal-tests", "browser-tests", "effects-instrumentation"]
-local-features = ["effects-instrumentation"]
+# The named-type memo and validator-cache regressions count work through
+# `work-counters`; without it they compile out.
+features = ["terminal-tests", "browser-tests", "effects-instrumentation", "work-counters"]
+local-features = ["effects-instrumentation", "work-counters"]
 l2-backends = ["wezterm"]
 l1-include-slow = true

@@ -215,7 +215,7 @@ fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument, &claudine::composition::TriggerFindings::default())
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -243,7 +243,7 @@ fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allo
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument, &claudine::composition::TriggerFindings::default())
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -266,7 +266,7 @@ fn pre_validate_with_interactive_succeeds_when_overrides_supply_value() {
 
     let overrides = serde_json::json!({ "title": "Plan" });
     let term = Terminal::default();
-    let pre = pre_validate_with_interactive_collection(&source, Some(&overrides), InteractiveSchemaOptions::default(), &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
+    let pre = pre_validate_with_interactive_collection(&source, Some(&overrides), InteractiveSchemaOptions::default(), &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument, &claudine::composition::TriggerFindings::default())
     .unwrap();
     let fm = pre.set_overrides.unwrap();
     assert_eq!(
@@ -298,7 +298,7 @@ fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
     assert!(interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument, &claudine::composition::TriggerFindings::default())
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),

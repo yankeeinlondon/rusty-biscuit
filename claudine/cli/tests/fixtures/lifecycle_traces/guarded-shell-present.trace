@@ -1,0 +1,14 @@
+# scenario: guarded-shell-present
+# doc: guarded-shell-present.md
+# given: invoked as `claudine compose --claude guarded-shell-present.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: shell approval is only the template rule `template trace-shell start {{ string }}`, so the guarded shell runs as its template and reads `note` when it starts
+# given: `note` is present when the guarded shell starts
+event initialize
+event start
+shell start hello
+work fresh 0
+event success
+event finalize
+err none
+exit 0

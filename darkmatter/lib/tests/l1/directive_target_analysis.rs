@@ -1,11 +1,11 @@
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use darkmatter::markdown::compose::directive_targets::{
-    TargetNullability, analyze_directive_targets, classify_target_nullability,
-    narrowed_expression_paths,
+    DirectiveTargetAnalysis, TargetNullability, analyze_directive_targets,
+    classify_target_nullability,
 };
 use darkmatter::markdown::compose::directives_api::DirectiveKind;
-use darkmatter::markdown::compose::expression::{parse, parse_condition};
+use darkmatter::markdown::compose::expression::parse;
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, SchemaOrigin, SimplifiedSchema, parse_yaml_schema,
 };
@@ -141,24 +141,24 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         "optional",
     );
 
+    // A property only a baseline or trigger layer declares is not in the
+    // authored projection, so it has no static nullability.
     for origin in [SchemaOrigin::baseline(), SchemaOrigin::trigger("trigger.yaml")] {
-        let mut unsupported = effective.clone();
-        unsupported.origins.insert("optional".into(), origin);
+        let mut layered = effective.clone();
+        layered.origins.insert("layered".into(), origin);
         assert_eq!(
-            classify_target_nullability(
-                &parse("optional").unwrap(),
-                Some(&unsupported),
-                &missing,
-            ),
+            classify_target_nullability(&parse("layered").unwrap(), Some(&layered), &missing),
             TargetNullability::Unknown,
         );
     }
 
+    // Without a SimplifiedSchema the merged JSON Schema still declares the
+    // optional property, so the raw layer projects its nullability.
     let mut raw_json = effective.clone();
     raw_json.simplified = None;
-    assert_eq!(
+    assert_nullable(
         classify_target_nullability(&parse("optional").unwrap(), Some(&raw_json), &missing),
-        TargetNullability::Unknown,
+        "optional",
     );
 
     for expression in ["nested.value", "fm.nested.value", "optional || 'fallback'"] {
@@ -177,17 +177,40 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
         serde_yaml_ng::from_str("- optional: file\n- optional: file(required)\n").unwrap();
     let union = parse_yaml_schema(&union_yaml).unwrap();
     assert!(matches!(union, SimplifiedSchema::Union(_)));
+    // The arms fold to `file | null`: optional in one arm, so nullable.
     let mut root_union = effective.clone();
     root_union.simplified = Some(union);
     root_union.origins.clear();
-    assert_eq!(
+    assert_nullable(
         classify_target_nullability(&parse("optional").unwrap(), Some(&root_union), &missing),
-        TargetNullability::Unknown,
+        "optional",
+    );
+
+    // Root-union arms that agree on a property declare it, as they do for
+    // every other reader of the shared type scope.
+    let agreeing_yaml: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str("- optional: file\n  a: string\n- optional: file\n  b: string\n").unwrap();
+    root_union.simplified = Some(parse_yaml_schema(&agreeing_yaml).unwrap());
+    assert_nullable(
+        classify_target_nullability(&parse("optional").unwrap(), Some(&root_union), &missing),
+        "optional",
     );
 }
 
+/// The one target of `source`.
+fn only_target(source: &str, frontmatter: &Value) -> DirectiveTargetAnalysis {
+    let (_, effective, _) = document_with_schema("  x: file\n  a: file\n  b: file\n", "");
+    let mut analyses = analyze_directive_targets(source, Some(&effective), frontmatter).unwrap();
+    assert_eq!(analyses.len(), 1, "{source}");
+    analyses.remove(0)
+}
+
+/// Every narrowing form the target analysis supported before it read the
+/// shared type scope still proves its paths, aliased predicate names and the
+/// other scope guards now do too, and the evaluator agrees that each guard
+/// can hold.
 #[test]
-fn guard_narrowing_matches_evaluator_truth_tables() {
+fn block_guards_narrow_targets_through_the_shared_type_scope() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("present.md"), "present").unwrap();
 
@@ -198,12 +221,27 @@ fn guard_narrowing_matches_evaluator_truth_tables() {
         ("(x)", json!({"x": "value"}), true, &["x"][..]),
         ("x != null", json!({"x": "value"}), true, &["x"][..]),
         ("x != null", json!({"x": null}), false, &["x"][..]),
-        ("x != ''", json!({"x": "value"}), true, &["x"][..]),
-        ("x != ''", json!({"x": ""}), false, &["x"][..]),
+        ("null != x", json!({"x": "value"}), true, &["x"][..]),
+        ("x == ''", json!({"x": ""}), true, &["x"][..]),
+        ("!(x == null)", json!({"x": "value"}), true, &["x"][..]),
         ("a && b", json!({"a": true, "b": true}), true, &["a", "b"][..]),
+        ("and(a, b)", json!({"a": true, "b": true}), true, &["a", "b"][..]),
+        // Aliases and case resolve through the function registry.
+        ("fileExists(x)", json!({"x": "present.md"}), true, &["x"][..]),
+        ("FILE_EXISTS(x)", json!({"x": "present.md"}), true, &["x"][..]),
+        ("isString(x)", json!({"x": "value"}), true, &["x"][..]),
+        ("!isNull(x)", json!({"x": "value"}), true, &["x"][..]),
+        ("!is_empty(x)", json!({"x": "value"}), true, &["x"][..]),
+        ("x == 'value'", json!({"x": "value"}), true, &["x"][..]),
+        ("x ? a : b", json!({"x": true, "a": true}), true, &[][..]),
+        // Nothing is proven by a disjunction, a negation, or a function result.
         ("a || b", json!({"a": true, "b": false}), true, &[][..]),
         ("!x", json!({"x": false}), true, &[][..]),
-        ("x == 'value'", json!({"x": "value"}), true, &[][..]),
+        ("is_null(x)", json!({"x": null}), true, &[][..]),
+        // `null != ''` and `null == null`, so neither admits only present values.
+        ("x != ''", json!({"x": null}), true, &[][..]),
+        ("'' != x", json!({"x": null}), true, &[][..]),
+        ("x == null", json!({"x": null}), true, &[][..]),
         ("length(x) > 0", json!({"x": [1]}), true, &[][..]),
     ];
 
@@ -213,13 +251,35 @@ fn guard_narrowing_matches_evaluator_truth_tables() {
             expected_result,
             "evaluator result for `{condition}`",
         );
-        let parsed = parse_condition(condition).unwrap();
-        let actual: Vec<_> = narrowed_expression_paths(&parsed)
-            .into_iter()
-            .map(|path| path.as_str().to_string())
-            .collect();
+        let source = format!("::block when=\"{condition}\"\n::file {{{{x}}}}\n::end-block\n");
+        let target = only_target(&source, &json!({}));
+        let actual: Vec<_> = target.narrowed_paths.iter().map(|path| path.as_str()).collect();
         assert_eq!(actual, expected_paths, "narrowed paths for `{condition}`");
+        assert_eq!(target.is_narrowed(), expected_paths.contains(&"x"), "`{condition}` narrows `x`");
     }
+}
+
+/// A guard narrows only its own region and its own paths: an unrelated path
+/// is not narrowed, a sibling member proves nothing about its parent, and a
+/// negated guard (the false side) proves nothing for its subject.
+#[test]
+fn block_guards_narrow_only_their_region_and_their_paths() {
+    let unrelated = only_target("::block when=\"a\"\n::file {{x}}\n::end-block\n", &json!({}));
+    assert!(!unrelated.is_narrowed());
+    assert_eq!(unrelated.narrowed_paths.len(), 1);
+
+    let member = only_target("::block when=\"x.path\"\n::file {{x}}\n::end-block\n", &json!({}));
+    assert!(!member.is_narrowed());
+    assert_eq!(member.narrowed_paths[0].as_str(), "x.path");
+
+    let negated = only_target("::block when=\"!file_exists(x)\"\n::file {{x}}\n::end-block\n", &json!({}));
+    assert!(!negated.is_narrowed());
+
+    let after = only_target("::block when=\"x\"\ninside\n::end-block\n::file {{x}}\n", &json!({}));
+    assert!(!after.is_narrowed());
+
+    let fm = only_target("::block when=\"x\"\n::file {{fm.x}}\n::end-block\n", &json!({}));
+    assert!(fm.is_narrowed(), "bare and `fm.` paths share one document binding");
 }
 
 #[test]
@@ -262,7 +322,8 @@ fn passive_analysis_does_not_execute_or_mutate_inputs() {
         "  remote: file\n  command: string\n",
         "remote: https://example.invalid/never-fetch.md\ncommand: 'touch should-not-exist'\n",
     );
-    let source = "::file {{remote}}\n::code {{command}}\n";
+    // The guard names an unreachable URL: narrowing it must not fetch it.
+    let source = "::file {{remote}}\n::code {{command}}\n::block when=\"file_exists(remote)\"\n::url {{remote}}\n::end-block\n";
     let original_source = source.to_string();
     let original_frontmatter = frontmatter.clone();
     #[cfg(feature = "effects-instrumentation")]
@@ -273,7 +334,8 @@ fn passive_analysis_does_not_execute_or_mutate_inputs() {
 
     let analyses = analyze_directive_targets(source, Some(&effective), &frontmatter).unwrap();
 
-    assert_eq!(analyses.len(), 2);
+    assert_eq!(analyses.len(), 3);
+    assert!(analyses[2].is_narrowed());
     assert_eq!(source, original_source);
     assert_eq!(frontmatter, original_frontmatter);
     #[cfg(feature = "effects-instrumentation")]

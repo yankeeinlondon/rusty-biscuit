@@ -1,0 +1,24 @@
+# scenario: retry-in-initialize-group-leg
+# doc: retry-in-initialize-group-leg.md
+# given: invoked as `claudine sequence --claude --yolo retry-in-initialize-group-leg.md` from the directory holding the fixture documents
+# given: group checks runs its one leg; the leg's initialize returns retry with one extra attempt
+# given: the retry raises LifecycleSetupPhaseRecoveryUnsupported in the leg, which runs failure then finalize and fails the group, which fails the sequence
+# given: no task runs and no provider launches
+event seq:initialize
+event seq:start
+event checks:initialize
+event checks:start
+event leg:initialize
+event leg:failure
+err composition.failed
+event leg:finalize
+err composition.failed
+event checks:failure
+err composition.failed
+event checks:finalize
+err composition.failed
+event seq:failure
+err composition.failed
+event seq:finalize
+err composition.failed
+exit 1

@@ -10,7 +10,7 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::MarkdownError;
-use darkmatter::markdown::compose::expression::ExpressionError;
+use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionError, TypeScope};
 use darkmatter::markdown::compose::shell_expansion::store::load_ruleset;
 use darkmatter::markdown::compose::shell_expansion::template::{
     ArgPart, CommandTemplate, HoleError, HoleTiming, RejectReason, TemplateShape, TemplateTargetError,
@@ -41,7 +41,9 @@ fn typed(command: &str, declarations: &[(&str, &str)]) -> CommandTemplate {
             .insert((*name).to_string(), PropertyDef::Single(parse_type_expr(name, ty).unwrap()));
     }
     let mut template = parse_authored(command).unwrap();
-    template.project_types(Some(&SimplifiedSchema::Single(shape)), &[]);
+    let schema = SimplifiedSchema::Single(shape);
+    let declared = DeclaredTypes::new(Some(&schema));
+    template.project_types(&TypeScope::unguarded(&declared));
     template
 }
 
@@ -121,7 +123,8 @@ fn null_is_missing_and_other_scalars_convert() {
 }
 
 /// Every hole of every segment is filled before anything can run, even a
-/// segment `&&` would skip, and each placeholder is evaluated exactly once.
+/// segment `&&` would skip, and each expression is evaluated exactly once,
+/// however many holes it fills.
 #[test]
 fn every_segment_is_filled_once_before_the_chain_runs() {
     let template = parse_authored("first {{ a }} && second {{ b }}{{ a }}").unwrap();
@@ -141,7 +144,7 @@ fn every_segment_is_filled_once_before_the_chain_runs() {
     };
     let filled = fill_template(&template, &evaluate, None).unwrap();
     assert_eq!(filled.segments[1].args, ["ba"]);
-    assert_eq!(*calls.borrow(), ["a", "b", "a"]);
+    assert_eq!(*calls.borrow(), ["a", "b"]);
 }
 
 // ── The late-value barrier ───────────────────────────────────────────────

@@ -13,6 +13,7 @@
 //! (the default role) rather than a pass-through: the precise lower identity is
 //! not discarded, it survives as the snapshot's one-level `cause`.
 
+use crate::diagnostics::DiagnosticSnapshotExt;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};

@@ -215,10 +215,30 @@ required-features = ["prompt-tests"]
 # The context construction and path lookup guards include darkmatter-cli's
 # shared engines by `#[path]` and spell those files in their tests; the
 # entry-point parity runner does the same with darkmatter's shared matrix.
+# The lifecycle one-implementation guard includes the library's shared scan.
+# (It also reads the library's `From<LifecycleError>` conversion, which is not
+# declared: guards here scan `claudine/lib/src` from helpers, so declaring a
+# library source file would schedule this whole L1 binary on its every edit.)
 source-inputs = [
+  "claudine/lib/tests/common/lifecycle_ownership_scan.rs",
   "darkmatter/cli/tests/common/context_guard.rs",
   "darkmatter/cli/tests/common/path_lookup_guard.rs",
   "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/src/lifecycle/control.rs",
+  "darkmatter/lib/src/lifecycle/executor.rs",
+  "darkmatter/lib/src/lifecycle/executor/host.rs",
+  "darkmatter/lib/src/lifecycle/executor/outcome.rs",
+  "darkmatter/lib/src/lifecycle/executor/shell.rs",
+  "darkmatter/lib/src/lifecycle/md_host.rs",
+  "darkmatter/lib/src/lifecycle/policy.rs",
+  "darkmatter/lib/src/lifecycle/preflight.rs",
+  "darkmatter/lib/src/lifecycle/preflight/candidates.rs",
+  "darkmatter/lib/src/lifecycle/preflight/shell_walk.rs",
+  "darkmatter/lib/src/lifecycle/registry.rs",
+  "darkmatter/lib/src/lifecycle/run.rs",
+  "darkmatter/lib/src/lifecycle/run/protocol.rs",
+  "darkmatter/lib/src/lifecycle/run_guard.rs",
+  "darkmatter/lib/src/lifecycle/runtime.rs",
   "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
 ]
 tiers = ["L1", "L2"]

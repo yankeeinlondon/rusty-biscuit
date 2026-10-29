@@ -48,6 +48,21 @@ pub(crate) fn build_resolution_cache(
         .collect()
 }
 
+/// The leading whitespace of the line a directive at `span` occupies, when a
+/// collection body repeated it; empty otherwise.
+///
+/// A directive written inside a list item loses that indentation when its
+/// line is replaced, which would end the item at the first line of a
+/// multiline child. Directives outside a collection keep their historical
+/// behavior.
+fn repeated_indent(content: &str, span: &std::ops::Range<usize>, repeated: bool) -> String {
+    if !repeated {
+        return String::new();
+    }
+    let line = &content[span.clone()];
+    line[..line.len() - line.trim_start().len()].to_string()
+}
+
 #[derive(Debug, Clone)]
 struct HeadingInfo {
     level: HeadingLevel,
@@ -257,6 +272,13 @@ pub(crate) enum PreparedTransclusion {
         opening: Option<SourceOpening>,
         directive_options: transclusion::BlockOptions,
         insertion_context: Option<(usize, usize)>,
+        /// The authored site and original items of a directive a collection
+        /// body repeated, which select the child's discovered subgraph.
+        site: Option<crate::markdown::compose::preflight::ScopedSite>,
+        /// The leading whitespace of a repeated directive's line, applied to
+        /// every line of the child's output so it stays inside the list
+        /// item the directive was written in. Empty outside a collection.
+        indent: String,
     },
     Code {
         order: usize,
@@ -271,6 +293,8 @@ pub(crate) enum PreparedTransclusion {
         url: url::Url,
         directive_options: transclusion::BlockOptions,
         insertion_context: Option<(usize, usize)>,
+        site: Option<crate::markdown::compose::preflight::ScopedSite>,
+        indent: String,
     },
     RemoteCode {
         order: usize,
@@ -441,6 +465,67 @@ impl<'a> TransclusionEngine<'a> {
         (idx > 0).then(|| table[idx - 1].1)
     }
 
+    /// The target pre-flight discovered for the repeated `directive` at
+    /// `site`, after checking it is what this copy resolves to.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellExpansionError::NotPreApproved`] when discovery found no such
+    /// site, found one with other explicit values, or the copy now resolves
+    /// to another target. Nothing is approved late.
+    fn scoped_resolution(
+        &self,
+        directive: &transclusion::BlockDirective,
+        site: &crate::markdown::compose::preflight::ScopedSite,
+        graph: &crate::markdown::compose::preflight::PreflightGraphNode,
+        options: &crate::markdown::compose::ComposeRequest,
+        transclusion_opts: &crate::markdown::compose::context::options::TransclusionOptions,
+    ) -> MarkdownResult<crate::markdown::compose::preflight::PreflightResolvedTarget> {
+        use crate::markdown::compose::preflight::{PreflightResolvedTarget, parameters_identity};
+        let refuse = |why: &str| -> crate::markdown::types::MarkdownError {
+            crate::markdown::compose::shell_expansion::types::ShellExpansionError::NotPreApproved {
+                ctx: Box::new(self.markdown.source_context_for_errors()),
+                command: format!("::{} {}", directive.kind.as_str(), directive.raw_target),
+                origin: crate::markdown::compose::shell_expansion::types::ShellCommandOrigin::Body {
+                    line: directive.line,
+                },
+                source_desc: format!(" ({why}; {})", site.iteration),
+            }
+            .into()
+        };
+        let (discovered, parameters) = if directive.kind == transclusion::DirectiveKind::Code {
+            let target = graph
+                .scoped_target(site)
+                .ok_or_else(|| refuse("this repeated target was not found by pre-flight"))?;
+            (target.resolved_target.clone(), 0)
+        } else {
+            let edge = graph
+                .scoped_edge(site)
+                .ok_or_else(|| refuse("this repeated target was not found by pre-flight"))?;
+            (edge.resolved_target.clone(), edge.parameters)
+        };
+        if directive.kind != transclusion::DirectiveKind::Code && parameters != parameters_identity(&directive.options) {
+            return Err(refuse("this repeated target's explicit values differ from the ones pre-flight walked"));
+        }
+        let now = transclusion::resolve_target(
+            directive.kind,
+            &directive.raw_target,
+            transclusion_opts,
+            &options.source,
+            directive.line,
+            self.markdown.source_context_for_errors(),
+        )?;
+        let same = match (&discovered, &now) {
+            (PreflightResolvedTarget::File { path, .. }, transclusion::ResolvedTarget::File { path: now, .. }) => path == now,
+            (PreflightResolvedTarget::Url(url), transclusion::ResolvedTarget::Url { url: now, .. }) => url == now,
+            _ => false,
+        };
+        if !same {
+            return Err(refuse("this repeated target resolves differently than pre-flight found it"));
+        }
+        Ok(discovered)
+    }
+
     /// Prepares `::file` / `::url` / `::code` transclusions from directives
     /// **parsed against the current content**.
     ///
@@ -467,15 +552,30 @@ impl<'a> TransclusionEngine<'a> {
         resolved_cache: Option<
             &HashMap<String, crate::markdown::compose::preflight::PreflightResolvedTarget>,
         >,
+        mut watch: Option<&mut crate::markdown::compose::pipeline::ReportWatch<'_>>,
+        scopes: &crate::markdown::compose::body_origin::ScopeRanges,
+        origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+        sites: &[Option<crate::markdown::compose::preflight::ScopedSite>],
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
-        for directive in directives.iter().filter(|directive| match kind {
+        for (directive, site) in directives.iter().zip(sites).filter(|(directive, _)| match kind {
             transclusion::DirectiveKind::Code => {
                 directive.kind == transclusion::DirectiveKind::Code
             }
             _ => directive.kind != transclusion::DirectiveKind::Code,
         }) {
+            // A failure of a directive a collection body repeated names the
+            // directive's authored site and the copy's items.
+            let in_scope = |error: crate::markdown::types::MarkdownError| {
+                crate::markdown::compose::site_scope::scope_failure(
+                    error,
+                    self.markdown,
+                    origin,
+                    scopes,
+                    directive.span.clone(),
+                )
+            };
             for unknown in &directive.options.unknown_options {
                 report.add_warning(
                     ComposeWarning::new(
@@ -495,16 +595,19 @@ impl<'a> TransclusionEngine<'a> {
                     transclusion::DeferredSetError::InvalidAssignment { raw, reason, line } => {
                         if options.allow_invalid_frontmatter_assignment {
                             report.add_warning(
-                                ComposeWarning::new(
-                                    "transclusion",
-                                    format!(
-                                        "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
-                                        directive.kind.as_str(),
-                                        line,
-                                        reason,
-                                        raw
-                                    ),
-                                )
+                                ComposeWarning {
+                                    code: Some(crate::markdown::compose::policy::INVALID_FRONTMATTER_ASSIGNMENT_CODE.to_string()),
+                                    ..ComposeWarning::new(
+                                        "transclusion",
+                                        format!(
+                                            "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
+                                            directive.kind.as_str(),
+                                            line,
+                                            reason,
+                                            raw
+                                        ),
+                                    )
+                                }
                                 .at_line(*line),
                             );
                         } else {
@@ -522,15 +625,18 @@ impl<'a> TransclusionEngine<'a> {
                     transclusion::DeferredSetError::ReassignedProperty { name } => {
                         if options.allow_reassigned_frontmatter_property {
                             report.add_warning(
-                                ComposeWarning::new(
-                                    "transclusion",
-                                    format!(
-                                        "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
-                                        name,
-                                        directive.kind.as_str(),
-                                        directive.line
-                                    ),
-                                )
+                                ComposeWarning {
+                                    code: Some(crate::markdown::compose::policy::REASSIGNED_FRONTMATTER_PROPERTY_CODE.to_string()),
+                                    ..ComposeWarning::new(
+                                        "transclusion",
+                                        format!(
+                                            "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
+                                            name,
+                                            directive.kind.as_str(),
+                                            directive.line
+                                        ),
+                                    )
+                                }
                                 .at_line(directive.line),
                             );
                         } else {
@@ -548,16 +654,25 @@ impl<'a> TransclusionEngine<'a> {
             }
 
             if let Some(expr) = &directive.options.when_expr {
-                let lookup = state::ResolvingLookup::new(
+                let document = state::ResolvingLookup::new(
                     state,
                     options.expression_resolution_context(remote_fetch),
                 );
+                // A directive in a repeated body reads the frame of its copy.
+                let lookup = crate::markdown::compose::site_scope::SiteLookup::new(&document, scopes, None);
+                crate::markdown::compose::site_scope::SiteHook::enter(&lookup, directive.span.start);
                 for warning in
                     crate::markdown::compose::conditions::collect_condition_context_warnings(
                         expr, &lookup, "condition",
                     )
                 {
                     report.add_warning(warning.at_line(directive.line));
+                }
+                // A blocking finding of an earlier directive, or of this
+                // condition's context check, stops before this condition
+                // runs: it may compose nested content.
+                if let Some(watch) = watch.as_deref_mut() {
+                    watch.check(report)?;
                 }
                 let mut missing = Vec::new();
                 let should_include =
@@ -568,7 +683,7 @@ impl<'a> TransclusionEngine<'a> {
                         self.markdown.source_context_for_errors(),
                         &mut missing,
                     )
-                    .map_err(transclusion::TransclusionError::from)?;
+                    .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 report.add_unknown_root_candidates("condition", missing, |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,
@@ -590,7 +705,22 @@ impl<'a> TransclusionEngine<'a> {
             }
 
             let target = &directive.raw_target;
-            let cached = resolved_cache.and_then(|cache| cache.get(target));
+            // A directive a collection body repeated is matched by its
+            // authored site and original item, never by target text: copies
+            // of one authored line share a target when they differ in
+            // parameters, and a target no copy was discovered for was never
+            // approved.
+            let scoped = match (site, options.preflight_graph()) {
+                (Some(site), Some(graph)) if !graph.is_empty() => Some(
+                    self.scoped_resolution(directive, site, graph, options, &transclusion_opts)
+                        .map_err(in_scope)?,
+                ),
+                _ => None,
+            };
+            let cached = match &scoped {
+                Some(resolved) => Some(resolved),
+                None => resolved_cache.and_then(|cache| cache.get(target)),
+            };
             let resolved = if let Some(cached) = cached {
                 // Reuse the preflight-resolved target, skipping a second
                 // `resolve_target` pass. The span still rides on `directive`
@@ -624,12 +754,11 @@ impl<'a> TransclusionEngine<'a> {
                     self.markdown.source_context_for_errors(),
                 ) {
                     Ok(resolved) => resolved,
-                    Err(err) if ignore_invalid => {
+                    Err(err) if ignore_invalid || removes_missing(options, &err) => {
                         let mut fixed_report = ComposeReport::new();
                         fixed_report.transclusions_skipped = 1;
                         fixed_report.add_warning(
-                            ComposeWarning::new("transclusion", err.to_string())
-                                .at_line(directive.line),
+                            skipped_transclusion_warning(&err).at_line(directive.line),
                         );
                         prepared.push(PreparedTransclusion::FixedReplace {
                             order: *next_order,
@@ -640,7 +769,7 @@ impl<'a> TransclusionEngine<'a> {
                         *next_order += 1;
                         continue;
                     }
-                    Err(err) => return Err(err.into()),
+                    Err(err) => return Err(in_scope(err.into())),
                 }
             };
 
@@ -662,6 +791,8 @@ impl<'a> TransclusionEngine<'a> {
                             opening: transclusion::source_opening(target, &resolved),
                             directive_options: directive.options.clone(),
                             insertion_context: Some((directive.span.start, directive.line)),
+                            site: site.clone(),
+                            indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
                         }
                     };
                     prepared.push(item);
@@ -695,6 +826,8 @@ impl<'a> TransclusionEngine<'a> {
                             url,
                             directive_options: directive.options.clone(),
                             insertion_context: Some((directive.span.start, directive.line)),
+                            site: site.clone(),
+                            indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
                         });
                     }
                     *next_order += 1;
@@ -721,10 +854,9 @@ impl<'a> TransclusionEngine<'a> {
                     *next_order += 1;
                 }
                 transclusion::ResolvedTarget::Url { url, .. } => {
-                    return Err(transclusion::TransclusionError::UrlExecutionDisabled {
-                        url: url.to_string(),
-                    }
-                    .into());
+                    return Err(in_scope(
+                        transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() }.into(),
+                    ));
                 }
             }
         }
@@ -806,10 +938,10 @@ impl<'a> TransclusionEngine<'a> {
             self.markdown.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
-            Err(err) if ignore_invalid => {
+            Err(err) if ignore_invalid || removes_missing(options, &err) => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
-                fixed_report.add_warning(ComposeWarning::new("transclusion", err.to_string()));
+                fixed_report.add_warning(skipped_transclusion_warning(&err));
                 prepared.push(PreparedTransclusion::FixedSection {
                     order: *next_order,
                     slot,
@@ -831,6 +963,8 @@ impl<'a> TransclusionEngine<'a> {
                     opening: Some(SourceOpening { reference: file_ref, resolved }),
                     directive_options: transclusion::BlockOptions::default(),
                     insertion_context: None,
+                    site: None,
+                    indent: String::new(),
                 });
                 *next_order += 1;
             }
@@ -850,6 +984,8 @@ impl<'a> TransclusionEngine<'a> {
                     url,
                     directive_options: transclusion::BlockOptions::default(),
                     insertion_context: None,
+                    site: None,
+                    indent: String::new(),
                 });
                 *next_order += 1;
             }
@@ -959,6 +1095,8 @@ impl<'a> TransclusionEngine<'a> {
                 opening,
                 directive_options,
                 insertion_context,
+                site,
+                indent,
             } => {
                 let mut child_runtime = {
                     let runtime = runtime_mutex.lock().unwrap();
@@ -969,6 +1107,7 @@ impl<'a> TransclusionEngine<'a> {
                     &path,
                     opening.as_ref(),
                     insertion_context,
+                    site.as_ref(),
                     &directive_options,
                     state,
                     state_identity,
@@ -976,6 +1115,7 @@ impl<'a> TransclusionEngine<'a> {
                     &mut child_runtime,
                     &mut child_report,
                 )?;
+                let content = crate::markdown::compose::indent::indent_text(&content, &indent, None);
                 child_report.transclusions_applied += 1;
                 {
                     let mut runtime = runtime_mutex.lock().unwrap();
@@ -1023,6 +1163,8 @@ impl<'a> TransclusionEngine<'a> {
                 url,
                 directive_options,
                 insertion_context,
+                site,
+                indent,
             } => {
                 let remote_fetch = {
                     let runtime = runtime_mutex.lock().unwrap();
@@ -1106,9 +1248,12 @@ impl<'a> TransclusionEngine<'a> {
                 // OWN preflight sub-node (whose edges point at grandchildren) so
                 // its transclusion stage reuses grandchild URL/path resolution
                 // too. Mirrors the local-file path; a miss falls back to None.
-                child_options.preflight_graph = options
-                    .preflight_graph()
-                    .and_then(|graph| graph.child_for_url(&url).cloned());
+                child_options.preflight_graph = options.preflight_graph().and_then(|graph| {
+                    site.as_ref()
+                        .and_then(|site| graph.scoped_edge(site))
+                        .map(|edge| std::sync::Arc::clone(&edge.child))
+                        .or_else(|| graph.child_for_url(&url).cloned())
+                });
 
                 let child_report = child
                     .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
@@ -1136,6 +1281,7 @@ impl<'a> TransclusionEngine<'a> {
                 }
 
                 let result = self.apply_wrappers(content, &directive_options);
+                let result = crate::markdown::compose::indent::indent_text(&result, &indent, None);
                 Ok(ResolvedTransclusion {
                     order,
                     target,
@@ -1406,6 +1552,7 @@ impl<'a> TransclusionEngine<'a> {
         path: &Path,
         opening: Option<&SourceOpening>,
         insertion_context: Option<(usize, usize)>,
+        site: Option<&crate::markdown::compose::preflight::ScopedSite>,
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
         state_identity: cache::hashing::PhaseStateIdentity,
@@ -1475,7 +1622,7 @@ impl<'a> TransclusionEngine<'a> {
 
         let path_buf = path.to_path_buf();
 
-        let cached = cache_handle.get_or_compute_compose(
+        let outcome = cache_handle.get_or_compute_compose_outcome(
             &cache_key,
             || {
                 let mut child_options =
@@ -1488,11 +1635,16 @@ impl<'a> TransclusionEngine<'a> {
                 // so its resolution cache would be keyed by the wrong
                 // (parent-level) targets. A miss (no graph attached, or this
                 // child was not in the preflight walk) falls back to None.
-                child_options.preflight_graph = options
-                    .preflight_graph()
-                    .and_then(|graph| graph.child_for_source(&path_buf).cloned());
+                child_options.preflight_graph = options.preflight_graph().and_then(|graph| {
+                    site.and_then(|site| graph.scoped_edge(site))
+                        .map(|edge| std::sync::Arc::clone(&edge.child))
+                        .or_else(|| graph.child_for_source(&path_buf).cloned())
+                });
 
                 let mut compose_runtime = runtime.clone_for_child();
+                // A ledger of its own records what this subtree consumes, so a
+                // later reuse can reserve the same amount.
+                compose_runtime.iteration = runtime.iteration.with_ledger();
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
@@ -1503,9 +1655,19 @@ impl<'a> TransclusionEngine<'a> {
                     context_groups: compose_runtime
                         .context_groups()
                         .union(child_context.capture_requirements()),
+                    usage: compose_runtime.iteration.ledger_usage(),
                 })
             },
         )?;
+        if outcome.reused {
+            runtime
+                .iteration
+                // A replay is charged to the item whose copy holds this
+                // directive, as the first composition was.
+                .reserve_usage(outcome.result.usage, &site.map(|site| site.iteration.clone()).unwrap_or_default())
+                .map_err(crate::markdown::compose::inline::shell_expansion::collection_budget)?;
+        }
+        let cached = outcome.result;
         runtime.record_context_groups(&cached.context_groups);
 
         report.merge(cached.report.clone());
@@ -1700,21 +1862,20 @@ pub(crate) fn apply_directive_set_overlay(
 /// every authored value once.
 pub(crate) fn markdown_child_options(
     parent: &crate::markdown::compose::ComposeRequest,
-    parent_data: &Map<String, Value>,
+    parent_data: &crate::markdown::compose::SharedFrontmatter,
     directive_options: &transclusion::BlockOptions,
     path: &Path,
     opening: Option<SourceOpening>,
 ) -> crate::markdown::compose::ComposeRequest {
-    let mut inherited = parent_data.clone();
     // Prologue/epilogue are scoped to the defining document — never propagate.
     // ctx is captured fresh per-document by EffectiveStateBuilder, so the
     // parent's merged runtime context must not leak into children (it would
     // appear as a document-defined ctx and trigger false collision warnings).
-    // `shift_remove`, not `remove` (a swap-remove under `preserve_order`), so
-    // the inherited keys keep the parent's order.
-    inherited.shift_remove("prologue");
-    inherited.shift_remove("epilogue");
-    inherited.shift_remove("ctx");
+    let inherited: Map<String, Value> = parent_data
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "prologue" | "epilogue" | "ctx"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
 
     let one_off = match &directive_options.replace {
         transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
@@ -1764,6 +1925,20 @@ fn parse_bool(raw: &str) -> Option<bool> {
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
     }
+}
+
+/// Whether `options` removes the transclusion `err` failed to resolve: its
+/// target does not exist and the missing-transclusion recovery is on.
+fn removes_missing(options: &crate::markdown::compose::ComposeRequest, err: &transclusion::TransclusionError) -> bool {
+    options.allow_missing_transclusions && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
+}
+
+/// The warning of a transclusion removed because it did not resolve; a
+/// missing target carries the code its recovery governs.
+fn skipped_transclusion_warning(err: &transclusion::TransclusionError) -> ComposeWarning {
+    let code = (err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch))
+        .then(|| crate::markdown::compose::policy::MISSING_TRANSCLUSION_CODE.to_string());
+    ComposeWarning { code, ..ComposeWarning::new("transclusion", err.to_string()) }
 }
 
 #[cfg(test)]

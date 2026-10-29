@@ -449,11 +449,13 @@ mod notify_send_stub {
     async fn notice_only_timeout_maps_to_timeout_error() {
         let stub = stub_path("stub_notify_send");
         let _env = EnvGuard::set(&[("STUB_NOTIFY_SEND_SLEEP_MS", "6000")]);
-        let helper = notify_send_helper(&stub);
+        let mut helper = notify_send_helper(&stub);
+        assert_eq!(helper.timeout_ms, 5000);
+        helper.timeout_ms = 100;
         let result = helper.send(&notice_request()).await;
         let error = result.expect_err("expected notify-send stub to timeout");
         assert!(
-            matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
+            matches!(error, HelperError::Timeout { timeout_ms: 100 }),
             "got {error:?}"
         );
     }
@@ -534,14 +536,15 @@ mod snoretoast_stub {
     #[tokio::test]
     #[serial(snoretoast)]
     async fn notice_only_timeout_maps_to_timeout_error() {
-        // SnoreToast notice-only timeout is 5000ms; sleep for 6000ms to trigger it.
         let stub = stub_path("stub_snoretoast");
         let _env = EnvGuard::set(&[("STUB_SNORETOAST_SLEEP_MS", "6000")]);
-        let helper = snoretoast_helper(&stub);
+        let mut helper = snoretoast_helper(&stub);
+        assert_eq!(helper.notice_timeout_ms, 5000);
+        helper.notice_timeout_ms = 100;
         let result = helper.send(&notice_request()).await;
         let error = result.expect_err("expected SnoreToast stub to timeout");
         assert!(
-            matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
+            matches!(error, HelperError::Timeout { timeout_ms: 100 }),
             "got {error:?}"
         );
     }
@@ -721,14 +724,15 @@ mod burnttoast_stub {
     #[tokio::test]
     #[serial(burnttoast)]
     async fn notice_only_timeout_maps_to_timeout_error() {
-        // BurntToast notice-only timeout is 10000ms; sleep for 11000ms to trigger it.
         let stub = stub_path("stub_burnttoast");
         let _env = EnvGuard::set(&[("STUB_BURNTTOAST_SLEEP_MS", "11000")]);
-        let helper = burnttoast_helper(&stub);
+        let mut helper = burnttoast_helper(&stub);
+        assert_eq!(helper.notice_timeout_ms, 10000);
+        helper.notice_timeout_ms = 100;
         let result = helper.send(&notice_request()).await;
         let error = result.expect_err("expected BurntToast stub to timeout");
         assert!(
-            matches!(error, HelperError::Timeout { timeout_ms: 10000 }),
+            matches!(error, HelperError::Timeout { timeout_ms: 100 }),
             "got {error:?}"
         );
     }
@@ -841,14 +845,15 @@ mod terminal_notifier_stub {
     #[tokio::test]
     #[serial(terminal_notifier)]
     async fn notice_only_timeout_maps_to_timeout_error() {
-        // terminal-notifier timeout is 5000ms; sleep for 6000ms to trigger it.
         let stub = stub_path("stub_terminal_notifier");
         let _env = EnvGuard::set(&[("STUB_TERMINAL_NOTIFIER_SLEEP_MS", "6000")]);
-        let helper = terminal_notifier_helper(&stub);
+        let mut helper = terminal_notifier_helper(&stub);
+        assert_eq!(helper.notice_timeout_ms, 5000);
+        helper.notice_timeout_ms = 100;
         let result = helper.send(&notice_request()).await;
         let error = result.expect_err("expected terminal-notifier stub to timeout");
         assert!(
-            matches!(error, HelperError::Timeout { timeout_ms: 5000 }),
+            matches!(error, HelperError::Timeout { timeout_ms: 100 }),
             "got {error:?}"
         );
     }

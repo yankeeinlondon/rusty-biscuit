@@ -10,12 +10,13 @@
 use std::collections::BTreeSet;
 
 use super::content_policy_fixtures::{
-    BASELINE_PATH, INVALID_CONTROL, POLICY_SCHEMA_PATH, SCHEMA_MUTATIONS, SchemaExpect, SchemaFile,
-    VALID_CONTROL, Verdict, baseline_with_policy,
+    BASELINE_PATH, CATALOG_PATH, INVALID_CONTROL, OTHER_PARTIAL_PATHS, POLICY_SCHEMA_PATH, SCHEMA_MUTATIONS,
+    SchemaExpect, SchemaFile, VALID_CONTROL, Verdict, baseline_with_policy,
 };
 use crate::markdown::Markdown;
 use crate::markdown::schemas::embedded::{self, EmbeddedDocument};
-use crate::markdown::schemas::resolve::{ResolvedSchema, prepare_embedded_schema};
+use crate::markdown::schemas::catalog::{DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog};
+use crate::markdown::schemas::resolve::{ResolvedSchema, prepare_embedded_inline_schema, prepare_embedded_schema};
 use crate::markdown::schemas::{
     DarkmatterSchemas, PropertyDef, SchemaError, SchemaSourceId, SimplifiedSchema, TypeExpr,
 };
@@ -58,12 +59,22 @@ fn property<'a>(resolved: &'a ResolvedSchema, name: &str) -> &'a PropertyDef {
 
 #[test]
 fn the_shipped_baseline_prepares_without_dependencies() {
-    let resolved = prepare_embedded_schema(embedded::BASELINE_PATH, embedded::SHIPPED)
+    // The baseline is the catalog's `fm` declaration, prepared from the
+    // embedded table as the catalog prepares it.
+    let declaration: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str("fm: fm@./partials/fm.yaml").expect("declaration");
+    let (resolved, _) = prepare_embedded_inline_schema(&declaration, DARKMATTER_CATALOG_PATH, embedded::SHIPPED, "")
         .expect("the shipped baseline prepares");
     assert!(resolved.imports.is_empty());
     assert!(resolved.examples.is_empty());
     assert!(resolved.referenced_files.is_empty());
-    let PropertyDef::Single(policy) = property(&resolved, "content_policy") else {
+    let PropertyDef::Single(fm) = property(&resolved, "fm") else {
+        panic!("fm is a single atom");
+    };
+    let TypeExpr::InlineObject(fm) = &fm.ty else {
+        panic!("fm is an object shape");
+    };
+    let PropertyDef::Single(policy) = &fm.properties["content_policy"] else {
         panic!("content_policy is a list atom");
     };
     assert!(policy.is_array);
@@ -165,7 +176,8 @@ fn malformed_imports_cycles_and_examples_fail_preparation() {
         "  a: \"one@./types.yaml\"\n",
         &[("schemas/types.yaml", "kind: schema\ntypes:\n  one: two\n  two: one\n")],
     );
-    assert!(matches!(cycle, Err(SchemaError::ImportCycle { .. })), "{cycle:?}");
+    // An alias cycle never descends into a child value.
+    assert!(matches!(cycle, Err(SchemaError::NonDescendingCycle { .. })), "{cycle:?}");
 
     let message = importer_message(
         prepare("  a: \"string(example(./a.md))\"\n", &[]).expect_err("example"),
@@ -211,8 +223,17 @@ fn an_embedded_namespace_is_distinct_from_a_disk_file_with_the_same_path() {
 
 // ── shared mutation table ──────────────────────────────────────────────────
 
-fn run_column(column: &str, shipped_baseline: &str, shipped_policy: &str) {
-    let baseline = baseline_with_policy(shipped_baseline);
+/// The shipped catalog bundle's texts, in [`CATALOG_PATH`], [`BASELINE_PATH`],
+/// [`OTHER_PARTIAL_PATHS`], [`POLICY_SCHEMA_PATH`] order.
+struct Shipped<'a> {
+    catalog: &'a str,
+    baseline: &'a str,
+    others: [&'a str; 4],
+    policy: &'a str,
+}
+
+fn run_column(column: &str, shipped: Shipped<'_>) {
+    let baseline = baseline_with_policy(shipped.baseline);
     let dir = tempfile::tempdir().expect("temp dir");
     let cells: Vec<_> = SCHEMA_MUTATIONS.iter().filter(|m| m.column == column).collect();
     assert!(!cells.is_empty(), "column `{column}` has cells");
@@ -220,20 +241,28 @@ fn run_column(column: &str, shipped_baseline: &str, shipped_policy: &str) {
 
     let mut failures = Vec::new();
     for cell in cells {
-        let (baseline, policy) = match cell.file {
-            SchemaFile::Baseline => (cell.edit.apply(&baseline), shipped_policy.to_string()),
-            SchemaFile::Policy => (baseline.clone(), cell.edit.apply(shipped_policy)),
+        let (catalog, baseline, policy) = match cell.file {
+            SchemaFile::Catalog => (cell.edit.apply(shipped.catalog), baseline.clone(), shipped.policy.to_string()),
+            SchemaFile::Baseline => (shipped.catalog.to_string(), cell.edit.apply(&baseline), shipped.policy.to_string()),
+            SchemaFile::Policy => (shipped.catalog.to_string(), baseline.clone(), cell.edit.apply(shipped.policy)),
         };
-        let documents = table(&[(BASELINE_PATH, &baseline), (POLICY_SCHEMA_PATH, &policy)]);
-        let outcome = prepare_embedded_schema(BASELINE_PATH, &documents)
-            .and_then(|resolved| {
+        let mut documents = vec![(CATALOG_PATH, catalog.as_str()), (BASELINE_PATH, baseline.as_str())];
+        documents.extend(OTHER_PARTIAL_PATHS.into_iter().zip(shipped.others));
+        documents.push((POLICY_SCHEMA_PATH, policy.as_str()));
+        let outcome = GlobalCatalog::from_documents(CATALOG_PATH, &documents, DARKMATTER_GLOBALS)
+            .map_err(|error| error.to_string())
+            .and_then(|catalog| {
+                let (baseline, definitions) = catalog.baseline().expect("the catalog declares `fm`");
+                let json = crate::markdown::schemas::to_json_schema_with_definitions(&baseline, &definitions)
+                    .map_err(|error| error.to_string())?;
                 DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
-                    .with_baseline_json_schema(resolved.json_schema)
+                    .with_baseline_json_schema(json)
+                    .map_err(|error| error.to_string())
             })
             .and_then(|api| {
-                let verdict = |frontmatter: &str| -> Result<bool, SchemaError> {
+                let verdict = |frontmatter: &str| -> Result<bool, String> {
                     let markdown: Markdown = format!("---\n{frontmatter}---\nBody\n").as_str().into();
-                    Ok(api.validate(&markdown)?.valid)
+                    Ok(api.validate(&markdown).map_err(|error| error.to_string())?.valid)
                 };
                 Ok((
                     verdict(VALID_CONTROL)?,
@@ -269,8 +298,17 @@ macro_rules! mutation_columns {
             fn $test() {
                 run_column(
                     $column,
-                    include_str!("../../../../../docs/schemas/darkmatter.yaml"),
-                    include_str!("../../../../../../content-policy/schemas/content-policy.yaml"),
+                    Shipped {
+                        catalog: include_str!("../../../../../schemas/darkmatter.yaml"),
+                        baseline: include_str!("../../../../../schemas/partials/fm.yaml"),
+                        others: [
+                            include_str!("../../../../../schemas/partials/style.yaml"),
+                            include_str!("../../../../../schemas/partials/context-variables.yaml"),
+                            include_str!("../../../../../schemas/partials/error.yaml"),
+                            include_str!("../../../../../schemas/partials/timing.yaml"),
+                        ],
+                        policy: include_str!("../../../../../../content-policy/schemas/content-policy.yaml"),
+                    },
                 );
             }
         )+

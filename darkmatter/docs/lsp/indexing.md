@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Workspace Indexing
 
 This page explains how DMLS (`darkmatter/dmls`) finds out what is in a
@@ -282,13 +286,14 @@ trigger:
 | Class | What it is | Example |
 | --- | --- | --- |
 | named schema | a standalone SimplifiedSchema document, usable by `$schema: name.yaml` and by trigger payloads | `prompt.yaml` declaring `kind: object` fields |
-| trigger schema | a file that declares `kind: trigger-schema` and loads | `prompt.trigger.yaml` with `match:` and `$schema:` |
-| failed trigger | a file that declares `kind: trigger-schema` but does not load (bad YAML, bad `match`, or a payload that fails to resolve) | a trigger whose `match:` has a typo, or whose `$schema:` names a missing file |
+| trigger schema | a file that declares `kind: schema-trigger` and loads | `prompt.trigger.yaml` with `match:` and `$schema:` |
+| failed trigger | a file that declares `kind: schema-trigger` but does not load (bad YAML, bad `match`, or a payload that fails to resolve) | a trigger whose `match:` has a typo, or whose `$schema:` names a missing file |
 | unclassified | anything else, including YAML that does not parse and claims no trigger envelope | a half-edited `notes.yaml` |
 
-An unclassified file never fails trigger discovery, so a mid-edit,
-unrelated YAML file in `schemas/` is silent. A failed trigger does fail its
-scope (see [Failures](#failures)).
+An unclassified file never affects trigger discovery, so a mid-edit,
+unrelated YAML file in `schemas/` is silent. A failed trigger is skipped with
+a warning on its file, and every other trigger in its scope still loads (see
+[Failures](#failures)).
 
 A document's registry is its five roots' triggers with the usual
 **filename shadowing**: the first root that holds a filename wins, and the
@@ -379,10 +384,14 @@ Each preparation records what it read: the searched and absent root folders,
 every root file and dependency with its xxHash, the folders that hold the
 dependencies, and every location payload resolution tried on its way to each
 selected file. A dependency can live anywhere, even outside every workspace
-folder. A scope that failed is prepared again after any change it recorded,
-so creating a missing payload file recovers it. A failed scope keeps the
-searched locations and dependency folders of the registry it replaced, so
-the folder holding a broken file stays watched until the file is repaired.
+folder. A skipped trigger is recorded too: its file is a dependency, and so
+are the files its failed payload resolution read, while every location that
+resolution tried is a searched location. So repairing the trigger or an
+import, or creating a missing payload file, prepares the scope again and
+installs the trigger. A scope that failed as a whole is prepared again after
+any change it recorded, and keeps the searched locations and dependency
+folders of the registry it replaced, so the folder holding the problem stays
+watched until it is fixed.
 
 For example, `schemas/payload.yaml` imports `Fields@shared/types.yaml`. The
 import is tried in the authoring folder first (`schemas/shared/types.yaml`)
@@ -454,20 +463,38 @@ each save re-lists the workspace and marks every registry stale. See
 
 A scope here is one document's registry, logged under the document's folder.
 
-- **A trigger fails to load.** If the document had a working registry
-  before, DMLS keeps using that last-good registry and publishes a
-  diagnostic on the failing trigger file. A malformed trigger affects only
-  the documents for which it is not shadowed. If there was no last-good
-  registry, the document gets no triggers, and the failure is reported
-  without claiming triggers are ready.
+- **A trigger fails to load.** Its envelope does not load, or its payload
+  fails to resolve, merge, or compile. DMLS skips that trigger and installs
+  every other valid trigger in the scope, the same set `md` uses for that
+  document; this holds even when every trigger is invalid, including on the
+  first load. A trigger that loaded before and is now broken loses its
+  schema at once: validation, completion, and hover stop offering its
+  properties, while a change to a valid neighbor still takes effect. The
+  skipped file still shadows the same name in later roots, so a malformed
+  trigger affects only the documents for which it is not shadowed. See
+  [Invalid discovered triggers](../topics/schemas/schema-triggers.md#invalid-discovered-triggers).
 - **A root cannot be read.** An I/O error listing or reading a schema root
   fails closed: the document gets the failure, never a last-good registry and
   never a file from a less local root. Other, healthy scopes still load.
-- **Recovery.** When the next preparation succeeds, the trigger-file
-  diagnostic is cleared, open documents are refreshed, and one `info` line is
-  logged.
+- **A scan fails as a whole.** Two file names in one root that differ only
+  by case fail the scope; DMLS keeps serving the scope's last-good registry
+  until the collision is resolved, or no triggers when there was none.
+- **Recovery.** When a repaired, deleted, or newly created file makes the
+  next preparation load, the scope's triggers are replaced, open documents
+  are refreshed, and one `info` line is logged.
 
-Each failure is logged once when it is new; see
+Each skipped trigger is published as a **warning** diagnostic
+(`dm.schema.invalid_trigger`) on its trigger file, whether or not the file is
+open, inside the workspace, or used by an open document. The diagnostic is
+published once per trigger file, however many scopes skip it, and cleared
+only when no prepared scope reports it any more, so one healthy scope never
+clears a warning another scope still has. An unchanged refresh publishes and
+logs nothing. A trigger embedded in a host program names no file, so it is
+logged but not published. See
+[DMLS Diagnostics](../../dmls/docs/diagnostics.md) for ranges and related
+information.
+
+Each failure and each skipped trigger is logged once when it is new; see
 [Trigger registry lines](#trigger-registry-lines).
 
 ## The file list
@@ -1131,7 +1158,7 @@ each.
 
 | Message | Level | When |
 | --- | --- | --- |
-| `schema registry ready` | `info` | startup registry preparation finishes with no failed scope |
+| `schema registry ready` | `info` | startup registry preparation finishes with no failed scope; skipped triggers alone leave this line, counted in `failed_triggers` |
 | `schema registry initialized with failures` | `info` | the same, when `failed_scopes` is above zero |
 | `workspace files listed` | `info` | the startup file list is installed |
 | `workspace rescan complete` | `info` | a server rescan has listed the workspace again |
@@ -1141,14 +1168,17 @@ each.
 | `index store unavailable, using memory` | `warn`, once per process, then `debug` | a store is off, cannot be opened, or fails while in use |
 | `index store recreated` | `warn` | a corrupt store was deleted and created again |
 | `index store sweep` | `info` (`debug` when it removed nothing) | the first store open in a process swept stores untouched for 30 days |
-| `retaining last-good trigger registry` | `warn`, then `debug` | a trigger fails to load and a last-good registry is kept |
-| `trigger registry unavailable` | `warn`, then `debug` | a trigger or root fails with no last-good registry |
+| `ignoring invalid schema trigger …` | `warn` | a trigger is skipped, or skipped for a different reason, in any prepared scope |
+| `invalid schema trigger no longer reported` | `info` | no prepared scope skips a trigger any more |
+| `retaining last-good trigger registry` | `warn`, then `debug` | a scope's scan fails as a whole and a last-good registry is kept |
+| `trigger registry unavailable` | `warn`, then `debug` | a scan or root fails with no last-good registry |
 | `trigger registry recovered` | `info` | a scope loads after a recorded failure |
 | `trigger registries prepared` | `debug` | a workspace pass on the registry worker finishes |
 | `skipping duplicate physical file …` | `warn` | a second path to an already listed file |
 | `workspace discovery incomplete` | `warn` | a listing walk hit an error |
 | `slow request` / `request complete` | `warn` / `debug` | every request, by elapsed time |
 | `slow notification` / `notification complete` | `warn` / `debug` | every notification, by elapsed time |
+| `slow schema validation` / `schema validation complete` | `warn` / `debug` | every diagnostics refresh of a document with frontmatter, by its schema work |
 
 Earlier versions logged `startup index complete documents=…` after parsing
 every file at startup. That line no longer exists; startup now logs the
@@ -1185,7 +1215,7 @@ The code is `workspace_identifier` in
 | `tree_schemas` | named schemas in folders that serve as a file tree root, `SCHEMAS_DIR`, or home root |
 | `scoped_schemas` | named schemas in folders that serve only as package or package-area roots |
 | `trigger_schemas` | trigger schemas that load, in any searched folder |
-| `failed_triggers` | files that declare `kind: trigger-schema` but fail to load: the envelope does not load, or a prepared scope failed to resolve the payload (a missing or unparseable payload file, or an import or example it names that does not resolve) |
+| `failed_triggers` | files that declare `kind: schema-trigger` but were skipped: the envelope does not load, or a prepared scope could not load the payload (a missing or unparseable payload file, an import or example it names that does not resolve, or a payload that does not compile) |
 | `unclassified` | other YAML files in searched folders |
 | `failed_scopes` | prepared scopes whose last preparation failed |
 | `elapsed_ms` | time spent preparing every startup scope's registry, including loading trigger payloads; the file-list walk, queue waits, and document jobs that ran between startup's scopes are not included |
@@ -1199,9 +1229,8 @@ The counting rules:
   `unclassified`.
 - A payload resolves in each document's own context, so one trigger can
   load for one scope and fail for another. It counts once, as a failed
-  trigger, if any prepared scope failed it. A trigger that no preparation
-  reached (shadowed in every prepared scope, or listed after an earlier
-  failing trigger) counts by its envelope alone.
+  trigger, if any prepared scope skipped it. A trigger that no preparation
+  reached (shadowed in every prepared scope) counts by its envelope alone.
 - A folder that is both a scoped root and a tree root counts once, as
   tree-wide. In a repository that is itself a package, `{repo}/schemas/` is
   both the package root and the file tree root, so its named schemas count
@@ -1209,7 +1238,10 @@ The counting rules:
 - The counts cover every startup scope (folders, the repositories the walk
   found, and the packages and package areas inside them, including
   first-directory fallback areas), so a broken trigger in an unopened
-  package appears here as `failed_triggers` and `failed_scopes`. The line is
+  package appears here in `failed_triggers`. A skipped trigger does not fail
+  its scope, so it leaves `failed_scopes` and the `schema registry ready`
+  message unchanged; read `failed_triggers`, or the per-trigger `warn` line,
+  to find it. The line is
   logged once, after the walk-found repositories are prepared, and before
   the file-list line. Roots prepared later for a document outside those
   scopes, or for a repository a later re-listing finds, are not logged again.
@@ -1288,26 +1320,41 @@ counts) mark the rest.
 ### Trigger registry lines
 
 These lines report changes in a scope's state, not every lookup. The code
-is `record_failure`, `record_recovery`, and `log_failure` in
-[`overlay/registry.rs`](../../dmls/src/overlay/registry.rs).
+is `reconcile_warnings`, `record_failure`, `record_recovery`, and
+`log_failure` in [`overlay/registry.rs`](../../dmls/src/overlay/registry.rs).
+
+A skipped trigger logs its warning, with the same text `md` prints, when it
+first appears or its reason changes, and one `info` line when no prepared
+scope skips it any more:
 
 ```text
-2026-10-17T10:02:13.552018Z  WARN dmls::overlay::registry: retaining last-good trigger registry scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas/prompt.trigger.yaml error=trigger-schema file `/Users/me/repo/schemas/prompt.trigger.yaml` is not valid YAML at line 17, column 93: mapping values are not allowed in this context has_last_good=true
-2026-10-17T10:04:40.008163Z  INFO dmls::overlay::registry: trigger registry recovered scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas/prompt.trigger.yaml
+2026-10-17T10:02:13.552018Z  WARN dmls::overlay::registry: ignoring invalid schema trigger /Users/me/repo/schemas/prompt.trigger.yaml: not valid YAML at line 17, column 93: mapping values are not allowed in this context trigger=/Users/me/repo/schemas/prompt.trigger.yaml code=dm.schema.invalid_trigger
+2026-10-17T10:04:40.008163Z  INFO dmls::overlay::registry: invalid schema trigger no longer reported trigger=/Users/me/repo/schemas/prompt.trigger.yaml
+```
+
+A scope whose scan fails as a whole, or whose root cannot be read, logs
+under the scope instead:
+
+```text
+2026-10-17T10:02:13.552018Z  WARN dmls::overlay::registry: retaining last-good trigger registry scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas error=trigger schema files in `/Users/me/repo/schemas` collide after case-folding: ["Prompt.yaml", "prompt.yaml"] has_last_good=true
+2026-10-17T10:04:40.008163Z  INFO dmls::overlay::registry: trigger registry recovered scope=/Users/me/repo/docs trigger_file=/Users/me/repo/schemas
 ```
 
 | Event | Level | Message | Fields |
 | --- | --- | --- | --- |
-| load fails, last-good registry kept; first failure, or a different file or error text | `warn` | `retaining last-good trigger registry` | `scope trigger_file error has_last_good` |
-| the same failure again (same file and error text) | `debug` | `retaining last-good trigger registry` | the same |
-| load fails with no last-good registry (a first load, or any root I/O failure) | `warn`, then `debug` on a repeat | `trigger registry unavailable` | `scope trigger_file error` |
-| load succeeds after a recorded failure | `info` | `trigger registry recovered` | `scope trigger_file` |
+| a trigger is skipped in some prepared scope; first time, or a different reason | `warn` | the warning text, `ignoring invalid schema trigger …` | `trigger code` |
+| no prepared scope skips that trigger any more | `info` | `invalid schema trigger no longer reported` | `trigger` |
+| the scan fails, last-good registry kept; first failure, or a different file or error text | `warn` | `retaining last-good trigger registry` | `scope trigger_file error has_last_good` |
+| the same scan failure again (same file and error text) | `debug` | `retaining last-good trigger registry` | the same |
+| the scan fails with no last-good registry (a first load, or any root I/O failure) | `warn`, then `debug` on a repeat | `trigger registry unavailable` | `scope trigger_file error` |
+| the scan succeeds after a recorded failure | `info` | `trigger registry recovered` | `scope trigger_file` |
 
-`scope` is the folder of the document whose registry failed; `trigger_file`
-is the file or folder the error names, empty when it names none. The rule
-that decides "this failure is new" is the same one that decides whether the
-trigger-file diagnostic is published again, so a repeated failure is neither
-re-published nor re-logged at `warn`.
+`trigger` is the skipped trigger file, or `embedded:{bundle}/{file name}` for
+a trigger a host program embeds. `scope` is the folder of the document whose
+registry failed; `trigger_file` is the file or folder the error names, empty
+when it names none. A skipped trigger's line follows the same rule as its
+diagnostic: a trigger that stays skipped for the same reason is neither
+re-published nor re-logged, however many scopes skip it or refreshes run.
 
 #### The workspace pass line
 
@@ -1325,7 +1372,7 @@ whether the trigger-payload memo saved work:
 | `probes` | the workspace scopes the pass checked |
 | `prepared` | scopes whose registry was prepared and loaded |
 | `fresh` | scopes still fresh, or outside every trigger boundary; nothing was read for them |
-| `failed` | scopes whose preparation failed (a trigger or schema root did not load), or whose folder context could not be built |
+| `failed` | scopes whose preparation failed (a schema root could not be read, or the scan failed as a whole), or whose folder context could not be built; a skipped trigger does not count here |
 | `payload_hits` | trigger payloads reused from the memo after their dependency fingerprint matched |
 | `payload_misses` | trigger payloads resolved because the memo had no valid entry, whether or not the resolution succeeded |
 | `elapsed_ms` | time spent building the probe list and preparing probes |
@@ -1387,7 +1434,7 @@ elapsed_ms                       dequeue to response sent, including waits
 └── provider_chain_ms            running the feature's providers
 ```
 
-When the document is itself a trigger-schema file being authored,
+When the document is itself a schema-trigger file being authored,
 `trigger_registry_ms` is timed directly under the overlay build. A stage that
 runs more than once in one message, such as a notification that refreshes
 every open document, reports the sum of its runs. In the hover sample above,
@@ -1400,6 +1447,48 @@ the worker's queue and the time it took to prepare; it does not separate the
 two. Each parked interval ends when the request resumes, is cancelled, or is
 answered at shutdown, so a cancelled request reports it too, and handler work
 or an index wait between two intervals is not included.
+
+### Schema validation timing lines
+
+Each time DMLS publishes diagnostics for a document with frontmatter, it
+logs one event with the time its schema validation took, split into
+stages. The code is
+[`validation_timing.rs`](../../dmls/src/validation_timing.rs) and
+`refresh_diagnostics` in [`router.rs`](../../dmls/src/router.rs).
+
+- At or above `schema.slow_validation_ms` (default **200 ms**; see
+  [Configuration](./configuration.md#schema)), the event is a `warn`:
+  `slow schema validation`. Below it, it is a `debug`: `schema validation
+  complete`. A threshold of `0` makes every one a `warn`, which is the
+  easiest way to see the breakdown without `--log-level debug`.
+- A refresh that waits for its document's trigger registry logs nothing
+  until the registry is prepared and the refresh runs; preparing the
+  registry is logged by the registry worker, not here.
+- A schema that fails to resolve still logs its event, with the stages
+  that ran, beside its usual `dm.schema.prepare` diagnostic.
+
+```text
+2026-10-23T10:02:11.402116Z  WARN dmls::validation_timing: slow schema validation path="/Users/me/repo/.claude/agents/review.md" matched_triggers="agent.trigger.yaml" discover_ms=0 match_ms=3 resolve_ms=96 compile_ms=268 validate_ms=4 total_ms=372 unassigned_ms=1 compile_cache="miss"
+2026-10-23T10:02:14.118530Z DEBUG dmls::validation_timing: schema validation complete path="/Users/me/repo/.claude/agents/review.md" matched_triggers="agent.trigger.yaml" discover_ms=0 match_ms=0 resolve_ms=0 compile_ms=0 validate_ms=4 total_ms=4 unassigned_ms=0 compile_cache="hit"
+```
+
+| Field | Meaning |
+| --- | --- |
+| `path` | the document's path |
+| `matched_triggers` | file names of the trigger schemas whose `match:` held, comma-separated in registry order; empty when none matched |
+| `discover_ms` | checking that the document's trigger registry is fresh and looking it up (never preparing it) |
+| `match_ms` | evaluating trigger conditions against the frontmatter |
+| `resolve_ms` | resolving `$schema`, trigger payloads, and configured extensions, and merging them with the baseline |
+| `compile_ms` | building validators; zero when every one came from a cache |
+| `validate_ms` | checking the frontmatter against the schema |
+| `total_ms` | the schema work alone; other diagnostics are not included |
+| `unassigned_ms` | the part of `total_ms` no stage claims, such as parsing the frontmatter |
+| `compile_cache` | `miss` when any validator was built, `hit` when validators were looked up and all were cached (or the document's unchanged schema was reused whole), `not requested` when no validator was looked up, as for a document whose context could not be built |
+
+Stages do not overlap, so the five stage figures and `unassigned_ms` add
+up to `total_ms` (each is rounded down to whole milliseconds). Validating
+an unchanged document again reuses its assembled schema, so only
+`validate_ms` remains, as in the second sample.
 
 Timing events never contain source text, frontmatter values, or protocol
 payloads. At `debug`, the `lsp_server` crate's own transport trace does

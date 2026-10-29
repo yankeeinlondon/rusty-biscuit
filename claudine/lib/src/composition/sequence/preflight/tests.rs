@@ -409,6 +409,98 @@ mod loading {
         );
         assert_eq!(graph.steps.len(), 2);
     }
+
+    /// The by-path lookup returns each reached document, in the graph's own
+    /// first-encounter order, and nothing for a path the graph never reached.
+    #[test]
+    fn prompt_document_finds_every_reached_document_by_path() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        for name in ["a", "b", "c"] {
+            write_legacy_source(root, &format!("{name}.md"), &[("title", json!(name))], "x\n");
+        }
+        write_legacy_source(root, "unreached.md", &[("title", json!("unreached"))], "x\n");
+        let source = write_legacy_source(
+            root,
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "one", "prompt": "c.md" },
+                    { "name": "two", "prompt": "a.md" },
+                    { "name": "three", "prompt": "c.md" },
+                    { "name": "four", "prompt": "b.md" },
+                ]),
+            )],
+            "Body.\n",
+        );
+
+        let graph = legacy_graph_for(&source).unwrap();
+
+        let order: Vec<String> = graph.prompt_documents.iter()
+            .map(|document| document.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(order, ["c.md", "a.md", "b.md"]);
+        for name in ["a", "b", "c"] {
+            let path = dunce::canonicalize(root.join(format!("{name}.md"))).unwrap();
+            let document = graph.prompt_document(&path).unwrap_or_else(|| panic!("{name}.md was reached"));
+            assert_eq!(document.path, path);
+            assert_eq!(document.markdown.frontmatter().as_map().get("title"), Some(&json!(name)));
+        }
+        let unreached = dunce::canonicalize(root.join("unreached.md")).unwrap();
+        assert!(graph.prompt_document(&unreached).is_none());
+        assert!(graph.prompt_document(&root.join("missing.md")).is_none());
+    }
+}
+
+// -- invocation parse memo --------------------------------------------------
+
+/// A memo entry's key is the text its parse read, so a file that changes
+/// between the walk's read and the parse, then reverts, can never be served
+/// a parse of other bytes.
+mod parse_memo {
+    use super::*;
+
+    #[test]
+    fn a_referenced_data_document_parses_the_bytes_the_walk_read() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("g.yaml");
+        fs::write(&path, "version: disk\n").unwrap();
+        let sources = NestedSources::default();
+
+        let held = sources.document(&path, Some(b"version: held\n")).unwrap();
+        let again = sources.document(&path, Some(b"version: held\n")).unwrap();
+        let disk = sources.document(&path, Some(b"version: disk\n")).unwrap();
+
+        assert_eq!(held.value, json!({"version": "held"}));
+        assert_eq!(held.text, b"version: held\n");
+        assert!(Arc::ptr_eq(&held, &again), "the same bytes reuse the entry");
+        assert_eq!(disk.value, json!({"version": "disk"}));
+    }
+
+    #[test]
+    fn a_referenced_markdown_document_is_keyed_by_the_text_its_parse_read() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("g.md");
+        fs::write(&path, "---\nversion: disk\n---\n").unwrap();
+        let sources = NestedSources::default();
+
+        let parsed = sources.document(&path, Some(b"---\nversion: held\n---\n")).unwrap();
+
+        assert_eq!(parsed.value, json!({"version": "disk"}));
+        assert_eq!(parsed.text, b"---\nversion: disk\n---\n");
+    }
+
+    #[test]
+    fn a_data_container_source_parses_the_text_it_was_given() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("s.yaml");
+        fs::write(&path, "label: disk\nsequence: []\n").unwrap();
+
+        let parsed = parse_nested_source(&path, "label: held\nsequence: []\n".into()).unwrap();
+
+        assert_eq!(parsed.document["label"], json!("held"));
+        assert_eq!(parsed.source.original_text, "label: held\nsequence: []\n");
+    }
 }
 
 // -- group catalogs --------------------------------------------------------
@@ -1364,6 +1456,65 @@ mod shell {
         );
     }
 
+    /// The target-identity scan visits every read position and reports the
+    /// first in source order: a static path (dotted, string-keyed, through
+    /// parentheses) at or below a target-identity root names the root; a
+    /// `ctx`/`env` read with a numeric or computed index names the access up
+    /// to its last such index, as written.
+    #[test]
+    fn target_identity_paths_are_found_in_every_read_position() {
+        for (raw, expected) in [
+            ("{{ ctx.agent[0] }}", Some("ctx.agent[0]")),
+            ("{{ ctx[k].x[j].y }}", Some("ctx[k].x[j]")),
+            ("{{ ctx[0] }}", Some("ctx[0]")),
+            ("{{ (ctx)[k] }}", Some("(ctx)[k]")),
+            ("{{ (ctx).agent }}", Some("ctx.agent")),
+            ("{{ ctx['agent'].name }}", Some("ctx.agent")),
+            ("{{ x ? 'a' : env.MODEL }}", Some("env.MODEL")),
+            ("{{ upper(trim(ctx.model)) }}", Some("ctx.model")),
+            ("{{ {a: env.AGENT} }}", Some("env.AGENT")),
+            ("{{ a || ctx.agent }}", Some("ctx.agent")),
+            ("{{ seq[ctx.agent] }}", Some("ctx.agent")),
+            ("{{ env.MODEL == ctx.agent }}", Some("env.MODEL")),
+            ("{{ ctx.cwd }} {{ ctx.agent }}", Some("ctx.agent")),
+            ("{{ ctx.agentx }}", None),
+            ("{{ ctx.cwd }}", None),
+            ("{{ f(x)[k] }}", None),
+            ("{{ fm.ctx.agent }}", None),
+        ] {
+            assert_eq!(shape::first_target_identity_root(raw).as_deref(), expected, "{raw}");
+        }
+    }
+
+    /// The retained-syntax scan is the text scan: a malformed occurrence never
+    /// hides a valid read beside it, and static-bracket and dotted spellings
+    /// of one path agree.
+    #[test]
+    fn prepared_target_identity_scan_matches_the_text_scan() {
+        use darkmatter::markdown::compose::expression::PreparedInterpolation;
+        for raw in [
+            "{{ 1 + }} {{ ctx.agent }}",
+            "{{ ctx.agent }} {{ 1 + }}",
+            "{{ 1 + }} {{ ctx.cwd }}",
+            "{{ ctx['agent'] }} {{ ctx.agent }}",
+            "{{ ctx.agent[0] }}",
+            "{{ env[key] }}",
+            "{{ ctx.cwd }} {{ env.HOME }} {{ fm.ctx.agent }}",
+            "no placeholders",
+        ] {
+            assert_eq!(
+                shape::first_target_identity_root_prepared(&PreparedInterpolation::new(raw)),
+                shape::first_target_identity_root(raw),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            shape::first_target_identity_root_prepared(&PreparedInterpolation::new("{{ 1 + }} {{ ctx.agent }}"))
+                .as_deref(),
+            Some("ctx.agent"),
+        );
+    }
+
     /// A task's `teardown:` stack resolves through the same graph phase, so a
     /// target-identity reference there is rejected identically — the bytes it
     /// would bake in are the bytes execution runs.
@@ -1844,7 +1995,7 @@ mod template_position {
 
     /// Approve `graph` against the policy files in `policy`, with no handler:
     /// whatever no rule covers fails as it does without a terminal.
-    fn approve(graph: &PreflightGraph, policy: &TempDir) -> Result<ShellPreApprovals, CompositionError> {
+    pub(super) fn approve(graph: &PreflightGraph, policy: &TempDir) -> Result<ShellPreApprovals, CompositionError> {
         let options = ShellApprovalOptions {
             policy_root: Some(policy.path().to_path_buf()),
             ..Default::default()
@@ -2707,5 +2858,906 @@ mod phase7 {
         assert_eq!(terminal.requirement, ModeRequirement::TemplateRequired);
         assert!(candidates.iter().any(|candidate| candidate.authored() == Some("echo {{ value }}") && candidate.resolved.is_some()));
         assert!(candidates.iter().any(|candidate| candidate.authored() == Some("echo {{ group.label }}") && candidate.resolved.is_none()));
+    }
+}
+
+mod task_guards {
+    //! A task's `when:` narrows the values the sequence evaluates for that
+    //! task — its `shell:` command and its `with:` — and nothing else.
+
+    use super::*;
+    use darkmatter::markdown::compose::shell_expansion::template::{HoleTiming, ModeRequirement};
+
+    pub(super) fn task(graph: &PreflightGraph, step: usize) -> &PreflightTask {
+        graph.steps[step].task.as_ref().expect("the step declares a task")
+    }
+
+    /// The `(expression, guard label, late roots)` of each `Guarded` hole of
+    /// the task's first site.
+    pub(super) fn guarded_holes(task: &PreflightTask) -> Vec<(String, String, Vec<String>)> {
+        task.shell_sites[0]
+            .template
+            .as_ref()
+            .expect("a typed site")
+            .placeholders()
+            .filter_map(|placeholder| match &placeholder.timing {
+                HoleTiming::Guarded { guard, roots } => {
+                    Some((placeholder.expression.clone(), guard.label().to_string(), roots.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(super) fn sequence(dir: &Path, steps: Value) -> String {
+        write_source(dir, "seq.md", &[("sequence", steps)], "Body.\n")
+    }
+
+    pub(super) fn missing_value(error: CompositionError) -> String {
+        match &error {
+            CompositionError::SequenceShellResolution { message, .. } if message.contains("which is missing") => {
+                message.clone()
+            }
+            other => panic!("expected a missing-value refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_guard_proven_missing_value_waits_for_the_tasks_template() {
+        let dir = TempDir::new().unwrap();
+        let source = sequence(dir.path(), json!([{ "name": "commit", "when": "msg", "shell": "git commit -m {{ msg }}" }]));
+
+        let graph = graph_for(&source).expect("the guard proves `msg` present when the task runs");
+
+        let task = task(&graph, 0);
+        assert_eq!(task.shell_sites[0].mode, SiteMode::Template);
+        assert_eq!(guarded_holes(task), vec![("msg".to_string(), "tasks[0].when".to_string(), Vec::new())]);
+        assert!(graph.shell_commands.is_empty(), "no bytes stand in for the missing value");
+        assert_eq!(graph.template_candidates[0].requirement, ModeRequirement::TemplateRequired);
+    }
+
+    #[test]
+    fn the_same_command_without_a_guard_still_fails_preflight() {
+        let dir = TempDir::new().unwrap();
+        let source = sequence(dir.path(), json!([{ "name": "commit", "shell": "git commit -m {{ msg }}" }]));
+        missing_value(err_for(&source));
+    }
+
+    #[test]
+    fn a_guard_on_one_value_does_not_defer_another() {
+        let dir = TempDir::new().unwrap();
+        let source = sequence(dir.path(), json!([{ "name": "one", "when": "x", "shell": "tool {{ x }} {{ y }}" }]));
+        let message = missing_value(err_for(&source));
+        assert!(message.contains("`y`"), "{message}");
+    }
+
+    #[test]
+    fn a_guarded_late_value_is_left_to_its_command_not_the_step_barrier() {
+        let dir = TempDir::new().unwrap();
+        let source = sequence(
+            dir.path(),
+            json!([
+                { "name": "guarded", "when": "seq.outputs[3]", "shell": "tool {{ seq.outputs[3] }}" },
+                { "name": "plain", "shell": "tool {{ seq.outputs[3] }}" },
+            ]),
+        );
+
+        let graph = graph_for(&source).unwrap();
+
+        let guarded = task(&graph, 0);
+        assert_eq!(
+            guarded_holes(guarded),
+            vec![("seq.outputs[3]".to_string(), "tasks[0].when".to_string(), vec!["seq".to_string()])]
+        );
+        assert!(!guarded.shell_sites[0].reads_late_value());
+        assert_eq!(guarded.late_sites().count(), 0, "the barrier reads nothing for the guarded task");
+        let plain = task(&graph, 1);
+        assert!(plain.shell_sites[0].reads_late_value(), "an unguarded late value keeps its barrier");
+        assert_eq!(plain.late_sites().count(), 1);
+    }
+
+    #[test]
+    fn a_referencing_guard_narrows_the_referenced_tasks_command() {
+        let dir = TempDir::new().unwrap();
+        write_yaml(dir.path(), "task.yaml", &json!({ "kind": "task", "shell": "tool {{ msg }}" }));
+        let source = sequence(dir.path(), json!([{ "name": "one", "when": "msg", "task": "task.yaml" }]));
+
+        let graph = graph_for(&source).expect("the reference's guard decides whether the task runs");
+
+        let task = task(&graph, 0);
+        assert_eq!(task.when.as_deref(), Some("msg"));
+        assert_eq!(guarded_holes(task), vec![("msg".to_string(), "tasks[0].when".to_string(), Vec::new())]);
+    }
+
+    #[test]
+    fn a_guarded_with_value_that_is_missing_now_is_late_for_the_document() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("doc.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        let guarded = sequence(
+            dir.path(),
+            json!([{ "name": "one", "when": "msg", "prompt": "doc.md", "with": { "message": "{{ msg }}", "other": "{{ y }}" } }]),
+        );
+
+        let graph = graph_for(&guarded).unwrap();
+
+        let reference = &graph.prompt_references[0];
+        assert_eq!(reference.deferred_with, vec!["message".to_string()]);
+        assert_eq!(reference.with.get("other"), Some(&Value::Null), "an unguarded value is still read now");
+
+        let unguarded = sequence(
+            dir.path(),
+            json!([{ "name": "one", "prompt": "doc.md", "with": { "message": "{{ msg }}" } }]),
+        );
+        let graph = graph_for(&unguarded).unwrap();
+        assert!(graph.prompt_references[0].deferred_with.is_empty());
+        assert_eq!(graph.prompt_references[0].with.get("message"), Some(&Value::Null));
+    }
+
+    /// A guard naming a `with:` key reads the caller's bindings, where that
+    /// key is not yet bound: it proves nothing about the value the key gets.
+    #[test]
+    fn a_tasks_own_with_value_cannot_prove_its_guard() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("doc.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        let source = sequence(
+            dir.path(),
+            json!([{ "name": "one", "when": "message", "prompt": "doc.md", "with": { "message": "{{ msg }}" } }]),
+        );
+
+        let graph = graph_for(&source).unwrap();
+
+        let reference = &graph.prompt_references[0];
+        assert!(reference.deferred_with.is_empty(), "{:?}", reference.deferred_with);
+        assert_eq!(reference.with.get("message"), Some(&Value::Null), "the value is read now");
+    }
+
+    /// The referenced document has its own scope: the caller's `when: msg`
+    /// does not prove `msg` for the document's unguarded command.
+    #[test]
+    fn a_callers_guard_does_not_narrow_the_referenced_document() {
+        let dir = TempDir::new().unwrap();
+        for (row, document) in [
+            ("lifecycle", "---\nstart:\n    - shell: tool {{ msg }}\n---\n\nBody.\n"),
+            ("body", "---\ntitle: t\n---\n\n::shell tool {{ msg }}\n"),
+        ] {
+            fs::write(dir.path().join("doc.md"), document).unwrap();
+            let source = sequence(dir.path(), json!([{ "name": "one", "when": "msg", "prompt": "doc.md" }]));
+            let graph = graph_for(&source).expect("the graph reads no document command");
+            assert!(graph.prompt_references[0].deferred_with.is_empty(), "{row}");
+
+            let policy = TempDir::new().unwrap();
+            fs::write(policy.path().join(".darkmatter-shell-whitelist"), "template tool {{ string }}\n").unwrap();
+            let error = super::template_position::approve(&graph, &policy).expect_err(row);
+
+            let message = error.to_string();
+            assert!(message.contains("msg") && message.contains("which is missing"), "{row}: {message}");
+        }
+    }
+}
+
+mod scope_site_conformance {
+    //! The sequence cells of the type-scope conformance matrix
+    //! (`lifecycle/executor/tests/scope_site_conformance.rs`), each named
+    //! `{site}_{case}` after its row there.
+
+    use super::task_guards::{guarded_holes, missing_value, sequence, task};
+    use super::*;
+    use darkmatter::markdown::compose::shell_expansion::template::{ApprovalType, ModeRequirement};
+
+    fn shell_task(guard: &str, command: &str) -> Value {
+        json!([{ "name": "one", "when": guard, "shell": command }])
+    }
+
+    fn with_task(guard: &str, with: Value) -> Value {
+        json!([{ "name": "one", "when": guard, "prompt": "doc.md", "with": with }])
+    }
+
+    fn graph(steps: Value) -> Result<PreflightGraph, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("doc.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+        graph_for(&sequence(dir.path(), steps))
+    }
+
+    /// Preflight accepts the first task's command as a template and marks
+    /// exactly `expressions` as guarded.
+    fn assert_shell_guarded(steps: Value, expressions: &[&str]) {
+        let graph = graph(steps.clone()).unwrap_or_else(|error| panic!("preflight refused {steps}: {error}"));
+        let task = task(&graph, 0);
+        assert_eq!(task.shell_sites[0].mode, SiteMode::Template, "{steps}");
+        let mut holes: Vec<String> = guarded_holes(task).into_iter().map(|(expression, ..)| expression).collect();
+        holes.sort();
+        assert_eq!(holes, expressions, "{steps}");
+        assert!(graph.shell_commands.is_empty(), "no bytes stand in for a missing value");
+        assert_eq!(graph.template_candidates[0].requirement, ModeRequirement::TemplateRequired);
+    }
+
+    fn assert_shell_missing(steps: Value, expression: &str) {
+        let message = missing_value(graph(steps.clone()).expect_err("a missing value no guard proves"));
+        assert!(message.contains(&format!("`{expression}`")), "{steps}: {message}");
+    }
+
+    /// The `with:` keys of the first reference left late for the document,
+    /// and the values read now.
+    fn with_outcome(steps: Value) -> (Vec<String>, Map<String, Value>) {
+        let graph = graph(steps.clone()).unwrap_or_else(|error| panic!("preflight refused {steps}: {error}"));
+        let reference = &graph.prompt_references[0];
+        let mut late = reference.deferred_with.clone();
+        late.sort();
+        (late, reference.with.clone())
+    }
+
+    fn assert_with_late(steps: Value, keys: &[&str]) {
+        assert_eq!(with_outcome(steps.clone()).0, keys, "{steps}");
+    }
+
+    /// No guard proves `message`: it is read now, as `null`.
+    fn assert_with_read_now(steps: Value) {
+        let (late, with) = with_outcome(steps.clone());
+        assert!(late.is_empty(), "{steps}: {late:?}");
+        assert_eq!(with.get("message"), Some(&Value::Null), "{steps}");
+    }
+
+    fn message(value: &str) -> Value {
+        json!({ "message": value })
+    }
+
+    #[test]
+    fn sequence_task_shell_negated_guard() {
+        assert_shell_missing(shell_task("!msg", "tool {{ msg }}"), "msg");
+    }
+
+    #[test]
+    fn sequence_task_shell_and_operands() {
+        assert_shell_guarded(shell_task("a && b", "tool {{ a }} {{ b }}"), &["a", "b"]);
+    }
+
+    #[test]
+    fn sequence_task_shell_or_join() {
+        assert_shell_missing(shell_task("a || b", "tool {{ a }}"), "a");
+    }
+
+    #[test]
+    fn sequence_task_shell_bare_and_fm_alias() {
+        assert_shell_guarded(shell_task("fm.msg", "tool {{ msg }}"), &["msg"]);
+        assert_shell_guarded(shell_task("msg", "tool {{ fm.msg }}"), &["fm.msg"]);
+    }
+
+    #[test]
+    fn sequence_task_shell_is_string_alias() {
+        for guard in ["is_string(msg)", "isString(msg)"] {
+            assert_shell_guarded(shell_task(guard, "tool {{ msg }}"), &["msg"]);
+        }
+    }
+
+    #[test]
+    fn sequence_task_shell_file_exists_alias() {
+        for guard in ["file_exists(target)", "fileExists(target)"] {
+            assert_shell_guarded(shell_task(guard, "tool {{ target }}"), &["target"]);
+        }
+    }
+
+    #[test]
+    fn sequence_task_shell_not_null() {
+        assert_shell_guarded(shell_task("msg != null", "tool {{ msg }}"), &["msg"]);
+    }
+
+    #[test]
+    fn sequence_task_shell_equality() {
+        assert_shell_guarded(shell_task("mode == 'release'", "tool {{ mode }}"), &["mode"]);
+    }
+
+    /// Truthiness removes only `null` from an undeclared value: the hole keeps
+    /// the broad approval type, so the live value is still validated when the
+    /// command fills.
+    #[test]
+    fn sequence_task_shell_unknown_value() {
+        let steps = shell_task("msg", "tool {{ msg }}");
+        assert_shell_guarded(steps.clone(), &["msg"]);
+        let graph = graph(steps).unwrap();
+        let template = task(&graph, 0).shell_sites[0].template.clone().expect("a typed site");
+        let hole = template.placeholders().next().expect("one hole");
+        assert_eq!(hole.typing.approval, ApprovalType::BroadString);
+    }
+
+    #[test]
+    fn sequence_task_shell_contradictory_guard() {
+        let guard = "mode == 'a' && mode == 'b'";
+        assert_shell_guarded(shell_task(guard, "tool {{ mode }}"), &["mode"]);
+        assert_shell_missing(shell_task(guard, "tool {{ mode }} {{ y }}"), "y");
+    }
+
+    #[test]
+    fn sequence_task_shell_sibling_path() {
+        assert_shell_guarded(shell_task("x.a", "tool {{ x.a }}"), &["x.a"]);
+        assert_shell_missing(shell_task("x.a", "tool {{ x.b }}"), "x.b");
+    }
+
+    #[test]
+    fn sequence_task_shell_facts_stay_in_their_owner() {
+        assert_shell_missing(
+            json!([
+                { "name": "one", "when": "msg", "shell": "tool {{ msg }}" },
+                { "name": "two", "shell": "tool {{ msg }}" },
+            ]),
+            "msg",
+        );
+    }
+
+    #[test]
+    fn sequence_task_with_negated_guard() {
+        assert_with_read_now(with_task("!msg", message("{{ msg }}")));
+    }
+
+    #[test]
+    fn sequence_task_with_and_operands() {
+        assert_with_late(with_task("a && b", json!({ "message": "{{ a }}", "other": "{{ b }}" })), &["message", "other"]);
+    }
+
+    #[test]
+    fn sequence_task_with_or_join() {
+        assert_with_read_now(with_task("msg || b", message("{{ msg }}")));
+    }
+
+    #[test]
+    fn sequence_task_with_bare_and_fm_alias() {
+        assert_with_late(with_task("fm.msg", message("{{ msg }}")), &["message"]);
+        assert_with_late(with_task("msg", message("{{ fm.msg }}")), &["message"]);
+    }
+
+    #[test]
+    fn sequence_task_with_is_string_alias() {
+        for guard in ["is_string(msg)", "isString(msg)"] {
+            assert_with_late(with_task(guard, message("{{ msg }}")), &["message"]);
+        }
+    }
+
+    #[test]
+    fn sequence_task_with_file_exists_alias() {
+        for guard in ["file_exists(msg)", "fileExists(msg)"] {
+            assert_with_late(with_task(guard, message("{{ msg }}")), &["message"]);
+        }
+    }
+
+    #[test]
+    fn sequence_task_with_not_null() {
+        assert_with_late(with_task("msg != null", message("{{ msg }}")), &["message"]);
+    }
+
+    #[test]
+    fn sequence_task_with_equality() {
+        assert_with_late(with_task("msg == 'release'", message("{{ msg }}")), &["message"]);
+    }
+
+    /// Only a whole-value read is proven; text around the read is composed now.
+    #[test]
+    fn sequence_task_with_unknown_value() {
+        assert_with_late(with_task("msg", message("{{ msg }}")), &["message"]);
+        let (late, _) = with_outcome(with_task("msg", message("prefix {{ msg }}")));
+        assert!(late.is_empty(), "{late:?}");
+    }
+
+    #[test]
+    fn sequence_task_with_contradictory_guard() {
+        let guard = "msg == 'a' && msg == 'b'";
+        assert_with_late(with_task(guard, message("{{ msg }}")), &["message"]);
+        let (late, with) = with_outcome(with_task(guard, json!({ "message": "{{ msg }}", "other": "{{ y }}" })));
+        assert_eq!(late, ["message"]);
+        assert_eq!(with.get("other"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn sequence_task_with_sibling_path() {
+        assert_with_late(with_task("x.a", message("{{ x.a }}")), &["message"]);
+        assert_with_read_now(with_task("x.a", message("{{ x.b }}")));
+    }
+
+    #[test]
+    fn sequence_task_with_facts_stay_in_their_owner() {
+        let graph = graph(json!([
+            { "name": "one", "when": "msg", "prompt": "doc.md", "with": { "message": "{{ msg }}" } },
+            { "name": "two", "prompt": "doc.md", "with": { "message": "{{ msg }}" } },
+        ]))
+        .unwrap();
+        assert_eq!(graph.prompt_references[0].deferred_with, ["message"]);
+        assert!(graph.prompt_references[1].deferred_with.is_empty());
+        assert_eq!(graph.prompt_references[1].with.get("message"), Some(&Value::Null));
+    }
+}
+
+/// Pins the observable result of static shell-site analysis: which error wins
+/// when several placeholders are wrong, and the byte coordinates every
+/// diagnostic and template span is reported in.
+mod static_analysis_characterization {
+    use super::*;
+    use darkmatter::markdown::MarkdownError;
+    use darkmatter::markdown::compose::ShellExpansionError;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+    use darkmatter::markdown::compose::shell_expansion::template::TemplateGrammarError;
+    use darkmatter::markdown::compose::shell_expansion::template::HoleTiming;
+
+    fn shell_steps(commands: &[&str]) -> Value {
+        Value::Array(
+            commands
+                .iter()
+                .enumerate()
+                .map(|(index, command)| json!({ "name": format!("s{index}"), "shell": command }))
+                .collect(),
+        )
+    }
+
+    /// Frontmatter every case shares: present values, including the falsy ones.
+    fn fixture(dir: &Path, steps: Value) -> String {
+        write_legacy_source(
+            dir,
+            "seq.md",
+            &[
+                ("prog", json!("echo")),
+                ("word", json!("w")),
+                ("ok", json!(true)),
+                ("zero", json!(0)),
+                ("empty", json!("")),
+                ("no", json!(false)),
+                ("sequence", steps),
+            ],
+            "Body.\n",
+        )
+    }
+
+    fn commands_graph(commands: &[&str]) -> Result<PreflightGraph, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        legacy_graph_for(&fixture(dir.path(), shell_steps(commands)))
+    }
+
+    /// A stack `set` value in the last of `leading` plain steps' teardown.
+    fn set_graph(value: &str, later: bool) -> Result<PreflightGraph, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        let task = json!({ "name": "one", "shell": "echo one", "teardown": [{ "set": { "v": value } }] });
+        let steps = if later { json!([{ "name": "zero", "shell": "echo z" }, task]) } else { json!([task]) };
+        legacy_graph_for(&fixture(dir.path(), steps))
+    }
+
+    fn shell_sites(graph: &PreflightGraph) -> &[PreparedShellSite] {
+        &graph.steps.last().unwrap().task.as_ref().unwrap().shell_sites
+    }
+
+    fn assert_parse_failure(error: &CompositionError, command: &str, text: &str) {
+        let CompositionError::SequenceShellResolution { command: found, source: Some(source), message, .. } = error
+        else {
+            panic!("expected a typed resolution failure for `{text}`, got {error:?}");
+        };
+        assert_eq!(found, command);
+        assert!(message.contains(&format!("interpolation of `{text}` failed")), "{message}");
+        let MarkdownError::Interpolation { expression, cause, .. } = &**source else {
+            panic!("the parse failure is carried typed, got {source:?}");
+        };
+        assert_eq!(expression, text);
+        assert!(matches!(**cause, ExpressionError::Parse(_)), "{cause:?}");
+    }
+
+    // -- control and malformed expressions -----------------------------------
+
+    #[test]
+    fn a_well_formed_command_is_the_control_for_every_malformed_case_below() {
+        let graph = commands_graph(&["echo {{ word }} {{ word }}"]).unwrap();
+        assert_eq!(
+            shell_sites(&graph)[0].mode,
+            SiteMode::ResolvedBytes { bytes: "echo w w".to_string() }
+        );
+    }
+
+    #[test]
+    fn a_malformed_expression_alone_is_a_typed_parse_failure_in_any_task() {
+        for commands in [vec!["echo {{ 1 + }}"], vec!["echo hi", "echo {{ 1 + }}"]] {
+            let error = commands_graph(&commands).unwrap_err();
+            assert_parse_failure(&error, "echo {{ 1 + }}", "1 +");
+        }
+    }
+
+    #[test]
+    fn a_malformed_expression_beside_err_reports_whichever_resolution_reaches_first() {
+        // The malformed occurrence suppresses the approval diagnostics, so
+        // `err` is no longer refused by name; resolution then evaluates the
+        // occurrences in order and stops at the first failure.
+        let error = commands_graph(&["echo {{ err.msg }} {{ 1 + }}"]).unwrap_err();
+        assert_parse_failure(&error, "echo {{ err.msg }} {{ 1 + }}", "1 +");
+
+        let error = commands_graph(&["echo {{ 1 + }} {{ err.msg }}"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+            panic!("expected a resolution failure, got {error:?}");
+        };
+        assert!(message.contains("interpolation of `err.msg` failed"), "{message}");
+        let MarkdownError::Interpolation { cause, .. } = &**source else { panic!("{source:?}") };
+        assert!(matches!(**cause, ExpressionError::Binding(_)), "{cause:?}");
+    }
+
+    #[test]
+    fn a_target_identity_read_wins_on_either_side_of_a_malformed_expression() {
+        for (access, root) in [
+            ("ctx.agent", "ctx.agent"),
+            (r#"ctx["model"]"#, "ctx.model"),
+            ("env.AGENT", "env.AGENT"),
+            (r#"env["MODEL"]"#, "env.MODEL"),
+        ] {
+            for command in [
+                format!("echo {{{{ {access} }}}} {{{{ 1 + }}}}"),
+                format!("echo {{{{ 1 + }}}} {{{{ {access} }}}}"),
+                format!("echo {{{{ 1 + }}}} {{{{ {access} }}}} {{{{ 2 * }}}}"),
+            ] {
+                for commands in [vec![command.as_str()], vec!["echo hi", command.as_str()]] {
+                    let error = commands_graph(&commands).unwrap_err();
+                    assert!(
+                        matches!(&error, CompositionError::SequenceShellTargetIdentity { root: found, command: c, .. }
+                            if found == root && *c == command),
+                        "`{command}` must be refused as `{root}`; got {error:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unrelated_ctx_and_env_properties_beside_a_malformed_expression_are_not_identity_reads() {
+        let error = commands_graph(&["echo {{ ctx.repo }} {{ env.HOME }} {{ 1 + }}"]).unwrap_err();
+        assert_parse_failure(&error, "echo {{ ctx.repo }} {{ env.HOME }} {{ 1 + }}", "1 +");
+    }
+
+    // -- template position and grammar precedence ----------------------------
+
+    #[test]
+    fn a_program_hole_is_exact_in_the_first_task_and_a_grammar_refusal_in_a_later_one() {
+        let graph = commands_graph(&["{{ prog }} arg"]).unwrap();
+        assert_eq!(shell_sites(&graph)[0].mode, SiteMode::ResolvedBytes { bytes: "echo arg".to_string() });
+
+        let error = commands_graph(&["echo hi", "{{ prog }} arg"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+            panic!("expected a grammar refusal, got {error:?}");
+        };
+        assert!(message.contains("it must run as a template"), "{message}");
+        let MarkdownError::ShellExpansion(inner) = &**source else { panic!("{source:?}") };
+        assert!(matches!(
+            &**inner,
+            ShellExpansionError::TemplateGrammar { reason: TemplateGrammarError::ProgramWordHole, .. }
+        ), "{inner:?}");
+    }
+
+    #[test]
+    fn an_optional_invalid_template_resolves_exactly_and_a_required_one_is_refused() {
+        let graph = commands_graph(&["echo {{ prog }} | cat"]).unwrap();
+        assert_eq!(
+            shell_sites(&graph)[0].mode,
+            SiteMode::ResolvedBytes { bytes: "echo echo | cat".to_string() }
+        );
+
+        let error = commands_graph(&["echo hi", "echo {{ prog }} | cat"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), .. } = &error else {
+            panic!("expected a grammar refusal, got {error:?}");
+        };
+        let MarkdownError::ShellExpansion(inner) = &**source else { panic!("{source:?}") };
+        assert!(matches!(
+            &**inner,
+            ShellExpansionError::TemplateGrammar { reason: TemplateGrammarError::Pipe, .. }
+        ), "{inner:?}");
+    }
+
+    #[test]
+    fn a_late_read_beside_a_malformed_expression_still_reports_the_malformed_one() {
+        let error = commands_graph(&["echo hi", "echo {{ 1 + }} {{ last(seq.outputs) }}"]).unwrap_err();
+        assert_parse_failure(&error, "echo {{ 1 + }} {{ last(seq.outputs) }}", "1 +");
+    }
+
+    #[test]
+    fn a_missing_value_fails_and_empty_zero_and_false_are_present() {
+        let error = commands_graph(&["echo {{ nothere }}"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+            panic!("expected a missing-value failure, got {error:?}");
+        };
+        assert!(message.contains("it reads `nothere`, which is missing"), "{message}");
+        let MarkdownError::ShellExpansion(inner) = &**source else { panic!("{source:?}") };
+        assert!(matches!(&**inner, ShellExpansionError::MissingValue { expression, .. } if expression == "nothere"));
+
+        let graph = commands_graph(&["echo {{ zero }}{{ empty }}{{ no }}"]).unwrap();
+        assert_eq!(shell_sites(&graph)[0].mode, SiteMode::ResolvedBytes { bytes: "echo 0false".to_string() });
+    }
+
+    // -- `set` wrapper coordinates -------------------------------------------
+
+    #[test]
+    fn a_set_values_template_spans_index_the_extracted_command_in_bytes() {
+        let value = "$(git é {{  word  }} ü {{ word }})::ok";
+        for later in [false, true] {
+            let graph = set_graph(value, later).unwrap();
+            let site = &shell_sites(&graph)[1];
+            assert_eq!(site.kind, ShellSiteKind::SetValue { key: "v".to_string() });
+            assert_eq!(site.authored, "git é {{  word  }} ü {{ word }}");
+            let template = site.template.as_ref().expect("a placeholder-bearing set value keeps its template");
+            let holes: Vec<_> = template.placeholders().map(|hole| (hole.expression.clone(), hole.span.clone())).collect();
+            assert_eq!(holes, vec![("word".to_string(), 7..19), ("word".to_string(), 23..33)]);
+            for (_, span) in holes {
+                assert!(site.authored[span.clone()].starts_with("{{") && site.authored[span].ends_with("}}"));
+            }
+            assert!(template.placeholders().all(|hole| hole.timing == HoleTiming::ApprovalTime));
+            if later {
+                assert_eq!(site.mode, SiteMode::Template);
+            } else {
+                assert_eq!(site.mode, SiteMode::ResolvedBytes { bytes: "$(git é w ü w)::ok".to_string() });
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_set_suffixes_keep_their_extracted_coordinates() {
+        for suffix in ["::ok", "::exit-code", "::result", "::timeout:30", "::no-cache"] {
+            let graph = set_graph(&format!("$(git é {{{{ word }}}}){suffix}"), true).unwrap();
+            let site = &shell_sites(&graph)[1];
+            assert_eq!(site.authored, "git é {{ word }}", "{suffix}");
+            let spans: Vec<_> = site.template.as_ref().unwrap().placeholders().map(|hole| hole.span.clone()).collect();
+            assert_eq!(spans, vec![7..17], "{suffix}");
+        }
+    }
+
+    #[test]
+    fn a_set_value_diagnostic_offset_indexes_the_raw_wrapper_and_a_late_namespace_has_none() {
+        let value = "$(git é {{ err.msg }})";
+        for later in [false, true] {
+            let error = set_graph(value, later).unwrap_err();
+            let CompositionError::SequenceShellLateBinding { command, root, source: Some(source), .. } = &error else {
+                panic!("expected a late-binding refusal, got {error:?}");
+            };
+            assert_eq!((command.as_str(), root.as_str()), (value, "err"));
+            let ExpressionError::Binding(binding) = &**source else { panic!("{source:?}") };
+            let darkmatter::markdown::compose::expression::BindingError::Unavailable(unavailable) = &**binding
+            else {
+                panic!("{binding:?}");
+            };
+            let span = unavailable.span.clone().expect("a normal diagnostic carries its raw span");
+            assert_eq!(&value[span], "err.msg", "the span indexes the raw wrapper bytes");
+        }
+
+        // The late-namespace append pass reports the read without a span.
+        let error = set_graph("$(git é {{ current.branch }})", false).unwrap_err();
+        let CompositionError::SequenceShellLateBinding { root, source: Some(source), .. } = &error else {
+            panic!("expected a late-binding refusal, got {error:?}");
+        };
+        assert_eq!(root, "current");
+        let ExpressionError::Binding(binding) = &**source else { panic!("{source:?}") };
+        let darkmatter::markdown::compose::expression::BindingError::Unavailable(unavailable) = &**binding else {
+            panic!("{binding:?}");
+        };
+        assert_eq!(unavailable.span, None);
+    }
+
+    #[test]
+    fn a_set_value_with_a_dead_branch_unknown_function_is_refused_by_name() {
+        for later in [false, true] {
+            let error = set_graph("$(git é {{ ok ? 'a' : nofn() }})", later).unwrap_err();
+            let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+                panic!("expected a resolution failure, got {error:?}");
+            };
+            assert!(message.starts_with("Unknown function: nofn"), "{message}");
+            let MarkdownError::Interpolation { cause, .. } = &**source else { panic!("{source:?}") };
+            assert!(matches!(**cause, ExpressionError::UnknownFunction { .. }), "{cause:?}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_set_wrapper_fails_extraction_before_any_placeholder_is_read() {
+        for later in [false, true] {
+            let error = set_graph("$(git {{ word }}", later).unwrap_err();
+            let CompositionError::SequenceShellResolution { command, message, source: None, .. } = &error else {
+                panic!("expected an extraction failure, got {error:?}");
+            };
+            assert_eq!(command, "$(git {{ word }}");
+            assert!(message.contains("must be a whole-value `$( … )` command"), "{message}");
+        }
+        // Malformed placeholders inside a malformed wrapper never get that far.
+        let error = set_graph("$(git {{ 1 + }}", false).unwrap_err();
+        assert!(matches!(&error, CompositionError::SequenceShellResolution { source: None, .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_malformed_expression_inside_a_set_value_is_a_typed_parse_failure() {
+        for later in [false, true] {
+            let error = set_graph("$(git é {{ 1 + }})", later).unwrap_err();
+            assert_parse_failure(&error, "$(git é {{ 1 + }})", "1 +");
+        }
+    }
+}
+
+/// Behavior the retained-syntax route must keep: every lifecycle position is
+/// collected, and a retained template reads current values, never frozen ones.
+mod prepared_site_behavior {
+    use super::*;
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, ResolutionContext};
+    use darkmatter::markdown::compose::shell_expansion::template::{LookupEvaluator, fill_template};
+
+    fn sorted_commands(graph: &PreflightGraph) -> Vec<&str> {
+        let mut commands: Vec<&str> = graph.shell_commands.iter().map(|c| c.command.as_str()).collect();
+        commands.sort_unstable();
+        commands
+    }
+
+    /// Placeholder-bearing commands in setup, teardown, an `on_error:`
+    /// companion and a `set` value of the first task are each resolved from the
+    /// same retained-syntax route as a body step.
+    #[test]
+    fn placeholder_commands_in_setup_teardown_on_error_and_set_resolve_once_each() {
+        let dir = TempDir::new().unwrap();
+        let source = write_legacy_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("word", json!("w")),
+                (
+                    "sequence",
+                    json!([{
+                        "name": "one",
+                        "shell": "echo body {{ word }}",
+                        "setup": [{ "shell": { "command": "echo setup {{ word }}", "on_error": "echo recover {{ word }}" } }],
+                        "teardown": [
+                            { "shell": "echo teardown {{ word }}" },
+                            { "set": { "v": "$(  echo set {{ word }}  )" } },
+                        ],
+                    }]),
+                ),
+            ],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        assert_eq!(
+            sorted_commands(&graph),
+            vec![
+                "echo body w",
+                "echo recover w",
+                "echo set w",
+                "echo setup w",
+                "echo teardown w",
+            ],
+        );
+        assert_eq!(graph.template_candidates.len(), 5);
+    }
+
+    struct DocumentLookup(ResolutionContext);
+
+    impl EvaluationLookup for DocumentLookup {
+        fn get(&self, _: &str) -> Option<Value> {
+            None
+        }
+
+        fn resolution_context(&self) -> Option<ResolutionContext> {
+            Some(self.0.clone())
+        }
+    }
+
+    /// Retained syntax is not a retained value: the template prepared once
+    /// reads `fixture.md` again on each fill.
+    #[test]
+    fn a_template_prepared_once_rereads_a_document_value_on_every_fill() {
+        let dir = TempDir::new().unwrap();
+        let fixture = dir.path().join("fixture.md");
+        fs::write(&fixture, "---\nstatus: draft\n---\nBody\n").unwrap();
+        let source = write_legacy_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "zero", "shell": "echo zero" },
+                    { "name": "one", "shell": "tool {{ frontmatter('fixture.md', 'status') }}" },
+                ]),
+            )],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        let site = &graph.steps[1].task.as_ref().unwrap().shell_sites[0];
+        assert_eq!(site.mode, SiteMode::Template);
+        let template = site.template.as_ref().expect("a later task keeps its template");
+
+        let context = ResolutionContext::new(biscuit_file::FileResolutionContext::from_snapshot(
+            dir.path(),
+            Some(dir.path().to_path_buf()),
+            HashMap::new(),
+        ));
+        let lookup = DocumentLookup(context);
+        let evaluator = LookupEvaluator::new(&lookup);
+        let args = |template| fill_template(template, &evaluator, None).unwrap().segments[0].args.clone();
+
+        assert_eq!(args(template), ["draft"]);
+        fs::write(&fixture, "---\nstatus: ready\n---\nBody\n").unwrap();
+        assert_eq!(args(template), ["ready"]);
+    }
+}
+
+/// The owning document's schema and the task's `when:` reach the template
+/// sequence preflight returns: each hole keeps its declared validator, and a
+/// guard that narrows a declared type keeps that refinement, so filling the
+/// template accepts and rejects exactly what the schema and guard allow.
+mod schema_typed_holes {
+    use super::*;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+    use darkmatter::markdown::compose::shell_expansion::template::{
+        CommandTemplate, HoleError, RejectReason, fill_template,
+    };
+
+    const COMMAND: &str = "tool {{ count }} {{ mode }}";
+
+    /// A sequence with `count: number(min(1))` and `mode: enum(release, debug)`
+    /// whose later task runs `COMMAND` under `when` (if any), and whose root
+    /// `finalize` captures `count` through a whole-value `set`.
+    fn graph(when: Option<&str>) -> PreflightGraph {
+        let dir = TempDir::new().unwrap();
+        let mut typed = json!({ "name": "typed", "shell": COMMAND });
+        if let Some(when) = when {
+            typed["when"] = json!(when);
+        }
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("$schema", json!({ "count": "number(min(1))", "mode": "enum(release, debug)" })),
+                ("count", json!(2)),
+                ("mode", json!("release")),
+                ("finalize", json!([{ "set": { "stamp": "$(stamp {{ count }})" } }])),
+                ("sequence", json!([{ "name": "first", "shell": "echo first" }, typed])),
+            ],
+            "Body.\n",
+        );
+        graph_for(&source).unwrap()
+    }
+
+    fn template<'g>(graph: &'g PreflightGraph, authored: &str) -> &'g CommandTemplate {
+        let candidate = graph
+            .template_candidates
+            .iter()
+            .find(|candidate| candidate.authored() == Some(authored))
+            .unwrap_or_else(|| panic!("no candidate for `{authored}`: {:?}", graph.template_candidates));
+        candidate.template.as_ref().expect("the command parses as a template")
+    }
+
+    /// Fill `template` with `count` and `mode`, returning the arguments or the
+    /// rejected expression and its reason.
+    fn fill(template: &CommandTemplate, count: Value, mode: &str) -> Result<Vec<String>, (String, RejectReason)> {
+        let values = json!({ "count": count, "mode": mode });
+        let evaluate = |expression: &str| -> Result<Value, ExpressionError> {
+            Ok(values.get(expression).cloned().unwrap_or(Value::Null))
+        };
+        fill_template(template, &evaluate, None)
+            .map(|chain| chain.segments[0].args.clone())
+            .map_err(|error| match error {
+                HoleError::Rejected { expression, reason, .. } => (expression, reason),
+                other => panic!("expected a rejected value, got {other:?}"),
+            })
+    }
+
+    #[test]
+    fn a_later_task_keeps_its_schema_validator_and_guard_refinement() {
+        let graph = graph(Some("mode == 'release'"));
+        let template = template(&graph, COMMAND);
+
+        assert_eq!(fill(template, json!(2), "release"), Ok(vec!["2".into(), "release".into()]));
+        assert_eq!(fill(template, json!(0), "release"), Err(("count".into(), RejectReason::DeclaredType)));
+        assert_eq!(fill(template, json!("2"), "release"), Err(("count".into(), RejectReason::DeclaredType)));
+        assert_eq!(fill(template, json!(2), "debug"), Err(("mode".into(), RejectReason::GuardRefinement)));
+    }
+
+    /// Control: without the guard, `debug` satisfies the declared enum, so the
+    /// refinement above came from the task's `when:`.
+    #[test]
+    fn without_a_guard_the_declared_enum_accepts_every_member() {
+        let graph = graph(None);
+        let template = template(&graph, COMMAND);
+
+        assert_eq!(fill(template, json!(2), "debug"), Ok(vec!["2".into(), "debug".into()]));
+        assert_eq!(fill(template, json!(2), "nightly"), Err(("mode".into(), RejectReason::DeclaredType)));
+    }
+
+    /// A container `set` command shares the projection: the schema's validator
+    /// applies, and no task guard reaches it.
+    #[test]
+    fn a_container_set_command_keeps_the_schema_validator() {
+        let graph = graph(Some("mode == 'release'"));
+        let template = template(&graph, "stamp {{ count }}");
+
+        assert_eq!(fill(template, json!(2), "debug"), Ok(vec!["2".into()]));
+        assert_eq!(fill(template, json!(0), "debug"), Err(("count".into(), RejectReason::DeclaredType)));
     }
 }

@@ -69,6 +69,21 @@ impl NestedComposeSlot {
         matches!(self, Self::Discover(_))
     }
 
+    /// Takes the blocking stop a nested child of this document reported, so
+    /// the document stops before its next effect instead of when its stages
+    /// finish.
+    pub(crate) fn take_blocked(&self) -> Option<MarkdownError> {
+        let Self::Active(nested) = self else {
+            return None;
+        };
+        let mut outcome = lock(&nested.scope.outcome);
+        if matches!(outcome.restored, Some(MarkdownError::BlockedDiagnostics { .. })) {
+            outcome.restored.take()
+        } else {
+            None
+        }
+    }
+
     /// Evaluates `as_markdown(content)` on this surface.
     pub(crate) fn evaluate(&self, content: &str) -> Result<String, ExpressionError> {
         match self {
@@ -151,7 +166,9 @@ impl NestedCompose {
     }
 
     /// Folds every nested child's report, depth, and context groups into the
-    /// calling document once its stages finish.
+    /// calling document once its stages finish. When the document fails,
+    /// the skipped triggers those reports (the pre-approved gate's included)
+    /// carry join the failure's warnings instead.
     pub(crate) fn finish(
         self,
         result: MarkdownResult<ComposeReport>,
@@ -162,17 +179,51 @@ impl NestedCompose {
         if let Some(groups) = &outcome.context_groups {
             runtime.record_context_groups(groups);
         }
-        if let Some(error) = outcome.restored {
-            return Err(error);
+        let failure = match (outcome.restored, result) {
+            (Some(error), _) | (None, Err(error)) => error,
+            (None, Ok(mut report)) => {
+                for child in outcome.reports {
+                    report.merge(child);
+                }
+                return Ok(report);
+            }
+        };
+        // The document's own warnings are already kept; the triggers its
+        // nested children and the pre-approved gate found follow them.
+        runtime.record_failed_triggers(outcome.reports.into_iter().flat_map(|report| report.warnings));
+        Err(failure)
+    }
+
+    /// A blocking warning the child's last stages reported stops the calling
+    /// document as one the child stopped on does.
+    ///
+    /// Out of line and in place: a report moved through a closure here would
+    /// add its copies to a frame that recurs once per nested composition.
+    #[inline(never)]
+    fn stop_if_child_blocked(&self, result: &mut MarkdownResult<ComposeReport>) {
+        if let Ok(report) = result
+            && let Err(stop) = super::pipeline::stop_if_blocked(report, &lock(&self.scope.options), None)
+        {
+            *result = Err(stop);
         }
-        let mut report = result?;
-        for child in outcome.reports {
-            report.merge(child);
-        }
-        Ok(report)
     }
 
     fn compose(&self, content: &str) -> Result<String, ExpressionError> {
+        // The setup and the fold run out of line, and the child travels
+        // boxed: this frame recurs once per nested composition, so only what
+        // the recursive call needs is live in it.
+        let mut child = self.prepare_child(content)?;
+        let NestedChild { markdown, runtime, options, node, .. } = &mut *child;
+        let options = options.take().expect("a prepared child holds its request");
+        let mut result = markdown.run_compose_pipeline_node(options, runtime, node.take(), None);
+        self.stop_if_child_blocked(&mut result);
+        self.fold_child(child, result)
+    }
+
+    /// Parses `content` and derives the request and runtime its nested
+    /// pipeline runs with.
+    #[inline(never)]
+    fn prepare_child(&self, content: &str) -> Result<Box<NestedChild>, ExpressionError> {
         let source_context = biscuit_terminal::errors::SourceContext::new(
             PathBuf::from("as_markdown()"),
             PathBuf::from("as_markdown()"),
@@ -183,18 +234,26 @@ impl NestedCompose {
         let authored_keys: Option<HashSet<String>> = (frontmatter.raw_source().is_some()
             || !frontmatter.is_empty())
         .then(|| frontmatter.as_map().keys().cloned().collect());
-        let mut child = Markdown::with_frontmatter(frontmatter, body);
+        let child = Markdown::with_frontmatter(frontmatter, body);
 
         let mut runtime = lock(&self.scope.runtime).clone_for_child();
         let mut options = lock(&self.scope.options).clone();
         if let Some(root) = &self.scope.root_gate
             && !runtime.preflight_validated().load(Ordering::Acquire)
         {
-            if let Err(error) = super::preflight::validate_pre_approved(root, &options) {
+            // The gate's skipped-trigger warnings fold into the calling
+            // document with the nested reports, or follow its warnings into
+            // the failure when the gate (a denied trigger included) stops it.
+            let mut gate_report = ComposeReport::default();
+            let gate = super::preflight::validate_pre_approved(root, &options, &mut gate_report);
+            let mut outcome = lock(&self.scope.outcome);
+            outcome.reports.push(gate_report);
+            if let Err(error) = gate {
                 let message = format!("the pre-approved command gate failed: {error}");
-                lock(&self.scope.outcome).restored.get_or_insert(error);
+                outcome.restored.get_or_insert(error);
                 return Err(violation(message));
             }
+            drop(outcome);
             runtime.preflight_validated().store(true, Ordering::Release);
         }
         // Relative references resolve against the root document (R11), not
@@ -217,8 +276,24 @@ impl NestedCompose {
         let options = options.derive(|options| options.with_request_context(context));
 
         let node = format!("as_markdown#{}", NEXT_NODE.fetch_add(1, Ordering::Relaxed));
-        let result = child.run_compose_pipeline_node(options, &mut runtime, Some((node, PathBuf::from("as_markdown()"))), None);
+        Ok(Box::new(NestedChild {
+            markdown: child,
+            runtime,
+            options: Some(options),
+            node: Some((node, PathBuf::from("as_markdown()"))),
+            authored_keys,
+        }))
+    }
 
+    /// Folds a finished child into this document's outcome and serializes
+    /// the composed content.
+    #[inline(never)]
+    fn fold_child(
+        &self,
+        child: Box<NestedChild>,
+        result: MarkdownResult<ComposeReport>,
+    ) -> Result<String, ExpressionError> {
+        let NestedChild { markdown: mut child, runtime, authored_keys, .. } = *child;
         let mut outcome = lock(&self.scope.outcome);
         outcome.deepest_seen = outcome.deepest_seen.max(runtime.transclusion.deepest_seen);
         outcome.context_groups = Some(match outcome.context_groups.take() {
@@ -251,7 +326,19 @@ impl NestedCompose {
     }
 }
 
+/// A nested child between [`NestedCompose::prepare_child`] and
+/// [`NestedCompose::fold_child`].
+struct NestedChild {
+    markdown: Markdown,
+    runtime: PipelineRuntime,
+    /// Taken by the recursive call.
+    options: Option<crate::markdown::compose::ComposeRequest>,
+    node: Option<(String, PathBuf)>,
+    authored_keys: Option<HashSet<String>>,
+}
+
 fn is_structural(error: &MarkdownError) -> bool {
+    let error = error.without_iteration();
     let transclusion_limit = matches!(
         error,
         MarkdownError::Transclusion(inner)
@@ -261,7 +348,14 @@ fn is_structural(error: &MarkdownError) -> bool {
                     | transclusion::TransclusionError::MaxDepthExceeded { .. }
             )
     );
-    transclusion_limit || error.pre_approval_violation().is_some() || error.shell_input_violation().is_some()
+    transclusion_limit
+        || error.iteration_failure().is_some()
+        || error.pre_approval_violation().is_some()
+        || error.shell_input_violation().is_some()
+        // A collection's typing, pattern, ordering, and budget failures end
+        // the request however a fallback handles the call that raised them.
+        || matches!(error, MarkdownError::Collection(_))
+        || matches!(error, MarkdownError::BlockedDiagnostics { .. })
 }
 
 fn violation(message: String) -> ExpressionError {

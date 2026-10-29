@@ -4,9 +4,9 @@
 
 use super::{
     ArgPart, CommandTemplate, Placeholder, RedirectOp, TemplateArg, TemplateGrammarError, TemplateSegment,
-    project_hole,
+    HoleType, TypeProvenance, project_hole, project_hole_expr,
 };
-use crate::markdown::compose::expression::ExpressionFinder;
+use crate::markdown::compose::expression::{DeclaredTypes, ExpressionFinder, PreparedInterpolationView, TypeScope};
 use crate::markdown::compose::shell_expansion::types::ChainOperator;
 use std::ops::Range;
 
@@ -16,8 +16,8 @@ use std::ops::Range;
 /// any quote, whitespace, or operator is interpreted, so a span's own spaces,
 /// quotes, and `||` never split or chain the command. A placeholder stays
 /// inside the argument that contains it, quoted or not. Placeholders are typed
-/// as if the document had no schema; call
-/// [`CommandTemplate::project_types`] with the owner's schema.
+/// as if the document had no schema and no guard; call
+/// [`CommandTemplate::project_types`] with the site's type scope.
 ///
 /// ## Examples
 ///
@@ -46,10 +46,68 @@ pub fn parse_authored(text: &str) -> Result<CommandTemplate, TemplateGrammarErro
         .into_iter()
         .map(|location| (location.start..location.end, location.expression))
         .collect();
+    let declared = SchemaFree::new();
+    let scope = declared.scope();
+    build(text, holes, &|_, expression| project_hole(expression, &scope))
+}
+
+/// Parses the authored command a prepared view covers, typing each
+/// placeholder from the syntax the view already retains.
+///
+/// Matches [`parse_authored`] result for result, but parses nothing: a
+/// placeholder whose retained expression failed keeps the fallback type, as
+/// the text path gives an expression that does not parse. Holes are matched to
+/// retained occurrences by span, so repeated text stays distinct.
+///
+/// ## Errors
+///
+/// The same [`TemplateGrammarError`]s as [`parse_authored`].
+pub fn parse_authored_prepared(view: PreparedInterpolationView<'_>) -> Result<CommandTemplate, TemplateGrammarError> {
+    if view.has_literal_syntax() {
+        return Err(TemplateGrammarError::InterpolationLiteral);
+    }
+    let holes: Vec<(Range<usize>, String)> = view
+        .placeholders()
+        .map(|placeholder| (placeholder.span(), placeholder.text().to_string()))
+        .collect();
+    let declared = SchemaFree::new();
+    let scope = declared.scope();
+    build(view.text(), holes, &|span, _| {
+        view.placeholder_at(span)
+            .and_then(|placeholder| placeholder.expr())
+            .map_or_else(
+                || HoleType::fallback(TypeProvenance::NotBareProperty),
+                |expr| project_hole_expr(expr, &scope),
+            )
+    })
+}
+
+/// The schema-free, guard-free types a template's holes have until
+/// `project_types` retypes them at their site.
+struct SchemaFree<'s>(DeclaredTypes<'s>);
+
+impl SchemaFree<'_> {
+    fn new() -> Self {
+        Self(DeclaredTypes::new(None))
+    }
+
+    fn scope(&self) -> TypeScope<'_> {
+        TypeScope::unguarded(&self.0)
+    }
+}
+
+/// The shared grammar body; `typing` gives a hole its initial type from its
+/// whole-placeholder span and expression text.
+fn build(
+    text: &str,
+    holes: Vec<(Range<usize>, String)>,
+    typing: &dyn Fn(&Range<usize>, &str) -> HoleType,
+) -> Result<CommandTemplate, TemplateGrammarError> {
     let mut parser = Parser {
         text,
         pos: 0,
         holes,
+        typing,
         next_hole: 0,
         segments: Vec::new(),
         words: Vec::new(),
@@ -68,6 +126,7 @@ struct Parser<'a> {
     text: &'a str,
     pos: usize,
     holes: Vec<(Range<usize>, String)>,
+    typing: &'a dyn Fn(&Range<usize>, &str) -> HoleType,
     next_hole: usize,
     segments: Vec<TemplateSegment>,
     words: Vec<Vec<ArgPart>>,
@@ -173,7 +232,7 @@ impl Parser<'_> {
         let placeholder = Placeholder {
             expression: expression.clone(),
             span: span.clone(),
-            typing: project_hole(expression, None, &[]),
+            typing: (self.typing)(span, expression),
             timing: super::HoleTiming::ApprovalTime,
         };
         self.pos = span.end;

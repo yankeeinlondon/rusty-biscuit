@@ -1,0 +1,17 @@
+# scenario: shell-unlocked-blocked-after-start
+# doc: shell-unlocked-blocked-after-start.md
+# given: invoked as `claudine compose --claude --yolo shell-unlocked-blocked-after-start.md` from the directory holding the fixture documents
+# given: shell approval is granted by --yolo
+# given: start runs its shell, then proxies to a target that does not exist, so the handoff is refused before any launch
+# given: blocked and finalize run their shells after start unlocked them
+# given: the provider never launches
+event initialize
+event start
+shell start
+event blocked
+err composition.invalid_file_reference
+shell blocked
+event finalize
+err composition.invalid_file_reference
+shell finalize
+exit 1

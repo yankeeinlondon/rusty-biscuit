@@ -411,6 +411,10 @@ pub enum Token {
     /// Arithmetic minus / unary minus `-`.
     Minus,
 
+    /// A callback arrow, `=>` or `->`. The two spellings are identical; the
+    /// token span records which was authored. Only callback parsing accepts it.
+    Arrow,
+
     /// Arithmetic multiplication `*`.
     Star,
 
@@ -483,6 +487,7 @@ impl fmt::Display for Token {
             Token::RBrace => write!(f, "}}"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
+            Token::Arrow => write!(f, "=>"),
             Token::Star => write!(f, "*"),
             Token::Slash => write!(f, "/"),
             Token::Percent => write!(f, "%"),
@@ -706,7 +711,15 @@ impl<'a> Lexer<'a> {
             }
             '-' => {
                 self.advance();
-                Ok(Token::Minus)
+                // `->` is a callback arrow. Previously `-` followed by `>` could
+                // never parse (a binary operand cannot start with `>`), so no
+                // valid expression changes meaning.
+                if self.current_char() == Some('>') {
+                    self.advance();
+                    Ok(Token::Arrow)
+                } else {
+                    Ok(Token::Minus)
+                }
             }
             '*' => {
                 self.advance();
@@ -726,6 +739,9 @@ impl<'a> Lexer<'a> {
                 if self.current_char() == Some('=') {
                     self.advance();
                     Ok(Token::CompOp(ComparisonOp::Equal))
+                } else if self.current_char() == Some('>') {
+                    self.advance();
+                    Ok(Token::Arrow)
                 } else {
                     Err(LexerError::new(
                         "Expected '=' after '=' for equality operator",
@@ -886,7 +902,9 @@ impl<'a> Lexer<'a> {
     ///
     /// Numbers are always non-negative at the lexer level. Unary minus is
     /// handled in the parser so `5 - 3` tokenizes as three tokens rather than
-    /// being collapsed into `5, -3`.
+    /// being collapsed into `5, -3`. The written digits are admitted before
+    /// they become an `f64`, so a whole literal no `f64` holds exactly
+    /// (`9007199254740993`) is a lexer error at the literal.
     fn read_number(&mut self) -> Result<Token, LexerError> {
         let start_pos = self.pos;
         let mut value = String::new();
@@ -917,10 +935,16 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        value
-            .parse::<f64>()
-            .map(Token::NumberLiteral)
-            .map_err(|_| LexerError::new(format!("Invalid number: '{}'", value), start_pos))
+        match crate::markdown::numeric::admit_number_spelling(&value) {
+            Ok(number) => Ok(Token::NumberLiteral(number)),
+            Err(crate::markdown::numeric::NumberTextError::Admission(reason)) => Err(LexerError::new(
+                format!("Invalid number: '{value}' {reason}"),
+                start_pos,
+            )),
+            Err(crate::markdown::numeric::NumberTextError::NotANumber) => {
+                Err(LexerError::new(format!("Invalid number: '{}'", value), start_pos))
+            }
+        }
     }
 
     /// Whether the `-` at the cursor continues the identifier being scanned.

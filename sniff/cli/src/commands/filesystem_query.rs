@@ -68,6 +68,7 @@ pub(crate) fn run(
             if let Some(performance) = &performance {
                 value = output::attach_performance(value, performance);
             }
+            output::sort_json_keys(&mut value);
             format!("{}\n", serde_json::to_string_pretty(&value)?)
         }
         Ok(report) => {

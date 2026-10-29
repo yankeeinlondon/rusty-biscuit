@@ -89,6 +89,14 @@ const ROWS: &[Row] = &[
         replacement: "remove `route`",
     },
     Row {
+        name: "communication_route_in_unselected_else",
+        frontmatter: "start:\n    - when: \"true\"\n      then:\n          - info: selected\n      else:\n          - message:\n                text: unused\n                route: ops\n",
+        body: "Body\n",
+        path: "start[0].else[0].message.route",
+        removed: "message.route",
+        replacement: "remove `route`",
+    },
+    Row {
         name: "loop_read_in_frontmatter",
         frontmatter: "note: \"pass {{ _loop_count }}\"\n",
         body: "Body\n",
@@ -214,6 +222,7 @@ removed_grammar_rows!(
     communication_message,
     communication_sound,
     communication_route,
+    communication_route_in_unselected_else,
     loop_read_in_frontmatter,
     loop_read_in_body,
 );

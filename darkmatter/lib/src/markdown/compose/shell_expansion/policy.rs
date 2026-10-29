@@ -354,7 +354,8 @@ pub fn check_whitelist(ruleset: &ShellRuleSet, executable: &str, normalized: &st
 /// Normalizes a command into a stable string representation.
 ///
 /// Produces `executable arg1 arg2 ...` with proper quoting for args
-/// that contain whitespace or special characters.
+/// that contain whitespace or special characters. An empty argument is
+/// written `""`, so it stays in the key and tokenizes back to one empty word.
 ///
 /// ## Examples
 ///
@@ -388,8 +389,10 @@ pub fn normalize_command(executable: &str, args: &[String]) -> String {
 
 /// Returns true if the argument needs quoting in normalized form.
 fn needs_quoting(arg: &str) -> bool {
-    arg.chars()
-        .any(|ch| ch.is_whitespace() || ch == '"' || ch == '\'' || ch == '\\')
+    arg.is_empty()
+        || arg
+            .chars()
+            .any(|ch| ch.is_whitespace() || ch == '"' || ch == '\'' || ch == '\\')
 }
 
 /// Returns true if args start with the given prefix of literal words.
@@ -592,6 +595,19 @@ mod tests {
     fn normalize_no_args() {
         let normalized = normalize_command("pwd", &[]);
         assert_eq!(normalized, "pwd");
+    }
+
+    /// An empty argument is spelled `""` and tokenizes back to one empty
+    /// word, so an exact key names the bytes that run.
+    #[test]
+    fn normalize_quotes_an_empty_argument_and_round_trips() {
+        let args = ["commit".to_string(), "-m".to_string(), String::new()];
+        let normalized = normalize_command("git", &args);
+        assert_eq!(normalized, r#"git commit -m """#);
+
+        let ctx = biscuit_terminal::errors::SourceContext::new("/t".into(), "t".into(), "");
+        let words = super::super::tokenize::tokenize_simple(&normalized, &ctx).unwrap();
+        assert_eq!(words, ["git", "commit", "-m", ""]);
     }
 
     #[test]

@@ -1,0 +1,10 @@
+$schema: ./frontmatter.schema.yaml
+flag: On
+maybe: 2
+meta:
+  level: 3
+n: 7
+values:
+- 1
+- 2
+zip: '02134'

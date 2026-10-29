@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # DMLS Configuration
 
 DMLS, the Darkmatter language server, reads its settings from a
@@ -9,6 +13,7 @@ these you can:
   (`[wiki]`)
 - make frontmatter validation strict, and add schema baselines for parts of
   the tree (`[schema]`)
+- make function-call diagnostics strict (`[expressions]`)
 - set workspace defaults for `textDocument/formatting` (`[formatting]`)
 - toggle code-action categories, frontmatter outline symbols, and semantic
   tokens
@@ -219,7 +224,9 @@ these; see [Who wins](../topics/markdown-formatting.md#who-wins-precedence).
 | `schema.strict` | `false` | yes |
 | `schema.extensions.<name>.path` | (required per entry) | yes |
 | `schema.extensions.<name>.globs` | `[]` | yes |
+| `schema.slow_validation_ms` | `200` | yes |
 | `style.strict` | `false` | **parsed only** |
+| `expressions.strict` | `false` | yes |
 | `shell.policy_path` | unset | yes |
 | `hints.inlay` | `true` | **parsed only** |
 | `code_actions.categories.<category>` | every category enabled | yes |
@@ -389,6 +396,21 @@ globs = ["prompts/**", ".claude/**"]
 | `strict` | `false` | Off: a missing required key is not reported (a value may arrive at compose time), and an unknown key is a warning. On: missing required keys are errors, and unknown keys are errors. |
 | `extensions.<name>.path` | required | A SimplifiedSchema (or JSON Schema) file merged over the built-in baseline for matching documents. A relative path resolves against the first workspace folder. It names a document schema, never a trigger schema. |
 | `extensions.<name>.globs` | `[]` | Which documents the extension applies to, matched against the document's path relative to its workspace folder. An extension with no globs never applies. |
+| `slow_validation_ms` | `200` | The time, in whole milliseconds, at or above which a document's schema validation is logged at `warn` (`slow schema validation`) rather than `debug`. `0` logs every validation at `warn`. It changes only the log level, never a diagnostic. |
+
+`slow_validation_ms` must be a whole number of zero or more. Like any other
+value outside `[formatting]`, a wrong one (`-1`, `1.5`, `"200"`, or an
+editor `null`) is rejected: in `.dmls.toml` none of the file's settings
+apply, and in the editor settings the file layer stays (see
+[A malformed file degrades to defaults](#a-malformed-file-degrades-to-defaults)
+and [Precedence](#precedence-editor-settings-the-file-defaults)). What the
+event carries is described in [Schema validation timing
+lines](./indexing.md#schema-validation-timing-lines).
+
+```toml
+[schema]
+slow_validation_ms = 0   # log every validation's stage breakdown at warn
+```
 
 Extensions are applied in name order, a later one winning over an earlier
 one. Trigger schemas need no entry here; DMLS finds them in the schema roots.
@@ -406,6 +428,52 @@ strict = false
 `strict` (default `false`) is **parsed only**. Unknown and deprecated
 `style:` keys are reported (`dm.style.unknown_key`,
 `dm.style.deprecated_key`) whatever its value.
+
+## `[expressions]`
+
+Function-call diagnostics.
+
+```toml
+[expressions]
+strict = true
+```
+
+`strict` (default `false`) decides which call arguments warn. Off: an argument
+that might not convert to its parameter's type warns
+(`dm.expression.uncertain_call`), and one that can never bind is an error
+(`dm.expression.incompatible_call`). On: an argument that may be `null` where
+the parameter does not accept `null`, or whose type is unknown, warns as well.
+
+```markdown
+---
+$schema:
+  maybe: number   # optional: a number or null
+maybe: 3
+untyped_var: 1    # not in $schema: its type is unknown
+---
+{{ min(maybe, 5) }}
+{{ min(untyped_var, 5) }}
+```
+
+Both calls are silent by default and warn in strict mode: `maybe` may be
+`null`, and `untyped_var` has no declared type.
+
+Two call warnings ignore `strict` and appear either way:
+
+- `dm.expression.always_false_call`: a `file_exists` call on literal text
+  that can never be a file reference (`file_exists("https://")`).
+- `dm.expression.incomplete_analysis`: a call to a host function (one a host
+  such as Claudine registers) whose facts artifact, `<catalog>.facts.json`
+  beside the host's function catalog, is missing, invalid, or out of date.
+  The call gets no type check and its guard narrows nothing until the host
+  regenerates the artifact. See
+  [Host Expression Functions](../topics/host-functions.md).
+
+It is the only call-diagnostic setting; no function has one of its own (there
+is no `file_exists` setting). The
+editor key is `expressions.strict` under `dmls`, and it overrides the file
+both ways. See [DMLS Diagnostics](../../dmls/docs/diagnostics.md#expressionsstrict)
+for the categories, the fix for each warning, and what an invalid value does.
 
 ## `[shell]`
 

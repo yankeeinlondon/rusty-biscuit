@@ -1,12 +1,13 @@
 //! Differential evidence against production APIs; the candidate model imports no Claudine types.
-#[path = "../../../features/2026-10-27-darkmatter-lifecycle-ownership/spike/model.rs"]
+#[path = "../fixtures/lifecycle_control_flow_spike/model.rs"]
 mod model;
 
-use claudine::composition::lifecycle::actions::RetryBackoff;
-use claudine::composition::lifecycle::control::{ControlDispatch, decide_control};
-use claudine::composition::lifecycle::executor::{LifecycleEventOutcome, StackControl};
-use claudine::composition::lifecycle::runtime::{LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState};
-use claudine::composition::{LifecycleErrorInfo, LifecycleSignal};
+use claudine::composition::{LifecycleCatchProtocolExt, LifecycleErrorInfoExt};
+use darkmatter::lifecycle::actions::RetryBackoff;
+use darkmatter::lifecycle::control::{ControlDispatch, decide_control};
+use darkmatter::lifecycle::executor::{LifecycleEventOutcome, StackControl};
+use darkmatter::lifecycle::runtime::{LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState};
+use darkmatter::lifecycle::{LifecycleErrorInfo, LifecycleSignal};
 use model::{Catch, Control, Outcome, Recovery, Role};
 
 fn signal(role: Role) -> LifecycleSignal {
@@ -129,7 +130,8 @@ fn catch_cleanup_controls_are_not_normal_finalize_recovery() {
 
 #[test]
 fn production_guard_records_downgrade_and_distinguishes_retry_from_proxy_reset() {
-    use claudine::composition::{DefaultLifecycleEmitter, LifecycleConfig, LifecycleRunGuard, LifecycleRuntimeContext};
+    use claudine::composition::{DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext};
+    use darkmatter::lifecycle::LifecycleConfig;
     use claudine::events::GlobalSettings;
     use claudine::messaging::RuntimeMessagingSettings;
     use biscuit_terminal::terminal::Terminal;

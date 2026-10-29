@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Side Effects
 
 A **side effect** is an operation that changes something: a value held in memory, a Markdown file, a log, or a remote service. For example, a workflow might mark a document as `done` after an agent finishes its task.
@@ -60,6 +63,25 @@ Frontmatter is the YAML metadata between `---` lines at the start of a Markdown 
 | `decrement_frontmatter` | Subtracts one from a number and returns the new number. A missing property becomes `-1`.            |
 | `append_frontmatter`    | Adds a value to the end of an array and returns the updated array.                                  |
 | `prepend_frontmatter`   | Adds a value to the beginning of an array and returns the updated array.                            |
+
+`set_frontmatter` takes a file, a property name, and a value. The value may
+be null: that stores an explicit null rather than deleting the key. Use
+`delete_frontmatter` when the key itself should disappear.
+
+```yaml
+success:
+  - set_frontmatter: ["state.md", "reviewer", null]
+```
+
+`merge_frontmatter` takes only a file and an object; there is no property-name
+argument. For example, if frontmatter declares
+`changes: { status: done, reviewer: null }`, the following action merges those
+two properties. A scalar or list in place of that object is rejected.
+
+```yaml
+success:
+  - merge_frontmatter: ["state.md", "{{ changes }}"]
+```
 
 When a Claudine lifecycle action or sequence `side_effect:` writes a value
 with `set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, or
@@ -152,11 +174,14 @@ It uses Darkmatter's optional `effects-instrumentation` feature, which counts en
 1. Add an `EffectEngine` method in `verbs.rs`, honoring the applicable filesystem, network, and hash rules.
 2. Add an `EffectDescriptor` to `EFFECT_DESCRIPTORS`, including an example.
 3. Add an entry to the test-only `EFFECT_VERBS` table that calls the real method.
+4. Type the operation's parameters in `darkmatter/schemas/partials/mutations.yaml`, written in the expression-function catalog grammar (one `function(...)` per overload). These types are the operation's argument contract: a lifecycle action's arguments are bound to them when the event runs, before the engine is called, and the generated lifecycle schema projects them (`just -f darkmatter/justfile regen-lifecycle-schema`).
 
 Two tests in `effects/catalog.rs` check the result:
 
 - `verb_signature_set_equals_descriptor_signature_set` checks that the test table and descriptor catalog contain exactly the same signatures, and that every descriptor has an example.
 - `every_verb_maps_to_a_reachable_method` exercises each test-table entry in a sandbox. The HTTP entry checks the default host refusal without sending a request.
+
+A third test in `effects/types.rs`, `every_effect_descriptor_has_exactly_one_typed_overload`, fails when a descriptor signature has no typed entry in `mutations.yaml`, or a typed entry has no descriptor.
 
 These tests catch disagreement between the two tables, including missing entries for alternate signatures such as `ensure_file(file, content)`. They **cannot detect a new public method omitted from both tables**. Reviewing new methods for catalog coverage remains necessary.
 

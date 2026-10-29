@@ -479,7 +479,7 @@ fn contradictory_container_bounds_fail_with_their_origins() {
     assert_eq!(kind, SchemaConstraintConflictKind::Bounds);
     assert_eq!(site.path, SchemaSourcePath::root().property("p"));
     assert_eq!(
-        constraints.iter().map(|origin| origin.keyword.as_str()).collect::<Vec<_>>(),
+        constraints.iter().map(|participant| participant.origin.keyword.as_str()).collect::<Vec<_>>(),
         ["min", "max"]
     );
 }
@@ -518,6 +518,73 @@ fn container_defaults_match_plain_arrays_and_arm_defaults_are_rejected() {
         .expect("resolves");
     assert_eq!(property(&single, "p")["default"], 3);
     assert_eq!(property(&single, "p")["anyOf"][2], json!({ "type": "number" }));
+}
+
+fn programmatic_array_defaults(
+    root: &Path,
+    inherited: Value,
+    supplied: Value,
+) -> Result<darkmatter::markdown::schemas::resolve::NamedTypeExpansion, SchemaError> {
+    let value = serde_yaml_ng::from_str("choice: [string, number]\np: choice[]\n").unwrap();
+    let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+    let SimplifiedSchema::Single(shape) = &mut schema else {
+        panic!("single shape");
+    };
+    let PropertyDef::Union(arms) = shape.properties.get_mut("choice").unwrap() else {
+        panic!("union definition");
+    };
+    arms[0].constraints.push(Constraint::Default(inherited));
+    let PropertyDef::Single(reference) = shape.properties.get_mut("p").unwrap() else {
+        panic!("single reference");
+    };
+    reference.array_constraints.push(Constraint::Default(supplied));
+    darkmatter::markdown::schemas::resolve::expand_named_types(
+        &schema,
+        root,
+        None,
+        &[],
+        &biscuit_file::FileResolutionContext::new(root),
+    )
+}
+
+#[test]
+fn inherited_array_defaults_lift_once_and_merge_with_equal_container_defaults() {
+    let (_dir, root) = temp_root();
+    let expansion = programmatic_array_defaults(&root, json!(["a", 3]), json!(["a", 3.0]))
+        .expect("equal array defaults merge after numeric normalization");
+    let lowered = darkmatter::markdown::schemas::to_json_schema(&expansion.schema).unwrap();
+    let container = &lowered["properties"]["p"];
+    assert_eq!(container["default"], json!(["a", 3]));
+    let array = unwrap_optional(container);
+    assert_eq!(array["type"], "array");
+    assert_eq!(array["items"]["anyOf"], json!([{"type": "string"}, {"type": "number"}]));
+    let SimplifiedSchema::Single(shape) = &expansion.schema else {
+        panic!("single shape");
+    };
+    let PropertyDef::Single(atom) = &shape.properties["p"] else {
+        panic!("one array atom");
+    };
+    assert_eq!(atom.array_constraints, vec![Constraint::Default(json!(["a", 3]))]);
+    assert!(atom.union_arms().unwrap().iter().all(|arm| {
+        arm.constraints.iter().all(|constraint| !matches!(constraint, Constraint::Default(_)))
+    }));
+}
+
+#[test]
+fn conflicting_inherited_array_defaults_report_the_definition_arm_and_use_site() {
+    let (_dir, root) = temp_root();
+    let error = programmatic_array_defaults(&root, json!(["a", 3]), json!(["a", 4]))
+        .expect_err("distinct array defaults must not be discarded or overwritten");
+    let SchemaError::ConstraintConflict { name, kind, site, constraints } = error else {
+        panic!("expected ConstraintConflict, got {error:?}");
+    };
+    assert_eq!(name, "choice");
+    assert_eq!(kind, SchemaConstraintConflictKind::Default);
+    assert_eq!(site.path, SchemaSourcePath::root().property("p"));
+    assert_eq!(constraints.len(), 2);
+    assert_eq!(constraints[0].origin.path, SchemaSourcePath::root().property("choice").union_arm(0));
+    assert_eq!(constraints[1].origin.path, SchemaSourcePath::root().property("p"));
+    assert!(constraints.iter().all(|participant| participant.origin.keyword == "default"));
 }
 
 // ── AC 2 and AC 7: rejected operations and their provenance ──────────────
@@ -619,8 +686,14 @@ fn a_rejection_inside_a_referenced_schema_keeps_the_referenced_wrapper() {
 #[test]
 fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
     let (_dir, root) = temp_root();
+    // `b: a[]` descends into list items, so the cycle is admitted; `[]` over
+    // a union one of whose alternatives is already a list is still refused.
     let err = resolve_inline(&root, "a: [\"b(required)\", number]\nb: a[]\n").expect_err("cycle");
-    assert!(matches!(err, SchemaError::ImportCycle { .. }), "{err:?}");
+    assert!(
+        matches!(&err, SchemaError::UnionReference { rejection, .. }
+            if matches!(**rejection, darkmatter::markdown::schemas::SchemaUnionRejection::ArrayArm { arm: 0 })),
+        "{err:?}"
+    );
 
     let mut chain = String::new();
     for index in 0..40 {
@@ -638,7 +711,7 @@ fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
 // ── Authored references round-trip; resolved unions are display-only ──────
 
 #[test]
-fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected() {
+fn authored_union_references_round_trip_and_union_arrays_share_one_spelling() {
     use darkmatter::markdown::schemas::simplified::{grammar::parse_type_expr, serialize_property_atom};
 
     for authored in [
@@ -667,8 +740,9 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
         );
     }
 
-    // The resolved form is a display spelling the grammar refuses, so it can
-    // never be mistaken for an authored expression.
+    // The resolved list of a named union and the grouped spelling
+    // `(A | B)[]` are one representation: the resolved form serializes to
+    // that spelling, which parses back to the same atom.
     let (_dir, root) = temp_root();
     let resolved = resolve_inline(&root, "choice: [string, number]\np: \"choice[](min(1))\"\n")
         .expect("schema resolves");
@@ -677,14 +751,14 @@ fn authored_union_references_round_trip_and_anonymous_union_arrays_stay_rejected
     };
     assert!(matches!(atom.ty, TypeExpr::Union(_)), "{atom:?}");
     let display = serialize_property_atom(atom);
-    assert!(parse_type_expr("p", &display).is_err(), "{display}");
+    assert_eq!(display, "(string | number)[](min(1))");
+    assert_eq!(&parse_type_expr("p", &display).expect(&display), atom);
 
-    // Only a named union takes `[]`; no anonymous spelling is accepted.
-    for anonymous in ["(string | number)[]", "[string, number][]"] {
-        assert!(parse_type_expr("p", anonymous).is_err(), "{anonymous}");
-        let schema = format!("p: \"{anonymous}\"\n");
-        resolve_inline(&root, &schema).expect_err(&schema);
-    }
+    // A bracketed arm list is still not a type expression.
+    let anonymous = "[string, number][]";
+    assert!(parse_type_expr("p", anonymous).is_err(), "{anonymous}");
+    let schema = format!("p: \"{anonymous}\"\n");
+    resolve_inline(&root, &schema).expect_err(&schema);
 }
 
 // ── AC 2 and AC 7: a postfixed alias is still a union target ─────────────

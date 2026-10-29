@@ -1,0 +1,24 @@
+---
+source: darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+expression: "pretty(\"id: 'string | number'\\n\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,52 @@
+[
+  {
+    "at": "plain scalar value",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**`yolo`**\n\nType: **boolean**\n\n\n\nskip permission prompts; set by flag, not read from a document"
+      },
+      "range": {
+        "start": {
+          "line": 13,
+          "character": 0
+        },
+        "end": {
+          "line": 13,
+          "character": 4
+        }
+      }
+    }
+  },
+  {
+    "at": "empty string value",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**`commit_message`**\n\nType: **string**\n\n\n\nif you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it"
+      },
+      "range": {
+        "start": {
+          "line": 14,
+          "character": 0
+        },
+        "end": {
+          "line": 14,
+          "character": 14
+        }
+      }
+    }
+  },
+  {
+    "at": "list item marker",
+    "hover": null
+  },
+  {
+    "at": "comment line",
+    "hover": null
+  },
+  {
+    "at": "body",
+    "hover": null
+  }
+]

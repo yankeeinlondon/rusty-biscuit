@@ -31,9 +31,9 @@ fn parse(args: &[&str]) -> Cli {
 
 /// The features `md` hands the renderer: the top-level list plus `render`'s.
 fn dispatched_features(cli: &Cli) -> Vec<Feature> {
-    match &cli.command {
-        Some(Command::Render { features, .. }) => [cli.features.as_slice(), features].concat(),
-        _ => cli.features.clone(),
+    match cli.command_or_render() {
+        Command::Render(options) => options.features,
+        _ => cli.render.features.clone(),
     }
 }
 
@@ -56,7 +56,7 @@ fn page_for(args: &[&str], doc: &str) -> (darkmatter::layout::DarkmatterPage, Ma
     // A default-layout page detects color from the process, not from `term`,
     // unless its depth is set: pin it so `NO_COLOR` or `TERM=dumb` cannot
     // strip the highlighting these tests assert.
-    let page = terminal_page(&md, None, &cli, &term, &dispatched_features(&cli))
+    let page = terminal_page(&md, None, &cli, &term, false, &dispatched_features(&cli))
         .expect("terminal page")
         .with_color_depth(ColorDepth::TrueColor);
     (page, md)

@@ -1,0 +1,36 @@
+{
+  "catalog_hash": "c149f3a65e7765458de8911af7adaa22f5b09a81ed2d275037604f2f384f406a",
+  "format_version": 1,
+  "functions": {
+    "is_project_file": {
+      "aliases": [],
+      "conversion_recovery": null,
+      "facts": [
+        {
+          "kind": "true_implies",
+          "parameter": "value",
+          "position": 0,
+          "type": "file"
+        }
+      ],
+      "lazy": false,
+      "malformed_reference": null,
+      "source_exclusions": []
+    },
+    "project_label": {
+      "aliases": [],
+      "conversion_recovery": null,
+      "facts": [],
+      "lazy": false,
+      "malformed_reference": null,
+      "source_exclusions": [
+        {
+          "kinds": [
+            "number"
+          ],
+          "parameter": "name"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,63 @@
+Darkmatter Side-Effect Capabilities
+
+This report documents Darkmatter's side-effect capabilities. It is documentation-only and does not invoke any side effects.
+
+- this report is documentation only and does not invoke side effects
+- only an external orchestrator invokes side effects
+- filesystem writes are restricted to the configured mutation root
+- network operations are restricted by the host allowlist, which is deny-all by default
+- Markdown mutations honor Darkmatter's auto-rehash behavior
+- capability catalog membership does not imply authorization or availability
+
+State Mutation
+ ┌────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────┬─────────┬───────────────┐
+ │ Capability                             │ Description                                                         │ Example │ Safety        │
+ ├────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────┼─────────┼───────────────┤
+ │ set(key, value)                        │ Sets a top-level key in the in-memory state map (no disk write).    │ → null  │ InMemoryState │
+ │                                        │ Returns the prior value (or null).                                  │         │               │
+ └────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────┴─────────┴───────────────┘
+
+Frontmatter Mutations
+ ┌────────────────────────────────────────┬────────────────────────────────────────────────────────┬───────────────────┬──────────────────┐
+ │ Capability                             │ Description                                            │ Example           │ Safety           │
+ ├────────────────────────────────────────┼────────────────────────────────────────────────────────┼───────────────────┼──────────────────┤
+ │ set_frontmatter(file, prop, value)     │ Sets a frontmatter property. Returns the prior value ( │ → null            │ MarkdownMutation │
+ │                                        │ or null).                                              │                   │                  │
+ │ merge_frontmatter(file, obj)           │ Shallow-merges an object into the document's           │ → {"owner":"ken"} │ MarkdownMutation │
+ │                                        │ frontmatter. Returns the merged object.                │                   │                  │
+ │ delete_frontmatter(file, prop)         │ Removes a frontmatter property. Returns the removed    │ → ken             │ MarkdownMutation │
+ │                                        │ value (or null).                                       │                   │                  │
+ │ increment_frontmatter(file, prop)      │ Increments a numeric frontmatter property. Missing     │ → 2               │ MarkdownMutation │
+ │                                        │ becomes 1. Returns the new number.                     │                   │                  │
+ │ decrement_frontmatter(file, prop)      │ Decrements a numeric frontmatter property. Missing     │ → 0               │ MarkdownMutation │
+ │                                        │ becomes -1. Returns the new number.                    │                   │                  │
+ │ append_frontmatter(file, prop, value)  │ Appends a value to a frontmatter array property.       │ → ["a","b"]       │ MarkdownMutation │
+ │                                        │ Returns the new array.                                 │                   │                  │
+ │ prepend_frontmatter(file, prop, value) │ Prepends a value to a frontmatter array property.      │ → ["z","a","b"]   │ MarkdownMutation │
+ │                                        │ Returns the new array.                                 │                   │                  │
+ └────────────────────────────────────────┴────────────────────────────────────────────────────────┴───────────────────┴──────────────────┘
+
+File & Directory
+ ┌────────────────────────────────────────┬──────────────────────────────────────────────────────┬──────────────────────┬─────────────────┐
+ │ Capability                             │ Description                                          │ Example              │ Safety          │
+ ├────────────────────────────────────────┼──────────────────────────────────────────────────────┼──────────────────────┼─────────────────┤
+ │ ensure_file(file)                      │ Creates an empty file if missing. Returns the        │ → /path/to/new.txt   │ FilesystemWrite │
+ │                                        │ absolute path.                                       │                      │                 │
+ │ ensure_file(file, content)             │ Creates a file with content if missing. Existing     │ → /path/to/new.txt   │ FilesystemWrite │
+ │                                        │ files are unchanged. Returns the absolute path.      │                      │                 │
+ │ ensure_dir(dir)                        │ Creates a directory and all parents if missing.      │ → /path/to/sub       │ FilesystemWrite │
+ │                                        │ Returns the absolute path.                           │                      │                 │
+ │ append_line(file, text)                │ Appends text and a newline to a file. Returns the    │ → /path/to/log.txt   │ FilesystemWrite │
+ │                                        │ absolute path.                                       │                      │                 │
+ │ append_jsonl(file, obj)                │ Serializes an object as JSON and appends it as a     │ → /path/to/log.jsonl │ FilesystemWrite │
+ │                                        │ line. Returns the absolute path.                     │                      │                 │
+ └────────────────────────────────────────┴──────────────────────────────────────────────────────┴──────────────────────┴─────────────────┘
+
+Network
+ ┌────────────────────────────────────────┬────────────────────────────────────────────────────────┬────────────────────────────┬─────────┐
+ │ Capability                             │ Description                                            │ Example                    │ Safety  │
+ ├────────────────────────────────────────┼────────────────────────────────────────────────────────┼────────────────────────────┼─────────┤
+ │ http_post(url, body)                   │ Sends an HTTP POST request. Returns an object with     │ → {"status":403,"body":""} │ Network │
+ │                                        │ status and body.                                       │                            │         │
+ └────────────────────────────────────────┴────────────────────────────────────────────────────────┴────────────────────────────┴─────────┘
+

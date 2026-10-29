@@ -11,7 +11,8 @@ use super::{CliProcessFixture, write_executable};
 /// Install a stub `binary` in the fixture's `bin` directory that records each
 /// launch, then runs `behavior`; returns the record directory.
 ///
-/// Launch `n` (0-based, in launch order, shared by every stub in the fixture)
+/// Launch `n` (0-based, in launch order, shared by every stub in the fixture;
+/// claimed with an atomic `mkdir`, so concurrent group legs never share one)
 /// writes the binary name and then its arguments to `launches/launch-NNN`
 /// (`\x1f` separated), its `AGENT_PARAMS` to `launches/params-N`, and its
 /// stdin, which is where the composed prompt arrives, to
@@ -24,8 +25,8 @@ pub fn install(fixture: &CliProcessFixture, binary: &str, behavior: &str) -> Pat
         &format!(
             "#!/bin/sh\n\
              dir='{dir}'\n\
-             n=$(cat \"$dir/count\" 2>/dev/null || echo 0)\n\
-             echo $((n + 1)) > \"$dir/count\"\n\
+             n=0\n\
+             while ! mkdir \"$dir/claim-$n\" 2>/dev/null; do n=$((n + 1)); done\n\
              file=$(printf 'launch-%03d' \"$n\")\n\
              {{ printf '%s\\037' '{binary}'; for arg in \"$@\"; do printf '%s\\037' \"$arg\"; done; }} > \"$dir/$file\"\n\
              printf '%s' \"$AGENT_PARAMS\" > \"$dir/params-$n\"\n\

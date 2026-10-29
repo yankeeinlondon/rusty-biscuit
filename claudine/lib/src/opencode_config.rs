@@ -124,6 +124,9 @@ pub fn merge_named_overlay(name: &str, current: Option<&OsStr>, overlay: Value) 
     };
 
     deep_merge(&mut base, overlay);
+    // Keys stay sorted so the value is byte-identical however its maps were
+    // built, as it was before `serde_json/preserve_order`.
+    base.sort_all_objects();
     Ok(serde_json::to_string(&base)?)
 }
 
@@ -218,7 +221,9 @@ mod tests {
     }
 
     #[test]
-    fn yolo_permission_block_round_trips_independent_of_insertion_order() {
+    fn yolo_permission_block_serializes_independent_of_insertion_order() {
+        // Build the same logical block with the three keys inserted in a
+        // different order; the merged value must be byte-identical.
         let mut permission = Map::new();
         permission.insert("doom_loop".into(), Value::String("allow".into()));
         permission.insert("*".into(), Value::String("allow".into()));
@@ -228,11 +233,8 @@ mod tests {
         let reordered = Value::Object(root);
 
         assert_eq!(
-            serde_json::from_str::<Value>(
-                &serde_json::to_string(&yolo_permission_block()).unwrap()
-            )
-            .unwrap(),
-            reordered
+            merge_overlay(None, yolo_permission_block()).unwrap(),
+            merge_overlay(None, reordered).unwrap()
         );
     }
 }

@@ -145,23 +145,37 @@ fn a_valid_document_exits_zero_with_no_problems() {
     assert_eq!(report["problems"], serde_json::json!([]));
 }
 
-/// An assignment that replaces an authored value keeps the original node's
-/// start; one that adds a new top-level property has no position, which JSON
-/// reports as `null`.
+/// Assignments keep authored node starts, fall back to an authored ancestor
+/// for new nested paths, and report `null` for new top-level paths.
 #[test]
 fn assigned_values_use_the_original_node_or_report_null() {
     let process = CliProcessFixture::new();
     let doc = write_document(
         &process,
         "assigned",
-        "---\ncount: 1\n$schema:\n  count: number\n  extra: number\n---\n",
+        "---\ncount: 1\nm:\n  a: 1\n$schema:\n  count: number\n  m: '{ a: number, b: number }'\n  extra: number\n---\n",
     );
 
-    let (code, report) = validate_json(&process, &doc, &["count=abc", "extra=abc"]);
+    let (code, report) = validate_json(
+        &process,
+        &doc,
+        &["count=abc", "m.a=abc", "m.b=abc", "extra=abc"],
+    );
 
     assert_eq!(code, 1, "{report:#}");
+    assert_eq!(report["problems"].as_array().unwrap().len(), 4, "{report:#}");
     let replaced = problem(&report, "/count", "type");
     assert_eq!((&replaced["line"], &replaced["column"]), (&serde_json::json!(2), &serde_json::json!(8)));
+    let nested_replaced = problem(&report, "/m/a", "type");
+    assert_eq!(
+        (&nested_replaced["line"], &nested_replaced["column"]),
+        (&serde_json::json!(4), &serde_json::json!(6)),
+    );
+    let nested_added = problem(&report, "/m/b", "type");
+    assert_eq!(
+        (&nested_added["line"], &nested_added["column"]),
+        (&serde_json::json!(4), &serde_json::json!(3)),
+    );
     let added = problem(&report, "/extra", "type");
     assert!(added["line"].is_null() && added["column"].is_null(), "{added:#}");
 }

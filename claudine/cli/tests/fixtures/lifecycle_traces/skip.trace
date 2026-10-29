@@ -1,0 +1,7 @@
+# scenario: skip
+# doc: skip.md
+# given: invoked as `claudine compose --claude skip.md` from the directory holding the fixture documents
+# given: initialize returns skip
+# given: the provider never launches
+event initialize
+exit 0

@@ -1,0 +1,27 @@
+# scenario: cancelled-not-opted-in
+# doc: cancelled-not-opted-in.md
+# given: invoked as `claudine sequence --claude --yolo cancelled-not-opted-in.md` from the directory holding the fixture documents
+# given: group checks has fail_fast true; leg opted does not declare cancelled, so it is not cancelled; its shell completes after bad has failed
+# given: leg bad's shell exits 1 after opted's shell started
+# given: no provider launches
+event seq:initialize
+event seq:start
+event checks:initialize
+event checks:start
+event opted:initialize
+event opted:start
+task opted waiting
+task bad
+task opted completed
+event opted:success
+event opted:finalize
+err none
+event checks:failure
+err composition.failed
+event checks:finalize
+err composition.failed
+event seq:failure
+err composition.failed
+event seq:finalize
+err composition.failed
+exit 1

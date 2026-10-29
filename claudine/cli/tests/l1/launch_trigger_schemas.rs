@@ -10,17 +10,43 @@
 //! at their fresh reads, runs after `initialize`, and inline completion reuses
 //! the schema frozen at launch.
 //!
-//! Darkmatter validation coerces scalars to text, so every rejected value here
-//! is a list or mapping where the payload declares a scalar.
+//! Darkmatter validation coerces scalars to text, so a rejected scalar here is
+//! one no conversion accepts (`pr_list: three`), a malformed template, or a
+//! `null` for a non-nullable parameter; the other rejected values are lists or
+//! mappings where the payload declares a scalar. A deferred generated-verb
+//! operand passes the verdict and is bound to its parameter type when its
+//! event fires, before the action dispatches.
+//!
+//! The marker provider is the compiled `claudine-fake-goose`, so every test
+//! that only asks whether the provider launched runs on every OS. The tests
+//! marked `#[cfg(unix)]` need a provider that records its prompt, edits the
+//! document, or acts as an inline agent, which only the shell stubs do.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::common;
-use common::{CliProcessFixture, InlineAgentStub, launch_recorder, sh_quote, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi};
+#[cfg(unix)]
+use common::{InlineAgentStub, launch_recorder, sh_quote};
 
 /// The cleanup warning the launch cleaner prints when it drops a value.
 const DROPPED: &str = "dropped optional schema property";
+
+macro_rules! launch_verdict_cases {
+    ($schedule:ident, $helper:ident; $($(#[$meta:meta])* $name:ident: $case:literal),+ $(,)?) => {
+        const $schedule: &[bool] = &[$($case),+];
+
+        $(
+            $(#[$meta])*
+            #[test]
+            fn $name() {
+                $helper($case);
+            }
+        )+
+    };
+}
+
 
 /// Collapse whitespace and block gutters so substring assertions survive the
 /// renderer's terminal-width wrapping.
@@ -34,15 +60,30 @@ struct Run {
     stderr: String,
 }
 
-/// A fixture whose `goose` writes a marker on any launch.
+/// The file the marker provider appends one line to per launch; [`run`] names
+/// it in `PROVIDER_MARKER` for every command.
+fn marker_path(fixture: &CliProcessFixture) -> PathBuf {
+    fixture.cwd().join("provider-launched.txt")
+}
+
+/// A fixture whose `goose` appends a line to [`marker_path`] on each launch.
+///
+/// A built binary, not a script: a `.cmd` shim cannot carry Claudine's prompt
+/// argument on Windows ("batch file arguments are invalid").
 fn marker_fixture(name: &str) -> (CliProcessFixture, PathBuf) {
     let fixture = CliProcessFixture::named(name);
-    let marker = fixture.cwd().join("provider-launched.txt");
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        &format!("#!/bin/sh\necho touched >> {}\nexit 0\n", sh_quote(&marker.display().to_string())),
-    );
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        fixture.bin_dir().join(format!("goose{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .expect("the fake provider is built with `test-fixtures`");
+    let marker = marker_path(&fixture);
     (fixture, marker)
+}
+
+/// How many times the marker provider launched.
+fn provider_launches(marker: &Path) -> usize {
+    fs::read_to_string(marker).map_or(0, |log| log.lines().count())
 }
 
 fn write_doc(fixture: &CliProcessFixture, name: &str, content: &str) -> PathBuf {
@@ -54,6 +95,7 @@ fn write_doc(fixture: &CliProcessFixture, name: &str, content: &str) -> PathBuf 
 fn run(fixture: &CliProcessFixture, subcommand: &str, doc: &Path, extra: &[&str]) -> Run {
     let output = fixture
         .command()
+        .env("PROVIDER_MARKER", marker_path(fixture))
         .args([subcommand, "--goose", doc.to_str().unwrap()])
         .args(extra)
         .output()
@@ -73,6 +115,7 @@ fn events(fixture: &CliProcessFixture) -> Vec<String> {
 }
 
 /// The prompt goose received: the argument after `-t`.
+#[cfg(unix)]
 fn goose_prompt(argv: &[String]) -> &str {
     let at = argv.iter().position(|arg| arg == "-t").expect("goose run -t <prompt>");
     argv[at + 1].as_str()
@@ -120,6 +163,45 @@ const ROWS: &[Row] = &[
         frontmatter: "loop: 42\n",
         needles: &["/loop"],
     },
+    // Generated per-verb types: the lifecycle parser does not type-check a
+    // literal operand, so only the schema verdict stops these before launch.
+    Row {
+        name: "generated_verb_wrong_type",
+        frontmatter: "start:\n    - pr_list: three\n",
+        needles: &["/start/0/pr_list", "three"],
+    },
+    Row {
+        name: "generated_verb_malformed_template",
+        frontmatter: "start:\n    - pr_list: \"{{ 1 + }}\"\n",
+        needles: &["/start/0/pr_list", "{{ 1 + }}"],
+    },
+    // The operand's type accepts text, so only the template's syntax is wrong.
+    Row {
+        name: "generated_verb_malformed_string_template",
+        frontmatter: "start:\n    - ensure_file: \"{{ 1 + }}\"\n",
+        needles: &["/start/0/ensure_file", "malformed template `{{ 1 + }}`"],
+    },
+    // A verb the parser owns itself reads the same strings as templates.
+    Row {
+        name: "handwritten_verb_malformed_template",
+        frontmatter: "start:\n    - say: \"{{ 1 + }}\"\n",
+        needles: &["/start/0/say", "malformed template `{{ 1 + }}`"],
+    },
+    Row {
+        name: "with_overlay_malformed_template",
+        frontmatter: "start:\n    - proxy: { target: next.md, with: { note: \"{{ 1 + }}\" } }\n",
+        needles: &["/start/0/proxy/with/note", "malformed template `{{ 1 + }}`"],
+    },
+    Row {
+        name: "generated_verb_bad_sibling_beside_deferred",
+        frontmatter: "x: 2\nstart:\n    - min: [three, \"{{ fm.x }}\"]\n",
+        needles: &["/start/0/min/0", "three"],
+    },
+    Row {
+        name: "optional_nonnullable_null",
+        frontmatter: "start:\n    - ping: [\"127.0.0.1\", null]\n",
+        needles: &["/start/0/ping/1", "null"],
+    },
 ];
 
 fn assert_row_blocks_launch(row_name: &str, subcommand: &str) {
@@ -137,6 +219,11 @@ fn assert_row_blocks_launch(row_name: &str, subcommand: &str) {
     let result = run(&fixture, subcommand, &doc, &[]);
 
     assert_schema_rejection(&result, row.needles, &format!("`{subcommand}`/`{row_name}`"));
+    assert!(
+        !result.stderr.to_lowercase().contains("dropped"),
+        "`{subcommand}`/`{row_name}` keeps the control key:\n{}",
+        result.stderr
+    );
     assert!(!marker.exists(), "`{subcommand}`/`{row_name}` must not launch the provider:\n{}", result.stderr);
 }
 
@@ -161,7 +248,19 @@ macro_rules! invalid_control_rows {
     };
 }
 
-invalid_control_rows!(misspelled_long_form_key, unknown_say_parameter, empty_agent_list, numeric_loop);
+invalid_control_rows!(
+    misspelled_long_form_key,
+    unknown_say_parameter,
+    empty_agent_list,
+    numeric_loop,
+    generated_verb_wrong_type,
+    generated_verb_malformed_template,
+    generated_verb_malformed_string_template,
+    handwritten_verb_malformed_template,
+    with_overlay_malformed_template,
+    generated_verb_bad_sibling_beside_deferred,
+    optional_nonnullable_null,
+);
 
 #[test]
 fn every_table_row_generates_its_tests() {
@@ -173,37 +272,41 @@ fn every_table_row_generates_its_tests() {
 // An authored `$schema` merges with the payload; phase rules are unchanged
 // ---------------------------------------------------------------------------
 
-/// `compose` reports an omitted authored required property as missing, and
-/// once the caller supplies it the payload still judges the Claudine controls
-/// beside it.
-#[test]
-fn compose_reports_an_omitted_authored_property_and_still_applies_the_payload() {
-    let (fixture, marker) = marker_fixture("launch-trigger-schemas-authored");
-    let valid = write_doc(
-        &fixture,
-        "valid.md",
-        "---\n$schema:\n  topic: string(required)\nstart:\n    - info: hi\n---\nPlan {{ topic }}\n",
-    );
-    let missing = run(&fixture, "compose", &valid, &[]);
-    assert_eq!(missing.code, Some(1), "{}", missing.stderr);
-    assert!(missing.stderr.contains("missing properties"), "{}", missing.stderr);
-    assert!(missing.stderr.contains("`topic`"), "{}", missing.stderr);
+// `compose` reports an omitted authored required property as missing, and
+// once the caller supplies it the payload still judges the Claudine controls
+// beside it.
+launch_verdict_cases! {
+    AUTHORED_PROPERTY_SCHEDULE, authored_property_case;
+    compose_reports_an_omitted_authored_property_and_still_applies_the_payload: false,
+    compose_supplied_authored_property_still_checks_the_trigger_payload: true,
+}
 
-    let invalid = write_doc(
+fn authored_property_case(supplied: bool) {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-authored");
+    let control = if supplied { "agent: []\n" } else { "start:\n    - info: hi\n" };
+    let doc = write_doc(
         &fixture,
-        "invalid.md",
-        "---\n$schema:\n  topic: string(required)\nagent: []\n---\nPlan {{ topic }}\n",
+        "prompt.md",
+        &format!("---\n$schema:\n  topic: string(required)\n{control}---\nPlan {{{{ topic }}}}\n"),
     );
-    let supplied = run(&fixture, "compose", &invalid, &["topic=diffs"]);
-    assert_schema_rejection(&supplied, &["/agent"], "the supplied run");
-    assert!(!supplied.stderr.contains("missing properties"), "{}", supplied.stderr);
-    assert!(!marker.exists(), "neither run launches the provider");
+    let setters = if supplied { &["topic=diffs"][..] } else { &[] };
+    let result = run(&fixture, "compose", &doc, setters);
+    if supplied {
+        assert_schema_rejection(&result, &["/agent"], "the supplied run");
+        assert!(!result.stderr.contains("missing properties"), "{}", result.stderr);
+    } else {
+        assert_eq!(result.code, Some(1), "{}", result.stderr);
+        assert!(result.stderr.contains("missing properties"), "{}", result.stderr);
+        assert!(result.stderr.contains("`topic`"), "{}", result.stderr);
+    }
+    assert!(!marker.exists(), "the rejected run launches no provider");
 }
 
 const DEFERRED_DOC: &str = "---\n$schema:\n  topic: string(required)\nprompt: Write about the topic\nstart:\n    - info: hi\n---\nBody\n";
 
 /// `SchemaPhase::Launch` still defers a required non-eager absence to the
 /// agent with the payload selected.
+#[cfg(unix)]
 #[test]
 fn inline_compose_defers_a_required_non_eager_property() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-deferred");
@@ -254,6 +357,7 @@ fn inline_compose_rejects_a_missing_required_eager_property() {
 // ---------------------------------------------------------------------------
 
 /// Lifecycle stacks in both shapes, linking keys, and application data.
+#[cfg(unix)]
 const VALID_FRONTMATTER: &str = concat!(
     "start:\n    - info: hi\n",
     "success:\n    say: done\n",
@@ -263,6 +367,7 @@ const VALID_FRONTMATTER: &str = concat!(
     "ticket: 123\n",
 );
 
+#[cfg(unix)]
 #[test]
 fn compose_launches_a_valid_document_with_its_application_data() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-valid");
@@ -279,6 +384,7 @@ fn compose_launches_a_valid_document_with_its_application_data() {
     assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
 }
 
+#[cfg(unix)]
 #[test]
 fn inline_compose_launches_a_valid_document_and_keeps_its_application_data() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-valid-inline");
@@ -380,6 +486,29 @@ fn inline_compose_runs_initialize_before_the_verdict_and_never_start() {
     assert_initialize_precedes_the_verdict("inline-compose", "prompt: hi\n");
 }
 
+/// A wrong-typed generated literal passes the lifecycle parser, so
+/// `initialize` still runs; the verdict then blocks `start` and the provider.
+#[test]
+fn compose_runs_initialize_before_a_generated_verb_verdict() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-initialize-generated");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        concat!(
+            "---\n",
+            "initialize:\n    - append_line: [\"events.log\", \"initialize\"]\n",
+            "start:\n    - append_line: [\"events.log\", \"start\"]\n    - pr_list: three\n",
+            "---\nBody\n",
+        ),
+    );
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_schema_rejection(&result, &["/start/1/pr_list", "three"], "compose");
+    assert_eq!(events(&fixture), ["initialize"], "{}", result.stderr);
+    assert!(!marker.exists(), "{}", result.stderr);
+}
+
 // ---------------------------------------------------------------------------
 // Fresh-read boundaries share the verdict
 // ---------------------------------------------------------------------------
@@ -408,6 +537,7 @@ fn a_proxy_target_with_an_invalid_control_fails_before_its_provider() {
 /// A step document whose control only the launch schema rejects fails at its
 /// turn, before its provider. (A static `agent: []` is not used here: preflight
 /// rejects it before any step launches.)
+#[cfg(unix)]
 #[test]
 fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence");
@@ -429,35 +559,44 @@ fn a_sequence_step_document_with_an_invalid_control_fails_before_its_provider() 
     assert!(goose_prompt(&argv[0]).contains("GOOD-STEP"), "{argv:?}");
 }
 
-/// A sequence document whose only control is `sequence` is judged by the
-/// embedded `sequence.yaml` payload, imports included, with no schema on
-/// disk: a malformed task field fails the run before any step launches. The
-/// unedited sequence launches its one step.
-#[test]
-fn a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_step() {
+// A sequence document whose only control is `sequence` is judged by the
+// embedded `sequence.yaml` payload, imports included, with no schema on
+// disk: a malformed task field fails the run before any step launches. The
+// unedited sequence launches its one step.
+launch_verdict_cases! {
+    SEQUENCE_TRIGGER_SCHEDULE, sequence_trigger_case;
+    #[cfg(unix)]
+    a_sequence_document_is_judged_by_the_embedded_sequence_trigger_before_any_step: false,
+    #[cfg(unix)]
+    an_unedited_sequence_passes_the_embedded_trigger_and_launches_its_step: true,
+}
+
+#[cfg(unix)]
+fn sequence_trigger_case(valid: bool) {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-sequence-root");
     let launches = launch_recorder::install(&fixture, "goose", "exit 0");
     write_doc(&fixture, "step.md", "---\ntitle: Step\n---\nSTEP-BODY\n");
-    let valid = write_doc(&fixture, "valid.md", "---\nsequence:\n    - name: one\n      prompt: step.md\n---\nBody.\n");
-    let malformed = write_doc(
+    let extra = if valid { "" } else { "      operation: [review]\n" };
+    let doc = write_doc(
         &fixture,
-        "malformed.md",
-        "---\nsequence:\n    - name: one\n      prompt: step.md\n      operation: [review]\n---\nBody.\n",
+        "sequence.md",
+        &format!("---\nsequence:\n    - name: one\n      prompt: step.md\n{extra}---\nBody.\n"),
     );
-
-    let control = run(&fixture, "sequence", &valid, &[]);
-    assert_eq!(control.code, Some(0), "{}", control.stderr);
-    assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", control.stderr);
-
-    let result = run(&fixture, "sequence", &malformed, &[]);
-    assert_eq!(result.code, Some(1), "{}", result.stderr);
-    assert!(result.stderr.contains("/sequence/0/operation"), "{}", result.stderr);
-    assert_eq!(launch_recorder::launches(&launches).len(), 1, "the malformed sequence launches nothing:\n{}", result.stderr);
+    let result = run(&fixture, "sequence", &doc, &[]);
+    if valid {
+        assert_eq!(result.code, Some(0), "{}", result.stderr);
+        assert_eq!(launch_recorder::launches(&launches).len(), 1, "{}", result.stderr);
+    } else {
+        assert_eq!(result.code, Some(1), "{}", result.stderr);
+        assert!(result.stderr.contains("/sequence/0/operation"), "{}", result.stderr);
+        assert!(launch_recorder::launches(&launches).is_empty(), "the malformed sequence launches nothing:\n{}", result.stderr);
+    }
 }
 
 /// The first attempt edits the document to carry an invalid control and fails;
 /// `failure: [retry]` re-reads it, and the retried attempt fails the verdict
 /// instead of launching.
+#[cfg(unix)]
 #[test]
 fn a_retried_attempt_rereads_the_document_through_the_verdict() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-retry");
@@ -486,11 +625,13 @@ fn a_retried_attempt_rereads_the_document_through_the_verdict() {
 
 /// The completion verdict's summary; a payload problem is listed beneath it
 /// by property.
+#[cfg(unix)]
 const COMPLETION_VERDICT: &str = "does not satisfy its schema at completion";
 
 /// The stderr of a completion verdict that failed on `property`, a property
 /// only the trigger payload declares: it is listed by name, and the block
 /// does not claim the document has a `$schema` or a raw JSON Schema.
+#[cfg(unix)]
 fn assert_completion_names(stderr: &str, property: &str) {
     assert!(stderr.contains(COMPLETION_VERDICT), "{stderr}");
     assert!(stderr.contains("Problems:"), "{stderr}");
@@ -499,30 +640,32 @@ fn assert_completion_names(stderr: &str, property: &str) {
     assert!(!stderr.contains("its `$schema`"), "{stderr}");
 }
 
-/// The agent's valid `model` passes completion and an invalid one fails it,
-/// so the payload frozen at launch judges what the agent wrote.
-#[test]
-fn inline_completion_rejects_an_invalid_control_the_agent_wrote() {
-    let fixture = CliProcessFixture::named("launch-trigger-schemas-completion");
-    let source = "---\nprompt: Write the body\n---\nBody\n";
-    let doc = write_doc(&fixture, "prompt.md", source);
-    InlineAgentStub::new(&doc)
-        .frontmatter_additions("model: gpt-x\n")
-        .install(fixture.bin_dir(), "goose");
-    let valid = run(&fixture, "inline-compose", &doc, &[]);
-    assert_eq!(valid.code, Some(0), "{}", valid.stderr);
+// The agent's valid `model` passes completion and an invalid one fails it,
+// so the payload frozen at launch judges what the agent wrote.
+launch_verdict_cases! {
+    INLINE_COMPLETION_SCHEDULE, inline_completion_case;
+    #[cfg(unix)]
+    inline_completion_rejects_an_invalid_control_the_agent_wrote: false,
+    #[cfg(unix)]
+    inline_completion_accepts_a_valid_control_the_agent_wrote: true,
+}
 
-    fs::write(&doc, source).unwrap();
-    InlineAgentStub::new(&doc)
-        .frontmatter_additions("model: {x: 1}\n")
-        .install(fixture.bin_dir(), "goose");
-    let invalid = run(&fixture, "inline-compose", &doc, &[]);
-    assert_eq!(invalid.code, Some(1), "{}", invalid.stderr);
-    assert_completion_names(&invalid.stderr, "model");
+#[cfg(unix)]
+fn inline_completion_case(valid: bool) {
+    let fixture = CliProcessFixture::named("launch-trigger-schemas-completion");
+    let doc = write_doc(&fixture, "prompt.md", "---\nprompt: Write the body\n---\nBody\n");
+    let addition = if valid { "model: gpt-x\n" } else { "model: {x: 1}\n" };
+    InlineAgentStub::new(&doc).frontmatter_additions(addition).install(fixture.bin_dir(), "goose");
+    let result = run(&fixture, "inline-compose", &doc, &[]);
+    assert_eq!(result.code, Some(if valid { 0 } else { 1 }), "{}", result.stderr);
+    if !valid {
+        assert_completion_names(&result.stderr, "model");
+    }
 }
 
 /// With an authored `$schema`, the completion block keeps its property table
 /// and still lists a problem on a property only the payload declares.
+#[cfg(unix)]
 #[test]
 fn inline_completion_lists_a_payload_problem_beside_the_authored_table() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-completion-authored");
@@ -551,13 +694,45 @@ fn write_git_skeleton(dir: &Path) {
     fs::write(git.join("config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
 }
 
+/// A malformed disk `claudine.yaml` is skipped with one warning naming it and
+/// its grammar failure, and the prompt launches. The skipped file still
+/// shadows the embedded copy, so the embedded payload's `start` rule never
+/// judges the launch.
+#[test]
+fn a_malformed_disk_trigger_is_skipped_with_a_warning_and_shadows_the_embedded_copy() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-broken-disk");
+    write_git_skeleton(fixture.cwd());
+    let schemas = fixture.cwd().join("schemas");
+    fs::create_dir_all(&schemas).unwrap();
+    fs::write(schemas.join("claudine.yaml"), "kind: schema-trigger\nmatch: 42\n$schema: {}\n").unwrap();
+    // Only the embedded payload rejects this operand (the parser does not
+    // type-check it), and the `failure` stack never fires on a passing run.
+    let doc = write_doc(&fixture, "prompt.md", "---\nfailure:\n  - pr_list: three\n---\nBody\n");
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_eq!(result.code, Some(0), "the prompt launches:\n{}", result.stderr);
+    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
+    assert_eq!(
+        result.stderr.matches("ignoring invalid schema trigger").count(),
+        1,
+        "the skipped trigger is reported once:\n{}",
+        result.stderr
+    );
+    assert!(result.stderr.contains("claudine.yaml"), "the skipped source is visible:\n{}", result.stderr);
+    assert!(result.stderr.contains("match"), "the trigger grammar failure is visible:\n{}", result.stderr);
+    assert!(!result.stderr.contains("schema load failed"), "never a schema-load error:\n{}", result.stderr);
+}
+
 /// A disk `claudine.yaml` that replaces the embedded one and loosens
 /// `description` to any value.
-const LOOSENED_CLAUDINE_SCHEMA: &str = "kind: trigger-schema\nmatch:\n    any:\n        - prompt: string(required)\n$schema:\n    description: \"unknown -> loosened\"\n";
+#[cfg(unix)]
+const LOOSENED_CLAUDINE_SCHEMA: &str = "kind: schema-trigger\nmatch:\n    group:\n        - prompt: string(required)\n$schema:\n    description: \"unknown -> loosened\"\n";
 
 /// An agent that loosens `description` on disk mid-run and writes a mapping
 /// into it: this run's completion verdict still uses the launch schema, and
 /// the next run reloads the disk file.
+#[cfg(unix)]
 #[test]
 fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-frozen");
@@ -591,27 +766,43 @@ fn an_agent_written_disk_schema_takes_effect_on_the_next_run() {
 // Pending values are judged after composition
 // ---------------------------------------------------------------------------
 
-/// `mode: "{{ m }}"` is not judged as authored: a supplied member launches,
-/// and a frontmatter non-member fails on the composed value.
-#[test]
-fn a_templated_control_is_judged_after_composition() {
-    let (fixture, marker) = marker_fixture("launch-trigger-schemas-templated");
-    let supplied = write_doc(&fixture, "supplied.md", "---\nmode: \"{{ m }}\"\nstart:\n    - info: hi\n---\nBody\n");
-    let launched = run(&fixture, "compose", &supplied, &["--set", r#"{"m":"append"}"#]);
-    assert_eq!(launched.code, Some(0), "{}", launched.stderr);
-    assert!(marker.exists(), "{}", launched.stderr);
-    fs::remove_file(&marker).unwrap();
-
-    let composed = write_doc(
-        &fixture,
-        "composed.md",
-        "---\nmode: \"{{ m }}\"\nm: bogus\nstart:\n    - info: hi\n---\nBody\n",
-    );
-    let rejected = run(&fixture, "compose", &composed, &[]);
-    assert_schema_rejection(&rejected, &["/mode", "bogus"], "the composed value");
-    assert!(!marker.exists(), "{}", rejected.stderr);
+// `mode: "{{ m }}"` is not judged as authored: a supplied member launches,
+// and a frontmatter non-member fails on the composed value.
+launch_verdict_cases! {
+    TEMPLATED_CONTROL_SCHEDULE, templated_control_case;
+    a_templated_control_is_judged_after_composition: true,
+    a_templated_control_rejects_its_composed_non_member: false,
 }
 
+fn templated_control_case(valid: bool) {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-templated");
+    let value = if valid { "" } else { "m: bogus\n" };
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        &format!("---\nmode: \"{{{{ m }}}}\"\n{value}start:\n    - info: hi\n---\nBody\n"),
+    );
+    let setters = if valid { &["--set", r#"{"m":"append"}"#][..] } else { &[] };
+    let result = run(&fixture, "compose", &doc, setters);
+    if valid {
+        assert_eq!(result.code, Some(0), "{}", result.stderr);
+        assert!(marker.exists(), "{}", result.stderr);
+    } else {
+        assert_schema_rejection(&result, &["/mode", "bogus"], "the composed value");
+        assert!(!marker.exists(), "{}", result.stderr);
+    }
+}
+
+#[test]
+fn every_split_launch_verdict_has_its_positive_and_negative_case() {
+    for schedule in [AUTHORED_PROPERTY_SCHEDULE, SEQUENCE_TRIGGER_SCHEDULE, INLINE_COMPLETION_SCHEDULE, TEMPLATED_CONTROL_SCHEDULE] {
+        let mut cases = schedule.to_vec();
+        cases.sort();
+        assert_eq!(cases, [false, true], "schedule each verdict case exactly once");
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn a_templated_model_and_a_lifecycle_span_launch() {
     let fixture = CliProcessFixture::named("launch-trigger-schemas-spans");
@@ -634,4 +825,185 @@ fn a_templated_model_and_a_lifecycle_span_launch() {
         "the composed model reaches the provider"
     );
     assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
+}
+
+// ---------------------------------------------------------------------------
+// Deferred generated-verb arguments pass preflight and bind at event time
+// ---------------------------------------------------------------------------
+
+/// The entries of the fixture's working directory, to prove a failed run
+/// created nothing there. Claudine's own `.claudine-tmp` scratch directory,
+/// made by every run, is not an effect.
+fn cwd_entries(fixture: &CliProcessFixture) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(fixture.cwd())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".claudine-tmp")
+        .collect();
+    names.sort();
+    names
+}
+
+/// The rendering of an event-time binding failure: the same mapping as any
+/// other raising `start` expression (exit 1, nothing launched).
+fn assert_binding_failure(run: &Run, site: &str, needles: &[&str], what: &str) {
+    assert_eq!(run.code, Some(1), "{what} exits 1:\n{}", run.stderr);
+    assert!(run.stderr.contains("lifecycle evaluation error"), "{what}:\n{}", run.stderr);
+    assert!(run.stderr.contains(&format!("in `{site}`")), "{what} names `{site}`:\n{}", run.stderr);
+    assert!(run.stderr.contains("crashed expression"), "{what}:\n{}", run.stderr);
+    for needle in needles {
+        assert!(run.stderr.contains(needle), "{what} names `{needle}`:\n{}", run.stderr);
+    }
+    assert!(!run.stderr.contains("schema validation"), "{what} passed the launch verdict:\n{}", run.stderr);
+}
+
+const DEFERRED_SCALAR: &str = "start:\n    - ensure_file: \"{{ target }}\"\n";
+
+#[test]
+fn a_deferred_scalar_argument_passes_preflight_and_binds_at_event_time() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-scalar");
+    let doc = write_doc(&fixture, "prompt.md", &format!("---\ntarget: notes.md\n{DEFERRED_SCALAR}---\nBody\n"));
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_eq!(result.code, Some(0), "{}", result.stderr);
+    assert!(!result.stderr.contains(DROPPED), "{}", result.stderr);
+    assert!(fixture.cwd().join("notes.md").is_file(), "the effect dispatched:\n{}", result.stderr);
+    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
+    assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
+}
+
+/// A long-form side effect and an array-form expression verb, each with a
+/// deferred operand, evaluate to values of their parameters' types.
+#[test]
+fn deferred_structured_arguments_pass_preflight_and_bind_at_event_time() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-structured");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        concat!(
+            "---\ntarget: notes.md\nbody: \"# Notes\"\nx: 2\n",
+            "start:\n",
+            "    - min: [1, \"{{ fm.x }}\"]\n",
+            "    - ensure_file: { file: \"{{ target }}\", content: \"{{ body }}\" }\n",
+            "---\nBody\n",
+        ),
+    );
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_eq!(result.code, Some(0), "{}", result.stderr);
+    assert!(!result.stderr.contains(DROPPED), "{}", result.stderr);
+    let written = fs::read_to_string(fixture.cwd().join("notes.md")).expect("the effect dispatched");
+    assert_eq!(written.trim_end(), "# Notes");
+    assert_eq!(provider_launches(&marker), 1, "{}", result.stderr);
+    assert!(!fixture.audio_spool().exists(), "lifecycle audio must stay unpublished");
+}
+
+fn assert_wrong_evaluated_type_fails_before_dispatch(subcommand: &str, own_frontmatter: &str) {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-wrong-type");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        &format!("---\n{own_frontmatter}target: [a, b]\n{DEFERRED_SCALAR}---\nBody\n"),
+    );
+    let before = cwd_entries(&fixture);
+
+    let result = run(&fixture, subcommand, &doc, &[]);
+
+    assert_binding_failure(
+        &result,
+        "start[0].ensure_file",
+        &["expected string", "received list"],
+        subcommand,
+    );
+    assert_eq!(cwd_entries(&fixture), before, "`{subcommand}` dispatched nothing:\n{}", result.stderr);
+    assert!(!marker.exists(), "{}", result.stderr);
+    let authored = fs::read_to_string(&doc).unwrap();
+    assert!(authored.contains("ensure_file: \"{{ target }}\""), "the operand is unchanged:\n{authored}");
+}
+
+#[test]
+fn compose_fails_a_wrong_evaluated_type_before_dispatch() {
+    assert_wrong_evaluated_type_fails_before_dispatch("compose", "");
+}
+
+#[test]
+fn inline_compose_fails_a_wrong_evaluated_type_before_dispatch() {
+    assert_wrong_evaluated_type_fails_before_dispatch("inline-compose", "prompt: hi\n");
+}
+
+/// An expression verb's failed conversion stops the event at that action,
+/// mapped exactly like the same call raising inside a text template.
+#[test]
+fn a_failed_expression_verb_conversion_maps_like_any_raising_start_expression() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-conversion");
+    let next = "    - append_line: [after.log, ran]\n";
+    let verb = write_doc(
+        &fixture,
+        "verb.md",
+        &format!("---\nx: three\nstart:\n    - min: [1, \"{{{{ fm.x }}}}\"]\n{next}---\nBody\n"),
+    );
+    let template = write_doc(
+        &fixture,
+        "template.md",
+        &format!("---\nx: three\nstart:\n    - info: \"{{{{ min(1, fm.x) }}}}\"\n{next}---\nBody\n"),
+    );
+
+    let by_verb = run(&fixture, "compose", &verb, &[]);
+    let by_template = run(&fixture, "compose", &template, &[]);
+
+    let reason = "(argument 2): expected number; received text \"three\"";
+    assert_binding_failure(&by_verb, "start[0].min", &[reason], "the verb");
+    assert_binding_failure(&by_template, "start[0].info", &[reason], "the template");
+    assert!(!fixture.cwd().join("after.log").exists(), "the event stopped at the failed action");
+    assert!(!marker.exists(), "neither run launches the provider");
+}
+
+/// `no_error` tolerates a dispatch failure, never a binding failure.
+#[test]
+fn no_error_does_not_suppress_a_binding_failure() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-no-error");
+    let doc = write_doc(
+        &fixture,
+        "prompt.md",
+        concat!(
+            "---\ntarget: [a, b]\nstart:\n",
+            "    - ensure_file: { file: \"{{ target }}\", no_error: true }\n",
+            "    - append_line: [after.log, ran]\n",
+            "---\nBody\n",
+        ),
+    );
+
+    let result = run(&fixture, "compose", &doc, &[]);
+
+    assert_binding_failure(&result, "start[0].ensure_file", &["expected string"], "compose");
+    assert!(!fixture.cwd().join("after.log").exists(), "{}", result.stderr);
+    assert!(!marker.exists(), "{}", result.stderr);
+}
+
+/// The dry run shows the operand as authored and reports it deferred to its
+/// event; nothing is dispatched or launched.
+#[test]
+fn dry_run_shows_the_deferred_operand_as_authored() {
+    let (fixture, marker) = marker_fixture("launch-trigger-schemas-deferred-dry-run");
+    let doc = write_doc(&fixture, "prompt.md", &format!("---\ntarget: notes.md\n{DEFERRED_SCALAR}---\nBody\n"));
+
+    let output = fixture
+        .command()
+        .env("PROVIDER_MARKER", &marker)
+        .args(["compose", "--goose", doc.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+
+    let text = normalize(&strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )));
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("ensure_file: '{{ target }}'"), "the operand is shown as authored:\n{text}");
+    assert!(text.contains("interpolated at event-time: start"), "{text}");
+    assert!(!fixture.cwd().join("notes.md").exists(), "{text}");
+    assert!(!marker.exists(), "{text}");
 }

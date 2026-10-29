@@ -1,0 +1,12 @@
+# scenario: finalize-error
+# doc: finalize-error.md
+# given: invoked as `claudine compose --claude finalize-error.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: finalize raises an explicit error
+event initialize
+event start
+work fresh 0
+event success
+event finalize
+err none
+exit 1

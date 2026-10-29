@@ -1,11 +1,7 @@
 ---
-features:
-  - 2026-07-04-dmls
-  - 2026-07-09-suggest-constraint
-  - 2026-07-10-interpolation-literal
-  - 2026-07-10-schema-triggers
-  - 2026-07-11-semantic-tokens
+kind: canonical-documentation
 ---
+
 # DMLS Features
 
 The Darkmatter Language Server (`dmls`) brings IDE-grade intelligence to
@@ -93,9 +89,10 @@ Darkmatter's **SimplifiedSchema**:
 - **Effective schema** — the Darkmatter base schema, plus any configured
   extension schemas whose globs match the file, plus repository-scoped
   **trigger schemas** (content-triggered envelopes discovered under `schemas/`
-  roots within the workspace boundary — cached until a watched change, with
-  last-good retention and a diagnostic on a malformed envelope, placed at the
-  YAML error when the envelope is not valid YAML), plus the document's own
+  roots within the workspace boundary — cached until a watched change; an
+  envelope that fails to load is skipped with a warning on its file, placed
+  at the YAML error when the envelope is not valid YAML, while the valid
+  triggers still apply), plus the document's own
   `$schema`, merged with compose precedence.
 - **Completion** — schema keys (required keys marked), enum values, boolish
   scaffolds, `file(...)` paths, `style.*` keys, and advisory `suggest(...)`
@@ -110,20 +107,56 @@ Darkmatter's **SimplifiedSchema**:
   mismatches, constraint violations, missing required keys, unknown keys,
   invalid file references, invalid `suggest(...)` candidates, malformed
   standalone schema envelopes, and `style.*` problems.
+- **Lifecycle stacks** — md's lifecycle events (`initialize`, `composed`,
+  `failed`, `cancelled`, `finalize`) are typed by the baseline, so their items
+  complete and validate as md's actions, and an action md does not provide
+  passes without being offered. Expressions inside a stack are checked,
+  hovered, and completed with that event's globals: reading `err` where the
+  event has no failure is `dm.expression.unavailable_global`. Host-catalog
+  globals (Claudine's `seq`, `loop`, `group`) are always accepted, and a host
+  catalog that fails to load is the warning `dm.schema.host_catalog`. A host
+  that ships a [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md)
+  beside its catalog (Claudine does) has its stacks analyzed with its own
+  events, renames, globals, and verbs: Claudine's `start`, `success`,
+  `blocked`, `failure`, and `loop` gate are stacks, and `say`, `retry`, or
+  `proxy` operands are checked. Each call is typed at its site, narrowed by
+  the `when:` items around it until a `set` writes the property, exactly as
+  the host's launch types it. Without a usable artifact the stacks are
+  analyzed as md's and the document carries
+  `dm.lifecycle.incomplete_analysis`. See
+  [Diagnostics](./diagnostics.md), [Hover](./hover.md), and
+  [Autocomplete](./autocomplete.md#lifecycle-stacks).
 
-Claudine (and any other tool) activates as **pure configuration**: point a
-`[schema.extensions.*]` entry at a schema file and a set of globs. There is no
-Claudine-specific code in the server.
+Host support is data-driven. A document selects its schemas through discovered
+triggers, its own `$schema`, or an explicit `[schema.extensions.*]` mapping.
+The host catalog supplies global types, and its lifecycle artifact supplies
+event names and action rules. For Claudine, make the files under
+`claudine/schemas/` available in the document's schema roots; an installed
+Claudine executable alone does not install those editor files. See
+[Editor Setup](./editors/README.md) for deployment. DMLS interprets these files
+through Darkmatter's library and does not execute Claudine or its actions.
 
 ### Layer 3 — Darkmatter DSL
 
 Intelligence for Darkmatter's composition DSL — all **read-only**:
 
-- **Directives** (`::file`, `::code`, `::shell`, `::block`, disclosures, …) —
-  `::`-prefix name completion, per-family option-key/enum completion, semantics
-  and resolved-target hover, block/disclosure folding, and `dm.directive.*`
-  diagnostics (unknown directive, malformed option, unclosed block, malformed
-  disclosure).
+- **Directives** (`::file`, `::code`, `::shell`, `::block`, `::map`, `::filter`,
+  disclosures, …) — `::`-prefix name completion, per-family option-key/enum
+  completion, semantics and resolved-target hover, block/region/disclosure
+  folding, and `dm.directive.*` diagnostics (unknown directive, malformed
+  option, unclosed block, malformed disclosure).
+- **Collections** (`::map` / `::filter`) — source, option, and callback
+  completion; hover on the source, callbacks, and the locals they bind; and
+  the `dm.collection.*` diagnostics `md compose` reports, all read from
+  Darkmatter's shared region analysis (see [Autocomplete](./autocomplete.md#collection-regions),
+  [Hover](./hover.md#collection-locals), and
+  [Diagnostics](./diagnostics.md#collection-regions)).
+- **Inline collection callbacks** (`map` / `filter`) — completion prefers the
+  innermost callback locals within its body, and hover shows their owner and
+  projected item type. Both arrows and shallow pattern bindings are highlighted.
+  The iterable argument keeps its enclosing scope, and locals disappear after
+  the callback. Parsing, typing, and diagnostics are passive and shared with
+  composition; see [Diagnostics](./diagnostics.md#inline-collection-callbacks).
 - **Transclusion** (`::file` / `::code` / `prologue` / `epilogue`) — document
   links, go-to-definition, "who transcludes this file" references,
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
@@ -140,7 +173,11 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   effective-schema property description for a declared-but-unset key),
   variable → frontmatter-key definition, malformed-expression and
   unknown-function diagnostics, and the undeclared-property advisory (every
-  operand is checked; a schema-declared property is declared). Bare names are
+  operand is checked; a schema-declared property is declared). Function calls
+  are checked against their parameter types: a call `md compose` would reject,
+  such as `min(flag, 5)` with `flag: boolean(required)`, is an error, and one
+  that might fail for some values is a warning (see
+  [Call diagnostics](./diagnostics.md#call-diagnostics)). Bare names are
   document properties: only `ctx.`-qualified names get context-variable
   completion and hover.
 - **Interpolation literals** (`{{{ … }}}`) — recognized as inert: hover shows
@@ -166,9 +203,10 @@ styling recipe.
 
 - **Interpolations** — the whole `{{ … }}` span is `macro.interpolation`;
   `{{{ literal }}}` adds `inert`.
-- **Directives** — the twelve `::` keywords are `macro.directive`; the three
-  structural closers (`::end-block`, `::details`, `::end-disclosure`) add
-  `closer`. Structured targets are `string.directive`, option keys/values
+- **Directives** — the sixteen `::` keywords are `macro.directive`; the structural
+  closers (`::end-block`, `::details`, `::end-disclosure`, `::end-map`,
+  `::end-filter`) add `closer`. Structured targets (including a collection's
+  source and quoted positional callback) are `string.directive`, option keys/values
   `property.directive` / `string.directive`. Unknown directives, `::shell`
   payloads, and disclosure summary prose get no token.
 - **Wiki links** — brackets and `#`/`|` separators are `macro.wiki`; the
@@ -280,8 +318,10 @@ For the full, source-cited capability matrix behind these gates, see
 - **Per-editor setup guides** (VS Code, Zed, Neovim, Helix) and a manual smoke
   checklist live in [`docs/editors/`](./editors/).
 - **Configuration** is a `.dmls.toml` file at the workspace root (which also
-  serves as the editor root marker), layered under LSP
-  `workspace/configuration` and reloadable without a restart. Keys cover wiki
-  behavior, baseline schema extensions, strict schema/style modes, shell-policy
-  discovery, code-action categories, formatting, semantic tokens
-  (`[semantic_tokens] enable`), and diagnostics debounce.
+  serves as the editor root marker), overridden by the editor's
+  `workspace/didChangeConfiguration` settings and reloadable without a
+  restart. Keys cover wiki behavior, baseline schema extensions, strict
+  schema/style modes, strict function-call diagnostics
+  (`[expressions] strict`), shell-policy discovery, code-action categories,
+  formatting, semantic tokens (`[semantic_tokens] enable`), and diagnostics
+  debounce. See [DMLS Configuration](../../docs/lsp/configuration.md).

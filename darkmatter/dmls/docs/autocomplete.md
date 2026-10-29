@@ -1,9 +1,7 @@
 ---
-features:
-  - 2026-07-04-dmls
-  - 2026-07-08-modal-and-autocomplete
-  - 2026-07-09-suggest-constraint
+kind: canonical-documentation
 ---
+
 # DMLS Autocomplete
 
 Autocomplete (the LSP `textDocument/completion` capability) offers context-aware
@@ -84,10 +82,61 @@ comes from the library's `alternatives_for_def`:
   unknown, or conflicting tag keeps every alternative's keys.
 
 ```yaml
+$schema:
+    step:
+      - "{ kind: literal(say; required), text: string(required) }"
+      - "{ kind: literal(shell; required), run: string(required) }"
+    steps: step[]
 steps:
   - kind: say
     # offers `text`, not `run`
 ```
+
+### Recursive types and new list items
+
+Below a recursive named type (`item: "{ value: string, children: item[] }"`),
+completion offers the referenced definition's keys and values at every
+depth. Each step of the cursor's path opens only the definition it stands
+on, through the library's `resolved_alternatives`, so a type the path never
+reaches is never read. On an empty `- ` line of a list of objects, recursive
+or not, the object's keys are offered (marked `(required)` where they are),
+as they are for an object that has no keys yet. See
+[Recursive types](../../docs/topics/schemas/dmls-schema-support.md#recursive-types).
+
+### Only the cursor's path is typed
+
+Completion resolves the schema along the cursor's own path and reads the
+document's stored schema shapes, so completing in one item of a long list
+costs the same as in a short one. It never classifies the other entries;
+that happens once, on the first diagnostics pass, and completion may read
+its result when it exists. See
+[Frontmatter typing and its reuse](./hover.md#frontmatter-typing-and-its-reuse).
+
+### Lifecycle stacks
+
+The items of md's lifecycle events (`initialize`, `composed`, `failed`,
+`cancelled`, `finalize`) complete from the baseline's
+[lifecycle typing](../../docs/topics/schemas/definition.md#lifecycle-event-typing),
+so they offer md's verbs only (`info`, `stdout`, `shell`, `set`, `stop`, …).
+A verb only another host provides, such as `say`, `retry`, `notify`, or
+`proxy`, is accepted there but never offered, and `shell` is not offered in
+`initialize`. A key only another host treats as an event, such as Claudine's
+`start`, is untyped under the baseline and offers neither. `then` and `else`
+are not offered inside these stacks, because md's conditionals type them with
+one pattern key.
+
+```yaml
+composed:
+  - |      # offers `info`, `warn`, `shell`, `set`, `stop`, ...; not `say`
+```
+
+Inside a `{{ … }}` span or a `when` condition in such a stack, the
+interpolation candidates (described below) also include the globals that
+event may read: `err` and its members in `failed`, but not in `composed`.
+Under a host with a
+[lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), the
+host's events are stacks for this purpose too: under Claudine, `err` is
+offered in `blocked` and `failure` and not in `start` or `success`.
 
 ### Schema definitions
 
@@ -124,7 +173,7 @@ without a number.
 
 ## Interpolation completion (`{{ … }}`)
 
-Inside an interpolation, the DSL provider offers four candidate families:
+Inside an interpolation, the DSL provider offers these candidate families:
 
 1. **Frontmatter keys** — the document's own top-level keys, plus the
    top-level properties its own `$schema` declares but leaves unset. A key
@@ -140,9 +189,22 @@ Inside an interpolation, the DSL provider offers four candidate families:
    eight list-formatting functions (`as_csv`, `as_tsv`, `as_space_separated`,
    `as_line_separated`, `as_unordered_list`, `as_ordered_list`, `as_json`,
    `as_json5`).
+5. **Host globals** — every global a host catalog in the document's schema
+   roots declares, such as Claudine's `seq`, `loop`, and `group`.
+6. **Event globals** — inside a lifecycle stack only, the globals that
+   event may read under the document's host: md's events, or a host's from
+   its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md),
+   such as Claudine's `start` or `failure` (see
+   [Lifecycle stacks](#lifecycle-stacks)).
 
 Matching is **prefix-based and case-sensitive**. `{{ ctx.pa }}` offers matching
 `ctx.*` variables; it does not offer the removed `*_list` aliases.
+
+These candidates are names, not values: interpolation completion does not
+offer a property's enum members, literals, or object members. An enclosing
+guard such as `::block when="mode != 'release'"` therefore leaves the
+candidate list unchanged; hover shows the narrowed type instead
+([Hover](./hover.md#formatting-rule-narrowed-local-type)).
 
 ### `ctx.*` candidate discovery
 
@@ -162,6 +224,27 @@ The explicit-`ctx.`-prefix requirement is a **hover classification** rule, not a
 completion restriction: a bare `{{ today }}` must not receive `ctx.today` *hover*
 metadata even when `today` is a known context-variable tail. See
 [Hover](./hover.md) for that classification.
+
+## Collection regions
+
+Inside a `::map` / `::filter` body, `{{ … }}` completion also offers the
+locals visible at the cursor, bare and as `local.<name>`, typed by the
+library's scope: the body binding, destructured fields, the mapped result, and
+outer captures. It never offers a sibling callback's parameter, a local of a
+closed or later region, or a frontmatter key a local shadows (`fm.<key>` still
+reaches it).
+
+On an opener line:
+
+- **Source** — reserved roots plus frontmatter keys, locals, and `ctx` / host
+  globals whose declared type is iterable.
+- **Options** — `when`, `filter`, `sort`, `sort-order`, `while`, `until`,
+  without those already written; `while` and `until` exclude each other and
+  `sort-order` is offered once `sort` is written. `sort-order=` completes
+  `asc` / `desc`.
+- **Callbacks and `when`** — the expression after `=>` / `->` completes with
+  the callback's own parameters (a `when` sees the enclosing scope). Member
+  names of a local (`person.na`) are not completed.
 
 ## Completion item metadata
 
@@ -194,8 +277,9 @@ library's semantics.
 
 ## Configuration
 
-Via `.dmls.toml` (layered under LSP `workspace/configuration`, reloadable without
-restart):
+Via `.dmls.toml`, overridden by the editor's `workspace/didChangeConfiguration`
+settings and reloadable without restart (see
+[DMLS Configuration](../../docs/lsp/configuration.md)):
 
 - **`wiki.path_style`** — `shortest` / `relative` / `root-relative`: how an
   inserted wiki target is spelled.
@@ -226,3 +310,15 @@ evaluates an expression, fetches a remote URL, or mutates a file. Offering a
   within.
 - [Diagnostics](./diagnostics.md) — problem reporting and the stable code taxonomy.
 - [Features](./features.md) — the full capability overview and per-editor matrix.
+
+
+## Inline collection callbacks
+
+Inside `map(people, person => person.name)`, completion in the body prefers
+`person` and `local.person`, with projected types in their details, over
+same-named document properties. `fm.person` offers the document property.
+Array/tuple item and object-entry types come from the shared library projection.
+Nested callbacks see their enclosing locals, with the nearest binding winning.
+The iterable argument is completed before the new parameter exists, and the
+binding is not offered after the callback ends. Incomplete callback bodies use
+the same cursor scope without executing the expression.

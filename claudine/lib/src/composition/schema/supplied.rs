@@ -3,11 +3,12 @@
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::CallerInputRecords;
 use darkmatter::markdown::schemas::file_match::{
-    file_match_admits, file_match_groups, root_union_match_groups,
+    FileAlternative, file_alternatives, file_match_admits, root_union_match_groups,
 };
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, EffectiveSchema, PropertyDef, SchemaArm,
-    SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
+    Constraint, DarkmatterSchemas, DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef,
+    SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
+    to_json_schema_with_definitions,
     select_literal_discriminant_arm,
 };
 
@@ -50,7 +51,9 @@ pub fn unresolved_supplied_files(
     };
     let mut pending = Vec::new();
     for (name, record) in records {
-        let Some(FileTarget { is_array, alternatives }) = arms.eager_file_target(name) else {
+        let Some(FileTarget { is_array, alternatives }) =
+            arms.eager_file_target(name, effective.definitions())
+        else {
             continue;
         };
         let values: Vec<_> = match record.raw() {
@@ -134,20 +137,21 @@ enum SuppliedArms<'a> {
 }
 
 impl SuppliedArms<'_> {
-    /// Where `name` must be an existing file whichever arm finally applies.
+    /// Where `name` must be an existing file whichever arm finally applies;
+    /// `definitions` is the table the arms' references name.
     ///
     /// An undecided union qualifies only when every contending arm declares
     /// `name` as an eager `file(match)` with the same array shape (ruling D1),
     /// because only then does the existence verdict not depend on the arm. Each
     /// arm contributes its groups as one alternative, de-duplicated in arm
     /// order; the chosen literal path settles the arm afterward.
-    fn eager_file_target(&self, name: &str) -> Option<FileTarget> {
+    fn eager_file_target(&self, name: &str, definitions: &DefinitionTable) -> Option<FileTarget> {
         match self {
-            Self::Unique(shape) => eager_file_target(shape, name),
+            Self::Unique(shape) => eager_file_target(shape, name, definitions),
             Self::Undecided(arms) => {
                 let mut merged: Option<FileTarget> = None;
                 for arm in arms {
-                    let target = eager_file_target(arm, name)?;
+                    let target = eager_file_target(arm, name, definitions)?;
                     match &mut merged {
                         None => merged = Some(target),
                         Some(merged) => merged.merge(target)?,
@@ -159,33 +163,40 @@ impl SuppliedArms<'_> {
     }
 }
 
-fn eager_file_target(shape: &SchemaShape, name: &str) -> Option<FileTarget> {
+/// [`file_match_target`] when every file alternative of `name` is eager.
+fn eager_file_target(shape: &SchemaShape, name: &str, definitions: &DefinitionTable) -> Option<FileTarget> {
     let definition = shape.properties.get(name)?;
-    let PropertyDef::Single(atom) = definition else {
-        return None;
-    };
-    let eager = atom
-        .constraints
-        .iter()
-        .chain(&atom.array_constraints)
-        .any(|constraint| matches!(constraint, Constraint::Eager));
-    if !eager {
+    let alternatives = file_alternatives(definition, definitions)?;
+    if !alternatives.iter().all(FileAlternative::is_eager) {
         return None;
     }
-    file_match_target(definition)
+    file_match_target(definition, definitions)
 }
 
-/// Every `match(...)` group of a `file`/`file[]` property, as one
-/// alternative, whether or not it is eager.
-fn file_match_target(definition: &PropertyDef) -> Option<FileTarget> {
-    let PropertyDef::Single(atom) = definition else {
-        return None;
-    };
-    let groups = file_match_groups(definition)?;
-    Some(FileTarget {
-        is_array: atom.is_array,
-        alternatives: vec![groups.into_iter().map(<[String]>::to_vec).collect()],
-    })
+/// The `match(...)` groups of a property whose string value can only be a
+/// file, whether or not it is eager: the property's own `file` atom, or one
+/// alternative per `file` alternative its recursive references reach in
+/// `definitions` ([`file_alternatives`]).
+///
+/// `None` when a string could be something else (including an acyclic union
+/// with a `file` alternative, which is not read as a file), when no
+/// alternative is a file, when some file alternative has no glob to walk, or
+/// when the alternatives disagree on whether the value is a list.
+fn file_match_target(definition: &PropertyDef, definitions: &DefinitionTable) -> Option<FileTarget> {
+    let alternatives = file_alternatives(definition, definitions)?;
+    let is_array = alternatives.first()?.is_array;
+    let mut target = FileTarget { is_array, alternatives: Vec::new() };
+    for alternative in &alternatives {
+        let groups = alternative.match_groups();
+        if alternative.is_array != is_array || groups.is_empty() {
+            return None;
+        }
+        let groups: Vec<_> = groups.into_iter().map(<[String]>::to_vec).collect();
+        if !target.alternatives.contains(&groups) {
+            target.alternatives.push(groups);
+        }
+    }
+    Some(target)
 }
 
 /// The typed completion signal for a caller value that names no existing file.
@@ -224,7 +235,13 @@ pub(super) fn file_reference_target(
     name: &str,
     instance: &serde_json::Value,
 ) -> Option<FileTarget> {
-    let file_atom = |shape: &SchemaShape| shape.properties.get(name).and_then(file_match_target);
+    let definitions = effective.definitions();
+    let file_atom = |shape: &SchemaShape| {
+        shape
+            .properties
+            .get(name)
+            .and_then(|definition| file_match_target(definition, definitions))
+    };
     match effective.simplified.as_ref()? {
         SimplifiedSchema::Single(shape) => file_atom(shape),
         SimplifiedSchema::Union(arms) => {
@@ -316,16 +333,20 @@ fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> Str
 /// as opposed to a parse or resolution error that a glob walk cannot rescue.
 pub(super) const NO_MATCH: &str = "no existing file matched reference";
 
-/// Whether every existing caller file this arm declares satisfies every one
-/// of its `match` groups.
+/// Whether every existing caller file this arm declares satisfies the arm's
+/// `match` rule: some file alternative the value could be judged by admits
+/// it. The rule is the one the arm's lowering enforces (see
+/// [`root_union_match_groups`]): a property that is directly a `file`, or a
+/// file reached through a recursive reference in `definitions`; a file
+/// alternative written in the arm itself only suggests and rules nothing out.
 ///
 /// Each arm is validated alone below, where Darkmatter cannot tell which of
 /// its globs discriminate, so the arm-level rule is applied here through the
 /// same judgment Darkmatter's validator makes: a value naming no existing file
 /// (a partial the chooser will complete) never rules an arm out.
-fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
+fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords, definitions: &DefinitionTable) -> bool {
     records.iter().all(|(name, record)| {
-        let Some(groups) = root_union_match_groups(arm, name) else {
+        let Some(alternatives) = root_union_match_groups(arm, name, definitions) else {
             return true;
         };
         let values: Vec<&str> = match record.raw() {
@@ -337,7 +358,11 @@ fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
         };
         values
             .into_iter()
-            .all(|value| file_match_admits(value, &groups, record.origin()))
+            .all(|value| {
+                alternatives
+                    .iter()
+                    .any(|groups| file_match_admits(value, groups, record.origin()))
+            })
     })
 }
 
@@ -385,26 +410,43 @@ fn supplied_file_arms<'a>(
         let mut relaxed = shape.clone();
         let mut candidate = instance.clone();
         for (name, definition) in &mut relaxed.properties {
-            if !records.contains_key(name) {
-                continue;
-            }
-            let PropertyDef::Single(atom) = definition else {
+            let Some(record) = records.get(name) else {
                 continue;
             };
-            if !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File)) {
+            if let PropertyDef::Single(atom) = definition
+                && matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
+            {
+                without_eager(atom);
+                if atom.is_array && candidate.get(name).is_some_and(serde_json::Value::is_string) {
+                    candidate[name] = serde_json::Value::Array(vec![candidate[name].take()]);
+                }
                 continue;
             }
-            atom.constraints.retain(|constraint| !matches!(constraint, Constraint::Eager));
-            atom.array_constraints.retain(|constraint| !matches!(constraint, Constraint::Eager));
-            if atom.is_array && candidate.get(name).is_some_and(serde_json::Value::is_string) {
-                candidate[name] = serde_json::Value::Array(vec![candidate[name].take()]);
+            if let Some(lazy) = lazy_file_alternatives(definition, record.raw(), effective.definitions()) {
+                if lazy.iter().all(|atom| atom.is_array)
+                    && candidate.get(name).is_some_and(serde_json::Value::is_string)
+                {
+                    candidate[name] = serde_json::Value::Array(vec![candidate[name].take()]);
+                }
+                *definition = match <[PropertyAtom; 1]>::try_from(lazy) {
+                    Ok([atom]) => PropertyDef::Single(atom),
+                    Err(lazy) => PropertyDef::Union(lazy),
+                };
             }
         }
+        // The arm's references name the document's recursive definitions, so
+        // it lowers against that table; without it an arm reaching a
+        // recursive type would not convert and no arm would be selected.
+        let relaxed = to_json_schema_with_definitions(
+            &SimplifiedSchema::Single(relaxed),
+            effective.definitions(),
+        )
+        .ok()?;
         let schemas = DarkmatterSchemas::new(document_context.clone())
-            .with_baseline(SimplifiedSchema::Single(relaxed))
+            .with_baseline_json_schema(relaxed)
             .ok()?;
         let projected = schemas.effective_for(&schema_source).ok()??;
-        if !admits_arm_files(arm, records) {
+        if !admits_arm_files(arm, records, effective.definitions()) {
             continue;
         }
         let report = projected.validate(&candidate);
@@ -412,7 +454,7 @@ fn supplied_file_arms<'a>(
             .problems
             .iter()
             .all(|problem| {
-                !is_composition_independent(problem, &candidate, &std::collections::BTreeSet::new())
+                !is_composition_independent(problem, &candidate, &std::collections::BTreeSet::new(), &report.deferred)
             })
         {
             applicable.push(shape);
@@ -423,6 +465,59 @@ fn supplied_file_arms<'a>(
         0 => SuppliedArms::Undecided(shapes),
         _ => SuppliedArms::Undecided(applicable),
     })
+}
+
+fn without_eager(atom: &mut PropertyAtom) {
+    atom.constraints.retain(|constraint| !matches!(constraint, Constraint::Eager));
+    atom.array_constraints.retain(|constraint| !matches!(constraint, Constraint::Eager));
+}
+
+/// The lazy `file` alternatives a caller's string value (or list of strings)
+/// of a property written through a recursive reference is judged by, for
+/// relaxing existence on that value alone.
+///
+/// A string can only match a file alternative ([`file_alternatives`]), so
+/// those alternatives, each with its list shape and without `eager`, judge
+/// the value as the full definition would, short of existence. The shared
+/// definitions stay untouched, so a document-authored use keeps its `eager`.
+/// A list written on the property itself keeps its item-count bounds. `None`
+/// for any other value, or when a string could be something other than a
+/// file.
+fn lazy_file_alternatives(
+    definition: &PropertyDef,
+    value: &serde_json::Value,
+    definitions: &DefinitionTable,
+) -> Option<Vec<PropertyAtom>> {
+    let strings = match value {
+        serde_json::Value::String(_) => true,
+        serde_json::Value::Array(items) => items.iter().all(serde_json::Value::is_string),
+        _ => false,
+    };
+    if !strings {
+        return None;
+    }
+    let outer_bounds = match definition {
+        PropertyDef::Single(atom) if atom.is_array => atom.array_constraints.as_slice(),
+        _ => &[],
+    };
+    let alternatives = file_alternatives(definition, definitions)?;
+    if alternatives.is_empty() {
+        return None;
+    }
+    Some(
+        alternatives
+            .iter()
+            .map(|alternative| {
+                let mut atom = alternative.atom.clone();
+                if alternative.is_array && !atom.is_array {
+                    atom.is_array = true;
+                    atom.array_constraints = outer_bounds.to_vec();
+                }
+                without_eager(&mut atom);
+                atom
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

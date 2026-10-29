@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Expression Engine
 
 Expressions let a Markdown document calculate values and choose which content
@@ -166,8 +170,43 @@ the full written reference, see
 
 An unknown function name produces an error with a suggested match when one is
 available. For example, `uper` can suggest `upper` along with its signature,
-description, and example. Supplying the wrong number of arguments also produces
-an error showing the expected signature and example.
+description, and example.
+
+### Arguments have types
+
+Each function declares a type for each argument: `min(a: number, b: number)`
+takes two numbers. When a value is not already that type, Darkmatter converts
+it only when the value has an exact equivalent (the text `"4"` is the number
+`4`; the number `2026` is the text `"2026"`), and otherwise fails the call
+with a type error instead of guessing:
+
+```markdown
+{{ min("4", 9) }}         → 4: the text "4" converts to a number
+{{ min("pear", 9) }}      → type error: "pear" is not a number
+{{ number("pear", 0) }}   → 0: number() returns its fallback instead of failing
+{{ upper(missing) }}      → empty: upper passes a missing value through
+```
+
+The same rules convert frontmatter values to their schema types. Darkmatter's
+[Type Coercion](../../../../darkmatter/docs/topics/schemas/definition.md#type-coercion)
+lists them, and [Numbers](../../../../darkmatter/docs/topics/numbers.md)
+describes how numbers are held and displayed.
+
+**A call that can never work stops the whole document.** Before any
+expression or shell command runs, Darkmatter checks every call against the
+types the document's `$schema` declares. A wrong argument count (`min(1)`), a
+literal that cannot convert (`min("pear", 9)`), or a declared type that never
+fits, such as a `boolean(required)` property passed to `min`, rejects the
+document, even inside a branch that would never run. Claudine adds no rule of
+its own: `claudine compose`, `inline-compose`, and every `sequence` task fail
+the same way `md compose` does. See
+[Call Check](../../../../darkmatter/docs/inline/call-check.md).
+
+A call that might fail only for some values, such as a text property passed to
+`min`, still composes; its value is checked when the call runs. The DMLS
+editor integration shows both cases as you type: an error for a call
+composition will reject, a warning for one that may fail. See
+[DMLS call diagnostics](../../../../darkmatter/dmls/docs/diagnostics.md#call-diagnostics).
 
 ## Implementation reference
 
@@ -187,8 +226,10 @@ An expression passes through three stages:
 
 ### Function descriptions and executable behavior
 
-Function metadata—signatures, descriptions, ordering, and examples—is authored
-in [expression-functions.yaml](../../../../darkmatter/docs/schemas/expression-functions.yaml).
+Function metadata—typed signatures, categories, descriptions, and examples—is
+authored as `function(...)` types in the catalog
+[functions.yaml](../../../../darkmatter/schemas/partials/functions.yaml); its
+`categories:` list fixes the order categories are shown in.
 Executable implementations live in domain modules under
 [functions/](../../../../darkmatter/lib/src/markdown/compose/expression/functions/).
 
@@ -197,7 +238,8 @@ mode and handler. `FunctionHandler::Pure` handles value-based calculations;
 `FunctionHandler::Context` handles operations that need a resolution context.
 The lazy `and` and `or` bindings evaluate arguments only as needed.
 
-The registry joins these bindings to catalog descriptors by canonical name.
+The registry joins these bindings to the catalog's function entries by
+canonical name.
 Initialization rejects duplicate names, alias collisions, and names missing
 from either side. This keeps the documented list tied to executable functions.
 
@@ -208,8 +250,12 @@ suggestions, and plain-text error details. Claudine supplies terminal styling.
 ### How the report and written reference stay current
 
 Claudine's [context command](../../../cli/src/commands/context/mod.rs) renders
-functions from `expression_function_descriptors()`, grouped by category and
-sorted by display order. Language rules come from the descriptor catalogs in
+functions from `expression_function_catalog()`: categories in the catalog's
+`categories:` order, functions alphabetically within each, and every overload
+once under its canonical name, never an alias. Each row shows all of that
+overload's examples, inline ones as `call ⇒ result` (a display-only example,
+one that tests do not execute, followed by its reason) and file-form ones as
+the example file's invocation and result. Language rules come from the descriptor catalogs in
 [semantics.rs](../../../../darkmatter/lib/src/markdown/compose/expression/semantics.rs).
 The CLI does not maintain a second list of functions or language rules.
 
@@ -226,18 +272,21 @@ Tests check different parts of this connection:
 |---|---|
 | `operator_precedence_matches_parser` | Documented precedence matches the parser's table. |
 | Semantics `*_examples_evaluate_correctly` tests | Language-rule examples produce their stated results. |
-| `every_descriptor_overload_is_dispatchable_at_its_declared_arity` | Each documented signature runs with the stated number of arguments. |
-| `every_example_evaluates_to_its_declared_result` | Function examples produce their stated results. |
-| `lazy_operators_are_dispatchable` / `unknown_function_is_rejected` | Lazy operators work and unknown names fail. |
+| `catalog_and_runtime_bindings_have_bidirectional_canonical_parity` | Every catalog function has a runtime binding, and every binding a catalog entry. |
+| `each_registration_compiles_its_catalog_overloads` | Each function's declared overloads compile for dispatch. |
+| `every_executable_example_evaluates_to_its_declared_result` | Inline examples not marked display-only produce their stated results. |
+| `every_embedded_example_file_evaluates_to_its_returns` | File-form examples produce the result their file states. |
+| `unknown_names_are_not_dispatched` | Unknown function names fail. |
 | `narrative_doc_function_table_matches_catalog` | The generated function table matches the catalog. |
+| `context_expressions_function_order_snapshot` | `claudine context --expressions` keeps the category and alphabetical order. |
 
 These checks verify the catalog connections and examples, rather than every
 sentence of explanatory prose. See [Drift Control](drift.md) for broader limits.
 
 ### How to add an expression function
 
-1. Add its signatures, descriptions, ordering, and examples to
-   `darkmatter/docs/schemas/expression-functions.yaml`.
+1. Add its `function(...)` type—parameters, return type, category,
+   description, and examples—to `darkmatter/schemas/partials/functions.yaml`.
 2. Add its handler and runtime binding to the appropriate domain module under
    `expression/functions/`.
 3. Regenerate the written function table and run the relevant catalog and

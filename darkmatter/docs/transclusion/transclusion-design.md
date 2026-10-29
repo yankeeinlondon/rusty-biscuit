@@ -371,7 +371,7 @@ Reuse interpolation parser/evaluator infrastructure with transclusion condition 
 ### Semantics
 
 1. Missing values evaluate as falsy
-2. Equality/inequality compare normalized scalar strings
+2. Equality/inequality are strict: same runtime type and same value, with a missing value equal only to `null`
 3. Numeric comparisons in `when` coerce non-numeric values to `0` (per functional spec)
 4. `and(a,b,c)` requires all truthy
 5. `or(a,b,c)` requires any truthy

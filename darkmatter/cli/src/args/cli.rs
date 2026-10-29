@@ -1,8 +1,8 @@
 use clap::Parser;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::{
-    CliFill, CodeBlockArg, Feature, OutputFormat, PageAlignmentArg, PageBackgroundArg,
-    complete_markdown_files, complete_theme_names, parse_cli_fill, parse_max_width,
+    CliFill, CodeBlockArg, PageAlignmentArg, PageBackgroundArg,
+    complete_theme_names, parse_cli_fill, parse_max_width,
     parse_theme_name, reject_width_flag,
 };
 use darkmatter::markdown::highlighting::ThemePair;
@@ -16,9 +16,9 @@ use std::path::PathBuf;
 #[command(name = "md", about = "Darkmatter CLI", version)]
 #[command(subcommand_precedence_over_arg = true, disable_help_subcommand = true)]
 pub struct Cli {
-    /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
-    #[arg(add = ArgValueCompleter::new(complete_markdown_files))]
-    pub input: Option<PathBuf>,
+    /// Options used when no subcommand is supplied.
+    #[command(flatten)]
+    pub render: crate::args::RenderOptions,
 
     /// Theme for prose content (kebab-case name)
     #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
@@ -37,14 +37,6 @@ pub struct Cli {
     #[arg(long)]
     pub list_themes: bool,
 
-    /// Output format for top-level render mode (when no subcommand given)
-    #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
-    pub output: OutputFormat,
-
-    /// Open selected output in the default app using a temp file
-    #[arg(long)]
-    pub show: bool,
-
     /// Shorthand for `clean --save` with top-level [INPUT]
     #[arg(long)]
     pub save: bool,
@@ -53,18 +45,6 @@ pub struct Cli {
     /// where the terminal shows no images; other diagrams stay code blocks.
     #[arg(long)]
     pub mermaid: bool,
-
-    /// Turn on a named feature (repeatable and comma-separated; names are
-    /// case-insensitive)
-    #[arg(
-        long = "feature",
-        value_name = "NAME",
-        value_enum,
-        value_delimiter = ',',
-        ignore_case = true,
-        action = clap::ArgAction::Append
-    )]
-    pub features: Vec<Feature>,
 
     // ── Layout flags (Phase 5) ──────────────────────────────────────────
     /// Margin on all sides (cells)
@@ -240,10 +220,6 @@ pub struct Cli {
     #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_code_blocks: Option<CliFill>,
 
-    /// Promote schema-validation warnings (unknown / deprecated keys) to errors.
-    #[arg(long)]
-    pub strict_style: bool,
-
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
         short = 'v',
@@ -279,6 +255,21 @@ pub struct Cli {
     /// Subcommand (read, clean, compose, toc, delta)
     #[command(subcommand)]
     pub command: Option<crate::args::Command>,
+}
+
+impl Cli {
+    /// Normalizes default rendering to `render`, combining top-level and
+    /// subcommand features once before dispatch.
+    pub fn command_or_render(&self) -> crate::args::Command {
+        match self.command.clone() {
+            Some(crate::args::Command::Render(mut options)) => {
+                options.features.splice(0..0, self.render.features.iter().copied());
+                crate::args::Command::Render(options)
+            }
+            Some(command) => command,
+            None => crate::args::Command::Render(self.render.clone()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -366,17 +357,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn compose_allow_shell_timeout_flag_parses() {
-        let cli =
-            Cli::try_parse_from(["md", "compose", "doc.md", "--allow-shell-timeout"]).unwrap();
-        match cli.command {
-            Some(crate::args::Command::Compose {
-                allow_shell_timeout,
-                ..
-            }) => assert!(allow_shell_timeout),
+    /// The resolved policy of a parsed `md compose`.
+    fn compose_policy(cli: &Cli) -> Result<crate::args::policy::ResolvedPolicy, clap::Error> {
+        match &cli.command {
+            Some(crate::args::Command::Compose { allow, deny, disable, baseline_schema, .. }) => {
+                crate::args::policy::resolve_for(
+                    crate::args::policy::PolicyCommand::Compose,
+                    allow,
+                    deny,
+                    disable,
+                    baseline_schema.is_some().then_some("--baseline-schema <PATH>"),
+                )
+            }
             _ => panic!("Expected Compose command"),
         }
+    }
+
+    #[test]
+    fn compose_allow_shell_timeout_parses() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--allow", "shell-timeout"]).unwrap();
+        assert!(compose_policy(&cli).unwrap().recovers("shell-timeout"));
     }
 
     #[test]
@@ -389,15 +389,11 @@ mod tests {
     }
 
     #[test]
-    fn compose_allow_shell_timeout_defaults_false() {
+    fn compose_recovers_nothing_by_default() {
         let cli = Cli::try_parse_from(["md", "compose"]).unwrap();
-        match cli.command {
-            Some(crate::args::Command::Compose {
-                allow_shell_timeout,
-                ..
-            }) => assert!(!allow_shell_timeout),
-            _ => panic!("Expected Compose command"),
-        }
+        let policy = compose_policy(&cli).unwrap();
+        assert!(!policy.recovers("shell-timeout"));
+        assert!(policy.blocking_policy().is_empty());
     }
 
     #[test]
@@ -414,16 +410,9 @@ mod tests {
     }
 
     #[test]
-    fn compose_no_baseline_schema_flag_parses() {
-        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--no-baseline-schema"])
-            .unwrap();
-        match cli.command {
-            Some(crate::args::Command::Compose {
-                no_baseline_schema,
-                ..
-            }) => assert!(no_baseline_schema),
-            _ => panic!("Expected Compose command"),
-        }
+    fn compose_disable_baseline_schema_parses() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--disable", "baseline-schema"]).unwrap();
+        assert!(compose_policy(&cli).unwrap().disables("baseline-schema"));
     }
 
     #[test]
@@ -434,9 +423,11 @@ mod tests {
             "doc.md",
             "--baseline-schema",
             "schema.yaml",
-            "--no-baseline-schema",
-        ]);
-        let Err(err) = result else {
+            "--disable",
+            "baseline-schema",
+        ])
+        .map(|cli| compose_policy(&cli));
+        let Ok(Err(err)) = result else {
             panic!("expected conflicting compose baseline flags to fail");
         };
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);

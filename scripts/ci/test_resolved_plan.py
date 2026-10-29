@@ -357,7 +357,7 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
             ("pnpm-workspace.yaml", ["test-toolkit"], []),
             ("tools/test-toolkit/Cargo.toml", ["test-toolkit"], []),
             ("docs/topics/ci-cd.md", [], ["darkmatter", "test-toolkit"]),
-            ("darkmatter/README.md", [], []),
+            ("darkmatter/README.md", [], ["darkmatter"]),
         ):
             with self.subTest(path=path):
                 plan = self.plan(path)

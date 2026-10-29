@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 
 use crate::composition::lifecycle::LifecycleSignal;
-use crate::composition::lifecycle::actions::LifecyclePath;
 
 /// Render an overlay as its property names against a redaction placeholder.
 ///
@@ -35,40 +34,7 @@ fn redacted_overlay(overlay: &IndexMap<String, serde_json::Value>) -> impl fmt::
 /// What an overlay value renders as anywhere it would otherwise be printed.
 pub(crate) const REDACTED_VALUE: &str = "<redacted>";
 
-/// Where in a document's lifecycle frontmatter an action was authored.
-///
-/// Renders as the action's authored path (`failure[0].else[1].proxy`), the
-/// same spelling every lifecycle diagnostic uses, so a proxy diagnostic and a
-/// parse or shell diagnostic name the same property the same way. The path
-/// is what the author wrote, never an execution position.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActionLocation {
-    signal: LifecycleSignal,
-    path: LifecyclePath,
-}
-
-impl ActionLocation {
-    /// Locate the action at `path` in the stack of `signal`.
-    pub fn new(signal: LifecycleSignal, path: LifecyclePath) -> Self {
-        Self { signal, path }
-    }
-
-    #[allow(missing_docs)]
-    pub fn signal(&self) -> LifecycleSignal {
-        self.signal
-    }
-
-    #[allow(missing_docs)]
-    pub fn path(&self) -> &LifecyclePath {
-        &self.path
-    }
-}
-
-impl fmt::Display for ActionLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.path)
-    }
-}
+pub use darkmatter::lifecycle::executor::ActionLocation;
 
 /// Everything a diagnostic needs to attribute a proxy back to the exact
 /// property that requested it.

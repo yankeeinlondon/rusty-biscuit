@@ -1,9 +1,7 @@
 ---
-features:
-- 2026-07-04-dmls
-- 2026-07-08-modal-and-autocomplete
-- 2026-07-10-interpolation-literal
+kind: canonical-documentation
 ---
+
 # DMLS Hover Effects
 
 Hover (`textDocument/hover`) is how DMLS explains the symbol under the cursor without navigating away from it — a schema property's type and description, a `ctx.*` variable, a directive's semantics, a wiki link's target, and so on. This page describes how hover content is produced, the hard limits on how it can look, and the formatting rules DMLS applies within those limits.
@@ -115,6 +113,37 @@ list. Whether an alternative accepts an item is decided by the Darkmatter
 library: the alternative is lowered to JSON Schema and checked with its
 structural validator, which judges a file value by syntax alone.
 
+A field that only some object forms of a value declare still hovers. In a
+Claudine lifecycle item, `ensure_file`'s long form is one of three overloads,
+and only the later two declare `content`; hovering `content` in
+`- ensure_file: { file: notes.md, content: "# Notes" }` describes it with the
+same item line as `file`.
+
+### Recursive types
+
+A property typed by a recursive named type is described by name, followed
+by the definition once; inside it, each recursive use is again written by
+name, so the hover is finite however deep the type goes:
+
+```markdown
+Type: **item[](required)**
+
+`item` is defined as: `{children: item[](required),value: string(required) -> The node text}`
+```
+
+A property below the recursion (`value` four levels down) hovers exactly as
+it does at the top level.
+
+The same named form describes a property typed by a
+[shared named type](../../docs/topics/schemas/definition.md#shared-named-types),
+an acyclic object, dictionary, tuple, or list that the schema stores once
+because two or more places use it: `` `entry` is defined as: … ``. A stored
+**union**, recursive or shared, is the exception. It hovers exactly as the
+inlined union would, listing its alternatives as described under
+[Union-typed properties and list items](#union-typed-properties-and-list-items),
+so the item line ("matches alternative N of M") numbers the same list
+whether the union was stored or copied.
+
 ## Formatting rule: interpolation `ctx.*` hover
 
 Inside a `{{ … }}` body interpolation, a cursor on an explicitly `ctx.`-qualified variable renders the shared catalog-backed block followed by an interpolation-only note. The variable counts as the root through member access and index access too (for example `ctx.packages[0].first`), because the lexer keeps a dotted `ctx.packages` as a single token.
@@ -163,6 +192,94 @@ Cursor precedence: the function name wins on its own name identifier; an offset 
 
 A bare identifier inside `{{ … }}` is a **frontmatter variable** (the D2 rule above). When the document sets the key, hover shows its static value. When the key is *declared by the effective schema but unset in the document* — a caller-supplied parameter injected at compose time — hover falls back to the schema block: type, constraints, and `->` description, rendered by `frontmatter::schema_hover_details` (the schema body without the leading `` `key` `` heading, so the name is not duplicated under the `**Expression**` header). A set frontmatter value always wins over the schema block.
 
+## Formatting rule: narrowed local type
+
+When a guard narrows an identifier's type where the cursor is, the expression
+hover ends with one more line giving the type there and the guards that
+narrowed it. With `target: [string, number, "null"]` in the schema:
+
+```md
+::block when="is_string(target)"
+Checking out {{ target }}.
+::end-block
+```
+
+hovering `target` inside the block adds:
+
+> Type here: `string` (narrowed by `::block when="is_string(target)" (line 5)`)
+
+The type comes from Darkmatter's type scope, the same one composition uses for
+shell template holes and transclusion targets, so the editor and `md compose`
+always agree on it. DMLS does not decide any guard fact itself. A hover that no
+guard narrows shows no extra line.
+
+```mermaid
+flowchart LR
+    D[schema + static frontmatter] --> S[unguarded scope]
+    B["enclosing ::block when guards"] -->|true side| S2[scope at the interpolation]
+    S --> S2
+    E["ternary / && / || around the cursor"] -->|each side| S3[scope at the identifier]
+    S2 --> S3
+    S3 --> H[Type here line]
+```
+
+Guards that apply:
+
+- **Body `::block when="…"`**, every block that encloses the interpolation,
+  outermost first. This covers prose interpolations, `::shell` holes, and
+  `::shell-block` holes. On a `::shell` line or a `::shell-block` command the
+  shell hover keeps precedence and appends the same line when the cursor is on
+  a `{{ … }}` hole.
+- **Inside the expression**: the branch of a ternary gets its side of the
+  condition (`is_string(target) ? target : 'none'` shows `string` on the first
+  `target`, `number | null` on the last), and a later `&&` / `and` operand gets
+  the earlier operands' true side, a later `||` / `or` operand their false side.
+  This also applies to an `expression`-typed frontmatter value.
+
+Both branches are analyzed, each with its own side's type, because the editor
+cannot know which one runs; this says nothing about which branch compose
+reads. Guards are never evaluated: `file_exists(x)` makes `x` a present string
+inside its block without checking any file or URL.
+
+Not applied yet (**planned**):
+
+- A lifecycle `when` (with its `then` / `else` actions) and a sequence task
+  `when` in frontmatter do not narrow the hover of the actions they select: a
+  value under `then:` hovers with its declared type. Call diagnostics in
+  lifecycle stacks are narrowed (see
+  [Diagnostics](./diagnostics.md)); sequence task bodies are not.
+- Host globals (`err`, `timing`, `group`) and nested union members are not
+  projected: a guard on `x.kind` narrows only `x.kind`, never `x`.
+
+## Formatting rule: globals inside a lifecycle stack
+
+Inside the value of one of the document's host's lifecycle events (md's
+`initialize`, `composed`, `failed`, `cancelled`, `finalize`, or a host's from
+its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md), such as
+Claudine's `start` and `success`), an expression is hovered with that
+event's binding view, at any depth of the stack: a `{{ … }}` span, a `when`
+condition, or an expression-typed value. A cursor on a global the event
+declares, such as `err`, shows its declaration and whether the event can read
+it, with the reason when it cannot. The event's global wins over a
+frontmatter key of the same name, so the key's static value is not shown:
+
+```yaml
+err: shadow                       # a frontmatter key
+composed:
+    - info: "{{ err.msg }}"       # hover: err is unavailable in composed, and why
+failed:
+    - info: "{{ err.msg }}"       # hover: err is available in failed
+```
+
+Outside every stack, such as `{{ err }}` in the document body, `err` is the
+frontmatter key again and hovers with its static value.
+
+Hover on an event key itself is the ordinary schema hover, so it shows the
+description of whichever schema types the key. Under Claudine's schema, for
+example, `composed` and `failed` hover with the guidance to use Claudine's
+`start` and `blocked`. A schema problem's diagnostic does not repeat that
+description; hover is where it appears.
+
 ## Formatting rule: interpolation literal hover
 
 A cursor anywhere inside an interpolation literal (`{{{ … }}}`) renders an `**Interpolation literal**` block showing the composed output — the inner content wrapped in `{{ … }}` as inline code (a fenced block when multiline, with backtick fences sized to survive content containing backticks) — followed by the note that the content is rendered as literal `{{ … }}` text and is not interpolated. The body is assembled by the pure `literal_hover_markdown` function in `src/providers/dsl.rs`. The hover range is the literal's complete outer `{{{ … }}}` span.
@@ -176,9 +293,100 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 | substrate (Markdown) | a link                                               | graph-sourced target preview (an unopened target is read once, then cached)                               |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
 | frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
-| DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
+| DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note, plus a guard-narrowed local type; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
+
+## Frontmatter typing and its reuse
+
+Many frontmatter answers need to know what the schema says about a value:
+whether it is an `expression`, a `file`, which union arm a list item
+selected. DMLS works that out lazily and keeps it for as long as the buffer
+and its schema inputs stay the same, so an editor's stream of hovers costs
+the same on a large document as on a small one.
+
+**A cursor request types only its own path.** Hover, completion, and
+go-to-definition resolve the schema along the path of the entry under the
+cursor (`initialize[3].then[0].warn`) and nothing else. On a hover inside a
+lifecycle stack, only that scalar's `{{ … }}` spans and `when` guard are
+read. A request never types the other entries to find its own, so a hover
+on a 200-item lifecycle stack does the same work as on a one-item stack.
+
+**Diagnostics types the whole frontmatter once.** Diagnostics and document
+links need every scalar. The first of them classifies each scalar entry
+(expression, file, or neither, with its decoded text) and keeps the list.
+Every later request on the same buffer and schema reads that list instead
+of walking again, including the next diagnostics pass. A cursor request
+reads an entry from the list when it is already there, but never starts the
+walk.
+
+**Items share schema storage, not results.** Each list item still selects
+its own union arm from its own authored values, exactly as before. What is
+shared is the stored schema for an arm: every item that selects it reads the
+same stored shape instead of a copy.
+
+```yaml
+$schema:
+  step:
+    - "{ kind: literal(say; required), text: string(required) }"
+    - "{ kind: literal(shell; required), run: string(required) }"
+  steps: step[]
+steps:
+  - kind: say      # selects the `say` arm
+    text: hello
+  - kind: shell    # selects the `shell` arm
+    run: ls
+  - kind: say      # selects `say` again: the same stored shape as item 0
+    text: again
+```
+
+A hover on `text` in the third item describes the `say` arm; a hover on
+`run` describes the `shell` arm. Items 0 and 2 share one stored `say` shape,
+and item 1 has the `shell` one. An item whose `kind` is missing, unknown, or
+not one of the literals sees the merged view of every arm, built once and
+shared the same way. A recursive type (`item: "{ children: item[] }"`)
+returns to the same stored shapes at every depth.
+
+**When the stored analysis is replaced.** It belongs to one snapshot of the
+document, and any change to what it was built from starts a new one:
+
+| Change | Replaces the analysis |
+| ------ | --------------------- |
+| An edit, or a new buffer version with the same text | yes |
+| A schema file the document's schema was built from changes on disk, even with no edit | yes, on the next request |
+| A schema that failed to assemble because an imported file was malformed, when that file is fixed | yes, on the next request |
+| A schema that failed because an imported file is missing, when the file is created | on the next watched-file event, rescan, or edit |
+| The `.dmls.toml` or editor configuration, the trigger files, or the document's repository context | yes |
+| Malformed YAML (the last good tree is kept) | yes: answers use the last good tree, never another buffer's text or ranges |
+| Closing the document | dropped |
+
+A request that is still running when the analysis is replaced finishes on
+the one it started with; the replaced analysis is then dropped, and it never
+becomes current again.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Snapshot: first request after open, edit, or input change
+    Snapshot --> Snapshot: hover, completion, definition (cursor path only)
+    Snapshot --> Inventoried: first diagnostics or document links (every scalar, once)
+    Inventoried --> Inventoried: any later request reads the stored list
+    Snapshot --> Replaced: edit or input change
+    Inventoried --> Replaced: edit or input change
+    Replaced --> [*]: last running request finishes
+    Snapshot --> [*]: document closed
+    Inventoried --> [*]: document closed
+```
+
+**Work kept across edits.** Two kinds of schema work are expensive enough
+on large recursive types that DMLS keeps them across edits, keyed by the
+schema content they came from rather than by a snapshot: the array-item
+definition of a list (the union `- ` items are checked against), and, for
+each union alternative, the prepared check that says whether an item matches
+it (the `matches alternative … of …` line above). An edit that leaves the
+schema as it was reuses both; a changed alternative is prepared again, and
+an unchanged one beside it is not. The server keeps at most 256 of each and
+starts over when that fills. The first hover over alternatives the server
+has not seen pays for preparing them once.
 
 ## Passivity
 
@@ -190,3 +398,30 @@ The formatting rule is covered at two levels:
 
 - **Unit** (`src/providers/frontmatter.rs`): `schema_hover_body` is called with   hand-built `PropertyDef`s and the emitted Markdown is asserted directly (type   is bold and not inline code; enum members and default are italic). No LSP   session is needed because the function is pure.
 - **Integration** (`tests/l1/lsp_session.rs`): a full   `initialize → didOpen → textDocument/hover` session over the in-memory   connection asserts the rendered `contents.value` the editor would receive. The   `hover_markup(fixture, uri, line, character)` helper collapses the   request-and-extract boilerplate so hover assertions stay one line.
+
+## Collection locals
+
+Inside a `::map` / `::filter` body, a read of a bound name shows the type the
+library's scope gives it at the cursor:
+
+> Local `person.name`: `string`
+
+A narrowed local appends the guards (`(narrowed by …)`), and a local shadows a
+frontmatter key or schema property of the same name, so no frontmatter value or
+property description is shown for it. On the opener, hovering the source shows
+its declared type and the type of one entry; a callback's expression and its
+parameters show the types at that callback's own scope (another callback's
+parameter is not visible there). The keyword still shows the directive
+description.
+
+
+
+## Inline callback locals
+
+In `map(people, person => person.name)`, hover on a body read identifies it as
+a callback local, names the owning function, and shows the projected item or
+member type. A shallow `{name}` pattern projects that field directly. Bare
+`person` and `local.person` refer to the same binding; `fm.person` still gets
+document hover. Nested callbacks use the innermost matching local. The source
+argument uses its enclosing scope and the local ends with the callback. Hover
+uses shared passive type analysis and never runs a callback to obtain a value.

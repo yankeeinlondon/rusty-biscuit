@@ -95,6 +95,42 @@ impl DecodedScalar {
         }
     }
 
+    /// The part of this scalar authored before raw offset `cursor` of
+    /// `source`, the text this scalar was decoded from.
+    ///
+    /// A cursor past the scalar's authored end keeps the whole scalar plus the
+    /// spaces and tabs between them, mapped byte for byte, so a cursor after
+    /// trailing whitespace reads as a fresh position there. `None` when the
+    /// cursor precedes the scalar, is not a character boundary of either text,
+    /// or follows anything but spaces and tabs after the scalar's end.
+    pub(crate) fn prefix_at(&self, source: &str, cursor: usize) -> Option<DecodedScalar> {
+        let start = self.raw_offset(0)?;
+        let end = self.raw_offset(self.decoded.len())?;
+        if cursor < start || !source.is_char_boundary(cursor) {
+            return None;
+        }
+        if cursor > end {
+            let trailing = source.get(end..cursor)?;
+            if !trailing.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
+                return None;
+            }
+            let mut prefix = self.clone();
+            prefix.decoded.push_str(trailing);
+            prefix.decoded_starts.extend(end..cursor);
+            prefix.decoded_to_raw.extend(end + 1..=cursor);
+            return Some(prefix);
+        }
+        let length = self.decoded_offset(cursor);
+        if !self.decoded.is_char_boundary(length) {
+            return None;
+        }
+        Some(DecodedScalar {
+            decoded: self.decoded[..length].to_string(),
+            decoded_to_raw: self.decoded_to_raw[..=length].to_vec(),
+            decoded_starts: self.decoded_starts[..length].to_vec(),
+        })
+    }
+
     /// The decoded byte offset for an authored (raw) offset — the inverse of
     /// [`raw_offset`](Self::raw_offset), clamped into the decoded range.
     ///
@@ -217,6 +253,45 @@ pub fn decode_scalar_node(
     match *bytes.get(start)? {
         b'|' | b'>' => decode_block_scalar(source, start, parent_indent),
         b'\'' | b'"' => decode_flow_quoted(source, start),
+        _ => decode_plain_content(source, start, parent_indent),
+    }
+}
+
+/// Decodes the scalar node at `start` exactly as [`decode_scalar_node`] does,
+/// but only when it is a plain scalar.
+///
+/// Same-line tags and anchors before the scalar are skipped (never
+/// interpreted), and the result is the same decoded map and consumed-end
+/// offset [`decode_scalar_node`] would return. A quoted or block scalar, a
+/// flow collection, an alias, a comment, an empty value, or a tag or anchor
+/// whose scalar starts on a later line returns `None`. An editor uses this to
+/// recognize a plain value that may continue onto the next line: the general
+/// decoder's success cannot tell it that, because it also accepts quoted and
+/// block scalars.
+pub fn decode_plain_scalar_node(
+    source: &str,
+    start: usize,
+    parent_indent: usize,
+) -> Option<(DecodedScalar, usize)> {
+    let start = skip_node_properties(source.as_bytes(), start)?;
+    match *source.as_bytes().get(start)? {
+        // An empty value: whatever follows on later lines is another node,
+        // not this scalar.
+        b'\n' | b'\r' | b' ' | b'\t' => None,
+        b'|' | b'>' | b'\'' | b'"' => None,
+        _ => decode_plain_content(source, start, parent_indent),
+    }
+}
+
+/// The plain scalar whose content (after any node properties) starts at
+/// `start`; `None` for any other node an indicator character starts.
+fn decode_plain_content(
+    source: &str,
+    start: usize,
+    parent_indent: usize,
+) -> Option<(DecodedScalar, usize)> {
+    let bytes = source.as_bytes();
+    match *bytes.get(start)? {
         b'[' | b'{' | b'&' | b'*' | b'!' | b'%' | b'@' | b'`' | b'#' => None,
         b'-' | b'?' | b':' if is_blankz(bytes, start + 1) => None,
         _ => decode_multiline_plain(source, start, parent_indent),
@@ -1224,5 +1299,129 @@ mod tests {
             assert_eq!(alias_search_work() - before, 0, "{count} known definitions");
             assert_eq!(known, searched);
         }
+    }
+
+    /// The value of `key:` in `yaml` decoded by both node decoders, plus the
+    /// value's start offset. The general decoder is the reference: wherever the
+    /// plain decoder answers, it must answer identically.
+    fn both_decoders(yaml: &str, key: &str) -> (Option<(DecodedScalar, usize)>, usize) {
+        let needle = format!("{key}:");
+        let key_start = yaml.find(&needle).expect("key in fixture");
+        let mut start = key_start + needle.len();
+        while yaml.as_bytes().get(start) == Some(&b' ') {
+            start += 1;
+        }
+        let parent_indent = column(yaml, key_start);
+        let plain = decode_plain_scalar_node(yaml, start, parent_indent);
+        if let Some(plain) = &plain {
+            assert_eq!(
+                Some(plain.clone()),
+                decode_scalar_node(yaml, start, parent_indent),
+                "plain and general decoders disagree for {yaml:?}"
+            );
+        }
+        (plain, start)
+    }
+
+    #[test]
+    fn plain_node_skips_same_line_anchors_and_tags_in_either_order() {
+        for (yaml, raw_start) in [
+            ("entry: &e string(min(1))\n", 10),
+            ("entry: !!str string(min(1))\n", 13),
+            ("entry: &e !!str string(min(1))\n", 16),
+            ("entry: !!str &e string(min(1))\n", 16),
+        ] {
+            let (decoded, _) = both_decoders(yaml, "entry");
+            let (scalar, end) = decoded.unwrap_or_else(|| panic!("{yaml:?} is a plain value"));
+            assert_eq!(scalar.decoded(), "string(min(1))", "{yaml:?}");
+            assert_eq!(scalar.raw_offset(0), Some(raw_start), "{yaml:?}");
+            assert_eq!(end, yaml.len() - 1, "{yaml:?}");
+        }
+    }
+
+    #[test]
+    fn plain_node_follows_continuation_lines_with_lf_and_crlf() {
+        for (yaml, break_len) in [
+            ("entry: &e string(min(1);\n  max(3))\nnext: x\n", 1),
+            ("entry: &e string(min(1);\r\n  max(3))\r\nnext: x\r\n", 2),
+        ] {
+            let (decoded, _) = both_decoders(yaml, "entry");
+            let (scalar, end) = decoded.expect("continued plain value");
+            assert_eq!(scalar.decoded(), "string(min(1); max(3))");
+            // The consumed end sits just past `max(3))`, before the break.
+            let continuation = yaml.find("max(3))").expect("continuation");
+            assert_eq!(end, continuation + "max(3))".len());
+            let first_break = yaml.find("min(1);").expect("first line") + "min(1);".len();
+            assert_eq!(continuation, first_break + break_len + 2);
+            // The continuation's first decoded byte projects onto the second line.
+            let decoded_max = scalar.decoded().find("max").expect("max");
+            assert_eq!(
+                scalar.project(decoded_max..decoded_max + 3),
+                Some(continuation..continuation + 3)
+            );
+        }
+    }
+
+    #[test]
+    fn plain_node_folds_blank_lines_and_stops_at_comments_and_dedent() {
+        let (folded, _) = both_decoders("entry: a\n\n  b\nnext: x\n", "entry");
+        assert_eq!(folded.expect("folded").0.decoded(), "a\nb");
+
+        let yaml = "entry: a\n  # note\n  b\n";
+        let (commented, _) = both_decoders(yaml, "entry");
+        let (scalar, end) = commented.expect("value before the comment");
+        assert_eq!(scalar.decoded(), "a");
+        assert_eq!(end, "entry: a".len());
+
+        let yaml = "entry: a\nsibling: b\n";
+        let (dedented, _) = both_decoders(yaml, "entry");
+        let (scalar, end) = dedented.expect("value before the dedented sibling");
+        assert_eq!(scalar.decoded(), "a");
+        assert_eq!(end, "entry: a".len());
+    }
+
+    #[test]
+    fn plain_node_in_a_sequence_uses_the_dash_column() {
+        // The dash sits at column 2; a continuation must be indented past it.
+        let yaml = "list:\n  - &e string(min(1);\n    max(3))\n  - b\n";
+        let start = yaml.find("&e").expect("item");
+        let (scalar, end) = decode_plain_scalar_node(yaml, start, 2).expect("sequence item");
+        assert_eq!(scalar.decoded(), "string(min(1); max(3))");
+        assert_eq!(end, yaml.find("max(3))").expect("continuation") + "max(3))".len());
+        assert_eq!(decode_scalar_node(yaml, start, 2), Some((scalar, end)));
+    }
+
+    #[test]
+    fn plain_node_rejects_every_other_presentation() {
+        for yaml in [
+            "entry: 'string'\n",
+            "entry: \"string\"\n",
+            "entry: &e 'string'\n",
+            "entry: !!str \"string\"\n",
+            "entry: |\n  string\n",
+            "entry: &e >-\n  string\n",
+            "entry: [string]\n",
+            "entry: {a: string}\n",
+            "anchor: &e string\nentry: *e\n",
+            "entry: # comment\n",
+            "entry:\n",
+            "entry: \n",
+            // An empty holder followed by indented content: that content is
+            // another node, never this value's continuation.
+            "entry:\n  string(min(1);\n",
+            "entry:\r\n  string(min(1);\r\n",
+            "entry:\n  - string(min(1);\n  ma\n",
+            "entry: &e\n  string\n",
+            "entry: !!str\n  string\n",
+        ] {
+            let (plain, _) = both_decoders(yaml, "entry");
+            assert_eq!(plain, None, "{yaml:?} is not a continuable plain value");
+        }
+        // The general decoder accepts several of these, which is why its
+        // success alone cannot identify a plain holder.
+        let (_, start) = both_decoders("entry: &e 'string'\n", "entry");
+        assert!(decode_scalar_node("entry: &e 'string'\n", start, 0).is_some());
+        let (_, start) = both_decoders("anchor: &e string\nentry: *e\n", "entry");
+        assert!(decode_scalar_node("anchor: &e string\nentry: *e\n", start, 0).is_some());
     }
 }

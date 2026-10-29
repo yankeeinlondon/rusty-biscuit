@@ -1,0 +1,7 @@
+$schema:
+    n: number(required)
+    maybe: number
+    zip: string
+    flag: string
+    values: number[]
+    meta: "{ level: number }"

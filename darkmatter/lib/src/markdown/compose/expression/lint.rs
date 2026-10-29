@@ -209,6 +209,11 @@ fn collect_flagged(
                 collect_flagged(source, arg, false, out);
             }
         }
+        SpannedExprKind::CallbackCall { args, .. } => {
+            for arg in args {
+                collect_flagged(source, arg.expression(), false, out);
+            }
+        }
     }
 }
 
@@ -435,6 +440,7 @@ fn is_atomic(expr: &Expr) -> bool {
             | Expr::MemberAccess { .. }
             | Expr::Index { .. }
             | Expr::FunctionCall { .. }
+            | Expr::CallbackCall { .. }
             | Expr::StringLiteral(_)
             | Expr::NumberLiteral(_)
             | Expr::BoolLiteral(_)
@@ -499,6 +505,16 @@ fn substitute(expr: &SpannedExpr, replacements: &HashMap<usize, Expr>) -> Expr {
         SpannedExprKind::FunctionCall { name, args } => Expr::FunctionCall {
             name: name.clone(),
             args: args.iter().map(|arg| substitute(arg, replacements)).collect(),
+        },
+        SpannedExprKind::CallbackCall { name, args } => Expr::CallbackCall {
+            name: name.clone(),
+            args: args.iter().map(|arg| match arg {
+                super::ast::SpannedCallArgument::Value(value) => super::ast::CallArgument::Value(substitute(value, replacements)),
+                super::ast::SpannedCallArgument::Callback(callback) => super::ast::CallArgument::Callback(super::ast::Callback {
+                    pattern: callback.pattern.erase(),
+                    body: substitute(&callback.body, replacements),
+                }),
+            }).collect(),
         },
         SpannedExprKind::Variable(_)
         | SpannedExprKind::StringLiteral(_)

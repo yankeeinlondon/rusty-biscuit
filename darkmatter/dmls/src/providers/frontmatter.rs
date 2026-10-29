@@ -10,18 +10,19 @@
 //! the [`FrontmatterAst`] supplies every range. Completion items carry an eager
 //! `textEdit` and no snippets (Zed-safe).
 
-use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::schemas::completion::{
-    AlternativeKey, AlternativeSite, alternative_accepts, alternatives_for_def,
+    AlternativeKey, AlternativeSite, DefinitionLookup, alternatives_for_def_in,
 };
+use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    decode_scalar, effective_property_shape, locate_schema_declaration_cursor, mapping_separator,
-    locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
+    DecodedScalar, decode_plain_scalar_node, decode_scalar, locate_schema_declaration_cursor,
+    locate_schema_declaration_cursor_in_scalar, mapping_separator, locate_type_definition_cursor,
+    locate_type_definition_cursor_in_scalar, parse_property_definition, parse_schema_declaration,
     schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
     flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
@@ -38,8 +39,10 @@ use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
     doc_links, expressions, format_dotted,
 };
+use crate::overlay::FrontmatterAnalysis;
+use crate::overlay::analysis::{ArmAdmission, ExpressionTyping, ScalarTyping, baseline_root};
 use crate::overlay::named_types::AuthoredDeclaration;
-use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, semantic_type_regions};
+use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -80,7 +83,14 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
     match value_cursor(ctx, offset, line_start, trimmed) {
         Some((key, value_partial)) => {
             let ancestors = enclosing_path(ctx, offset, line_start, indent);
-            value_completions(ctx, offset, &ancestors, &key, &value_partial)
+            let root = ancestors.first().map_or(key.as_str(), String::as_str);
+            let event = crate::overlay::event_views::LifecycleHost::for_document(ctx).event_of_key(root);
+            if let Some(event) = &event
+                && let Some(items) = stack_completions(ctx, offset, &key, &value_partial, event)
+            {
+                return items;
+            }
+            value_completions(ctx, offset, &ancestors, &key, &value_partial, event.as_ref())
         }
         None if indent == 0 => top_level_key_completions(ctx, ast, offset, trimmed),
         None => {
@@ -105,21 +115,30 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
 /// never from searching the value text for a delimiter.
 fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
     let overlay = ctx.overlay?;
-    let (value_start, kinds) = match flow_cursor(ctx, offset) {
-        Some((value_start, ancestors, key)) => {
-            (value_start, meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?)
-        }
+    let cursor = match flow_cursor(ctx, offset) {
+        Some((value_start, ancestors, key)) => SemanticValueCursor {
+            value_start,
+            kinds: meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?,
+            continued: None,
+        },
         None => block_cursor(ctx, overlay, offset)?,
     };
 
+    let value_start = cursor.value_start;
     let value_source = ctx.text.get(value_start..)?;
     let mut items = Vec::new();
-    for kind in kinds {
-        let state = match kind {
-            MetaSchemaKind::TypeDefinition => {
+    for kind in cursor.kinds {
+        let state = match (kind, &cursor.continued) {
+            (MetaSchemaKind::TypeDefinition, Some(scalar)) => {
+                locate_type_definition_cursor_in_scalar(ctx.text, scalar, offset)
+            }
+            (MetaSchemaKind::Schema, Some(scalar)) => {
+                locate_schema_declaration_cursor_in_scalar(ctx.text, scalar, offset)
+            }
+            (MetaSchemaKind::TypeDefinition, None) => {
                 locate_type_definition_cursor(value_source, value_start, offset)
             }
-            MetaSchemaKind::Schema => {
+            (MetaSchemaKind::Schema, None) => {
                 locate_schema_declaration_cursor(value_source, value_start, offset)
             }
         };
@@ -139,7 +158,18 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     Some(dedup_completions(items))
 }
 
-/// The `(value_start, meta-schema kinds)` a block-presented cursor resolves to.
+/// The semantic value a completion cursor sits in.
+struct SemanticValueCursor {
+    /// Document offset where the value's authored text begins.
+    value_start: usize,
+    kinds: Vec<MetaSchemaKind>,
+    /// The decoded plain scalar the cursor continues onto a later line, when
+    /// no loaded model describes it; the cursor is read through this map
+    /// rather than from the raw text at `value_start`.
+    continued: Option<DecodedScalar>,
+}
+
+/// The semantic value a block-presented cursor resolves to.
 ///
 /// Standalone documents consult the shared source map first, which covers both
 /// implicit and explicit mapping pairs. Frontmatter and incomplete source then
@@ -148,7 +178,7 @@ fn block_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
-) -> Option<(usize, Vec<MetaSchemaKind>)> {
+) -> Option<SemanticValueCursor> {
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
         &overlay.schema_authoring
         && let Some(schema) = model.schema()
@@ -158,7 +188,11 @@ fn block_cursor(
                 region.definition_span.start <= offset && offset <= region.definition_span.end
             })
     {
-        return Some((region.definition_span.start, vec![region.kind]));
+        return Some(SemanticValueCursor {
+            value_start: region.definition_span.start,
+            kinds: vec![region.kind],
+            continued: None,
+        });
     }
     line_cursor(ctx, overlay, offset)
 }
@@ -167,43 +201,70 @@ fn block_cursor(
 /// source no loaded model describes.
 ///
 /// A line that is neither a `key:` value nor a `- ` item may continue a plain
-/// scalar begun on an earlier line; the cursor then belongs to that scalar,
-/// whose value starts on its holder line.
+/// scalar begun on an earlier line. The cursor then belongs to that scalar
+/// only when the shared plain-scalar decoder, run from the holder's value
+/// start, consumes the text up to the cursor.
 fn line_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
-) -> Option<(usize, Vec<MetaSchemaKind>)> {
+) -> Option<SemanticValueCursor> {
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
 
-    if let Some((key, partial)) = value_cursor(ctx, offset, line_start, trimmed) {
+    let (value_start, kinds) = if let Some((key, partial)) =
+        value_cursor(ctx, offset, line_start, trimmed)
+    {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?;
-        Some((semantic_value_start(ctx, offset, line_start, partial.len()), kinds))
+        (semantic_value_start(ctx, offset, line_start, partial.len()), kinds)
     } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        Some((offset - after_dash.len(), kinds))
+        (offset - after_dash.len(), kinds)
     } else if trimmed == "-" {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        Some((offset, kinds))
+        (offset, kinds)
     } else {
-        line_cursor(ctx, overlay, continued_scalar_holder(ctx.text, line_start, indent)?)
-    }
+        return continued_scalar_cursor(ctx, overlay, offset, line_start, indent);
+    };
+    Some(SemanticValueCursor { value_start, kinds, continued: None })
 }
 
-/// The content end of the line holding the plain scalar that the line at
-/// `line_start` (indented `indent`) continues, or `None` when it continues
-/// none.
+/// The semantic value whose plain scalar the cursor's line (starting at
+/// `line_start`, indented `indent`) continues.
+///
+/// Holder selection is a backward indentation scan, but whether the holder's
+/// value is a plain scalar that reaches the cursor is decided by
+/// [`decode_plain_scalar_node`] alone: same-line anchors and tags are skipped,
+/// while quoted and block scalars, collections, aliases, comments, empty
+/// values, and a dedented sibling do not continue.
+fn continued_scalar_cursor(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+) -> Option<SemanticValueCursor> {
+    let (holder_end, parent_indent) = continued_scalar_holder(ctx.text, line_start, indent)?;
+    let holder = line_cursor(ctx, overlay, holder_end)?;
+    let (scalar, _) = decode_plain_scalar_node(ctx.text, holder.value_start, parent_indent)?;
+    // A declaration arm reads the whole scalar as one token, so this succeeds
+    // exactly when the scalar reaches the cursor (or only blanks follow it).
+    locate_schema_declaration_cursor_in_scalar(ctx.text, &scalar, offset)?;
+    Some(SemanticValueCursor { continued: Some(scalar), ..holder })
+}
+
+/// The content end of the line holding the scalar that the line at
+/// `line_start` (indented `indent`) may continue, and the column of the block
+/// collection holding that value (its key, or the `-` of a sequence item), or
+/// `None` when no such line precedes it.
 ///
 /// The holder is the nearest earlier line indented less that carries a `key:`
 /// or `- ` indicator; less-indented lines without one are earlier
 /// continuations of the same scalar. Blank lines fold into the scalar, while a
-/// comment line ends it. The holder's value must open a plain scalar on its
-/// own line: an empty value, a quoted or block scalar, a flow collection, or
-/// node properties are not continued this way.
-fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Option<usize> {
+/// comment line ends it.
+fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Option<(usize, usize)> {
     let mut needed = indent;
     let mut end = line_start;
     while end > 0 {
@@ -222,22 +283,19 @@ fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Opti
             continue;
         }
         let mut value = trimmed;
-        let mut held = false;
+        let mut holder_column = None;
         if let Some(after_dash) = value.strip_prefix("- ") {
             value = after_dash.trim_start();
-            held = true;
+            holder_column = Some(line_indent);
         }
-        if let Some(colon) = mapping_separator(value, false) {
-            value = value[colon + 1..].trim_start();
-            held = true;
+        if mapping_separator(value, false).is_some() {
+            holder_column = Some(line.len() - value.len());
         }
-        if !held {
+        let Some(holder_column) = holder_column else {
             needed = line_indent;
             continue;
-        }
-        let opens_plain = !value.is_empty()
-            && !value.starts_with(['#', '|', '>', '\'', '"', '[', '{', '!', '&', '*']);
-        return opens_plain.then_some(start + line.len());
+        };
+        return Some((start + line.len(), holder_column));
     }
     None
 }
@@ -683,7 +741,7 @@ fn top_level_key_completions(
 ) -> Vec<CompletionItem> {
     let present: Vec<&str> = ast.top_level().map(|entry| entry.key.as_str()).collect();
     let shape = known_shape(ctx);
-    shape_key_completions(ctx, offset, &shape, &present, partial)
+    shape_key_completions(ctx, offset, shape, &present, partial)
 }
 
 /// Nested-mapping key completion. When the enclosing parent path resolves to an
@@ -700,10 +758,9 @@ fn nested_key_completions(
 ) -> Vec<CompletionItem> {
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
-    let shape = known_shape(ctx);
     let segments = key_segments(&ancestor_refs);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Transparent);
-    if let Some(nested) = memo.shape(ctx, &shape, &segments) {
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+    if let Some(nested) = memo.shape(&segments) {
         let present = present_child_keys(ast, &ancestors);
         return shape_key_completions(ctx, offset, nested, &present, partial);
     }
@@ -766,6 +823,7 @@ fn value_completions(
     ancestors: &[String],
     key: &str,
     partial: &str,
+    event: Option<&crate::overlay::event_views::StackEvent>,
 ) -> Vec<CompletionItem> {
     let start = offset - partial.len();
     let mut path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
@@ -784,20 +842,18 @@ fn value_completions(
         return items;
     }
 
-    let shape = known_shape(ctx);
     let segments = key_segments(&path);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Transparent);
-    let Some(def) = def_at_path_ctx(ctx, &shape, &segments, &mut memo) else {
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+    let Some(def) = memo.def_at(&segments) else {
         return Vec::new();
     };
-    let def: &PropertyDef = &def;
 
     let mut items = Vec::new();
 
     // Each authored `literal(x)` value, preselected, with YAML insertion text
     // matching the value's scalar type. A union-typed reference contributes
-    // its arms.
-    let alternatives = flattened_alternatives(def);
+    // its arms, and a recursive reference its definition's.
+    let alternatives = resolved_alternatives(def, definitions(ctx));
     for atom in alternatives.iter().map(|alternative| alternative.atom) {
         if let Some(value) = atom.literal_value() {
             let insert = yaml_scalar_literal(value);
@@ -812,7 +868,7 @@ fn value_completions(
     // Expression-typed arm: the shared catalog completion (see
     // `expression_value_completions`).
     if expression_atom(def).is_some() {
-        items.extend(expression_value_completions(ctx, offset, partial, start));
+        items.extend(expression_value_completions(ctx, offset, partial, start, event));
     }
 
     // Scaffolds from EVERY non-Literal arm (enum members, boolish `true`/`false`,
@@ -920,13 +976,72 @@ fn expression_value_completions(
     offset: usize,
     value_partial: &str,
     value_start: usize,
+    event: Option<&crate::overlay::event_views::StackEvent>,
 ) -> Vec<CompletionItem> {
     let (token_start, token) = expressions::value_completion_partial(value_partial, value_start);
+    expression_candidates(ctx, token_start, offset, token, event)
+}
+
+/// The shared expression candidates for `token` (typed over
+/// `token_start..offset`): frontmatter keys, `ctx.*`, functions, host
+/// globals, and, inside `event`'s stack, the globals that event may read.
+fn expression_candidates(
+    ctx: &DocumentContext,
+    token_start: usize,
+    offset: usize,
+    token: &str,
+    event: Option<&crate::overlay::event_views::StackEvent>,
+) -> Vec<CompletionItem> {
     let frontmatter_keys = expression_property_keys(ctx);
-    expressions::completion_candidates(token, &frontmatter_keys)
-        .into_iter()
-        .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
-        .collect()
+    let host = expressions::host_global_candidates(token, &crate::providers::dsl::host_catalogs(ctx));
+    let lifecycle = event.map(|event| expressions::event_global_candidates(token, event)).unwrap_or_default();
+    crate::providers::dsl::with_site_scope(ctx, None, |site| {
+        let prefix = &ctx.text[..offset];
+        let line_start = prefix.rfind('\n').map_or(0, |at| at + 1);
+        let start = prefix.rfind("{{").filter(|at| *at >= line_start).map(|at| at + 2)
+            .or_else(|| prefix[line_start..].find(':').map(|at| line_start + at + 1))
+            .unwrap_or(token_start);
+        let expression = ctx.text[start..offset].trim_start();
+        let expression = expression.strip_prefix(['\'', '"']).unwrap_or(expression);
+        let scope = ctx.overlay.and_then(|overlay| overlay.ast.as_deref()).and_then(|ast| {
+            let index = cursor_scalar(ast, offset)?;
+            let typing = scalar_typing(ctx, index)?;
+            if let Some(value) = expression_value(ast, index, typing) {
+                let decoded = value.decoded_offset(offset)?;
+                return Some(expressions::cursor_scope(value.expression(), decoded, site));
+            }
+            expressions::scalar_interpolations(ctx.text, &ast.entries()[index], index).into_iter().find_map(|value| {
+                if !value.outer_span().contains(&offset) { return None; }
+                let decoded = value.projection().analyzed_offset(offset)?.saturating_sub(value.analyzed_start());
+                Some(expressions::cursor_scope(&value.text, decoded, site))
+            })
+        }).unwrap_or_else(|| expressions::cursor_scope(expression, expression.len(), site));
+        let candidates = expressions::scoped_completion_candidates(token, &frontmatter_keys, lifecycle.into_iter().chain(host), &scope);
+        let prioritize = candidates.iter().any(|candidate| candidate.kind == expressions::ExprCompletionKind::LocalBinding);
+        let mut items: Vec<_> = candidates.into_iter()
+            .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
+            .collect();
+        if prioritize { crate::providers::dsl::retain_completion_order(&mut items); }
+        items
+    })
+}
+
+/// Completion inside `event`'s lifecycle stack value: inside an open `{{`
+/// span, or in a `when` guard's condition text, the shared expression
+/// candidates with the event's globals. `None` elsewhere in the stack, which
+/// completes like any other value.
+fn stack_completions(
+    ctx: &DocumentContext,
+    offset: usize,
+    key: &str,
+    value_partial: &str,
+    event: &crate::overlay::event_views::StackEvent,
+) -> Option<Vec<CompletionItem>> {
+    let value_start = offset - value_partial.len();
+    if let Some((token_start, token)) = expressions::completion_partial(value_partial, value_partial.len()) {
+        return Some(expression_candidates(ctx, value_start + token_start, offset, token, Some(event)));
+    }
+    (key == "when").then(|| expression_value_completions(ctx, offset, value_partial, value_start, Some(event)))
 }
 
 /// The document properties an expression may name: the document's top-level
@@ -968,6 +1083,7 @@ fn expr_completion_item(
         expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
         expressions::ExprCompletionKind::ReservedRoot => CompletionItemKind::MODULE,
         expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
+        expressions::ExprCompletionKind::LocalBinding => CompletionItemKind::VARIABLE,
     };
     Some(CompletionItem {
         label: candidate.label,
@@ -990,20 +1106,24 @@ fn expr_completion_item(
 /// An Expression-typed scalar frontmatter value: the authored entry plus the
 /// parser-decoded expression text and its scalar-style projection back to
 /// authored document bytes (YAML quotes excluded).
+///
+/// The decoded text and projection are borrowed from the snapshot's scalar
+/// typing ([`ScalarTyping`]), so every request on one snapshot reads the same
+/// stored values.
 pub(crate) struct ExpressionValue<'a> {
     /// The authored entry — `value_span` is the whole authored value range.
     pub(crate) entry: &'a FmEntry,
     /// The entry's arena index, for O(depth) [`FrontmatterAst::path_at`].
     pub(crate) index: usize,
     /// The decoded expression text the compose parser sees.
-    expression: String,
-    projection: expressions::ScalarProjection,
+    expression: &'a str,
+    projection: &'a expressions::ScalarProjection,
 }
 
 impl ExpressionValue<'_> {
     /// The decoded expression text the compose parser sees.
     pub(crate) fn expression(&self) -> &str {
-        &self.expression
+        self.expression
     }
 
     /// Whether ranges inside the value are exact: an untagged single-line
@@ -1015,7 +1135,7 @@ impl ExpressionValue<'_> {
 
     /// The scalar-style projection, for lints that encode an authored rewrite.
     pub(crate) fn projection(&self) -> &expressions::ScalarProjection {
-        &self.projection
+        self.projection
     }
 
     /// Projects a decoded byte range to a document span, YAML quotes excluded.
@@ -1047,64 +1167,142 @@ fn expression_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
     atoms_of(def).iter().find(|atom| is_expression(atom))
 }
 
+/// What the schema says about the scalar entry `index` of `ast`, resolved
+/// through `memo` (explicit array crossing, the same resolver every
+/// value-oriented capability uses). The one classifier behind both
+/// [`scalar_typing`] and [`scalar_inventory`].
+fn classify_scalar<'p>(
+    memo: &mut ShapeMemo<'_, 'p>,
+    ast: &'p FrontmatterAst,
+    document: &str,
+    index: usize,
+) -> ScalarTyping {
+    let path = ast.path_at(index);
+    let Some(def) = memo.def_at(&path) else {
+        return ScalarTyping::UNRESOLVED;
+    };
+    let expression = if expression_atom(def).is_none() {
+        ExpressionTyping::No
+    } else {
+        match expressions::ScalarProjection::for_value(&ast.entries()[index], document) {
+            Some((projection, text)) => ExpressionTyping::Decoded { text, projection },
+            None => ExpressionTyping::Undecodable,
+        }
+    };
+    ScalarTyping { file: file_atom(def).is_some(), expression }
+}
+
+/// The typing of the one scalar entry `index`, from the snapshot when any
+/// request has classified it, else classified now and stored. Resolves only
+/// that entry's path and never starts the whole-document inventory, so a
+/// cursor request costs the same however many other scalars the document has.
+/// `None` without a frontmatter tree.
+pub(crate) fn scalar_typing<'c>(ctx: &DocumentContext<'c>, index: usize) -> Option<&'c ScalarTyping> {
+    let overlay = ctx.overlay?;
+    let ast = overlay.ast.as_deref()?;
+    Some(overlay.analysis.scalar(index, || {
+        classify_scalar(&mut ShapeMemo::new(ctx, ArrayCrossing::Explicit), ast, ctx.text, index)
+    }))
+}
+
+/// Every scalar entry with its typing, in document order: the snapshot's
+/// inventory, built by the first whole-document request and read by every
+/// later one. Empty without a frontmatter tree.
+fn scalar_inventory<'c>(ctx: &DocumentContext<'c>) -> impl Iterator<Item = (usize, &'c ScalarTyping)> + use<'c> {
+    ctx.overlay
+        .and_then(|overlay| {
+            let ast = overlay.ast.as_deref()?;
+            let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+            Some(overlay.analysis.inventory(&mut |index| classify_scalar(&mut memo, ast, ctx.text, index)))
+        })
+        .into_iter()
+        .flatten()
+}
+
+/// The scalar entry whose authored value span contains `offset`.
+fn cursor_scalar(ast: &FrontmatterAst, offset: usize) -> Option<usize> {
+    ast.entries()
+        .iter()
+        .position(|entry| entry.kind == FmValueKind::Scalar && entry.value_span.contains(&offset))
+}
+
+/// The Expression-typed value at entry `index`, when `typing` decoded one.
+fn expression_value<'a>(ast: &'a FrontmatterAst, index: usize, typing: &'a ScalarTyping) -> Option<ExpressionValue<'a>> {
+    let ExpressionTyping::Decoded { text, projection } = &typing.expression else {
+        return None;
+    };
+    Some(ExpressionValue { entry: &ast.entries()[index], index, expression: text, projection })
+}
+
 /// Every Expression-typed **scalar** frontmatter value, in document order. A
 /// mapping/sequence value on an expression property is intentionally excluded —
 /// it stays a schema type mismatch, not an expression.
-pub(crate) fn expression_values<'a>(
-    ctx: &DocumentContext,
-    ast: &'a FrontmatterAst,
-) -> Vec<ExpressionValue<'a>> {
-    let shape = known_shape(ctx);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-    let mut out = Vec::new();
-    for (index, entry) in ast.entries().iter().enumerate() {
-        if entry.kind != FmValueKind::Scalar {
-            continue;
-        }
-        let path = ast.path_at(index);
-        let Some(def) = def_at_path_ctx(ctx, &shape, &path, &mut memo) else {
-            continue;
-        };
-        if expression_atom(&def).is_none() {
-            continue;
-        }
-        let Some((projection, expression)) =
-            expressions::ScalarProjection::for_value(entry, ctx.text)
-        else {
-            continue;
-        };
-        out.push(ExpressionValue { entry, index, expression, projection });
-    }
-    out
-}
-
-/// The Expression-typed scalar value whose authored value span contains
-/// `offset`.
-fn expression_value_at<'a>(
-    ctx: &DocumentContext,
-    ast: &'a FrontmatterAst,
-    offset: usize,
-) -> Option<ExpressionValue<'a>> {
-    expression_values(ctx, ast)
-        .into_iter()
-        .find(|value| value.entry.value_span.contains(&offset))
+///
+/// Reads the snapshot's scalar inventory, initializing it on first use; a
+/// cursor request uses [`scalar_typing`] instead.
+pub(crate) fn expression_values<'c>(ctx: &DocumentContext<'c>) -> Vec<ExpressionValue<'c>> {
+    let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_deref()) else {
+        return Vec::new();
+    };
+    scalar_inventory(ctx).filter_map(|(index, typing)| expression_value(ast, index, typing)).collect()
 }
 
 /// Hover on an Expression-typed frontmatter value, via the shared
 /// [`expressions::hover_markdown_condition`] authority (condition dialect, so
 /// `&&`/`||` values hover like any other expression). Fires only when the cursor
 /// is inside the value (a cursor on the key falls through to the schema hover,
-/// which describes the `expression` type itself).
-fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, offset: usize) -> Option<Hover> {
-    let value = expression_value_at(ctx, ast, offset)?;
+/// which describes the `expression` type itself). The value's own ternary and
+/// `&&`/`||` facts narrow it; no enclosing lifecycle or task `when` does.
+/// Inside a lifecycle stack, the event's globals shadow frontmatter keys
+/// ([`expressions::hover_markdown_in_event`]).
+fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, value: &ExpressionValue<'_>, offset: usize) -> Option<Hover> {
     let expr_offset = value.decoded_offset(offset)?;
-    let markdown = expressions::hover_markdown_condition(
-        value.expression(),
-        expr_offset,
-        |name| frontmatter_scalar(ctx, name),
-        |name| schema_property_details(ctx, name),
-    );
+    let host = crate::providers::dsl::host_catalogs(ctx);
+    let event = crate::overlay::event_views::LifecycleHost::for_document(ctx).stack_event(&ast.path_at(value.index));
+    let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
+        let scalar = |name: &str| frontmatter_scalar(ctx, name);
+        let property =
+            |name: &str| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name));
+        match event {
+            Some(event) => expressions::hover_markdown_in_event(
+                expressions::parse_condition,
+                value.expression(),
+                expr_offset,
+                site,
+                scalar,
+                property,
+                &event,
+            ),
+            None => expressions::hover_markdown_condition(value.expression(), expr_offset, site, scalar, property),
+        }
+    });
     markup_hover(ctx, value.expression_span(), markdown)
+}
+
+/// Hover on a `{{ … }}` span or `when` guard inside the lifecycle stack
+/// scalar `index`, which is not an Expression-typed value: the shared
+/// expression hover, with the globals of the stack's event
+/// ([`expressions::hover_markdown_in_event`]). Unguarded, like every
+/// frontmatter site. Only that scalar's expressions are extracted.
+fn stack_expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, index: usize, offset: usize) -> Option<Hover> {
+    let lifecycle = crate::overlay::event_views::LifecycleHost::for_document(ctx);
+    let expression = crate::overlay::event_views::scalar_stack_expressions(&lifecycle, ctx.text, ast, index)
+        .into_iter()
+        .find(|expression| expression.reach().contains(&offset))?;
+    let expr_offset = expression.text_offset(offset).unwrap_or(0).min(expression.text.len());
+    let host = crate::providers::dsl::host_catalogs(ctx);
+    let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
+        expressions::hover_markdown_in_event(
+            expression.dialect.parser(),
+            &expression.text,
+            expr_offset,
+            site,
+            |name| frontmatter_scalar(ctx, name),
+            |name| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name)),
+            &expression.event,
+        )
+    });
+    markup_hover(ctx, expression.reach().clone(), markdown)
 }
 
 /// The static scalar value of a top-level frontmatter key, for expression hover.
@@ -1118,10 +1316,9 @@ fn frontmatter_scalar(ctx: &DocumentContext, name: &str) -> Option<String> {
 /// The heading-less schema hover details for a declared top-level property, for
 /// a bare expression identifier that names a caller-supplied parameter.
 fn schema_property_details(ctx: &DocumentContext, name: &str) -> Option<String> {
-    let shape = known_shape(ctx);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-    let def = def_at_path_ctx(ctx, &shape, &[FmPathSegment::Key(name)], &mut memo)?;
-    schema_hover_details(&def)
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+    let def = memo.def_at(&[FmPathSegment::Key(name)])?;
+    schema_hover_details(def, definitions(ctx))
 }
 
 // ── Suggestion completion ──────────────────────────────────────────────────
@@ -1131,7 +1328,7 @@ fn schema_property_details(ctx: &DocumentContext, name: &str) -> Option<String> 
 /// does not resolve.
 ///
 /// The property definition is resolved through the same selected-arm-aware
-/// [`def_at_path_ctx`] every other value capability uses, then handed to the
+/// [`ShapeMemo::def_at`] every other value capability uses, then handed to the
 /// library's context-aware [`suggestions_for_def`]. This keeps `suggest(...)`
 /// candidates on the arm the discriminant selects (and, when narrowing is
 /// unavailable, on the merged view of every arm) instead of the context-free
@@ -1144,11 +1341,10 @@ fn suggestion_completions(
     prefix: &str,
 ) -> Option<Vec<CompletionItem>> {
     let (leaf, _) = property_path.split_last()?;
-    let shape = known_shape(ctx);
     let segments = key_segments(property_path);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Transparent);
-    let def = def_at_path_ctx(ctx, &shape, &segments, &mut memo)?;
-    let query = suggestions_for_def(leaf, &def)?;
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+    let def = memo.def_at(&segments)?;
+    let query = suggestions_for_def(leaf, def)?;
     let items: Vec<CompletionItem> = query
         .items
         .iter()
@@ -1191,15 +1387,17 @@ fn block_array_suggestions(
 }
 
 /// Completion for one block-sequence item of an array whose items are a union
-/// (`U[]`, or a property union of several array types), from the library's
-/// [`alternatives_for_def`].
+/// (`U[]`, or a property union of several array types) or an object (a
+/// recursive `item[]` among them), from the library's
+/// [`alternatives_for_def_in`].
 ///
 /// On a `- ` line the item is still empty, so the keys of every object
 /// alternative and the values of every scalar alternative are offered
-/// together. On a later line of an object item, the item's authored keys are
-/// excluded and an unambiguous literal tag in the item narrows the keys to
-/// its alternative; anything less keeps the combined keys. `None` hands the
-/// cursor to the ordinary item and nested-key completion.
+/// together; an array of one object type offers that object's keys. On a
+/// later line of a union item, the item's authored keys are excluded and an
+/// unambiguous literal tag in the item narrows the keys to its alternative;
+/// anything less keeps the combined keys. `None` hands the cursor to the
+/// ordinary item and nested-key completion.
 fn union_item_completions(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
@@ -1208,21 +1406,20 @@ fn union_item_completions(
     indent: usize,
     trimmed: &str,
 ) -> Option<Vec<CompletionItem>> {
-    let shape = known_shape(ctx);
     let (marker_len, partial) = match trimmed.strip_prefix("- ") {
         Some(after_dash) => (2, after_dash),
         None if trimmed == "-" => (1, ""),
-        None => return object_item_key_completions(ctx, ast, &shape, offset, line_start, indent, trimmed),
+        None => return object_item_key_completions(ctx, ast, offset, line_start, indent, trimmed),
     };
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let segments = key_segments(&path);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Transparent);
-    let def = def_at_path_ctx(ctx, &shape, &segments, &mut memo)?;
-    if !has_union_items(&def) {
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+    let def = memo.def_at(&segments)?;
+    if !has_union_items(def, definitions(ctx)) && !has_object_items(def, definitions(ctx)) {
         return None;
     }
-    let completion = alternatives_for_def(&def, AlternativeSite::Item, &Value::Null)?;
+    let completion = alternatives_for_def_in(def, AlternativeSite::Item, &Value::Null, definitions(ctx))?;
     let start = line_start + indent + marker_len;
     let mut items: Vec<CompletionItem> = completion
         .values
@@ -1241,7 +1438,6 @@ fn union_item_completions(
 fn object_item_key_completions(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
-    shape: &SchemaShape,
     offset: usize,
     line_start: usize,
     indent: usize,
@@ -1252,9 +1448,9 @@ fn object_item_key_completions(
     let (FmPathSegment::Index(_), array_path) = item_path.split_last()? else {
         return None;
     };
-    let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-    let def = def_at_path_ctx(ctx, shape, array_path, &mut memo)?;
-    if !has_union_items(&def) {
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+    let def = memo.def_at(array_path)?;
+    if !has_union_items(def, definitions(ctx)) {
         return None;
     }
     let value = ctx
@@ -1262,7 +1458,7 @@ fn object_item_key_completions(
         .and_then(|overlay| overlay.bundle())
         .and_then(|bundle| navigate_json(&bundle.frontmatter_json, &item_path).cloned())
         .unwrap_or(Value::Null);
-    let completion = alternatives_for_def(&def, AlternativeSite::Item, &value)?;
+    let completion = alternatives_for_def_in(def, AlternativeSite::Item, &value, definitions(ctx))?;
     let present: Vec<&str> = ast
         .entries()
         .iter()
@@ -1301,9 +1497,18 @@ fn enclosing_object_item(
     (!leaves_item && still_placed(ctx, entry)).then_some(index)
 }
 
-/// Whether `def` is an array whose item has more than one alternative.
-fn has_union_items(def: &PropertyDef) -> bool {
-    flattened_alternatives(def).iter().filter(|alternative| alternative.is_array).count() > 1
+/// Whether `def` is an array whose item has more than one alternative, a
+/// recursive item reference counting its definition's alternatives.
+fn has_union_items(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> bool {
+    resolved_alternatives(def, definitions).iter().filter(|alternative| alternative.is_array).count() > 1
+}
+
+/// Whether `def` is an array with an inline-object item alternative, a
+/// recursive item reference counting its definition's alternatives.
+fn has_object_items(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> bool {
+    resolved_alternatives(def, definitions)
+        .iter()
+        .any(|alternative| alternative.is_array && matches!(alternative.atom.ty, TypeExpr::InlineObject(_)))
 }
 
 /// `FIELD` completions for alternative keys not yet authored, filtered by
@@ -1387,9 +1592,19 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 
     // A cursor inside an Expression-typed value gets the shared expression hover
     // (parsed form + `ctx.*`/function catalog); a cursor on its key falls
-    // through to the schema hover describing the `expression` type.
-    if let Some(hover) = expression_hover(ctx, ast, offset) {
-        return Some(hover);
+    // through to the schema hover describing the `expression` type. Any other
+    // scalar inside a lifecycle stack gets the hover of its own `{{ … }}` span
+    // or `when` guard. Only the cursor's scalar is typed.
+    if let Some(index) = cursor_scalar(ast, offset)
+        && let Some(typing) = scalar_typing(ctx, index)
+    {
+        let hover = match expression_value(ast, index, typing) {
+            Some(value) => expression_hover(ctx, ast, &value, offset),
+            None => stack_expression_hover(ctx, ast, index, offset),
+        };
+        if hover.is_some() {
+            return hover;
+        }
     }
 
     let entry = ast.entry_at_offset(offset)?;
@@ -1441,7 +1656,7 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
         );
     }
 
-    let parsed = AuthoredDeclaration::frontmatter(ctx.text, overlay.ast.as_deref()?)?;
+    let parsed = AuthoredDeclaration::frontmatter_at(ctx.text, overlay.ast.as_deref()?, offset)?;
     let SchemaDeclaration::Schema(schema) = parsed.declaration else {
         return None;
     };
@@ -1524,6 +1739,9 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
                 named_references::reference_spelling(name, reference, atom.is_array)
             }
             TypeExpr::Union(_) => "union".to_string(),
+            TypeExpr::Tuple(_) => "tuple".to_string(),
+            TypeExpr::Function(_) => "function".to_string(),
+            TypeExpr::Ref(key) => key.name.clone(),
         };
         if atom.is_array && !matches!(atom.ty, TypeExpr::Imported { .. }) {
             name.push_str("[]");
@@ -1599,39 +1817,42 @@ fn alphanumeric_hover_lines(atom: &PropertyAtom) -> Vec<String> {
 /// there is one, and otherwise through the usual literal-tag selection or the
 /// merged object alternatives.
 fn schema_hover(ctx: &DocumentContext, path: &[FmPathSegment<'_>], entry: &FmEntry) -> Option<Hover> {
-    let shape = known_shape(ctx);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-    let item = union_item(ctx, &shape, path, &mut memo);
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Explicit);
+    let item = union_item(ctx, path, &mut memo);
     let (span, label) = match &entry.key_span {
         Some(key_span) => (key_span.clone(), entry.key.as_str()),
         None => (entry.value_span.clone(), entry.dotted.as_str()),
     };
     let Some(item) = item else {
-        let def = def_at_path_ctx(ctx, &shape, path, &mut memo)?;
-        return markup_hover(ctx, span, schema_hover_body(label, &def)?);
+        let def = memo.def_at(path)?;
+        return markup_hover(ctx, span, schema_hover_body(label, def, definitions(ctx))?);
     };
     let field = &path[item.depth..];
     if field.is_empty() {
-        return markup_hover(ctx, span, union_item_hover_body(label, &item));
+        return markup_hover(ctx, span, union_item_hover_body(label, &item, definitions(ctx)));
     }
     let matched_shape = item.matched.and_then(|index| match &item.alternatives[index].ty {
         TypeExpr::InlineObject(arm) => Some(arm),
         _ => None,
     });
-    let def = match matched_shape {
-        Some(arm) => Cow::Borrowed(def_at_path(arm, field)?),
-        None => def_at_path_ctx(ctx, &shape, path, &mut memo)?,
+    // The arm-local lookup descends only the first object arm below the item,
+    // so a key that only a later overload declares (`content` of
+    // `ensure_file`'s long forms) falls back to the context-aware resolver,
+    // which merges the arms.
+    let def = match matched_shape.and_then(|arm| def_at_path(arm, field, definitions(ctx))) {
+        Some(def) => def,
+        None => memo.def_at(path)?,
     };
-    let body = schema_hover_body(label, &def)?;
-    let note = union_item_note(&format_dotted(&path[..item.depth]), &item);
+    let body = schema_hover_body(label, def, definitions(ctx))?;
+    let note = union_item_note(&format_dotted(&path[..item.depth]), &item, definitions(ctx));
     markup_hover(ctx, span, format!("{body}\n\n{note}"))
 }
 
 /// The nearest sequence item enclosing a hovered path, when that item's type
 /// is a union, with the alternative its authored value matches.
-struct UnionItem {
+struct UnionItem<'c> {
     /// The item's flattened alternatives, in declaration order.
-    alternatives: Vec<PropertyAtom>,
+    alternatives: &'c [PropertyAtom],
     /// How the authored item relates to the alternatives.
     status: ItemMatch,
     /// The alternative `status` names when it is [`ItemMatch::Unique`].
@@ -1653,16 +1874,14 @@ enum ItemMatch {
     Several(usize),
 }
 
-fn union_item<'p>(
-    ctx: &DocumentContext,
-    shape: &SchemaShape,
+fn union_item<'c, 'p>(
+    ctx: &DocumentContext<'c>,
     path: &[FmPathSegment<'p>],
-    memo: &mut ShapeMemo<'p>,
-) -> Option<UnionItem> {
+    memo: &mut ShapeMemo<'c, 'p>,
+) -> Option<UnionItem<'c>> {
     let index = path.iter().rposition(|segment| matches!(segment, FmPathSegment::Index(_)))?;
     let item_path = &path[..=index];
-    let PropertyDef::Union(alternatives) = def_at_path_ctx(ctx, shape, item_path, memo)?.into_owned()
-    else {
+    let PropertyDef::Union(alternatives) = memo.def_at(item_path)? else {
         return None;
     };
     let value = ctx
@@ -1676,7 +1895,10 @@ fn union_item<'p>(
         let accepting: Vec<usize> = alternatives
             .iter()
             .enumerate()
-            .filter(|(_, alternative)| alternative_accepts(alternative, &value))
+            .filter(|(_, alternative)| {
+                ctx.overlay
+                    .is_some_and(|overlay| overlay.analysis.shared().accepts(alternative, definitions(ctx), &value))
+            })
             .map(|(index, _)| index)
             .collect();
         match accepting.as_slice() {
@@ -1689,37 +1911,37 @@ fn union_item<'p>(
 }
 
 /// Hover body for a union item hovered directly (a scalar item).
-fn union_item_hover_body(label: &str, item: &UnionItem) -> String {
+fn union_item_hover_body(label: &str, item: &UnionItem, definitions: &dyn DefinitionLookup) -> String {
     match item.matched {
         Some(index) => {
             let arm = PropertyDef::Single(item.alternatives[index].clone());
-            let details = schema_hover_details(&arm).unwrap_or_default();
+            let details = schema_hover_details(&arm, definitions).unwrap_or_default();
             format!(
                 "**`{label}`**\n\nMatches alternative {} of {}\n\n{details}",
                 index + 1,
                 item.alternatives.len()
             )
         }
-        None => format!("**`{label}`**\n\n{}", union_item_alternatives(item)),
+        None => format!("**`{label}`**\n\n{}", union_item_alternatives(item, definitions)),
     }
 }
 
 /// The note under a field's hover naming the alternative its item matches,
 /// or listing every alternative when no single one does.
-fn union_item_note(item_label: &str, item: &UnionItem) -> String {
+fn union_item_note(item_label: &str, item: &UnionItem, definitions: &dyn DefinitionLookup) -> String {
     match item.matched {
         Some(index) => format!(
             "Item `{item_label}` matches alternative {} of {}:\n{}",
             index + 1,
             item.alternatives.len(),
-            alternative_line(&item.alternatives[index])
+            alternative_line(&item.alternatives[index], definitions)
         ),
-        None => format!("Item `{item_label}`: {}", union_item_alternatives(item)),
+        None => format!("Item `{item_label}`: {}", union_item_alternatives(item, definitions)),
     }
 }
 
 /// Why no single alternative was chosen, followed by every alternative.
-fn union_item_alternatives(item: &UnionItem) -> String {
+fn union_item_alternatives(item: &UnionItem, definitions: &dyn DefinitionLookup) -> String {
     let count = item.alternatives.len();
     let reason = match item.status {
         ItemMatch::Missing => format!("no value; one of {count} alternatives:"),
@@ -1728,21 +1950,22 @@ fn union_item_alternatives(item: &UnionItem) -> String {
         ItemMatch::Unique => format!("one of {count} alternatives:"),
     };
     let refs: Vec<&PropertyAtom> = item.alternatives.iter().collect();
-    format!("{reason}\n{}", alternative_lines(&refs))
+    format!("{reason}\n{}", alternative_lines(&refs, definitions))
 }
 
 /// One Markdown list line per alternative.
-fn alternative_lines(alternatives: &[&PropertyAtom]) -> String {
+fn alternative_lines(alternatives: &[&PropertyAtom], definitions: &dyn DefinitionLookup) -> String {
     alternatives
         .iter()
-        .map(|alternative| alternative_line(alternative))
+        .map(|alternative| alternative_line(alternative, definitions))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 /// A list line naming an alternative's type (an object's keys) and its
-/// description.
-fn alternative_line(alternative: &PropertyAtom) -> String {
+/// description. A recursive reference keeps its name and lists the keys of
+/// the object its definition declares.
+fn alternative_line(alternative: &PropertyAtom, definitions: &dyn DefinitionLookup) -> String {
     let mut line = match &alternative.ty {
         TypeExpr::Primitive(ty) => format!("- **{}", ty.as_keyword()),
         TypeExpr::InlineObject(_) => "- **object".to_string(),
@@ -1752,12 +1975,23 @@ fn alternative_line(alternative: &PropertyAtom) -> String {
         ),
         // Callers pass flattened alternatives.
         TypeExpr::Union(_) => "- **union".to_string(),
+        TypeExpr::Tuple(_) => "- **tuple".to_string(),
+        TypeExpr::Function(_) => "- **function".to_string(),
+        TypeExpr::Ref(key) => format!("- **{}", key.name),
     };
     if alternative.is_array && !matches!(alternative.ty, TypeExpr::Imported { .. }) {
         line.push_str("[]");
     }
     line.push_str("**");
-    if let TypeExpr::InlineObject(shape) = &alternative.ty {
+    let object = match &alternative.ty {
+        TypeExpr::InlineObject(shape) => Some(shape),
+        TypeExpr::Ref(key) => definitions.lookup_definition(key).and_then(|definition| match &definition.body {
+            PropertyDef::Single(PropertyAtom { ty: TypeExpr::InlineObject(shape), is_array: false, .. }) => Some(shape),
+            _ => None,
+        }),
+        _ => None,
+    };
+    if let Some(shape) = object {
         let keys: Vec<String> = shape.properties.keys().map(|key| format!("`{key}`")).collect();
         if !keys.is_empty() {
             line.push_str(&format!(" with {}", keys.join(", ")));
@@ -1779,27 +2013,69 @@ fn alternative_line(alternative: &PropertyAtom) -> String {
 /// the property being described; **bold** = its type; _italic_ = its enum and
 /// default values. Kept pure (no `DocumentContext`) so the formatting rule is
 /// unit-testable without an LSP session.
-pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef) -> Option<String> {
-    let details = schema_hover_details(def)?;
+pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef, definitions: &dyn DefinitionLookup) -> Option<String> {
+    let details = schema_hover_details(def, definitions)?;
     Some(format!("**`{key}`**\n\n{details}"))
+}
+
+/// The type line of a reference whose definition resolves to several
+/// alternatives: the list the same union shows when it is inlined. The
+/// resolver stores a union two sites share, and that must not change what
+/// either use shows; the list is also the one the union-item note numbers.
+/// Opens only the references at the top of the hovered type. `None` when the
+/// reference resolves to one alternative.
+fn stored_union_type_line(atom: &PropertyAtom, definitions: &dyn DefinitionLookup) -> Option<String> {
+    let reference = PropertyDef::Single(PropertyAtom {
+        description: None,
+        ..atom.clone()
+    });
+    let alternatives = resolved_alternatives(&reference, definitions);
+    if alternatives.len() < 2 {
+        return None;
+    }
+    let lead = if alternatives.iter().all(|alternative| alternative.is_array) {
+        "Type: **array**, each item one of:"
+    } else {
+        "Type: one of:"
+    };
+    let atoms: Vec<&PropertyAtom> = alternatives.iter().map(|alternative| alternative.atom).collect();
+    Some(format!("{lead}\n{}", alternative_lines(&atoms, definitions)))
 }
 
 /// The schema-hover body **without** the leading `**`key`**` heading: type,
 /// required, eager, enum, default, and description. A union-typed reference
 /// (`U[]`, `U(required)`) is described by its flattened alternatives, each
-/// with its own description, in place of a single type. Callers that already display the
-/// property name in their own header (e.g. the interpolation hover's
-/// `**Expression**` block) use this to avoid repeating the name.
-pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
+/// with its own description, in place of a single type, whether the union was
+/// inlined or stored as a definition. Any other stored reference (`item[]`,
+/// recursive or shared) is named as its type and followed by its definition's
+/// body looked up in `definitions`, in which every stored use is again written
+/// by name, so the whole type shows once and never expands further. Callers
+/// that already display the property name in their own header (e.g. the
+/// interpolation hover's `**Expression**` block) use this to avoid repeating
+/// the name.
+pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn DefinitionLookup) -> Option<String> {
     let atom = primary_atom(def)?;
     let mut lines = Vec::new();
 
+    let stored_union = match &atom.ty {
+        TypeExpr::Ref(_) => stored_union_type_line(atom, definitions),
+        _ => None,
+    };
+    let described_by_alternatives = stored_union.is_some();
     let type_line = match &atom.ty {
+        _ if let Some(line) = stored_union => line,
         TypeExpr::Primitive(ty) => {
             let suffix = if atom.is_array { "[]" } else { "" };
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
+        TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
+            let spelled = darkmatter::markdown::schemas::simplified::serialize_property_atom(&PropertyAtom {
+                description: None,
+                ..atom.clone()
+            });
+            format!("Type: **{spelled}**")
+        }
         TypeExpr::Imported { name, reference } => format!(
             "Type: **{}**",
             named_references::reference_spelling(name, reference, atom.is_array)
@@ -1815,10 +2091,17 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
             } else {
                 "Type: one of:"
             };
-            format!("{lead}\n{}", alternative_lines(&alternatives))
+            format!("{lead}\n{}", alternative_lines(&alternatives, definitions))
         }
     };
     lines.push(type_line);
+    if let TypeExpr::Ref(key) = &atom.ty
+        && !described_by_alternatives
+        && let Some(definition) = definitions.lookup_definition(key)
+    {
+        let body = darkmatter::markdown::schemas::simplified::serialize_property_def(&definition.body);
+        lines.push(format!("`{}` is defined as: `{body}`", key.name));
+    }
 
     // A `literal(x)` atom shows its exact pinned value directly under the type,
     // ahead of the shared constraint/description lines.
@@ -1871,7 +2154,7 @@ fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
 // ── Navigation (definition + document links) ────────────────────────────────
 
 /// Definition on a named-type reference, a `$schema` file reference, or a
-/// `file(...)` value.
+/// `file(...)` value. Only the scalar under the cursor is typed and resolved.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if let Some(location) = named_references::definition(ctx, offset) {
         return vec![location];
@@ -1879,9 +2162,15 @@ pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
     };
-    nav_targets(ctx, ast)
+    if ctx.file_context().is_err() {
+        return Vec::new();
+    }
+    let schema = schema_target(ctx, ast).filter(|(span, _)| span.contains(&offset));
+    let file = cursor_scalar(ast, offset)
+        .and_then(|index| file_target(ctx, ast, index, scalar_typing(ctx, index)?));
+    schema
         .into_iter()
-        .filter(|(span, _)| span.contains(&offset))
+        .chain(file)
         .filter_map(|(_, path)| {
             let uri = file_path_to_uri(&path)?;
             Some(Location::new(uri, Range::default()))
@@ -1891,10 +2180,7 @@ pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
 
 /// Document links for `$schema` file references and `file(...)` values.
 pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
-    let Some(ast) = overlay_ast(ctx) else {
-        return Vec::new();
-    };
-    nav_targets(ctx, ast)
+    nav_targets(ctx)
         .into_iter()
         .filter_map(|(span, path)| {
             let range = ctx.source_map.byte_range_to_lsp(span)?;
@@ -1905,52 +2191,49 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 }
 
 /// The `(value_span, resolved_path)` navigation targets in the frontmatter:
-/// the `$schema` file reference plus every `file(...)`-typed scalar value.
+/// the `$schema` file reference plus every `file(...)`-typed scalar value,
+/// typed through the snapshot's scalar inventory.
 ///
 /// Each value resolves through the document's context to the existing file,
 /// else to where it would be created. A document without a context has no
-/// targets.
-fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, PathBuf)> {
+/// targets. Resolution is never cached: it reads the filesystem.
+fn nav_targets(ctx: &DocumentContext) -> Vec<(SourceSpan, PathBuf)> {
+    let Some(ast) = overlay_ast(ctx) else {
+        return Vec::new();
+    };
     if ctx.file_context().is_err() {
         return Vec::new();
     }
-    let navigate = |value: &str| {
-        ctx.resolve_reference(value)
-            .and_then(|target| target.navigation_target().map(Path::to_path_buf))
-    };
-    let mut targets = Vec::new();
+    schema_target(ctx, ast)
+        .into_iter()
+        .chain(scalar_inventory(ctx).filter_map(|(index, typing)| file_target(ctx, ast, index, typing)))
+        .collect()
+}
 
-    // `$schema: ./file.yaml` (an inline `{ ... }` mapping is not a file ref).
-    if let Some(entry) = ast.schema_entry()
-        && entry.kind == FmValueKind::Scalar
-        && let Some(value) = &entry.scalar
-        && looks_like_path(value)
-        && let Some(path) = navigate(value)
-    {
-        targets.push((entry.value_span.clone(), path));
-    }
+/// Where a navigable frontmatter value points, through the document's context.
+fn navigation_path(ctx: &DocumentContext, value: &str) -> Option<PathBuf> {
+    ctx.resolve_reference(value).and_then(|target| target.navigation_target().map(Path::to_path_buf))
+}
 
-    // `file(...)`-typed scalar values at any depth: a top-level key is a
-    // single-segment path, a nested one resolves through the schema's inline
-    // objects. Any union arm being a `file` type makes the value a navigable
-    // reference.
-    let shape = known_shape(ctx);
-    let mut memo = ShapeMemo::new(ArrayCrossing::Explicit);
-    for (index, entry) in ast.entries().iter().enumerate() {
-        if entry.kind != FmValueKind::Scalar {
-            continue;
-        }
-        let path = ast.path_at(index);
-        if def_at_path_ctx(ctx, &shape, &path, &mut memo)
-            .is_some_and(|def| file_atom(&def).is_some())
-            && let Some(value) = &entry.scalar
-            && is_schema_file_value(value)
-            && let Some(path) = navigate(value)
-        {
-            targets.push((entry.value_span.clone(), path));
-        }
-    }
-    targets
+/// The `$schema: ./file.yaml` target (an inline `{ ... }` mapping is not a
+/// file reference).
+fn schema_target(ctx: &DocumentContext, ast: &FrontmatterAst) -> Option<(SourceSpan, PathBuf)> {
+    let entry = ast.schema_entry().filter(|entry| entry.kind == FmValueKind::Scalar)?;
+    let value = entry.scalar.as_deref().filter(|value| looks_like_path(value))?;
+    Some((entry.value_span.clone(), navigation_path(ctx, value)?))
+}
+
+/// The target of the `file(...)`-typed scalar entry `index`, at any depth:
+/// any union arm being a `file` type makes the value a navigable reference.
+fn file_target(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    index: usize,
+    typing: &ScalarTyping,
+) -> Option<(SourceSpan, PathBuf)> {
+    let entry = ast.entries().get(index).filter(|_| typing.file)?;
+    let value = entry.scalar.as_deref().filter(|value| is_schema_file_value(value))?;
+    Some((entry.value_span.clone(), navigation_path(ctx, value)?))
 }
 
 // ── Folding + symbols ───────────────────────────────────────────────────────
@@ -2033,13 +2316,27 @@ pub fn document_symbols(ctx: &DocumentContext) -> Vec<DocumentSymbol> {
 /// order and per-property precedence validation uses
 /// ([`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape)).
 ///
+/// Assembled at most once per analysis snapshot and shared by every request
+/// on it ([`FrontmatterAnalysis::root`]); a context with no overlay gets the
+/// base properties alone.
+///
 /// Exposed for reuse by other frontmatter-aware providers (e.g. navigation).
-pub(crate) fn known_shape(ctx: &DocumentContext) -> SchemaShape {
+pub(crate) fn known_shape<'c>(ctx: &DocumentContext<'c>) -> &'c SchemaShape {
+    match ctx.overlay {
+        Some(overlay) => overlay.analysis.root(),
+        None => baseline_root(),
+    }
+}
+
+/// Where the editor opens a [`TypeExpr::Ref`] met in [`known_shape`]: the
+/// document bundle's definitions (see
+/// [`SchemaBundle`](crate::overlay::SchemaBundle)'s lookup), or none without
+/// a bundle. Every walk below a recursive type reads through it, so none
+/// judges a reference without its definition.
+pub(crate) fn definitions<'c>(ctx: &DocumentContext<'c>) -> &'c dyn DefinitionLookup {
     match ctx.overlay.and_then(|overlay| overlay.bundle()) {
-        Some(bundle) => bundle
-            .effective
-            .property_shape(&bundle.extension_shapes, &bundle.frontmatter_json),
-        None => effective_property_shape(&[], None, &Value::Null),
+        Some(bundle) => bundle,
+        None => &NoDefinitions,
     }
 }
 
@@ -2068,7 +2365,8 @@ fn merged_root_arm_shape(arms: &[SchemaArm]) -> SchemaShape {
 }
 
 /// The nested [`SchemaShape`] reached by walking typed `ancestors`, selecting
-/// the first inline-object arm of each property. An empty path yields `root`.
+/// the first inline-object arm of each property, a recursive reference opened
+/// through `definitions` one step at a time. An empty path yields `root`.
 ///
 /// A key followed by an [`FmPathSegment::Index`] descends an array arm's item
 /// shape (`initialize[0]`); a bare key descends a non-array arm. Every
@@ -2079,12 +2377,13 @@ fn merged_root_arm_shape(arms: &[SchemaArm]) -> SchemaShape {
 pub(crate) fn nested_shape<'a>(
     root: &'a SchemaShape,
     ancestors: &[FmPathSegment<'_>],
+    definitions: &'a dyn DefinitionLookup,
 ) -> Option<&'a SchemaShape> {
     let mut shape = root;
     let mut rest = ancestors;
     while !rest.is_empty() {
         let (key, item, tail) = split_step(rest)?;
-        shape = inline_object_shape(shape.properties.get(key)?, item)?;
+        shape = inline_object_shape(shape.properties.get(key)?, item, definitions)?;
         rest = tail;
     }
     Some(shape)
@@ -2127,25 +2426,45 @@ pub(crate) enum ArrayCrossing {
     Transparent,
 }
 
-/// Per-pass memo of context-aware nested shapes, keyed by typed ancestor path.
+/// Per-pass memo of context-aware nested shapes, keyed by typed ancestor path,
+/// over the snapshot's shared schema state.
 ///
-/// A diagnostics or links pass resolves one definition per scalar entry;
-/// without the memo each resolution re-materializes every ancestor shape, which
-/// sequence descent turns into thousands of whole-shape clones per keystroke
-/// (`claudine/fixes/2026-09-13-better-static-analysis/spikes/entry-arena-cost.md`).
-/// Create one per pass and drop it with the pass; it is never cached across
-/// document versions.
-pub(crate) struct ShapeMemo<'p> {
+/// The memo only remembers which shape each instance path reached, so a pass
+/// repeats no discriminant selection; it owns no shape. Every shape it hands
+/// out is borrowed from the snapshot's [`FrontmatterAnalysis`]: an arm, inline
+/// object, or opened recursive definition is borrowed where it lives, and a
+/// merged view of several arms is built once per snapshot for its schema node
+/// and admitted arms, then shared by every instance and request that reaches
+/// it. Siblings that select different arms get different shapes; siblings
+/// that select the same arm, and recursive depths that return to the same
+/// definition, get the same one.
+///
+/// Create one per pass and drop it with the pass. A context with no overlay
+/// has no frontmatter to descend into, so only its top-level properties
+/// resolve.
+pub(crate) struct ShapeMemo<'c, 'p> {
     crossing: ArrayCrossing,
-    shapes: HashMap<Vec<FmPathSegment<'p>>, Option<SchemaShape>>,
+    root: &'c SchemaShape,
+    analysis: Option<&'c FrontmatterAnalysis>,
+    /// The authored, typed frontmatter discriminants are read from.
+    frontmatter: Option<&'c Value>,
+    definitions: &'c dyn DefinitionLookup,
+    shapes: HashMap<Vec<FmPathSegment<'p>>, Option<&'c SchemaShape>>,
 }
 
-impl<'p> ShapeMemo<'p> {
-    pub(crate) fn new(crossing: ArrayCrossing) -> Self {
-        Self { crossing, shapes: HashMap::new() }
+impl<'c, 'p> ShapeMemo<'c, 'p> {
+    pub(crate) fn new(ctx: &DocumentContext<'c>, crossing: ArrayCrossing) -> Self {
+        Self {
+            crossing,
+            root: known_shape(ctx),
+            analysis: ctx.overlay.map(|overlay| &*overlay.analysis),
+            frontmatter: ctx.overlay.and_then(|overlay| overlay.bundle()).map(|bundle| &bundle.frontmatter_json),
+            definitions: definitions(ctx),
+            shapes: HashMap::new(),
+        }
     }
 
-    /// The context-aware shape at `ancestors`, computed at most once per
+    /// The context-aware shape at `ancestors`, resolved at most once per
     /// distinct ancestor path (prefixes included) for the life of the memo.
     ///
     /// When an ancestor property is a union of inline-object arms tagged by a
@@ -2157,20 +2476,15 @@ impl<'p> ShapeMemo<'p> {
     /// ordinary non-discriminated union), it descends into a MERGED view of
     /// every admissible inline-object arm instead — the root-union policy of
     /// [`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape) applied to nested unions (spec D3 / AC-10).
-    fn shape<'s>(
-        &'s mut self,
-        ctx: &DocumentContext,
-        root: &'s SchemaShape,
-        ancestors: &[FmPathSegment<'p>],
-    ) -> Option<&'s SchemaShape> {
+    pub(crate) fn shape(&mut self, ancestors: &[FmPathSegment<'p>]) -> Option<&'c SchemaShape> {
         if ancestors.is_empty() {
-            return Some(root);
+            return Some(self.root);
         }
-        self.ensure(ctx, root, ancestors);
-        self.shapes.get(ancestors).and_then(Option::as_ref)
+        self.ensure(ancestors);
+        self.shapes.get(ancestors).copied().flatten()
     }
 
-    fn ensure(&mut self, ctx: &DocumentContext, root: &SchemaShape, ancestors: &[FmPathSegment<'p>]) {
+    fn ensure(&mut self, ancestors: &[FmPathSegment<'p>]) {
         if ancestors.is_empty() || self.shapes.contains_key(ancestors) {
             return;
         }
@@ -2182,57 +2496,116 @@ impl<'p> ShapeMemo<'p> {
             return;
         };
         let parent = &ancestors[..step_start];
-        self.ensure(ctx, root, parent);
-        let parent_shape = if parent.is_empty() {
-            Some(root)
-        } else {
-            self.shapes.get(parent).and_then(Option::as_ref)
-        };
-        let next = parent_shape.and_then(|shape| {
+        let next = self.shape(parent).and_then(|shape| {
             let (key, item, tail) = split_step(&ancestors[step_start..])?;
             if !tail.is_empty() || (item && self.crossing == ArrayCrossing::Transparent) {
                 return None;
             }
-            descend(ctx, shape.properties.get(key)?, ancestors, item, self.crossing)
+            self.descend(shape.properties.get(key)?, ancestors, item)
         });
         self.shapes.insert(ancestors.to_vec(), next);
     }
-}
 
-#[cfg(test)]
-thread_local! {
-    /// Shapes materialized by [`descend`] on this thread, for the memo test.
-    static SHAPE_MATERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// One context-aware step into `def`'s inline-object arms, for the mapping
-/// authored at `path`. `item` is whether the step consumed an array index.
-fn descend(
-    ctx: &DocumentContext,
-    def: &PropertyDef,
-    path: &[FmPathSegment<'_>],
-    item: bool,
-    crossing: ArrayCrossing,
-) -> Option<SchemaShape> {
-    #[cfg(test)]
-    SHAPE_MATERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    // Aligned with the flattened alternatives so a selected discriminant index
-    // maps back; the object arms of `U[]` are the item's alternatives.
-    let arms: Vec<Option<&SchemaShape>> = flattened_alternatives(def)
-        .into_iter()
-        .map(|alternative| match &alternative.atom.ty {
-            TypeExpr::InlineObject(inner)
-                if crossing == ArrayCrossing::Transparent || alternative.is_array == item =>
-            {
-                Some(inner)
-            }
-            _ => None,
-        })
-        .collect();
-    if let Some(selected) = discriminated_arm_shape(ctx, &arms, path) {
-        return Some(selected.clone());
+    /// One context-aware step into `def`'s inline-object arms, for the mapping
+    /// authored at `path`. `item` is whether the step consumed an array index.
+    ///
+    /// A recursive reference at the top of `def` is opened through the bundle's
+    /// definitions, so each step opens at most the one definition it stands on;
+    /// the referenced body's own references wait for a later step.
+    fn descend(&self, def: &'c PropertyDef, path: &[FmPathSegment<'_>], item: bool) -> Option<&'c SchemaShape> {
+        let admission = match self.crossing {
+            ArrayCrossing::Transparent => ArmAdmission::Any,
+            ArrayCrossing::Explicit if item => ArmAdmission::Items,
+            ArrayCrossing::Explicit => ArmAdmission::Values,
+        };
+        // Aligned with the flattened alternatives so a selected discriminant
+        // index maps back; the object arms of `U[]` are the item's alternatives.
+        let arms: Vec<Option<&'c SchemaShape>> = resolved_alternatives(def, self.definitions)
+            .into_iter()
+            .map(|alternative| match &alternative.atom.ty {
+                TypeExpr::InlineObject(inner)
+                    if admission == ArmAdmission::Any || alternative.is_array == item =>
+                {
+                    Some(inner)
+                }
+                _ => None,
+            })
+            .collect();
+        if let Some(selected) = self.discriminated_arm(def, admission, &arms, path) {
+            return Some(selected);
+        }
+        let mut admitted = arms.iter().flatten();
+        match (admitted.next(), admitted.next()) {
+            (None, _) => None,
+            // One admissible arm is its own merged view.
+            (Some(only), None) => Some(*only),
+            (Some(_), Some(_)) => self
+                .analysis?
+                .merged_shape(def, admission, &arms, || merged_inline_object_shape(&arms)),
+        }
     }
-    merged_inline_object_shape(&arms)
+
+    /// The arm shape a shared literal discriminant selects for the mapping at
+    /// `path`, or `None` when fewer than two arms exist or no arm is
+    /// unambiguously selected. `arms` is aligned with `def`'s alternatives; an
+    /// inadmissible arm is `None` and contributes no discriminant properties.
+    ///
+    /// The authored instance is the already-parsed, correctly-typed
+    /// frontmatter mapping at `path` (from the effective schema bundle), so a
+    /// string `'2'` never matches a numeric `literal(2)`. Only the arms'
+    /// discriminant JSON is shared across instances; the selection is made
+    /// for each instance.
+    fn discriminated_arm(
+        &self,
+        def: &'c PropertyDef,
+        admission: ArmAdmission,
+        arms: &[Option<&'c SchemaShape>],
+        path: &[FmPathSegment<'_>],
+    ) -> Option<&'c SchemaShape> {
+        if arms.len() < 2 {
+            return None;
+        }
+        let instance = navigate_json(self.frontmatter?, path)?;
+        let build = || {
+            arms.iter()
+                .map(|arm| arm.map_or_else(|| serde_json::json!({}), shape_discriminant_json))
+                .collect()
+        };
+        let index = match self.analysis {
+            Some(analysis) => {
+                select_literal_discriminant_arm(analysis.discriminants(def, admission, build), instance)
+            }
+            None => select_literal_discriminant_arm(&build(), instance),
+        }?;
+        arms[index]
+    }
+
+    /// The [`PropertyDef`] at a full typed `path`, context-aware at each
+    /// ancestor.
+    ///
+    /// This is the single context-aware schema-path resolver shared by every
+    /// value-oriented capability (value completion, hover, expression
+    /// gating/diagnostics, file navigation) so they resolve against the same
+    /// selected arm key completion narrows to. A leaf key present in more than
+    /// one merged arm with divergent types resolves to the union of every
+    /// arm's atoms. A trailing index (an addressed sequence item) resolves to
+    /// the array arms' item definition, synthesized once per distinct content
+    /// and shared across snapshots. The result is borrowed from the snapshot;
+    /// nothing is cloned to return it.
+    pub(crate) fn def_at(&mut self, path: &[FmPathSegment<'p>]) -> Option<&'c PropertyDef> {
+        let leaf_at = path.iter().rposition(|segment| matches!(segment, FmPathSegment::Key(_)))?;
+        let FmPathSegment::Key(leaf) = path[leaf_at] else {
+            return None;
+        };
+        let def = self.shape(&path[..leaf_at])?.properties.get(leaf)?;
+        match &path[leaf_at + 1..] {
+            [] => Some(def),
+            [FmPathSegment::Index(_)] if self.crossing == ArrayCrossing::Explicit => self
+                .analysis?
+                .item_definition(def, || array_item_atoms(def, self.definitions), array_item_def),
+            _ => None,
+        }
+    }
 }
 
 /// A merged view of every admissible inline-object arm's properties, for an
@@ -2273,32 +2646,6 @@ fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
     }
 }
 
-/// The arm shape a shared literal discriminant selects for the mapping at
-/// `path`, or `None` when fewer than two arms exist or no arm is unambiguously
-/// selected. `arms` is aligned with the property's atoms; an inadmissible arm
-/// is `None` and contributes no discriminant properties.
-///
-/// The authored instance is the already-parsed, correctly-typed frontmatter
-/// mapping at `path` (from the effective schema bundle), so a string `'2'` never
-/// matches a numeric `literal(2)`.
-fn discriminated_arm_shape<'a>(
-    ctx: &DocumentContext,
-    arms: &[Option<&'a SchemaShape>],
-    path: &[FmPathSegment<'_>],
-) -> Option<&'a SchemaShape> {
-    if arms.len() < 2 {
-        return None;
-    }
-    let arm_json: Vec<Value> = arms
-        .iter()
-        .map(|arm| arm.map_or_else(|| serde_json::json!({}), shape_discriminant_json))
-        .collect();
-    let bundle = ctx.overlay.and_then(|overlay| overlay.bundle())?;
-    let instance = navigate_json(&bundle.frontmatter_json, path)?;
-    let index = select_literal_discriminant_arm(&arm_json, instance)?;
-    arms[index]
-}
-
 /// The minimal discriminant JSON the selector reads for one inline-object
 /// shape: `{ "properties": { key: { "const": <value> } } }` for each of its
 /// `literal(...)`-typed properties.
@@ -2332,66 +2679,42 @@ fn navigate_json<'a>(root: &'a Value, path: &[FmPathSegment<'_>]) -> Option<&'a 
 /// discriminated ancestor union always resolves against its first arm.
 ///
 /// Callers that have a [`DocumentContext`] and must honor a selected
-/// discriminated arm use [`def_at_path_ctx`] instead; this pure variant survives
+/// discriminated arm use [`ShapeMemo::def_at`] instead; this pure variant survives
 /// for the context-free code-action/DSL callers and the unit tests.
 pub(crate) fn def_at_path<'a>(
     root: &'a SchemaShape,
     path: &[FmPathSegment<'_>],
+    definitions: &'a dyn DefinitionLookup,
 ) -> Option<&'a PropertyDef> {
     let (FmPathSegment::Key(leaf), ancestors) = path.split_last()? else {
         return None;
     };
-    nested_shape(root, ancestors)?.properties.get(*leaf)
+    nested_shape(root, ancestors, definitions)?.properties.get(*leaf)
 }
 
-/// The [`PropertyDef`] at a full typed `path`, context-aware at each ancestor
-/// through `memo`.
-///
-/// This is the single context-aware schema-path resolver shared by every
-/// value-oriented capability (value completion, hover, expression
-/// gating/diagnostics, file navigation) so they resolve against the same
-/// selected arm key completion narrows to. A leaf key present in more than one
-/// merged arm with divergent types resolves to the union of every arm's atoms.
-/// A trailing index (an addressed sequence item) resolves to the array arms'
-/// item definition. The result is [`Cow`] because a merged or item definition
-/// must be owned; a top-level leaf borrows from `root`.
-fn def_at_path_ctx<'a, 'p>(
-    ctx: &DocumentContext,
-    root: &'a SchemaShape,
-    path: &[FmPathSegment<'p>],
-    memo: &mut ShapeMemo<'p>,
-) -> Option<Cow<'a, PropertyDef>> {
-    let leaf_at = path.iter().rposition(|segment| matches!(segment, FmPathSegment::Key(_)))?;
-    let FmPathSegment::Key(leaf) = path[leaf_at] else {
-        return None;
-    };
-    let ancestors = &path[..leaf_at];
-    let def = if ancestors.is_empty() {
-        Cow::Borrowed(root.properties.get(leaf)?)
-    } else {
-        Cow::Owned(memo.shape(ctx, root, ancestors)?.properties.get(leaf)?.clone())
-    };
-    match &path[leaf_at + 1..] {
-        [] => Some(def),
-        [FmPathSegment::Index(_)] if memo.crossing == ArrayCrossing::Explicit => {
-            array_item_def(&def).map(Cow::Owned)
-        }
-        _ => None,
-    }
-}
-
-/// The definition of one item of `def`'s array arms, or `None` when no arm is
-/// an array. The item of an array of a union (`U[]`) is a property-level union
-/// of its flattened alternatives; the container's markers, array constraints,
-/// and description describe the array and are not carried onto the item.
-fn array_item_def(def: &PropertyDef) -> Option<PropertyDef> {
-    let mut items: Vec<PropertyAtom> = flattened_alternatives(def)
+/// The atoms of `def`'s array arms, which one item's definition is built
+/// from ([`array_item_def`]). The item of an array of a union (`U[]`) has its
+/// flattened alternatives, and the item of a recursive `item[]` its
+/// definition's alternatives.
+fn array_item_atoms<'a>(def: &'a PropertyDef, definitions: &'a dyn DefinitionLookup) -> Vec<&'a PropertyAtom> {
+    resolved_alternatives(def, definitions)
         .into_iter()
         .filter(|alternative| alternative.is_array)
-        .map(|alternative| PropertyAtom {
+        .map(|alternative| alternative.atom)
+        .collect()
+}
+
+/// The definition of one item built from its array arms' `atoms`, or `None`
+/// when there is none: a property-level union of several. The container's
+/// markers, array constraints, and description describe the array and are
+/// not carried onto the item.
+fn array_item_def(atoms: &[&PropertyAtom]) -> Option<PropertyDef> {
+    let mut items: Vec<PropertyAtom> = atoms
+        .iter()
+        .map(|atom| PropertyAtom {
             is_array: false,
             array_constraints: Vec::new(),
-            ..alternative.atom.clone()
+            ..(*atom).clone()
         })
         .collect();
     match items.len() {
@@ -2424,15 +2747,24 @@ fn file_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
 /// The shape of the first inline-object arm whose array-ness matches `item`,
 /// if any — the deterministic arm a context-free nested lookup descends
 /// through even when it is not first. The arms of a union-typed reference
-/// count, so `U[]`'s object arms are item arms.
-fn inline_object_shape(def: &PropertyDef, item: bool) -> Option<&SchemaShape> {
-    flattened_alternatives(def).into_iter().find_map(|alternative| match &alternative.atom.ty {
+/// count, so `U[]`'s object arms are item arms, and so do a recursive
+/// reference's, opened through `definitions`.
+fn inline_object_shape<'a>(
+    def: &'a PropertyDef,
+    item: bool,
+    definitions: &'a dyn DefinitionLookup,
+) -> Option<&'a SchemaShape> {
+    resolved_alternatives(def, definitions).into_iter().find_map(|alternative| match &alternative.atom.ty {
         TypeExpr::InlineObject(inner) if alternative.is_array == item => Some(inner),
-        // Flattening has already replaced a union type with its arms.
+        // Resolution has already replaced a union type with its arms; a
+        // reference left in place is one with no definition, offering nothing.
         TypeExpr::InlineObject(_)
         | TypeExpr::Primitive(_)
         | TypeExpr::Imported { .. }
-        | TypeExpr::Union(_) => None,
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => None,
     })
 }
 
@@ -2818,6 +3150,9 @@ mod named_references;
 mod sequence_tests;
 
 #[cfg(test)]
+mod snapshot_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2951,9 +3286,11 @@ mod tests {
                 panic!("markdown hover");
             };
             // Byte-identical to the shared interpolation hover for the same text.
+            let declared = darkmatter::markdown::compose::expression::DeclaredTypes::new(None);
             let expected = expressions::hover_markdown(
                 "ctx.today",
                 2,
+                &darkmatter::markdown::compose::expression::TypeScope::unguarded(&declared),
                 |_| None,
                 |_| None,
             );
@@ -3525,8 +3862,7 @@ mod tests {
         for deleted_first in [false, true] {
             let deleted = change_union_doc(deleted_first, "  kind: deleted\n  asset: ./target.md\n");
             with_ctx(&deleted, |ctx| {
-                let ast = overlay_ast(ctx).expect("frontmatter ast");
-                let targets = nav_targets(ctx, ast);
+                let targets = nav_targets(ctx);
                 assert!(
                     targets.iter().any(|(_, path)| path.ends_with("target.md")),
                     "deleted arm `asset` navigates (deleted_first={deleted_first}): {targets:#?}"
@@ -3534,8 +3870,7 @@ mod tests {
             });
             let created = change_union_doc(deleted_first, "  kind: created\n  asset: ./target.md\n");
             with_ctx(&created, |ctx| {
-                let ast = overlay_ast(ctx).expect("frontmatter ast");
-                let targets = nav_targets(ctx, ast);
+                let targets = nav_targets(ctx);
                 assert!(
                     targets.iter().all(|(_, path)| !path.ends_with("target.md")),
                     "created arm `asset` is a plain string, not navigable (deleted_first={deleted_first}): {targets:#?}"
@@ -3603,8 +3938,7 @@ mod tests {
         for deleted_first in [false, true] {
             let text = change_union_doc(deleted_first, "  asset: ./target.md\n");
             with_ctx(&text, |ctx| {
-                let ast = overlay_ast(ctx).expect("frontmatter ast");
-                let targets = nav_targets(ctx, ast);
+                let targets = nav_targets(ctx);
                 assert!(
                     targets.iter().any(|(_, path)| path.ends_with("target.md")),
                     "unresolved union file arm navigates (deleted_first={deleted_first}): {targets:#?}"
@@ -3978,7 +4312,7 @@ mod tests {
         atom.description = Some("the publication state".to_string());
         let def = PropertyDef::Single(atom);
 
-        let body = schema_hover_body("status", &def).expect("hover body");
+        let body = schema_hover_body("status", &def, &NoDefinitions).expect("hover body");
 
         assert!(body.contains("**`status`**"), "property → inline-code box: {body}");
         assert!(body.contains("Type: **"), "type → bold: {body}");
@@ -3991,7 +4325,7 @@ mod tests {
     #[test]
     fn test_schema_hover_body_bare_type_is_bold() {
         let def = PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String));
-        let body = schema_hover_body("title", &def).expect("hover body");
+        let body = schema_hover_body("title", &def, &NoDefinitions).expect("hover body");
         assert_eq!(body, "**`title`**\n\nType: **string**", "{body}");
     }
 
@@ -4097,7 +4431,7 @@ mod tests {
         assert_eq!(eager_hover_line(&schema_def("string")), None);
 
         let definition_hover = meta_schema_definition_hover_body("p", &def);
-        let instance_hover = schema_hover_body("p", &def).expect("hover body");
+        let instance_hover = schema_hover_body("p", &def, &NoDefinitions).expect("hover body");
         for body in [&definition_hover, &instance_hover] {
             assert!(
                 body.contains(eager_catalog_description()),
@@ -4129,7 +4463,7 @@ mod tests {
 
     #[test]
     fn schema_bound_instance_hover_separates_eager_timing_from_required_presence() {
-        let eager_only = schema_hover_body("p", &schema_def("string(eager)")).expect("hover body");
+        let eager_only = schema_hover_body("p", &schema_def("string(eager)"), &NoDefinitions).expect("hover body");
         assert!(eager_only.contains(eager_catalog_description()), "{eager_only}");
         assert!(
             !eager_only.contains("Required"),
@@ -4137,7 +4471,7 @@ mod tests {
         );
 
         let combined =
-            schema_hover_body("p", &schema_def("string(required; eager)")).expect("hover body");
+            schema_hover_body("p", &schema_def("string(required; eager)"), &NoDefinitions).expect("hover body");
         assert!(combined.contains("Required"), "{combined}");
         assert!(combined.contains(eager_catalog_description()), "{combined}");
 
@@ -4145,6 +4479,7 @@ mod tests {
         let annotated = schema_hover_body(
             "p",
             &schema_def("enum(draft, published; eager; default(draft)) -> the publication state"),
+            &NoDefinitions,
         )
         .expect("hover body");
         assert!(annotated.contains("Values: _draft_, _published_"), "{annotated}");
@@ -4158,7 +4493,7 @@ mod tests {
         for placement in ["file(eager)[]", "file[](eager)"] {
             let def = schema_def(placement);
             let definition_hover = meta_schema_definition_hover_body("p", &def);
-            let instance_hover = schema_hover_body("p", &def).expect("hover body");
+            let instance_hover = schema_hover_body("p", &def, &NoDefinitions).expect("hover body");
             for body in [&definition_hover, &instance_hover] {
                 assert!(
                     body.contains(eager_catalog_description()),
@@ -4173,7 +4508,7 @@ mod tests {
 
         let array_required = schema_def("file[](required)");
         let definition_hover = meta_schema_definition_hover_body("p", &array_required);
-        let instance_hover = schema_hover_body("p", &array_required).expect("hover body");
+        let instance_hover = schema_hover_body("p", &array_required, &NoDefinitions).expect("hover body");
         for body in [&definition_hover, &instance_hover] {
             assert!(
                 body.contains("Required"),
@@ -4490,9 +4825,9 @@ mod tests {
     fn test_nested_shape_walks_inline_objects() {
         let root = nested_fixture();
         // Empty path is the root itself.
-        assert!(nested_shape(&root, &key_segments(&[])).unwrap().properties.contains_key("settings"));
+        assert!(nested_shape(&root, &key_segments(&[]), &NoDefinitions).unwrap().properties.contains_key("settings"));
         // One inline-object segment descends into its shape.
-        let settings = nested_shape(&root, &key_segments(&["settings"])).unwrap();
+        let settings = nested_shape(&root, &key_segments(&["settings"]), &NoDefinitions).unwrap();
         assert!(settings.properties.contains_key("mode"));
     }
 
@@ -4504,7 +4839,7 @@ mod tests {
             panic!("base schema must be a single object shape");
         };
 
-        let block_quote = nested_shape(&root, &key_segments(&["style", "block-quote"]))
+        let block_quote = nested_shape(&root, &key_segments(&["style", "block-quote"]), &NoDefinitions)
             .expect("block-quote must be a typed style bucket");
         for key in [
             "width",
@@ -4524,12 +4859,12 @@ mod tests {
             );
         }
 
-        let emphasis = nested_shape(&root, &key_segments(&["style", "block-quote", "emphasis"]))
+        let emphasis = nested_shape(&root, &key_segments(&["style", "block-quote", "emphasis"]), &NoDefinitions)
             .expect("compound emphasis must expose nested keys");
         assert!(emphasis.properties.contains_key("italic"));
         assert!(emphasis.properties.contains_key("underline"));
 
-        let alignment = def_at_path(&root, &key_segments(&["style", "block-quote", "alignment"]))
+        let alignment = def_at_path(&root, &key_segments(&["style", "block-quote", "alignment"]), &NoDefinitions)
             .and_then(primary_atom)
             .and_then(enum_members)
             .expect("alignment must offer enum values");
@@ -4539,25 +4874,25 @@ mod tests {
     #[test]
     fn test_nested_shape_missing_segment_is_none() {
         let root = nested_fixture();
-        assert!(nested_shape(&root, &key_segments(&["absent"])).is_none());
+        assert!(nested_shape(&root, &key_segments(&["absent"]), &NoDefinitions).is_none());
     }
 
     #[test]
     fn test_nested_shape_non_inline_object_is_none() {
         let root = nested_fixture();
         // `title` is a primitive, not an inline object — cannot descend.
-        assert!(nested_shape(&root, &key_segments(&["title"])).is_none());
+        assert!(nested_shape(&root, &key_segments(&["title"]), &NoDefinitions).is_none());
     }
 
     #[test]
     fn test_def_at_path_resolves_leaf_atom() {
         let root = nested_fixture();
-        let def = def_at_path(&root, &key_segments(&["settings", "mode"])).unwrap();
+        let def = def_at_path(&root, &key_segments(&["settings", "mode"]), &NoDefinitions).unwrap();
         assert_eq!(primary_atom(def).unwrap().ty, TypeExpr::Primitive(SimplifiedType::Enum));
         // A missing leaf under a valid inline object is `None`.
-        assert!(def_at_path(&root, &key_segments(&["settings", "absent"])).is_none());
+        assert!(def_at_path(&root, &key_segments(&["settings", "absent"]), &NoDefinitions).is_none());
         // A top-level leaf resolves through an empty ancestor path.
-        assert!(def_at_path(&root, &key_segments(&["title"])).is_some());
+        assert!(def_at_path(&root, &key_segments(&["title"]), &NoDefinitions).is_some());
     }
 
     #[test]
@@ -4622,10 +4957,10 @@ mod tests {
             PropertyAtom::bare(SimplifiedType::String),
             PropertyAtom::bare_inline_object(inner),
         ]);
-        let shape = inline_object_shape(&def, false).expect("the inline-object arm is selectable");
+        let shape = inline_object_shape(&def, false, &NoDefinitions).expect("the inline-object arm is selectable");
         assert!(shape.properties.contains_key("mode"));
         // No inline-object arm → `None`.
-        assert!(inline_object_shape(&PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)), false).is_none());
+        assert!(inline_object_shape(&PropertyDef::Single(PropertyAtom::bare(SimplifiedType::String)), false, &NoDefinitions).is_none());
     }
 
     #[test]
@@ -4644,10 +4979,10 @@ mod tests {
                 PropertyAtom::bare_inline_object(inner),
             ]),
         );
-        let settings = nested_shape(&root, &key_segments(&["settings"])).expect("descends the union inline arm");
+        let settings = nested_shape(&root, &key_segments(&["settings"]), &NoDefinitions).expect("descends the union inline arm");
         assert!(settings.properties.contains_key("mode"));
         // And `def_at_path` reaches the nested leaf through the same union arm.
-        assert!(def_at_path(&root, &key_segments(&["settings", "mode"])).is_some());
+        assert!(def_at_path(&root, &key_segments(&["settings", "mode"]), &NoDefinitions).is_some());
     }
 
     // ── Suggestion completion helper tests ──

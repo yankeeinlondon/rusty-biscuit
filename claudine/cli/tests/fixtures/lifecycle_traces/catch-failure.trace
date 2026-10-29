@@ -1,0 +1,13 @@
+# scenario: catch-failure
+# doc: catch-failure.md
+# given: invoked as `claudine compose --claude catch-failure.md` from the directory holding the fixture documents
+# given: launch 1 exits 1 with no result
+# given: the failure guard raises an evaluation error (frontmatter() of a missing file)
+event initialize
+event start
+work fresh 1
+event failure
+err provider.exited
+event finalize
+err uncoded: invalid file path: nope-failure.md
+exit 1

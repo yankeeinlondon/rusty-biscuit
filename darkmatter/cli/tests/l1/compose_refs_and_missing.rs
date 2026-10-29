@@ -8,7 +8,7 @@ fn test_compose_scalar_ctx_without_allow_override_fails() {
     let fixture = CliProcessFixture::named("test_compose_scalar_ctx_without_allow_override_fails");
     fixture
         .command()
-        .args(["compose", "-", "--no-baseline-schema"])
+        .args(["compose", "-", "--disable", "baseline-schema"])
         .write_stdin("---\nctx: hello\n---\n# Test {{ ctx.today }}")
         .assert()
         .failure()
@@ -19,14 +19,14 @@ fn test_compose_scalar_ctx_without_allow_override_fails() {
 #[test]
 fn test_compose_scalar_ctx_with_allow_override_succeeds() {
     let fixture = CliProcessFixture::named("test_compose_scalar_ctx_with_allow_override_succeeds");
-    // --allow-ctx-override downgrades the error to a warning
+    // `--allow ctx-override` downgrades the error to a warning
     fixture
         .command()
         .args([
             "compose",
             "-",
-            "--allow-ctx-override",
-            "--no-baseline-schema",
+            "--allow", "ctx-override",
+            "--disable", "baseline-schema",
         ])
         .write_stdin("---\nctx: hello\n---\n# Test")
         .assert()
@@ -41,7 +41,7 @@ fn test_compose_object_ctx_collision_emits_warning() {
     // succeed but emit a collision warning on stderr.
     fixture
         .command()
-        .args(["compose", "-", "--no-baseline-schema"])
+        .args(["compose", "-", "--disable", "baseline-schema"])
         .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
         .assert()
         .success()

@@ -1,7 +1,17 @@
+---
+kind: canonical-documentation
+---
+
 # Sequences in Claudine
 
 A **sequence** runs an ordered list of *steps*. Each step composes and executes
 one unit of work, and later steps can see what earlier steps produced.
+
+Use a sequence when work must happen in order, and a group when independent
+tasks can run concurrently. Either can contain the other. Each container has
+its own lifecycle and returns one value to its parent: an array for a sequence,
+or a dictionary keyed by leg name for a group. Read the active container through
+`seq` or `group`; ordinary document properties remain under `fm`.
 
 ![sequence overview](sequence-overview.png)
 
@@ -222,6 +232,27 @@ sequence:
 `params:` is not a task field. On a step it is ordinary step data, read as
 `seq.params` like any other key.
 
+Evaluation installs the mapping as a whole. If one value fails, none of its
+other values becomes visible to the child, and no child launches. For example,
+the following task fails at `with.notes`; it does not first install `phase`:
+
+```yaml
+sequence:
+    - name: review
+      prompt: review.md
+      with:
+          phase: 2
+          notes: "{{ no_such_function() }}"
+```
+
+The child receives the evaluated values as data. Text produced by an expression
+is not evaluated again just because it contains `{{ ... }}` or `$( ... )`.
+File values retain their authoring origin through retry and proxy transitions;
+the target's effective schema decides whether and how to resolve them. See
+[Caller File Provenance and Materialization](../composition.md#caller-file-provenance-and-materialization)
+for eager files, missing lazy files, remote URLs, and ambiguous file/string
+unions.
+
 ### Task guards (`when:`)
 
 A `when:` beside a task's executable decides, at that task's turn, whether the
@@ -273,6 +304,43 @@ sequence:
 A guard never hides a task from [static preflight](#phase-1--static-preflight):
 a task whose guard will be false is still validated, and its shell commands are
 still approved before step 1.
+
+**What a guard proves to its task.** Pre-flight does use what the guard proves
+for the values the sequence itself evaluates for that task: its `shell:`
+command and its `with:` values. A value the guard proves present may be
+missing before step 1:
+
+```yaml
+sequence:
+    - name: tag
+      when: "release_tag"
+      shell: git tag {{ release_tag }}
+```
+
+With no `release_tag`, pre-flight passes once the shape
+`git tag {{ string }}` is approved. A false guard skips the task without
+reading `release_tag`. A true guard reads it when the command starts; a `null`
+then fails the task with `MissingValue` and nothing launches. Without the
+`when:`, the missing value fails pre-flight. Which guards prove presence, and
+how equality treats a missing value, is in Darkmatter's
+[What a Guard Proves](../../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
+
+- The guard reads the bindings visible when it is evaluated. The task's own
+  `with:` values cannot prove their own guard.
+- A `prompt:` task's document has its own schema and its own guards; the
+  task's `when:` does not narrow its body. A `with:` value written as one
+  `{{ … }}` that the guard proves present, but that is missing at pre-flight,
+  becomes a late value of that document, checked by the document's own
+  barrier.
+- **Late values keep their barrier.** An ordinary late value (one reading
+  `seq`, `loop`, or `group`) is still checked when its task is reached, before
+  any of that task's commands run (`SequenceShellLateValue`). A value the
+  guard proves present is not part of that barrier: it is checked by its
+  command once the guard has selected the task. That is why a task, or a
+  group member, whose guard is false is skipped without failing the barrier,
+  while an unguarded late value that is missing still fails it.
+- The proof lasts for that task's turn only. Every pass of an enclosing loop,
+  and every retry, evaluates the guard and checks the value again.
 
 ## Step state
 
@@ -466,10 +534,14 @@ sequence: "$(ls -1 src)"             # the command must be approved at preflight
 
 ### Empty lists
 
-A static empty `sequence: []` is an authoring error. A **dynamic** source that
-resolves to zero steps is a graceful no-op: Claudine prints a "resolved to 0
-steps" notice to stderr and exits `0`. A clean repo legitimately makes
-`{{ ctx.dirty_files }}` empty.
+Both an authored `sequence: []` and a dynamic source that resolves to no steps
+are valid. The container runs its own lifecycle without starting a child and
+returns `[]`. A nested empty sequence therefore contributes one empty array
+to its parent's results, rather than disappearing like a skipped task.
+
+For example, a clean repository can legitimately make
+`sequence: "{{ ctx.dirty_files }}"` empty. The root command reports that it
+resolved to zero steps and succeeds unless its own lifecycle fails.
 
 ### Formal sequence documents
 
@@ -544,7 +616,8 @@ Claudine walks the **entire task graph**:
   `loop`, `group`, `current`, a key a lifecycle `set` writes, or a `$( … )`) is
   *decided at launch* and checked when its task is prepared; an expression
   error in a hint that reads none of those (an unknown function, say) fails
-  here like an uninstalled provider. Prediction runs
+  here like an uninstalled provider. A plain value (no `{{ … }}` or
+  `$( … )`) is predicted as written, with nothing evaluated. Prediction runs
   nothing and composes nothing. Each step's status line names the provider that
   ran. See [`claudine sequence` → Choosing providers](../../cli/sequence.md#choosing-providers).
 - **Schemas validate and missing properties aggregate** across all steps and all
@@ -558,8 +631,9 @@ Claudine walks the **entire task graph**:
   - **The first task** (the first step's task, or every leg of a first-step
     group, or the first child recursively through nested first-step sequences)
     resolves each command now, under the launch environment and the
-    caller's values, and approves those bytes. They are what runs. If a later
-    pass of an outer loop changes a value such a command reads (a loop action
+    caller's values, and offers exact approval plus shape approval for valid
+    placeholders. If exact approval is selected, those bytes are what runs.
+    If a later pass of an outer loop changes a value such a command reads (a loop action
     or a runtime `set`), the changed command is refused before it runs
     (`SequenceShellApprovalChanged`, naming `changed: <value>`); it is never
     silently replaced by the approved bytes.
@@ -630,6 +704,12 @@ Claudine walks the **entire task graph**:
   changed), and nothing in the task runs. Approving `deploy {{ env.TARGET }}`
   as `deploy staging` never authorizes `deploy prod`. See
   [Composition — Approval under a later document's map](../composition.md#approval-under-a-later-documents-map).
+- **The document's definitions are read once per walk.** The walk decodes
+  the sequence document's frontmatter, including its `sequence:` list, once.
+  Each step is checked against that shared state plus its own `seq` row, and
+  reads only its own definitions and the values they reach, so checking step
+  *k* never re-analyzes the other steps. Results are the same as checking
+  each step against a full copy of the document.
 - **Git working state is observed once for the whole walk.** Static preflight
   is one discovery run: every referenced document (and every file it includes)
   that names a Git fact such as `ctx.staged_files` reads the same observation.
@@ -715,7 +795,21 @@ sequence:
 When a nested container prepares, its source is still read again: its own
 lifecycle events and a group's `variables` take the current file's values, and
 a command, template, or prompt document the reread introduces is refused
-because approval has closed. To let a later step observe a file an earlier
+because approval has closed. The file is read at every container start, but
+parsed only when its text differs from the last parse in this invocation: many
+containers authored in one unchanged file share one parse, and a file an
+earlier task rewrote is parsed again, so its new events are always seen.
+Referenced files follow the same rule: a group file or catalog, a `kind: task`
+file, or a referenced sequence file is parsed once per distinct text in an
+invocation, however many steps name it. A hundred steps that each name a
+different entry of one hundred-entry catalog (`g7@catalog.yaml`) parse the
+catalog once, and each step reads only its own entry.
+A group decides at its start whether to prepare again by rereading only its
+own files: the document it is authored in and every file it references. A
+group whose files are unchanged keeps the node the audit built, even when an
+earlier task rewrote some other group's file; only that other group prepares
+again at its own start.
+To let a later step observe a file an earlier
 step wrote, read the file when the step runs, through a prompt document or an
 expression such as `{{ frontmatter('state.md', 'status') }}`.
 
@@ -867,6 +961,96 @@ or `variables` scoping around one task.
 
 A group leg may itself declare a group or a sequence task. Each leg receives
 a private in-memory runtime branch; siblings share the filesystem.
+
+A leg's branch exists only while the leg runs. Claudine validates every leg
+and captures each leg's environment when the group starts, but builds a
+leg's branch only when the leg is admitted, copied from the group-start
+state, and drops it as soon as the leg's result and writes are collected,
+before the next leg takes its slot. Under `max_parallel: 2`, a group of a
+hundred legs holds at most two branches at a time; the results and writes
+of finished legs are all that accumulate. A retried group builds fresh
+branches for its legs from the retry's starting state.
+
+Each of the group's slots (`max_parallel` of them, or one per leg without a
+cap) runs this loop. A leg that is never admitted, because `fail_fast`
+stopped admission or the run was interrupted, never builds a branch:
+
+```mermaid
+flowchart TD
+    seed["group starts: take the group-start state once"] --> admit{"a leg not yet admitted,<br/>and admission still open?"}
+    admit -- "yes: take the next leg in declaration order" --> build["build the leg's branch<br/>as a copy of the group-start state"]
+    build --> run["run the leg against its branch"]
+    run --> collect["keep the leg's result and writes"]
+    collect --> drop["drop the branch"]
+    drop --> admit
+    admit -- "no" --> merge["every slot done: fold results and writes<br/>in declaration order"]
+```
+
+### What a leg sees
+
+Every leg starts from the state as it was when its group started, and keeps
+its own in-memory writes to itself. Files are the one thing legs share.
+
+- **Private, in memory.** A runtime `set`, and a `set_frontmatter` (or another
+  frontmatter effect) on the running document, update the leg's own view.
+  The leg's later stages and its nested steps read the new value; a sibling
+  never does, even one admitted later under `max_parallel`. When the group
+  succeeds, the legs' `set` values merge into the sequence in declaration
+  order; the legs' views of the document are dropped with the group.
+- **Shared, on disk.** A frontmatter effect also writes the file. A sibling's
+  `{{ key }}` still reads the group-start value, because legs never reread
+  the sequence document. A read of the file itself, such as
+  `{{ frontmatter('state.md', 'status') }}`, sees whatever is on disk when it
+  runs, in any leg or nested step. The next root step rereads the source and
+  sees the write ([Phase 2](#phase-2--just-in-time-composition)).
+
+```mermaid
+flowchart LR
+    start["group-start state"] --> a["leg writer: start + its own writes"]
+    start --> b["leg reader: start only"]
+    a -- "set_frontmatter" --> disk[("sequence.md on disk")]
+    disk -- "reread" --> next["next root step"]
+```
+
+Here the reader runs after the writer, yet prints the old value; the next
+step prints the new one:
+
+```yaml
+value: initial
+success: [{ stdout: "sibling={{ sibling_saw }};next={{ next_saw }}" }]
+sequence:
+  - name: legs
+    group:
+      name: legs
+      max_parallel: 1
+      tasks:
+        - name: writer
+          side_effect: { set_frontmatter: [sequence.md, value, written] }
+        - name: reader
+          side_effect: { set: { sibling_saw: "{{ value }}" } }
+  - name: after
+    side_effect: { set: { next_saw: "{{ value }}" } }
+# prints: sibling=initial;next=written
+```
+
+A leg's view is not a copy of the document. Every leg reads the one
+group-start state, which still holds the authored `sequence:` list, and
+holds only the keys it has written itself. Starting a leg costs the same
+whether the document declares ten steps or a thousand. The same holds for
+any container: starting it, preparing its spoken phrases ahead of time,
+resolving a templated `loop.max`, and judging and staging each loop pass all
+read the current state in place, so their cost does not grow with how many
+other containers the document declares.
+
+Reading runtime state copies only the part that is read. A task's runtime
+writes, a container event's frontmatter, and a loop pass's entry point are
+read without copying the `seq.outputs` history, and a task's `when:` guard
+reads `seq` only when the task has one. A nested sequence sets the enclosing
+outputs aside when it starts and hands the same list back when it ends, so
+running one inside a long sequence costs the same as running it first.
+Anything that reads `seq` (a guard, a templated value, a task's own actions,
+a prompt document) copies the outputs it sees when it runs, and a group copies
+them once into each leg's private branch when it admits the leg.
 
 A group object's `loop:` repeats the whole group: every pass admits its legs
 again, rebuilds `group.legs` and the outcome lists, and exposes the pass's
@@ -1125,9 +1309,12 @@ flowchart TD
 
 `retry.max_attempts` counts additional attempts. Initialize runs once; a retry
 starts another preparation and `start`, without finalizing the abandoned
-attempt. Child results and group outcome summaries reset, while runtime writes
-survive. `retry.with` values become runtime writes and never modify the source
-file. Finalize runs once after the last attempt.
+attempt. For a container without `loop:`, child results and group outcome
+summaries reset while runtime writes survive. A looping container instead
+restores its outputs and runtime writes to the current pass's entry, preserving
+completed passes; see [Retrying a looping container](looping.md#retry-inside-a-looping-container).
+In either case, evaluated `retry.with` values apply after that reset and never
+modify the source file. Finalize runs once after the last attempt of the pass.
 
 ```yaml
 failure:

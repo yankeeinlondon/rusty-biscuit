@@ -168,7 +168,7 @@ impl RemoteReadConfig {
 
     /// The allowlist entries that are HTTP host patterns.
     ///
-    /// `--allow-host` is also the ICMP grant entry point (R6). A strict CIDR
+    /// `--allow host=HOST` is also the ICMP grant entry point (R6). A strict CIDR
     /// entry names an address range, which no URL host can ever spell, so it
     /// authorizes ICMP only and is withheld from the HTTP allowlist rather than
     /// left to fail an exact-string comparison. A bare IP literal keeps its
@@ -462,6 +462,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         } => vec![condition.as_ref(), then_branch.as_ref(), else_branch.as_ref()],
         Expr::Comparison { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         Expr::FunctionCall { args, .. } => args.iter().collect(),
+        Expr::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
         Expr::ArrayLiteral(items) => items.iter().collect(),
         Expr::ObjectLiteral(entries) => entries.iter().map(|(_, value)| value).collect(),
     }

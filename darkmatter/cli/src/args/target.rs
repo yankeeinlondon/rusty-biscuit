@@ -1,5 +1,6 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
+use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::{
     GraphFormat, SchemaDetectFormat, SchemaValidateFormat, ValidateOutputFormat,
     complete_compose_args, complete_markdown_files,
@@ -70,13 +71,8 @@ pub enum SchemaTarget {
         /// Custom baseline schema path (YAML SimplifiedSchema or JSON
         /// Schema) replacing the built-in Darkmatter baseline; used even when
         /// `DARKMATTER_NO_BASELINE_SCHEMA` is set
-        #[arg(long, value_name = "PATH", conflicts_with = "no_baseline_schema")]
+        #[arg(long, value_name = "PATH")]
         schema: Option<PathBuf>,
-
-        /// Validate without any baseline schema, ignoring `BASELINE_SCHEMA`;
-        /// the document's `$schema` and trigger schemas still apply
-        #[arg(long)]
-        no_baseline_schema: bool,
 
         /// Output format
         #[arg(long, value_enum, default_value_t = SchemaValidateFormat::Pretty)]
@@ -86,12 +82,18 @@ pub enum SchemaTarget {
         #[arg(long)]
         quiet: bool,
 
-        /// Disable trigger discovery and bare-name schema-root lookup
-        #[arg(long)]
-        no_trigger_schemas: bool,
+        /// Stop a feature from running (repeatable): `baseline-schema` validates without any baseline, ignoring `BASELINE_SCHEMA`; the document's `$schema` and trigger schemas still apply
+        #[arg(
+            long = "disable",
+            value_name = "ID",
+            value_parser = PolicyValueParser::new(PolicyCommand::SchemaValidate, PolicyVerb::Disable),
+            long_help = policy::long_help(PolicyCommand::SchemaValidate, PolicyVerb::Disable),
+            add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::SchemaValidate, PolicyVerb::Disable, current))
+        )]
+        disable: Vec<PolicySelector>,
     },
 
-    /// Explain trigger-schema discovery and activation for a document.
+    /// Explain schema-trigger discovery and activation for a document.
     Triggers {
         /// Markdown file to inspect
         #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]

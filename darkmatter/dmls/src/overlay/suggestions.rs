@@ -86,12 +86,12 @@ pub fn reference_lints(
     if written.is_empty() {
         return Vec::new();
     }
-    let Ok((expanded, _)) =
+    let Ok(expansion) =
         expand_named_types(schema, base_dir, defining_file, schema_roots, context)
     else {
         return Vec::new();
     };
-    lint_suggestions(&expanded)
+    lint_suggestions(&expansion.schema)
         .unwrap_or_default()
         .into_iter()
         .filter(|problem| written.contains(&(problem.span.clone(), problem.decoded.clone())))
@@ -125,7 +125,11 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
                     TypeExpr::InlineObject(nested) => walk_shape(nested, out),
                     // Only the resolver produces a union type; an authored
                     // schema writes the reference itself.
-                    TypeExpr::Union(_) | TypeExpr::Primitive(_) => {}
+                    TypeExpr::Union(_)
+                    | TypeExpr::Primitive(_)
+                    | TypeExpr::Tuple(_)
+                    | TypeExpr::Function(_)
+                    | TypeExpr::Ref(_) => {}
                 }
             }
         }
@@ -144,7 +148,8 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
 
 /// Classifies a standalone YAML buffer and computes suggestion lint problems.
 ///
-/// Returns `None` for ordinary YAML documents and raw JSON Schema. Once a
+/// Returns `None` for ordinary YAML documents, raw JSON Schema, and text that
+/// is not YAML. Once a
 /// recognized envelope claims the document (`$schema`-only pure or
 /// `kind: schema` tagged), malformed payload content is carried as a
 /// [`SuggestionState::Standalone`] error rather than falling back.
@@ -157,8 +162,13 @@ pub fn standalone_lints(text: &str, path: &Path) -> Option<SuggestionState> {
         }),
         Ok(None) => None,
         Err(error) => {
-            // The error is always SchemaError::SchemaDocument for a recognized
-            // but malformed envelope; ordinary YAML returns Ok(None) above.
+            // Text that is not YAML claims no envelope here: the overlay's
+            // lexical envelope claim decides whether a malformed buffer is a
+            // schema mid-edit. Otherwise the error is the SchemaDocument of a
+            // recognized but malformed envelope.
+            if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text).is_err() {
+                return None;
+            }
             let SchemaError::SchemaDocument { .. } = &error else {
                 return None;
             };

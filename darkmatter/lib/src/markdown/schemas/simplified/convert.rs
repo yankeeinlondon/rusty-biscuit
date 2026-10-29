@@ -13,9 +13,11 @@
 //!   `default(...)` that disagrees across arms is a hard conversion error.
 //! - **`x-darkmatter-*` extensions** include the URL-scheme validator and the
 //!   grammar-backed semantic meta-type keywords. `file(match(...))` is
-//!   suggestion metadata in a single schema. In a root union each simplified
-//!   arm's declared globs lower to `x-darkmatter-match` on its file fragment
-//!   and rule that arm out for an existing file outside them (see
+//!   suggestion metadata in a single schema. In a root union a simplified
+//!   arm's globs lower to `x-darkmatter-match`, and rule that arm out for an
+//!   existing file outside them, on a property that is directly a `file` and
+//!   on every file inside the arm's own copy of a recursive definition it
+//!   references; any other file in the arm stays suggestion-only (see
 //!   [`crate::markdown::schemas::file_match`]).
 //! - **Repeated constraints on one atom never overwrite a keyword.** Patterns
 //!   (including `not-empty`) are conjunctive, bounds keep the stricter value
@@ -24,6 +26,10 @@
 //! - **`file` existence posture** is carried by the emitted `format`: bare
 //!   `file` lowers to the lazy `darkmatter-file-reference` (syntax-only),
 //!   `file(eager)` lowers to the eager `darkmatter-file` (resolve + exists).
+//! - **Tuples** lower to `prefixItems` / `minItems` / `items` with no
+//!   optional-null wrapper on positions; **`function`** types are
+//!   description-only and fail conversion, naming the property path.
+//! - **`category(Name)`** lowers to the `x-darkmatter-category` annotation.
 //! - **Root-level unions** with unresolved [`SchemaArm::FileRef`] arms fail
 //!   with [`SchemaError::Convert`] — Phase 3's resolver is expected to inline
 //!   them before invoking the converter.
@@ -34,16 +40,23 @@
 
 use serde_json::{Map, Value, json};
 
+use indexmap::IndexMap;
+
 use super::alphanumeric::AlphanumericOptions;
+use super::definitions::{DefKey, DefinitionOuter, DefinitionTable, definition_pointer};
 use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType, TypeExpr,
+    SimplifiedType, TupleType, TypeExpr,
 };
+use crate::markdown::numeric::json_number;
 use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_groups};
+use crate::markdown::schemas::file_match::{
+    DARKMATTER_MATCH_KEYWORD, DARKMATTER_MATCH_PROPERTY_KEYWORD, file_match_groups,
+};
 use crate::markdown::schemas::format::{
-    DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
+    DARKMATTER_INTEGER_KEYWORD,
+    DARKMATTER_BOOLISH_FORMAT, DARKMATTER_DATETIME_FORMAT, DARKMATTER_NUMBERLIKE_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
     DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
     DARKMATTER_SHELL_FORMAT, DARKMATTER_TYPE_ANNOTATION,
     DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
@@ -51,17 +64,6 @@ use crate::markdown::schemas::format::{
 
 /// Draft 2020-12 schema URI emitted on every generated root schema.
 pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
-
-/// String spellings a `boolish` field accepts (and that coercion maps to a
-/// real boolean). Single source of truth shared with [`super::super::coerce`].
-pub(in crate::markdown::schemas) const BOOLISH_VALUES: [&str; 6] =
-    ["true", "false", "True", "False", "TRUE", "FALSE"];
-
-/// Pattern the `numberlike` string arm carries — the source for the schema the
-/// validator compiles. Single source of truth shared with
-/// [`super::super::coerce`], which matches it exactly when recognizing a
-/// numberlike `anyOf` arm.
-pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+)?$";
 
 /// Converts a [`SimplifiedSchema`] into a Draft 2020-12 JSON Schema value.
 ///
@@ -72,7 +74,10 @@ pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+
 /// - a constraint is applied to a type that doesn't accept it
 ///   (e.g. `integer` on a `string`),
 /// - a property-level union has conflicting `default(...)` values,
-/// - a root-level union arm is an unresolved [`SchemaArm::FileRef`].
+/// - a root-level union arm is an unresolved [`SchemaArm::FileRef`],
+/// - the schema reaches a description-only `function` type, directly or
+///   through a union, array, tuple, or object (named references are inlined
+///   by the resolver before conversion); the error names the property path.
 ///
 /// ## Examples
 ///
@@ -85,32 +90,250 @@ pub(in crate::markdown::schemas) const NUMBERLIKE_PATTERN: &str = r"^-?\d+(\.\d+
 /// assert_eq!(json["type"], "object");
 /// ```
 pub fn to_json_schema(schema: &SimplifiedSchema) -> Result<Value, SchemaError> {
-    let mut root = match schema {
-        SimplifiedSchema::Single(shape) => shape_to_object_schema(shape)?,
-        SimplifiedSchema::Union(arms) => union_to_root_schema(arms)?,
+    to_json_schema_with_definitions(schema, &DefinitionTable::default())
+}
+
+/// Converts a resolved [`SimplifiedSchema`] whose stored named types (cyclic
+/// or shared) are [`TypeExpr::Ref`]s into `definitions`.
+///
+/// Each use lowers to a local `{"$ref": "#/$defs/<key>"}` carrying the use
+/// site's own constraints and annotations as siblings, and every definition
+/// the schema reaches is emitted once under a root `$defs`, after the other
+/// root keys and in the table's allocation order. A schema that reaches no
+/// definition lowers exactly as [`to_json_schema`] does, with no `$defs`.
+///
+/// ## Errors
+///
+/// As [`to_json_schema`], and [`SchemaError::Convert`] naming the use-site
+/// path when a reference names no definition in `definitions` or a
+/// definition body reaches a `function` type.
+pub fn to_json_schema_with_definitions(
+    schema: &SimplifiedSchema,
+    defs: &DefinitionTable,
+) -> Result<Value, SchemaError> {
+    let mut copies = MatchCopies::default();
+    let root = match schema {
+        SimplifiedSchema::Single(shape) => shape_to_object_schema(shape, Lowering::suggesting(defs))?,
+        SimplifiedSchema::Union(arms) => {
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    copies.collect_arm(shape, defs);
+                }
+            }
+            union_to_root_schema(arms, Lowering::enforcing(defs, &copies))?
+        }
     };
-    root.insert("$schema".into(), Value::String(DRAFT_2020_12.into()));
-    Ok(Value::Object(root))
+    // `$schema` leads the document, as JSON Schema readers expect, now that
+    // maps keep insertion order.
+    let mut document = Map::with_capacity(root.len() + 2);
+    document.insert("$schema".into(), Value::String(DRAFT_2020_12.into()));
+    document.extend(root);
+    if let Some(mut definitions) = lower_reachable_definitions(schema, defs)? {
+        definitions.extend(lower_match_copies(&copies, defs)?.into_iter().map(|copy| (copy.key, copy.body)));
+        document.insert("$defs".into(), Value::Object(definitions));
+    }
+    Ok(Value::Object(document))
+}
+
+// ── Recursive definitions ─────────────────────────────────────────────────
+
+/// Lowers every definition `schema` reaches, directly or through another
+/// definition, keyed by its `$defs` key in allocation order; `None` when it
+/// reaches none.
+///
+/// A body is lowered under the property path of the first use that reached
+/// it, so an error inside a shared body (a `function` type, say) names a
+/// place in the schema being converted.
+fn lower_reachable_definitions(
+    schema: &SimplifiedSchema,
+    defs: &DefinitionTable,
+) -> Result<Option<Map<String, Value>>, SchemaError> {
+    if defs.is_empty() {
+        return Ok(None);
+    }
+    let mut first_use: IndexMap<DefKey, String> = IndexMap::new();
+    match schema {
+        SimplifiedSchema::Single(shape) => collect_shape_refs(shape, "<root>", &mut first_use),
+        SimplifiedSchema::Union(arms) => {
+            for (index, arm) in arms.iter().enumerate() {
+                if let SchemaArm::Inline(shape) = arm {
+                    collect_shape_refs(shape, &format!("<arm[{index}]>"), &mut first_use);
+                }
+            }
+        }
+    }
+    // Bodies reach further definitions; the index walks the growing list.
+    let mut next = 0;
+    while let Some((key, path)) = first_use.get_index(next).map(|(key, path)| (key.clone(), path.clone())) {
+        next += 1;
+        let definition = defs.get(&key).ok_or_else(|| missing_definition(&path, &key))?;
+        collect_def_refs(&definition.body, &path, &mut first_use);
+    }
+    if first_use.is_empty() {
+        return Ok(None);
+    }
+    let mut lowered: Vec<(usize, String, Value)> = Vec::with_capacity(first_use.len());
+    for (key, path) in &first_use {
+        let definition = defs.get(key).ok_or_else(|| missing_definition(path, key))?;
+        let body = lower_definition_body(path, &definition.body, Lowering::suggesting(defs))?;
+        let order = defs
+            .iter()
+            .position(|(candidate, _)| candidate == key)
+            .expect("a definition found by key has a position");
+        lowered.push((order, definition.json_key.clone(), body));
+    }
+    lowered.sort_by_key(|(order, ..)| *order);
+    Ok(Some(lowered.into_iter().map(|(_, key, body)| (key, body)).collect()))
+}
+
+fn lower_definition_body(path: &str, body: &PropertyDef, defs: Lowering<'_>) -> Result<Value, SchemaError> {
+    Ok(match body {
+        PropertyDef::Single(atom) => atom_fragment_without_null_wrap(path, atom, false, defs)?.0,
+        PropertyDef::Union(arms) => any_of_value(union_arm_fragments(path, arms, false, defs)?.0),
+    })
+}
+
+fn missing_definition(path: &str, key: &DefKey) -> SchemaError {
+    SchemaError::Convert {
+        property: path.to_string(),
+        message: format!(
+            "the recursive named type `{}` has no definition in this schema's scope",
+            key.name
+        ),
+    }
+}
+
+fn collect_shape_refs(shape: &SchemaShape, context: &str, out: &mut IndexMap<DefKey, String>) {
+    for (name, def) in &shape.properties {
+        let path = if context == "<root>" {
+            name.clone()
+        } else {
+            format!("{context}.{name}")
+        };
+        collect_def_refs(def, &path, out);
+    }
+    for pattern in &shape.pattern_keys {
+        collect_def_refs(&pattern.def, context, out);
+    }
+}
+
+fn collect_def_refs(def: &PropertyDef, path: &str, out: &mut IndexMap<DefKey, String>) {
+    match def {
+        PropertyDef::Single(atom) => collect_atom_refs(atom, path, out),
+        PropertyDef::Union(arms) => arms.iter().for_each(|arm| collect_atom_refs(arm, path, out)),
+    }
+}
+
+fn collect_atom_refs(atom: &PropertyAtom, path: &str, out: &mut IndexMap<DefKey, String>) {
+    match &atom.ty {
+        TypeExpr::Ref(key) => {
+            if !out.contains_key(key) {
+                out.insert(key.clone(), path.to_string());
+            }
+        }
+        TypeExpr::InlineObject(shape) => collect_shape_refs(shape, path, out),
+        TypeExpr::Union(arms) => arms.iter().for_each(|arm| collect_atom_refs(arm, path, out)),
+        TypeExpr::Tuple(tuple) => {
+            for (index, element) in tuple.elements.iter().enumerate() {
+                collect_def_refs(&element.def, &format!("{path}[{index}]"), out);
+            }
+            if let Some(spread) = &tuple.spread {
+                collect_atom_refs(spread, &format!("{path}[...]"), out);
+            }
+        }
+        // A function type fails conversion where it is met; an unresolved
+        // import does too.
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+    }
+}
+
+/// Lowers a use of the definition `key`: a local reference with the use
+/// site's value constraints as siblings, which Draft 2020-12 applies together
+/// with the target. The constraints a use may add depend on what the
+/// definition is: key bounds beside an object, item bounds and `unique`
+/// beside an array, and none beside a union or tuple.
+fn reference_fragment(
+    name: &str,
+    key: &DefKey,
+    constraints: &[Constraint],
+    defs: Lowering<'_>,
+) -> Result<Value, SchemaError> {
+    let definition = defs.get(key).ok_or_else(|| missing_definition(name, key))?;
+    let mut fragment = Map::new();
+    let json_key = defs.pointer_key(key).unwrap_or(&definition.json_key);
+    fragment.insert("$ref".into(), Value::String(definition_pointer(json_key)));
+    let value_constraints: Vec<&Constraint> =
+        constraints.iter().filter(|constraint| !is_reference_annotation(constraint)).collect();
+    match defs.outer(key) {
+        Some(DefinitionOuter::Array) => {
+            let owned: Vec<Constraint> = value_constraints.into_iter().cloned().collect();
+            apply_array_constraints(name, &mut fragment, &owned)?;
+        }
+        Some(DefinitionOuter::Object) => {
+            if let Some(other) = value_constraints
+                .iter()
+                .find(|constraint| {
+                    !matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_))
+                })
+            {
+                return Err(reference_constraint_error(name, key, other));
+            }
+            apply_object_arity(name, &mut fragment, value_constraints.into_iter())?;
+        }
+        _ => {
+            if let Some(other) = value_constraints.first() {
+                return Err(reference_constraint_error(name, key, other));
+            }
+        }
+    }
+    Ok(Value::Object(fragment))
+}
+
+/// A constraint a reference carries for its property rather than for the
+/// referenced value; the shared atom path lowers these as annotations or
+/// presence.
+fn is_reference_annotation(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::Required
+            | Constraint::Generated
+            | Constraint::Eager
+            | Constraint::Default(_)
+            | Constraint::Example(_)
+            | Constraint::Category(_)
+            | Constraint::Operands(_)
+    )
+}
+
+fn reference_constraint_error(name: &str, key: &DefKey, constraint: &Constraint) -> SchemaError {
+    SchemaError::Convert {
+        property: name.to_string(),
+        message: format!(
+            "constraint `{}` is not valid on a reference to the recursive named type `{}`",
+            constraint.keyword(),
+            key.name
+        ),
+    }
 }
 
 // ── Shape & root union ────────────────────────────────────────────────────
 
-fn shape_to_object_schema(shape: &SchemaShape) -> Result<Map<String, Value>, SchemaError> {
+fn shape_to_object_schema(shape: &SchemaShape, defs: Lowering<'_>) -> Result<Map<String, Value>, SchemaError> {
     // Root shapes default to open (`additionalProperties: true`); a pattern-keyed
     // root switches to closed-object semantics inside `object_body_from_shape`.
-    let mut obj = object_body_from_shape("<root>", shape, Value::Bool(true))?;
+    let mut obj = object_body_from_shape("<root>", shape, Value::Bool(true), defs)?;
     reject_block_constraints("<root>", shape, ObjectScope::Root)?;
     apply_object_arity("<root>", &mut obj, shape.constraints.iter())?;
     Ok(obj)
 }
 
-fn union_to_root_schema(arms: &[SchemaArm]) -> Result<Map<String, Value>, SchemaError> {
+fn union_to_root_schema(arms: &[SchemaArm], defs: Lowering<'_>) -> Result<Map<String, Value>, SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
     for (idx, arm) in arms.iter().enumerate() {
         match arm {
             SchemaArm::Inline(shape) => {
-                let mut arm_json = Value::Object(shape_to_object_schema(shape)?);
-                attach_root_union_match(&mut arm_json, shape);
+                let mut arm_json = Value::Object(shape_to_object_schema(shape, defs)?);
+                attach_direct_file_match(&mut arm_json, shape);
                 any_of.push(arm_json);
             }
             SchemaArm::FileRef(path) => {
@@ -129,15 +352,358 @@ fn union_to_root_schema(arms: &[SchemaArm]) -> Result<Map<String, Value>, Schema
     Ok(obj)
 }
 
-/// Emits a root-union arm's declared file globs onto its converted fragments.
-/// Called for each simplified arm even when other arms use raw JSON Schema.
+// ── Root-union `match(...)` ───────────────────────────────────────────────
+
+/// The definition table a lowering resolves references in, and what it does
+/// with `match(...)`. Dereferences to the table.
+#[derive(Clone, Copy)]
+struct Lowering<'a> {
+    defs: &'a DefinitionTable,
+    matching: Matching<'a>,
+}
+
+#[derive(Clone, Copy)]
+enum Matching<'a> {
+    /// A single schema: `match(...)` only shapes completion.
+    Suggest,
+    /// A root-union arm: a reference that the arm's copies redirect (see
+    /// [`MatchCopies`]) points to its copy, and every `file(match(...))`
+    /// inside an enforcing copy emits [`DARKMATTER_MATCH_KEYWORD`].
+    /// Elsewhere in the arm `match(...)` stays suggestion-only, as in an
+    /// acyclic schema before recursion existed; [`attach_direct_file_match`]
+    /// adds the keyword to a property that is directly a `file`.
+    Enforce {
+        copies: &'a MatchCopies,
+        /// The arm's top-level property being lowered; `None` at the arm
+        /// root and below a root pattern key.
+        property: Option<&'a str>,
+        /// Lowering the body of an enforcing copy under `$defs`: the only
+        /// place a file fragment emits the keyword itself. Its location
+        /// names no top-level property, so the keyword names it.
+        in_copy: bool,
+    },
+}
+
+impl<'a> Lowering<'a> {
+    fn suggesting(defs: &'a DefinitionTable) -> Self {
+        Self { defs, matching: Matching::Suggest }
+    }
+
+    fn enforcing(defs: &'a DefinitionTable, copies: &'a MatchCopies) -> Self {
+        Self { defs, matching: Matching::Enforce { copies, property: None, in_copy: false } }
+    }
+
+    /// This lowering for the value of `property` of the object at `context`;
+    /// only an arm-root property (`<root>`) names the property its matches
+    /// are judged for.
+    fn for_property<'b>(self, context: &str, property: &'b str) -> Lowering<'b>
+    where
+        'a: 'b,
+    {
+        match self.matching {
+            Matching::Enforce { copies, in_copy: false, property: None } if context == "<root>" => Lowering {
+                defs: self.defs,
+                matching: Matching::Enforce { copies, property: Some(property), in_copy: false },
+            },
+            _ => self,
+        }
+    }
+
+    /// The `$defs` key a use of `key` points to: the arm's copy when the
+    /// arm redirects the use, the shared definition otherwise.
+    fn pointer_key(&self, key: &DefKey) -> Option<&'a str> {
+        match self.matching {
+            Matching::Enforce { copies, property, in_copy } => copies.copy_key(key, property, in_copy),
+            Matching::Suggest => None,
+        }
+    }
+}
+
+impl std::ops::Deref for Lowering<'_> {
+    type Target = DefinitionTable;
+
+    fn deref(&self) -> &DefinitionTable {
+        self.defs
+    }
+}
+
+/// The copies a root union's arms need, per definition and per top-level
+/// property that reaches it.
 ///
-/// Every `match(...)` group is emitted in one keyword: a single group keeps
-/// the flat pattern array, several become an array of pattern arrays (see
-/// [`crate::markdown::schemas::file_match`], "Keyword encoding"). One keyword,
-/// not an `allOf` of keywords, because root-union arm selection recognizes a
-/// glob rejection by a schema path that ends in the keyword.
-pub(crate) fn attach_root_union_match(arm_schema: &mut Value, shape: &SchemaShape) {
+/// A use of a definition lowers as its inlined value would at the same
+/// place, and the copies make that so:
+///
+/// - an **enforcing copy** (`<key>@match:<property>`) of a definition that
+///   reaches a `match(...)`, for a use of a cyclic definition anywhere in the
+///   arm, and for a use of any definition inside an enforcing copy (an
+///   inlined value there was part of the enforced body). Every
+///   `file(match(...))` in it emits the keyword, so the glob applies at every
+///   depth of a recursive value;
+/// - a **redirecting copy** (`<key>@arm:<property>`) of a shared acyclic
+///   definition used in the arm outside any copy, whose body reaches a
+///   cyclic definition that needs an enforcing copy. Its own files only
+///   suggest, as the inlined value's did; only its references are
+///   redirected. Without such a reference the use points to the shared
+///   body itself.
+///
+/// The shared definition keeps its suggestion-only body, so a use of it
+/// outside the arms (a merged trigger payload, a single schema importing the
+/// same file) gains no constraint. Copies are per property because a caller
+/// may supply one top-level property, and the keyword is judged in the
+/// context that property came from. Below a root pattern key the key drops
+/// `:<property>`. Type names cannot contain `@`, so a copy key never equals
+/// a definition's own key.
+#[derive(Default)]
+pub(crate) struct MatchCopies {
+    /// Keyed by definition, property, and whether the copy enforces.
+    keys: IndexMap<(DefKey, Option<String>, bool), String>,
+    /// The table's cyclic definitions, read once the first reference is met.
+    cyclic: Option<std::collections::HashSet<DefKey>>,
+}
+
+impl MatchCopies {
+    /// Adds the copies `shape`, one root-union arm, reaches.
+    fn collect_arm(&mut self, shape: &SchemaShape, defs: &DefinitionTable) {
+        for (name, def) in &shape.properties {
+            self.collect_def(def, Some(name), false, defs);
+        }
+        for pattern in &shape.pattern_keys {
+            self.collect_def(&pattern.def, None, false, defs);
+        }
+    }
+
+    fn collect_def(&mut self, def: &PropertyDef, property: Option<&str>, in_copy: bool, defs: &DefinitionTable) {
+        match def {
+            PropertyDef::Single(atom) => self.collect_atom(atom, property, in_copy, defs),
+            PropertyDef::Union(arms) => arms.iter().for_each(|arm| self.collect_atom(arm, property, in_copy, defs)),
+        }
+    }
+
+    fn collect_atom(&mut self, atom: &PropertyAtom, property: Option<&str>, in_copy: bool, defs: &DefinitionTable) {
+        match &atom.ty {
+            TypeExpr::Ref(key) => {
+                // A missing definition fails where the use is lowered.
+                let Some(definition) = defs.get(key) else {
+                    return;
+                };
+                let cyclic = self
+                    .cyclic
+                    .get_or_insert_with(|| defs.iter().map(|(key, _)| key).filter(|key| defs.is_cyclic(key)).cloned().collect());
+                let enforcing = in_copy || cyclic.contains(key);
+                let entry = (key.clone(), property.map(str::to_string), enforcing);
+                if self.keys.contains_key(&entry) {
+                    return;
+                }
+                let needed = if enforcing {
+                    atom_reaches_match(atom, defs, &mut std::collections::HashSet::new())
+                } else {
+                    reaches_enforced_reference(&definition.body, defs, cyclic, &mut std::collections::HashSet::new())
+                };
+                if !needed {
+                    return;
+                }
+                let kind = if enforcing { "match" } else { "arm" };
+                let copy_key = match property {
+                    Some(property) => format!("{}@{kind}:{property}", definition.json_key),
+                    None => format!("{}@{kind}", definition.json_key),
+                };
+                self.keys.insert(entry, copy_key);
+                self.collect_def(&definition.body, property, enforcing, defs);
+            }
+            TypeExpr::InlineObject(shape) => {
+                for def in shape.properties.values().chain(shape.pattern_keys.iter().map(|pattern| &pattern.def)) {
+                    self.collect_def(def, property, in_copy, defs);
+                }
+            }
+            TypeExpr::Union(arms) => arms.iter().for_each(|arm| self.collect_atom(arm, property, in_copy, defs)),
+            TypeExpr::Tuple(tuple) => {
+                for element in &tuple.elements {
+                    self.collect_def(&element.def, property, in_copy, defs);
+                }
+                if let Some(spread) = &tuple.spread {
+                    self.collect_atom(spread, property, in_copy, defs);
+                }
+            }
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
+        }
+    }
+
+    /// The copy a use of `key` points to, lowered inside an enforcing copy
+    /// when `in_copy`.
+    fn copy_key(&self, key: &DefKey, property: Option<&str>, in_copy: bool) -> Option<&str> {
+        let enforcing = in_copy || self.cyclic.as_ref()?.contains(key);
+        self.keys.get(&(key.clone(), property.map(str::to_string), enforcing)).map(String::as_str)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+}
+
+/// Whether `atom` reaches a `file(match(...))`, through unions, inline
+/// objects, tuples, and references; each definition is entered once.
+fn atom_reaches_match(atom: &PropertyAtom, defs: &DefinitionTable, seen: &mut std::collections::HashSet<DefKey>) -> bool {
+    let def_reaches = |def: &PropertyDef, seen: &mut std::collections::HashSet<DefKey>| match def {
+        PropertyDef::Single(atom) => atom_reaches_match(atom, defs, seen),
+        PropertyDef::Union(arms) => arms.iter().any(|arm| atom_reaches_match(arm, defs, seen)),
+    };
+    match &atom.ty {
+        TypeExpr::Primitive(SimplifiedType::File) => !match_groups(&atom.constraints).is_empty(),
+        TypeExpr::Ref(key) => {
+            seen.insert(key.clone()) && defs.get(key).is_some_and(|definition| def_reaches(&definition.body, seen))
+        }
+        TypeExpr::InlineObject(shape) => shape
+            .properties
+            .values()
+            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+            .any(|def| def_reaches(def, seen)),
+        TypeExpr::Union(arms) => arms.iter().any(|arm| atom_reaches_match(arm, defs, seen)),
+        TypeExpr::Tuple(tuple) => {
+            tuple.elements.iter().any(|element| def_reaches(&element.def, seen))
+                || tuple.spread.as_deref().is_some_and(|spread| atom_reaches_match(spread, defs, seen))
+        }
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+    }
+}
+
+/// Whether `def`, the body of a shared acyclic definition, references a
+/// cyclic definition that reaches a `match(...)`, directly or through other
+/// acyclic definitions; each definition is entered once.
+fn reaches_enforced_reference(
+    def: &PropertyDef,
+    defs: &DefinitionTable,
+    cyclic: &std::collections::HashSet<DefKey>,
+    seen: &mut std::collections::HashSet<DefKey>,
+) -> bool {
+    fn atom_reaches(
+        atom: &PropertyAtom,
+        defs: &DefinitionTable,
+        cyclic: &std::collections::HashSet<DefKey>,
+        seen: &mut std::collections::HashSet<DefKey>,
+    ) -> bool {
+        match &atom.ty {
+            TypeExpr::Ref(key) if cyclic.contains(key) => {
+                atom_reaches_match(atom, defs, &mut std::collections::HashSet::new())
+            }
+            TypeExpr::Ref(key) => {
+                seen.insert(key.clone())
+                    && defs.get(key).is_some_and(|definition| reaches_enforced_reference(&definition.body, defs, cyclic, seen))
+            }
+            TypeExpr::InlineObject(shape) => shape
+                .properties
+                .values()
+                .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+                .any(|def| reaches_enforced_reference(def, defs, cyclic, seen)),
+            TypeExpr::Union(arms) => arms.iter().any(|arm| atom_reaches(arm, defs, cyclic, seen)),
+            TypeExpr::Tuple(tuple) => {
+                tuple.elements.iter().any(|element| reaches_enforced_reference(&element.def, defs, cyclic, seen))
+                    || tuple.spread.as_deref().is_some_and(|spread| atom_reaches(spread, defs, cyclic, seen))
+            }
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+        }
+    }
+    match def {
+        PropertyDef::Single(atom) => atom_reaches(atom, defs, cyclic, seen),
+        PropertyDef::Union(arms) => arms.iter().any(|arm| atom_reaches(arm, defs, cyclic, seen)),
+    }
+}
+
+/// Every non-empty `match(...)` group of a file atom, in authored order.
+fn match_groups(constraints: &[Constraint]) -> Vec<&[String]> {
+    constraints
+        .iter()
+        .filter_map(|constraint| match constraint {
+            Constraint::Match(patterns) if !patterns.is_empty() => Some(patterns.as_slice()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// One copy, lowered.
+struct LoweredCopy {
+    key: String,
+    /// The `$defs` key of the definition it copies.
+    original: String,
+    body: Value,
+}
+
+fn lower_match_copies(copies: &MatchCopies, defs: &DefinitionTable) -> Result<Vec<LoweredCopy>, SchemaError> {
+    let mut lowered = Vec::with_capacity(copies.keys.len());
+    for ((key, property, enforcing), copy_key) in &copies.keys {
+        let definition = defs.get(key).ok_or_else(|| missing_definition(copy_key, key))?;
+        let lowering = Lowering {
+            defs,
+            matching: Matching::Enforce { copies, property: property.as_deref(), in_copy: *enforcing },
+        };
+        lowered.push(LoweredCopy {
+            key: copy_key.clone(),
+            original: definition.json_key.clone(),
+            body: lower_definition_body(property.as_deref().unwrap_or(&key.name), &definition.body, lowering)?,
+        });
+    }
+    Ok(lowered)
+}
+
+/// Makes a lowered simplified root-union arm enforce its `match(...)` rules.
+/// `arm_schema` is the arm as lowered for a single schema (examples resolved,
+/// its `$defs` already joined into `root_defs`, the `$defs` of the union
+/// root); `defs` is the table its references were lowered against.
+///
+/// Two places enforce, and nothing else does:
+///
+/// - a property that is directly a `file` (or `file[]`) gets the keyword on
+///   its file fragment ([`attach_direct_file_match`]);
+/// - a reference to a cyclic definition that reaches a `match(...)`, at any
+///   depth of the arm, is redirected to the arm's enforcing copy, which
+///   joins `root_defs` beside the shared definition and enforces every
+///   `file(match(...))` inside it (see [`MatchCopies`]). The redirects come
+///   from lowering the arm once more in enforcing mode and grafting the
+///   difference on.
+///
+/// Any other file in the arm (a property-union alternative, a nested inline
+/// object, a dictionary value, a tuple slot, a list of a union, or the body
+/// of a shared acyclic definition) keeps its suggestion-only lowering, as
+/// the schema's output before recursive types existed did. A single schema never calls this, so there
+/// `match` only suggests.
+///
+/// ## Errors
+///
+/// [`SchemaError::Convert`] when the enforcing lowering fails; it lowers what
+/// the single-schema lowering already lowered, so it fails only as that did.
+pub(crate) fn attach_root_union_match(
+    arm_schema: &mut Value,
+    shape: &SchemaShape,
+    defs: &DefinitionTable,
+    root_defs: &mut Map<String, Value>,
+) -> Result<(), SchemaError> {
+    let mut copies = MatchCopies::default();
+    copies.collect_arm(shape, defs);
+    attach_direct_file_match(arm_schema, shape);
+    if copies.is_empty() {
+        return Ok(());
+    }
+    let enforced = Value::Object(shape_to_object_schema(shape, Lowering::enforcing(defs, &copies))?);
+    graft_enforcement(arm_schema, &enforced);
+    for copy in lower_match_copies(&copies, defs)? {
+        // Start from the shared body as the arm's resolution left it, so its
+        // resolved annotations are kept.
+        let mut body = root_defs.get(&copy.original).cloned().unwrap_or_else(|| copy.body.clone());
+        graft_enforcement(&mut body, &copy.body);
+        root_defs.entry(copy.key).or_insert(body);
+    }
+    Ok(())
+}
+
+/// Emits the globs of each arm property that is directly a `file` (scalar or
+/// list) onto its converted file fragments. Called for each simplified arm
+/// even when other arms use raw JSON Schema.
+///
+/// Every `match(...)` group of one atom is emitted in one keyword: a single
+/// group keeps the flat pattern array, several become an array of pattern
+/// arrays (see [`crate::markdown::schemas::file_match`], "Keyword encoding").
+/// One keyword, not an `allOf` of keywords, because root-union arm selection
+/// recognizes a glob rejection by a schema path that ends in the keyword.
+fn attach_direct_file_match(arm_schema: &mut Value, shape: &SchemaShape) {
     let Some(Value::Object(properties)) = arm_schema.get_mut("properties") else {
         return;
     };
@@ -175,19 +741,53 @@ fn attach_match_keyword(fragment: &mut Value, keyword: &Value) {
     }
 }
 
+/// Copies onto `target` what an enforcing lowering of the same schema added
+/// in `enforced`: match keywords inside a copy (only beside the same file
+/// `format`) and redirected `$ref`s (only where `target` has one). The two share every
+/// other key, so the walk follows the keys both hold.
+fn graft_enforcement(target: &mut Value, enforced: &Value) {
+    match (target, enforced) {
+        (Value::Object(target), Value::Object(enforced)) => {
+            for (key, value) in enforced {
+                if key == DARKMATTER_MATCH_KEYWORD || key == DARKMATTER_MATCH_PROPERTY_KEYWORD {
+                    if target.get("format") == enforced.get("format") {
+                        target.insert(key.clone(), value.clone());
+                    }
+                } else if key == "$ref" {
+                    if let Some(reference) = target.get_mut("$ref") {
+                        *reference = value.clone();
+                    }
+                } else if let Some(nested) = target.get_mut(key) {
+                    graft_enforcement(nested, value);
+                }
+            }
+        }
+        (Value::Array(target), Value::Array(enforced)) if target.len() == enforced.len() => {
+            for (target, enforced) in target.iter_mut().zip(enforced) {
+                graft_enforcement(target, enforced);
+            }
+        }
+        _ => {}
+    }
+}
+
 // ── Property-level dispatch (single vs union) ────────────────────────────
 
-fn property_def_to_schema(name: &str, def: &PropertyDef) -> Result<(Value, bool), SchemaError> {
+fn property_def_to_schema(
+    name: &str,
+    def: &PropertyDef,
+    defs: Lowering<'_>,
+) -> Result<(Value, bool), SchemaError> {
     match def {
         // A postfixed union reference without `[]` (`U(required)`, `U -> text`),
         // or a union whose flattened postfixed arm hoisted its markers
         // (`[U(required), T]`), is a property union whose markers and
         // description sit on `atom`.
         PropertyDef::Single(atom) => match atom.union_arms() {
-            Some(arms) if !atom.is_array => union_property_to_schema(name, arms, Some(atom)),
-            _ => atom_to_schema(name, atom),
+            Some(arms) if !atom.is_array => union_property_to_schema(name, arms, Some(atom), defs),
+            _ => atom_to_schema(name, atom, defs),
         },
-        PropertyDef::Union(arms) => union_property_to_schema(name, arms, None),
+        PropertyDef::Union(arms) => union_property_to_schema(name, arms, None, defs),
     }
 }
 
@@ -198,6 +798,7 @@ fn union_property_to_schema(
     name: &str,
     arms: &[PropertyAtom],
     container: Option<&PropertyAtom>,
+    defs: Lowering<'_>,
 ) -> Result<(Value, bool), SchemaError> {
     // Union requiredness must be known *before* building arms: a required
     // union (any arm carries `required`, and no arm admits null) gets neither
@@ -223,7 +824,7 @@ fn union_property_to_schema(
 
     // The optional-`file` empty-string arm is allowed only when the union
     // itself is optional.
-    let (any_of, hoisted_default) = union_arm_fragments(name, arms, !required)?;
+    let (any_of, hoisted_default) = union_arm_fragments(name, arms, !required, defs)?;
 
     let mut union_schema = Map::new();
     union_schema.insert("anyOf".into(), Value::Array(any_of));
@@ -248,12 +849,9 @@ fn union_property_to_schema(
         // Lift the null arm into the existing anyOf array so the output
         // stays a single-level `anyOf: [null, arm1, arm2, ...]` rather than
         // nesting the whole union under a second anyOf wrapper.
-        let mut arms = union_schema
-            .remove("anyOf")
-            .expect("union schema has anyOf")
-            .as_array()
-            .expect("anyOf is an array")
-            .clone();
+        let Some(Value::Array(mut arms)) = union_schema.remove("anyOf") else {
+            unreachable!("the union schema's anyOf is an array")
+        };
         arms.insert(0, json!({ "type": "null" }));
         union_schema.insert("anyOf".into(), Value::Array(arms));
         Value::Object(union_schema)
@@ -276,13 +874,14 @@ fn union_arm_fragments(
     name: &str,
     arms: &[PropertyAtom],
     allow_optional_empty_file: bool,
+    defs: Lowering<'_>,
 ) -> Result<(Vec<Value>, Option<Value>), SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
     let mut hoisted_default: Option<Value> = None;
 
     for atom in arms {
         let (mut arm_value, _arm_required) =
-            atom_fragment_without_null_wrap(name, atom, allow_optional_empty_file)?;
+            atom_fragment_without_null_wrap(name, atom, allow_optional_empty_file, defs)?;
         // `atom_fragment_without_null_wrap` always returns a `Value::Object`.
         if let Value::Object(map) = &mut arm_value
             && let Some(arm_default) = map.remove("default")
@@ -311,11 +910,26 @@ fn union_arm_fragments(
 /// Wraps a finished typed fragment so an optional property also accepts
 /// JSON `null` as a sentinel for "absent".
 fn wrap_optional_null(inner: Value) -> Value {
-    json!({ "anyOf": [ { "type": "null" }, inner ] })
+    any_of_value(vec![json!({ "type": "null" }), inner])
 }
 
-fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), SchemaError> {
-    let (mut fragment, non_nullable) = atom_fragment_without_null_wrap(name, atom, true)?;
+/// `{ "anyOf": arms }`, moving `arms` in.
+///
+/// Never `json!({ "anyOf": arms })`: the macro passes an interpolated value
+/// through `serde_json::to_value`, which re-serializes the whole subtree, and
+/// these fragments nest, so a deep schema paid that copy once per level.
+fn any_of_value(arms: Vec<Value>) -> Value {
+    let mut map = Map::new();
+    map.insert("anyOf".into(), Value::Array(arms));
+    Value::Object(map)
+}
+
+fn atom_to_schema(
+    name: &str,
+    atom: &PropertyAtom,
+    defs: Lowering<'_>,
+) -> Result<(Value, bool), SchemaError> {
+    let (mut fragment, non_nullable) = atom_fragment_without_null_wrap(name, atom, true, defs)?;
     let generated = atom.is_generated();
 
     // `null` and `unknown` already accept null and are never required, so they
@@ -346,11 +960,13 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     let mut description_val: Option<Value> = None;
     let mut generated_val: Option<Value> = None;
     let mut example_val: Option<Value> = None;
+    let mut category_val: Option<Value> = None;
     if let Value::Object(map) = &mut fragment {
         default_val = map.remove("default");
         description_val = map.remove("description");
         generated_val = map.remove("x-darkmatter-generated");
         example_val = map.remove("x-darkmatter-example");
+        category_val = map.remove(DARKMATTER_CATEGORY_KEYWORD);
     }
 
     let is_optional_scalar_file = matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File))
@@ -359,14 +975,17 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
     let mut schema = if is_optional_scalar_file {
         // The bare fragment is already `[{ "const": "" }, file-typed]`.
         // Prepend the null arm to keep a flat, single-level anyOf.
-        let mut arms = fragment
-            .get("anyOf")
-            .and_then(|a| a.as_array())
-            .expect("optional file fragment has anyOf")
-            .clone();
+        let Some(Value::Array(mut arms)) = fragment.as_object_mut().and_then(|map| map.remove("anyOf")) else {
+            unreachable!("the optional file fragment's anyOf is an array")
+        };
         arms.insert(0, json!({ "type": "null" }));
         let mut m = Map::new();
         m.insert("anyOf".into(), Value::Array(arms));
+        // The flattened union is the marked node now; a template still never
+        // matches its `null` arm, so marking it defers the same values.
+        if let Some(deferred) = fragment.as_object_mut().and_then(|map| map.remove(DARKMATTER_DEFERRED_KEYWORD)) {
+            m.insert(DARKMATTER_DEFERRED_KEYWORD.into(), deferred);
+        }
         Value::Object(m)
     } else {
         wrap_optional_null(fragment)
@@ -384,6 +1003,9 @@ fn atom_to_schema(name: &str, atom: &PropertyAtom) -> Result<(Value, bool), Sche
         }
         if let Some(e) = example_val {
             map.insert("x-darkmatter-example".into(), e);
+        }
+        if let Some(category) = category_val {
+            map.insert(DARKMATTER_CATEGORY_KEYWORD.into(), category);
         }
     }
 
@@ -406,6 +1028,7 @@ fn atom_fragment_without_null_wrap(
     name: &str,
     atom: &PropertyAtom,
     allow_optional_empty_file: bool,
+    defs: Lowering<'_>,
 ) -> Result<(Value, bool), SchemaError> {
     // Required is hoisted out; default may appear on either constraints
     // (single/value-level) or array_constraints (array-level). Repeated
@@ -420,8 +1043,12 @@ fn atom_fragment_without_null_wrap(
     // (resolved into example objects by `resolve.rs`) and never reach a type
     // fragment builder as a constraint.
     let mut examples: Vec<String> = Vec::new();
+    let mut category: Option<&str> = None;
+    let mut operands: Option<&str> = None;
     for c in atom.property_constraints() {
         match c {
+            Constraint::Category(name) => category = Some(name),
+            Constraint::Operands(name) => operands = Some(name),
             Constraint::Default(v) => {
                 let value = normalize_json_number(v.clone());
                 match &default_val {
@@ -442,9 +1069,30 @@ fn atom_fragment_without_null_wrap(
         }
     }
 
+    // `category(...)`, `operands(...)`, and `deferred` are annotations, not
+    // constraints any type builder checks.
+    let value_constraints: Vec<Constraint> = atom
+        .constraints
+        .iter()
+        .filter(|constraint| {
+            !matches!(constraint, Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred)
+        })
+        .cloned()
+        .collect();
+    let deferred_value = atom.constraints.contains(&Constraint::Deferred);
+    let deferred_list = atom.is_array && atom.array_constraints.contains(&Constraint::Deferred);
     let inner = match &atom.ty {
-        TypeExpr::Primitive(ty) => type_fragment(name, *ty, &atom.constraints)?,
-        TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &atom.constraints)?,
+        TypeExpr::Primitive(ty) => type_fragment(name, *ty, &value_constraints, defs.matching)?,
+        TypeExpr::InlineObject(shape) => inline_object_fragment(name, shape, &value_constraints, defs)?,
+        TypeExpr::Tuple(tuple) => tuple_fragment(name, tuple, defs)?,
+        TypeExpr::Function(_) => {
+            return Err(SchemaError::Convert {
+                property: name.to_string(),
+                message: "a `function` type is description-only: it describes a callable and \
+                          cannot type a value in a document schema"
+                    .into(),
+            });
+        }
         // The alternatives of each item (with `is_array`) or of a union
         // nested as an arm. Items get no `null` wrapper or empty-file arm,
         // like the items of any array.
@@ -453,6 +1101,7 @@ fn atom_fragment_without_null_wrap(
                 name,
                 arms,
                 allow_optional_empty_file && !atom.is_array && !required,
+                defs,
             )?;
             if let Some(value) = arm_default {
                 // The resolver lifts an array-compatible arm default to the
@@ -479,8 +1128,9 @@ fn atom_fragment_without_null_wrap(
                     None => default_val = Some(value),
                 }
             }
-            json!({ "anyOf": any_of })
+            any_of_value(any_of)
         }
+        TypeExpr::Ref(key) => reference_fragment(name, key, &value_constraints, defs)?,
         // An imported type must be inline-expanded by the resolver before
         // conversion, just as a root-union `FileRef` arm is. Reaching the
         // converter with one unresolved is a hard error (resolution lands in
@@ -510,6 +1160,10 @@ fn atom_fragment_without_null_wrap(
         && !atom.is_array
         && !required;
 
+    let mut inner = inner;
+    if deferred_value && atom.is_array {
+        mark_deferred(&mut inner);
+    }
     let mut fragment = if atom.is_array {
         let mut arr = Map::new();
         arr.insert("type".into(), Value::String("array".into()));
@@ -517,10 +1171,13 @@ fn atom_fragment_without_null_wrap(
         apply_array_constraints(name, &mut arr, &atom.array_constraints)?;
         Value::Object(arr)
     } else if optional_empty_file {
-        json!({ "anyOf": [ { "const": "" }, inner ] })
+        any_of_value(vec![json!({ "const": "" }), inner])
     } else {
         inner
     };
+    if deferred_list || (deferred_value && !atom.is_array) {
+        mark_deferred(&mut fragment);
+    }
 
     // Attach default + description on the fragment. For single atoms these
     // are moved to the optional wrapper by `atom_to_schema`; for union arms
@@ -543,9 +1200,76 @@ fn atom_fragment_without_null_wrap(
                 Value::Array(examples.into_iter().map(Value::String).collect()),
             );
         }
+        if let Some(category) = category {
+            map.insert(DARKMATTER_CATEGORY_KEYWORD.into(), Value::String(category.to_string()));
+        }
+        if let Some(operands) = operands {
+            map.insert(DARKMATTER_OPERANDS_KEYWORD.into(), Value::String(operands.to_string()));
+        }
     }
 
     Ok((fragment, required))
+}
+
+/// The annotation a `category(Name)` lowers to on a data type.
+pub const DARKMATTER_CATEGORY_KEYWORD: &str = "x-darkmatter-category";
+
+/// The annotation `uncounted-keys` lowers to beside the `allOf` conditions
+/// that enforce it (see [`Constraint::UncountedKeys`]): `{ keys, min?, max? }`,
+/// the uncounted keys and the key bounds they leave out of the count. The
+/// coercion core reads it in place of those conditions, which it cannot
+/// model, so the count stays a modeled rule rather than an opaque assertion.
+pub const DARKMATTER_UNCOUNTED_KEYWORD: &str = "x-darkmatter-uncounted-keys";
+
+/// The annotation `operands(<verb>-short)` or `operands(<verb>-long)` lowers
+/// to (see [`Constraint::Operands`]): the generated verb type name. Like
+/// `x-darkmatter-deferred`, it stays on the typed node the arm lowers to,
+/// never on an optional property's `null` wrapper, so every copy of a verb's
+/// arm lowers identically.
+pub const DARKMATTER_OPERANDS_KEYWORD: &str = "x-darkmatter-operands";
+
+/// The annotation `deferred` lowers to: a `{{ … }}` template at this node is
+/// accepted unjudged (see [`Constraint::Deferred`]). It stays on the typed
+/// node, never on an optional property's `null` wrapper, so the coercion
+/// translator sees it on the shape it marks.
+pub const DARKMATTER_DEFERRED_KEYWORD: &str = "x-darkmatter-deferred";
+
+fn mark_deferred(fragment: &mut Value) {
+    if let Value::Object(map) = fragment {
+        map.insert(DARKMATTER_DEFERRED_KEYWORD.into(), Value::Bool(true));
+    }
+}
+
+/// Lowers a tuple to `type: array` with `prefixItems` for its positions,
+/// `minItems` for its required positions, and `items` for what may follow:
+/// `false` for a fixed length, the spread's item schema otherwise.
+///
+/// Positions get the bare fragment, without the optional-null wrapper: an
+/// optional position may be omitted, but a supplied `null` must match its
+/// type. An empty tuple writes no `prefixItems`, which Draft 2020-12 requires
+/// to be non-empty.
+fn tuple_fragment(name: &str, tuple: &TupleType, defs: Lowering<'_>) -> Result<Value, SchemaError> {
+    let mut prefix = Vec::with_capacity(tuple.elements.len());
+    for (index, element) in tuple.elements.iter().enumerate() {
+        prefix.push(pattern_value_schema(&format!("{name}[{index}]"), &element.def, defs)?);
+    }
+    let items = match &tuple.spread {
+        Some(spread) => {
+            let mut item = spread.as_ref().clone();
+            item.is_array = false;
+            item.array_constraints.clear();
+            atom_fragment_without_null_wrap(&format!("{name}[...]"), &item, false, defs)?.0
+        }
+        None => Value::Bool(false),
+    };
+    let mut m = Map::new();
+    m.insert("type".into(), Value::String("array".into()));
+    if !prefix.is_empty() {
+        m.insert("prefixItems".into(), Value::Array(prefix));
+    }
+    m.insert("minItems".into(), json!(tuple.required_len()));
+    m.insert("items".into(), items);
+    Ok(Value::Object(m))
 }
 
 /// Builds the exact non-null schema fragment used to lint one atom's
@@ -554,7 +1278,7 @@ pub(super) fn suggestion_target_schema(
     name: &str,
     atom: &PropertyAtom,
 ) -> Result<Value, SchemaError> {
-    let (fragment, _) = atom_fragment_without_null_wrap(name, atom, false)?;
+    let (fragment, _) = atom_fragment_without_null_wrap(name, atom, false, Lowering::suggesting(&DefinitionTable::default()))?;
     let mut target = if atom.is_array {
         fragment
             .get("items")
@@ -588,6 +1312,7 @@ fn inline_object_fragment(
     name: &str,
     shape: &SchemaShape,
     atom_constraints: &[Constraint],
+    defs: Lowering<'_>,
 ) -> Result<Value, SchemaError> {
     // Inline object atoms accept the universal `required` / `default` /
     // `generated` constraints (hoisted elsewhere) plus the object-arity
@@ -601,7 +1326,8 @@ fn inline_object_fragment(
             | Constraint::Example(_)
             | Constraint::Eager
             | Constraint::MinKeys(_)
-            | Constraint::MaxKeys(_) => {}
+            | Constraint::MaxKeys(_)
+            | Constraint::UncountedKeys(_) => {}
             other => {
                 return Err(SchemaError::Convert {
                     property: name.to_string(),
@@ -614,7 +1340,7 @@ fn inline_object_fragment(
         }
     }
 
-    let mut obj = object_body_from_shape(name, shape, Value::Bool(false))?;
+    let mut obj = object_body_from_shape(name, shape, Value::Bool(false), defs)?;
     reject_block_constraints(name, shape, ObjectScope::Inline)?;
     apply_object_arity(name, &mut obj, shape.constraints.iter().chain(atom_constraints))?;
     Ok(Value::Object(obj))
@@ -631,15 +1357,15 @@ enum ObjectScope {
 }
 
 /// Rejects `$constraints` keys that have no meaning on the block's object.
-/// The block parser accepts every key the grammar knows; only `min-keys` /
-/// `max-keys` lower here.
+/// The block parser accepts every key the grammar knows; only `min-keys`,
+/// `max-keys`, and `uncounted-keys` lower here.
 fn reject_block_constraints(
     name: &str,
     shape: &SchemaShape,
     scope: ObjectScope,
 ) -> Result<(), SchemaError> {
     for c in &shape.constraints {
-        if !matches!(c, Constraint::MinKeys(_) | Constraint::MaxKeys(_)) {
+        if !matches!(c, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_)) {
             let place = match scope {
                 ObjectScope::Inline => "an inline object",
                 ObjectScope::Root => "the root object",
@@ -667,6 +1393,7 @@ fn object_body_from_shape(
     context: &str,
     shape: &SchemaShape,
     default_additional: Value,
+    defs: Lowering<'_>,
 ) -> Result<Map<String, Value>, SchemaError> {
     let mut properties = Map::new();
     let mut required = Vec::new();
@@ -677,7 +1404,7 @@ fn object_body_from_shape(
         } else {
             format!("{context}.{prop_name}")
         };
-        match property_def_to_schema(&qualified_name, def) {
+        match property_def_to_schema(&qualified_name, def, defs.for_property(context, prop_name)) {
             Ok((prop_schema, is_required)) => {
                 if is_required {
                     required.push(Value::String(prop_name.clone()));
@@ -705,11 +1432,11 @@ fn object_body_from_shape(
     for pk in &shape.pattern_keys {
         match &pk.key {
             PatternKey::CatchAll => {
-                catch_all = Some(pattern_value_schema(context, &pk.def)?);
+                catch_all = Some(pattern_value_schema(context, &pk.def, defs)?);
             }
             other => {
                 let emitted = emitted_pattern_property(context, other, &literal_names)?;
-                let value_schema = pattern_value_schema(context, &pk.def)?;
+                let value_schema = pattern_value_schema(context, &pk.def, defs)?;
                 pattern_properties.insert(emitted, value_schema);
             }
         }
@@ -743,15 +1470,19 @@ fn object_body_from_shape(
 /// are not "optional properties", so they emit the bare typed fragment (no
 /// nullable wrapper) — `<string>: number` yields `additionalProperties:
 /// { "type": "number" }`, not a null-tolerant `anyOf`.
-fn pattern_value_schema(context: &str, def: &PropertyDef) -> Result<Value, SchemaError> {
+fn pattern_value_schema(
+    context: &str,
+    def: &PropertyDef,
+    defs: Lowering<'_>,
+) -> Result<Value, SchemaError> {
     match def {
-        PropertyDef::Single(atom) => Ok(atom_fragment_without_null_wrap(context, atom, false)?.0),
+        PropertyDef::Single(atom) => Ok(atom_fragment_without_null_wrap(context, atom, false, defs)?.0),
         PropertyDef::Union(arms) => {
             let mut any_of = Vec::with_capacity(arms.len());
             for atom in arms {
-                any_of.push(atom_fragment_without_null_wrap(context, atom, false)?.0);
+                any_of.push(atom_fragment_without_null_wrap(context, atom, false, defs)?.0);
             }
-            Ok(json!({ "anyOf": any_of }))
+            Ok(any_of_value(any_of))
         }
     }
 }
@@ -806,20 +1537,41 @@ fn wrap_literal_exclusion(core: &str, literal_names: &[&str]) -> String {
     }
 }
 
+/// The emitted patterns [`validate_emitted_pattern`] has seen compile.
+static COMPILED_PATTERNS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// Empties this module's process-wide caches (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    if let Some(compiled) = COMPILED_PATTERNS.get() {
+        compiled.lock().expect("compiled pattern set poisoned").clear();
+    }
+}
+
 /// Verifies an emitted pattern compiles under the same regex engine schema
 /// validation uses: `fancy-regex` when the pattern carries a lookaround
 /// (Feature C literal precedence), otherwise the linear `regex` engine.
+///
+/// A pattern that compiled once is remembered for the process: a named type
+/// inlined at many sites (the baseline's lifecycle stacks) emits the same
+/// pattern at each, and compiling a long alternation is not free.
 fn validate_emitted_pattern(
     context: &str,
     key: &PatternKey,
     emitted: &str,
 ) -> Result<(), SchemaError> {
+    let compiled = COMPILED_PATTERNS.get_or_init(Default::default);
+    if compiled.lock().expect("compiled pattern set poisoned").contains(emitted) {
+        return Ok(());
+    }
     let compiles = if has_lookaround(emitted) {
         fancy_regex::Regex::new(emitted).is_ok()
     } else {
         regex::Regex::new(emitted).is_ok()
     };
     if compiles {
+        compiled.lock().expect("compiled pattern set poisoned").insert(emitted.to_string());
         Ok(())
     } else {
         Err(SchemaError::Convert {
@@ -855,20 +1607,90 @@ pub(in crate::markdown::schemas) fn has_lookaround(pattern: &str) -> bool {
 /// postfix form are one scope, so repeated bounds from either surface merge
 /// as [`Bounds`] do. Other constraints are ignored here: they are hoisted
 /// (`required` / `default` / `generated`) or rejected elsewhere.
+///
+/// With `uncounted-keys`, the bounds move into one `allOf` condition per
+/// combination of the uncounted keys present, so the named keys never count
+/// toward them.
 fn apply_object_arity<'c>(
     name: &str,
     obj: &mut Map<String, Value>,
     constraints: impl Iterator<Item = &'c Constraint>,
 ) -> Result<(), SchemaError> {
     let mut keys = Bounds::default();
+    let mut uncounted: Vec<&str> = Vec::new();
     for c in constraints {
         match c {
             Constraint::MinKeys(n) => keys.lower(*n, c),
             Constraint::MaxKeys(n) => keys.upper(*n, c),
+            Constraint::UncountedKeys(names) => {
+                for key in names {
+                    if !uncounted.contains(&key.as_str()) {
+                        uncounted.push(key);
+                    }
+                }
+            }
             _ => {}
         }
     }
-    keys.emit(name, obj, "minProperties", "maxProperties", |n| json!(n))
+    if uncounted.is_empty() {
+        return keys.emit(name, obj, "minProperties", "maxProperties", |n| json!(n));
+    }
+    let convert = |message: String| SchemaError::Convert {
+        property: name.to_string(),
+        message,
+    };
+    if uncounted.len() > super::types::MAX_UNCOUNTED_KEYS {
+        return Err(convert(format!(
+            "`uncounted-keys` names at most {} keys, got {}",
+            super::types::MAX_UNCOUNTED_KEYS,
+            uncounted.len()
+        )));
+    }
+    let mut bounds = Map::new();
+    keys.emit(name, &mut bounds, "minProperties", "maxProperties", |n| json!(n))?;
+    if bounds.is_empty() {
+        return Err(convert("`uncounted-keys` needs `min-keys` or `max-keys` on the same object".to_string()));
+    }
+    // JSON Schema counts every key, so each combination of uncounted keys
+    // present raises both bounds by its size; absent keys are pinned with
+    // `false` so exactly one combination applies.
+    let mut annotation = Map::new();
+    annotation.insert("keys".into(), json!(uncounted));
+    for (keyword, short) in [("minProperties", "min"), ("maxProperties", "max")] {
+        if let Some(bound) = bounds.get(keyword) {
+            annotation.insert(short.into(), bound.clone());
+        }
+    }
+    obj.insert(DARKMATTER_UNCOUNTED_KEYWORD.into(), Value::Object(annotation));
+    let conditions = obj.entry("allOf").or_insert_with(|| Value::Array(Vec::new()));
+    let Value::Array(conditions) = conditions else {
+        return Err(convert("an object's `allOf` is not a list".to_string()));
+    };
+    for present in 0u32..(1 << uncounted.len()) {
+        let mut required = Vec::new();
+        let mut absent = Map::new();
+        for (bit, key) in uncounted.iter().enumerate() {
+            if present & (1 << bit) == 0 {
+                absent.insert((*key).to_string(), Value::Bool(false));
+            } else {
+                required.push(Value::String((*key).to_string()));
+            }
+        }
+        let extra = required.len() as u64;
+        let mut condition = Map::new();
+        if !required.is_empty() {
+            condition.insert("required".into(), Value::Array(required));
+        }
+        if !absent.is_empty() {
+            condition.insert("properties".into(), Value::Object(absent));
+        }
+        let then: Map<String, Value> = bounds
+            .iter()
+            .map(|(keyword, bound)| (keyword.clone(), json!(bound.as_u64().unwrap_or_default() + extra)))
+            .collect();
+        conditions.push(json!({ "if": condition, "then": then }));
+    }
+    Ok(())
 }
 
 /// Repeated bounds of one kind on one scope (string length, number, item
@@ -970,8 +1792,12 @@ fn apply_array_constraints(
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_)
+            | Constraint::Category(_)
+            | Constraint::Operands(_)
+            | Constraint::Deferred
             | Constraint::Eager => {
-                // Hoisted to the property level by `atom_to_schema`.
+                // Hoisted to the property level by `atom_to_schema`, or (for
+                // `deferred`) marked on the list by the atom's lowering.
             }
             Constraint::MinItems(n) => items.lower(*n, c),
             Constraint::MaxItems(n) => items.upper(*n, c),
@@ -998,6 +1824,7 @@ fn type_fragment(
     name: &str,
     ty: SimplifiedType,
     constraints: &[Constraint],
+    matching: Matching<'_>,
 ) -> Result<Value, SchemaError> {
     // `eager` is universal timing metadata rather than a presence constraint,
     // so it has no JSON Schema form of its own. Only `file` also assigns it
@@ -1030,7 +1857,7 @@ fn type_fragment(
         SimplifiedType::Boolean => simple_typed_fragment(name, "boolean", constraints),
         SimplifiedType::Boolish => boolish_fragment(name, constraints),
         SimplifiedType::Object => simple_typed_fragment(name, "object", constraints),
-        SimplifiedType::File => file_fragment(name, constraints),
+        SimplifiedType::File => file_fragment(name, constraints, matching),
         SimplifiedType::Enum => enum_fragment(name, constraints),
         SimplifiedType::Url => url_fragment(name, constraints),
         SimplifiedType::Email => email_fragment(name, constraints),
@@ -1125,8 +1952,7 @@ fn push_unique(patterns: &mut Vec<String>, pattern: &str) {
 
 /// A value must satisfy every pattern. One pattern keeps the plain `pattern`
 /// keyword; several become `allOf` entries beside the base fragment's other
-/// keywords, never one combined regex. `coerce` recognizes the numberlike arm
-/// by its single `pattern` key, which this keeps unchanged.
+/// keywords, never one combined regex.
 fn insert_patterns(m: &mut Map<String, Value>, patterns: Vec<String>) {
     match <[String; 1]>::try_from(patterns) {
         Ok([only]) => {
@@ -1188,31 +2014,24 @@ fn number_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
         "type".into(),
         Value::String(if is_integer { "integer" } else { "number" }.into()),
     );
+    if is_integer {
+        m.insert(DARKMATTER_INTEGER_KEYWORD.into(), Value::Bool(true));
+    }
     Ok(Value::Object(m))
 }
 
+/// `numberlike` accepts a real number or number text and keeps it as sent,
+/// so it compiles to both JSON types plus the format backed by the canonical
+/// numeric-text parser; a regex cannot express the exactness check.
 fn numberlike_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "numberlike", constraints, &[])?;
-    Ok(json!({
-        "anyOf": [
-            { "type": "number" },
-            { "type": "string", "pattern": NUMBERLIKE_PATTERN }
-        ]
-    }))
+    Ok(json!({ "type": ["number", "string"], "format": DARKMATTER_NUMBERLIKE_FORMAT }))
 }
 
+/// `boolish` accepts a real boolean or a boolean word and keeps it as sent.
 fn boolish_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     reject_unsupported(name, "boolish", constraints, &[])?;
-    let enum_members: Vec<Value> = BOOLISH_VALUES
-        .iter()
-        .map(|s| Value::String((*s).into()))
-        .collect();
-    Ok(json!({
-        "anyOf": [
-            { "type": "boolean" },
-            { "enum": enum_members }
-        ]
-    }))
+    Ok(json!({ "type": ["boolean", "string"], "format": DARKMATTER_BOOLISH_FORMAT }))
 }
 
 fn simple_typed_fragment(
@@ -1224,7 +2043,7 @@ fn simple_typed_fragment(
     Ok(json!({ "type": ty }))
 }
 
-fn file_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+fn file_fragment(name: &str, constraints: &[Constraint], matching: Matching<'_>) -> Result<Value, SchemaError> {
     // `eager` flips the emitted `format` so the build-time existence decision
     // is legible to the (sibling-blind) jsonschema format closure: bare `file`
     // lowers to the lazy `darkmatter-file-reference` (syntax-only), while
@@ -1246,10 +2065,24 @@ fn file_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Schema
             | Constraint::Example(_) => {}
             // Consumed above to pick the format; nothing further to emit.
             Constraint::Eager => {}
-            // Root-union conversion emits `match(...)` after this atom has
-            // been converted; a single schema uses it for completion only.
+            // Emitted below inside a root-union arm's enforcing copy, and by
+            // `attach_direct_file_match` on an arm's direct file property;
+            // anywhere else it is used for completion only.
             Constraint::Match(_) => {}
             other => return Err(invalid_constraint(name, "file", other)),
+        }
+    }
+    if let Matching::Enforce { property, in_copy: true, .. } = matching {
+        let groups = match_groups(constraints);
+        if !groups.is_empty() {
+            let keyword = match groups.as_slice() {
+                [only] => json!(only),
+                several => json!(several),
+            };
+            m.insert(DARKMATTER_MATCH_KEYWORD.into(), keyword);
+            // A copy under `$defs` cannot be traced to its property by
+            // location, so it names it.
+            m.insert(DARKMATTER_MATCH_PROPERTY_KEYWORD.into(), property.map_or(Value::Null, |p| json!(p)));
         }
     }
     Ok(Value::Object(m))
@@ -1521,7 +2354,7 @@ fn check_alphanumeric_values(
         map.remove("default");
         map.remove("x-darkmatter-suggest");
     }
-    let validator = super::super::validate::build_structural_validator(&target)?;
+    let validator = alphanumeric_check_validator(&target)?;
     match values.into_iter().find(|(_, value)| !validator.is_valid(value)) {
         Some((keyword, value)) => Err(SchemaError::Convert {
             property: name.to_string(),
@@ -1529,6 +2362,20 @@ fn check_alphanumeric_values(
         }),
         None => Ok(()),
     }
+}
+
+/// The structural validator judging `target`, from the process-wide cache's
+/// structural slot, so every resolution lowering the same complete
+/// constraints (option pattern plus string constraints) shares one compile.
+/// Only the compiled validator is reused; each value is still judged fresh.
+fn alphanumeric_check_validator(target: &Value) -> Result<std::sync::Arc<jsonschema::Validator>, SchemaError> {
+    let cache = &*crate::markdown::schemas::SHARED_VALIDATOR_CACHE;
+    let content = crate::markdown::schemas::validate::schema_content_hash(target);
+    if let Some(validator) = cache.cached_structural(content) {
+        return Ok(validator);
+    }
+    crate::note_work!(AlphanumericCheckCompile);
+    cache.structural_validator_hashed(target, content)
 }
 
 /// Lowers `shell` to `{ "type": "string", "format": "darkmatter-shell" }`.
@@ -1599,41 +2446,23 @@ fn invalid_constraint(property: &str, ty: &str, c: &Constraint) -> SchemaError {
     }
 }
 
-/// Emit a JSON number that prefers integer form when the value is integral.
-/// This keeps snapshots tidy (`0` instead of `0.0`).
+/// Emits a JSON number in its exact form: an integral value as a JSON
+/// integer (`0`, not `0.0`), any other finite value as a float. A
+/// non-finite value, which admission rejects, is written as text.
 fn number_to_json(n: f64) -> Value {
-    if n.is_finite() && n.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(&n) {
-        json!(n as i64)
-    } else if let Some(num) = serde_json::Number::from_f64(n) {
-        Value::Number(num)
-    } else {
-        Value::String(format!("{n}"))
-    }
+    json_number(n).map_or_else(|| Value::String(format!("{n}")), Value::Number)
 }
 
-/// Normalises numeric values inside a default literal so integral floats
-/// (the form the parser emits for `default(3)`) render as `3` rather than
-/// `3.0`. Recurses into arrays/objects defensively even though v1 grammar
-/// only emits scalars.
-fn normalize_json_number(value: Value) -> Value {
+/// Normalizes numeric literals for both lowering and inherited-default
+/// equality, including values supplied through the programmatic schema API.
+pub(crate) fn normalize_json_number(value: Value) -> Value {
     match value {
-        // An already-integer-typed number (the parser preserves i64/u64 for a
-        // bare literal like `9007199254740993`) is exact — passing it through
-        // `as_f64()` would round it, so return it untouched. Only a genuine
-        // floating representation (the parser's `default(3)` emits `3.0`) is
-        // canonicalized to integer form.
+        // An integer-typed number is already exact.
         Value::Number(n) if n.is_i64() || n.is_u64() => Value::Number(n),
-        Value::Number(n) => {
-            if let Some(f) = n.as_f64()
-                && f.is_finite()
-                && f.fract() == 0.0
-                && (i64::MIN as f64..=i64::MAX as f64).contains(&f)
-            {
-                json!(f as i64)
-            } else {
-                Value::Number(n)
-            }
-        }
+        Value::Number(n) => match n.as_f64().and_then(json_number) {
+            Some(number) => Value::Number(number),
+            None => Value::Number(n),
+        },
         Value::Array(items) => Value::Array(items.into_iter().map(normalize_json_number).collect()),
         Value::Object(map) => Value::Object(
             map.into_iter()
@@ -1665,12 +2494,12 @@ mod tests {
         // Shape tests focus on the typed fragment, so force the atom to be
         // required. Optional wrapping is exercised separately.
         atom.constraints.push(Constraint::Required);
-        atom_to_schema("test", &atom).expect("convert").0
+        atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).expect("convert").0
     }
 
     fn optional_atom_value(input: &str) -> Value {
         let atom = parse_type_expr("test", input).expect("parse atom");
-        atom_to_schema("test", &atom).expect("convert").0
+        atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).expect("convert").0
     }
 
     #[test]
@@ -1730,22 +2559,19 @@ mod tests {
     }
 
     #[test]
-    fn numberlike_is_any_of() {
-        let v = atom_value("numberlike");
-        let arms = v["anyOf"].as_array().expect("anyOf");
-        assert_eq!(arms.len(), 2);
-        assert_eq!(arms[0]["type"], "number");
-        assert_eq!(arms[1]["type"], "string");
-        assert_eq!(arms[1]["pattern"], r"^-?\d+(\.\d+)?$");
+    fn numberlike_compiles_to_its_format() {
+        assert_eq!(
+            atom_value("numberlike"),
+            json!({ "type": ["number", "string"], "format": DARKMATTER_NUMBERLIKE_FORMAT })
+        );
     }
 
     #[test]
-    fn boolish_is_any_of() {
-        let v = atom_value("boolish");
-        let arms = v["anyOf"].as_array().expect("anyOf");
-        assert_eq!(arms.len(), 2);
-        assert_eq!(arms[0]["type"], "boolean");
-        assert!(arms[1]["enum"].is_array());
+    fn boolish_compiles_to_its_format() {
+        assert_eq!(
+            atom_value("boolish"),
+            json!({ "type": ["boolean", "string"], "format": DARKMATTER_BOOLISH_FORMAT })
+        );
     }
 
     #[test]
@@ -2031,7 +2857,7 @@ flag:
     fn invalid_constraint_for_type_errors() {
         // `integer` is a number-only constraint but parses on a string atom.
         let atom = parse_type_expr("test", "string(integer)").unwrap();
-        let err = atom_to_schema("test", &atom).unwrap_err();
+        let err = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).unwrap_err();
         match err {
             SchemaError::Convert { property, message } => {
                 assert_eq!(property, "test");
@@ -2047,7 +2873,7 @@ flag:
         // `file` retains the universal constraint's additional existence
         // semantics by selecting the eager `darkmatter-file` format.
         let atom = parse_type_expr("test", "file(eager; required)").unwrap();
-        let v = atom_to_schema("test", &atom)
+        let v = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default()))
             .expect("file(eager) must convert")
             .0;
         assert_eq!(v["format"], "darkmatter-file");
@@ -2061,7 +2887,7 @@ flag:
             ("object(eager)", "object"),
         ] {
             let atom = parse_type_expr("test", input).unwrap();
-            let value = atom_to_schema("test", &atom)
+            let value = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default()))
                 .unwrap_or_else(|error| panic!("{input} must convert: {error}"))
                 .0;
             assert_eq!(value["anyOf"][1]["type"], expected_type);
@@ -2173,7 +2999,7 @@ flag:
     fn array_level_invalid_constraint_errors() {
         // `pattern` is not legal at the array level.
         let atom = parse_type_expr("test", "string[](pattern(x))").unwrap();
-        let err = atom_to_schema("test", &atom).unwrap_err();
+        let err = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).unwrap_err();
         match err {
             SchemaError::Convert { message, .. } => {
                 assert!(message.contains("array level"), "{message}");
@@ -2306,7 +3132,7 @@ config: "{ host: string }(required)"
         // illegal on an inline object, mirroring the per-type
         // `invalid_constraint` wording in the existing fragment builders.
         let atom = parse_type_expr("test", "{ host: string }(min(1))").unwrap();
-        let err = atom_to_schema("test", &atom).unwrap_err();
+        let err = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).unwrap_err();
         match err {
             SchemaError::Convert { property, message } => {
                 assert_eq!(property, "test");
@@ -2777,9 +3603,64 @@ ctx_kind:
         ] {
             let atom = parse_type_expr("test", input)
                 .unwrap_or_else(|e| panic!("parse failed for `{input}`: {e:?}"));
-            atom_to_schema("test", &atom)
+            atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default()))
                 .unwrap_or_else(|e| panic!("convert failed for `{input}`: {e:?}"));
         }
+    }
+
+    /// `deferred` is accepted on every type and marks the typed node it
+    /// belongs to: the value itself, an item when written before `[]`, the
+    /// list when written after it. An optional value keeps the mark on its
+    /// typed arm, not on the `null` wrapper.
+    #[test]
+    fn deferred_marks_the_node_it_is_written_on() {
+        for input in [
+            "string(deferred)",
+            "number(integer; min(1); deferred)",
+            "boolean(deferred)",
+            "date(deferred)",
+            "enum(a, b; deferred)",
+            "literal(1; deferred)",
+            "any(deferred)",
+            "object(deferred)",
+            "file(deferred)",
+            "{ foo: string }(deferred)",
+            "tuple([number, number]; deferred)",
+        ] {
+            let value = atom_value(input);
+            assert_eq!(value[DARKMATTER_DEFERRED_KEYWORD], true, "`{input}`: {value}");
+        }
+        let items = atom_value("number(deferred)[]");
+        assert_eq!(items["items"][DARKMATTER_DEFERRED_KEYWORD], true, "{items}");
+        assert!(items.get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{items}");
+        let list = atom_value("number[](deferred)");
+        assert_eq!(list[DARKMATTER_DEFERRED_KEYWORD], true, "{list}");
+        assert!(list["items"].get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{list}");
+
+        let optional = optional_atom_value("number(deferred)");
+        assert!(optional.get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{optional}");
+        assert_eq!(optional["anyOf"][1][DARKMATTER_DEFERRED_KEYWORD], true, "{optional}");
+    }
+
+    /// In a union `a | b` the mark belongs to the alternative that carries
+    /// it; a tuple slot carries its own mark.
+    #[test]
+    fn deferred_is_per_union_arm_and_per_tuple_slot() {
+        let v = convert("op: \"number(integer; deferred) | { state: string }\"");
+        let arms = v["properties"]["op"]["anyOf"].as_array().expect("anyOf");
+        let marked: Vec<bool> = arms.iter().map(|arm| arm.get(DARKMATTER_DEFERRED_KEYWORD).is_some()).collect();
+        assert_eq!(marked, [false, true, false], "{arms:?}");
+
+        let v = convert("pair: \"tuple([number(deferred), number])\"");
+        let prefix = &v["properties"]["pair"]["anyOf"][1]["prefixItems"];
+        assert_eq!(prefix[0][DARKMATTER_DEFERRED_KEYWORD], true, "{prefix}");
+        assert!(prefix[1].get(DARKMATTER_DEFERRED_KEYWORD).is_none(), "{prefix}");
+    }
+
+    #[test]
+    fn deferred_takes_no_arguments() {
+        let error = parse_type_expr("test", "number(deferred(1))").expect_err("rejected");
+        assert!(format!("{error:?}").contains("`deferred` does not take arguments"), "{error:?}");
     }
 }
 
@@ -2800,14 +3681,14 @@ mod schema_plus_phase1 {
     fn atom_value(input: &str) -> Value {
         let mut atom = parse_type_expr("test", input).expect("parse atom");
         atom.constraints.push(Constraint::Required);
-        atom_to_schema("test", &atom).expect("convert").0
+        atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).expect("convert").0
     }
 
     /// Lowers one type expression as an **optional** property (the standard
     /// nullable `anyOf` wrapper is applied).
     fn optional_atom_value(input: &str) -> Value {
         let atom = parse_type_expr("test", input).expect("parse atom");
-        atom_to_schema("test", &atom).expect("convert").0
+        atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).expect("convert").0
     }
 
     /// Compiles a `$schema`-body YAML mapping to its full JSON Schema.
@@ -2917,7 +3798,7 @@ mod schema_plus_phase1 {
         // `patternProperties` entry; conversion fails loudly rather than
         // shipping a schema the validator would reject at build time.
         let atom = parse_type_expr("dict", "{ <pattern::*>: string }").expect("parse");
-        let err = atom_to_schema("dict", &atom).unwrap_err();
+        let err = atom_to_schema("dict", &atom, Lowering::suggesting(&DefinitionTable::default())).unwrap_err();
         match err {
             SchemaError::Convert { message, .. } => {
                 assert!(message.contains("pattern key"), "{message}");
@@ -2931,7 +3812,7 @@ mod schema_plus_phase1 {
         // Object arity is only meaningful on objects; `min-keys` on a scalar
         // atom is a conversion error, mirroring the per-type constraint guard.
         let atom = parse_type_expr("test", "string(min-keys(1))").expect("parse");
-        let err = atom_to_schema("test", &atom).unwrap_err();
+        let err = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).unwrap_err();
         match err {
             SchemaError::Convert { message, .. } => {
                 assert!(message.contains("min-keys"), "{message}");
@@ -2946,7 +3827,7 @@ mod schema_plus_phase1 {
         // `max-keys` in an array-level constraint position is ambiguous and
         // rejected — object arity attaches to object items, not the array.
         let atom = parse_type_expr("test", "object[](max-keys(1))").expect("parse");
-        let err = atom_to_schema("test", &atom).unwrap_err();
+        let err = atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).unwrap_err();
         match err {
             SchemaError::Convert { message, .. } => {
                 assert!(message.contains("array level"), "{message}");
@@ -2961,6 +3842,11 @@ mod schema_plus_phase1 {
     fn schema_of(yaml: &str) -> Value {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml parse");
         to_json_schema(&parse_yaml_schema(&value).expect("schema parse")).expect("convert")
+    }
+
+    fn schema_of_result(yaml: &str) -> Result<Value, SchemaError> {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml parse");
+        to_json_schema(&parse_yaml_schema(&value).expect("schema parse"))
     }
 
     fn validator_of(schema: &Value) -> jsonschema::Validator {
@@ -3050,6 +3936,61 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[test]
+    fn uncounted_keys_are_left_out_of_the_key_bounds() {
+        // One verb, beside which `when` and `no_error` may sit.
+        let block = schema_of(
+            "action:\n  info: string\n  stop: null\n  when: string\n  no_error: boolean\n  $constraints:\n    min-keys: 1\n    max-keys: 1\n    uncounted-keys: [when, no_error]",
+        );
+        let postfix = schema_of("action: \"{ info: string, stop: null, when: string, no_error: boolean }(min-keys(1); max-keys(1); uncounted-keys(when, no_error))\"");
+        for schema in [block, postfix] {
+            let action = &schema["properties"]["action"]["anyOf"][1];
+            assert!(action.get("maxProperties").is_none(), "the bounds move into the conditions: {action}");
+            assert_eq!(action["allOf"].as_array().map(Vec::len), Some(4), "one condition per combination");
+            let v = validator_of(&schema);
+            for valid in [
+                json!({ "info": "hi" }),
+                json!({ "info": "hi", "when": "x" }),
+                json!({ "info": "hi", "no_error": true }),
+                json!({ "stop": null, "when": "x", "no_error": true }),
+            ] {
+                assert!(v.is_valid(&json!({ "action": valid })), "{valid}");
+            }
+            for invalid in [
+                json!({}),
+                json!({ "when": "x" }),
+                json!({ "when": "x", "no_error": true }),
+                json!({ "info": "hi", "stop": null }),
+                json!({ "info": "hi", "stop": null, "when": "x" }),
+                json!({ "info": "hi", "stop": null, "when": "x", "no_error": true }),
+            ] {
+                assert!(!v.is_valid(&json!({ "action": invalid })), "{invalid}");
+            }
+        }
+    }
+
+    #[test]
+    fn uncounted_keys_need_a_key_bound_and_a_short_list() {
+        let without_bound = schema_of_result(
+            "action:\n  info: string\n  when: string\n  $constraints:\n    uncounted-keys: [when]",
+        );
+        assert!(
+            matches!(&without_bound, Err(SchemaError::Convert { message, .. }) if message.contains("needs `min-keys` or `max-keys`")),
+            "{without_bound:?}"
+        );
+        for (block, needle) in [
+            ("[]", "at least one key"),
+            ("[when, when]", "names `when` twice"),
+            ("[a, b, c, d, e, f, g, h, i]", "at most 8 keys"),
+            ("when", "list of key names"),
+        ] {
+            let yaml = format!("action:\n  info: string\n  $constraints:\n    max-keys: 1\n    uncounted-keys: {block}");
+            let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).unwrap();
+            let error = parse_yaml_schema(&value).expect_err(block);
+            assert!(error.to_string().contains(needle), "{block}: {error}");
+        }
+    }
+
     // ── Feature D — content-format string types ──────────────────────────
 
     #[test]
@@ -3108,11 +4049,11 @@ mod schema_plus_phase1 {
     fn literal_equal_default_loads_and_mismatch_errors() {
         // An equal default is fine.
         assert!(parse_type_expr("kind", "literal(spec; default(spec))")
-            .and_then(|a| atom_to_schema("kind", &a))
+            .and_then(|a| atom_to_schema("kind", &a, Lowering::suggesting(&DefinitionTable::default())))
             .is_ok());
         // A default that violates its own const fails conversion.
         let atom = parse_type_expr("kind", "literal(spec; default(other))").expect("parse");
-        let err = atom_to_schema("kind", &atom).expect_err("mismatched default must fail");
+        let err = atom_to_schema("kind", &atom, Lowering::suggesting(&DefinitionTable::default())).expect_err("mismatched default must fail");
         assert!(matches!(err, SchemaError::Convert { .. }));
     }
 
@@ -3121,7 +4062,7 @@ mod schema_plus_phase1 {
         // `min(1)` is meaningless on a literal identity and must be rejected at
         // conversion (the grammar admits it; convert is the enforcement point).
         let atom = parse_type_expr("v", "literal(2; min(1))").expect("parse");
-        let err = atom_to_schema("v", &atom).expect_err("min not valid on literal");
+        let err = atom_to_schema("v", &atom, Lowering::suggesting(&DefinitionTable::default())).expect_err("min not valid on literal");
         assert!(matches!(err, SchemaError::Convert { .. }));
     }
 
@@ -3136,10 +4077,10 @@ mod schema_plus_phase1 {
     fn expression_default_must_parse() {
         // A parseable default loads.
         let ok = parse_type_expr("when", "expression(default('is_agent()'))").expect("parse");
-        assert!(atom_to_schema("when", &ok).is_ok());
+        assert!(atom_to_schema("when", &ok, Lowering::suggesting(&DefinitionTable::default())).is_ok());
         // An unparseable default fails at schema load.
         let bad = parse_type_expr("when", "expression(default('(('))").expect("parse");
-        let err = atom_to_schema("when", &bad).expect_err("bad default must fail");
+        let err = atom_to_schema("when", &bad, Lowering::suggesting(&DefinitionTable::default())).expect_err("bad default must fail");
         assert!(matches!(err, SchemaError::Convert { .. }));
     }
 
@@ -3172,17 +4113,23 @@ mod schema_plus_phase1 {
     }
 
     #[test]
-    fn literal_large_integer_const_is_exact() {
-        // Bare integer literals beyond f64's 2^53 exact range must reach `const`
-        // verbatim — `normalize_json_number` must not round them through f64.
-        let cases: [(&str, Value); 4] = [
-            ("literal(9007199254740993)", Value::from(9_007_199_254_740_993_i64)),
-            ("literal(9223372036854775807)", Value::from(i64::MAX)),
+    fn literal_large_integer_const_is_exact_or_rejected() {
+        // A whole number is admitted only when an `f64` holds it exactly; the
+        // admitted value reaches `const` as a JSON integer, never rounded.
+        let exact: [(&str, Value); 2] = [
+            ("literal(9007199254740992)", Value::from(9_007_199_254_740_992_i64)),
             ("literal(9223372036854775808)", Value::from(9_223_372_036_854_775_808_u64)),
-            ("literal(18446744073709551615)", Value::from(u64::MAX)),
         ];
-        for (input, expected) in cases {
+        for (input, expected) in exact {
             assert_eq!(atom_value(input)["const"], expected, "const for {input}");
+        }
+        for input in [
+            "literal(9007199254740993)",
+            "literal(9223372036854775807)",
+            "literal(18446744073709551615)",
+        ] {
+            let error = parse_type_expr("test", input).expect_err(input).to_string();
+            assert!(error.contains("cannot be represented exactly"), "{input}: {error}");
         }
     }
 
@@ -3197,21 +4144,25 @@ mod schema_plus_phase1 {
     fn large_integer_default_equal_to_literal_accepted() {
         // An equal large-integer `default(...)` must compile (values compared
         // exactly), and the const survives.
-        let v = atom_value("literal(9007199254740993; default(9007199254740993))");
-        assert_eq!(v["const"], Value::from(9_007_199_254_740_993_i64));
-        assert_eq!(v["default"], Value::from(9_007_199_254_740_993_i64));
+        let v = atom_value("literal(9007199254740992; default(9007199254740992))");
+        assert_eq!(v["const"], Value::from(9_007_199_254_740_992_i64));
+        assert_eq!(v["default"], Value::from(9_007_199_254_740_992_i64));
     }
 
     #[test]
     fn large_integer_default_unequal_to_literal_rejected() {
         let mut atom =
-            parse_type_expr("test", "literal(9007199254740993; default(9007199254740992))")
+            parse_type_expr("test", "literal(9007199254740992; default(9007199254740990))")
                 .expect("parse atom");
         atom.constraints.push(Constraint::Required);
         assert!(
-            atom_to_schema("test", &atom).is_err(),
-            "an off-by-one large-integer default must fail schema load"
+            atom_to_schema("test", &atom, Lowering::suggesting(&DefinitionTable::default())).is_err(),
+            "an unequal large-integer default must fail schema load"
         );
+        let error = parse_type_expr("test", "literal(1; default(9007199254740993))")
+            .expect_err("an inexact default is rejected")
+            .to_string();
+        assert!(error.contains("cannot be represented exactly"), "{error}");
     }
 }
 
@@ -3225,7 +4176,7 @@ mod repeated_constraints {
 
     fn lower(input: &str) -> Result<Value, SchemaError> {
         let atom = parse_type_expr("p", input).expect("parse atom");
-        atom_fragment_without_null_wrap("p", &atom, false).map(|(fragment, _)| fragment)
+        atom_fragment_without_null_wrap("p", &atom, false, Lowering::suggesting(&DefinitionTable::default())).map(|(fragment, _)| fragment)
     }
 
     fn convert_message(input: &str) -> String {

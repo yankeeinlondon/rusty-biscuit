@@ -1,0 +1,36 @@
+# scenario: sequence-nested-group
+# doc: sequence-nested-group.md
+# given: invoked as `claudine sequence --claude --yolo sequence-nested-group.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: the group runs its legs with max_parallel 1, so legs run in declaration order
+# given: every shell task exits 0
+event seq:initialize
+event seq:start
+event step:initialize
+event step:start
+work fresh 0
+event step:success
+event step:finalize
+err none
+event checks:initialize
+event checks:start
+event leg-a:initialize
+event leg-a:start
+task leg-a
+event leg-a:success
+event leg-a:finalize
+err none
+event leg-b:initialize
+event leg-b:start
+task leg-b
+event leg-b:success
+event leg-b:finalize
+err none
+event checks:success
+event checks:finalize
+err none
+task last
+event seq:success
+event seq:finalize
+err none
+exit 0

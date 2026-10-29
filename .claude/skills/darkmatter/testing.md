@@ -166,3 +166,26 @@ absolute-link file, and the symlinked directory at runtime). The self-check in
 behavior that may look surprising (no percent-decoding, case-sensitive wiki
 names, ambiguous wiki links counting for every candidate); keep it passing
 when changing the oracle.
+
+## Collection (`::map` / `::filter`) tests
+
+- `darkmatter/lib/tests/l1/collection_blocks/` (`grammar`, `types_values`,
+  `scope_schedule`, `pipeline`, `budget`, `docs_corpus`, `support`) plus
+  `collection_{analysis,execution,effects,discovery}.rs`. Fixtures live in
+  `tests/fixtures/collection_blocks/`.
+- `docs_corpus.rs` parses the fenced `md` examples of `map.md`, `filter.md` and
+  `iterables.md`: a block counts when its opener is at column 0 and contains
+  neither `<` nor `...`; prose containing "mismatched", "invalid" or
+  "malformed" marks an expected `dm.collection.malformed` rejection. Keep those
+  conventions when editing the pages.
+- Count effects with controlled handlers to prove short-circuiting; use small
+  limits for budget boundaries and keep one defaults-parity assertion.
+- CLI: `darkmatter/cli/tests/l1/{collection_blocks,compose_collection_controls}.rs`;
+  DMLS: `dmls/tests/l1/collection_editor.rs`; Claudine compatibility:
+  `claudine/lib/tests/l1/collection_host_compat.rs`.
+- Expression-call acceptance: `lib/tests/l1/collection_expression_surfaces.rs`
+  covers typed frontmatter, body and block conditions, nested scope, warnings,
+  and inserted-text provenance; CLI wiring is in `compose_call_warnings.rs`.
+  Claudine's `collection_host_compat` tests prepare dependency gates against
+  fixture-owned specs and execute the initialize event with its host binding
+  view, without providers or shells.

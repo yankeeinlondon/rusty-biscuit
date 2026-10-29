@@ -267,6 +267,10 @@ fn run_sequence_inner(
     let invocation = claudine::invocation_context::InvocationContext::capture(request)?
         .with_environment_source(documents)
         .with_prewarm(prewarm.handle());
+    // Dropped on every return, so a skipped schema trigger recorded before a
+    // failure is shown ahead of the error `main` renders.
+    let _trigger_warnings =
+        super::compose::TriggerWarningDrain::new(invocation.trigger_findings(), shared.silent);
     let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
@@ -415,8 +419,10 @@ fn run_sequence_inner(
             set_overrides,
             launch_area_fallback.as_deref(),
             &file_resolution_context,
+            invocation.trigger_findings(),
         );
     emit_dropped_optional_warnings(&dropped_optionals);
+    super::compose::emit_trigger_warnings(invocation.trigger_findings(), shared.silent);
 
     let execution_options = SequenceExecutionOptions { fail_fast_override: None };
 

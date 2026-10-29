@@ -84,6 +84,34 @@ pub(super) fn run_target_initialize(
         );
     }
     if let Some(control) = catch_result.control.as_ref() {
+        use claudine::composition::lifecycle::policy::{RecoveryVerdict, SubjectKind, recovery_verdict};
+        if let Some(RecoveryVerdict::Refuse(_)) =
+            recovery_verdict(SubjectKind::Document, LifecycleSignal::Initialize, control)
+        {
+            // An adopted target reports the refusal by its stage rather than
+            // as the origin document's setup refusal: there is no provider
+            // attempt at `initialize` for the directive to act on, and calling
+            // the action invalid would send the user looking for an authoring
+            // mistake they did not make.
+            return TargetInitializeAction::Abort(
+                CompositionError::LifecycleTransitionUnownedAtStage {
+                    source_path: source_path.to_path_buf(),
+                    // Only `proxy` carries an `ActionLocation`, so these name
+                    // the event rather than the exact action index.
+                    property: "initialize.stack".to_string(),
+                    verb: match control {
+                        StackControl::Retry { .. } => "retry",
+                        StackControl::Resume { .. } => "resume",
+                        _ => "defer",
+                    },
+                    stage: "initialize",
+                    reason: "no provider attempt has run yet, so there is nothing to \
+                             retry, resume, or defer"
+                        .to_string(),
+                }
+                .into(),
+            );
+        }
         match control {
             StackControl::Skip => TargetInitializeAction::ExitCleanly,
             StackControl::Error { .. } => {
@@ -100,34 +128,9 @@ pub(super) fn run_target_initialize(
             )),
             StackControl::Stop => TargetInitializeAction::Proceed,
             StackControl::Break { .. } => TargetInitializeAction::Break,
-            // Authored placement is legal — `is_valid_for` makes every control
-            // except `skip` universally placeable — but there is no provider
-            // attempt at `initialize` for these to act on. So the diagnostic
-            // names the stage rather than calling the action invalid, which
-            // would send the user looking for an authoring mistake they did
-            // not make.
-            StackControl::Retry { .. }
-            | StackControl::Resume { .. }
-            | StackControl::Defer { .. } => TargetInitializeAction::Abort(
-                CompositionError::LifecycleTransitionUnownedAtStage {
-                    source_path: source_path.to_path_buf(),
-                    // Only `proxy` carries an `ActionLocation`, so these name
-                    // the event rather than the exact action index. The event
-                    // is the actionable part regardless: `initialize` is where
-                    // the stack is.
-                    property: "initialize.stack".to_string(),
-                    verb: match control {
-                        StackControl::Retry { .. } => "retry",
-                        StackControl::Resume { .. } => "resume",
-                        _ => "defer",
-                    },
-                    stage: "initialize",
-                    reason: "no provider attempt has run yet, so there is nothing to \
-                             retry, resume, or defer"
-                        .to_string(),
-                }
-                .into(),
-            ),
+            StackControl::Retry { .. } | StackControl::Resume { .. } | StackControl::Defer { .. } => {
+                unreachable!("the policy kernel refuses initialize's retry, resume, and defer")
+            }
         }
     } else {
         TargetInitializeAction::Proceed

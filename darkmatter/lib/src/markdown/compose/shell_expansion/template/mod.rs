@@ -3,7 +3,8 @@
 //! into the command text and tokenized afterwards.
 //!
 //! A [`CommandTemplate`] is parsed from authored text ([`parse_authored`]),
-//! typed against the owning document's schema ([`CommandTemplate::project_types`]),
+//! typed at its site's type scope: the owning document's schema narrowed by
+//! the guards that enclose the site ([`CommandTemplate::project_types`]),
 //! and reduced to a [`TemplateShape`] whose holes keep only their approval
 //! type. A shape is what a `template <shape>` policy rule stores, what the
 //! whitelist and blacklist match, and what a template approval authorizes.
@@ -27,19 +28,22 @@ mod typing;
 #[cfg(test)]
 mod tests;
 
-pub use approval::{ApprovalKey, OfferedChoices, ShellPreApprovals, TemplateApprovalView};
+pub use approval::{ApprovalKey, OfferedChoices, ShellPreApprovals, SuggestedRules, TemplateApprovalView};
 pub use canonical::TemplateRuleError;
-pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate, derived_deferred_keys};
+pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate, derived_deferred_keys, value_read_roots};
 pub use fill::{
     DocumentShellValues, HoleError, HoleEvaluator, LateValueError, LateValues, LookupEvaluator, RejectReason, SiteValues,
     fill_template, resolve_late_values,
 };
-pub use grammar::parse_authored;
+pub use grammar::{parse_authored, parse_authored_prepared};
 pub use matching::rule_covers;
 pub use target::{TemplateTargetError, resolve_direct_target};
-pub use typing::{ApprovalType, HoleType, HoleValidator, StringLikeType, TypeProvenance, project_hole};
+pub use typing::{
+    ApprovalType, HoleRefinement, HoleType, HoleValidator, StringLikeType, TypeProvenance, project_hole, project_hole_expr,
+};
 
 use super::tokenize::{ShellToken, apply_redirection};
+use crate::markdown::compose::expression::{GuardOrigin, PreparedInterpolationView, TypeScope};
 use super::types::{ChainOperator, RedirectionConfig};
 use std::ops::Range;
 
@@ -90,11 +94,13 @@ pub struct Placeholder {
     /// The byte span of the whole `{{ … }}` in [`CommandTemplate::authored`].
     pub span: Range<usize>,
     /// The hole's type. [`parse_authored`] projects it without a schema;
-    /// [`CommandTemplate::project_types`] replaces it with the owner's.
+    /// [`CommandTemplate::project_types`] replaces it with the type at the
+    /// site's scope.
     pub typing: HoleType,
     /// When the hole's value exists. [`parse_authored`] assumes
     /// [`HoleTiming::ApprovalTime`]; discovery marks a read of a root the host
-    /// declared late (see [`DeferredShellRoots`]).
+    /// declared late (see [`DeferredShellRoots`]) and a guard-proven value it
+    /// found missing.
     pub timing: HoleTiming,
 }
 
@@ -108,6 +114,26 @@ pub enum HoleTiming {
     /// roots the expression reads, directly or through a derived frontmatter
     /// value; nothing about the value is checked at approval.
     Deferred { roots: Vec<String> },
+    /// A guard enclosing this site proves the value present, but it is
+    /// missing at approval or reads a late root (`roots`, empty otherwise).
+    /// It is read and validated only when the guarded command is reached:
+    /// never at approval, and never by an unconditional barrier
+    /// ([`resolve_late_values`]), so a branch that does not run cannot fail
+    /// on it.
+    Guarded { guard: GuardOrigin, roots: Vec<String> },
+    /// The hole reads a local of an enclosing `::map` / `::filter` body. Its
+    /// value belongs to one repeated copy, so it is read from that copy's
+    /// frame when the command is reached: never at approval, and never by an
+    /// unconditional barrier. Only a template can be approved for it.
+    Local,
+}
+
+impl HoleTiming {
+    /// Whether the value is not read at approval, so the command can be
+    /// approved only as a template.
+    pub fn is_late(&self) -> bool {
+        !matches!(self, Self::ApprovalTime)
+    }
 }
 
 /// One of the four curated redirections, in the order it was written.
@@ -217,22 +243,39 @@ pub enum ShapePart {
 }
 
 impl CommandTemplate {
-    /// Types every placeholder against the owning document's schema
-    /// projection; see [`project_hole`].
-    pub fn project_types(
-        &mut self,
-        schema: Option<&crate::markdown::schemas::SimplifiedSchema>,
-        host_globals: &[&str],
-    ) {
-        for segment in &mut self.segments {
-            for arg in &mut segment.args {
-                for part in &mut arg.parts {
-                    if let ArgPart::Hole(placeholder) = part {
-                        placeholder.typing = project_hole(&placeholder.expression, schema, host_globals);
-                    }
-                }
-            }
+    /// Types every placeholder at the site whose types are `scope`; see
+    /// [`project_hole`].
+    pub fn project_types(&mut self, scope: &TypeScope<'_>) {
+        for placeholder in self.placeholders_mut() {
+            placeholder.typing = project_hole(&placeholder.expression, scope);
         }
+    }
+
+    /// [`project_types`](Self::project_types) from retained syntax: each
+    /// placeholder is matched to its occurrence in `view` by span, and one
+    /// whose expression did not parse keeps the fallback type.
+    pub fn project_types_prepared(&mut self, view: PreparedInterpolationView<'_>, scope: &TypeScope<'_>) {
+        for placeholder in self.placeholders_mut() {
+            placeholder.typing = view
+                .placeholder_at(&placeholder.span)
+                .and_then(|occurrence| occurrence.expr())
+                .map_or_else(
+                    || HoleType::fallback(TypeProvenance::NotBareProperty),
+                    |expr| project_hole_expr(expr, scope),
+                );
+        }
+    }
+
+    /// Every placeholder, in authored order, for retyping or retiming.
+    pub fn placeholders_mut(&mut self) -> impl Iterator<Item = &mut Placeholder> {
+        self.segments
+            .iter_mut()
+            .flat_map(|segment| &mut segment.args)
+            .flat_map(|arg| &mut arg.parts)
+            .filter_map(|part| match part {
+                ArgPart::Hole(placeholder) => Some(placeholder),
+                ArgPart::Literal(_) => None,
+            })
     }
 
     /// Every placeholder, in authored order.

@@ -43,7 +43,7 @@ pub mod json;
 // Re-exports for convenience
 
 #[cfg(feature = "xx_hash")]
-pub use xx::{HashVariant, xx_hash, xx_hash_bytes, xx_hash_variant};
+pub use xx::{HashVariant, XxHasher, xx_hash, xx_hash_bytes, xx_hash_variant};
 
 #[cfg(feature = "blake3")]
 pub use blake::{blake3_hash, blake3_hash_bytes, blake3_hash_reader, blake3_hash_trimmed};

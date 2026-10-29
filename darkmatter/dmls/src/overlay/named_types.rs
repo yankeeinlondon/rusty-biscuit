@@ -20,7 +20,8 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
 use darkmatter::markdown::schemas::{
-    PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError,
+    SchemaShape, SchemaSourceMap, SourceAware,
     SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
     parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
@@ -37,6 +38,33 @@ pub struct AuthoredDeclaration {
     pub source_map: SchemaSourceMap,
 }
 
+/// The authored bytes of the frontmatter `$schema` value.
+fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::Range<usize>> {
+    let mut span = ast.schema_entry()?.value_span.clone();
+    // A flow collection's recorded value span stops before its closing
+    // bracket.
+    if let Some(end) = flow_collection_end(text, span.start) {
+        span.end = end + 1;
+    }
+    Some(span)
+}
+
+/// The frontmatter `$schema` value of `text` through the source-aware
+/// declaration parser, re-parsed in place: the text before the value on its
+/// first line is replaced with spaces, so every column and byte offset matches
+/// the document and continuation lines keep their indentation.
+fn parse_frontmatter_declaration(
+    text: &str,
+    ast: &FrontmatterAst,
+) -> Option<Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure>> {
+    let span = frontmatter_value_span(text, ast)?;
+    let line_start = text[..span.start].rfind('\n').map_or(0, |index| index + 1);
+    let mut source = " ".repeat(span.start - line_start);
+    source.push_str(text.get(span)?);
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    Some(parse_schema_declaration_with_source(&yaml, &source, line_start))
+}
+
 impl AuthoredDeclaration {
     /// The declaration a standalone schema document authors.
     pub fn standalone(model: &StandaloneSchemaDocument) -> Self {
@@ -47,27 +75,32 @@ impl AuthoredDeclaration {
     }
 
     /// The frontmatter `$schema` value of `text`, or `None` when the value is
-    /// absent or cannot be projected (for example a block scalar).
-    ///
-    /// The value is re-parsed in place: the text before the value on its first
-    /// line is replaced with spaces, so every column and byte offset matches
-    /// the document and continuation lines keep their indentation.
+    /// absent, invalid, or cannot be projected (for example a block scalar).
     pub fn frontmatter(text: &str, ast: &FrontmatterAst) -> Option<Self> {
-        let mut span = ast.schema_entry()?.value_span.clone();
-        // A flow collection's recorded value span stops before its closing
-        // bracket.
-        if let Some(end) = flow_collection_end(text, span.start) {
-            span.end = end + 1;
-        }
-        let line_start = text[..span.start].rfind('\n').map_or(0, |index| index + 1);
-        let mut source = " ".repeat(span.start - line_start);
-        source.push_str(text.get(span)?);
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
-        let parsed = parse_schema_declaration_with_source(&yaml, &source, line_start).ok()?;
+        let parsed = parse_frontmatter_declaration(text, ast)?.ok()?;
         Some(Self {
             declaration: parsed.value,
             source_map: parsed.source_map,
         })
+    }
+
+    /// Why the frontmatter `$schema` value of `text` is not a declaration,
+    /// located in `text`'s bytes; `None` when it parses, is absent, or is not
+    /// YAML on its own.
+    pub fn frontmatter_failure(text: &str, ast: &FrontmatterAst) -> Option<LocatedDefinitionFailure> {
+        parse_frontmatter_declaration(text, ast)?.err()
+    }
+
+    /// [`Self::frontmatter`] for a request at `offset`: `None`, without
+    /// parsing, unless `offset` lies within the `$schema` value (end
+    /// inclusive, like [`Self::reference_at`]), since no span of the
+    /// declaration lies elsewhere.
+    pub fn frontmatter_at(text: &str, ast: &FrontmatterAst, offset: usize) -> Option<Self> {
+        let span = frontmatter_value_span(text, ast)?;
+        if offset < span.start || offset > span.end {
+            return None;
+        }
+        Self::frontmatter(text, ast)
     }
 
     /// The named-type reference whose name contains `offset` (end inclusive,
@@ -155,6 +188,9 @@ pub struct ExternalNamespace {
     pub text: Arc<str>,
     /// The parsed file, or `None` when it is not a standalone schema document.
     pub document: Option<StandaloneSchemaDocument>,
+    /// Why the file is not usable as a schema document: its text is not YAML,
+    /// or its recognized envelope is malformed.
+    pub error: Option<Arc<SchemaError>>,
 }
 
 impl ExternalNamespace {
@@ -228,8 +264,11 @@ impl NamedTypeCatalog {
                     .ok()
                     .flatten()?;
                 let text: Arc<str> = Arc::from(crate::work_counters::read_to_string(&path).ok()?);
-                let document = parse_standalone_schema_document(&text, &path).ok().flatten();
-                Some(ExternalNamespace { target, path, text, document })
+                let (document, error) = match parse_standalone_schema_document(&text, &path) {
+                    Ok(document) => (document, None),
+                    Err(error) => (None, Some(Arc::new(error))),
+                };
+                Some(ExternalNamespace { target, path, text, document, error })
             })
             .collect();
         Self { externals }
@@ -317,7 +356,15 @@ fn collect_atom_targets(atom: &PropertyAtom, targets: &mut BTreeSet<String>) {
                 collect_atom_targets(arm, targets);
             }
         }
-        TypeExpr::Primitive(_) => {}
+        TypeExpr::Tuple(tuple) => {
+            tuple.any_atom(|atom| {
+                collect_atom_targets(atom, targets);
+                false
+            });
+        }
+        // A function signature is description-only; a document schema that
+        // reaches one fails to load before its references matter.
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {}
     }
 }
 
@@ -354,5 +401,31 @@ mod tests {
         assert_eq!(reference.target.as_deref(), Some("./types.yaml"));
         let u = text.find("U@").unwrap();
         assert_eq!(declaration.reference_at(text, u).unwrap().target, None, "`@this` is local");
+    }
+
+    /// A request outside the `$schema` value never parses the declaration,
+    /// and one at either end of it (the end inclusive, as a reference's is)
+    /// gets the same declaration [`AuthoredDeclaration::frontmatter`] does.
+    #[test]
+    fn a_request_parses_the_declaration_only_inside_the_schema_value() {
+        let text = "---\ntitle: x\n$schema:\n  base: string\n  alias: base\nafter: 1\n---\n";
+        let ast = FrontmatterAst::parse(text).and_then(|parse| parse.ast).expect("frontmatter");
+        let value = ast.schema_entry().expect("a `$schema` entry").value_span.clone();
+        let at = |offset| AuthoredDeclaration::frontmatter_at(text, &ast, offset);
+        assert!(at(text.find("title").unwrap()).is_none(), "a key before the declaration");
+        assert!(at(text.find("$schema").unwrap()).is_none(), "the `$schema` key itself");
+        assert!(at(text.find("after").unwrap() + 1).is_none(), "a key after the declaration");
+        assert!(at(value.start).is_some());
+        assert!(at(value.end).is_some(), "the end is inclusive");
+        let alias_end = text.find("alias: base").unwrap() + "alias: base".len();
+        let declaration = at(alias_end).expect("a cursor just after the last reference");
+        assert_eq!(declaration.reference_at(text, alias_end).expect("the reference").name, "base");
+
+        // A flow value's span runs through its closing bracket.
+        let text = "---\n$schema: { a: 'T@./types.yaml' }\nafter: 1\n---\n";
+        let ast = FrontmatterAst::parse(text).and_then(|parse| parse.ast).expect("frontmatter");
+        let close = text.find('}').unwrap();
+        assert!(AuthoredDeclaration::frontmatter_at(text, &ast, close + 1).is_some());
+        assert!(AuthoredDeclaration::frontmatter_at(text, &ast, close + 2).is_none(), "the next line");
     }
 }

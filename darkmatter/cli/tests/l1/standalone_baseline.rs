@@ -421,7 +421,7 @@ fn compose_rejects_an_invalid_shell_resolved_policy() {
 
 #[test]
 fn compose_without_trigger_schemas_rejects_an_invalid_shell_resolved_policy() {
-    assert_shell_resolved_policies_rejected(&["--no-trigger-schemas"]);
+    assert_shell_resolved_policies_rejected(&["--disable", "schema-triggers"]);
 }
 
 /// The positive control: shell output that resolves to a value the
@@ -430,7 +430,7 @@ fn compose_without_trigger_schemas_rejects_an_invalid_shell_resolved_policy() {
 #[test]
 fn compose_accepts_valid_shell_resolved_values_in_both_trigger_modes() {
     let frontmatter = "title: \"$(echo words)\"\ncontent_policy: [TimeSensitive]\n";
-    for extra in [&[][..], &["--no-trigger-schemas"][..]] {
+    for extra in [&[][..], &["--disable", "schema-triggers"][..]] {
         let (code, stdout, stderr) = compose_shell_resolved(frontmatter, extra);
         assert_eq!(code, Some(0), "{extra:?}: {stderr}");
         assert!(stdout.contains("title: words"), "{extra:?}: {stdout}");
@@ -444,7 +444,7 @@ fn compose_accepts_valid_shell_resolved_values_in_both_trigger_modes() {
 fn compose_accepts_a_policy_template_over_shell_output_in_both_trigger_modes() {
     for content_policy in ["[\"{{ rule }}\"]", "\"{{ [rule] }}\""] {
         let frontmatter = format!("rule: \"$(echo TimeSensitive)\"\ncontent_policy: {content_policy}\n");
-        for extra in [&[][..], &["--no-trigger-schemas"][..]] {
+        for extra in [&[][..], &["--disable", "schema-triggers"][..]] {
             let (code, stdout, stderr) = compose_shell_resolved(&frontmatter, extra);
             assert_eq!(code, Some(0), "{extra:?} {content_policy}: {stderr}");
             assert!(
@@ -459,7 +459,7 @@ fn compose_accepts_a_policy_template_over_shell_output_in_both_trigger_modes() {
 /// effective schema, so the post-resolution check has nothing to apply.
 #[test]
 fn compose_without_any_schema_leaves_shell_resolved_values_unjudged() {
-    for extra in [&["--no-baseline-schema"][..], &["--no-baseline-schema", "--no-trigger-schemas"][..]] {
+    for extra in [&["--disable", "baseline-schema"][..], &["--disable", "baseline-schema", "--disable", "schema-triggers"][..]] {
         let (code, stdout, stderr) = compose_shell_resolved("content_policy: \"$(echo words)\"\n", extra);
         assert_eq!(code, Some(0), "{extra:?}: {stderr}");
         assert!(stdout.contains("content_policy: words"), "{extra:?}: {stdout}");

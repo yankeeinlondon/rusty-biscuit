@@ -844,11 +844,11 @@ class CheckSnapshotsTests(unittest.TestCase):
 
 
 class PackageTableTests(unittest.TestCase):
-    def test_the_wave_2_feature_sets_are_the_ruled_table(self) -> None:
-        # 2026-09-22-consolidated-test-binaries-wave-2 rulings R1 (from spikes/s1-feature-sets.md).
+    def test_the_wave_2_feature_sets_cover_reviewed_recipes_and_ci(self) -> None:
+        # The reviewed recipe sets also include each package's current CI union.
         self.assertEqual({
             "tree-hugger": ((),),
-            "claudine": ((),),
+            "claudine": ((), ("work-counters",)),
             "sniff": ((), ("remote",), ("network",)),
             "sniff-detection-cli": ((), ("test-fixtures",)),
             "biscuit-file": ((), ("fetch",)),

@@ -16,12 +16,18 @@
 //! - `Invalid`: Darkmatter cannot load the frontmatter that would be
 //!   emitted; nothing is saved and the run fails (exit `1`).
 //!
+//! A referenced schema that is missing, unreadable, or invalid fails the run
+//! (exit `1`) before any outcome; under `--json` the version-1 envelope is
+//! still written first, carrying the skipped-trigger `warnings` discovery
+//! retained.
+//!
 //! This module owns what is specific to the `md` binary: flags as explicit
 //! rule overrides, schema flags and the request contexts they resolve in,
 //! terminal findings, and (in [`json`]) the version-1 JSON envelope.
 
 mod json;
 
+use crate::commands::trigger_findings::emit_warnings;
 use crate::io::{OpenedArgument, open_argument};
 use crate::request::MdRequest;
 use biscuit_terminal::components::list::UnorderedList;
@@ -38,7 +44,7 @@ use darkmatter::markdown::cleanup::rules::{
 use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
 use darkmatter::markdown::delta::DeltaReport;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::CleanSchemaConfig;
+use darkmatter::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
@@ -54,10 +60,10 @@ pub struct CleanSchemaFlags {
     pub schema: Option<PathBuf>,
     /// `--baseline-schema PATH`
     pub baseline_schema: Option<PathBuf>,
-    /// `--no-baseline-schema`
+    /// `--disable baseline-schema`
     pub no_baseline_schema: bool,
-    /// `--no-trigger-schemas`
-    pub no_trigger_schemas: bool,
+    /// `--disable schema-triggers`
+    pub no_schema_triggers: bool,
 }
 
 /// The `md` request a `clean` run resolves schema references in, and the
@@ -148,7 +154,20 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     let overrides = rule_overrides(options)?;
 
     let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
-    let result = clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request)?;
+    let result = match clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request) {
+        Ok(result) => result,
+        Err(CleanFailure { error, trigger_findings: None }) => return Err(error),
+        Err(CleanFailure { error, trigger_findings: Some(findings) }) => {
+            if options.json {
+                let report = json::schema_failure_report(&findings, resolved, &raw);
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                io::stdout().flush()?;
+            } else {
+                emit_warnings(&findings, &Terminal::new());
+            }
+            return Err(error);
+        }
+    };
 
     if options.json {
         let report = json_report(&result, resolved, &raw);
@@ -163,6 +182,9 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
         return Ok(());
     }
 
+    let terminal = Terminal::new();
+    emit_warnings(&result.trigger_findings, &terminal);
+
     if result.outcome == CleanOutcome::Invalid {
         // The error the document itself reports keeps the message today's
         // users see for unrepairable YAML.
@@ -172,7 +194,6 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
         });
     }
 
-    let terminal = Terminal::new();
     report_findings(&result.diagnostics, &terminal);
 
     let Some(path) = save_path else {
@@ -240,16 +261,23 @@ fn body_offset(text: &str) -> usize {
     }
 }
 
+/// A failed clean transaction: the original error, so messages are
+/// unchanged, and for a schema failure the triggers discovery skipped before
+/// it (`None` for any other failure, where no envelope is written).
+struct CleanFailure {
+    error: Report,
+    trigger_findings: Option<Vec<InvalidTriggerFinding>>,
+}
+
 /// Runs the library clean transaction with this invocation's overrides and
-/// schema configuration, keeping each failure's original error so messages
-/// are unchanged.
+/// schema configuration.
 fn clean(
     raw: &str,
     overrides: &MarkdownRuleOverrides,
     document_path: Option<&Path>,
     flags: &CleanSchemaFlags,
     request: &DocumentRequest<'_>,
-) -> Result<CleanResult> {
+) -> std::result::Result<CleanResult, CleanFailure> {
     let clean_request = CleanRequest {
         source: raw,
         overrides,
@@ -258,9 +286,13 @@ fn clean(
     };
     clean_document(&clean_request, || schema_config(flags, document_path, request)).map_err(
         |error| match error {
-            FrontmatterRepairError::Extraction(error) => Report::new(error),
-            FrontmatterRepairError::Schema(error) => Report::new(error),
-            FrontmatterRepairError::Context(error) => error,
+            FrontmatterRepairError::Extraction(error) => {
+                CleanFailure { error: Report::new(error), trigger_findings: None }
+            }
+            FrontmatterRepairError::Schema { error, trigger_findings } => {
+                CleanFailure { error: Report::new(*error), trigger_findings: Some(trigger_findings) }
+            }
+            FrontmatterRepairError::Context(error) => CleanFailure { error, trigger_findings: None },
         },
     )
 }
@@ -299,7 +331,7 @@ fn schema_config(
         ));
     }
 
-    Ok(config.with_trigger_schemas(!flags.no_trigger_schemas))
+    Ok(config.with_trigger_schemas(!flags.no_schema_triggers))
 }
 
 /// Renders report-only findings to STDERR: frontmatter suggestions, then

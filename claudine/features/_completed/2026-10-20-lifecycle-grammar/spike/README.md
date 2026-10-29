@@ -23,7 +23,7 @@ findings live in [`../spike-results.md`](../spike-results.md).
 ```sh
 REPO=/Volumes/coding/wt/rusty-biscuit/feat-schema-enhancement
 cd $REPO && cargo build -p darkmatter-cli --release          # binary: target/release/md
-python3 claudine/features/2026-09-21-lifecycle-ergonomics/spike/gen-action-schema.py
+python3 claudine/features/_completed/2026-10-20-lifecycle-grammar/spike/gen-action-schema.py  # any CWD; writes spike/schemas/
 cd claudine/features/2026-09-21-lifecycle-ergonomics/spike/fixtures
 $REPO/target/release/md schema triggers depth1.md            # discovery + shadowing + match
 for f in *.md; do $REPO/target/release/md schema validate $f; done

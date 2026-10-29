@@ -1,6 +1,7 @@
 //! The lifecycle binding matrix: every catalog global in every scope, checked
 //! through Darkmatter's passive validation and its runtime session alike.
 
+use crate::composition::LifecycleErrorInfoExt;
 use darkmatter::markdown::compose::expression::{
     AuthoredMode, BindingError, EvaluationLookup, EvaluationSession, ExpressionError, evaluate,
     parse, prepare_value, validate_prepared,
@@ -9,6 +10,8 @@ use serde_json::{Map, Value, json};
 
 use super::*;
 use crate::composition::looping::LoopAmbient;
+
+mod loop_member_reads;
 
 /// A document whose properties share the globals' names, so any fall-through
 /// from a global to the document is visible.
@@ -264,6 +267,49 @@ fn approval_diagnostics_name_late_globals_and_namespaces_in_any_branch() {
 }
 
 #[test]
+fn prepared_approval_diagnostics_equal_the_text_entry_point() {
+    use darkmatter::markdown::compose::expression::PreparedInterpolation;
+    for scope in [LifecycleScope::LifecycleShellApproval, LifecycleScope::SequenceShellApproval] {
+        for raw in [
+            "echo {{ err.msg }} {{ x }}",
+            "echo {{ false ? timing : 'x' }}",
+            "echo {{ x || current.os }} {{ seq.outputs[0] }}",
+            "echo {{ nope(1) }}",
+            "echo {{ fm.err }} {{ ctx.repo }} {{ env.HOME }}",
+            "echo {{ x }} {{ x }}",
+            "plain",
+            "echo {{ 1 + }}",
+            "echo {{ err.msg }} {{ 1 + }} {{ also bad ( }}",
+        ] {
+            let by_text = approval_diagnostics(raw, scope);
+            let by_prepared = approval_diagnostics_prepared(&PreparedInterpolation::new(raw), scope);
+            match (by_text, by_prepared) {
+                (Ok(text), Ok(prepared)) => {
+                    let key = |d: &ValidationDiagnostic| (d.pointer.clone(), d.span.clone(), format!("{:?}", d.error));
+                    assert_eq!(
+                        prepared.iter().map(key).collect::<Vec<_>>(),
+                        text.iter().map(key).collect::<Vec<_>>(),
+                        "{scope:?}: `{raw}`"
+                    );
+                }
+                (Err(text), Err(prepared)) => {
+                    assert_eq!((prepared.span, prepared.text), (text.span, text.text), "{scope:?}: `{raw}`");
+                }
+                (text, prepared) => panic!("{scope:?}: `{raw}`: {text:?} vs {prepared:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn a_malformed_occurrence_suppresses_every_approval_diagnostic() {
+    use darkmatter::markdown::compose::expression::PreparedInterpolation;
+    let prepared = PreparedInterpolation::new("echo {{ err.msg }} {{ 1 + }}");
+    let error = approval_diagnostics_prepared(&prepared, LifecycleScope::LifecycleShellApproval).unwrap_err();
+    assert_eq!(error.text, "1 +");
+}
+
+#[test]
 fn the_loop_global_carries_one_iteration_and_never_falls_back_to_the_document() {
     let document = Document::shadowing();
     let ambient = ambient();
@@ -357,6 +403,37 @@ fn a_retired_loop_read_is_found_only_in_parsed_reads() {
     );
     assert_eq!(removed_loop_read_in_text("plain _loop_count text"), None);
     assert_eq!(removed_loop_read_in_text("{{ '_loop_count' }}"), None);
+}
+
+/// The retired-name check visits every read position, reports the first
+/// read in source order, and reads only a static first member of `fm`.
+#[test]
+fn a_retired_loop_read_is_found_in_every_read_position() {
+    for (text, found) in [
+        ("fm[_loop_count]", Some("_loop_count")),
+        ("x[_loop_is_first]", Some("_loop_is_first")),
+        ("f(g(_loop_count))", Some("_loop_count")),
+        ("{a: _loop_last_output}", Some("_loop_last_output")),
+        ("x ? _loop_count : 1", Some("_loop_count")),
+        ("_loop_is_last || _loop_count", Some("_loop_is_last")),
+        ("-_loop_count + !_loop_is_first", Some("_loop_count")),
+        ("fm._loop_count.x", Some("_loop_count")),
+        ("fm['_loop_count'].x", Some("_loop_count")),
+        // Parentheses do not hide an explicit frontmatter read.
+        ("(fm)['_loop_count']", Some("_loop_count")),
+        ("(fm)._loop_is_last", Some("_loop_is_last")),
+        ("fm.cfg['_loop_count']", None),
+        ("fm['cfg']['_loop_count']", None),
+        ("fm[0]", None),
+        ("f(fm)['_loop_count']", None),
+    ] {
+        let expr = darkmatter::markdown::compose::expression::parse_condition(text).unwrap();
+        assert_eq!(
+            removed_loop_read(&expr).map(|(removed, _)| removed),
+            found,
+            "`{text}`"
+        );
+    }
 }
 
 #[test]

@@ -2,15 +2,16 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
-    fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
-    resolve_fm_namespace_in_object,
+    FmPath, fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
 };
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, LoopExpressionCause};
+use super::super::sequence::expr::DocumentFrontmatter;
 use super::super::lifecycle::bindings::{removed_loop_grammar, removed_loop_read};
 use super::super::types::{AmbientVariable, LoopCondition};
 use super::frame::LoopBreakSlot;
@@ -29,8 +30,9 @@ pub struct LoopAmbient {
     pub is_last: bool,
     /// The result of the previous pass, or of the pass that just finished
     /// once it reports: text for a document, an array for a sequence, a
-    /// dictionary for a group.
-    pub last_output: Value,
+    /// dictionary for a group. Shared, so cloning the ambient (as a binding
+    /// that outlives the borrow does) never copies a large result.
+    pub last_output: Arc<Value>,
     /// Exit code from the previous iteration.
     pub last_exit_code: i32,
     /// Where a `break` that ends this loop is recorded. Every page whose
@@ -63,7 +65,7 @@ impl LoopAmbient {
             iteration,
             is_first,
             is_last,
-            last_output: last_output.into(),
+            last_output: Arc::new(last_output.into()),
             last_exit_code,
             breaks: LoopBreakSlot::default(),
         }
@@ -80,6 +82,7 @@ impl LoopAmbient {
     /// The `loop` global's runtime value:
     /// `{count, is_first, is_last, last_output, last_exit_code}`.
     pub fn to_value(&self) -> Value {
+        crate::note_work!(LoopAmbientMaterialize);
         let mut object = Map::new();
         for member in AmbientVariable::ALL {
             object.insert(member.as_str().to_string(), self.member(member));
@@ -87,12 +90,22 @@ impl LoopAmbient {
         Value::Object(object)
     }
 
+    /// The `loop.<name>` member, copying only that value: `name` is one
+    /// member's exact name, so a dotted remainder names no member and is
+    /// absent, just as it is in [`Self::to_value`]'s object.
+    pub(crate) fn member_named(&self, name: &str) -> Option<Value> {
+        AmbientVariable::ALL
+            .into_iter()
+            .find(|member| member.as_str() == name)
+            .map(|member| self.member(member))
+    }
+
     fn member(&self, member: AmbientVariable) -> Value {
         match member {
             AmbientVariable::Iteration => Value::Number(self.iteration.into()),
             AmbientVariable::IsFirst => Value::Bool(self.is_first),
             AmbientVariable::IsLast => Value::Bool(self.is_last),
-            AmbientVariable::LastOutput => self.last_output.clone(),
+            AmbientVariable::LastOutput => Value::clone(&self.last_output),
             AmbientVariable::LastExitCode => Value::Number(self.last_exit_code.into()),
         }
     }
@@ -109,8 +122,9 @@ impl LoopAmbient {
 /// 2. Prepared `ctx.NAME` and `env.NAME` from the document epoch, when supplied
 /// 3. Ambient `env.NAME` compatibility lookup
 /// 4. The `loop` global: bare `loop` is [`LoopAmbient::to_value`], and
-///    `loop.<member>` one of its members. A missing member is `null`; it
-///    never falls through to frontmatter.
+///    `loop.<member>` one of its members, read without building the object.
+///    A missing member is absent (`null` in an expression); it never falls
+///    through to frontmatter.
 /// 5. Frontmatter properties, including nested object paths via `.`
 ///
 /// The lookup resolves file references through the request's
@@ -127,7 +141,7 @@ impl LoopAmbient {
 /// references are resolved before loop evaluation.
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
-    frontmatter: &'a Map<String, Value>,
+    frontmatter: &'a dyn DocumentFrontmatter,
     runtime_state: Option<&'a crate::composition::RuntimeState>,
     ambient: &'a LoopAmbient,
     file_ref_fallback_dir: Option<&'a Path>,
@@ -140,7 +154,7 @@ impl<'a> LoopExpressionLookup<'a> {
     /// Create a lookup over the current loop state of the document at
     /// `source_path`, resolving its references through `file_resolution_context`.
     pub fn new(
-        frontmatter: &'a Map<String, Value>,
+        frontmatter: &'a dyn DocumentFrontmatter,
         ambient: &'a LoopAmbient,
         file_resolution_context: &'a biscuit_file::FileResolutionContext,
         source_path: &'a Path,
@@ -187,8 +201,21 @@ impl<'a> LoopExpressionLookup<'a> {
 
 impl EvaluationLookup for LoopExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        if fm_namespace_path(path).is_some() {
-            return resolve_fm_namespace_in_object(path, self.frontmatter);
+        if let Some(fm_path) = fm_namespace_path(path) {
+            return match fm_path {
+                FmPath::Whole => Some(Value::Object(self.frontmatter.to_object())),
+                FmPath::Member(rest) => {
+                    let mut segments = rest.split('.');
+                    let mut current = self.frontmatter.top_level(segments.next()?)?;
+                    for segment in segments {
+                        match current {
+                            Value::Object(map) => current = map.get(segment)?,
+                            _ => return None,
+                        }
+                    }
+                    Some(current.clone())
+                }
+            };
         }
 
         if path == "seq" || path.starts_with("seq.") {
@@ -225,10 +252,10 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         }
 
         if let Some(member) = loop_member(path) {
-            return member.map_or_else(
-                || Some(self.ambient.to_value()),
-                |member| self.ambient.to_value().get(member).cloned(),
-            );
+            return match member {
+                None => Some(self.ambient.to_value()),
+                Some(name) => self.ambient.member_named(name),
+            };
         }
 
         if let Some(value) = resolve_boolean_literal(path) {
@@ -341,18 +368,18 @@ fn resolve_boolean_literal(path: &str) -> Option<Value> {
     }
 }
 
-fn resolve_frontmatter(frontmatter: &Map<String, Value>, path: &str) -> Option<Value> {
+fn resolve_frontmatter(frontmatter: &dyn DocumentFrontmatter, path: &str) -> Option<Value> {
     if path.trim().is_empty() {
         return None;
     }
 
-    if let Some(value) = frontmatter.get(path) {
+    if let Some(value) = frontmatter.top_level(path) {
         return Some(value.clone());
     }
 
     let mut parts = path.split('.');
     let head = parts.next()?;
-    let mut current = frontmatter.get(head)?.clone();
+    let mut current = frontmatter.top_level(head)?.clone();
     for part in parts {
         current = match current {
             Value::Object(map) => map.get(part).cloned()?,

@@ -1,0 +1,17 @@
+kind: schema
+categories:
+    - Project -> Ask about the files and names of the test host's project.
+types:
+    is_project_file: |-
+        function(
+            parameters(value: unknown | null);
+            returns(boolean);
+            narrows(value: file; true-implies);
+            category(Project);
+        ) -> Returns true when the value is text naming a Markdown file of the project.
+    project_label: |-
+        function(
+            parameters(name: string);
+            returns(string);
+            category(Project);
+        ) -> Returns the project's label for a name.

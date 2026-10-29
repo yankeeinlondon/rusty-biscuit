@@ -1,39 +1,19 @@
 use serde_json::Value;
 
-use super::{
-    EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext,
-};
+use super::{BoundCall, FunctionBinding, ResolutionContext};
 use crate::markdown::compose::expression::ExpressionError;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding {
-        canonical: "predict_conflicts",
-        aliases: &["predictconflicts"],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(predict_conflicts_fn)),
-    },
-    FunctionBinding {
-        canonical: "branch_exists_on_remote",
-        aliases: &["branchexistsonremote"],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(branch_exists_on_remote_fn)),
-    },
-    FunctionBinding {
-        canonical: "remote_vendor",
-        aliases: &["remotevendor"],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(remote_vendor_fn)),
-    },
-    FunctionBinding {
-        canonical: "recent_commits",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(recent_commits_fn)),
-    },
+    FunctionBinding::context("predict_conflicts", &["predictconflicts"], predict_conflicts_fn),
+    FunctionBinding::context("branch_exists_on_remote", &["branchexistsonremote"], branch_exists_on_remote_fn),
+    FunctionBinding::context("remote_vendor", &["remotevendor"], remote_vendor_fn),
+    FunctionBinding::context("recent_commits", &[], recent_commits_fn),
 ];
 
 /// The largest float `count` accepted: every integer up to it is exactly
 /// representable, so a larger value may not be the integer the author wrote.
+/// `number(integer; min(1))` admits whole floats up to 2^64, so this bound is
+/// the one count check binding does not make.
 const MAX_EXACT_FLOAT_COUNT: f64 = 9_007_199_254_740_991.0;
 
 /// `recent_commits(count)` — the pair of `ctx.recent_commits` evaluated at
@@ -43,11 +23,8 @@ const MAX_EXACT_FLOAT_COUNT: f64 = 9_007_199_254_740_991.0;
 /// walks history; nothing is memoized, so a commit made mid-compose is visible
 /// to a later call. Elements use the capture's formatter, so commits that
 /// touched no files are omitted and the array can be shorter than `count`.
-fn recent_commits_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    let [count] = args else {
-        return Err(argument_count("recent_commits", "one", args.len()));
-    };
-    let count = commit_count(count)?;
+fn recent_commits_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let count = commit_count(call.args().get(0))?;
     let Some(root) = context.repository_root.as_deref() else {
         return Ok(Value::Array(Vec::new()));
     };
@@ -65,67 +42,31 @@ fn recent_commits_fn(args: &[Value], context: &ResolutionContext) -> Result<Valu
     ))
 }
 
-fn commit_count(value: &Value) -> Result<usize, ExpressionError> {
-    // R28: an out-of-domain count is a compose error on every surface.
+/// The bound count, a whole number of at least 1; a float above the exact
+/// range is rejected rather than rounded (R28).
+fn commit_count(value: Option<&Value>) -> Result<usize, ExpressionError> {
     let invalid = |message: String| ExpressionError::ContractViolation {
         function: "recent_commits".to_string(),
         message,
     };
-    let Value::Number(number) = value else {
-        return Err(ExpressionError::ArgType {
-            function: "recent_commits",
-            index: 0,
-            expected: "number",
-            actual_type: value_type(value),
-        });
+    let number = value.and_then(Value::as_number).ok_or_else(|| invalid("count must be a number".to_string()))?;
+    let count = match number.as_u64() {
+        Some(count) => count,
+        None => {
+            let float = number.as_f64().unwrap_or(f64::NAN);
+            if float.is_nan() || float > MAX_EXACT_FLOAT_COUNT {
+                return Err(invalid(format!("count {number} exceeds the supported maximum")));
+            }
+            float as u64
+        }
     };
-    let count = if let Some(count) = number.as_u64() {
-        count
-    } else if number.as_i64().is_some() {
-        return Err(invalid(format!("count must be at least 1, got {number}")));
-    } else {
-        let float = number.as_f64().unwrap_or(f64::NAN);
-        if !float.is_finite() || float.fract() != 0.0 {
-            return Err(invalid(format!("count must be an integer, got {number}")));
-        }
-        if float > MAX_EXACT_FLOAT_COUNT {
-            return Err(invalid(format!("count {number} exceeds the supported maximum")));
-        }
-        if float < 1.0 {
-            return Err(invalid(format!("count must be at least 1, got {number}")));
-        }
-        float as u64
-    };
-    if count == 0 {
-        return Err(invalid("count must be at least 1, got 0".to_string()));
-    }
     usize::try_from(count)
         .map_err(|_| invalid(format!("count {count} exceeds the supported maximum")))
 }
 
-fn predict_conflicts_fn(
-    args: &[Value],
-    context: &ResolutionContext,
-) -> Result<Value, ExpressionError> {
-    if args.len() != 1 {
-        return Err(ExpressionError::Other {
-            function: "predict_conflicts".to_string(),
-            message: format!(
-                "predict_conflicts() requires 1 argument, got {}",
-                args.len()
-            ),
-        });
-    }
-    if args[0].is_null() {
+fn predict_conflicts_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let Some(branch) = call.args().text(0) else {
         return Ok(Value::Null);
-    }
-    let Value::String(branch) = &args[0] else {
-        return Err(ExpressionError::ArgType {
-            function: "predict_conflicts",
-            index: 0,
-            expected: "string",
-            actual_type: value_type(&args[0]),
-        });
     };
     if branch.trim().is_empty() {
         return Err(ExpressionError::Other {
@@ -151,18 +92,11 @@ fn predict_conflicts_fn(
     ))
 }
 
-fn branch_exists_on_remote_fn(
-    args: &[Value],
-    context: &ResolutionContext,
-) -> Result<Value, ExpressionError> {
-    if args.len() > 2 {
-        return Err(argument_count("branch_exists_on_remote", "zero, one, or two", args.len()));
-    }
-    let branch = args.first().map(|value| string_arg("branch_exists_on_remote", 0, value)).transpose()?.filter(|value| !value.is_empty());
-    let remote = args
-        .get(1)
-        .map(|value| string_arg("branch_exists_on_remote", 1, value))
-        .transpose()?;
+/// Overloads in catalog order: `()`, `(branch)`, `(branch, remote)`. An
+/// empty `branch` means the caller's current branch, as omitting it does.
+fn branch_exists_on_remote_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let branch = call.args().text(0).filter(|value| !value.is_empty()).map(str::to_string);
+    let remote = call.args().text(1).map(str::to_string);
     if remote.as_deref() == Some("") {
         return Err(ExpressionError::Other {
             function: "branch_exists_on_remote".to_string(),
@@ -186,14 +120,9 @@ fn branch_exists_on_remote_fn(
     })
 }
 
-fn remote_vendor_fn(
-    args: &[Value],
-    context: &ResolutionContext,
-) -> Result<Value, ExpressionError> {
-    if args.len() > 1 {
-        return Err(argument_count("remote_vendor", "zero or one", args.len()));
-    }
-    let remote = args.first().map(|value| string_arg("remote_vendor", 0, value)).transpose()?.filter(|value| !value.is_empty());
+/// An omitted or empty `remote` selects the preferred remote.
+fn remote_vendor_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let remote = call.args().text(0).filter(|value| !value.is_empty()).map(str::to_string);
     let key = format!("remote_vendor:{}", remote.as_deref().unwrap_or_default());
     context.cached_provider_query("remote_vendor", key, || {
         sniff::filesystem::git::remote_vendor_at(
@@ -206,75 +135,43 @@ fn remote_vendor_fn(
     })
 }
 
-fn argument_count(function: &str, expected: &str, actual: usize) -> ExpressionError {
-    ExpressionError::Other {
-        function: function.to_string(),
-        message: format!("requires {expected} arguments, got {actual}"),
-    }
-}
-
-fn string_arg(
-    function: &'static str,
-    index: usize,
-    value: &Value,
-) -> Result<String, ExpressionError> {
-    value.as_str().map(str::to_string).ok_or_else(|| ExpressionError::ArgType {
-        function,
-        index,
-        expected: "string",
-        actual_type: value_type(value),
-    })
-}
-
-pub(super) fn value_type(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::dispatch_fs;
+    use super::super::call_function;
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
 
     fn call(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-        dispatch_fs("recent_commits", args, context).expect("registered context function")
+        call_function("recent_commits", args, Some(context)).expect("registered context function")
     }
 
+    /// Ledger row 66 (`recent_commits(count: number(integer; min(1)))`): a
+    /// count outside the type is a binding type error and the handler is never
+    /// entered; numeric text converts (`"3"` → 3). Only a whole float beyond
+    /// the exact range, which the type admits, is the handler's own error.
     #[test]
     fn invalid_counts_are_errors_before_any_git_io() {
+        use crate::markdown::compose::expression::functions::test_hooks::{handler_entries, reset_handler_entries};
+
         // No repository root: a valid count would return `[]`, so an error
         // proves validation ran first.
         let context = ResolutionContext::default();
-        for (count, expected) in [
-            (json!(0), "at least 1"),
-            (json!(-3), "at least 1"),
-            (json!(0.0), "at least 1"),
-            (json!(1.5), "must be an integer"),
-            (json!(1e300), "exceeds the supported maximum"),
-            (json!(9_007_199_254_740_993.0_f64), "exceeds the supported maximum"),
-        ] {
+        reset_handler_entries();
+        for count in [json!(0), json!(-3), json!(0.0), json!(1.5), json!(1e300), json!(null), json!(true), json!("0")] {
             let error = call(std::slice::from_ref(&count), &context).unwrap_err();
-            assert!(matches!(error, ExpressionError::ContractViolation { .. }), "{count}: {error:?}");
-            assert!(error.is_authoring_fatal());
-            assert!(error.to_string().contains(expected), "{count}: {error}");
+            assert!(matches!(error, ExpressionError::Call(_)), "{count}: {error:?}");
         }
-        for count in [json!("3"), json!(null), json!(true)] {
-            assert!(matches!(
-                call(&[count], &context),
-                Err(ExpressionError::ArgType { function: "recent_commits", index: 0, .. })
-            ));
-        }
+        assert_eq!(handler_entries("recent_commits"), 0);
+
+        let error = call(&[json!(9_007_199_254_740_993.0_f64)], &context).unwrap_err();
+        assert!(matches!(error, ExpressionError::ContractViolation { .. }), "{error:?}");
+        assert!(error.is_authoring_fatal());
+        assert!(error.to_string().contains("exceeds the supported maximum"), "{error}");
+
         assert_eq!(call(&[json!(3)], &context).unwrap(), json!([]));
         assert_eq!(call(&[json!(3.0)], &context).unwrap(), json!([]));
-        assert_eq!(call(&[json!(u64::MAX)], &context).unwrap(), json!([]));
+        assert_eq!(call(&[json!("3")], &context).unwrap(), json!([]));
     }
 
     /// Each reached call walks history again: a commit between two calls on

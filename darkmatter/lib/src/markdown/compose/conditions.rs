@@ -364,6 +364,11 @@ impl<'a> ShortcutLookup<'a> {
 
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
+        // `local` is bound only by a lexical scope, which wraps this lookup;
+        // seen here it has no bindings and never reads a data key.
+        if super::expression::is_local_path(path) {
+            return None;
+        }
         // Reserved namespaces first, their exact roots included, so no data
         // key can shadow `fm`, `ctx`, or `env`.
         if fm_namespace::is_fm_namespace(path) {
@@ -513,9 +518,9 @@ mod tests {
     }
 
     #[test]
-    fn null_equal_null_is_false() {
+    fn null_equal_null_is_true() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("missing_a == missing_b", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("missing_a == missing_b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]

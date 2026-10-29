@@ -1,0 +1,8 @@
+# scenario: resume-no-session
+# doc: resume-no-session.md
+# given: invoked as `claudine compose --claude resume-no-session.md` from the directory holding the fixture documents
+# given: start returns resume before any provider launched, so no session exists
+# given: the provider never launches
+event initialize
+event start
+exit 1

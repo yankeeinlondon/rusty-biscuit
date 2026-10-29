@@ -1,3 +1,4 @@
+use claudine::composition::LifecycleRunGuardExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

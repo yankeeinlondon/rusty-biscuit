@@ -40,6 +40,12 @@ related:
     - 2026-09-28-content-policy
     - 2026-10-13-named-type-presence-and-local-names
 implemented: true
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/schemas/darkmatter-schema.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - content-policy/docs/topics/policy-lifecycle.md
 ---
 
 # Compile Content Policy's Schema into the Base Schema

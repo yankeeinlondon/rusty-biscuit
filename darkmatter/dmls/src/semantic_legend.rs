@@ -59,7 +59,8 @@ pub mod modifier {
     pub const INERT: u32 = 1 << 1;
     /// Every token on a directive line.
     pub const DIRECTIVE: u32 = 1 << 2;
-    /// The three structural closers (`::end-block`, `::details`, `::end-disclosure`).
+    /// The structural closers (`::end-block`, `::details`, `::end-disclosure`,
+    /// `::end-map`, `::end-filter`).
     pub const CLOSER: u32 = 1 << 3;
     /// Every token in a `[[wiki]]` link.
     pub const WIKI: u32 = 1 << 4;

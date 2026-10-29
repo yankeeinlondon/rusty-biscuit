@@ -1,0 +1,48 @@
+# The `fm` type: Darkmatter-owned Markdown frontmatter. The catalog's resolved
+# `fm` definition is the built-in document baseline that compose,
+# `md schema validate`, and DMLS apply. Document schemas override these
+# properties on conflict.
+#
+# The five lifecycle events are typed with the `md` host profile
+# (md-lifecycle.yaml), named through the reserved `darkmatter:` namespace so
+# the profile always comes from the shipped schemas. A host that names an
+# event differently, or provides other verbs, declares its own types in its
+# schemas, which override these.
+kind: schema
+types:
+    fm:
+        "$schema": "schema -> Declares an inline SimplifiedSchema mapping, referenced schema file, or root union for this document. Raw JSON Schema is supported through referenced files only. Document schemas override baseline properties on conflict."
+
+        title: "string -> Human-readable document title. Used by markdown_title(), reports, diagnostics, and downstream tools that need a display name."
+        description: "string -> Human-readable document summary. Used by reports and diagnostics when identifying a document."
+        tags: "string[] -> Freeform document tags."
+        draft: "boolish -> Author-controlled draft marker. Darkmatter does not use this for compose control but commonly ignores it during hash workflows."
+        last_updated: "date -> Managed content-change date in YYYY-MM-DD form. Hash save and downstream tools may update it when content changes."
+        content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy.yaml"
+        metadata: "object -> Arbitrary author metadata. Darkmatter preserves it and leaves interpretation to downstream tools."
+
+        hash:
+            - "string -> Stored shorthand hash. The simple form is '<frontmatter>-<body>' with 16 hexadecimal characters per segment."
+            - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> Hash resolution stored in longhand form."
+              value: "any -> Stored hash payload. A string is used for fm, body, simple, and structured hashes; detailed hashes use a nested object."
+              ignored: "string[] -> Extra frontmatter keys ignored during hash computation. The managed hash key and last_updated are always ignored and should not be listed."
+
+        style: "style@./style.yaml"
+
+        change: "any -> Change metadata used by Darkmatter workflows. The v1 baseline accepts all shapes until the public change contract is finalized."
+        replace: "object -> Literal text replacement map applied during compose. Keys are source strings and values are replacement strings."
+        ctx: "context@./context-variables.yaml"
+        prologue:
+            - "string(default(null)) -> File reference, inline text, or bare filename inserted before the body during transclusion."
+            - "string[] -> Ordered prologue references inserted before the body during transclusion."
+        epilogue:
+            - "string(default(null)) -> File reference, inline text, or bare filename inserted after the body during transclusion."
+            - "string[] -> Ordered epilogue references inserted after the body during transclusion."
+        ignore_invalid: "boolish -> Allows invalid transclusion references to be left in place as warnings instead of aborting composition."
+        interpolate_code_blocks: "boolish -> Enables interpolation inside fenced code blocks. Disabled by default so code examples stay literal."
+
+        initialize: "md-initialize-stack@darkmatter:md-lifecycle -> actions run before the document composes; shell-free"
+        composed: "md-stack@darkmatter:md-lifecycle -> actions run after the document composed"
+        failed: "md-stack@darkmatter:md-lifecycle -> actions run when the run failed"
+        cancelled: "md-stack@darkmatter:md-lifecycle -> actions run when the run is cancelled"
+        finalize: "md-stack@darkmatter:md-lifecycle -> actions run last, whatever the outcome"

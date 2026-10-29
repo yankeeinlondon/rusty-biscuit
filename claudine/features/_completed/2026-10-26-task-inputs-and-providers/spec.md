@@ -1,5 +1,14 @@
 ---
 area: claudine
+canonical_docs:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - biscuit-tui/docs/components/input_table.md
 status: finalized-spec
 created: 2026-10-10
 owner: Ken Snyder <ken@ken.net>

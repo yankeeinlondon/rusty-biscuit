@@ -4,7 +4,7 @@
 //! `Result<Value, String>` boundary in the expression engine. It is introduced
 //! per the integrated design
 //! (`claudine/features/2026-06-28-real-errors/integrated-design.md` §3–§5): a
-//! flat [`ExpressionError`] (the *what*) plus a reusable
+//! typed [`ExpressionError`] (the *what*) plus a reusable
 //! [`FileReferenceDiagnostic`] shared by every filesystem builtin
 //! (`frontmatter`, `absolute`, `relative`, `load_markdown`, …).
 //!
@@ -22,9 +22,9 @@
 //! - Filesystem builtins carry [`FileReferenceDiagnostic`] via
 //!   [`ExpressionError::FileReference`].
 //! - An unrecognized function name is [`ExpressionError::UnknownFunction`] — the
-//!   sole authoring-fatal variant in lenient mode.
-//! - Wrong argument count / type are [`ExpressionError::Arity`] /
-//!   [`ExpressionError::ArgType`].
+//!   failure remains authoring-fatal through callback wrappers.
+//! - A call that does not bind to its declared signatures, or a handler result
+//!   that breaks its return type, is [`ExpressionError::Call`].
 //! - The recursive-descent parser stays string-typed behind
 //!   [`ExpressionError::Parse`].
 //! - The long tail of pure builtins not yet individually classified is carried
@@ -200,43 +200,10 @@ impl ProviderFailureKind {
     }
 }
 
-/// The expected argument count for an [`ExpressionError::Arity`] error.
-///
-/// Models the three arity shapes the builtins express today: an exact count
-/// (`"requires 1 argument"`), an open lower bound (`"requires at least 1
-/// argument"`), and an inclusive range (`"requires 1 or 2 arguments"`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArityBound {
-    /// Exactly `n` arguments.
-    Exact(usize),
-    /// At least `n` arguments.
-    AtLeast(usize),
-    /// Between `min` and `max` arguments, inclusive.
-    Range(usize, usize),
-}
-
-impl std::fmt::Display for ArityBound {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn plural(n: usize) -> &'static str {
-            if n == 1 {
-                "argument"
-            } else {
-                "arguments"
-            }
-        }
-        match self {
-            ArityBound::Exact(n) => write!(f, "{n} {}", plural(*n)),
-            ArityBound::AtLeast(n) => write!(f, "at least {n} {}", plural(*n)),
-            ArityBound::Range(min, max) => write!(f, "{min} or {max} arguments"),
-        }
-    }
-}
-
 /// A typed expression-evaluation error (Layer A: the *what*).
 ///
-/// Flat by design (§3): the where (frontmatter key vs body, on-disk vs
-/// effective source) is added by the `MarkdownError::Interpolation` wrapper in a
-/// later phase, never by reformatting this error's message.
+/// Document locations are added by `MarkdownError::Interpolation`; callback
+/// wrappers retain original item positions and a typed source chain.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExpressionError {
     /// A filesystem builtin failed to resolve its file argument.
@@ -264,35 +231,40 @@ pub enum ExpressionError {
         name: String,
     },
 
-    /// A builtin was called with the wrong number of arguments.
-    #[error("{function}() requires {expected}, got {actual}")]
-    Arity {
-        /// The builtin's name.
-        function: &'static str,
-        /// The argument count the builtin expects.
-        expected: ArityBound,
-        /// The argument count actually supplied.
-        actual: usize,
-    },
-
-    /// A builtin argument had the wrong type.
-    #[error("{function}() argument {index}: expected {expected}, got {actual_type}")]
-    ArgType {
-        /// The builtin's name.
-        function: &'static str,
-        /// The zero-based index of the rejected argument.
-        index: usize,
-        /// The expected type domain (`"numeric"`, `"string"`, `"array"`).
-        expected: &'static str,
-        /// The type actually supplied.
-        actual_type: &'static str,
-    },
-
     /// A parse failure. The recursive-descent parser stays string-typed (§4); a
     /// parse error is rarely the author's actual confusion in the observed
     /// failures, so it is carried as last-mile text behind this single variant.
     #[error("parse error: {0}")]
     Parse(String),
+
+    /// A callback pattern binds a protected name or violates callback syntax.
+    #[error("invalid callback: {message}")]
+    InvalidCallback {
+        /// Located pattern or callback syntax in the expression text.
+        span: crate::markdown::span::SourceSpan,
+        /// The actionable rejection, retaining the shared binding rule.
+        message: String,
+    },
+
+    /// A callback failed at an original source position. Each enclosing
+    /// callback retains its own wrapper and the typed underlying cause.
+    #[error("{function}[{position}]: {source}")]
+    Callback {
+        /// Registered collection function.
+        function: String,
+        /// Original zero-based array index or object key.
+        position: super::iteration::IterationPosition,
+        /// Pattern or body failure, before any later item executes.
+        #[source]
+        source: Box<ExpressionError>,
+    },
+
+    /// A collection allowance (visits or expansion bytes) was exhausted.
+    ///
+    /// Request-fatal on every surface: no handler, fallback, or recovery
+    /// option converts it into a value.
+    #[error("{0}")]
+    IterationLimit(Box<super::iteration::IterationError>),
 
     /// A binary arithmetic operator (`+`, `-`, `*`, `/`, `%`) received a
     /// non-numeric operand. Operators are not function calls, so they are modeled
@@ -347,11 +319,11 @@ pub enum ExpressionError {
     },
 
     /// A call that breaks a function's specified contract where the
-    /// specification requires a compose error: an argument outside the
-    /// documented domain (`recent_commits(0)`), a name outside a closed set, or
-    /// a required effect the host cannot perform. Unlike [`Other`](Self::Other)
-    /// and [`ArgType`](Self::ArgType), it is never demoted to a warning or
-    /// replaced by a fallback value on any surface.
+    /// specification requires a compose error and the declared signature
+    /// cannot express the rule (an argument out of a domain the type does
+    /// not bound, or a required effect the host cannot perform). Unlike
+    /// [`Other`](Self::Other) and a [`Call`](Self::Call) type error, it is never
+    /// demoted to a warning or replaced by a fallback value on any surface.
     #[error("{function}(): {message}")]
     ContractViolation {
         /// The function's canonical name.
@@ -420,6 +392,19 @@ pub enum ExpressionError {
         /// The full unresolvable path, root included.
         path: String,
     },
+
+    /// A function call that did not bind to any of the function's declared
+    /// signatures (type, arity, or ambiguous overload), or a handler result
+    /// that breaks its declared return type (implementation contract). The
+    /// handler is never entered for a call that did not bind.
+    #[error("{0}")]
+    Call(Box<super::call_binding::CallBindingError>),
+
+    /// A call the design-time check proves wrong (category 5), found before
+    /// any expression of the document was evaluated. Always fatal: the
+    /// document is rejected whichever branch the call is in.
+    #[error("{}", .0.rejection_message())]
+    CallCheck(Box<super::call_check::CallCheck>),
 
     /// A binding failure: a read of a global the host declared unavailable in
     /// this scope, or an invalid host registration. Never resolved by falling
@@ -523,6 +508,14 @@ impl ExpressionError {
     /// - [`Binding`] — an unavailable global must never render as an empty
     ///   value or a same-named document property.
     ///
+    /// - [`Call`] of kind `ImplementationContract` — a handler returned a value
+    ///   its declared return type rejects, a Darkmatter defect. A call that does
+    ///   not bind (type, arity, ambiguous overload) is not fatal here, like the
+    ///   arity and arg-type errors it replaces.
+    ///
+    /// - [`CallCheck`] — a call the design-time check proves wrong rejects the
+    ///   document before evaluation, so no lenient surface may keep it.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -540,6 +533,8 @@ impl ExpressionError {
     /// [`ReservedRootPathUnknown`]: ExpressionError::ReservedRootPathUnknown
     /// [`MalformedLiteralToken`]: ExpressionError::MalformedLiteralToken
     /// [`Binding`]: ExpressionError::Binding
+    /// [`Call`]: ExpressionError::Call
+    /// [`CallCheck`]: ExpressionError::CallCheck
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -547,13 +542,21 @@ impl ExpressionError {
     /// [`RemoteNotEnabled`]: FileRefFailure::RemoteNotEnabled
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
-            ExpressionError::UnknownFunction { .. } => true,
+            ExpressionError::Callback { source, .. } => source.is_authoring_fatal(),
+            ExpressionError::UnknownFunction { .. } | ExpressionError::InvalidCallback { .. } => true,
+            ExpressionError::IterationLimit(_) => true,
             ExpressionError::GlobReference { .. } => true,
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContractViolation { .. } => true,
             ExpressionError::ReservedRootPathUnknown { .. } => true,
             ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::Binding(_) => true,
+            ExpressionError::CallCheck(_) => true,
+            // A broken return contract is a Darkmatter defect; a call that
+            // does not bind keeps the old arity/arg-type severity.
+            ExpressionError::Call(error) => {
+                error.kind() == super::call_binding::CallErrorKind::ImplementationContract
+            }
             ExpressionError::ContextNotCaptured { .. }
             | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }
@@ -571,6 +574,27 @@ impl ExpressionError {
         }
     }
 
+    /// Original collection positions, outermost first, including an exhausted
+    /// visit's position when the body has not started yet.
+    pub fn callback_path(&self) -> super::iteration::IterationPath {
+        use super::iteration::{IterationFrame, IterationPath};
+        match self {
+            Self::Callback { function, position, source } => IterationPath::empty()
+                .pushed(IterationFrame { collection: function.clone(), position: position.clone() })
+                .joined(&source.callback_path()),
+            Self::IterationLimit(error) => error.path.clone(),
+            _ => IterationPath::empty(),
+        }
+    }
+
+    /// The underlying failure after all collection callback wrappers.
+    pub fn without_callbacks(&self) -> &Self {
+        match self {
+            Self::Callback { source, .. } => source.without_callbacks(),
+            other => other,
+        }
+    }
+
     /// Whether this is a missing runtime context failure
     /// ([`ContextNotCaptured`], [`FunctionContextNotCaptured`],
     /// [`ContextProjectionInvariant`], or [`ExecutionNonceUnavailable`]).
@@ -583,6 +607,9 @@ impl ExpressionError {
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`ExecutionNonceUnavailable`]: ExpressionError::ExecutionNonceUnavailable
     pub fn is_missing_runtime_context(&self) -> bool {
+        if let Self::Callback { source, .. } = self {
+            return source.is_missing_runtime_context();
+        }
         matches!(
             self,
             ExpressionError::ContextNotCaptured { .. }
@@ -602,6 +629,16 @@ impl ExpressionError {
     /// stringly evaluator error.
     pub fn starts_with(&self, needle: &str) -> bool {
         self.to_string().starts_with(needle)
+    }
+}
+
+impl From<super::ParseError> for ExpressionError {
+    fn from(error: super::ParseError) -> Self {
+        if error.diagnostic_code().is_some() {
+            Self::InvalidCallback { span: error.position..error.position, message: error.to_string() }
+        } else {
+            Self::Parse(error.to_string())
+        }
     }
 }
 
@@ -738,27 +775,6 @@ mod tests {
         }
 
         #[test]
-        fn arity_is_not_authoring_fatal() {
-            let err = ExpressionError::Arity {
-                function: "length",
-                expected: ArityBound::Exact(1),
-                actual: 0,
-            };
-            assert!(!err.is_authoring_fatal());
-        }
-
-        #[test]
-        fn arg_type_is_not_authoring_fatal() {
-            let err = ExpressionError::ArgType {
-                function: "min",
-                index: 0,
-                expected: "numeric",
-                actual_type: "string",
-            };
-            assert!(!err.is_authoring_fatal());
-        }
-
-        #[test]
         fn parse_is_not_authoring_fatal() {
             let err = ExpressionError::Parse("unexpected token".to_string());
             assert!(!err.is_authoring_fatal());
@@ -847,41 +863,6 @@ mod tests {
                 name: "unknown_fn".to_string(),
             };
             assert_eq!(err.to_string(), "Unknown function: unknown_fn");
-        }
-
-        #[test]
-        fn arity_display_contains_requires() {
-            let exact = ExpressionError::Arity {
-                function: "length",
-                expected: ArityBound::Exact(1),
-                actual: 0,
-            };
-            assert_eq!(exact.to_string(), "length() requires 1 argument, got 0");
-
-            let at_least = ExpressionError::Arity {
-                function: "min",
-                expected: ArityBound::AtLeast(1),
-                actual: 0,
-            };
-            assert!(at_least.to_string().contains("requires at least 1 argument"));
-
-            let range = ExpressionError::Arity {
-                function: "number",
-                expected: ArityBound::Range(1, 2),
-                actual: 0,
-            };
-            assert!(range.to_string().contains("requires 1 or 2 arguments"));
-        }
-
-        #[test]
-        fn arg_type_display_names_domain() {
-            let err = ExpressionError::ArgType {
-                function: "min",
-                index: 0,
-                expected: "numeric",
-                actual_type: "string",
-            };
-            assert!(err.to_string().contains("numeric"), "{err}");
         }
 
         #[test]

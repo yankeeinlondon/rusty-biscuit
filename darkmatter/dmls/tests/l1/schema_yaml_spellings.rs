@@ -1,6 +1,7 @@
 //! Standalone schema documents written with an indentless block sequence or a
 //! plain scalar continued across physical lines, seen through the editor:
-//! malformed-definition diagnostics, hover, and completion.
+//! malformed-definition diagnostics, hover, and completion, plus inline
+//! frontmatter `$schema` definition errors ranged the same way.
 //!
 //! Every range is asserted in the negotiated position encoding against the
 //! original authored buffer (LF and CRLF alike), so a byte offset reported as
@@ -200,6 +201,208 @@ fn a_grammar_error_on_a_continuation_line_ranges_the_offending_token() {
     fixture.shutdown();
 }
 
+/// An invalid `narrows(...)` clause inside a `|-` block scalar is ranged at
+/// the clause's offending token, with the grammar's own message, and a
+/// control whose clause is valid reports nothing.
+#[test]
+fn an_invalid_narrows_clause_in_a_block_scalar_is_ranged_at_its_token() {
+    let function = |clause: &str| {
+        format!(
+            "kind: schema\ntypes:\n  pred: |-\n    function(\n      parameters(x: unknown | null);\n      returns(boolean);\n      {clause};\n    )\n"
+        )
+    };
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+
+    let control = function("narrows(x: string; true-iff)");
+    let uri = open(&fixture, &workspace, "narrows-valid.yaml", &control);
+    assert_eq!(definition_diagnostics(&mut fixture, &uri), Vec::<Value>::new(), "control");
+
+    for (name, clause, token, message) in [
+        ("kind.yaml", "narrows(x: string; true-sometimes)", "true-sometimes", "true-sometimes"),
+        ("parameter.yaml", "narrows(y: string; true-iff)", "y", "does not declare"),
+    ] {
+        let text = function(clause);
+        let uri = open(&fixture, &workspace, name, &text);
+        let diagnostics = definition_diagnostics(&mut fixture, &uri);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{name}: expected one schema diagnostic: {diagnostics:#?}");
+        };
+        assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"), "{name}: {diagnostic:#?}");
+        assert!(diagnostic["message"].as_str().is_some_and(|text| text.contains(message)), "{name}: {diagnostic:#?}");
+        let clause_start = text.find(clause).unwrap();
+        let token_start = clause_start + clause.find(token).unwrap();
+        assert_eq!(
+            diagnostic["range"],
+            json!({
+                "start": position(&text, token_start, "utf-8"),
+                "end": position(&text, token_start + token.len(), "utf-8"),
+            }),
+            "{name}: {diagnostic:#?}"
+        );
+    }
+    fixture.shutdown();
+}
+
+/// Standalone authoring applies the declaration rules registration does: a
+/// `file` target is one-way only, so `true-iff` is diagnosed at the target,
+/// and an overload set where only one overload declares the fact is
+/// diagnosed at that clause. The one-way `file` control reports nothing.
+#[test]
+fn a_narrows_fact_registration_rejects_is_diagnosed_while_authoring() {
+    let function = |clause: &str| {
+        format!(
+            "kind: schema\ntypes:\n  pred: |-\n    function(\n      parameters(x: unknown | null);\n      returns(boolean);\n      {clause};\n    )\n"
+        )
+    };
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+
+    let uri = open(&fixture, &workspace, "file-implies.yaml", &function("narrows(x: file; true-implies)"));
+    assert_eq!(definition_diagnostics(&mut fixture, &uri), Vec::<Value>::new(), "control");
+
+    let iff = function("narrows(x: file; true-iff)");
+    let mixed = "kind: schema\ntypes:\n  pred: |-\n    function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))\n    | function(parameters(x: unknown | null, y: string); returns(boolean))\n".to_string();
+    for (name, text, token, message) in [
+        ("file-iff.yaml", &iff, "file", "true-iff"),
+        ("mixed.yaml", &mixed, "narrows(x: string; true-iff)", "does not"),
+    ] {
+        let uri = open(&fixture, &workspace, name, text);
+        let diagnostics = definition_diagnostics(&mut fixture, &uri);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{name}: expected one schema diagnostic: {diagnostics:#?}");
+        };
+        assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"), "{name}: {diagnostic:#?}");
+        assert!(diagnostic["message"].as_str().is_some_and(|text| text.contains(message)), "{name}: {diagnostic:#?}");
+        let token_start = text.find(token).unwrap();
+        assert_eq!(
+            diagnostic["range"],
+            json!({
+                "start": position(text, token_start, "utf-8"),
+                "end": position(text, token_start + token.len(), "utf-8"),
+            }),
+            "{name}: {diagnostic:#?}"
+        );
+    }
+    fixture.shutdown();
+}
+
+/// A function definition spelled as a single-quoted scalar and as a `|-`
+/// block scalar, each in a standalone schema document.
+fn narrows_spellings(signature: &str) -> [(&'static str, String); 2] {
+    [
+        ("quoted", format!("kind: schema\ntypes:\n  pred: '{signature}'\n")),
+        ("block", format!("kind: schema\ntypes:\n  pred: |-\n    {}\n", signature.replace("; ", ";\n    "))),
+    ]
+}
+
+/// The one schema diagnostic of `text`, asserting its primary range covers
+/// `primary` and its related information is exactly `related`, each a
+/// `(needle, occurrence)` in `text`, in this document.
+fn assert_related_diagnostic(
+    fixture: &mut LspFixture<'_>,
+    uri: &str,
+    text: &str,
+    primary: (&str, usize),
+    related: &[(&str, usize)],
+    case: &str,
+) {
+    let diagnostics = definition_diagnostics(fixture, uri);
+    let [diagnostic] = diagnostics.as_slice() else {
+        panic!("{case}: expected one schema diagnostic: {diagnostics:#?}");
+    };
+    assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"), "{case}: {diagnostic:#?}");
+    assert!(!diagnostic["message"].as_str().unwrap().contains("byte"), "{case}: {diagnostic:#?}");
+    assert_eq!(diagnostic["range"], range_of(text, primary.0, primary.1, "utf-8"), "{case}: {diagnostic:#?}");
+    let expected: Vec<Value> = related
+        .iter()
+        .map(|(needle, occurrence)| json!({ "uri": uri, "range": range_of(text, needle, *occurrence, "utf-8") }))
+        .collect();
+    let actual: Vec<Value> = diagnostic["relatedInformation"]
+        .as_array()
+        .map(|related| related.iter().map(|entry| entry["location"].clone()).collect())
+        .unwrap_or_default();
+    assert_eq!(actual, expected, "{case}: {diagnostic:#?}");
+}
+
+/// A second `narrows` clause is diagnosed at its keyword with the first
+/// clause as related information, through a quoted scalar and a block
+/// scalar alike.
+#[test]
+fn a_duplicate_narrows_clause_relates_the_first_while_authoring() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+    let first = "narrows(x: string; true-iff)";
+    let signature = format!("function(parameters(x: unknown | null); returns(boolean); {first}; narrows(x; false-implies))");
+    for (spelling, text) in narrows_spellings(&signature) {
+        let block_first = first.replace("; ", ";\n    ");
+        let first = if spelling == "block" { block_first.as_str() } else { first };
+        let uri = open(&fixture, &workspace, &format!("duplicate-{spelling}.yaml"), &text);
+        assert_related_diagnostic(&mut fixture, &uri, &text, ("narrows", 1), &[(first, 0)], spelling);
+    }
+    fixture.shutdown();
+}
+
+/// Overloads that disagree on the fact name both declarations: a different
+/// fact is diagnosed at the later clause relating the earlier one, and a
+/// missing fact at the declaring clause relating the overload without one.
+/// The same holds for an inline frontmatter `$schema` definition and a value
+/// of the `type-definition` meta-type.
+#[test]
+fn disagreeing_narrows_overloads_relate_both_declarations_while_authoring() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+    let declaring = "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";
+    let different = "function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: number; true-iff))";
+    let absent = "function(parameters(x: unknown | null, y: string); returns(boolean))";
+    for (spelling, text) in narrows_spellings(&format!("{declaring} | {different}")) {
+        let uri = open(&fixture, &workspace, &format!("different-{spelling}.yaml"), &text);
+        let block = spelling == "block";
+        let later = if block { "narrows(x: number;\n    true-iff)" } else { "narrows(x: number; true-iff)" };
+        let earlier = if block { "narrows(x: string;\n    true-iff)" } else { "narrows(x: string; true-iff)" };
+        assert_related_diagnostic(&mut fixture, &uri, &text, (later, 0), &[(earlier, 0)], spelling);
+    }
+    let text = format!("kind: schema\ntypes:\n  pred: '{absent} | {declaring}'\n");
+    let uri = open(&fixture, &workspace, "absent-quoted.yaml", &text);
+    assert_related_diagnostic(&mut fixture, &uri, &text, ("narrows(x: string; true-iff)", 0), &[(absent, 0)], "absent");
+
+    let text = format!("---\n$schema:\n  pred: '{declaring} | {different}'\n---\n\nBody\n");
+    let path = workspace.path().join("inline.md");
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap().to_string();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
+    );
+    assert_related_diagnostic(
+        &mut fixture,
+        &uri,
+        &text,
+        ("narrows(x: number; true-iff)", 0),
+        &[("narrows(x: string; true-iff)", 0)],
+        "inline",
+    );
+
+    // A frontmatter value typed by the `type-definition` meta-type.
+    let text = format!("---\n$schema:\n  definition: type-definition\ndefinition: '{declaring} | {different}'\n---\n\nBody\n");
+    let path = workspace.path().join("meta.md");
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap().to_string();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
+    );
+    assert_related_diagnostic(
+        &mut fixture,
+        &uri,
+        &text,
+        ("narrows(x: number; true-iff)", 0),
+        &[("narrows(x: string; true-iff)", 0)],
+        "meta-type",
+    );
+    fixture.shutdown();
+}
+
 /// The specification's literal example: `bogus` on physical line 5, columns
 /// 5–9 when displayed one-based.
 #[test]
@@ -237,13 +440,13 @@ fn a_continuation_line_grammar_error_converts_through_the_negotiated_encoding() 
     }
 }
 
-/// When the strict locator cannot read the document (here, a block scalar
-/// for a sibling definition), the token cannot be projected, so the
-/// diagnostic keeps its existing whole-value fallback and code. It is never an
-/// empty or fabricated range.
+/// When the strict locator cannot read the document (here, a quoted scalar
+/// continued across lines for a sibling definition), the token cannot be
+/// projected, so the diagnostic keeps its existing whole-value fallback and
+/// code. It is never an empty or fabricated range.
 #[test]
 fn an_unprojectable_grammar_error_keeps_the_whole_value_fallback() {
-    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: |\n    boolean\n";
+    let text = "kind: schema\ntypes:\n  t: string(min(1);\n    bogus(2))\n  next: \"boolean -> a\n    b\"\n";
     let workspace = LspWorkspace::new();
     let mut fixture = start(&workspace, "utf-8");
     let uri = open(&fixture, &workspace, "block-sibling.yaml", text);
@@ -262,6 +465,116 @@ fn an_unprojectable_grammar_error_keeps_the_whole_value_fallback() {
     );
     assert_ne!(diagnostic["range"], range_of(text, "bogus", 0, "utf-8"));
     assert_ne!(diagnostic["range"]["start"], diagnostic["range"]["end"]);
+    fixture.shutdown();
+}
+
+/// A definition inside a pure root-union mapping arm is located through its
+/// indexed arm, at the offending token, as an inner-definition error; an arm
+/// of the wrong type stays a declaration-shape error on that arm.
+#[test]
+fn a_definition_inside_a_root_union_arm_is_ranged_at_its_token() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+    let text = "$schema:\n- title: string\n- count: number(bogus(1))\n";
+    let uri = open(&fixture, &workspace, "arm.yaml", text);
+    let diagnostics = definition_diagnostics(&mut fixture, &uri);
+    let [diagnostic] = diagnostics.as_slice() else {
+        panic!("expected one schema diagnostic: {diagnostics:#?}");
+    };
+    assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"));
+    assert_eq!(diagnostic["range"], range_of(text, "bogus", 0, "utf-8"));
+
+    let text = "$schema:\n- title: string\n- 7\n";
+    let uri = open(&fixture, &workspace, "shape.yaml", text);
+    let diagnostics = definition_diagnostics(&mut fixture, &uri);
+    let [diagnostic] = diagnostics.as_slice() else {
+        panic!("expected one schema diagnostic: {diagnostics:#?}");
+    };
+    assert_eq!(diagnostic["code"], json!("dm.schema.invalid_schema_shape"));
+    assert_eq!(diagnostic["range"], range_of(text, "7", 0, "utf-8"));
+    fixture.shutdown();
+}
+
+/// Opens `text` as a Markdown document named `name`.
+fn open_markdown(fixture: &LspFixture<'_>, workspace: &LspWorkspace, name: &str, text: &str) -> String {
+    let path = workspace.path().join(name);
+    std::fs::write(&path, text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap().to_string();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text }
+        }),
+    );
+    uri
+}
+
+/// A grammar error in an inline frontmatter `$schema` is underlined at its
+/// token, in a nested mapping and in a sequence member, through the
+/// source-aware declaration parser: LF and CRLF, non-BMP text before the
+/// token, and both negotiated encodings.
+#[test]
+fn an_inline_schema_definition_error_is_ranged_at_its_token() {
+    let cases = [
+        (
+            "nested",
+            "---\n$schema:\n  meta:\n    'a.b': string(suggest('😀'); bogus(1))\n---\n\nBody\n",
+        ),
+        (
+            "member",
+            "---\n$schema:\n  tags: [string, 'number(suggest(\"😀\"); bogus(1))']\n---\n\nBody\n",
+        ),
+        (
+            "block-member",
+            "---\n$schema:\n  tags:\n    - string\n    - number(suggest('😀');\n        bogus(1))\n---\n\nBody\n",
+        ),
+    ];
+    for encoding in ["utf-8", "utf-16"] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = start(&workspace, encoding);
+        for (name, body) in cases {
+            for (text, ending) in [(body.to_string(), "lf"), (crlf(body), "crlf")] {
+                let uri = open_markdown(&fixture, &workspace, &format!("{ending}-{name}.md"), &text);
+                let diagnostics: Vec<Value> = fixture
+                    .wait_for_diagnostics(&uri)
+                    .into_iter()
+                    .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition"))
+                    .collect();
+                let [diagnostic] = diagnostics.as_slice() else {
+                    panic!("{encoding} {ending} {name}: expected one definition error: {diagnostics:#?}");
+                };
+                assert_eq!(
+                    diagnostic["range"],
+                    range_of(&text, "bogus", 0, encoding),
+                    "{encoding} {ending} {name}: {diagnostic:#?}"
+                );
+            }
+        }
+        fixture.shutdown();
+    }
+}
+
+/// A definition error in a referenced schema file stays on the document's
+/// `$schema` reference: its byte offsets belong to that file and are never
+/// applied to this buffer.
+#[test]
+fn a_referenced_definition_error_keeps_the_local_reference_range() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+    std::fs::write(
+        workspace.path().join("bad.yaml"),
+        "kind: schema\ntypes:\n  title: string(min(1); bogus(1))\n",
+    )
+    .unwrap();
+    let text = "---\n$schema: ./bad.yaml\ntitle: x\n---\n\nBody text that is long enough to hold the offsets\n";
+    let uri = open_markdown(&fixture, &workspace, "doc.md", text);
+    let diagnostics = definition_diagnostics(&mut fixture, &uri);
+    let [diagnostic] = diagnostics.as_slice() else {
+        panic!("expected one schema diagnostic: {diagnostics:#?}");
+    };
+    assert_eq!(diagnostic["code"], json!("dm.schema.prepare"), "{diagnostic:#?}");
+    assert!(diagnostic["message"].as_str().is_some_and(|message| message.contains("bogus")));
+    assert_eq!(diagnostic["range"], range_of(text, "./bad.yaml", 0, "utf-8"));
     fixture.shutdown();
 }
 
@@ -388,7 +701,164 @@ fn completion_on_continuation_text_and_indentless_items_replaces_the_authored_to
                     position(&text, token_start, encoding),
                     "{encoding} {name}: {item:#?}"
                 );
+                assert_eq!(
+                    item["textEdit"]["range"]["end"],
+                    position(&text, cursor, encoding),
+                    "{encoding} {name}: replacement must stop before arguments or siblings"
+                );
+                let replacement = if label == "max" { "max(number)" } else { label };
+                assert_eq!(item["textEdit"]["newText"], replacement, "{encoding} {name}");
             }
+        }
+        fixture.shutdown();
+    }
+}
+
+/// Every completion label offered at `at`, sorted, with the `max` item's edit.
+fn completion_labels(fixture: &mut LspFixture<'_>, uri: &str, at: Value) -> Vec<String> {
+    let items = fixture
+        .request(
+            "textDocument/completion",
+            json!({ "textDocument": { "uri": uri }, "position": at }),
+        )
+        .result
+        .expect("completion result");
+    let mut labels: Vec<String> = items
+        .as_array()
+        .expect("completion array")
+        .iter()
+        .map(|item| item["label"].as_str().unwrap_or_default().to_string())
+        .collect();
+    labels.sort();
+    labels
+}
+
+/// An anchored or tagged plain value continued onto the next line completes
+/// the same way whether the document loads or is still being typed: the same
+/// candidates, and an edit that replaces only the token, never the `&e` or
+/// `!!str` before the value.
+#[test]
+fn an_anchored_or_tagged_continuation_completes_like_the_loaded_document() {
+    // (name, loaded text, incomplete text); the cursor follows the `max` on
+    // the continuation line in both.
+    let cases = [
+        (
+            "anchor",
+            "kind: schema\ntypes:\n  entry: &e string(min(1);\n    max(2))\n  next: boolean\n",
+            "kind: schema\ntypes:\n  entry: &e string(min(1);\n    max\n  next: boolean\n",
+        ),
+        (
+            "tag",
+            "kind: schema\ntypes:\n  entry: !!str string(min(1);\n    max(2))\n  next: boolean\n",
+            "kind: schema\ntypes:\n  entry: !!str string(min(1);\n    max\n  next: boolean\n",
+        ),
+        (
+            "blank-fold",
+            "kind: schema\ntypes:\n  entry: &e string(min(1);\n\n    max(2))\n  next: boolean\n",
+            "kind: schema\ntypes:\n  entry: &e string(min(1);\n\n    max\n  next: boolean\n",
+        ),
+        (
+            "sequence-item",
+            "kind: schema\ntypes:\n  entry:\n    - &e string(min(1);\n      max(2))\n    - number\n",
+            "kind: schema\ntypes:\n  entry:\n    - &e string(min(1);\n      max\n    - number\n",
+        ),
+    ];
+    for encoding in ["utf-8", "utf-16"] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = start(&workspace, encoding);
+        for (name, loaded, incomplete) in cases {
+            for ending in ["lf", "crlf"] {
+                let mut offered = Vec::new();
+                for (state, body) in [("loaded", loaded), ("incomplete", incomplete)] {
+                    let text = if ending == "crlf" { crlf(body) } else { body.to_string() };
+                    let uri = open(&fixture, &workspace, &format!("{ending}-{state}-{name}.yaml"), &text);
+                    let token_start = text.rfind("max").expect("continued token");
+                    let cursor = token_start + "max".len();
+                    let at = position(&text, cursor, encoding);
+                    let item = completion(&mut fixture, &uri, at.clone(), "max")
+                        .unwrap_or_else(|| panic!("{encoding} {ending} {state} {name}: no max"));
+                    assert_eq!(
+                        item["textEdit"]["range"],
+                        json!({ "start": position(&text, token_start, encoding), "end": at }),
+                        "{encoding} {ending} {state} {name}"
+                    );
+                    assert_eq!(item["textEdit"]["newText"], "max(number)");
+                    offered.push(completion_labels(&mut fixture, &uri, at));
+                }
+                assert_eq!(offered[0], offered[1], "{encoding} {ending} {name}: loaded vs incomplete");
+            }
+        }
+        fixture.shutdown();
+    }
+}
+
+/// A line that does not continue the holder's plain scalar offers no
+/// constraint completions from it: after a comment line or a trailing comment,
+/// under a quoted or block value, an alias, an empty holder, and on a dedented
+/// line that is the holder's sibling rather than its continuation.
+#[test]
+fn a_line_the_plain_scalar_does_not_reach_offers_none_of_its_completions() {
+    let cases = [
+        ("comment-line", "kind: schema\ntypes:\n  entry: string(min(1);\n    # note\n    ma\n"),
+        ("trailing-comment", "kind: schema\ntypes:\n  entry: string(min(1) # note\n    ma\n"),
+        ("single-quoted", "kind: schema\ntypes:\n  entry: 'string(min(1);'\n    ma\n"),
+        ("double-quoted", "kind: schema\ntypes:\n  entry: \"string(min(1);\"\n    ma\n"),
+        ("block", "kind: schema\ntypes:\n  entry: >\n    string(min(1);\n  ma\n"),
+        ("alias", "kind: schema\ntypes:\n  base: &e string\n  entry: *e\n    ma\n"),
+        ("flow", "kind: schema\ntypes:\n  entry: [string(min(1)]\n    ma\n"),
+        ("dedented-sibling", "kind: schema\ntypes:\n  entry: string(min(1);\n  ma\n"),
+        ("sequence-sibling", "kind: schema\ntypes:\n  entry:\n    - string(min(1);\n    ma\n"),
+    ];
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-16");
+    for (name, body) in cases {
+        for (text, ending) in [(body.to_string(), "lf"), (crlf(body), "crlf")] {
+            let uri = open(&fixture, &workspace, &format!("{ending}-{name}.yaml"), &text);
+            let cursor = text.rfind("ma").expect("cursor token") + 2;
+            assert!(
+                completion(&mut fixture, &uri, position(&text, cursor, "utf-16"), "max").is_none(),
+                "{ending} {name}: a line outside the scalar must not complete its constraints"
+            );
+        }
+    }
+    fixture.shutdown();
+}
+
+/// Recognizing a continued value is passive: a command substitution in the
+/// value being typed and an import it names are neither run nor loaded.
+#[test]
+fn continuation_completion_runs_and_loads_nothing() {
+    let workspace = LspWorkspace::new();
+    let marker = workspace.path().join("ran.txt");
+    let mut fixture = start(&workspace, "utf-8");
+    let text = format!(
+        "kind: schema\ntypes:\n  entry: &e string(suggest('$(touch {}) {{{{ ctx.today }}}}');\n    ma\n  other: Other@./missing.yaml\n",
+        marker.display()
+    );
+    let uri = open(&fixture, &workspace, "passive.yaml", &text);
+    let cursor = text.rfind("ma").unwrap() + 2;
+    assert!(completion(&mut fixture, &uri, position(&text, cursor, "utf-8"), "max").is_some());
+    fixture.shutdown();
+    assert!(!marker.exists(), "completion must not run the value");
+    assert!(!workspace.path().join("missing.yaml").exists());
+}
+
+#[test]
+fn completion_after_non_bmp_text_on_a_continuation_uses_negotiated_columns() {
+    let body = "kind: schema\ntypes:\n  t: string(min(1);\n    suggest('😀'); ma\n  next: boolean\n";
+    for encoding in ["utf-8", "utf-16"] {
+        let workspace = LspWorkspace::new();
+        let mut fixture = start(&workspace, encoding);
+        for (text, ending) in [(body.to_string(), "lf"), (crlf(body), "crlf")] {
+            let uri = open(&fixture, &workspace, &format!("{ending}-unicode.yaml"), &text);
+            let start = text.find("; ma").expect("partial token") + 2;
+            let item = completion(&mut fixture, &uri, position(&text, start + 2, encoding), "max")
+                .expect("max completion after the non-BMP suggestion");
+            assert_eq!(
+                item["textEdit"]["range"],
+                json!({ "start": position(&text, start, encoding), "end": position(&text, start + 2, encoding) })
+            );
+            assert_eq!(item["textEdit"]["newText"], "max(number)");
         }
         fixture.shutdown();
     }

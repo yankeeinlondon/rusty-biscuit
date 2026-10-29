@@ -1,0 +1,7 @@
+$schema:
+  meta:
+    level: number(max(5))
+    mode:
+      - number
+      - boolean
+  next: boolean

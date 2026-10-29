@@ -226,10 +226,16 @@ fn overlapping_item_arms_accept_either_shape_and_report_a_field_once() {
         []
     );
 
+    // Both arms read `name: 1` as the text `"1"`, so it converts; only the
+    // item no arm accepts is reported.
     assert_eq!(
         report(&root, "  e: entry[]@./described.yaml\n", "e: [{name: 1}, {name: b, size: x}]\n"),
+        [problem("/e/1/size", "\"x\" is not of type \"number\"", None, Some("bytes on disk"))]
+    );
+    assert_eq!(
+        report(&root, "  e: entry[]@./described.yaml\n", "e: [{name: [1]}, {name: b, size: x}]\n"),
         [
-            problem("/e/0/name", "1 is not of type \"string\"", None, Some("the entry name")),
+            problem("/e/0/name", "[1] is not of type \"string\"", None, Some("the entry name")),
             problem("/e/1/size", "\"x\" is not of type \"number\"", None, Some("bytes on disk")),
         ]
     );

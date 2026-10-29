@@ -8,6 +8,7 @@
 //! - [`xx_hash`] - Direct hash of a string
 //! - [`xx_hash_bytes`] - Direct hash of a byte slice
 //! - [`xx_hash_variant`] - Hash with configurable normalization via [`HashVariant`]
+//! - [`XxHasher`] - Streaming hash of content fed in pieces
 //!
 //! ## Examples
 //!
@@ -32,7 +33,7 @@
 //! ```
 
 use std::collections::HashMap;
-use xxhash_rust::xxh64::xxh64;
+use xxhash_rust::xxh64::{Xxh64, xxh64};
 
 /// The **HashVariant** enumeration lets you express characteristics about
 /// the content you're hashing which you want to remove from being a factor
@@ -103,6 +104,59 @@ pub fn xx_hash(data: &str) -> u64 {
 #[inline]
 pub fn xx_hash_bytes(data: &[u8]) -> u64 {
     xxh64(data, 0)
+}
+
+/// A streaming XXH64 hasher, for content too large or too scattered to
+/// gather into one buffer first.
+///
+/// Feeding the same bytes in any split produces the same digest as
+/// [`xx_hash_bytes`] over their concatenation. It implements
+/// [`std::hash::Hasher`], so `Hash` values can be fed to it, and
+/// [`std::fmt::Write`], so `write!` streams formatted text (for example a
+/// derived `Debug` rendering) without building the string.
+///
+/// ## Examples
+///
+/// ```rust
+/// use std::fmt::Write as _;
+/// use std::hash::Hasher as _;
+/// use biscuit_hash::{XxHasher, xx_hash};
+///
+/// let mut hasher = XxHasher::new();
+/// write!(hasher, "{}, {}!", "Hello", "World").unwrap();
+/// assert_eq!(hasher.finish(), xx_hash("Hello, World!"));
+/// ```
+#[derive(Clone)]
+pub struct XxHasher(Xxh64);
+
+impl XxHasher {
+    /// A hasher with no input, using the same seed as [`xx_hash`].
+    pub fn new() -> Self {
+        Self(Xxh64::new(0))
+    }
+}
+
+impl Default for XxHasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::hash::Hasher for XxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0.digest()
+    }
+}
+
+impl std::fmt::Write for XxHasher {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        self.0.update(text.as_bytes());
+        Ok(())
+    }
 }
 
 /// Produces an xxHash of a _mutated_ version of the content/data passed in.
@@ -290,6 +344,38 @@ mod tests {
         let data = b"Hello, World!";
         assert_eq!(xx_hash_bytes(data), xx_hash_bytes(data));
         assert_eq!(xx_hash_bytes(data), xx_hash("Hello, World!"));
+    }
+
+    #[test]
+    fn xx_hasher_matches_one_shot_hash_across_splits() {
+        use std::hash::Hasher as _;
+        let mut hasher = XxHasher::new();
+        hasher.write(b"Hello, ");
+        hasher.write(b"");
+        hasher.write(b"World!");
+        assert_eq!(hasher.finish(), xx_hash("Hello, World!"));
+        assert_eq!(XxHasher::default().finish(), xx_hash(""));
+    }
+
+    #[test]
+    fn xx_hasher_streams_formatted_text() {
+        use std::fmt::Write as _;
+        use std::hash::Hasher as _;
+        let value = vec![("a", 1), ("b", 2)];
+        let mut hasher = XxHasher::new();
+        write!(hasher, "{value:?}").unwrap();
+        assert_eq!(hasher.finish(), xx_hash(&format!("{value:?}")));
+    }
+
+    #[test]
+    fn xx_hasher_finish_does_not_consume_state() {
+        use std::hash::Hasher as _;
+        let mut hasher = XxHasher::new();
+        hasher.write(b"abc");
+        let first = hasher.finish();
+        assert_eq!(first, hasher.finish());
+        hasher.write(b"d");
+        assert_eq!(hasher.finish(), xx_hash("abcd"));
     }
 
     // ==================== xx_hash_variant Tests ====================

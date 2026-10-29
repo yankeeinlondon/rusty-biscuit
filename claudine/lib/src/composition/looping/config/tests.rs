@@ -561,6 +561,37 @@ fn extract_control_variables_fm_and_action_target_merge() {
     );
 }
 
+/// Every variable a condition or value template reads is visited: index
+/// expressions, both ternary branches, nested call arguments, and container
+/// literal values. A bracket read of `fm` (`fm['x']`) is a read of the bare
+/// namespace, which owns no single key.
+#[test]
+fn extract_control_variables_visits_every_read_shape() {
+    for (condition, expected) in [
+        ("a[i] > 0", &["a", "i"][..]),
+        ("x ? y : f(g(z))", &["x", "y", "z"]),
+        ("[a, {k: b}] == c", &["a", "b", "c"]),
+        ("fm['counter'] > 0", &[]),
+        ("!(a || -b)", &["a", "b"]),
+    ] {
+        let config = control_config(condition, vec![]);
+        assert_eq!(extract_control_variables(&config), expected, "`{condition}`");
+    }
+    // Every Darkmatter reserved namespace is supplied by the runtime.
+    for condition in ["ctx.today && current.branch && env.HOME && counter", "fm && counter"] {
+        let config = control_config(condition, vec![]);
+        assert_eq!(extract_control_variables(&config), ["counter"], "`{condition}`");
+    }
+    let config = control_config(
+        "done",
+        vec![LoopAction::Set {
+            prop: "next".into(),
+            value: json!("{{ fm.total - done }} of {{ ok ? a : b }}"),
+        }],
+    );
+    assert_eq!(extract_control_variables(&config), ["a", "b", "done", "next", "ok", "total"]);
+}
+
 // ── Located errors, key checks, and owners ───────────────────────────
 
 fn loop_error(loop_value: serde_json::Value) -> (CompositionError, ResolvedCompositionSource) {

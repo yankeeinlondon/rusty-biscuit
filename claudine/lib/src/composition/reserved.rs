@@ -15,8 +15,5 @@ pub(crate) const RETIRED_LOOP_NAMES: [(&str, &str); 5] = [
     ("_loop_last_exit_code", "last_exit_code"),
 ];
 
-/// Expression roots that cannot be interpreted as frontmatter properties.
-pub(crate) const EXPRESSION_RESERVED_ROOTS: &[&str] = &["true", "false", "fm", "env"];
-
 /// Frontmatter properties that loop set actions cannot mutate.
 pub(crate) const SET_ACTION_BLOCKLIST: &[&str] = &["seq", "group", "loop", "replace"];

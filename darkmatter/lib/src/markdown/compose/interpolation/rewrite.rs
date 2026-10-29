@@ -15,6 +15,7 @@ use crate::markdown::compose::parse_utils::structural_view;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::site_scope::SiteHook;
 use crate::markdown::compose::context::report::ExpressionOrigin;
 use crate::markdown::literal_token::{TOKEN_PREFIX, TokenError};
 use crate::markdown::types::{MarkdownError, SourceRef};
@@ -196,6 +197,68 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, LocatedInterpolationError> {
+    interpolate_text_guarded(input, data, evaluator, scan_mode, policy, warning_stage, None, None)
+}
+
+/// A check a rewrite makes before it evaluates each expression and once
+/// after the last, given the warnings reported since its previous call (in
+/// evaluation order). An `Err` ends the rewrite, unlocated, before the next
+/// expression runs; `None` checks nothing.
+pub(crate) type BeforeEval<'g> = Option<&'g mut dyn FnMut(&[ComposeWarning]) -> Result<(), MarkdownError>>;
+
+/// Reborrows `before_eval` for one nested rewrite.
+pub(crate) fn reborrow<'s>(before_eval: &'s mut BeforeEval<'_>) -> BeforeEval<'s> {
+    match before_eval {
+        Some(check) => Some(&mut **check),
+        None => None,
+    }
+}
+
+/// Shows `before_eval` the `warnings` reported since `shown`.
+pub(crate) fn show_new_warnings(
+    before_eval: &mut BeforeEval<'_>,
+    warnings: &[ComposeWarning],
+    shown: &mut usize,
+) -> Result<(), LocatedInterpolationError> {
+    let Some(check) = before_eval.as_deref_mut() else {
+        return Ok(());
+    };
+    let new = &warnings[*shown..];
+    *shown = warnings.len();
+    check(new).map_err(|error| LocatedInterpolationError { error: Box::new(error), span: None })
+}
+
+/// Charges `bytes` inserted at `offset` to the expansions that own it.
+pub(crate) fn charge(
+    site: Option<&dyn SiteHook>,
+    offset: usize,
+    bytes: usize,
+    span: Option<std::ops::Range<usize>>,
+) -> Result<(), LocatedInterpolationError> {
+    let Some(site) = site else {
+        return Ok(());
+    };
+    site.charge(offset, bytes).map_err(|error| LocatedInterpolationError {
+        error: Box::new(crate::markdown::types::MarkdownError::from(Box::new(
+            crate::markdown::compose::collection_blocks::CollectionError::budget(error),
+        ))),
+        span,
+    })
+}
+
+/// [`interpolate_text_in`], checking `before_eval` before each expression is
+/// evaluated and after the last.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
+    input: &str,
+    data: Option<&DataRanges>,
+    evaluator: &Evaluator<L>,
+    scan_mode: ScanMode,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
+    mut before_eval: BeforeEval<'_>,
+    site: Option<&dyn SiteHook>,
+) -> Result<InterpolationRewrite, LocatedInterpolationError> {
     let strict = policy == ExpressionFailurePolicy::Strict;
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
     // require the `{{` sequence. When the input contains none, the scan — the
@@ -245,12 +308,17 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
     let mut output = input.to_string();
     let mut count = 0;
     let mut warnings = Vec::new();
+    let mut shown = 0;
     let mut edits = Vec::new();
 
     for (start, end, item) in found {
+        if let Some(site) = site {
+            site.enter(start);
+        }
         let loc = match item {
             Found::Literal(lit) => {
                 let replacement = format!("{}{}{}", "{{", lit.content, "}}");
+                charge(site, start, replacement.len(), None)?;
                 edits.push(TextEdit::data(start..end, replacement.len()));
                 output.replace_range(start..end, &replacement);
                 continue;
@@ -266,6 +334,7 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
                 let mut ctx_warnings = evaluator.collect_context_warnings(&expr, warning_stage);
                 ctx_warnings.reverse();
                 warnings.append(&mut ctx_warnings);
+                show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
                 let mark = evaluator.missing_root_mark();
                 let evaluated = evaluator.eval(&expr);
                 evaluator.locate_missing_roots(mark, Some(loc.start..loc.end));
@@ -287,6 +356,7 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
                         } else {
                             replacement
                         };
+                        charge(site, loc.start, replacement.len(), Some(loc.start..loc.end))?;
                         edits.push(TextEdit::data(loc.start..loc.end, replacement.len()));
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
@@ -311,7 +381,7 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
                 return Err(LocatedInterpolationError {
                     error: Box::new(interpolation_error(
                         &loc.expression,
-                        ExpressionError::Parse(e.to_string()),
+                        ExpressionError::from(e),
                     )),
                     span: Some(loc.start..loc.end),
                 });
@@ -326,6 +396,8 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
             }
         }
     }
+
+    show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
 
     // Spans were visited end to start; report and record them in document
     // order so the first authored occurrence of an issue is the one kept.
@@ -378,6 +450,18 @@ pub(crate) fn interpolate_value_located<L: EvaluationLookup>(
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedInterpolationError> {
+    interpolate_value_guarded(input, evaluator, policy, warning_stage, None)
+}
+
+/// [`interpolate_value_located`], checking `before_eval` before each
+/// expression is evaluated and after the last.
+pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
+    input: &str,
+    evaluator: &Evaluator<L>,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
+    mut before_eval: BeforeEval<'_>,
+) -> Result<(Value, usize, Vec<ComposeWarning>), LocatedInterpolationError> {
     if is_whole_value_literal(input) {
         let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
         return Ok((Value::String(result.output), result.replacements, result.warnings));
@@ -391,19 +475,20 @@ pub(crate) fn interpolate_value_located<L: EvaluationLookup>(
             return Err(failure);
         }
         let expr = parse(&loc.expression).map_err(|e| {
-            located(interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string())))
+            located(interpolation_error(&loc.expression, ExpressionError::from(e)))
         })?;
         // The whole-value path bypasses `interpolate_text`, so it must still run
         // the context-typo check on its single parsed expression — otherwise
         // `phase: "{{ ctx.toady }}"` (resolving to null) would warn in body text
         // but stay silent in frontmatter.
         let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
+        show_new_warnings(&mut before_eval, &warnings, &mut 0)?;
         let value = evaluator
             .eval_json(&expr)
             .map_err(|cause| located(interpolation_error(&loc.expression, cause)))?;
         return Ok((value, 1, warnings));
     }
-    let result = interpolate_text_located(input, evaluator, ScanMode::Plain, policy, warning_stage)?;
+    let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None)?;
     Ok((Value::String(result.output), result.replacements, result.warnings))
 }
 

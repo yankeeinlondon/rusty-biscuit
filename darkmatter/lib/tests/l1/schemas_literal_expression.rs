@@ -663,15 +663,30 @@ fn expression_validation_never_evaluates() {
 // Feature A — large-integer literal precision (regression)
 // ══════════════════════════════════════════════════════════════════════════
 
-/// Boundary integers past f64's 2^53 exact range: 2^53+1, `i64::MAX`,
-/// `i64::MAX + 1` (a u64), and `u64::MAX`. Each pairs the literal spelling with
-/// an off-by-one neighbor for the negative validation case.
+/// Large whole numbers an `f64` holds exactly (2^53 and 2^63), each paired
+/// with an exactly representable neighbor for the negative validation case.
+/// A whole number no `f64` holds is a schema-load error instead; see
+/// [`literal_inexact_large_integer_is_a_schema_load_error`].
 const LARGE_INT_CASES: &[(&str, &str)] = &[
-    ("9007199254740993", "9007199254740992"),
-    ("9223372036854775807", "9223372036854775806"),
-    ("9223372036854775808", "9223372036854775807"),
-    ("18446744073709551615", "18446744073709551614"),
+    ("9007199254740992", "9007199254740990"),
+    ("9223372036854775808", "9223372036854773760"),
 ];
+
+#[test]
+fn literal_inexact_large_integer_is_a_schema_load_error() {
+    for lit in ["9007199254740993", "9223372036854775807", "18446744073709551615"] {
+        let error = parse_type_expr("prop", &format!("literal({lit})"))
+            .expect_err("an inexact whole literal is rejected")
+            .to_string();
+        assert!(error.contains("cannot be represented exactly"), "literal({lit}): {error}");
+        let document: Markdown =
+            format!("---\n$schema:\n  version: literal({lit})\n---\nbody\n").into();
+        assert!(
+            DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&document).is_err(),
+            "literal({lit}) must fail to load"
+        );
+    }
+}
 
 #[test]
 fn literal_large_integer_round_trips_through_serialization() {
@@ -697,37 +712,39 @@ fn literal_large_integer_const_is_exact() {
     }
 }
 
-#[test]
-fn literal_large_integer_validates_exact_and_rejects_neighbor() {
-    for (lit, neighbor) in LARGE_INT_CASES {
-        let ok = validate(&format!(
-            "---\n$schema:\n  version: literal({lit}; required)\nversion: {lit}\n---\nbody\n"
-        ));
-        assert!(
-            ok.valid,
-            "literal({lit}) must accept {lit}: {:?}",
-            ok.problems
-        );
+/// The one literal of [`LARGE_INT_CASES`] an `f64` holds exactly (2^63).
+const EXACT_LARGE_INT: &str = "9223372036854775808";
 
-        let bad = validate(&format!(
-            "---\n$schema:\n  version: literal({lit}; required)\nversion: {neighbor}\n---\nbody\n"
-        ));
-        assert!(!bad.valid, "literal({lit}) must reject neighbor {neighbor}");
+#[test]
+fn literal_large_integer_frontmatter_value_must_be_exact() {
+    let ok = validate(&format!(
+        "---\n$schema:\n  version: literal({EXACT_LARGE_INT}; required)\nversion: {EXACT_LARGE_INT}\n---\nbody\n"
+    ));
+    assert!(ok.valid, "literal({EXACT_LARGE_INT}) must accept itself: {:?}", ok.problems);
+
+    for value in LARGE_INT_CASES
+        .iter()
+        .flat_map(|(lit, neighbor)| [*lit, *neighbor])
+        .filter(|value| darkmatter::markdown::numeric::admit_number_spelling(value).is_err())
+    {
+        let error = Markdown::try_from_content(format!("---\nversion: {value}\n---\nbody\n"))
+            .expect_err("an inexact native integer must not load");
+        assert!(error.to_string().contains("cannot be represented exactly"), "{value}: {error}");
     }
 }
 
 #[test]
-fn literal_large_integer_coercion_is_exact() {
-    for (lit, _) in LARGE_INT_CASES {
-        let expected: Value = serde_json::from_str(lit).expect("literal is a JSON number");
-        let schema = json_schema(&format!("version: literal({lit})\n"));
-        let instance = serde_json::json!({"version": lit});
-        let outcome = coerce_frontmatter(&schema, &instance);
-        assert!(outcome.changed, "string '{lit}' must be coerced");
-        assert_eq!(
-            outcome.value["version"], expected,
-            "string '{lit}' must coerce to the exact integer"
-        );
+fn literal_large_integer_coercion_admits_before_converting() {
+    let expected: Value = serde_json::from_str(EXACT_LARGE_INT).expect("literal is a JSON number");
+    let schema = json_schema(&format!("version: literal({EXACT_LARGE_INT})\n"));
+    let outcome = coerce_frontmatter(&schema, &serde_json::json!({"version": EXACT_LARGE_INT}));
+    assert!(outcome.changed, "string '{EXACT_LARGE_INT}' must be coerced");
+    assert_eq!(outcome.value["version"], expected, "the exact integer is kept");
+
+    let schema = json_schema("version: number\n");
+    for lit in ["9007199254740993", "9223372036854775807", "18446744073709551615"] {
+        let outcome = coerce_frontmatter(&schema, &serde_json::json!({"version": lit}));
+        assert!(!outcome.changed, "string '{lit}' cannot be represented exactly and stays text");
     }
 }
 

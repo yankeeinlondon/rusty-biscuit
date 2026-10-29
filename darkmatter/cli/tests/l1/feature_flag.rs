@@ -20,7 +20,7 @@ fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
 }
 
 fn features(args: &[&str]) -> Vec<Feature> {
-    parse(args).expect("valid --feature arguments").features
+    parse(args).expect("valid --feature arguments").render.features
 }
 
 /// Every name `md --feature` accepts, in declaration order.
@@ -105,14 +105,14 @@ fn feature_is_absent_by_default() {
 #[test]
 fn render_subcommand_accepts_feature() {
     let cli = parse(&["render", "doc.md", "--feature", "embed-mermaid-font"]).unwrap();
-    let Some(Command::Render { features, .. }) = cli.command else {
+    let Some(Command::Render(options)) = cli.command else {
         panic!("expected the render subcommand");
     };
-    assert_eq!(features, [Feature::EmbedMermaidFont]);
+    assert_eq!(options.features, [Feature::EmbedMermaidFont]);
 
     // Before the subcommand it lands on the top level, which `render` merges.
     let cli = parse(&["--feature", "embed-mermaid-font", "render", "doc.md"]).unwrap();
-    assert_eq!(cli.features, [Feature::EmbedMermaidFont]);
+    assert_eq!(cli.render.features, [Feature::EmbedMermaidFont]);
 }
 
 #[test]
@@ -170,8 +170,8 @@ fn embed_mermaid_font_feature_sets_the_html_page_option() {
     let with = parse(&["--feature", "embed-mermaid-font", "doc.md"]).unwrap();
     let without = parse(&["doc.md"]).unwrap();
 
-    assert!(html_page(&md, &with, None, &with.features).unwrap().embed_mermaid_font());
-    assert!(!html_page(&md, &without, None, &without.features).unwrap().embed_mermaid_font());
+    assert!(html_page(&md, &with, None, false, &with.render.features).unwrap().embed_mermaid_font());
+    assert!(!html_page(&md, &without, None, false, &without.render.features).unwrap().embed_mermaid_font());
 }
 
 #[test]
@@ -183,10 +183,10 @@ fn no_frontmatter_key_turns_on_embedding() {
     let plain = Markdown::try_from_content(MERMAID_DOC).unwrap();
     let cli = parse(&["doc.md"]).unwrap();
 
-    assert!(!html_page(&with_keys, &cli, None, &cli.features).unwrap().embed_mermaid_font());
+    assert!(!html_page(&with_keys, &cli, None, false, &cli.render.features).unwrap().embed_mermaid_font());
     assert_eq!(
-        html_artifact(&with_keys, &cli, None, &cli.features).unwrap().content,
-        html_artifact(&plain, &cli, None, &cli.features).unwrap().content
+        html_artifact(&with_keys, &cli, None, false, &cli.render.features).unwrap().content,
+        html_artifact(&plain, &cli, None, false, &cli.render.features).unwrap().content
     );
 }
 

@@ -217,6 +217,18 @@ mod every_accepted_playa_dry_run_spelling_prepares_nothing {
         };
     }
 
+    /// The rows are exactly the spellings the pre-warm gate accepts, read
+    /// from its `matches!` arm, so a spelling added there gets its own test.
+    #[test]
+    fn every_accepted_spelling_is_a_row() {
+        let source = include_str!("../../../lib/src/composition/lifecycle/prewarm/worker.rs");
+        let marker = "matches!(playa_dry_run, Some(";
+        let start = source.find(marker).expect("the gate's `matches!` arm") + marker.len();
+        let arm = &source[start..start + source[start..].find(')').expect("the arm's close")];
+        let accepted: Vec<&str> = arm.split('|').map(|spelling| spelling.trim().trim_matches('"')).collect();
+        assert_eq!(SPELLINGS.as_slice(), accepted.as_slice());
+    }
+
     spelling_tests! {
         one => "1",
         lowercase_true => "true",
@@ -465,6 +477,61 @@ fn a_mixed_sequence_prepares_prompts_with_their_playback_configuration() {
     assert_eq!(prepared.len(), 3, "{prepared:?}");
     assert!(prepared.iter().all(|(_, config)| config == &prepared[0].1
         && config.contains("af_heart") && config.to_lowercase().contains("kokoro")), "{prepared:?}");
+    assert!(!fixture.audio_spool().exists(), "nothing was spoken");
+}
+
+#[test]
+fn container_captured_phrases_are_prepared_before_their_first_child_launches() {
+    let fixture = CliProcessFixture::named("prewarm-containers");
+    let record = record_path(&fixture);
+    let launches = common::launch_recorder::install(&fixture, "goose", &format!(
+        "seen=missing; i=0\n\
+         while [ $i -lt 40 ]; do\n\
+         if grep -q '^root Ada' '{record}' 2>/dev/null && \
+         grep -q '^group Ada' '{record}' && grep -q '^inline Ada' '{record}' && \
+         grep -q '^referenced Ada' '{record}'; then seen=prepared; break; fi\n\
+         sleep 0.025; i=$((i + 1))\n\
+         done\n\
+         echo $seen > \"$dir/containers-seen\"\nexit 0",
+        record = record.display(),
+    ));
+    write_document(&fixture, "prompt.md", "---\n---\nWork.\n");
+    write_document(&fixture, "nested.md", r#"---
+failure:
+    - say: "referenced {{ env.PREWARM_NAME }}"
+sequence:
+    - name: prompt
+      prompt: prompt.md
+---
+Nested.
+"#);
+    let sequence = write_document(&fixture, "seq.md", r#"---
+failure:
+    - say: "root {{ env.PREWARM_NAME }}"
+sequence:
+    - name: group
+      group:
+          failure:
+              - say: "group {{ env.PREWARM_NAME }}"
+          tasks:
+              - name: inline
+                failure:
+                    - say: "inline {{ env.PREWARM_NAME }}"
+                sequence:
+                    - name: referenced
+                      sequence: nested.md
+---
+Sequence.
+"#);
+    let output = observed(&fixture, "record")
+        .env("PREWARM_NAME", "Ada")
+        .args(["sequence", "--goose", sequence.to_str().unwrap()])
+        .output().unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(common::launch_recorder::launches(&launches).len(), 1, "{stderr}");
+    assert_eq!(fs::read_to_string(launches.join("containers-seen")).unwrap().trim(), "prepared", "{stderr}");
+    assert_eq!(sorted(recorded(&record)), ["group Ada", "inline Ada", "referenced Ada", "root Ada"], "{stderr}");
     assert!(!fixture.audio_spool().exists(), "nothing was spoken");
 }
 

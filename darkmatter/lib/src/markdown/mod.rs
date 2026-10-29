@@ -30,6 +30,7 @@
 pub mod block;
 pub mod cleanup;
 pub mod code_block;
+pub mod coercion;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -44,6 +45,7 @@ pub mod language_grammar;
 pub mod literal_token;
 mod mapping_orders;
 pub mod normalize;
+pub mod numeric;
 pub mod output;
 pub mod reference;
 pub mod render_tree;
@@ -261,6 +263,12 @@ impl Markdown {
                 frontmatter,
             ),
         }
+    }
+
+    /// The text this document was loaded from, before any stage rewrote it;
+    /// `None` when none was retained (a document built from parts).
+    pub fn loaded_text(&self) -> Option<&str> {
+        self.loaded.as_ref().map(|loaded| &*loaded.text)
     }
 
     /// A [`SourceContext`](biscuit_terminal::errors::SourceContext) over the

@@ -611,7 +611,7 @@ Lists every context variable exposed by Darkmatter, grouped by category and subs
 | Column | Content |
 |--------|---------|
 | `Property` | Canonical variable name prefixed with `ctx.` |
-| `Type` | Display type (`String`, `DateTime`, `Boolean`, etc.) |
+| `Type` | The variable's schema type in keyword form (`string`, `datetime`, `boolean`, `number(integer)`, `string[]`, etc.) |
 | `Description` | Short description of the variable |
 
 Context variable categories include date/time, repository metadata, file changes, languages, documents, operating system, and hardware. The `Property` and `Type` column widths are computed once across the entire catalog and reused for every section.
@@ -633,12 +633,17 @@ Displays the expression-language overview followed by the complete typed functio
 
 The overview covers operator precedence, truthiness rules, unary/comparison/arithmetic operators, variable access syntax (`ctx.today`, `env.HOME`, dot and bracket forms), the two parser modes (interpolation vs. condition), and null propagation behavior.
 
-The function catalog is grouped by category (Type Predicates, Math, Collection, String Predicates, String Mutations, Date Formatting, Date Validators, Logical, Type Conversion, Filesystem) with columns:
+The function catalog comes from Darkmatter's library API (`expression_function_catalog()`, loaded from the embedded `darkmatter/schemas/partials/functions.yaml`). Categories appear in the catalog's `categories:` list order and functions alphabetically within each; each canonical appears once (one row per overload), never under an alias. Columns:
 
 | Column | Content |
 |--------|---------|
 | `Function` | Canonical snake_case signature |
 | `Description` | Behavior and return-value summary |
+| `Example` | Every example, one per line: inline `call ⇒ result` (display-only ones marked with their reason) and file-form examples (`invocation ⇒ returns (from function-examples/<name>.yaml)`) |
+
+`cli/tests/l1/context_command.rs::context_expressions_function_order_snapshot` pins the category and signature order.
+
+The `Function` column is the catalog's display key (parameter names, optional ones bracketed), not the typed signature; DMLS completion and hover show the typed form (`typed_signature()`). The report states no conversion rules of its own: argument conversion and the design-time call check that rejects a proven-bad call before composition are Darkmatter's (`darkmatter/docs/topics/schemas/definition.md#type-coercion`, `darkmatter/docs/inline/call-check.md`).
 
 ### `--side-effects` report
 

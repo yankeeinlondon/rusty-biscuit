@@ -125,7 +125,7 @@ impl<'a> PathSubject<'a> {
 pub fn matches(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>) -> bool {
     match expr {
         MatchExpr::All(children) => children.iter().all(|c| matches(c, frontmatter, subject)),
-        MatchExpr::Any(children) => children.iter().any(|c| matches(c, frontmatter, subject)),
+        MatchExpr::Group(children) => children.iter().any(|c| matches(c, frontmatter, subject)),
         MatchExpr::None(children) => !children.iter().any(|c| matches(c, frontmatter, subject)),
         MatchExpr::MinMatch { count, of } => {
             let met = of
@@ -141,8 +141,8 @@ pub fn matches(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>)
     }
 }
 
-/// Returns the first defeating condition for a non-matching arm, for the
-/// `md schema triggers` trace. Returns `None` when the arm matches.
+/// Returns the first defeating condition for a non-matching expression, for
+/// the `md schema triggers` trace. Returns `None` when the expression matches.
 pub fn first_defeat(
     expr: &MatchExpr,
     frontmatter: &Value,
@@ -179,7 +179,7 @@ fn describe_defeat(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<
             .iter()
             .find_map(|c| first_defeat(c, frontmatter, subject))
             .unwrap_or_else(|| "all-children".into()),
-        MatchExpr::Any(_) => "no any-child matched".into(),
+        MatchExpr::Group(_) => "no group alternative matched".into(),
         MatchExpr::None(_) => "a none-child matched".into(),
         MatchExpr::MinMatch { count, of } => {
             let met = of.iter().filter(|c| matches(c, frontmatter, subject)).count();
@@ -266,6 +266,14 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
         // item) conforms when some arm accepts it; the container's own
         // markers and array constraints are checked by `type_conforms`.
         TypeExpr::Union(arms) => arms.iter().any(|arm| type_conforms(arm, value)),
+        // A tuple conforms by length; its positions are checked by full
+        // validation, not by a trigger condition.
+        TypeExpr::Tuple(tuple) => value.as_array().is_some_and(|items| {
+            items.len() >= tuple.required_len()
+                && (tuple.spread.is_some() || items.len() <= tuple.elements.len())
+        }),
+        // A function describes a callable; no frontmatter value is one.
+        TypeExpr::Function(_) => false,
         TypeExpr::InlineObject(shape) => {
             let Some(map) = value.as_object() else {
                 return false;
@@ -340,7 +348,7 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
             }
             true
         }
-        TypeExpr::Imported { .. } => {
+        TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {
             // Imports are rejected at load time; unreachable in a loaded trigger.
             false
         }
@@ -500,12 +508,20 @@ fn is_required(atom: &PropertyAtom) -> bool {
     atom.is_required()
 }
 
+thread_local! {
+    /// [`regex_match`]'s compiled patterns.
+    static REGEX_CACHE: std::cell::RefCell<Vec<(String, regex::Regex)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Empties the calling thread's matcher regex cache (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_thread_caches() {
+    REGEX_CACHE.with_borrow_mut(Vec::clear);
+}
+
 fn regex_match(pattern: &str, input: &str) -> bool {
-    thread_local! {
-        static CACHE: std::cell::RefCell<Vec<(String, regex::Regex)>> =
-            const { std::cell::RefCell::new(Vec::new()) };
-    }
-    CACHE.with(|cell| {
+    REGEX_CACHE.with(|cell| {
         if let Some(re) = cell.borrow().iter().find(|(p, _)| p == pattern) {
             return re.1.is_match(input);
         }
@@ -566,13 +582,13 @@ mod tests {
     }
 
     #[test]
-    fn any_needs_one_child() {
-        let expr = MatchExpr::Any(vec![
+    fn group_needs_one_child() {
+        let expr = MatchExpr::Group(vec![
             prop("a", SimplifiedType::String, vec![Constraint::Required]),
             prop("b", SimplifiedType::String, vec![Constraint::Required]),
         ]);
         // `a` present but type-contradicts → defeats; `b` absent → required
-        // gate fails → any fails.
+        // gate fails → the group fails.
         let fm = frontmatter(&[("a", json!(42))]);
         assert!(!matches(&expr, &fm, &PathSubject::detached()));
         let fm = frontmatter(&[("b", json!("y"))]);
@@ -626,7 +642,7 @@ mod tests {
 
     #[test]
     fn free_nesting() {
-        let expr = MatchExpr::All(vec![MatchExpr::Any(vec![
+        let expr = MatchExpr::All(vec![MatchExpr::Group(vec![
             MatchExpr::None(vec![prop("kind", SimplifiedType::String, vec![])]),
             prop("tag", SimplifiedType::String, vec![Constraint::Required]),
         ])]);

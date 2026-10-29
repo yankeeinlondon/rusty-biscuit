@@ -48,7 +48,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 
-use claudine::diagnostics::{CODES, DiagnosticSnapshot, code_spec};
+use claudine::diagnostics::{CODES, DiagnosticSnapshot, DiagnosticSnapshotExt, code_spec};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -927,7 +927,7 @@ mod corpus {
     use std::path::PathBuf;
 
     use claudine::composition::{CompositionError, ShellApprovalFailure};
-    use claudine::diagnostics::{Diagnostic, DiagnosticSnapshot, RestoredDiagnostic};
+    use claudine::diagnostics::{Diagnostic, DiagnosticSnapshot, DiagnosticSnapshotExt, RestoredDiagnostic};
     use claudine::error::ClaudineError;
     use claudine::harness::error::{HarnessError, PathResolutionFailure};
     use claudine::hook_adapters::AdapterError;

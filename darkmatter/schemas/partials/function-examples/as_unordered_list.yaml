@@ -1,0 +1,15 @@
+kind: example
+invocation: >-
+    as_unordered_list([{package: "darkmatter", dependencies: ["biscuit-terminal", "renderable"]},
+    {package: "renderable", dependencies: []}])
+returns: |-
+    - darkmatter
+      - biscuit-terminal
+      - renderable
+    - renderable
+description: |-
+    `as_unordered_list` renders a Markdown unordered list and nests structure.
+    The `ctx.depends_on` / `ctx.used_by` object-array shape
+    (`{ package, dependencies }`) renders each package as a bullet and each
+    dependency as an indented sub-bullet; a package with no dependencies is a
+    single leaf bullet.

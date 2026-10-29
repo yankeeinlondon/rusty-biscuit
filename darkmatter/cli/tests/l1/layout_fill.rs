@@ -24,7 +24,7 @@ fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
     let md = Markdown::try_from_content(raw).unwrap();
     let term = Terminal::new_optimistic(80);
     let page = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
-    apply_style_frontmatter(page, &md, &cli, None).expect("style apply")
+    apply_style_frontmatter(page, &md, &cli, None, false).expect("style apply")
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
     let term = Terminal::new_optimistic(120);
     let cli_only = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
     let after_style =
-        apply_style_frontmatter(cli_only.clone(), &md, &cli, None).expect("style apply");
+        apply_style_frontmatter(cli_only.clone(), &md, &cli, None, false).expect("style apply");
 
     assert_eq!(
         after_style.page_margin(),
@@ -487,7 +487,7 @@ terminal is reasonably wide.\n";
     let term = Terminal::new_optimistic(100);
     let page = DarkmatterPage::new(&term);
     let page = apply_cli_layout_flags(page, &cli);
-    let page = apply_style_frontmatter(page, &md, &cli, None).expect("style apply");
+    let page = apply_style_frontmatter(page, &md, &cli, None, false).expect("style apply");
 
     // Structural guard: the apply pipeline put the fill where the renderer
     // will look for it.

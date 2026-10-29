@@ -134,6 +134,10 @@ mod sequence_magic_reference_follows_launch_scope_and_relative_stays_source_anch
     /// init` is unavailable.
     fn staged() -> Option<(CliProcessFixture, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)> {
         let fixture = CliProcessFixture::named("sequence-magic-reference");
+        fixture.seed_inline_metadata_schema(
+            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../schemas/document.yaml"),
+        );
 
         // --- Primary repo: source doc + source-relative fixtures (1 step) ---
         let repo_root = fixture.cwd().join("repo");

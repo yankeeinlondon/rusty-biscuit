@@ -14,14 +14,15 @@
 //!   `ctx.*` unresolved.
 //! - [`EventMetaConditionLookup`] — used by hook `when` evaluation. Layers
 //!   Darkmatter's lazy `ctx.*` capture on top of [`EventMetaExpressionLookup`]
-//!   so that conditions like `ctx.today != ''` resolve correctly.
+//!   so that conditions like `!is_empty(ctx.today)` resolve correctly.
 //!
 //! ## Resolution Order (both adapters)
 //!
 //! 0. `hook` / `hook.<path>` — bare `hook` is the whole event payload (the
 //!    top-level fields plus `os`, `hardware`, `git`, `project`, without the
-//!    process `env` root); `hook.<path>` traverses that object and is absent
-//!    when missing, never falling through to the steps below.
+//!    process `env` root); `hook.<path>` is the value at that path in the
+//!    object, read straight off the event so only that value is copied, and
+//!    is absent when missing, never falling through to the steps below.
 //! 1. `env.NAME` — resolves to the current process environment variable.
 //!    Fallback syntax (`env.NAME || "default"`) is handled by Darkmatter's
 //!    parser, so this layer never inspects the `||` token itself.
@@ -95,7 +96,7 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
             return Some(hook_payload_object(self.meta));
         }
         if let Some(rest) = path.strip_prefix("hook.") {
-            return nested_pointer(&hook_payload_object(self.meta), rest);
+            return hook_member(self.meta, rest);
         }
 
         if let Some(env_key) = path.strip_prefix("env.") {
@@ -221,6 +222,47 @@ fn resolve_extra(extra: &HashMap<String, Value>, path: &str) -> Option<Value> {
     Some(current.clone())
 }
 
+/// `hook.<path>`: the same value as traversing [`hook_payload_object`] along
+/// `path`, read straight off the event so that only the requested value is
+/// copied, never a large sibling such as `tool_response`.
+fn hook_member(meta: &EventMeta, path: &str) -> Option<Value> {
+    let (member, rest) = split_member(path);
+    match member {
+        "tool_input" => descend(meta.tool_input.as_ref()?, rest),
+        "tool_response" => descend(meta.tool_response.as_ref()?, rest),
+        "extra" => match rest.map(split_member) {
+            None => Some(extra_as_value(&meta.extra)),
+            Some((key, tail)) => descend(meta.extra.get(key)?, tail),
+        },
+        // The environment groups are a handful of short strings; building
+        // one keeps its absent-field and `null` rules in a single place.
+        "os" => descend(&os_hook_object(meta), rest),
+        "hardware" => descend(&hardware_hook_object(meta), rest),
+        "git" => descend(&git_hook_object(meta)?, rest),
+        "project" => descend(&project_hook_object(meta)?, rest),
+        // The remaining members are strings, which have no members of their
+        // own; anything else, including `env`, is absent.
+        _ if rest.is_none() => resolve_top_level(meta, member),
+        _ => None,
+    }
+}
+
+/// The first segment of a dotted path and the remainder, if any.
+fn split_member(path: &str) -> (&str, Option<&str>) {
+    match path.split_once('.') {
+        Some((member, rest)) => (member, Some(rest)),
+        None => (path, None),
+    }
+}
+
+/// `value` itself, or the value at the dotted `rest` inside it.
+fn descend(value: &Value, rest: Option<&str>) -> Option<Value> {
+    match rest {
+        Some(rest) => nested_pointer(value, rest),
+        None => Some(value.clone()),
+    }
+}
+
 fn nested_pointer(value: &Value, path: &str) -> Option<Value> {
     let mut current = value;
     for part in path.split('.') {
@@ -254,6 +296,7 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
 /// `git`, `project`) as a JSON object. Process environment (`env.*`) is
 /// deliberately excluded.
 fn hook_payload_object(meta: &EventMeta) -> Value {
+    crate::note_work!(HookPayloadMaterialize);
     const TOP_LEVEL_KEYS: [&str; 14] = [
         "provider",
         "event",

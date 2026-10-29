@@ -46,19 +46,26 @@
 //! name a file that does not exist yet, and keeps the candidates and folders
 //! of the scope it replaced so their watches survive until it recovers.
 //!
-//! Failures follow the transition rule in [`TriggerRegistries::record_failure`]:
-//! one record per failure scope (workspace boundary and document folder)
-//! decides both the trigger-file diagnostic and the log level, so a repeated
-//! failure is neither re-published nor re-logged at `warn`.
-
+//! A scan that skips invalid triggers succeeds: the scope installs the valid
+//! subset, and its findings record the skipped envelopes as dependencies and
+//! the locations their failed payloads probed as searched candidates, so a
+//! repair, deletion, or creation refreshes it like any other input. Each
+//! skipped disk trigger is published as one warning diagnostic on its file
+//! for as long as any prepared scope reports it
+//! ([`TriggerRegistries::reconcile_warnings`]).
+//!
+//! Scope failures (an unreadable root, a case-fold collision) follow the
+//! transition rule in [`TriggerRegistries::record_failure`]: one record per
+//! failure scope (workspace boundary and document folder) decides the log
+//! level, so a repeated failure is not re-logged at `warn`.
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::triggers::{
-    SchemaRootSource, TriggerRegistry, enumerate_root_files, parse_trigger_envelope_from_str,
-    scan_with_source,
+    InvalidTriggerFinding, SchemaRootSource, TriggerRegistry, TriggerSource, enumerate_root_files,
+    parse_trigger_envelope_from_str, scan_with_source,
 };
 use darkmatter::markdown::schemas::{
     SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, parse_standalone_schema_document,
@@ -70,16 +77,16 @@ use crate::workspace::watch::WatchedFolder;
 
 /// What a schema-root file is, judged from its text alone.
 ///
-/// A [`TriggerSchema`](Self::TriggerSchema) can still fail to load once its
+/// A [`SchemaTrigger`](Self::SchemaTrigger) can still fail to load once its
 /// payload is resolved in a document's context; [`TriggerRegistries::summary`]
 /// combines this class with those outcomes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RootFileClass {
     /// A standalone SimplifiedSchema document, available by name.
     NamedSchema,
-    /// A file claiming `kind: trigger-schema` whose envelope loads.
-    TriggerSchema,
-    /// A file claiming `kind: trigger-schema` whose envelope does not load.
+    /// A file claiming `kind: schema-trigger` whose envelope loads.
+    SchemaTrigger,
+    /// A file claiming `kind: schema-trigger` whose envelope does not load.
     FailedTrigger,
     /// Neither: ordinary or unparseable YAML that claims no envelope.
     Unclassified,
@@ -88,7 +95,7 @@ pub enum RootFileClass {
 /// Classifies one root file's text. Passive: nothing is resolved or read.
 fn classify(text: &str, path: &Path) -> RootFileClass {
     match parse_trigger_envelope_from_str(text) {
-        Ok(Some(_)) => RootFileClass::TriggerSchema,
+        Ok(Some(_)) => RootFileClass::SchemaTrigger,
         Err(_) => RootFileClass::FailedTrigger,
         Ok(None) => match parse_standalone_schema_document(text, path) {
             Ok(Some(_)) => RootFileClass::NamedSchema,
@@ -108,14 +115,13 @@ pub struct RegistrySummary {
     pub tree_schemas: usize,
     /// Named schemas in folders serving only package or package-area roles.
     pub scoped_schemas: usize,
-    /// Trigger schemas whose envelope loads and whose payload no prepared
-    /// registry failed to resolve, in any folder.
+    /// Trigger schemas whose envelope loads and that no prepared registry
+    /// skipped as invalid, in any folder.
     pub trigger_schemas: usize,
     /// Root files claiming the trigger envelope that failed to load: the
-    /// envelope does not load, or a prepared registry failed resolving the
-    /// payload. A trigger no preparation attempted (shadowed in every
-    /// prepared registry, or after an earlier failing trigger) keeps its
-    /// envelope's class.
+    /// envelope does not load, or a prepared registry skipped the trigger
+    /// because its payload failed. A trigger no preparation attempted
+    /// (shadowed in every prepared registry) keeps its envelope's class.
     pub failed_triggers: usize,
     /// Root files that are neither named nor trigger schemas.
     pub unclassified: usize,
@@ -283,12 +289,12 @@ pub struct InstalledRegistry {
 
 /// What a document registry's last preparation produced.
 enum Outcome {
+    /// The scan completed; invalid triggers it skipped are the installed
+    /// registry's findings.
     Ready,
-    /// A trigger failed to load; the scope serves its last-good registry.
-    TriggerFailed {
-        /// The [`normalized`] trigger file the error names, when it names one.
-        trigger_file: Option<PathBuf>,
-    },
+    /// The scan failed as a whole (a case-fold collision, an invalid
+    /// embedded bundle); the scope serves its last-good registry.
+    TriggerFailed,
     /// A schema root could not be read; the scope serves this error and
     /// never last-good data.
     RootFailed(Arc<SchemaError>),
@@ -365,13 +371,24 @@ struct Scope {
     /// context prepares it again.
     context: FileResolutionContext,
     outcome: Outcome,
-    /// The last registry that loaded, served while a trigger failure holds
-    /// and never while a root failure does.
+    /// The last registry that loaded, served while a scan failure holds and
+    /// never while a root failure does.
     installed: Option<InstalledRegistry>,
     deps: Dependencies,
     stale: bool,
     /// The [`Preparation`] sequence number that installed this scope.
     seq: u64,
+}
+
+impl Scope {
+    /// The skipped triggers of the registry this scope serves: none while a
+    /// root failure holds.
+    fn findings(&self) -> &[InvalidTriggerFinding] {
+        match (&self.outcome, &self.installed) {
+            (Outcome::RootFailed(_), _) | (_, None) => &[],
+            (_, Some(installed)) => installed.registry.findings(),
+        }
+    }
 }
 
 /// A change recorded while a preparation was running, replayed against its
@@ -475,22 +492,23 @@ type FailureKey = (PathBuf, PathBuf);
 /// The current failure of one failure scope.
 #[derive(Clone)]
 struct FailureRecord {
-    /// The trigger file (or root folder) the error names.
+    /// The root folder the error names.
     path: Option<PathBuf>,
     error: Arc<SchemaError>,
-    /// Whether the error is a trigger-file load error, whose diagnostic is
-    /// published on that file.
-    owns_diagnostic: bool,
 }
 
-/// Every document's trigger registry, and the failure state shared by the
-/// diagnostics and the log.
+/// Every document's trigger registry, and the warning and failure state
+/// shared by the diagnostics and the log.
 #[derive(Default)]
 pub struct TriggerRegistries {
     roots: RootContents,
     /// Keyed by document path.
     scopes: HashMap<PathBuf, Scope>,
     failures: HashMap<FailureKey, FailureRecord>,
+    /// The skipped triggers currently published, keyed by
+    /// [`InvalidTriggerFinding::identity`]: the first finding, in scope path
+    /// order, that any prepared scope reports for that trigger.
+    warnings: HashMap<TriggerSource, InvalidTriggerFinding>,
     transitions: Vec<TriggerDiagnosticTransition>,
     next_version: u64,
     /// Bumped by every invalidation.
@@ -511,9 +529,10 @@ impl TriggerRegistries {
     /// ## Returns
     ///
     /// `Ok(None)` when no registry has loaded for this document yet (a cold
-    /// trigger failure, or a document never prepared); the last-good
-    /// registry while a trigger failure holds; the installed registry of a
-    /// scope that has gone stale until its preparation installs.
+    /// scan failure, or a document never prepared); the last-good registry
+    /// while a scan failure holds; the installed registry of a scope that
+    /// has gone stale until its preparation installs. A scan that skipped
+    /// invalid triggers installs its valid subset, even when it is empty.
     ///
     /// ## Errors
     ///
@@ -524,7 +543,7 @@ impl TriggerRegistries {
         };
         match &scope.outcome {
             Outcome::RootFailed(error) => Err(Arc::clone(error)),
-            Outcome::Ready | Outcome::TriggerFailed { .. } => Ok(scope.installed.clone()),
+            Outcome::Ready | Outcome::TriggerFailed => Ok(scope.installed.clone()),
         }
     }
 
@@ -566,8 +585,8 @@ impl TriggerRegistries {
         })
     }
 
-    /// Installs a finished preparation in one step and records its failure
-    /// or recovery.
+    /// Installs a finished preparation in one step, records its failure or
+    /// recovery, and reconciles the published skipped-trigger warnings.
     ///
     /// A result is dropped when a preparation of the same document that
     /// began later has already installed, so an older reading never
@@ -616,13 +635,9 @@ impl TriggerRegistries {
                 Outcome::RootFailed(error)
             }
             Err(error) => {
-                let trigger_file = match &error {
-                    SchemaError::TriggerLoad { path, .. } => Some(normalized(path)),
-                    _ => None,
-                };
                 let error = Arc::new(error);
                 self.record_failure(&failure_key, &error, installed.is_some());
-                Outcome::TriggerFailed { trigger_file }
+                Outcome::TriggerFailed
             }
         };
         let mut scope = Scope { context, outcome, installed, deps, stale: false, seq };
@@ -634,6 +649,7 @@ impl TriggerRegistries {
         });
         let fresh = !scope.stale;
         self.scopes.insert(path, scope);
+        self.reconcile_warnings();
         fresh
     }
 
@@ -660,34 +676,17 @@ impl TriggerRegistries {
     /// Records a failed preparation for `key` and logs it once.
     ///
     /// The comparison with the recorded failure is the one source of truth
-    /// for "this failure is new": a different file or error text publishes
-    /// the trigger-file diagnostic (moving it off a previously failing file)
-    /// and logs at `warn`; the same file and text logs at `debug` only.
+    /// for "this failure is new": a different path or error text logs at
+    /// `warn`; the same path and text logs at `debug` only.
     fn record_failure(&mut self, key: &FailureKey, error: &Arc<SchemaError>, has_last_good: bool) {
-        let owns_diagnostic = matches!(**error, SchemaError::TriggerLoad { .. });
         let failure = FailureRecord {
             path: failing_path(error),
             error: Arc::clone(error),
-            owns_diagnostic,
         };
         let previous = self.failures.insert(key.clone(), failure.clone());
         let is_new = previous.as_ref().is_none_or(|old| {
             old.path != failure.path || old.error.to_string() != failure.error.to_string()
         });
-        if let Some(old) = previous.as_ref().filter(|old| old.owns_diagnostic && old.path != failure.path)
-            && let Some(path) = &old.path
-        {
-            self.transitions.push(TriggerDiagnosticTransition { path: path.clone(), error: None });
-        }
-        if is_new
-            && owns_diagnostic
-            && let Some(path) = &failure.path
-        {
-            self.transitions.push(TriggerDiagnosticTransition {
-                path: path.clone(),
-                error: Some(Arc::clone(&failure.error)),
-            });
-        }
         log_failure(key, &failure, has_last_good, is_new);
     }
 
@@ -696,11 +695,6 @@ impl TriggerRegistries {
         let Some(previous) = self.failures.remove(key) else {
             return;
         };
-        if previous.owns_diagnostic
-            && let Some(path) = &previous.path
-        {
-            self.transitions.push(TriggerDiagnosticTransition { path: path.clone(), error: None });
-        }
         tracing::info!(
             scope = %key.1.display(),
             trigger_file = %display_path(previous.path.as_deref()),
@@ -736,13 +730,68 @@ impl TriggerRegistries {
         }
     }
 
-    /// The current load error a failure scope attributes to trigger file
-    /// `path`.
-    pub fn load_error_for(&self, path: &Path) -> Option<Arc<SchemaError>> {
-        self.failures
-            .values()
-            .find(|failure| failure.owns_diagnostic && failure.path.as_deref() == Some(path))
-            .map(|failure| Arc::clone(&failure.error))
+    /// Publishes what changed in the set of skipped triggers the prepared
+    /// scopes report, since the last call.
+    ///
+    /// The comparison with the published set is the one source of truth for
+    /// "this warning is new": a trigger first reported, or reported with a
+    /// different finding, publishes its file's warning and logs at `warn`; a
+    /// trigger no prepared scope reports any more clears it. An unchanged
+    /// refresh publishes and logs nothing. Every scope's findings count,
+    /// including a stale scope's until it is prepared again, so one healthy
+    /// scope never clears a warning another still reports. An embedded
+    /// trigger is logged but never published: it names no file.
+    fn reconcile_warnings(&mut self) {
+        let mut scope_paths: Vec<&PathBuf> = self.scopes.keys().collect();
+        scope_paths.sort();
+        let mut current: HashMap<TriggerSource, InvalidTriggerFinding> = HashMap::new();
+        let mut order = Vec::new();
+        for scope_path in scope_paths {
+            for finding in self.scopes[scope_path].findings() {
+                if !current.contains_key(finding.identity()) {
+                    order.push(finding.identity().clone());
+                    current.insert(finding.identity().clone(), finding.clone());
+                }
+            }
+        }
+        let mut cleared: Vec<&InvalidTriggerFinding> = self
+            .warnings
+            .iter()
+            .filter(|(identity, _)| !current.contains_key(*identity))
+            .map(|(_, finding)| finding)
+            .collect();
+        cleared.sort_by_key(|finding| finding.source().to_string());
+        for finding in cleared {
+            tracing::info!(trigger = %finding.source(), "invalid schema trigger no longer reported");
+            if let Some(path) = finding.source().path() {
+                self.transitions.push(TriggerDiagnosticTransition { path: path.to_path_buf(), finding: None });
+            }
+        }
+        for identity in order {
+            let finding = &current[&identity];
+            if self.warnings.get(&identity) == Some(finding) {
+                continue;
+            }
+            tracing::warn!(trigger = %finding.source(), code = finding.code(), "{}", finding.message());
+            if let Some(path) = finding.source().path() {
+                self.transitions.push(TriggerDiagnosticTransition {
+                    path: path.to_path_buf(),
+                    finding: Some(finding.clone()),
+                });
+            }
+        }
+        self.warnings = current;
+    }
+
+    /// The published warning for trigger file `path`, when a prepared scope
+    /// skipped it.
+    pub fn finding_for(&self, path: &Path) -> Option<&InvalidTriggerFinding> {
+        let identity = TriggerSource::File(
+            biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()),
+        );
+        self.warnings
+            .get(&identity)
+            .or_else(|| self.warnings.values().find(|finding| finding.source().path() == Some(path)))
     }
 
     /// Takes trigger-file diagnostic changes since the last call.
@@ -760,8 +809,8 @@ impl TriggerRegistries {
 
     /// Counts the distinct root folders and files the prepared registries
     /// searched. Each file counts once, under its passive class, except that
-    /// a trigger schema whose load failed in a prepared registry counts as a
-    /// failed trigger.
+    /// a trigger schema a prepared registry skipped counts as a failed
+    /// trigger.
     pub fn summary(&self) -> RegistrySummary {
         let mut tree_role: HashMap<&Path, bool> = HashMap::new();
         for scope in self.scopes.values() {
@@ -779,28 +828,26 @@ impl TriggerRegistries {
                 .count(),
             ..RegistrySummary::default()
         };
-        // Failed in any prepared registry counts as failed, even where another
-        // context loads it: the payload resolves per context, and counting the
-        // file as loaded would hide a failure the log has reported.
-        let failed_loads: HashSet<&Path> = self
+        // Skipped in any prepared registry counts as failed, even where
+        // another context loads it: the payload resolves per context, and
+        // counting the file as loaded would hide a warning DMLS published.
+        let failed_loads: HashSet<PathBuf> = self
             .scopes
             .values()
-            .filter_map(|scope| match &scope.outcome {
-                Outcome::TriggerFailed { trigger_file } => trigger_file.as_deref(),
-                Outcome::Ready | Outcome::RootFailed(_) => None,
-            })
+            .flat_map(Scope::findings)
+            .filter_map(|finding| finding.identity().path().map(Path::to_path_buf))
             .collect();
         for (path, file) in &self.roots.files {
             let Some(tree) = path.parent().and_then(|parent| tree_role.get(parent)) else {
                 continue;
             };
             match file.class {
-                RootFileClass::TriggerSchema if failed_loads.contains(path.as_path()) => {
+                RootFileClass::SchemaTrigger if failed_loads.contains(path) => {
                     summary.failed_triggers += 1;
                 }
                 RootFileClass::NamedSchema if *tree => summary.tree_schemas += 1,
                 RootFileClass::NamedSchema => summary.scoped_schemas += 1,
-                RootFileClass::TriggerSchema => summary.trigger_schemas += 1,
+                RootFileClass::SchemaTrigger => summary.trigger_schemas += 1,
                 RootFileClass::FailedTrigger => summary.failed_triggers += 1,
                 RootFileClass::Unclassified => summary.unclassified += 1,
             }
@@ -868,7 +915,7 @@ fn scope_affected(scope: &Scope, path: &Path, current: Option<&mut Option<Option
 /// The file or folder a preparation error names.
 fn failing_path(error: &SchemaError) -> Option<PathBuf> {
     match error {
-        SchemaError::TriggerLoad { path, .. } | SchemaError::Io { path, .. } => Some(path.clone()),
+        SchemaError::Io { path, .. } => Some(path.clone()),
         SchemaError::TriggerCaseFoldCollision { root, .. } => Some(root.clone()),
         _ => None,
     }
@@ -911,7 +958,7 @@ mod tests {
     use crate::work_counters::{WorkCounts, work_counts};
 
     fn trigger(key: &str, payload: &str) -> String {
-        format!("kind: trigger-schema\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
+        format!("kind: schema-trigger\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
     }
 
     fn payload(property: &str) -> String {
@@ -1219,19 +1266,30 @@ mod tests {
             ["env.trigger.yaml", "home.trigger.yaml"]
         );
 
-        // A trigger whose payload does not exist yet fails cold: no registry
-        // is claimed for a fresh document.
+        // A trigger whose payload (and its folder) does not exist yet is
+        // skipped: a fresh document installs the valid rest and the warning.
         let missing = fixture.repo.join("payloads/late.yaml");
         write(&envelope, &trigger("title", "../payloads/late.yaml"));
         registries.invalidate_paths(std::slice::from_ref(&envelope));
         let fresh_doc = fixture.repo.join("fresh.md");
-        assert!(fixture.lookup(&mut registries, &fresh_doc).unwrap().is_none());
+        let skipped = fixture.ready(&mut registries, &fresh_doc);
+        assert_eq!(names(&skipped.registry), ["env.trigger.yaml", "home.trigger.yaml"]);
+        assert_eq!(skipped.registry, scan(&fixture.context(&fresh_doc).for_source(&fresh_doc)).unwrap());
+        let published = registries.take_transitions();
+        assert!(
+            published.iter().any(|transition| transition.path == envelope && transition.finding.is_some()),
+            "the skipped trigger's warning is published"
+        );
 
+        // Creating the payload in its absent folder refreshes the scope.
         write(&missing, &payload("late_model"));
         registries.invalidate_paths(std::slice::from_ref(&missing));
         let recovered = fixture.ready(&mut registries, &fresh_doc);
         assert_eq!(names(&recovered.registry)[0], "tree.trigger.yaml");
-        assert!(registries.take_transitions().iter().any(|transition| transition.error.is_none()));
+        assert!(recovered.registry.findings.is_empty());
+        let cleared = registries.take_transitions();
+        assert!(cleared.iter().any(|transition| transition.path == envelope && transition.finding.is_none()));
+        assert!(registries.finding_for(&envelope).is_none());
     }
 
     #[test]
@@ -1244,17 +1302,19 @@ mod tests {
         let home_envelope = fixture.home.join("schemas/home.trigger.yaml");
         let mut previous = fixture.ready(&mut registries, &doc).version;
         for (envelope, key) in [(&env_envelope, "env"), (&home_envelope, "home")] {
-            write(envelope, "kind: trigger-schema\nmatch: {}\n");
+            write(envelope, "kind: schema-trigger\nmatch: {}\n");
             registries.invalidate_paths(std::slice::from_ref(envelope));
-            assert_eq!(fixture.ready(&mut registries, &doc).version, previous, "last-good retained");
-            assert!(registries.load_error_for(envelope).is_some(), "{}", envelope.display());
+            let skipped = fixture.ready(&mut registries, &doc);
+            assert_ne!(skipped.version, previous, "the valid subset replaces the registry");
+            assert_eq!(skipped.registry, scan(&fixture.context(&doc).for_source(&doc)).unwrap());
+            assert!(registries.finding_for(envelope).is_some(), "{}", envelope.display());
 
             write(envelope, &trigger(key, &format!("{key}-payload.yaml")));
             registries.invalidate_paths(std::slice::from_ref(envelope));
             let recovered = fixture.ready(&mut registries, &doc);
-            assert_ne!(recovered.version, previous);
+            assert_ne!(recovered.version, skipped.version);
             assert_eq!(recovered.registry, scan(&fixture.context(&doc).for_source(&doc)).unwrap());
-            assert!(registries.load_error_for(envelope).is_none());
+            assert!(registries.finding_for(envelope).is_none());
             previous = recovered.version;
         }
     }
@@ -1287,28 +1347,169 @@ mod tests {
     }
 
     #[test]
-    fn last_good_is_retained_only_where_the_malformed_file_is_unshadowed() {
+    fn a_malformed_trigger_is_skipped_only_where_it_is_unshadowed() {
         let fixture = Fixture::new();
         let mut registries = TriggerRegistries::default();
         let tree = fixture.ready(&mut registries, &fixture.tree_doc());
         let pkg = fixture.ready(&mut registries, &fixture.pkg_doc());
         let envelope = fixture.repo.join("schemas/tree.trigger.yaml");
-        write(&envelope, "kind: trigger-schema\nmatch: {}\n");
+        write(&envelope, "kind: schema-trigger\nmatch: {}\n");
         registries.invalidate_paths(std::slice::from_ref(&envelope));
 
-        // The tree document serves its last-good registry and reports the
-        // failure; the package document, where the file is shadowed, loads.
-        let retained = fixture.ready(&mut registries, &fixture.tree_doc());
-        assert_eq!(retained.version, tree.version);
-        assert!(scan(&fixture.context(&fixture.tree_doc()).for_source(fixture.tree_doc())).is_err());
+        // The tree document installs the valid rest and reports the skipped
+        // file; the package document, where the file is shadowed, loads it
+        // all and reports nothing.
+        let skipped = fixture.ready(&mut registries, &fixture.tree_doc());
+        assert_ne!(skipped.version, tree.version);
+        assert!(!names(&skipped.registry).contains(&"tree.trigger.yaml".to_string()));
+        assert_eq!(skipped.registry.findings.len(), 1, "discovery skips the malformed file");
+        assert_eq!(
+            skipped.registry,
+            scan(&fixture.context(&fixture.tree_doc()).for_source(fixture.tree_doc())).unwrap()
+        );
         let reloaded = fixture.ready(&mut registries, &fixture.pkg_doc());
         assert_ne!(reloaded.version, pkg.version);
+        assert!(reloaded.registry.findings.is_empty());
         assert_eq!(
             reloaded.registry,
             scan(&fixture.context(&fixture.pkg_doc()).for_source(fixture.pkg_doc())).unwrap()
         );
+        assert_eq!(registries.summary().failed_scopes, 0, "a skipped trigger fails no scope");
+        assert!(registries.finding_for(&envelope).is_some());
+    }
+
+    #[test]
+    fn a_trigger_saved_invalid_is_dropped_while_a_valid_neighbor_changes() {
+        let fixture = Fixture::new();
+        let mut registries = TriggerRegistries::default();
+        let doc = fixture.tree_doc();
+        let initial = fixture.ready(&mut registries, &doc);
+        assert!(names(&initial.registry).contains(&"tree.trigger.yaml".to_string()));
+        assert!(registries.take_transitions().is_empty());
+
+        let envelope = fixture.repo.join("schemas/tree.trigger.yaml");
+        let neighbor_payload = fixture.schemas_dir.join("env-payload.yaml");
+        write(&envelope, "kind: schema-trigger\nname: memory\nmatch:\n$schema: tree-payload.yaml\n");
+        write(&neighbor_payload, &payload("env_changed"));
+        registries.invalidate_paths(&[envelope.clone(), neighbor_payload.clone()]);
+        let current = fixture.ready(&mut registries, &doc);
+
+        assert_eq!(names(&current.registry), ["env.trigger.yaml", "home.trigger.yaml"]);
+        let dependencies: Vec<&Path> = current.registry.dependencies().collect();
+        assert!(dependencies.iter().any(|path| path.ends_with("env-payload.yaml")));
+        assert_eq!(current.registry, scan(&fixture.context(&doc).for_source(&doc)).unwrap());
+        let installed_text = format!("{:?}", current.registry);
+        assert!(installed_text.contains("env_changed"), "the neighbor's change applies");
+        assert!(!installed_text.contains("tree_model"), "the skipped trigger's payload is gone");
+        let transitions = registries.take_transitions();
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].path, envelope);
+        let finding = transitions[0].finding.as_ref().expect("the skipped trigger is published");
+        assert_eq!(finding.code(), darkmatter::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE);
+    }
+
+    #[test]
+    fn a_first_load_with_only_invalid_triggers_installs_an_empty_ready_registry() {
+        let fixture = Fixture::new();
+        let doc = fixture.tree_doc();
+        let envelopes = [
+            fixture.repo.join("schemas/tree.trigger.yaml"),
+            fixture.schemas_dir.join("env.trigger.yaml"),
+            fixture.home.join("schemas/home.trigger.yaml"),
+        ];
+        write(&envelopes[0], "kind: schema-trigger\nmatch: {}\n");
+        write(&envelopes[1], "kind: schema-trigger\nmatch:\n  env: string\n$schema: absent.yaml\n");
+        write(&envelopes[2], "kind: schema-trigger\nmatch: [unclosed\n");
+        let mut registries = TriggerRegistries::default();
+
+        let installed = fixture.ready(&mut registries, &doc);
+        assert!(installed.registry.is_empty(), "no previous registry exists to retain");
+        assert_eq!(installed.registry.findings.len(), 3);
+        assert_eq!(registries.summary().failed_scopes, 0);
+        let mut published: Vec<PathBuf> = registries
+            .take_transitions()
+            .into_iter()
+            .filter(|transition| transition.finding.is_some())
+            .map(|transition| transition.path)
+            .collect();
+        published.sort();
+        let mut expected = envelopes.to_vec();
+        expected.sort();
+        assert_eq!(published, expected, "one warning per skipped trigger");
+    }
+
+    #[test]
+    fn a_shared_source_is_published_once_and_cleared_only_when_no_scope_reports_it() {
+        let fixture = Fixture::new();
+        // One `SCHEMAS_DIR` trigger whose bare payload name the first package
+        // supplies and the other two do not.
+        let envelope = fixture.schemas_dir.join("env.trigger.yaml");
+        write(&envelope, &trigger("env", "scoped-payload.yaml"));
+        write(&fixture.repo.join("area/pkg/schemas/scoped-payload.yaml"), &payload("a_model"));
+        let pkg_b = fixture.repo.join("area/pkg-b");
+        write(&pkg_b.join("schemas/notes.yaml"), "just: data\n");
+        let mut registries = TriggerRegistries::default();
+        let prepare_b = |registries: &mut TriggerRegistries, doc: &Path| {
+            let context = fixture.context(doc).with_package_root(&pkg_b);
+            registries.prepare(doc, &fixture.repo, &context);
+        };
+
+        let (doc_b, other_b) = (pkg_b.join("doc.md"), pkg_b.join("other.md"));
+        prepare_b(&mut registries, &doc_b);
+        prepare_b(&mut registries, &other_b);
+        let transitions = registries.take_transitions();
+        assert_eq!(transitions.len(), 1, "two scopes, one source, one publication");
+        assert!(transitions[0].finding.is_some());
+
+        // A healthy scope never clears the warning another scope reports.
+        fixture.ready(&mut registries, &fixture.pkg_doc());
+        assert!(registries.take_transitions().is_empty());
+        assert!(registries.finding_for(&envelope).is_some());
+
+        // Supplying the payload repairs both package-b scopes; the warning
+        // clears once the last of them stops reporting it.
+        let supplied = pkg_b.join("schemas/scoped-payload.yaml");
+        write(&supplied, &payload("b_model"));
+        registries.invalidate_paths(std::slice::from_ref(&supplied));
+        prepare_b(&mut registries, &doc_b);
+        assert!(registries.take_transitions().is_empty(), "the other scope still reports it");
+        prepare_b(&mut registries, &other_b);
+        let cleared = registries.take_transitions();
+        assert_eq!(cleared.len(), 1);
+        assert!(cleared[0].finding.is_none());
+        assert!(registries.finding_for(&envelope).is_none());
+    }
+
+    #[test]
+    fn a_whole_scan_failure_keeps_last_good_and_warns_once() {
+        let fixture = Fixture::new();
+        let doc = fixture.tree_doc();
+        let mut registries = TriggerRegistries::default();
+        let good = fixture.ready(&mut registries, &doc);
+        // A case-fold collision cannot be created on a case-insensitive
+        // file system, so the scan's error is substituted.
+        let collide = |registries: &mut TriggerRegistries| {
+            registries.invalidate_all();
+            let mut prepared = registries.begin(&doc, &fixture.repo, &fixture.context(&doc)).unwrap().run();
+            prepared.result = Err(SchemaError::TriggerCaseFoldCollision {
+                root: fixture.repo.join("schemas"),
+                files: vec!["A.yaml".into(), "a.yaml".into()],
+            });
+            registries.install(prepared);
+        };
+        let ((), logs) = CapturedLogs::scoped(|| {
+            for _ in 0..3 {
+                collide(&mut registries);
+                assert_eq!(registries.lookup(&doc).unwrap().unwrap().version, good.version, "last-good retained");
+            }
+        });
+        let warnings = logs.matching("WARN");
+        assert_eq!(warnings.len(), 1, "{:#?}", logs.lines());
+        assert!(warnings[0].contains("retaining last-good trigger registry"), "{}", warnings[0]);
+        assert!(warnings[0].contains("has_last_good=true"), "{}", warnings[0]);
+        assert_eq!(logs.matching("DEBUG").iter().filter(|line| line.contains("retaining last-good")).count(), 2);
         assert_eq!(registries.summary().failed_scopes, 1);
-        assert!(registries.load_error_for(&envelope).is_some());
+        assert!(registries.take_transitions().is_empty(), "a scan failure publishes no trigger warning");
     }
 
     #[test]
@@ -1387,56 +1588,52 @@ mod tests {
         let mut registries = TriggerRegistries::default();
         let ((), logs) = CapturedLogs::scoped(|| {
             fixture.ready(&mut registries, &doc);
-            write(&envelope, "kind: trigger-schema\nmatch: {}\n");
+            write(&envelope, "kind: schema-trigger\nmatch: {}\n");
             registries.invalidate_paths(std::slice::from_ref(&envelope));
             fixture.ready(&mut registries, &doc);
             assert_eq!(registries.take_transitions().len(), 1);
-            // The same failure again: neither re-published nor re-warned.
+            // The same finding again: neither re-published nor re-warned.
             for _ in 0..3 {
                 registries.invalidate_all();
                 fixture.ready(&mut registries, &doc);
             }
             assert!(registries.take_transitions().is_empty());
             // A different error.
-            write(&envelope, "kind: trigger-schema\nmatch:\n  title: string(required)\n");
+            write(&envelope, "kind: schema-trigger\nmatch: []\n");
             registries.invalidate_paths(std::slice::from_ref(&envelope));
             fixture.ready(&mut registries, &doc);
-            // Recovery.
+            assert_eq!(registries.take_transitions().len(), 1);
+            // Repair.
             write(&envelope, &trigger("title", "tree-payload.yaml"));
             registries.invalidate_paths(std::slice::from_ref(&envelope));
             fixture.ready(&mut registries, &doc);
+            assert_eq!(registries.take_transitions().len(), 1);
         });
         let warnings = logs.matching("WARN");
         assert_eq!(warnings.len(), 2, "{:#?}", logs.lines());
         for warning in &warnings {
-            assert!(warning.contains("retaining last-good trigger registry"), "{warning}");
-            assert!(warning.contains("has_last_good=true"), "{warning}");
-            assert!(warning.contains(&format!("scope={}", fixture.repo.display())), "{warning}");
-            assert!(warning.contains(&format!("trigger_file={}", envelope.display())), "{warning}");
-            assert!(warning.contains("error="), "{warning}");
+            assert!(warning.contains("ignoring invalid schema trigger"), "{warning}");
+            assert!(warning.contains("code=\"dm.schema.invalid_trigger\""), "{warning}");
+            assert!(warning.contains(&format!("trigger={}", envelope.display())), "{warning}");
         }
         assert_ne!(warnings[0], warnings[1], "the second warning carries the different error");
-        let repeats = logs.matching("DEBUG");
-        assert_eq!(
-            repeats.iter().filter(|line| line.contains("retaining last-good trigger registry")).count(),
-            3,
-            "{repeats:#?}"
-        );
-        let recovered = logs.matching("trigger registry recovered");
+        assert!(logs.matching("retaining last-good").is_empty(), "a skipped trigger fails no scope");
+        let recovered = logs.matching("invalid schema trigger no longer reported");
         assert_eq!(recovered.len(), 1, "{:#?}", logs.lines());
         assert!(recovered[0].contains("INFO"), "{}", recovered[0]);
-        assert!(recovered[0].contains(&format!("trigger_file={}", envelope.display())), "{}", recovered[0]);
+        assert!(recovered[0].contains(&format!("trigger={}", envelope.display())), "{}", recovered[0]);
     }
 
     #[test]
     fn a_cold_failure_logs_unavailable_once() {
         let fixture = Fixture::new();
         let doc = fixture.tree_doc();
-        write(&fixture.repo.join("schemas/tree.trigger.yaml"), "kind: trigger-schema\nmatch: {}\n");
+        // Text that is not UTF-8 cannot be read as a root file.
+        std::fs::write(fixture.repo.join("schemas/binary.yaml"), [0xff, 0xfe, 0x00]).unwrap();
         let mut registries = TriggerRegistries::default();
         let ((), logs) = CapturedLogs::scoped(|| {
             for _ in 0..3 {
-                assert!(fixture.lookup(&mut registries, &doc).unwrap().is_none());
+                assert!(fixture.lookup(&mut registries, &doc).is_err());
                 registries.invalidate_all();
             }
         });
@@ -1450,7 +1647,7 @@ mod tests {
     #[test]
     fn root_files_are_classified_and_counted_once_per_folder() {
         let fixture = Fixture::new();
-        write(&fixture.repo.join("schemas/broken.trigger.yaml"), "kind: trigger-schema\nmatch: {}\n");
+        write(&fixture.repo.join("schemas/broken.trigger.yaml"), "kind: schema-trigger\nmatch: {}\n");
         let mut registries = TriggerRegistries::default();
         for doc in [fixture.tree_doc(), fixture.area_doc(), fixture.pkg_doc()] {
             let _ = fixture.lookup(&mut registries, &doc);
@@ -1468,7 +1665,7 @@ mod tests {
                 trigger_schemas: 5,
                 failed_triggers: 1,
                 unclassified: 2,
-                failed_scopes: 3,
+                failed_scopes: 0,
             }
         );
     }
@@ -1490,12 +1687,12 @@ mod tests {
         for doc in [pkg_b.join("doc.md"), pkg_b.join("other.md")] {
             let context = fixture.context(&doc).with_package_root(&pkg_b);
             registries.prepare(&doc, &fixture.repo, &context);
-            assert!(registries.lookup(&doc).unwrap().is_none());
+            assert_eq!(registries.lookup(&doc).unwrap().unwrap().registry.findings.len(), 1);
         }
         let failed = registries.summary();
         assert_eq!(
             (failed.trigger_schemas, failed.failed_triggers, failed.failed_scopes),
-            (loaded.trigger_schemas - 1, loaded.failed_triggers + 1, 2),
+            (loaded.trigger_schemas - 1, loaded.failed_triggers + 1, 0),
             "loaded: {loaded:?}, failed: {failed:?}"
         );
     }
@@ -1511,11 +1708,11 @@ mod tests {
         let shadowed = registries.summary();
         assert_eq!((shadowed.failed_triggers, shadowed.failed_scopes), (0, 0), "{shadowed:?}");
 
-        assert!(fixture.lookup(&mut registries, &fixture.tree_doc()).unwrap().is_none());
+        assert_eq!(fixture.ready(&mut registries, &fixture.tree_doc()).registry.findings.len(), 1);
         let reached = registries.summary();
         assert_eq!(
             (reached.trigger_schemas, reached.failed_triggers, reached.failed_scopes),
-            (shadowed.trigger_schemas - 1, 1, 1),
+            (shadowed.trigger_schemas - 1, 1, 0),
             "shadowed: {shadowed:?}, reached: {reached:?}"
         );
     }
@@ -1646,7 +1843,7 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_nearer_candidate_keeps_last_good_and_its_watch_until_repaired() {
+    fn a_malformed_nearer_candidate_skips_its_trigger_and_keeps_its_watch_until_repaired() {
         let fixture = shared_import_fixture();
         let mut registries = TriggerRegistries::default();
         let doc = fixture.tree_doc();
@@ -1656,11 +1853,13 @@ mod tests {
 
         write(&nearer, "$schema:\n  Fields: [unclosed\n");
         registries.invalidate_paths(std::slice::from_ref(&nearer));
-        assert!(scan(&fixture.context(&doc).for_source(&doc)).is_err(), "the nearer file fails to load");
-        assert_eq!(fixture.ready(&mut registries, &doc).version, initial.version, "last-good retained");
-        assert_eq!(registries.summary().failed_scopes, 1);
-        // The failed resolution reports no candidates, yet the folder holding
-        // the failing file stays watched, now as present.
+        let skipped = fixture.ready(&mut registries, &doc);
+        assert_ne!(skipped.version, initial.version, "the valid subset replaces the registry");
+        assert_eq!(skipped.registry.findings.len(), 1, "the nearer file fails to load, so discovery skips its trigger");
+        assert!(!names(&skipped.registry).contains(&"tree.trigger.yaml".to_string()));
+        assert_eq!(registries.summary().failed_scopes, 0);
+        // The failed resolution's observations keep the folder holding the
+        // failing file watched, now as present.
         assert!(
             registries.watch_folders().contains(&WatchedFolder::present(nearer_folder.clone())),
             "{:?}",

@@ -19,7 +19,6 @@
 //! body for instructions; later stages rewrite whole text and scan nothing.
 
 use std::borrow::Cow;
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use crate::markdown::Markdown;
@@ -59,6 +58,21 @@ impl TextEdit {
     pub(crate) fn authored(range: Range<usize>, replacement_len: usize) -> Self {
         Self { range, replacement_len, origin: EditOrigin::Authored }
     }
+}
+
+/// A run of the text a structural expansion wrote that was copied from the
+/// text it read.
+///
+/// Unlike a [`TextEdit`], splices may read the same input range more than
+/// once, because repeating a body writes its authored span once per item.
+/// Splices are listed in output order and tile the output exactly: text an
+/// expansion writes is always a copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Splice {
+    /// The run of the input that was copied.
+    pub input: Range<usize>,
+    /// Where the copy starts in the output.
+    pub output: usize,
 }
 
 /// A run of `len` bytes at `output` in the current text that was copied from
@@ -176,6 +190,35 @@ impl BodyOrigin {
         }
     }
 
+    /// The map for `output`, the text an expansion produced by writing
+    /// `splices` of the text this map describes.
+    pub(crate) fn after_splices(&self, splices: &[Splice], output: &str) -> Self {
+        let mut segments = Vec::new();
+        for splice in splices {
+            let first = self.segments.partition_point(|segment| segment.output + segment.len <= splice.input.start);
+            for segment in &self.segments[first..] {
+                if segment.output >= splice.input.end {
+                    break;
+                }
+                let start = splice.input.start.max(segment.output);
+                let end = splice.input.end.min(segment.output + segment.len);
+                if start < end {
+                    push_segment(
+                        &mut segments,
+                        splice.output + (start - splice.input.start),
+                        segment.origin + (start - segment.output),
+                        end - start,
+                    );
+                }
+            }
+        }
+        Self {
+            segments,
+            text_len: output.len(),
+            text_hash: hash_text(output),
+        }
+    }
+
     /// The loaded-document range `range` of the current text was copied from,
     /// when all of it was.
     pub(crate) fn project(&self, range: &Range<usize>) -> Option<Range<usize>> {
@@ -275,6 +318,28 @@ impl DataRanges {
         Cow::Owned(String::from_utf8(bytes).expect("masking replaces whole characters"))
     }
 
+    /// The map for `output`, the text an expansion produced by writing
+    /// `splices` of the text this map describes: each copy keeps the data of
+    /// the range it copied.
+    pub(crate) fn after_splices(&self, splices: &[Splice], output: &str) -> Self {
+        let mut ranges = Vec::new();
+        for splice in splices {
+            let first = self.ranges.partition_point(|data| data.end <= splice.input.start);
+            for data in &self.ranges[first..] {
+                if data.start >= splice.input.end {
+                    break;
+                }
+                let start = splice.input.start.max(data.start);
+                let end = splice.input.end.min(data.end);
+                if start < end {
+                    let at = splice.output + (start - splice.input.start);
+                    ranges.push(at..at + (end - start));
+                }
+            }
+        }
+        Self::covering(output, ranges)
+    }
+
     /// The map for `output`, the text a stage produced by applying `edits`
     /// (sorted and non-overlapping) to the text this map describes.
     pub(crate) fn after_edits(&self, edits: &[TextEdit], output: &str) -> Self {
@@ -347,6 +412,15 @@ impl AuthoredBody {
         self.map.describes(current).then(|| self.map.project(range)).flatten()
     }
 
+    /// Carries the map past an expansion that wrote `splices` of `before`; a
+    /// map that does not describe `before` is dropped.
+    pub(crate) fn spliced(self, before: &str, splices: &[Splice], after: &str) -> Option<Self> {
+        self.map.describes(before).then(|| Self {
+            map: self.map.after_splices(splices, after),
+            text: self.text,
+        })
+    }
+
     /// Carries the map past a stage; a map that does not describe `before`
     /// is dropped.
     pub(crate) fn advanced(self, before: &str, edits: &[TextEdit], after: &str) -> Option<Self> {
@@ -357,12 +431,296 @@ impl AuthoredBody {
     }
 }
 
+/// Identity of one collection expansion that wrote a run of the body.
+///
+/// A nested expansion's bytes are charged to every enclosing owner exactly
+/// once, so a run records its owner chain outermost first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ExpansionOwner(pub(crate) u64);
+
+/// A run of the current body with the lexical scope and iteration it was
+/// copied for.
+///
+/// Repeating a body range copies the same authored span once per item, so
+/// ordinary [`TextEdit`]s (which advance through source runs only once)
+/// cannot describe it; each copy carries its own `ScopeRange`.
+#[derive(Debug, Clone)]
+pub(crate) struct ScopeRange {
+    /// The run of the current body.
+    pub(crate) range: Range<usize>,
+    /// The frame sites in this run read locals from.
+    pub(crate) scope: std::sync::Arc<super::expression::LexicalScope>,
+    /// The original item positions that produced this run.
+    pub(crate) iteration: super::expression::iteration::IterationPath,
+    /// The enclosing expansions that own this run's bytes, outermost first.
+    pub(crate) owners: Vec<ExpansionOwner>,
+    /// The index of the range this one is nested in.
+    parent: Option<usize>,
+}
+
+/// The maps pre-flight discovery reads to attribute a directive of an expanded
+/// body to the authored site and original item it was repeated for.
+///
+/// Advisory, like the maps it holds, so a report's equality ignores it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BodySites {
+    pub(crate) scopes: ScopeRanges,
+    pub(crate) authored: Option<AuthoredBody>,
+}
+
+impl PartialEq for BodySites {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl BodySites {
+    /// See [`scoped_site`].
+    pub(crate) fn site_at(
+        &self,
+        current: &str,
+        span: &Range<usize>,
+        line_offset: usize,
+    ) -> Option<super::preflight::ScopedSite> {
+        scoped_site(&self.scopes, self.authored.as_ref(), current, span, line_offset)
+    }
+}
+
+/// The authored site and original items of the directive occupying `span`
+/// of `current`, when a `::map` / `::filter` copy repeated it.
+///
+/// The site is the file line of the directive's authored opener (the `::`
+/// that begins it, which no stage writes), so every copy of one authored
+/// directive shares a line and differs by its item path. `None` for a
+/// directive no copy holds, and when the maps no longer describe `current`.
+pub(crate) fn scoped_site(
+    scopes: &ScopeRanges,
+    authored: Option<&AuthoredBody>,
+    current: &str,
+    span: &Range<usize>,
+    line_offset: usize,
+) -> Option<super::preflight::ScopedSite> {
+    let iteration = scopes.get(scopes.index_at(span.start)?)?.iteration.clone();
+    if iteration.is_empty() {
+        return None;
+    }
+    let authored = authored?;
+    let opener = span.start..(span.start + 2).min(current.len());
+    let from = authored.project(current, &opener)?.start;
+    let line = authored.text()[..from].matches('\n').count() + 1;
+    Some(super::preflight::ScopedSite { line: line + line_offset, iteration })
+}
+
+/// The [`ScopeRange`]s of a body, in body order.
+///
+/// Ranges are listed by start with each enclosing range before the ranges
+/// inside it, so the innermost range holding an offset is found by a binary
+/// search followed by a walk up the enclosing chain.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ScopeRanges(Vec<ScopeRange>);
+
+impl ScopeRanges {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn get(&self, index: usize) -> Option<&ScopeRange> {
+        self.0.get(index)
+    }
+
+    /// The index of the innermost range containing `offset`, which names the
+    /// scope a site at `offset` executes in.
+    pub(crate) fn index_at(&self, offset: usize) -> Option<usize> {
+        let after = self.0.partition_point(|run| run.range.start <= offset);
+        let mut candidate = after.checked_sub(1)?;
+        loop {
+            let run = &self.0[candidate];
+            if run.range.contains(&offset) {
+                return Some(candidate);
+            }
+            // A range that holds `offset` and starts no later than this one
+            // must enclose it, so only its ancestors can still match.
+            candidate = run.parent?;
+        }
+    }
+
+    /// The innermost range containing `offset`.
+    pub(crate) fn at(&self, offset: usize) -> Option<&ScopeRange> {
+        self.index_at(offset).map(|index| &self.0[index])
+    }
+
+    /// Charges `bytes` inserted at `offset` once to every collection
+    /// expansion that owns the copy there; text outside every copy is free.
+    pub(crate) fn charge(
+        &self,
+        budget: &super::expression::iteration::IterationBudget,
+        offset: usize,
+        bytes: usize,
+    ) -> Result<(), super::expression::iteration::IterationError> {
+        let Some(range) = self.at(offset) else {
+            return Ok(());
+        };
+        match (bytes as u64).checked_mul(range.owners.len() as u64) {
+            Some(0) => Ok(()),
+            Some(charge) => budget.reserve_bytes(charge, &range.iteration),
+            None => budget.reserve_bytes(u64::MAX, &range.iteration),
+        }
+    }
+
+    /// Starts a range at the writer's current offset; `close` ends it.
+    pub(crate) fn open(
+        &mut self,
+        start: usize,
+        scope: std::sync::Arc<super::expression::LexicalScope>,
+        iteration: super::expression::iteration::IterationPath,
+        owners: Vec<ExpansionOwner>,
+        parent: Option<usize>,
+    ) -> usize {
+        self.0.push(ScopeRange { range: start..start, scope, iteration, owners, parent });
+        self.0.len() - 1
+    }
+
+    /// Ends the range opened as `index` at `end`.
+    pub(crate) fn close(&mut self, index: usize, end: usize) {
+        self.0[index].range.end = end;
+    }
+
+    /// These ranges carried past a stage that applied `edits` (sorted and
+    /// non-overlapping) to the text they describe.
+    pub(crate) fn after_edits(&self, edits: &[TextEdit]) -> Self {
+        if edits.is_empty() || self.0.is_empty() {
+            return self.clone();
+        }
+        Self(
+            self.0
+                .iter()
+                .map(|run| ScopeRange {
+                    range: map_offset(edits, run.range.start, false)..map_offset(edits, run.range.end, true),
+                    ..run.clone()
+                })
+                .collect(),
+        )
+    }
+}
+
+/// `offset` of the text `edits` were applied to, as an offset of the result.
+/// An offset inside a replaced range maps to the replacement's start, or to
+/// its end for `inclusive_end`, so a range that held the replacement still
+/// holds it.
+fn map_offset(edits: &[TextEdit], offset: usize, inclusive_end: bool) -> usize {
+    let mut shift: isize = 0;
+    for edit in edits {
+        if edit.range.end <= offset {
+            shift += edit.replacement_len as isize - edit.range.len() as isize;
+        } else if edit.range.start < offset {
+            let start = (edit.range.start as isize + shift) as usize;
+            return if inclusive_end { start + edit.replacement_len } else { start };
+        } else {
+            break;
+        }
+    }
+    (offset as isize + shift) as usize
+}
+
+/// Builds the text of a structural expansion and the provenance of every
+/// byte it writes.
+///
+/// Everything the writer appends is a copy of authored text, so the result is
+/// described by [`Splice`]s plus the [`ScopeRanges`] of the repeated bodies.
+/// Every append is charged to the request's byte allowance before it is
+/// written: once for each collection expansion that encloses it, so output a
+/// nested expansion produced is charged again when it lands in the enclosing
+/// one.
+pub(crate) struct ExpansionWriter<'a> {
+    output: String,
+    splices: Vec<Splice>,
+    scopes: ScopeRanges,
+    budget: &'a super::expression::iteration::IterationBudget,
+    owners: Vec<ExpansionOwner>,
+    open_ranges: Vec<usize>,
+    next_owner: u64,
+}
+
+impl<'a> ExpansionWriter<'a> {
+    pub(crate) fn new(content_len: usize, budget: &'a super::expression::iteration::IterationBudget) -> Self {
+        Self {
+            output: String::with_capacity(content_len),
+            splices: Vec::new(),
+            scopes: ScopeRanges::default(),
+            budget,
+            owners: Vec::new(),
+            open_ranges: Vec::new(),
+            next_owner: 0,
+        }
+    }
+
+    /// Begins one collection invocation's expansion; bytes written until the
+    /// matching [`close_expansion`](Self::close_expansion) are charged to it.
+    pub(crate) fn open_expansion(&mut self) {
+        self.next_owner += 1;
+        self.owners.push(ExpansionOwner(self.next_owner));
+    }
+
+    pub(crate) fn close_expansion(&mut self) {
+        self.owners.pop();
+    }
+
+    /// Appends `content[input]`, failing before the write when an enclosing
+    /// expansion's byte allowance cannot cover it.
+    pub(crate) fn copy(
+        &mut self,
+        content: &str,
+        input: Range<usize>,
+        path: &super::expression::iteration::IterationPath,
+    ) -> Result<(), super::expression::iteration::IterationError> {
+        if input.is_empty() {
+            return Ok(());
+        }
+        let charge = (input.len() as u64).checked_mul(self.owners.len() as u64);
+        match charge {
+            Some(0) => {}
+            Some(charge) => self.budget.reserve_bytes(charge, path)?,
+            None => self.budget.reserve_bytes(u64::MAX, path)?,
+        }
+        self.splices.push(Splice { input: input.clone(), output: self.output.len() });
+        self.output.push_str(&content[input]);
+        Ok(())
+    }
+
+    /// Opens the range one repeated body copy occupies.
+    pub(crate) fn open_iteration(
+        &mut self,
+        scope: std::sync::Arc<super::expression::LexicalScope>,
+        iteration: super::expression::iteration::IterationPath,
+    ) {
+        let parent = self.open_ranges.last().copied();
+        let index = self.scopes.open(self.output.len(), scope, iteration, self.owners.clone(), parent);
+        self.open_ranges.push(index);
+    }
+
+    /// Closes the range [`open_iteration`](Self::open_iteration) opened last.
+    pub(crate) fn close_iteration(&mut self) {
+        if let Some(index) = self.open_ranges.pop() {
+            self.scopes.close(index, self.output.len());
+        }
+    }
+
+    pub(crate) fn finish(self) -> (String, Vec<Splice>, ScopeRanges) {
+        (self.output, self.splices, self.scopes)
+    }
+}
+
 /// The provenance maps of a body between the stages that scan it.
 #[derive(Debug, Clone)]
 pub(crate) struct BodyProvenance {
     pub(crate) origin: Option<BodyOrigin>,
     pub(crate) data: DataRanges,
     pub(crate) authored: Option<AuthoredBody>,
+    pub(crate) scopes: ScopeRanges,
 }
 
 impl BodyProvenance {
@@ -373,7 +731,31 @@ impl BodyProvenance {
             origin: BodyOrigin::capture(markdown),
             data: DataRanges::none_for(markdown.content()),
             authored: Some(AuthoredBody::capture(markdown.content())),
+            scopes: ScopeRanges::default(),
         }
+    }
+
+    /// See [`scoped_site`].
+    pub(crate) fn site_at(
+        &self,
+        current: &str,
+        span: &Range<usize>,
+        line_offset: usize,
+    ) -> Option<super::preflight::ScopedSite> {
+        scoped_site(&self.scopes, self.authored.as_ref(), current, span, line_offset)
+    }
+
+    /// `error`, raised by the site at `span` of `markdown`'s current body,
+    /// with its authored site and iteration (see
+    /// [`scope_failure`](super::site_scope::scope_failure)).
+    pub(crate) fn scope_failure(
+        &self,
+        markdown: &crate::markdown::Markdown,
+        span: Range<usize>,
+        error: impl Into<crate::markdown::types::MarkdownError>,
+    ) -> crate::markdown::types::MarkdownError {
+        let origin = self.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
+        super::site_scope::scope_failure(error.into(), markdown, origin, &self.scopes, span)
     }
 
     /// Carries every map past a stage that rewrote `before` into `after` by
@@ -384,9 +766,36 @@ impl BodyProvenance {
     /// Fails when the data map does not describe `before`.
     pub(crate) fn advance(&mut self, before: &str, edits: &[TextEdit], after: &str) -> MarkdownResult<()> {
         self.data.ensure_describes(before)?;
+        self.scopes = self.scopes.after_edits(edits);
         self.data = self.data.after_edits(edits, after);
         advance(&mut self.origin, before, edits, after);
         self.authored = self.authored.take().and_then(|authored| authored.advanced(before, edits, after));
+        Ok(())
+    }
+
+    /// Carries every map past a structural expansion that wrote `splices` of
+    /// `before` as `after`, and records the scope of each repeated body.
+    ///
+    /// ## Errors
+    ///
+    /// Fails when the data map does not describe `before`.
+    pub(crate) fn expand(
+        &mut self,
+        before: &str,
+        splices: &[Splice],
+        after: &str,
+        scopes: ScopeRanges,
+    ) -> MarkdownResult<()> {
+        self.data.ensure_describes(before)?;
+        debug_assert!(self.scopes.is_empty(), "a body is expanded before any scope is recorded");
+        self.data = self.data.after_splices(splices, after);
+        self.origin = self
+            .origin
+            .take()
+            .filter(|origin| origin.describes(before))
+            .map(|origin| origin.after_splices(splices, after));
+        self.authored = self.authored.take().and_then(|authored| authored.spliced(before, splices, after));
+        self.scopes = scopes;
         Ok(())
     }
 }
@@ -448,9 +857,7 @@ fn push_segment(segments: &mut Vec<Segment>, output: usize, origin: usize, len: 
 }
 
 fn hash_text(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    biscuit_hash::xx_hash(text)
 }
 
 #[cfg(test)]
@@ -647,5 +1054,106 @@ mod tests {
         let (markdown, origin) = origin_of("body\n");
         assert!(origin.describes(markdown.content()));
         assert!(!origin.describes("bodx\n"));
+    }
+
+    mod expansion {
+        use super::*;
+        use crate::markdown::compose::expression::LexicalScope;
+        use crate::markdown::compose::expression::iteration::{IterationBudget, IterationLimits, IterationPath};
+        use std::num::NonZeroU64;
+
+        fn scope() -> std::sync::Arc<LexicalScope> {
+            LexicalScope::new(vec![("i".to_string(), serde_json::json!(1))])
+        }
+
+        #[test]
+        fn a_repeated_range_projects_to_the_same_authored_bytes_each_time() {
+            let loaded = "head\nbody {{ x }}\ntail\n";
+            let (markdown, origin) = origin_of(loaded);
+            let content = markdown.content();
+            let body = span_of(content, "body {{ x }}\n");
+            let budget = IterationBudget::new(IterationLimits::default());
+            let mut writer = ExpansionWriter::new(content.len(), &budget);
+            let path = IterationPath::empty();
+            writer.copy(content, 0..body.start, &path).unwrap();
+            for _ in 0..2 {
+                writer.copy(content, body.clone(), &path).unwrap();
+            }
+            writer.copy(content, body.end..content.len(), &path).unwrap();
+            let (output, splices, _) = writer.finish();
+            assert_eq!(output, "head\nbody {{ x }}\nbody {{ x }}\ntail\n");
+            let carried = origin.after_splices(&splices, &output);
+            let authored = span_of(loaded, "{{ x }}");
+            let first = span_of(&output, "{{ x }}");
+            let second = first.start + body.len()..first.end + body.len();
+            assert_eq!(carried.project(&first), Some(authored.clone()));
+            assert_eq!(carried.project(&second), Some(authored));
+        }
+
+        #[test]
+        fn data_inside_a_repeated_range_is_data_in_every_copy() {
+            let text = "ab\ncd\n";
+            let data = DataRanges::covering(text, std::iter::once(3..5).collect());
+            let splices = vec![
+                Splice { input: 3..6, output: 0 },
+                Splice { input: 3..6, output: 3 },
+            ];
+            let output = "cd\ncd\n";
+            let carried = data.after_splices(&splices, output);
+            assert!(carried.intersects(&(0..2)) && carried.intersects(&(3..5)));
+            assert!(!carried.intersects(&(2..3)) && !carried.intersects(&(5..6)));
+        }
+
+        #[test]
+        fn nested_ranges_resolve_to_the_innermost_copy() {
+            let budget = IterationBudget::new(IterationLimits::default());
+            let mut writer = ExpansionWriter::new(0, &budget);
+            let path = IterationPath::empty();
+            writer.open_expansion();
+            writer.open_iteration(scope(), path.clone());
+            writer.copy("abcdefgh", 0..2, &path).unwrap();
+            writer.open_iteration(scope(), path.clone());
+            writer.copy("abcdefgh", 2..4, &path).unwrap();
+            writer.close_iteration();
+            writer.copy("abcdefgh", 4..5, &path).unwrap();
+            writer.close_iteration();
+            writer.close_expansion();
+            let (_, _, ranges) = writer.finish();
+            assert_eq!(ranges.at(0).unwrap().range, 0..5);
+            assert_eq!(ranges.at(3).unwrap().range, 2..4);
+            assert_eq!(ranges.at(4).unwrap().range, 0..5, "after the inner copy the outer one holds again");
+            assert!(ranges.at(5).is_none());
+            assert_eq!(ranges.at(3).unwrap().owners.len(), 1);
+        }
+
+        #[test]
+        fn ranges_follow_the_edits_of_later_stages() {
+            let budget = IterationBudget::new(IterationLimits::default());
+            let mut writer = ExpansionWriter::new(0, &budget);
+            let path = IterationPath::empty();
+            writer.open_expansion();
+            writer.open_iteration(scope(), path.clone());
+            writer.copy("aa{{x}}bb", 0..9, &path).unwrap();
+            writer.close_iteration();
+            let (_, _, ranges) = writer.finish();
+            let carried = ranges.after_edits(&[TextEdit::data(2..7, 1)]);
+            assert_eq!(carried.at(0).unwrap().range, 0..5, "the replacement shrinks the copy");
+        }
+
+        #[test]
+        fn copies_are_charged_once_per_enclosing_expansion_and_fail_before_the_write() {
+            let budget =
+                IterationBudget::new(IterationLimits::new(NonZeroU64::new(9).unwrap(), NonZeroU64::new(8).unwrap()));
+            let path = IterationPath::empty();
+            let mut writer = ExpansionWriter::new(0, &budget);
+            writer.copy("xxxx", 0..4, &path).unwrap();
+            assert_eq!(budget.usage().bytes, 0, "outside every expansion is free");
+            writer.open_expansion();
+            writer.open_expansion();
+            writer.copy("xxxx", 0..4, &path).unwrap();
+            assert_eq!(budget.usage().bytes, 8);
+            assert!(writer.copy("x", 0..1, &path).is_err());
+            assert_eq!(writer.finish().0.len(), 8, "the failing copy wrote nothing");
+        }
     }
 }

@@ -99,6 +99,8 @@ pub struct ResolutionContext {
     /// the compose lookups (frontmatter seed state and the body's resolving
     /// lookup) before the document. `None` declares nothing.
     pub(crate) host_globals: Option<super::HostGlobals>,
+    /// Collection callbacks share the enclosing request or standalone context's allowance.
+    pub(crate) iteration: super::iteration::IterationBudget,
     /// Projected property/array occurrences mapped back to their immutable caller records.
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
@@ -134,6 +136,7 @@ impl ResolutionContext {
             current: Default::default(),
             file_resolution_context: context,
             host_globals: None,
+            iteration: super::iteration::IterationBudget::new(Default::default()),
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
         }
@@ -337,26 +340,20 @@ pub(crate) fn is_remote_url(raw: &str) -> bool {
         .is_some()
 }
 
-/// Normalizes a filepath argument: strips a leading `file://` scheme and
-/// collapses doubled `/` separators (per the spec's normalization note).
+/// The `file://` input adapter: strips one leading `file://` and leaves the
+/// rest untouched, so `file://foo/bar` reads as `foo/bar` and
+/// `file:////server/share/x` keeps its UNC meaning. It is not a reference
+/// scheme; the remainder is validated and resolved as any other reference.
 pub fn normalize_path_arg(raw: &str) -> String {
-    let stripped = raw.strip_prefix("file://").unwrap_or(raw);
-    // Collapse repeated slashes; a leading "./" or "../" is preserved because
-    // only consecutive separators are merged, not the dots that precede them.
-    let mut out = String::with_capacity(stripped.len());
-    let mut prev_slash = false;
-    for ch in stripped.chars() {
-        if ch == '/' {
-            if !prev_slash {
-                out.push(ch);
-            }
-            prev_slash = true;
-        } else {
-            out.push(ch);
-            prev_slash = false;
-        }
-    }
-    out
+    raw.strip_prefix("file://").unwrap_or(raw).to_string()
+}
+
+/// Whether `raw` is a well-formed file reference: the `file://` input
+/// adapter ([`normalize_path_arg`]), then `biscuit-file`'s passive structural
+/// rules ([`biscuit_file::FileReference::new`]). Reads no filesystem,
+/// environment, or network, and answers the same on every host OS.
+pub fn is_well_formed_reference(raw: &str) -> bool {
+    biscuit_file::FileReference::new(&normalize_path_arg(raw)).is_ok()
 }
 
 /// Canonical document-backed file-reference resolver shared by the expression
@@ -524,10 +521,13 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn normalizes_file_scheme_and_double_slashes() {
+    fn the_file_scheme_adapter_strips_only_its_prefix() {
         assert_eq!(normalize_path_arg("file://foo/bar"), "foo/bar");
-        assert_eq!(normalize_path_arg("foo//bar"), "foo/bar");
-        assert_eq!(normalize_path_arg("./a//b"), "./a/b");
+        assert_eq!(normalize_path_arg("file:///tmp/spec.md"), "/tmp/spec.md");
+        assert_eq!(normalize_path_arg("file:////server/share/x"), "//server/share/x");
+        assert_eq!(normalize_path_arg("//server/share/x"), "//server/share/x");
+        assert_eq!(normalize_path_arg("foo//bar"), "foo//bar");
+        assert_eq!(normalize_path_arg("https://"), "https://");
     }
 
     #[test]

@@ -57,9 +57,10 @@ pub fn render_terminal_output(
     input_path: Option<&PathBuf>,
     cli: &Cli,
     term: Terminal,
+    strict_style: bool,
     features: &[Feature],
 ) -> Result<()> {
-    let output = terminal_page(md, input_path, cli, &term, features)?
+    let output = terminal_page(md, input_path, cli, &term, strict_style, features)?
         .render(md)
         .context("Failed to render markdown for terminal")?;
 
@@ -79,6 +80,7 @@ pub fn terminal_page(
     input_path: Option<&PathBuf>,
     cli: &Cli,
     term: &Terminal,
+    strict_style: bool,
     features: &[Feature],
 ) -> Result<DarkmatterPage> {
     // Resolve the theme from the same `Terminal` that will render the page.
@@ -109,7 +111,7 @@ pub fn terminal_page(
 
     // Apply page-level frontmatter style after CLI flags so CLI wins on
     // overlapping fields via PageStyleOverrides.
-    page = apply_style_frontmatter(page, md, cli, input_path)?;
+    page = apply_style_frontmatter(page, md, cli, input_path, strict_style)?;
 
     // Handle line numbers: CLI flag overrides default.
     if let Some(on) = cli.line_numbers {
@@ -154,30 +156,27 @@ pub fn apply_features(page: DarkmatterPage, features: &[Feature]) -> DarkmatterP
 }
 
 /// Parse the `style:` frontmatter (if any), promote schema warnings to errors
-/// when `--strict-style` is set, log remaining warnings, and apply the
-/// page-level subset to `page` using the CLI's override summary.
+/// when `strict_style` (`--deny style` or `--deny all`) is set, log remaining
+/// warnings, and apply the page-level subset to `page` using the CLI's
+/// override summary.
 pub fn apply_style_frontmatter(
     page: DarkmatterPage,
     md: &Markdown,
     cli: &Cli,
     input_path: Option<&PathBuf>,
+    strict_style: bool,
 ) -> Result<DarkmatterPage> {
     let (style, all_warnings) =
         from_frontmatter(md.frontmatter()).context("Failed to parse `style:` frontmatter")?;
 
-    // `--strict-style` promotes schema issues (UnknownKey / Deprecated) to
+    // Denying `style` promotes schema issues (UnknownKey / Deprecated) to
     // errors, but informational `KnownButInactive` warnings must still flow
     // through `log_style_warnings` so `RUST_LOG=darkmatter=info` users see
     // future-phase keys regardless of strict mode.
-    let (style, warnings) = if cli.strict_style {
-        let (mut schema, informational): (Vec<_>, Vec<_>) = all_warnings
-            .into_iter()
-            .partition(StyleWarning::is_schema_issue);
-        // Also reject inline HR deprecation warnings in strict mode.
-        let inline_hr_warnings = scan_inline_hr_warnings(md.content());
-        schema.extend(inline_hr_warnings);
+    let (style, warnings) = if strict_style {
+        let (schema, informational) = denied_style_issues(all_warnings, md);
         let style = into_strict((style, schema))
-            .context("`style:` frontmatter rejected by --strict-style")?;
+            .context("`style:` frontmatter rejected by --deny style")?;
         (style, informational)
     } else {
         (style, all_warnings)
@@ -213,10 +212,20 @@ pub fn apply_style_frontmatter(
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
 }
 
+/// Splits `warnings` under a denied `style` into the issues that block (the
+/// schema issues plus the body's inline horizontal-rule deprecations) and the
+/// informational notices, which never block.
+fn denied_style_issues(warnings: Vec<StyleWarning>, md: &Markdown) -> (Vec<StyleWarning>, Vec<StyleWarning>) {
+    let (mut schema, informational): (Vec<_>, Vec<_>) =
+        warnings.into_iter().partition(StyleWarning::is_schema_issue);
+    schema.extend(scan_inline_hr_warnings(md.content()));
+    (schema, informational)
+}
+
 /// Log non-fatal style warnings via `tracing`.
 ///
 /// `KnownButInactive` is informational; `UnknownKey` and `Deprecated` are
-/// warnings (but only when not promoted to errors by `--strict-style`).
+/// warnings (but only when not promoted to errors by `--deny style`).
 fn log_style_warnings(warnings: &[StyleWarning]) {
     for w in warnings {
         match &w.kind {
@@ -298,15 +307,26 @@ mod tests {
     }
 
     #[test]
-    fn strict_style_flag_defaults_false() {
-        let cli = cli_from(&["md", "doc.md"]);
-        assert!(!cli.strict_style);
+    fn deny_defaults_to_nothing_and_takes_style() {
+        assert!(cli_from(&["md", "doc.md"]).render.deny.is_empty());
+        let cli = cli_from(&["md", "doc.md", "--deny", "style"]);
+        let policy = crate::args::policy::resolve_for(crate::args::policy::PolicyCommand::Render, &[], &cli.render.deny, &[], None)
+            .expect("resolves");
+        assert!(policy.denies("style"));
     }
 
     #[test]
-    fn strict_style_flag_parses() {
-        let cli = cli_from(&["md", "doc.md", "--strict-style"]);
-        assert!(cli.strict_style);
+    fn a_denied_style_blocks_schema_issues_and_inline_rules_but_never_a_notice() {
+        let md = Markdown::try_from_content("# Doc\n\n--- { style: waves }\n").unwrap();
+        let warnings = vec![
+            StyleWarning::new("style.page.bogus", StyleWarningKind::UnknownKey),
+            StyleWarning::new("style.page.later", StyleWarningKind::KnownButInactive { sub_spec: 99 }),
+        ];
+        let (blocking, informational) = denied_style_issues(warnings, &md);
+        assert!(blocking.iter().any(|w| w.path == "style.page.bogus"), "{blocking:?}");
+        assert!(blocking.iter().any(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. })), "{blocking:?}");
+        assert_eq!(informational.len(), 1);
+        assert!(matches!(informational[0].kind, StyleWarningKind::KnownButInactive { .. }));
     }
 
     // -----------------------------------------------------------------
@@ -322,7 +342,7 @@ mod tests {
     #[tracing_test::traced_test]
     fn strict_style_succeeds_on_schema_clean_sub_spec_7_key() {
         // After sub-spec #7, `page.stylesheet` is wired and produces no
-        // `KnownButInactive` warning. `--strict-style` must still succeed
+        // `KnownButInactive` warning. `--deny style` must still succeed
         // because the document is schema-clean.
         let raw = "---\n\
 style:\n\
@@ -330,9 +350,9 @@ style:\n\
 \x20       stylesheet: https://example.com/main.css\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
-        let cli = cli_from(&["md", "doc.md", "--strict-style"]);
-        apply_style_frontmatter(test_page(), &md, &cli, None)
-            .expect("strict-style must succeed on schema-clean wired key");
+        let cli = cli_from(&["md", "doc.md"]);
+        apply_style_frontmatter(test_page(), &md, &cli, None, true)
+            .expect("a denied style must succeed on a schema-clean wired key");
     }
 
     #[test]
@@ -346,7 +366,7 @@ style:\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
-        let page = apply_style_frontmatter(test_page(), &md, &cli, None).expect("apply");
+        let page = apply_style_frontmatter(test_page(), &md, &cli, None, false).expect("apply");
         assert!(page.stylesheet().is_some(), "sub-spec #7 key should be applied");
     }
 }
