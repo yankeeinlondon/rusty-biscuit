@@ -2,14 +2,106 @@
 kind: plan
 created: 2026-10-20
 total_phases: 5
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+- darkmatter
+- darkmatter-cli
+- dmls
+- claudine
+source_files_during_phase_2:
+- claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+- claudine/lib/src/dispatch/matcher.rs
+- claudine/lib/src/dispatch/matcher/tests.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- darkmatter/cli/tests/l1/compose_call_warnings.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/lib/src/lifecycle/schema_projection.rs
+- darkmatter/lib/src/lifecycle/signatures.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/ast.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/lint.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/parser.rs
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/lexical.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/tests/l1/function_binding_registry.rs
+- darkmatter/lib/tests/l1/function_call_binding.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- darkmatter/schemas/partials/functions.yaml
+docs_updated_during_phase_2:
+- darkmatter/docs/iterables.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/implementation-log.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/error.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/binding.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/site_scope.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/tests/l1/collection_execution.rs
+- darkmatter/lib/tests/l1/function_call_binding.rs
+- darkmatter/schemas/partials/functions.yaml
+docs_updated_during_phase_3:
+- darkmatter/README.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/plan.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/expressions.md
 ---
 
 # Map and Filter Implementation Plan
@@ -178,7 +270,7 @@ changes here. For the unstarted tasks below:
 Depends on Phase 1. These tasks are sequential because they change shared AST
 and analysis contracts; delegate them as one owned slice if using subagents.
 
-- [ ] **Parse inline callbacks**
+- [x] **Parse inline callbacks**
   - Add equivalent `=>` and `->` tokenization and a reusable `BindingPattern`
     (identifier or shallow object fields) to callback-only argument nodes.
     Preserve `parse_spanned(...).erase()`, formatting, and per-field,
@@ -195,7 +287,7 @@ and analysis contracts; delegate them as one owned slice if using subagents.
     precedence. Define incomplete editor input recovery without inventing a
     second grammar.
 
-- [ ] **Bind passive locals**
+- [x] **Bind passive locals**
   - Extend existing binding and static traversal APIs with immutable lexical
     frames, binding identities, and a reserved `local` namespace. Use retained
     owned/shared handles for scopes carried into later directive stages;
@@ -227,7 +319,7 @@ and analysis contracts; delegate them as one owned slice if using subagents.
     change; do not describe the present string-only registration as shipped file
     narrowing before that code changes.
 
-- [ ] **Check callback signatures**
+- [x] **Check callback signatures**
   - Extend the prerequisite's shared checker and executable registration
     validation to accept inline callback arguments: amend
     `RegistrationError::FunctionValued` (and the grammar translator's
@@ -266,7 +358,7 @@ and error modules; the editor owner controls DMLS; the catalog owner controls
 catalog artifacts and examples. Shared API changes return to the integrator
 before other owners adopt them. Do not run a full suite per subagent.
 
-- [ ] **Evaluate collection callbacks**
+- [x] **Evaluate collection callbacks**
   - Add registered callback dispatch for `map` and `filter`, separate from
     eager value-argument evaluation: an `EvaluationMode::Callback` beside the
     delivered `Eager` and `Lazy`, following the `LazyCall` pattern so the
@@ -308,7 +400,7 @@ before other owners adopt them. Do not run a full suite per subagent.
     `find_files`/`frontmatter` behavior in a controlled file fixture for the
     provenance case.
 
-- [ ] **Expose editor locals**
+- [x] **Expose editor locals**
   - Consume the shared parser, binding, and signature APIs in
     `dmls/src/overlay/expressions.rs` and hover, completion, diagnostics, and
     semantic-token providers. Highlight both arrows and every pattern binding;
@@ -322,7 +414,7 @@ before other owners adopt them. Do not run a full suite per subagent.
     incomplete input, completion ordering, hover ownership, and no provider
     execution through normal DMLS provider/protocol fixtures.
 
-- [ ] **Publish catalog entries**
+- [x] **Publish catalog entries**
   - Add both functions to `darkmatter/schemas/partials/functions.yaml` using
     the prerequisite's catalog wiring, signature grammar, and inline
     `example(call => result)` mechanism, with one declared category (for
