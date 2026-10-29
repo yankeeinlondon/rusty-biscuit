@@ -6,7 +6,8 @@ area: darkmatter
 clarified: false
 reviewed: false
 implemented: true
-review_iterations: 0
+review_iterations: 2
+completed: true
 $schema:
     status: |-
         enum(
