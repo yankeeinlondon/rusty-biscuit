@@ -43,7 +43,12 @@ Two traps keep that order intact:
 - **Remove with `shift_remove`.** Under `preserve_order`, `serde_json::Map::remove`
   (and `IndexMap::remove`) is a *swap* remove: the last key jumps into the
   removed key's slot. Any removal from frontmatter or effective state uses
-  `shift_remove`.
+  `shift_remove`, and so does schema lowering (`schemas/simplified/convert.rs`,
+  `schemas/resolve.rs`, `schemas/scope.rs`), whose JSON Schema key order is
+  pinned byte for byte by the convert snapshots and the
+  `recursive_schema_golden` goldens (re-bless with
+  `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1` only after showing the change is
+  order-only).
 - **Never round-trip through `HashMap`.** `EffectiveStateBuilder::with_frontmatter`
   and `EffectiveState::new` take a `serde_json::Map`; `EffectiveState::data()`
   and the frontmatter shell APIs use the ordered `SharedFrontmatter` view (see

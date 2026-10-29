@@ -37,15 +37,17 @@ the reference is written:
 
 | Where the reference is written | Its local names |
 |---|---|
+| a schema file with both `$schema` and `types` | the entries of `types`; the exported properties remain separate |
 | a `kind: schema` file | the entries of its `types` mapping |
 | a pure schema file (`$schema` as the only top-level key) | the top-level entries of its `$schema` mapping |
 | a document's inline `$schema` mapping | the top-level entries of that mapping |
 | one inline arm of a root union (`$schema` is a YAML sequence) | that arm's own top-level entries; names are never combined across arms |
 
-Each top-level entry is both a property of the schema and a named type you
+When there is no separate `types` table, each top-level entry is both a property of the schema and a named type you
 can reuse, so in a document's inline `$schema` a type such as `person` above
 is also a frontmatter property. Keep reusable types in a schema file when they
-should not be document properties. Some schemas export no names to other files: a root-union schema
+should not be document properties, or declare them beside the export in `types`.
+Without a separate `types` table, some schemas export no names to other files: a root-union schema
 file, a schema file whose whole payload is a reference to another file
 (`$schema: ./other.yaml`), and raw JSON Schema. Importing a name from one of
 them is a schema error.

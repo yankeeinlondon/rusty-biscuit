@@ -245,11 +245,29 @@ standalone schema file. Five library errors are projected this way:
   (`title: nope`) is reported on the file itself. An explicit target there
   that cannot be found or read (`Name@./missing.yaml`) is a
   `dm.schema.prepare` diagnostic on the target text.
+  This includes definitions in a separate `types` table that the exported
+  `$schema` does not use; an unused `types.unused: missing` still reports
+  the unknown name at `missing`.
 - `suggest(...)` candidates written on a reference are checked against the
   resolved type, as `dm.schema.invalid_suggestion`. An invalid candidate the
   type inherits is reported in the file that declared it.
 
 In a schema file, an invalid definition is ranged at the token the grammar rejected, such as an unknown constraint name, rather than the whole value. The same holds for the core types: an unknown, repeated, misplaced, or mixed `alphanumeric` option is ranged on the option, and a non-null default on `null` (`null(default(1))`) on its argument. A native YAML null definition (`review: null`, `review: ~`, or `review:` with no value) is the `null` type and produces no diagnostic, while a quoted `""` is still *expected a type name*. A value that breaks a type is an ordinary value diagnostic: under a schema whose `initialize` actions exclude `{ shell: shell(required) }`, a `shell` action there is ranged on that list item, exactly as `md schema validate` reports it. This also holds for the two line-wrapped spellings the schema grammar accepts, a plain value continued onto more-indented lines and a list whose `-` sits at its parent key's column (see [Source-Aware Presentation Boundary](./definition.md#source-aware-presentation-boundary)). Hover and completion work on continuation lines and indentless list items too, and select the same schema node as the conventional spelling.
+
+These editing rules also apply when `$schema` and `types` share a document,
+with or without `kind: schema`:
+
+```yaml
+$schema:
+  title: label
+types:
+  label: string(required)
+```
+
+Unsaved changes to `label` update hover and diagnostics from the current
+buffer. If an edit makes either table malformed, DMLS retains the last valid
+model while reporting the current error. Completion remains available inside
+both tables, including an unfinished union such as `title: [`.
 
 Completion on a continuation line also works while the definition is still being typed and the file does not parse yet, including when the value starts with an anchor or tag:
 

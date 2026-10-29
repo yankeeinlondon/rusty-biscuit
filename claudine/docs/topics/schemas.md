@@ -51,6 +51,13 @@ A file holding only a root `$schema` key is a document schema. A file with
 `kind: schema` is a type library instead: it holds `types:`, and a document
 reaches it only through an import such as `stack@./lifecycle.yaml`.
 
+A document schema can also declare a sibling `types:` mapping. Its `$schema`
+defines the document's properties and `types` defines reusable local names.
+For example, `$schema: { runners: runner[] }` can use `types.runner` from the
+same file. A local type can still import another definition such as
+`identifier@../_types.yaml`; local definitions and cross-file imports can be
+used together.
+
 ### Repo Wide Schemas
 
 A schema can also apply to documents that never mention it. Darkmatter looks

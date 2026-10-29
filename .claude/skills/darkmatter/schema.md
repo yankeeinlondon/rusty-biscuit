@@ -33,9 +33,24 @@ types:
     name: string(required)
 ```
 
-`parse_standalone_schema_document` is the passive authority. A pure schema must
-have `$schema` as its only root key. A kinded schema must declare `kind: schema`
-and provide a `types` mapping. Referenced YAML without either envelope remains
+`parse_standalone_schema_document` is the passive authority. A pure schema has
+`$schema` and an optional sibling `types` mapping. A kinded schema declares
+`kind: schema` and a `types` mapping, with an optional `$schema` export.
+When both tables are present, `$schema` defines document properties and `types`
+supplies local names and named imports; local definitions and cross-file imports
+can be mixed. Without a separate export, the mapping payload serves both roles.
+`StandaloneSchemaDocument.local_types` and its separate source map preserve
+that namespace; `resolution_source_map()` distinguishes `$schema` and `types`
+paths. Editors pass their current table to `expand_named_types_with_locals`
+instead of rereading the file for local references.
+The malformed-buffer lexical claim also admits `$schema` beside `types`;
+completion recognizes both tables independently of the tagged/untagged
+envelope. Cover valid → malformed → repaired buffers and unsaved local-type
+edits through the LSP handlers, not just successful standalone parsing.
+Standalone editor checks use `check_standalone_named_types` to check the
+export and every helper, including unused definitions, with each table's
+own source paths. Runtime expansion keeps helpers out of document properties.
+Referenced YAML without either envelope remains
 raw JSON Schema. When a non-empty bare map consists entirely of valid
 SimplifiedSchema property strings and has no recognized or reserved JSON
 Schema/custom-vocabulary keys, resolution emits the conservative
@@ -336,9 +351,10 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `TypeExpr::Imported { reference: "this" }` as `Name@this` (no stored
   spelling; `SimplifiedType::is_keyword` decides built-in vs reference, so
   `string` is built-in and `string@this` is local). Local names are the
-  schema's own top-level entries (`types` of `kind: schema`, else `$schema`);
-  each inline root-union arm uses only its own entries. Root-union,
-  whole-file-reference, and raw JSON Schema files export no names. A bare name
+  explicit `types` table when present beside an export, otherwise the mapping
+  payload's top-level entries. Without a separate table, each inline root-union
+  arm uses only its own entries. Root-union and whole-file-reference files
+  without `types`, and raw JSON Schema files, export no names. A bare name
   inside an imported definition resolves in its defining file. Serialization
   writes local references bare unless the name is a keyword.
 - Every constraint survives a reference, including `required` and `generated`
