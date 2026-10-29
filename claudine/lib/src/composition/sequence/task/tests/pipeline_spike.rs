@@ -42,13 +42,14 @@ fn group_fixture(legs: usize, max_parallel: usize, frontmatter_bytes: usize) -> 
 }
 
 /// The live document view a group starts from, as [`Fixture::execute_step`]
-/// seeds it; each leg's cell is a clone of it (`group.rs`).
+/// seeds it; each admitted leg's cell is a clone of it (`group/branch.rs`).
 fn group_start_view(fixture: &Fixture) -> darkmatter::markdown::compose::SharedFrontmatter {
     darkmatter::markdown::compose::SharedFrontmatter::from(fixture.frontmatter.clone())
 }
 
-/// C1: a capped group builds a private runtime branch and live-frontmatter
-/// view for every declared leg before any leg is admitted.
+/// C1: a capped group's per-leg state, a private runtime branch and
+/// live-frontmatter view built for each leg when it is admitted and released
+/// before the next admission.
 #[test]
 #[ignore = "measurement spike; run explicitly"]
 fn pipeline_spike_c1_group_leg_state() {

@@ -928,8 +928,8 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             .caller_input_records;
         caller_input_records.extend(self.run.compose.caller_input_records.clone());
         if let Some(runtime) = &request.runtime {
-            for key in runtime.snapshot().mutations.keys() {
-                caller_input_records.remove(key);
+            for key in runtime.mutation_keys() {
+                caller_input_records.remove(&key);
             }
         }
         for key in claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS {

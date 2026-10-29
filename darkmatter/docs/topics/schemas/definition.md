@@ -615,7 +615,9 @@ In a union, the target is the property's effective type at the place the candida
 $schema:
     # `large` is kept: the second arm accepts it. `huge` is linted.
     size: ["string(pattern(^small$); suggest(small, large, huge))", "string(pattern(^large$))"]
-``` Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
+```
+
+Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
 
 Invalid candidates produce structured lint problems (not schema-load errors) with decoded text, interpreted value, failure reason, and exact source span. Schema resolution, validator construction, frontmatter validation, and composition all continue uninterrupted. See `SuggestionLintProblem` and `SuggestionLintReason` in the library API.
 
@@ -834,7 +836,10 @@ the `;`, as with `enum` members.
 - **Defaults and suggestions must be valid values.** A `default(...)` or
   `suggest(...)` value that the type rejects fails the schema load, without
   coercion. `alphanumeric(default(12))` fails because `12` is a number; write
-  `default('12')`.
+  `default('12')`. The check's validator comes from the shared
+  [validator cache](#validator-cache), keyed on the type's complete
+  constraints, so 100 imports of one type compile it once; each value is
+  still judged on every load.
 - **No coercion.** A native number or boolean is a type mismatch, never
   converted to text: `n: 3` fails against `n: alphanumeric`. In a union, the
   other arms keep their own coercion, so `[alphanumeric, string]` still turns
@@ -1421,12 +1426,32 @@ structured types share their compiled bodies as described in
 mutate those bodies.
 
 There are two cache lifetimes. The expansion's namespace cache ends with that
-operation. Separately, a bounded cache in the running process retains parsed
-file tables by the path read and a hash of the file's contents. A new expansion
-reads the file before consulting that cache, so edits and deletions are
-observed; a cache hit saves parsing, rather than suppressing the read. The
-cache holds successful parses only. Expansion state, dependency tracking, and
-use-site modifications remain local to each operation.
+operation. Separately, the running process keeps one entry per imported file
+path: the hash of the contents it last parsed successfully and the parsed
+table. Every new expansion still reads and hashes the file first, so edits and
+deletions are observed; a matching hash saves parsing, rather than suppressing
+the read.
+
+- **An unchanged file is reused, however many files the process imports.**
+  Editing one file reparses that file alone; other entries are untouched.
+- **A changed file replaces its entry.** An operation that already holds the
+  earlier table keeps using it until it finishes.
+- **A failure is never served.** A file that cannot be read, decoded, or
+  parsed fails the import with its own error and loses its entry; fixing the
+  file parses it again.
+- **Entries are not evicted.** Memory grows with the number of distinct file
+  paths a process imports, not with how often they are edited.
+
+```text
+resolve (a, b, c imported)   parses a, b, c
+resolve again                parses nothing
+edit b; resolve              parses b only
+break c; resolve             error for c; c's entry dropped
+repair c; resolve            parses c
+```
+
+Expansion state, dependency tracking, and use-site modifications remain local
+to each operation.
 
 This sharing reduces copying and repeated parsing. It does not remove file
 resolution, selected-definition copying, or expansion work, and it does not
@@ -3751,7 +3776,15 @@ flowchart TD
 **Documents without loaded text.** Locations need the text the document was parsed from. A `Markdown` document built in code has no such text, so its locations refer to the serialized YAML of its frontmatter. Source-free validation reports no locations: `EffectiveSchema::validate`, or `validate_with_positions` given the empty `PositionMap::new()`. A library caller holding bare YAML can build a map with `schemas::validate::build_position_map(yaml)`; its lines are relative to that slice, so line 1 is the first YAML line rather than the `---`.
 
 A position map belongs to one source snapshot. Normal document validation
-builds it once and shares it across all problems, including root-union arms.
+(`DarkmatterSchemas::validate` and its siblings, which `md schema validate`
+and `md compose` use) builds it only when the finished report holds at least
+one problem, once, and shares it across all of that report's problems. A valid
+document, including one checked against the baseline alone or one without any
+schema, never builds a map, and neither does a document whose schema cannot be
+prepared. Problems are located after the report is settled, so a problem that
+is set aside before then (a losing root-union arm, a deferred template) costs
+no map either. A caller that passes its own `PositionMap` to
+`validate_with_positions` or a sibling keeps that map's positions unchanged.
 Lookup does not run expressions, resolve references, or modify frontmatter;
 the path, diagnostic identity, and validation outcome remain independent of
 whether a precise location is available.
@@ -3948,6 +3981,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
+| `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: `has_schema` is `false` when no baseline, trigger, or `$schema` applied. |
 | `ValidationTimings`   | Stage breakdown of one validation, from `DarkmatterSchemas::validate_timed` (same result as `validate`, timings on failure too) or `ValidationTimings::record(|| ...)`: per-`ValidationStage` durations (`discover`, `match`, `resolve`, `compile`, `validate`), `total()`, `unassigned()`, `compile_cache()` (`CompileCache::Hit` / `Miss` / `NotRequested`), and `matched_triggers()`. See [Stage timings](../../inline/schema-validation.md#stage-timings--vv). |
 | `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
 | `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`. |
@@ -4162,7 +4196,35 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 ### Validator Cache
 
-`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, repository anchors, and the origins of caller-supplied properties, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+
+Composition's eager-`file` rewrite ([Files](#files)) takes each union arm's
+validator from the same cache. The arm is compiled whole, with the root
+`$defs` its references point into, and keyed like any other validator: a
+validator compiled for one document directory, fallback, request context, or
+set of caller origins never judges for another. A root-union arm is compiled
+from the same wrapped arm the document's validation uses, so the rewrite
+reuses that validator. An arm of a union inside a property (reached directly,
+through a type reference, a list, or an inline object) is judged from the
+origin of the top-level property it sits under, as that property's
+validation judged it. For example, with
+`node: "file(eager; match(./*.md)) | { children: node[] }"` in a root-union
+arm, a caller in `launch/` who supplies `[a.md]` for `spec: node[]` gets
+`["launch/a.md"]` (its `./*.md` is judged from `launch/`), while a document-authored `other: node[]`
+holding `./a.md` gets `["a.md"]`. The rewrite holds each arm's validator, per
+origin, for the rest of the call, so a list of 1,000 union items costs one
+lookup per distinct arm and origin, not 1,000 compilations. Only compiled validators are reused: every item, and
+whether its file exists, is judged on every call, so a file created or
+removed between two compositions changes the outcome.
+
+The `alphanumeric` load check ([Alphanumeric Strings](#alphanumeric-strings))
+takes its validator from the process-wide cache's structural slot. The cached
+schema is the type's option pattern plus every string constraint, without the
+`default(...)` and `suggest(...)` values, so types with the same options and
+constraints share one validator across imports and resolutions, while
+different options compile apart. Only the validator is reused: every default
+and suggestion is judged again on every load, so a rejected value stays
+rejected with the same diagnostic.
 
 A hit needs the whole resolution context to match, and the built-in baseline declares a `file` property (`style.page.stylesheet`), so its merged validator depends on that context. With the built-in baseline, each document whose schema or context differs therefore compiles the merged baseline once; this is most of the cost of validating many documents, and `--disable baseline-schema` avoids it when only document schemas matter.
 
@@ -4353,8 +4415,9 @@ Schema-preparation errors (unparseable `$schema`, missing referenced file, etc.)
 
 ### Compose and Validate Defaults
 
-`md compose` and `md schema validate` share the same `DarkmatterSchemas::validate`
-implementation once their effective schemas are resolved, and both apply the
+`md compose` and `md schema validate` resolve the same effective schema
+(`DarkmatterSchemas::effective_for`) and judge the frontmatter with its
+validators, and both apply the
 built-in baseline by default, so a document with no `$schema` fails both for
 the same invalid Darkmatter-owned value. Each opts out with
 `--disable baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA`. They differ in how

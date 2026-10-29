@@ -94,9 +94,12 @@ globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
 baseline. Trigger files are `kind: schema-trigger`; a top-level `match:` list
 is AND and `group:` is OR. A discovered trigger that fails to load (envelope,
 payload, or import) is skipped with Darkmatter's `InvalidTriggerFinding` and
-the valid ones still apply; `load_effective_schema` records it in
+the valid ones still apply; `discover_schema_owner` records it in
 `InvocationContext::trigger_findings()` (`composition/schema/findings.rs`)
-before the authored `$schema` resolves, so every preliminary check carries it,
+before the authored `$schema` resolves (one `pre_validate_schema` call
+discovers once and shares the loaded triggers between its cleanup and verdict
+preparations, matching each pass's current values; every other entry point
+— standalone cleanup, status, `load_effective_schema` — discovers on its own), so every preliminary check carries it,
 and the CLI prints one `[schema_validation]` warning per trigger per
 invocation, ahead of any unrelated error. It is never a `CompositionError`; a
 `$schema` naming a trigger is still `SchemaLoad`. Every
@@ -443,7 +446,11 @@ coerced to the string arm (schema valid; the parser rejects it).
 A sequence has no single planned target. Preflight predicts each `prompt:`
 task's provider from its own `agent` (`PreflightTask.provider`, computed in
 `composition/sequence/preflight/providers.rs` without running or composing
-anything) and keys every task by its graph `TaskIdentity`. The CLI
+anything; a literal hint is classified before any state is built, so only a
+document hint that reads an expression builds `PredictionStateBuild` state;
+`ProviderPrediction.dependencies` is per task, so `defer_runtime_written`
+moves both `agent` and `model` to launch when either reads a runtime-written
+key) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
 unusable static hint with `SequenceTaskProviderSelection` before any task
@@ -486,9 +493,30 @@ root fallback for reads introduced by transclusion; Darkmatter's explicit
 `seq.previous`, and `seq.next`; typed expression evaluation retains objects.
 Sequence task templates defer `seq`/`group`/`loop`, including the first task.
 Container runners use complete lexical roots for their own events and restore
-the enclosing roots on exit. `RuntimeState::replace_sequence_scope` restores
-position and outputs while keeping mutations; group workers clone the snapshot
-so in-memory writes and proxy ancestry remain isolated across branches.
+the enclosing roots on exit. `RuntimeState::replace_sequence_scope` swaps
+position and outputs while keeping mutations and returns the replaced pair, so
+a nested sequence moves the enclosing outputs out and back instead of copying
+them; group workers clone the snapshot so in-memory writes and proxy ancestry
+remain isolated across branches. A leg's branch (`task/group/branch.rs::LegBranch`)
+is built from the group-start seed only at admission and dropped before its
+worker admits the next leg; `work_counters::Gauge::RuntimeStateBranch` (live
+and peak) and the `test-fixtures` seam `CLAUDINE_TEST_GROUP_BRANCHES` pin
+peak ≤ cap (`sequence/task/tests/branch_admission.rs`,
+`cli/tests/l1/group_branch_lifetime.rs`). Read runtime state through the narrow
+projections (`mutations`, `mutation_keys`, `mutations_and_outputs`,
+`mutations_and_output_count`, `outputs_from`, `sequence_scope`); a full
+`snapshot()` is only for seeding a branch or `layered_set_overrides`.
+`Work::RuntimeSnapshot`/`RuntimeOutputsCopy` pin this
+(`sequence/task/tests/runtime_projections.rs`). Dotted `hook.<path>`
+(`dispatch/expression.rs::hook_member`) and loop-condition `loop.<member>`
+(`LoopAmbient::member_named`) resolve the member without building the whole
+root; only a bare `hook`/`loop` read materializes it
+(`HookPayloadMaterialize`/`LoopAmbientMaterialize`). Lifecycle, body, and
+frontmatter `loop.*` reads do the same through Darkmatter's member-aware
+`RuntimeBinding::members` (`EnclosingLoop::binding`, used by
+`runtime_bindings_enclosed` and `composition_host_globals`); bracket access
+builds the whole root once per session. `LoopAmbient.last_output` is an
+`Arc<Value>`, so the `'static` binding clones the ambient without copying it.
 
 ## Structured shell authorization
 
@@ -519,6 +547,14 @@ the first spawn. Shared redirection targets identify original destinations:
 `2>&1 > /dev/null` retains stderr on original stdout; never collapse it to
 stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
 CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
+
+Sequence shell-site static analysis (`SequencePreflight::prepare_site`) parses each
+placeholder occurrence once into Darkmatter's `PreparedInterpolation` (raw view for
+approval diagnostics, target identity, fallback holes and presence; command view
+for grammar, typing and late roots), drops it on return, and stores it nowhere.
+Exact count is steps x holes x 6 (`preflight/tests/scaling.rs`). The text entry
+points remain for paths that bypass `prepare_site`; do not add a text reparse
+inside it.
 
 Static presence decisions read Darkmatter's shared `TypeScope`.
 `lib/tests/l1/type_scope_ownership_guard.rs` fails when a

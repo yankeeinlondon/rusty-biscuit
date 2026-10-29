@@ -657,3 +657,164 @@ mod passive_validation {
         assert!(validate_prepared(&prepared, &lifecycle_view()).is_empty());
     }
 }
+
+mod member_aware {
+    use super::*;
+
+    fn loop_view() -> Arc<BindingView> {
+        Arc::new(
+            BindingView::builder(ScopeId::new("host.iteration"))
+                .declare("loop", "The iteration's values.", Availability::Available)
+                .build()
+                .unwrap(),
+        )
+    }
+
+    fn whole_value() -> Value {
+        json!({"count": 2, "big": "large", "nested": {"k": "v", "none": null}, "list": [1, 2]})
+    }
+
+    /// Counts of member and whole-provider runs.
+    #[derive(Default)]
+    struct Calls {
+        member: AtomicUsize,
+        whole: AtomicUsize,
+    }
+
+    impl Calls {
+        fn counts(&self) -> (usize, usize) {
+            (self.member.load(Ordering::SeqCst), self.whole.load(Ordering::SeqCst))
+        }
+    }
+
+    fn members(calls: &Calls) -> RuntimeBinding<'_> {
+        RuntimeBinding::members(
+            move |name| {
+                calls.member.fetch_add(1, Ordering::SeqCst);
+                whole_value().get(name).cloned()
+            },
+            move || {
+                calls.whole.fetch_add(1, Ordering::SeqCst);
+                whole_value()
+            },
+        )
+    }
+
+    fn read(text: &str, session: &EvaluationSession<'_>) -> Value {
+        evaluate(&parse(text).unwrap(), session).unwrap()
+    }
+
+    #[test]
+    fn a_dotted_read_resolves_its_member_without_the_whole_value() {
+        let calls = Calls::default();
+        let doc = document(json!({ "loop": { "missing": "document" } }));
+        let session = session(loop_view(), &doc, vec![("loop", members(&calls))]).unwrap();
+        assert_eq!(calls.counts(), (0, 0), "association runs no provider");
+
+        for (text, expected) in [
+            ("loop.count", json!(2)),
+            ("loop.nested.k", json!("v")),
+            ("loop.nested.none", Value::Null),
+            ("loop.nested.k.deeper", Value::Null),
+            ("loop.list[1]", json!(2)),
+            ("loop.missing", Value::Null),
+            ("loop.count + 1", json!(3)),
+        ] {
+            assert_eq!(read(text, &session), expected, "`{text}`");
+        }
+        assert_eq!(render("n={{ loop.count }}", &session).unwrap(), json!("n=2"));
+        assert_eq!(calls.counts().1, 0, "no dotted read builds the whole value");
+        assert!(matches!(
+            session.resolve("loop.missing").unwrap(),
+            ResolvedBinding::Global { value: Value::Null }
+        ), "a missing member is the global's `null`, never the document's property");
+    }
+
+    /// Every dotted read equals the same path through an eager binding of the
+    /// whole value.
+    #[test]
+    fn member_reads_equal_whole_value_projection() {
+        let calls = Calls::default();
+        let doc = document(json!({}));
+        let member_session = session(loop_view(), &doc, vec![("loop", members(&calls))]).unwrap();
+        let eager_session =
+            session(loop_view(), &doc, vec![("loop", RuntimeBinding::eager(whole_value()))]).unwrap();
+        for path in [
+            "loop", "loop.count", "loop.big", "loop.nested", "loop.nested.k", "loop.nested.none",
+            "loop.nested.k.x", "loop.list", "loop.list.0", "loop.count.value", "loop.missing",
+        ] {
+            assert_eq!(
+                member_session.resolve(path).unwrap(),
+                eager_session.resolve(path).unwrap(),
+                "`{path}`"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_read_builds_the_whole_value_once_per_session() {
+        let calls = Calls::default();
+        let doc = document(json!({}));
+        let first = session(loop_view(), &doc, vec![("loop", members(&calls))]).unwrap();
+
+        assert_eq!(read("loop", &first), whole_value());
+        assert_eq!(read("loop", &first), whole_value());
+        assert_eq!(calls.counts(), (0, 1));
+        assert_eq!(read("loop.count", &first), json!(2));
+        assert_eq!(calls.counts(), (0, 1), "a member read reuses the session's whole value");
+
+        let second = session(loop_view(), &doc, vec![("loop", members(&calls))]).unwrap();
+        assert_eq!(read("loop", &second), whole_value());
+        assert_eq!(calls.counts(), (0, 2), "a new session builds it again");
+    }
+
+    #[test]
+    fn bracket_access_reads_the_whole_value() {
+        let calls = Calls::default();
+        let doc = document(json!({}));
+        let session = session(loop_view(), &doc, vec![("loop", members(&calls))]).unwrap();
+
+        assert_eq!(read("loop['count']", &session), json!(2));
+        assert_eq!(calls.counts(), (0, 1));
+        assert_eq!(read("loop['nested']['k']", &session), json!("v"));
+        assert_eq!(calls.counts(), (0, 1));
+    }
+
+    #[test]
+    fn a_member_binding_contradicts_an_unavailable_declaration() {
+        let calls = Calls::default();
+        let doc = document(json!({}));
+        let view = Arc::new(
+            BindingView::builder(ScopeId::new("host.outside"))
+                .declare("loop", "Outside.", Availability::Unavailable(reason("host.outside-loop")))
+                .build()
+                .unwrap(),
+        );
+        let error = session(view, &doc, vec![("loop", members(&calls))]).unwrap_err();
+        assert!(
+            matches!(&error, BindingError::ContradictsDeclaration { supplied, .. } if supplied == "members"),
+            "{error:?}"
+        );
+        assert_eq!(calls.counts(), (0, 0));
+    }
+
+    #[test]
+    fn an_unavailable_binding_beside_a_member_binding_is_unchanged() {
+        let calls = Calls::default();
+        let doc = document(json!({}));
+        let session = session(
+            lifecycle_view(),
+            &doc,
+            vec![
+                ("err", members(&calls)),
+                ("group", RuntimeBinding::unavailable(reason(OUTSIDE_GROUP))),
+                ("timing", RuntimeBinding::eager(json!({}))),
+            ],
+        )
+        .unwrap();
+        let error = render("{{ group.name }}", &session).unwrap_err();
+        assert_eq!(unavailable_root(&error), Some(("group", OUTSIDE_GROUP)));
+        assert_eq!(render("{{ err.count }}", &session).unwrap(), json!(2));
+        assert_eq!(calls.counts(), (1, 0));
+    }
+}

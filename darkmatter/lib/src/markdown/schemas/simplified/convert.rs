@@ -2354,8 +2354,7 @@ fn check_alphanumeric_values(
         map.remove("default");
         map.remove("x-darkmatter-suggest");
     }
-    crate::note_work!(AlphanumericCheckCompile);
-    let validator = super::super::validate::build_structural_validator(&target)?;
+    let validator = alphanumeric_check_validator(&target)?;
     match values.into_iter().find(|(_, value)| !validator.is_valid(value)) {
         Some((keyword, value)) => Err(SchemaError::Convert {
             property: name.to_string(),
@@ -2363,6 +2362,20 @@ fn check_alphanumeric_values(
         }),
         None => Ok(()),
     }
+}
+
+/// The structural validator judging `target`, from the process-wide cache's
+/// structural slot, so every resolution lowering the same complete
+/// constraints (option pattern plus string constraints) shares one compile.
+/// Only the compiled validator is reused; each value is still judged fresh.
+fn alphanumeric_check_validator(target: &Value) -> Result<std::sync::Arc<jsonschema::Validator>, SchemaError> {
+    let cache = &*crate::markdown::schemas::SHARED_VALIDATOR_CACHE;
+    let content = crate::markdown::schemas::validate::schema_content_hash(target);
+    if let Some(validator) = cache.cached_structural(content) {
+        return Ok(validator);
+    }
+    crate::note_work!(AlphanumericCheckCompile);
+    cache.structural_validator_hashed(target, content)
 }
 
 /// Lowers `shell` to `{ "type": "string", "format": "darkmatter-shell" }`.

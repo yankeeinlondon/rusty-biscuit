@@ -31,4 +31,14 @@ Part of the `rust-testing` skill; [SKILL.md](SKILL.md) is the index.
   New counters go through each crate's root `note_work!` macro, which
   compiles to nothing without the feature, so production builds carry no
   counter state.
+- **Where the counting allocator may be declared.** Only a final binary can
+  declare it: a dedicated bench target (`pipeline_work_alloc`, DMLS's
+  `pipeline_work_a3`), or a crate's own unit-test binary when the scenario
+  needs crate-private functions. Claudine's lib declares it under
+  `cfg(all(test, feature = "work-counters"))` for its ignored
+  `pipeline_spike_*` scenarios, run one at a time from `claudine/` with
+  `just test-library --release --features work-counters --run-ignored only
+  --no-capture pipeline_spike_<scenario>`. Because `work-counters` is on in
+  that package's L1 run, every Claudine lib unit test then allocates through
+  it; it changes no result, only adds an atomic per allocation.
 

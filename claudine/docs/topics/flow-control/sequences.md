@@ -616,7 +616,8 @@ Claudine walks the **entire task graph**:
   `loop`, `group`, `current`, a key a lifecycle `set` writes, or a `$( … )`) is
   *decided at launch* and checked when its task is prepared; an expression
   error in a hint that reads none of those (an unknown function, say) fails
-  here like an uninstalled provider. Prediction runs
+  here like an uninstalled provider. A plain value (no `{{ … }}` or
+  `$( … )`) is predicted as written, with nothing evaluated. Prediction runs
   nothing and composes nothing. Each step's status line names the provider that
   ran. See [`claudine sequence` → Choosing providers](../../cli/sequence.md#choosing-providers).
 - **Schemas validate and missing properties aggregate** across all steps and all
@@ -961,6 +962,30 @@ or `variables` scoping around one task.
 A group leg may itself declare a group or a sequence task. Each leg receives
 a private in-memory runtime branch; siblings share the filesystem.
 
+A leg's branch exists only while the leg runs. Claudine validates every leg
+and captures each leg's environment when the group starts, but builds a
+leg's branch only when the leg is admitted, copied from the group-start
+state, and drops it as soon as the leg's result and writes are collected,
+before the next leg takes its slot. Under `max_parallel: 2`, a group of a
+hundred legs holds at most two branches at a time; the results and writes
+of finished legs are all that accumulate. A retried group builds fresh
+branches for its legs from the retry's starting state.
+
+Each of the group's slots (`max_parallel` of them, or one per leg without a
+cap) runs this loop. A leg that is never admitted, because `fail_fast`
+stopped admission or the run was interrupted, never builds a branch:
+
+```mermaid
+flowchart TD
+    seed["group starts: take the group-start state once"] --> admit{"a leg not yet admitted,<br/>and admission still open?"}
+    admit -- "yes: take the next leg in declaration order" --> build["build the leg's branch<br/>as a copy of the group-start state"]
+    build --> run["run the leg against its branch"]
+    run --> collect["keep the leg's result and writes"]
+    collect --> drop["drop the branch"]
+    drop --> admit
+    admit -- "no" --> merge["every slot done: fold results and writes<br/>in declaration order"]
+```
+
 ### What a leg sees
 
 Every leg starts from the state as it was when its group started, and keeps
@@ -1016,6 +1041,16 @@ any container: starting it, preparing its spoken phrases ahead of time,
 resolving a templated `loop.max`, and judging and staging each loop pass all
 read the current state in place, so their cost does not grow with how many
 other containers the document declares.
+
+Reading runtime state copies only the part that is read. A task's runtime
+writes, a container event's frontmatter, and a loop pass's entry point are
+read without copying the `seq.outputs` history, and a task's `when:` guard
+reads `seq` only when the task has one. A nested sequence sets the enclosing
+outputs aside when it starts and hands the same list back when it ends, so
+running one inside a long sequence costs the same as running it first.
+Anything that reads `seq` (a guard, a templated value, a task's own actions,
+a prompt document) copies the outputs it sees when it runs, and a group copies
+them once into each leg's private branch when it admits the leg.
 
 A group object's `loop:` repeats the whole group: every pass admits its legs
 again, rebuilds `group.legs` and the outcome lists, and exposes the pass's

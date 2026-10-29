@@ -28,7 +28,8 @@ human_review: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
-review_iterations: 0
+review_iterations: 2
+completed: true
 needs_rulings: false
 depends-on:
     - 2026-10-26-sequence-quadratic-frontmatter
@@ -39,6 +40,8 @@ related:
     - 2026-10-25-host-function-catalog-leak
     - 2026-10-25-schema-diagnostic-provenance
     - 2026-10-25-shared-acyclic-definitions
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Pipeline work reduction: measure, then remove repeated work

@@ -333,9 +333,12 @@ covers the work done before the failure. Documents that cannot be opened or
 parsed get no breakdown.
 
 The breakdown covers all of the document's schema work, not just the final
-check. With `key=value` assignments, `md` first resolves the schema to coerce
-the assigned values, then resolves it again after assigning them, because an
-assignment can change which triggers match. Both resolutions are counted, so a
+check. Without assignments the schema is resolved once: that one resolution
+produces the report and also decides whether the document "has a schema
+definition". With `key=value` assignments, `md` first resolves the schema to
+coerce the assigned values, then resolves it again after assigning them,
+because an assignment can change which triggers match; the second resolution
+alone decides the report and the wording. Both resolutions are counted, so a
 validator first built while preparing the assignments is still a `miss`:
 
 ```console
@@ -723,6 +726,19 @@ if !report.valid {
 ```
 
 `DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`.
+
+`validate_summarized(&Markdown)` returns the same report as `validate`
+together with a `PreparationSummary` from the same schema resolution. Its
+`has_schema` is `false` when no baseline, trigger, or `$schema` applied (the
+report is then vacuously valid). Use it instead of calling `effective_for`
+again just to learn whether a schema applied:
+
+```rust
+let (report, summary) = api.validate_summarized(&markdown)?;
+if report.valid && !summary.has_schema {
+    println!("no schema applies; valid by default");
+}
+```
 
 `validate_timed(&Markdown)` returns the same result as `validate` together
 with a `ValidationTimings` (the stages above, `total()`, `unassigned()`,

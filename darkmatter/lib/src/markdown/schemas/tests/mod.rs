@@ -12,6 +12,7 @@ mod clean_suggestions;
 #[path = "../../../../tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
 mod embedded_sources;
+mod lazy_positions;
 mod positions;
 mod reset_process_caches;
 

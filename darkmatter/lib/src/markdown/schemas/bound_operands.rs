@@ -53,7 +53,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Map, Value};
 
 use super::simplified::{DARKMATTER_OPERANDS_KEYWORD, OperandForm, operands_verb};
-use super::{JsonPointer, PositionMap, ValidationProblem, ValidationProblemCode, ValidationProblemKind};
+use super::{JsonPointer, ValidationProblem, ValidationProblemCode, ValidationProblemKind};
 use crate::lifecycle::{
     ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, operand_form, template_operands,
     validate_action_operands_with,
@@ -184,16 +184,15 @@ impl BoundOperands {
 
     /// Adds a syntax problem for each malformed operand template, in place of
     /// the problems already reported at or below its string.
-    pub(super) fn report_malformed(&self, problems: &mut Vec<ValidationProblem>, positions: &PositionMap) {
+    pub(super) fn report_malformed(&self, problems: &mut Vec<ValidationProblem>) {
         for malformed in &self.malformed {
             let path = pointer(&malformed.at);
             problems.retain(|problem| !within(&problem_pointer(problem), &path));
-            problems.push(positioned_problem(
+            problems.push(operand_problem(
                 path,
                 malformed.message.clone(),
                 ValidationProblemKind::Invalid,
                 ValidationProblemCode::ConstraintViolation,
-                positions,
             ));
         }
     }
@@ -201,7 +200,7 @@ impl BoundOperands {
     /// Adds a problem for each rejected call that `problems` holds none
     /// inside of. Report [`Self::report_malformed`] first: a call holding a
     /// malformed template is then covered by its syntax problem.
-    pub(super) fn report_rejections(&self, problems: &mut Vec<ValidationProblem>, positions: &PositionMap) {
+    pub(super) fn report_rejections(&self, problems: &mut Vec<ValidationProblem>) {
         for rejection in &self.rejected {
             let action = pointer(&rejection.action);
             if problems.iter().any(|problem| within(&problem_pointer(problem), &action)) {
@@ -211,12 +210,11 @@ impl BoundOperands {
                 CallErrorKind::Type => (ValidationProblemKind::Type, ValidationProblemCode::TypeMismatch),
                 _ => (ValidationProblemKind::Invalid, ValidationProblemCode::ConstraintViolation),
             };
-            problems.push(positioned_problem(
+            problems.push(operand_problem(
                 pointer(&rejection.at),
                 rejection.error.to_string(),
                 kind,
                 code,
-                positions,
             ));
         }
     }
@@ -230,24 +228,22 @@ fn problem_pointer(problem: &ValidationProblem) -> String {
     }
 }
 
-fn positioned_problem(
+/// An operand problem at `path`, unlocated like every problem before its
+/// report settles.
+fn operand_problem(
     path: String,
     message: String,
     kind: ValidationProblemKind,
     code: ValidationProblemCode,
-    positions: &PositionMap,
 ) -> ValidationProblem {
     let instance_path = JsonPointer::parse(&path);
-    let (line, column) = positions
-        .locate(instance_path.segments(), super::positions::PositionTarget::Value)
-        .map_or((None, None), |(line, column)| (Some(line), Some(column)));
     ValidationProblem {
         path,
         message,
         kind,
         property: None,
-        line,
-        column,
+        line: None,
+        column: None,
         arm_index: None,
         description: None,
         code,

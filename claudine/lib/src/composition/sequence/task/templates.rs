@@ -41,8 +41,7 @@ impl TaskExecution<'_> {
         let approved = self.authorized_template(site, late)?;
         let mut data = self.state.data().clone();
         if let Some(runtime) = self.runtime {
-            let snapshot = runtime.snapshot();
-            data.extend(snapshot.mutations);
+            data.extend(runtime.mutations());
         }
         let state = EffectiveStateBuilder::new().with_shared_frontmatter(data)
             .with_context(self.state.context().clone()).with_allow_ctx_override(true).build()

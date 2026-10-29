@@ -3,12 +3,14 @@ mod command;
 mod completion;
 mod enums;
 mod parsers;
+mod render;
 pub mod policy;
 mod target;
 mod wrappers;
 
 pub use cli::Cli;
 pub use command::Command;
+pub use render::RenderOptions;
 pub use completion::{
     complete_compose_args, complete_compose_args_from, complete_fixed_width_values,
     complete_indent_values, complete_markdown_files, complete_markdown_files_from,

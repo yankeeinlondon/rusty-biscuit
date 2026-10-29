@@ -45,6 +45,9 @@ mod compose_initialize_acceptance;
 mod compose_initialize_staged_boot;
 #[cfg(unix)]
 mod compose_interactive_timeout_cli;
+// Copies the compiled fake goose, built only with `test-fixtures`.
+#[cfg(feature = "test-fixtures")]
+mod compose_named_type_import;
 #[cfg(unix)]
 mod compose_removed_grammar;
 #[cfg(unix)]
@@ -78,6 +81,10 @@ mod entry_point_parity;
 mod error_guards;
 mod errors_command;
 mod exit_site_guard;
+// Reads the `CLAUDINE_TEST_GROUP_BRANCHES` seam, which only `test-fixtures`
+// builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
+mod group_branch_lifetime;
 #[cfg(unix)]
 mod handle_blocking_output;
 mod handle_deadline;

@@ -1,13 +1,15 @@
 //! Concurrent group legs use isolated runtime branches and declaration-order
 //! admission and folding. A failed atomic group publishes no leg state or result.
 
+mod branch;
+
 use crate::composition::lifecycle::cancellation::CancellationCauseExt;
 use crate::composition::LifecycleErrorInfoExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder, SharedFrontmatter};
+use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder};
 use serde_json::{Map, Value};
 
 use super::super::super::error::CompositionError;
@@ -151,7 +153,7 @@ impl TaskExecution<'_> {
                 signal = LifecycleSignal::Cancelled;
             }
             let group = current_group.as_ref().unwrap_or(group);
-            live.lock().expect(SLOT_POISONED).extend(runtime.snapshot().mutations);
+            live.lock().expect(SLOT_POISONED).extend(runtime.mutations());
             let group_value = binding.event_value(signal);
             let mut stack = loop_stack.with_signal(signal);
             stack.scope = None;
@@ -269,7 +271,7 @@ impl TaskExecution<'_> {
                         Ok(crate::composition::looping::ContainerPassEnd::Complete | crate::composition::looping::ContainerPassEnd::Broken(_)) => {
                             if let Some(parent) = self.runtime
                                 && let Err(failure) = parent.set_batch(self.stack.effect_engine,
-                                    &runtime.snapshot().mutations, &Map::new())
+                                    &runtime.mutations(), &Map::new())
                             {
                                 return PrimaryOutcome::failed(TaskDiagnostic {
                                     stage: TaskStage::Primary,
@@ -296,7 +298,7 @@ impl TaskExecution<'_> {
                         result.result = super::PrimaryResult::Failed(TaskDiagnostic { stage: TaskStage::Primary, info });
                     } else if let Some(parent) = self.runtime
                         && let Err(failure) = parent.set_batch(self.stack.effect_engine,
-                            &runtime.snapshot().mutations, &Map::new())
+                            &runtime.mutations(), &Map::new())
                     {
                         return PrimaryOutcome::failed(TaskDiagnostic {
                             stage: TaskStage::Primary,
@@ -349,7 +351,7 @@ impl TaskExecution<'_> {
                     if matches!(result.result, super::PrimaryResult::Succeeded)
                         && let Some(parent) = self.runtime
                         && let Err(failure) = parent.set_batch(self.stack.effect_engine,
-                            &runtime.snapshot().mutations, &Map::new())
+                            &runtime.mutations(), &Map::new())
                     {
                         return PrimaryOutcome::failed(TaskDiagnostic {
                             stage: TaskStage::Primary,
@@ -430,6 +432,11 @@ impl TaskExecution<'_> {
     /// start, every member writes into its **own** runtime buffer, and every
     /// post-run fold — outputs, mutations, summaries — walks the tasks in
     /// declaration order.
+    ///
+    /// A member's buffer and live-frontmatter cell ([`branch::LegBranch`]) are
+    /// built from the group-start seed only when the member is admitted, and
+    /// dropped once its outcome carries its result and mutation delta, before
+    /// its worker admits the next member: at most `max_parallel` are alive.
     fn run_parallel(
         &self,
         group: &PreflightGroup,
@@ -437,12 +444,15 @@ impl TaskExecution<'_> {
         scope_stack: &StackExecutionContext<'_>,
         validated: &ValidatedGroup,
     ) -> PrimaryOutcome {
-        // Taken once. A sibling's `set` or `outputs` entry is invisible until the
-        // merge below, and no live file is re-read between siblings.
+        // The group-start seed, taken once and never written: every admitted
+        // leg's branch is copied from it, so a sibling's `set` or `outputs`
+        // entry is invisible until the merge below, even to a leg admitted
+        // after that sibling settled, and no live file is re-read between
+        // siblings.
         let base = self
             .runtime
             .map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        let member_state = match self.member_state_from(&base) {
+        let member_state = match self.member_state_from(&base.mutations) {
             Ok(state) => state,
             Err(error) => {
                 return PrimaryOutcome::failed(TaskDiagnostic::from_composition(
@@ -452,31 +462,17 @@ impl TaskExecution<'_> {
             }
         };
 
-        let buffers: Vec<Arc<RuntimeState>> = group
-            .tasks
-            .iter()
-            .map(|_| Arc::new(RuntimeState::from_snapshot(base.clone())))
-            .collect();
-        crate::note_work!(RuntimeStateBranch, group.tasks.len());
-        let slots: Vec<Mutex<Option<MemberRun>>> =
-            group.tasks.iter().map(|_| Mutex::new(None)).collect();
         // The live document cell is per-*attempt* and therefore shared by
         // construction; a member needs its own, seeded from the group-start
         // view, for the same reason it needs its own runtime buffer. Each cell
         // shares that view's base and owns only its own writes, which are
-        // dropped with the group: a member's `set_frontmatter` already
-        // reached disk, and the next *step* re-reads the file — a sibling never
-        // does (spec → *Concurrency*).
-        let live_cells: Vec<Mutex<SharedFrontmatter>> = scope_stack
-            .live_frontmatter_snapshot()
-            .into_iter()
-            .flat_map(|seed| {
-                // A cell copies only the values the group-start view owns.
-                crate::note_work!(LiveFrontmatterCopy, group.tasks.len() as u64 * crate::work_counters::value_nodes(seed.owned()));
-                group.tasks.iter().map(move |_| Mutex::new(seed.clone()))
-            })
-            .collect();
-        crate::note_work!(LiveFrontmatterView, live_cells.len());
+        // dropped with the member's branch: a member's `set_frontmatter`
+        // already reached disk, and the next *step* re-reads the file — a
+        // sibling never does (spec → *Concurrency*).
+        let live_seed = scope_stack.live_frontmatter_snapshot();
+        let ledger = branch::BranchLedger::default();
+        let slots: Vec<Mutex<Option<MemberRun>>> =
+            group.tasks.iter().map(|_| Mutex::new(None)).collect();
 
         // Absent cap means "launch all"; declaration-order admission falls out of
         // a single shared cursor, so a freed slot always takes the next task.
@@ -547,9 +543,6 @@ impl TaskExecution<'_> {
                         if let Some(stream) = &stream {
                             stream.open();
                         }
-                        // The stack's cells must be the member's too: a lifecycle
-                        // `set` inside the task accumulates through the stack,
-                        // not through `TaskExecution::runtime`.
                         let leg_run = leg_runs[index].as_ref();
                         let task_stack = StackExecutionContext {
                             source_path: &task.diagnostic.source_path,
@@ -559,26 +552,36 @@ impl TaskExecution<'_> {
                             loop_values: leg_loops[index].as_ref(),
                             ..scope_stack.with_signal(scope_stack.signal)
                         };
-                        let member_stack = task_stack
-                            .with_private_cells(&buffers[index], live_cells.get(index));
-                        let member = TaskExecution {
-                            task,
-                            state: &member_state,
-                            stack: &member_stack,
-                            overlay: Some(scope_overlay),
-                            runtime: Some(&buffers[index]),
-                            live: stream.as_ref(),
-                            run_evidence: leg_run
-                                .map(|opened| &opened.run)
-                                .or(group_evidence),
-                            document: leg_run
-                                .and_then(|opened| opened.document.as_ref())
-                                .or(self.document),
-                            ..*self
+                        let outcome = {
+                            let branch = branch::LegBranch::admit(&base, live_seed.as_ref(), &ledger);
+                            // The stack's cells must be the member's too: a
+                            // lifecycle `set` inside the task accumulates
+                            // through the stack, not through
+                            // `TaskExecution::runtime`.
+                            let member_stack = task_stack
+                                .with_private_cells(&branch.runtime, branch.live_frontmatter.as_ref());
+                            let member = TaskExecution {
+                                task,
+                                state: &member_state,
+                                stack: &member_stack,
+                                overlay: Some(scope_overlay),
+                                runtime: Some(&branch.runtime),
+                                live: stream.as_ref(),
+                                run_evidence: leg_run
+                                    .map(|opened| &opened.run)
+                                    .or(group_evidence),
+                                document: leg_run
+                                    .and_then(|opened| opened.document.as_ref())
+                                    .or(self.document),
+                                ..*self
+                            };
+                            // The guard reads the group-start state the member
+                            // was built from, even for a leg admitted late.
+                            member.run_guarded(Some(&validated.members[index]))
+                            // The outcome holds the result and mutation delta;
+                            // the branch is released here, before this worker
+                            // admits another leg.
                         };
-                        // The guard reads the group-start state the member was built
-                        // from, even for a leg admitted late.
-                        let outcome = member.run_guarded(Some(&validated.members[index]));
                         let duration = started.elapsed();
                         if let Some(stream) = &stream {
                             stream.close(outcome.status.into(), duration);
@@ -609,6 +612,7 @@ impl TaskExecution<'_> {
             }
         });
 
+        ledger.record(&group.name, group.tasks.len(), workers);
         let triggering_failure = admission.into_inner().expect(SLOT_POISONED).2;
         let statuses: Vec<Option<TaskStatus>> = slots.iter()
             .map(|slot| slot.lock().expect(SLOT_POISONED).as_ref().map(|run| run.outcome.status))
@@ -788,20 +792,18 @@ impl TaskExecution<'_> {
     fn member_state(
         &self,
     ) -> Result<EffectiveState, CompositionError> {
-        let snapshot = self
-            .runtime
-            .map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
-        self.member_state_from(&snapshot)
+        let mutations = self.runtime.map(|runtime| runtime.mutations()).unwrap_or_default();
+        self.member_state_from(&mutations)
     }
 
-    /// All concurrent siblings compose against the same group-entry snapshot.
+    /// All concurrent siblings compose against the same group-entry mutations.
     fn member_state_from(
         &self,
-        snapshot: &RuntimeSnapshot,
+        mutations: &darkmatter::markdown::FrontmatterMap,
     ) -> Result<EffectiveState, CompositionError> {
         let mut data = self.state.data().clone();
         if self.runtime.is_some() {
-            for (key, value) in &snapshot.mutations {
+            for (key, value) in mutations {
                 data.insert(key.clone(), value.clone());
             }
         }

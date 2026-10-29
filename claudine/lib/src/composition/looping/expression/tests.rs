@@ -2,6 +2,7 @@ use super::*;
 use darkmatter::markdown::compose::expression::EvaluationLookup;
 use serde_json::json;
 
+mod loop_leaf_reads;
 mod resolution_context;
 
 fn map(value: Value) -> Map<String, Value> {

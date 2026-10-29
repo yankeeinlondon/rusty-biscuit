@@ -500,6 +500,10 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 
 **Late values.** A host whose commands read values the run produces later (Claudine's sequence outputs, for example) declares those roots with `ComposeOptions::with_deferred_shell_roots`. Discovery does not evaluate a placeholder that reads one, directly or through a frontmatter value derived from one, and marks it `HoleTiming::Deferred`. Its command has no resolved bytes, so it can be approved only as a template (`ModeRequirement::TemplateRequired`); one whose authored text is not a valid template fails pre-flight with `TemplateGrammar`. Declaring a root late does not make it readable: availability stays with the host's globals. The command's other placeholders are still checked for missing values. A late root names a host global: `fm.<root>` reads the document's own property of that name and is an approval-time value.
 
+#### Parsed-once syntax for a host
+
+A host that analyzes the same authored text several ways (Claudine's sequence preflight) builds one `expression::PreparedInterpolation` per text and reads it through `view(range)` instead of re-parsing. The collection retains each placeholder occurrence with its range, trimmed text, and the spanned syntax or the located `PreparationError`; `PreparedPlaceholder::expr()` gives the plain `Expr` (erased once, cached). A view translates coordinates for a sub-range, such as the command inside a `$( … )` wrapper found by `authored_shell_command`. The parsed counterparts — `validate_interpolation`, `parse_authored_prepared`, `CommandTemplate::project_types_prepared`, `project_hole_expr`, `DeferredShellRoots::late_roots_of_expr`, and `placeholder_guard_expr` — share their analysis bodies with the text functions, which remain. The collection holds syntax only: no values, schema, guards, or approval decisions, and evaluation is unaffected.
+
 #### Guarded values
 
 A guard that encloses a command proves things about the values it reads. In

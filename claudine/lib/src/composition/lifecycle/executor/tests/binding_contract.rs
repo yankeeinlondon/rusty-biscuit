@@ -456,3 +456,59 @@ fn a_set_is_read_by_bare_and_qualified_fm_and_an_earlier_snapshot_is_unchanged()
     assert_eq!(after.get("x"), Some(&json!("new")));
     assert_eq!(after.get("before"), Some(&earlier));
 }
+
+/// An event's `loop.*` reads come from the enclosing iteration through
+/// [`StackExecutionContext::bindings`]: scalar members resolve without
+/// building the `loop` object beside a large previous result.
+#[cfg(feature = "work-counters")]
+mod loop_member_reads {
+    use super::*;
+    use crate::composition::LoopAmbient;
+    use crate::work_counters::{Work, snapshot};
+
+    fn run_in_loop(lifecycle: Value, ambient: &LoopAmbient) -> (LifecycleEventOutcome, Vec<Emitted>, u64) {
+        let config = parse_lifecycle_config(&lifecycle, Path::new("t.md")).unwrap();
+        let base = map(json!({}));
+        let live = std::sync::Mutex::new(base.clone().into());
+        let runtime = RuntimeState::new();
+        let (_dir, engine) = temp_engine();
+        let shell = MockShell::new(0);
+        let recorder = Recorder::default();
+        let harness = Harness::default();
+        let context = ctx_with_runtime(
+            LifecycleSignal::Success, &base, &live, &runtime, &engine, &shell, &recorder, &harness,
+            Path::new("t.md"),
+        );
+        let context = StackExecutionContext { loop_values: Some(ambient), ..context };
+        let before = snapshot();
+        let outcome = context.execute_event(&config);
+        let built = snapshot().since(&before).get(Work::LoopAmbientMaterialize);
+        (outcome, recorder.events(), built)
+    }
+
+    #[test]
+    fn event_loop_scalar_reads_build_no_loop_object() {
+        let ambient = LoopAmbient::new(3, false, true, "x".repeat(1024 * 1024), 7);
+        let (outcome, events, built) = run_in_loop(
+            json!({"success": [
+                {"when": "loop.count >= 2 && !loop.is_first", "message": "pass {{ loop.count }} exit {{ loop.last_exit_code }} [{{ loop.missing }}]"},
+            ]}),
+            &ambient,
+        );
+        assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+        assert_eq!(events, vec![Emitted::Message("pass 3 exit 7 []".into())]);
+        assert_eq!(built, 0);
+    }
+
+    #[test]
+    fn an_event_bare_loop_read_builds_the_object() {
+        let ambient = LoopAmbient::new(3, false, true, "prior", 7);
+        let (outcome, events, built) = run_in_loop(
+            json!({"success": [{"message": "{{ loop.last_output }} {{ length(keys(loop)) }}"}]}),
+            &ambient,
+        );
+        assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+        assert_eq!(events, vec![Emitted::Message("prior 5".into())]);
+        assert_eq!(built, 1);
+    }
+}

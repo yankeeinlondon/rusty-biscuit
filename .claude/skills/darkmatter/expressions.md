@@ -292,7 +292,13 @@ composition takes globals through `ComposeOptions::with_host_globals`
 inherits them, a bare read of one is exempt from the deferred-key (DM1a) check,
 and an unavailable read is a fatal transclusion failure
 (`MarkdownError::unavailable_binding`). Claudine declares `loop` and the retired
-`_loop_*` names this way. There is no
+`_loop_*` names this way. An entry is `Eager`, `Lazy` (whole root on first
+read, cached per session), `Members { member, whole }` (a dotted
+`root.name.rest` asks `member(name)` and selects `rest`; a bare or bracketed
+read runs the cached `whole`; `member` must agree with `whole`), or
+`Unavailable`; every match on `RuntimeBinding` (`read_global`, `kind`,
+`identity`, `check_agreement`, `subtree::undeclared_view`) handles all four.
+There is no
 strict mode and no root-membership hook. See
 [Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
 
@@ -311,3 +317,14 @@ vector shrinks, but an element replaced in place is not seen.
 is reported once. A new coded family, such as
 `dm.expression.undeclared_property`, adds a `WarningSubject` constructor
 rather than a message-based check.
+
+`expression::PreparedInterpolation::new(text)` scans and parses every `{{ }}`
+occurrence once, retaining each as a `PreparedPlaceholder` (range, trimmed
+text, spanned syntax or located `PreparationError`, cached `expr()`); never key
+it by text. `view(range)` translates coordinates to a sub-range (a `set`
+wrapper's inner command from `authored_shell_command`). Parsed counterparts
+share the text functions' analysis bodies: `validate_interpolation`,
+`parse_authored_prepared`, `CommandTemplate::project_types_prepared`,
+`project_hole_expr`, `DeferredShellRoots::late_roots_of_expr`,
+`lifecycle::shell_template::placeholder_guard_expr`. It holds syntax only;
+a host keeps it on the stack for one analysis and never stores it.

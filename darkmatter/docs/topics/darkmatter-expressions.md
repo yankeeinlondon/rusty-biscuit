@@ -1739,6 +1739,31 @@ global, a declared global with no entry, and an entry that contradicts its
 declaration. A lazy global (`RuntimeBinding::lazy`) runs at most once per
 session, on first read, and caches a `null` result too.
 
+A global that is an object with one large member can skip building the whole
+object when a read needs only one of its members. Give it to
+`RuntimeBinding::members(member, whole)`:
+
+- A dotted read `root.name.rest` calls `member("name")` and selects `rest`
+  from the result. A `None` result means the member is missing, and the read
+  is `null`.
+- A bare `root` read runs `whole()`, as a lazy global's provider does. So does
+  a read the evaluator does not spell as a dotted path, such as
+  `root['name']`. It runs at most once per session. After it has run, dotted
+  reads in that session select from its value.
+- `member(name)` must equal `whole().get(name)` for every name. Every read
+  then returns the same value an eager binding of `whole()` would.
+
+```rust
+let binding = RuntimeBinding::members(
+    |name| iteration_value().get(name).cloned(), // `loop.count`: one member
+    || iteration_value(),                        // `loop`, `loop['count']`
+);
+```
+
+A `member` call is not cached, so it may run once per read. Claudine binds
+`loop` this way, so `{{ loop.count }}` never copies the previous pass's
+output.
+
 `prepare_value` parses every expression in a value without evaluating it.
 `validate_prepared` reports unavailable globals and unknown functions in every
 branch, and runs no provider. `evaluate_prepared` evaluates through a session

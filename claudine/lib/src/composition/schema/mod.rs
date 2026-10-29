@@ -562,30 +562,62 @@ pub(super) fn load_effective_schema(
     callers: &darkmatter::markdown::compose::CallerInputRecords,
     trigger_findings: &TriggerFindings,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    let schema_error = |err: SchemaError| {
-        // A grammar/convert/shape error is a body-syntax problem (`SchemaParse`);
-        // a missing file / remote URL / ambiguous reference / malformed trigger
-        // stays `SchemaLoad`. Darkmatter hands us the typed cause directly.
-        schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err))
-    };
+    let schemas = discover_schema_owner(
+        source,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        trigger_findings,
+    )?
+    .with_caller_input_records(callers);
+    prepare_effective_schema(source, snapshot, &schemas)
+}
+
+/// Discover the document's trigger schemas once, record the triggers it
+/// skipped as invalid in `trigger_findings`, and own the result for the
+/// caller's passes.
+///
+/// A failed scan (root enumeration or text read) is an error and records
+/// nothing; an invalid individual trigger is a finding, never an error.
+fn discover_schema_owner(
+    source: &ResolvedCompositionSource,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
+) -> Result<DarkmatterSchemas, CompositionError> {
     let document_context = file_resolution_context.for_source(&source.resolved_path);
     let mut schemas = DarkmatterSchemas::new(document_context)
         .with_embedded_trigger_bundle(bundle::claudine_schema_bundle())
         .and_then(DarkmatterSchemas::with_trigger_discovery)
-        .map_err(schema_error)?
-        .with_file_resolution_context(file_resolution_context.clone())
-        .with_caller_input_records(callers);
-    // Recorded before the effective schema resolves, so a later authored
+        .map_err(|err| schema_load_error(source, &err))?;
+    // Recorded before any effective schema resolves, so a later authored
     // `$schema` failure is delivered with the triggers skipped before it.
     trigger_findings.record(schemas.discovery_findings());
+    schemas = schemas.with_file_resolution_context(file_resolution_context.clone());
     if let Some(fallback) = file_ref_fallback_dir {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
+    Ok(schemas)
+}
+
+/// Match the discovered triggers against `snapshot` (`None`: the source's own
+/// frontmatter) and merge the matches under the authored `$schema`.
+fn prepare_effective_schema(
+    source: &ResolvedCompositionSource,
+    snapshot: Option<&serde_json::Value>,
+    schemas: &DarkmatterSchemas,
+) -> Result<Option<EffectiveSchema>, CompositionError> {
     match snapshot.and_then(serde_json::Value::as_object) {
         Some(values) => schemas.effective_for(&matching_markdown(source, values)),
         None => schemas.effective_for(&source.markdown),
     }
-    .map_err(schema_error)
+    .map_err(|err| schema_load_error(source, &err))
+}
+
+/// A grammar/convert/shape error is a body-syntax problem (`SchemaParse`); a
+/// missing file / remote URL / ambiguous reference / failed scan stays
+/// `SchemaLoad`. Darkmatter hands us the typed cause directly.
+fn schema_load_error(source: &ResolvedCompositionSource, err: &SchemaError) -> CompositionError {
+    schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(err))
 }
 
 /// The authored `$schema` alone, with no trigger layers: what the document
@@ -833,27 +865,29 @@ fn pre_validate_verdict(
 
     // First pass: drop non-template invalid optionals so the prepare-time
     // pipeline (and the preflight Darkmatter pass) sees a clean slate.
-    let (source, set_overrides, dropped_optionals) = drop_invalid_optionals_with_origin(
-        source.clone(),
-        set_overrides.cloned(),
-        data_keys,
+    // One discovery serves both passes; each pass still matches and prepares
+    // against its own values and caller records.
+    let schemas = discover_schema_owner(
+        source,
         file_ref_fallback_dir,
         file_resolution_context,
         trigger_findings,
+    )?;
+    let original_callers = override_records(set_overrides, file_resolution_context, file_ref_fallback_dir);
+    let schemas = schemas.with_caller_input_records(&original_callers);
+    let (source, set_overrides, dropped_optionals) = drop_invalid_optionals_with_schemas(
+        source.clone(),
+        set_overrides.cloned(),
+        data_keys,
+        &schemas,
     );
 
     // Deferral is decided on the raw values, where a stored literal token is
     // visibly data; validation judges the text composition will read.
     let raw_instance = build_effective_instance(&source, set_overrides.as_ref());
     let callers = override_records(set_overrides.as_ref(), file_resolution_context, file_ref_fallback_dir);
-    let effective = match load_effective_schema(
-        &source,
-        Some(&raw_instance),
-        file_ref_fallback_dir,
-        file_resolution_context,
-        &callers,
-        trigger_findings,
-    ) {
+    let schemas = schemas.with_caller_input_records(&callers);
+    let effective = match prepare_effective_schema(&source, Some(&raw_instance), &schemas) {
         Ok(Some(e)) => e,
         // No authored `$schema` and no matching trigger: nothing to judge.
         Ok(None) => {
@@ -1063,25 +1097,33 @@ pub fn drop_invalid_optionals(
     Option<serde_json::Value>,
     Vec<DroppedOptional>,
 ) {
-    drop_invalid_optionals_with_origin(
-        source,
-        set_overrides,
-        &std::collections::BTreeSet::new(),
+    // A failed scan is left to the prepare-time validator to report.
+    let Ok(schemas) = discover_schema_owner(
+        &source,
         file_ref_fallback_dir,
         file_resolution_context,
         trigger_findings,
+    ) else {
+        return (source, set_overrides, Vec::new());
+    };
+    let callers = override_records(set_overrides.as_ref(), file_resolution_context, file_ref_fallback_dir);
+    let schemas = schemas.with_caller_input_records(&callers);
+    drop_invalid_optionals_with_schemas(
+        source,
+        set_overrides,
+        &std::collections::BTreeSet::new(),
+        &schemas,
     )
 }
 
-/// [`drop_invalid_optionals`] where the overrides named in `data_keys` are
+/// [`drop_invalid_optionals`] against an already discovered owner whose caller
+/// records match `set_overrides`; the overrides named in `data_keys` are
 /// data: final values, dropped when invalid whatever text they hold.
-fn drop_invalid_optionals_with_origin(
+fn drop_invalid_optionals_with_schemas(
     mut source: ResolvedCompositionSource,
     mut set_overrides: Option<serde_json::Value>,
     data_keys: &std::collections::BTreeSet<String>,
-    file_ref_fallback_dir: Option<&std::path::Path>,
-    file_resolution_context: &biscuit_file::FileResolutionContext,
-    trigger_findings: &TriggerFindings,
+    schemas: &DarkmatterSchemas,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -1092,19 +1134,14 @@ fn drop_invalid_optionals_with_origin(
     else {
         return (source, set_overrides, dropped);
     };
-    let callers = override_records(set_overrides.as_ref(), file_resolution_context, file_ref_fallback_dir);
-    let effective = match load_effective_schema(
+    let effective = match prepare_effective_schema(
         &source,
         Some(&serde_json::Value::Object(instance.clone())),
-        file_ref_fallback_dir,
-        file_resolution_context,
-        &callers,
-        trigger_findings,
+        schemas,
     ) {
         Ok(Some(e)) => e,
-        // No schema applies, or it cannot be loaded: the prepare-time
-        // validator reports a load failure. Skipped triggers are already in
-        // `trigger_findings` either way.
+        // No schema applies, or it cannot be prepared: the prepare-time
+        // validator reports a failure.
         Ok(None) | Err(_) => return (source, set_overrides, dropped),
     };
 

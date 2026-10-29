@@ -28,25 +28,28 @@ use hash::run_hash;
 
 pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
 pub use compose::report::ReportedExit;
-pub use render::run_render;
+use render::run_render;
 
 /// Validates that top-level CLI options are not combined with subcommands.
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     let mut conflicts = Vec::new();
 
-    if cli.input.is_some() {
+    if cli.render.input.is_some() {
         conflicts.push("[INPUT]");
     }
-    if cli.output != OutputFormat::Auto {
+    if cli.render.output != OutputFormat::Auto {
         conflicts.push("--output");
     }
-    if cli.show {
+    if cli.render.indent.is_some() {
+        conflicts.push("--indent");
+    }
+    if cli.render.show {
         conflicts.push("--show");
     }
     if cli.save {
         conflicts.push("--save");
     }
-    if !cli.deny.is_empty() {
+    if !cli.render.deny.is_empty() {
         conflicts.push("--deny");
     }
 
@@ -63,19 +66,7 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
 #[instrument(skip_all)]
 pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Result<()> {
     match command {
-        CliCommand::Render {
-            input,
-            output,
-            show,
-            indent,
-            deny,
-            features,
-        } => {
-            let policy = policy::resolve_for(PolicyCommand::Render, &[], &deny, &[], None)?;
-            // `md --feature a render --feature b` turns on both.
-            let features = [cli.features.as_slice(), features.as_slice()].concat();
-            run_render(input.as_ref(), output, show, indent, policy.denies("style"), &features, cli, request)?;
-        }
+        CliCommand::Render(options) => run_render(&options, cli, request)?,
         CliCommand::Clean {
             input,
             save,

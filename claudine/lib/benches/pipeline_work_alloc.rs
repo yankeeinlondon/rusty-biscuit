@@ -319,7 +319,8 @@ fn c8_document_entry() {
     }
 }
 
-/// D3: the optional scrub and the launch check each rediscover triggers.
+/// D3: one pre-validation discovers triggers once and shares them between
+/// its optional scrub and its launch check.
 fn d3_scrub_and_check() {
     for triggers in [1usize, 10, 100] {
         let sandbox = Sandbox::new();
@@ -348,8 +349,8 @@ fn d3_scrub_and_check() {
             &format!("schema-root-files={triggers}/pre_validate_schema"),
             &measured,
         );
-        // One discovery alone: what sharing the registry would save per
-        // pre-validation.
+        // One discovery alone: the discovery cost one pre-validation now
+        // pays once.
         let document_context = context.for_source(&source.resolved_path);
         let discovery = measure(9, || {
             DarkmatterSchemas::new(document_context.clone())

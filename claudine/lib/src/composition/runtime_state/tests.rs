@@ -314,3 +314,113 @@ fn container_scope_restore_and_retry_keep_native_results_and_mutations() {
     assert_eq!(state.outputs_value(), json!([{"alpha": [1, null], "beta": false}]));
     assert!(state.last_output_text().is_none());
 }
+
+/// A cell with two mutations, three outputs, and a position.
+fn populated() -> RuntimeState {
+    let state = RuntimeState::new();
+    state.set(&engine(), "first", json!(1), &base()).unwrap();
+    state.set(&engine(), "second", json!({"nested": [true]}), &base()).unwrap();
+    for entry in [json!("a"), json!(["b"]), json!({"c": null})] {
+        state.append_output_entry(entry);
+    }
+    state.set_sequence_binding(json!({"name": "step", "run_id": "r"}));
+    state
+}
+
+#[test]
+fn projections_equal_the_matching_fields_of_a_full_snapshot() {
+    let state = populated();
+    let full = state.snapshot();
+
+    assert_eq!(state.mutations(), full.mutations);
+    assert_eq!(state.mutation_keys(), ["first", "second"], "first-write order");
+    assert_eq!(state.mutations_and_outputs(), (full.mutations.clone(), full.outputs.clone()));
+    assert_eq!(state.mutations_and_output_count(), (full.mutations.clone(), 3));
+    assert_eq!(state.outputs_from(1), full.outputs[1..]);
+    assert_eq!(state.outputs_from(7), Vec::<Value>::new(), "a start past the end is empty");
+    assert_eq!(state.sequence_scope(), (full.seq.clone(), full.outputs.clone()));
+    assert_eq!(state.sequence_value(), full.sequence_value());
+    assert_eq!(RuntimeState::new().sequence_value(), RuntimeSnapshot::default().sequence_value(), "standalone");
+}
+
+#[test]
+fn replace_sequence_scope_moves_the_enclosing_scope_out_and_back() {
+    let state = populated();
+    let before = state.snapshot();
+
+    let (outer_seq, outer_outputs) = state.replace_sequence_scope(Some(json!({"name": "inner"})), Vec::new());
+    assert_eq!((outer_seq.clone(), outer_outputs.clone()), (before.seq.clone(), before.outputs.clone()));
+    state.append_output_entry(json!("inner"));
+    state.set(&engine(), "child", json!("kept"), &base()).unwrap();
+
+    let (inner_seq, inner_outputs) = state.replace_sequence_scope(outer_seq, outer_outputs);
+    assert_eq!((inner_seq, inner_outputs), (Some(json!({"name": "inner"})), vec![json!("inner")]));
+    let after = state.snapshot();
+    assert_eq!((after.seq, after.outputs), (before.seq, before.outputs), "the enclosing scope is restored");
+    assert_eq!(after.mutations.get("child"), Some(&json!("kept")), "child mutations are not undone");
+}
+
+/// A writer publishes `len` and an output list of that length under one lock;
+/// a reader of either pair projection never sees one without the other.
+#[test]
+fn multi_field_projections_are_coherent_under_a_concurrent_writer() {
+    const WRITES: usize = 2_000;
+    let state = RuntimeState::new();
+    let done = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for write in 1..=WRITES {
+                let mut inner = state.inner.lock().unwrap();
+                inner.mutations.insert("len".into(), json!(write));
+                inner.outputs.push(json!(write));
+                inner.seq = Some(json!({"len": write}));
+            }
+            done.store(true, std::sync::atomic::Ordering::Release);
+        });
+        let len_of = |mutations: &FrontmatterMap| mutations.get("len").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let mut reads = 0usize;
+        loop {
+            let finished = done.load(std::sync::atomic::Ordering::Acquire);
+            let (mutations, outputs) = state.mutations_and_outputs();
+            assert_eq!(len_of(&mutations), outputs.len(), "mutations and outputs torn");
+            let (mutations, count) = state.mutations_and_output_count();
+            assert_eq!(len_of(&mutations), count, "mutations and output count torn");
+            let (seq, outputs) = state.sequence_scope();
+            let position = seq.as_ref().and_then(|seq| seq["len"].as_u64()).unwrap_or(0) as usize;
+            assert_eq!(position, outputs.len(), "position and outputs torn");
+            reads += 1;
+            if finished { break; }
+        }
+        assert!(reads > 0);
+    });
+    assert_eq!(state.output_count(), WRITES);
+}
+
+#[cfg(feature = "work-counters")]
+#[test]
+fn field_projections_take_no_full_snapshot_and_copy_only_the_outputs_they_return() {
+    use crate::work_counters::{Work, snapshot};
+    let state = populated();
+    for _ in 0..97 { state.append_output_entry(json!("history")); }
+
+    let before = snapshot();
+    let _ = state.mutations();
+    let _ = state.mutation_keys();
+    let _ = state.mutations_and_output_count();
+    let mutation_reads = snapshot().since(&before);
+    assert_eq!(mutation_reads.get(Work::RuntimeSnapshot), 0);
+    assert_eq!(mutation_reads.get(Work::RuntimeOutputsCopy), 0, "mutation reads copy no output history");
+
+    let before = snapshot();
+    let tail = state.outputs_from(95);
+    let _ = state.mutations_and_outputs();
+    let _ = state.sequence_scope();
+    let output_reads = snapshot().since(&before);
+    assert_eq!(output_reads.get(Work::RuntimeSnapshot), 0);
+    assert_eq!(output_reads.get(Work::RuntimeOutputsCopy), tail.len() as u64 + 2 * 100, "only the entries each read returns");
+
+    let before = snapshot();
+    let _ = state.snapshot();
+    let full = snapshot().since(&before);
+    assert_eq!((full.get(Work::RuntimeSnapshot), full.get(Work::RuntimeOutputsCopy)), (1, 100));
+}

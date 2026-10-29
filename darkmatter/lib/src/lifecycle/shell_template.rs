@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 
 use super::registry::EventRegistry;
 use crate::markdown::compose::ShellCommandOrigin;
-use crate::markdown::compose::expression::{DeclaredTypes, GuardOrigin, TypeScope};
+use crate::markdown::compose::expression::{DeclaredTypes, Expr, GuardOrigin, TypeScope};
 use crate::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, HoleTiming, ModeRequirement, ShellCandidate, ShellPreApprovals, SiteValues,
     TemplateShape, parse_authored,
@@ -215,7 +215,12 @@ pub fn typed_template(raw: &str, scope: &TypeScope<'_>) -> Option<CommandTemplat
 /// expression proves nothing about another.
 pub fn placeholder_guard(expression: &str, scope: &TypeScope<'_>) -> Option<GuardOrigin> {
     let expr = crate::markdown::compose::expression::parse(expression).ok()?;
-    scope.type_of_expr(&expr)?.guard_presence().cloned()
+    placeholder_guard_expr(&expr, scope)
+}
+
+/// [`placeholder_guard`] for an expression already parsed.
+pub fn placeholder_guard_expr(expr: &Expr, scope: &TypeScope<'_>) -> Option<GuardOrigin> {
+    scope.type_of_expr(expr)?.guard_presence().cloned()
 }
 
 /// Mark each placeholder of `template` whose expression `guarded` names as

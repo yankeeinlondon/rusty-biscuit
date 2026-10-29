@@ -1486,6 +1486,35 @@ mod shell {
         }
     }
 
+    /// The retained-syntax scan is the text scan: a malformed occurrence never
+    /// hides a valid read beside it, and static-bracket and dotted spellings
+    /// of one path agree.
+    #[test]
+    fn prepared_target_identity_scan_matches_the_text_scan() {
+        use darkmatter::markdown::compose::expression::PreparedInterpolation;
+        for raw in [
+            "{{ 1 + }} {{ ctx.agent }}",
+            "{{ ctx.agent }} {{ 1 + }}",
+            "{{ 1 + }} {{ ctx.cwd }}",
+            "{{ ctx['agent'] }} {{ ctx.agent }}",
+            "{{ ctx.agent[0] }}",
+            "{{ env[key] }}",
+            "{{ ctx.cwd }} {{ env.HOME }} {{ fm.ctx.agent }}",
+            "no placeholders",
+        ] {
+            assert_eq!(
+                shape::first_target_identity_root_prepared(&PreparedInterpolation::new(raw)),
+                shape::first_target_identity_root(raw),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            shape::first_target_identity_root_prepared(&PreparedInterpolation::new("{{ 1 + }} {{ ctx.agent }}"))
+                .as_deref(),
+            Some("ctx.agent"),
+        );
+    }
+
     /// A task's `teardown:` stack resolves through the same graph phase, so a
     /// target-identity reference there is rejected identically — the bytes it
     /// would bake in are the bytes execution runs.
@@ -3232,5 +3261,503 @@ mod scope_site_conformance {
         assert_eq!(graph.prompt_references[0].deferred_with, ["message"]);
         assert!(graph.prompt_references[1].deferred_with.is_empty());
         assert_eq!(graph.prompt_references[1].with.get("message"), Some(&Value::Null));
+    }
+}
+
+/// Pins the observable result of static shell-site analysis: which error wins
+/// when several placeholders are wrong, and the byte coordinates every
+/// diagnostic and template span is reported in.
+mod static_analysis_characterization {
+    use super::*;
+    use darkmatter::markdown::MarkdownError;
+    use darkmatter::markdown::compose::ShellExpansionError;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+    use darkmatter::markdown::compose::shell_expansion::template::TemplateGrammarError;
+    use darkmatter::markdown::compose::shell_expansion::template::HoleTiming;
+
+    fn shell_steps(commands: &[&str]) -> Value {
+        Value::Array(
+            commands
+                .iter()
+                .enumerate()
+                .map(|(index, command)| json!({ "name": format!("s{index}"), "shell": command }))
+                .collect(),
+        )
+    }
+
+    /// Frontmatter every case shares: present values, including the falsy ones.
+    fn fixture(dir: &Path, steps: Value) -> String {
+        write_legacy_source(
+            dir,
+            "seq.md",
+            &[
+                ("prog", json!("echo")),
+                ("word", json!("w")),
+                ("ok", json!(true)),
+                ("zero", json!(0)),
+                ("empty", json!("")),
+                ("no", json!(false)),
+                ("sequence", steps),
+            ],
+            "Body.\n",
+        )
+    }
+
+    fn commands_graph(commands: &[&str]) -> Result<PreflightGraph, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        legacy_graph_for(&fixture(dir.path(), shell_steps(commands)))
+    }
+
+    /// A stack `set` value in the last of `leading` plain steps' teardown.
+    fn set_graph(value: &str, later: bool) -> Result<PreflightGraph, CompositionError> {
+        let dir = TempDir::new().unwrap();
+        let task = json!({ "name": "one", "shell": "echo one", "teardown": [{ "set": { "v": value } }] });
+        let steps = if later { json!([{ "name": "zero", "shell": "echo z" }, task]) } else { json!([task]) };
+        legacy_graph_for(&fixture(dir.path(), steps))
+    }
+
+    fn shell_sites(graph: &PreflightGraph) -> &[PreparedShellSite] {
+        &graph.steps.last().unwrap().task.as_ref().unwrap().shell_sites
+    }
+
+    fn assert_parse_failure(error: &CompositionError, command: &str, text: &str) {
+        let CompositionError::SequenceShellResolution { command: found, source: Some(source), message, .. } = error
+        else {
+            panic!("expected a typed resolution failure for `{text}`, got {error:?}");
+        };
+        assert_eq!(found, command);
+        assert!(message.contains(&format!("interpolation of `{text}` failed")), "{message}");
+        let MarkdownError::Interpolation { expression, cause, .. } = &**source else {
+            panic!("the parse failure is carried typed, got {source:?}");
+        };
+        assert_eq!(expression, text);
+        assert!(matches!(**cause, ExpressionError::Parse(_)), "{cause:?}");
+    }
+
+    // -- control and malformed expressions -----------------------------------
+
+    #[test]
+    fn a_well_formed_command_is_the_control_for_every_malformed_case_below() {
+        let graph = commands_graph(&["echo {{ word }} {{ word }}"]).unwrap();
+        assert_eq!(
+            shell_sites(&graph)[0].mode,
+            SiteMode::ResolvedBytes { bytes: "echo w w".to_string() }
+        );
+    }
+
+    #[test]
+    fn a_malformed_expression_alone_is_a_typed_parse_failure_in_any_task() {
+        for commands in [vec!["echo {{ 1 + }}"], vec!["echo hi", "echo {{ 1 + }}"]] {
+            let error = commands_graph(&commands).unwrap_err();
+            assert_parse_failure(&error, "echo {{ 1 + }}", "1 +");
+        }
+    }
+
+    #[test]
+    fn a_malformed_expression_beside_err_reports_whichever_resolution_reaches_first() {
+        // The malformed occurrence suppresses the approval diagnostics, so
+        // `err` is no longer refused by name; resolution then evaluates the
+        // occurrences in order and stops at the first failure.
+        let error = commands_graph(&["echo {{ err.msg }} {{ 1 + }}"]).unwrap_err();
+        assert_parse_failure(&error, "echo {{ err.msg }} {{ 1 + }}", "1 +");
+
+        let error = commands_graph(&["echo {{ 1 + }} {{ err.msg }}"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+            panic!("expected a resolution failure, got {error:?}");
+        };
+        assert!(message.contains("interpolation of `err.msg` failed"), "{message}");
+        let MarkdownError::Interpolation { cause, .. } = &**source else { panic!("{source:?}") };
+        assert!(matches!(**cause, ExpressionError::Binding(_)), "{cause:?}");
+    }
+
+    #[test]
+    fn a_target_identity_read_wins_on_either_side_of_a_malformed_expression() {
+        for (access, root) in [
+            ("ctx.agent", "ctx.agent"),
+            (r#"ctx["model"]"#, "ctx.model"),
+            ("env.AGENT", "env.AGENT"),
+            (r#"env["MODEL"]"#, "env.MODEL"),
+        ] {
+            for command in [
+                format!("echo {{{{ {access} }}}} {{{{ 1 + }}}}"),
+                format!("echo {{{{ 1 + }}}} {{{{ {access} }}}}"),
+                format!("echo {{{{ 1 + }}}} {{{{ {access} }}}} {{{{ 2 * }}}}"),
+            ] {
+                for commands in [vec![command.as_str()], vec!["echo hi", command.as_str()]] {
+                    let error = commands_graph(&commands).unwrap_err();
+                    assert!(
+                        matches!(&error, CompositionError::SequenceShellTargetIdentity { root: found, command: c, .. }
+                            if found == root && *c == command),
+                        "`{command}` must be refused as `{root}`; got {error:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unrelated_ctx_and_env_properties_beside_a_malformed_expression_are_not_identity_reads() {
+        let error = commands_graph(&["echo {{ ctx.repo }} {{ env.HOME }} {{ 1 + }}"]).unwrap_err();
+        assert_parse_failure(&error, "echo {{ ctx.repo }} {{ env.HOME }} {{ 1 + }}", "1 +");
+    }
+
+    // -- template position and grammar precedence ----------------------------
+
+    #[test]
+    fn a_program_hole_is_exact_in_the_first_task_and_a_grammar_refusal_in_a_later_one() {
+        let graph = commands_graph(&["{{ prog }} arg"]).unwrap();
+        assert_eq!(shell_sites(&graph)[0].mode, SiteMode::ResolvedBytes { bytes: "echo arg".to_string() });
+
+        let error = commands_graph(&["echo hi", "{{ prog }} arg"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+            panic!("expected a grammar refusal, got {error:?}");
+        };
+        assert!(message.contains("it must run as a template"), "{message}");
+        let MarkdownError::ShellExpansion(inner) = &**source else { panic!("{source:?}") };
+        assert!(matches!(
+            &**inner,
+            ShellExpansionError::TemplateGrammar { reason: TemplateGrammarError::ProgramWordHole, .. }
+        ), "{inner:?}");
+    }
+
+    #[test]
+    fn an_optional_invalid_template_resolves_exactly_and_a_required_one_is_refused() {
+        let graph = commands_graph(&["echo {{ prog }} | cat"]).unwrap();
+        assert_eq!(
+            shell_sites(&graph)[0].mode,
+            SiteMode::ResolvedBytes { bytes: "echo echo | cat".to_string() }
+        );
+
+        let error = commands_graph(&["echo hi", "echo {{ prog }} | cat"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), .. } = &error else {
+            panic!("expected a grammar refusal, got {error:?}");
+        };
+        let MarkdownError::ShellExpansion(inner) = &**source else { panic!("{source:?}") };
+        assert!(matches!(
+            &**inner,
+            ShellExpansionError::TemplateGrammar { reason: TemplateGrammarError::Pipe, .. }
+        ), "{inner:?}");
+    }
+
+    #[test]
+    fn a_late_read_beside_a_malformed_expression_still_reports_the_malformed_one() {
+        let error = commands_graph(&["echo hi", "echo {{ 1 + }} {{ last(seq.outputs) }}"]).unwrap_err();
+        assert_parse_failure(&error, "echo {{ 1 + }} {{ last(seq.outputs) }}", "1 +");
+    }
+
+    #[test]
+    fn a_missing_value_fails_and_empty_zero_and_false_are_present() {
+        let error = commands_graph(&["echo {{ nothere }}"]).unwrap_err();
+        let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+            panic!("expected a missing-value failure, got {error:?}");
+        };
+        assert!(message.contains("it reads `nothere`, which is missing"), "{message}");
+        let MarkdownError::ShellExpansion(inner) = &**source else { panic!("{source:?}") };
+        assert!(matches!(&**inner, ShellExpansionError::MissingValue { expression, .. } if expression == "nothere"));
+
+        let graph = commands_graph(&["echo {{ zero }}{{ empty }}{{ no }}"]).unwrap();
+        assert_eq!(shell_sites(&graph)[0].mode, SiteMode::ResolvedBytes { bytes: "echo 0false".to_string() });
+    }
+
+    // -- `set` wrapper coordinates -------------------------------------------
+
+    #[test]
+    fn a_set_values_template_spans_index_the_extracted_command_in_bytes() {
+        let value = "$(git é {{  word  }} ü {{ word }})::ok";
+        for later in [false, true] {
+            let graph = set_graph(value, later).unwrap();
+            let site = &shell_sites(&graph)[1];
+            assert_eq!(site.kind, ShellSiteKind::SetValue { key: "v".to_string() });
+            assert_eq!(site.authored, "git é {{  word  }} ü {{ word }}");
+            let template = site.template.as_ref().expect("a placeholder-bearing set value keeps its template");
+            let holes: Vec<_> = template.placeholders().map(|hole| (hole.expression.clone(), hole.span.clone())).collect();
+            assert_eq!(holes, vec![("word".to_string(), 7..19), ("word".to_string(), 23..33)]);
+            for (_, span) in holes {
+                assert!(site.authored[span.clone()].starts_with("{{") && site.authored[span].ends_with("}}"));
+            }
+            assert!(template.placeholders().all(|hole| hole.timing == HoleTiming::ApprovalTime));
+            if later {
+                assert_eq!(site.mode, SiteMode::Template);
+            } else {
+                assert_eq!(site.mode, SiteMode::ResolvedBytes { bytes: "$(git é w ü w)::ok".to_string() });
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_set_suffixes_keep_their_extracted_coordinates() {
+        for suffix in ["::ok", "::exit-code", "::result", "::timeout:30", "::no-cache"] {
+            let graph = set_graph(&format!("$(git é {{{{ word }}}}){suffix}"), true).unwrap();
+            let site = &shell_sites(&graph)[1];
+            assert_eq!(site.authored, "git é {{ word }}", "{suffix}");
+            let spans: Vec<_> = site.template.as_ref().unwrap().placeholders().map(|hole| hole.span.clone()).collect();
+            assert_eq!(spans, vec![7..17], "{suffix}");
+        }
+    }
+
+    #[test]
+    fn a_set_value_diagnostic_offset_indexes_the_raw_wrapper_and_a_late_namespace_has_none() {
+        let value = "$(git é {{ err.msg }})";
+        for later in [false, true] {
+            let error = set_graph(value, later).unwrap_err();
+            let CompositionError::SequenceShellLateBinding { command, root, source: Some(source), .. } = &error else {
+                panic!("expected a late-binding refusal, got {error:?}");
+            };
+            assert_eq!((command.as_str(), root.as_str()), (value, "err"));
+            let ExpressionError::Binding(binding) = &**source else { panic!("{source:?}") };
+            let darkmatter::markdown::compose::expression::BindingError::Unavailable(unavailable) = &**binding
+            else {
+                panic!("{binding:?}");
+            };
+            let span = unavailable.span.clone().expect("a normal diagnostic carries its raw span");
+            assert_eq!(&value[span], "err.msg", "the span indexes the raw wrapper bytes");
+        }
+
+        // The late-namespace append pass reports the read without a span.
+        let error = set_graph("$(git é {{ current.branch }})", false).unwrap_err();
+        let CompositionError::SequenceShellLateBinding { root, source: Some(source), .. } = &error else {
+            panic!("expected a late-binding refusal, got {error:?}");
+        };
+        assert_eq!(root, "current");
+        let ExpressionError::Binding(binding) = &**source else { panic!("{source:?}") };
+        let darkmatter::markdown::compose::expression::BindingError::Unavailable(unavailable) = &**binding else {
+            panic!("{binding:?}");
+        };
+        assert_eq!(unavailable.span, None);
+    }
+
+    #[test]
+    fn a_set_value_with_a_dead_branch_unknown_function_is_refused_by_name() {
+        for later in [false, true] {
+            let error = set_graph("$(git é {{ ok ? 'a' : nofn() }})", later).unwrap_err();
+            let CompositionError::SequenceShellResolution { source: Some(source), message, .. } = &error else {
+                panic!("expected a resolution failure, got {error:?}");
+            };
+            assert!(message.starts_with("Unknown function: nofn"), "{message}");
+            let MarkdownError::Interpolation { cause, .. } = &**source else { panic!("{source:?}") };
+            assert!(matches!(**cause, ExpressionError::UnknownFunction { .. }), "{cause:?}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_set_wrapper_fails_extraction_before_any_placeholder_is_read() {
+        for later in [false, true] {
+            let error = set_graph("$(git {{ word }}", later).unwrap_err();
+            let CompositionError::SequenceShellResolution { command, message, source: None, .. } = &error else {
+                panic!("expected an extraction failure, got {error:?}");
+            };
+            assert_eq!(command, "$(git {{ word }}");
+            assert!(message.contains("must be a whole-value `$( … )` command"), "{message}");
+        }
+        // Malformed placeholders inside a malformed wrapper never get that far.
+        let error = set_graph("$(git {{ 1 + }}", false).unwrap_err();
+        assert!(matches!(&error, CompositionError::SequenceShellResolution { source: None, .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_malformed_expression_inside_a_set_value_is_a_typed_parse_failure() {
+        for later in [false, true] {
+            let error = set_graph("$(git é {{ 1 + }})", later).unwrap_err();
+            assert_parse_failure(&error, "$(git é {{ 1 + }})", "1 +");
+        }
+    }
+}
+
+/// Behavior the retained-syntax route must keep: every lifecycle position is
+/// collected, and a retained template reads current values, never frozen ones.
+mod prepared_site_behavior {
+    use super::*;
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, ResolutionContext};
+    use darkmatter::markdown::compose::shell_expansion::template::{LookupEvaluator, fill_template};
+
+    fn sorted_commands(graph: &PreflightGraph) -> Vec<&str> {
+        let mut commands: Vec<&str> = graph.shell_commands.iter().map(|c| c.command.as_str()).collect();
+        commands.sort_unstable();
+        commands
+    }
+
+    /// Placeholder-bearing commands in setup, teardown, an `on_error:`
+    /// companion and a `set` value of the first task are each resolved from the
+    /// same retained-syntax route as a body step.
+    #[test]
+    fn placeholder_commands_in_setup_teardown_on_error_and_set_resolve_once_each() {
+        let dir = TempDir::new().unwrap();
+        let source = write_legacy_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("word", json!("w")),
+                (
+                    "sequence",
+                    json!([{
+                        "name": "one",
+                        "shell": "echo body {{ word }}",
+                        "setup": [{ "shell": { "command": "echo setup {{ word }}", "on_error": "echo recover {{ word }}" } }],
+                        "teardown": [
+                            { "shell": "echo teardown {{ word }}" },
+                            { "set": { "v": "$(  echo set {{ word }}  )" } },
+                        ],
+                    }]),
+                ),
+            ],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        assert_eq!(
+            sorted_commands(&graph),
+            vec![
+                "echo body w",
+                "echo recover w",
+                "echo set w",
+                "echo setup w",
+                "echo teardown w",
+            ],
+        );
+        assert_eq!(graph.template_candidates.len(), 5);
+    }
+
+    struct DocumentLookup(ResolutionContext);
+
+    impl EvaluationLookup for DocumentLookup {
+        fn get(&self, _: &str) -> Option<Value> {
+            None
+        }
+
+        fn resolution_context(&self) -> Option<ResolutionContext> {
+            Some(self.0.clone())
+        }
+    }
+
+    /// Retained syntax is not a retained value: the template prepared once
+    /// reads `fixture.md` again on each fill.
+    #[test]
+    fn a_template_prepared_once_rereads_a_document_value_on_every_fill() {
+        let dir = TempDir::new().unwrap();
+        let fixture = dir.path().join("fixture.md");
+        fs::write(&fixture, "---\nstatus: draft\n---\nBody\n").unwrap();
+        let source = write_legacy_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "zero", "shell": "echo zero" },
+                    { "name": "one", "shell": "tool {{ frontmatter('fixture.md', 'status') }}" },
+                ]),
+            )],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        let site = &graph.steps[1].task.as_ref().unwrap().shell_sites[0];
+        assert_eq!(site.mode, SiteMode::Template);
+        let template = site.template.as_ref().expect("a later task keeps its template");
+
+        let context = ResolutionContext::new(biscuit_file::FileResolutionContext::from_snapshot(
+            dir.path(),
+            Some(dir.path().to_path_buf()),
+            HashMap::new(),
+        ));
+        let lookup = DocumentLookup(context);
+        let evaluator = LookupEvaluator::new(&lookup);
+        let args = |template| fill_template(template, &evaluator, None).unwrap().segments[0].args.clone();
+
+        assert_eq!(args(template), ["draft"]);
+        fs::write(&fixture, "---\nstatus: ready\n---\nBody\n").unwrap();
+        assert_eq!(args(template), ["ready"]);
+    }
+}
+
+/// The owning document's schema and the task's `when:` reach the template
+/// sequence preflight returns: each hole keeps its declared validator, and a
+/// guard that narrows a declared type keeps that refinement, so filling the
+/// template accepts and rejects exactly what the schema and guard allow.
+mod schema_typed_holes {
+    use super::*;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+    use darkmatter::markdown::compose::shell_expansion::template::{
+        CommandTemplate, HoleError, RejectReason, fill_template,
+    };
+
+    const COMMAND: &str = "tool {{ count }} {{ mode }}";
+
+    /// A sequence with `count: number(min(1))` and `mode: enum(release, debug)`
+    /// whose later task runs `COMMAND` under `when` (if any), and whose root
+    /// `finalize` captures `count` through a whole-value `set`.
+    fn graph(when: Option<&str>) -> PreflightGraph {
+        let dir = TempDir::new().unwrap();
+        let mut typed = json!({ "name": "typed", "shell": COMMAND });
+        if let Some(when) = when {
+            typed["when"] = json!(when);
+        }
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("$schema", json!({ "count": "number(min(1))", "mode": "enum(release, debug)" })),
+                ("count", json!(2)),
+                ("mode", json!("release")),
+                ("finalize", json!([{ "set": { "stamp": "$(stamp {{ count }})" } }])),
+                ("sequence", json!([{ "name": "first", "shell": "echo first" }, typed])),
+            ],
+            "Body.\n",
+        );
+        graph_for(&source).unwrap()
+    }
+
+    fn template<'g>(graph: &'g PreflightGraph, authored: &str) -> &'g CommandTemplate {
+        let candidate = graph
+            .template_candidates
+            .iter()
+            .find(|candidate| candidate.authored() == Some(authored))
+            .unwrap_or_else(|| panic!("no candidate for `{authored}`: {:?}", graph.template_candidates));
+        candidate.template.as_ref().expect("the command parses as a template")
+    }
+
+    /// Fill `template` with `count` and `mode`, returning the arguments or the
+    /// rejected expression and its reason.
+    fn fill(template: &CommandTemplate, count: Value, mode: &str) -> Result<Vec<String>, (String, RejectReason)> {
+        let values = json!({ "count": count, "mode": mode });
+        let evaluate = |expression: &str| -> Result<Value, ExpressionError> {
+            Ok(values.get(expression).cloned().unwrap_or(Value::Null))
+        };
+        fill_template(template, &evaluate, None)
+            .map(|chain| chain.segments[0].args.clone())
+            .map_err(|error| match error {
+                HoleError::Rejected { expression, reason, .. } => (expression, reason),
+                other => panic!("expected a rejected value, got {other:?}"),
+            })
+    }
+
+    #[test]
+    fn a_later_task_keeps_its_schema_validator_and_guard_refinement() {
+        let graph = graph(Some("mode == 'release'"));
+        let template = template(&graph, COMMAND);
+
+        assert_eq!(fill(template, json!(2), "release"), Ok(vec!["2".into(), "release".into()]));
+        assert_eq!(fill(template, json!(0), "release"), Err(("count".into(), RejectReason::DeclaredType)));
+        assert_eq!(fill(template, json!("2"), "release"), Err(("count".into(), RejectReason::DeclaredType)));
+        assert_eq!(fill(template, json!(2), "debug"), Err(("mode".into(), RejectReason::GuardRefinement)));
+    }
+
+    /// Control: without the guard, `debug` satisfies the declared enum, so the
+    /// refinement above came from the task's `when:`.
+    #[test]
+    fn without_a_guard_the_declared_enum_accepts_every_member() {
+        let graph = graph(None);
+        let template = template(&graph, COMMAND);
+
+        assert_eq!(fill(template, json!(2), "debug"), Ok(vec!["2".into(), "debug".into()]));
+        assert_eq!(fill(template, json!(2), "nightly"), Err(("mode".into(), RejectReason::DeclaredType)));
+    }
+
+    /// A container `set` command shares the projection: the schema's validator
+    /// applies, and no task guard reaches it.
+    #[test]
+    fn a_container_set_command_keeps_the_schema_validator() {
+        let graph = graph(Some("mode == 'release'"));
+        let template = template(&graph, "stamp {{ count }}");
+
+        assert_eq!(fill(template, json!(2), "debug"), Ok(vec!["2".into()]));
+        assert_eq!(fill(template, json!(0), "debug"), Err(("count".into(), RejectReason::DeclaredType)));
     }
 }

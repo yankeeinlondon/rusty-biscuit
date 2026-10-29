@@ -308,9 +308,9 @@ mod tests {
 
     #[test]
     fn deny_defaults_to_nothing_and_takes_style() {
-        assert!(cli_from(&["md", "doc.md"]).deny.is_empty());
+        assert!(cli_from(&["md", "doc.md"]).render.deny.is_empty());
         let cli = cli_from(&["md", "doc.md", "--deny", "style"]);
-        let policy = crate::args::policy::resolve_for(crate::args::policy::PolicyCommand::Render, &[], &cli.deny, &[], None)
+        let policy = crate::args::policy::resolve_for(crate::args::policy::PolicyCommand::Render, &[], &cli.render.deny, &[], None)
             .expect("resolves");
         assert!(policy.denies("style"));
     }

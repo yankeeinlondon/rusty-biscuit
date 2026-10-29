@@ -160,6 +160,7 @@ pub use triggers::{
 };
 pub use timings::{CompileCache, ValidationStage, ValidationTimings};
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+use positions::ProblemPositions;
 
 /// The runtime baseline, prepared from the embedded table: its typed form with
 /// every import expanded, the shared definitions its references point into,
@@ -842,14 +843,25 @@ impl DarkmatterSchemas {
     /// frontmatter didn't satisfy it) are reported via
     /// [`ValidationReport::problems`] rather than this error path.
     pub fn validate(&self, source: &Markdown) -> Result<ValidationReport, SchemaError> {
-        let frontmatter_value = frontmatter_as_json(source);
-        let positions = positions_for(source);
-        let mut report = match self.effective_for(source)? {
-            Some(effective) => effective.validate_with_positions(&frontmatter_value, &positions),
-            None => ValidationReport::vacuous(),
-        };
-        report.trigger_findings = self.discovery_findings().to_vec();
-        Ok(report)
+        self.validate_prepared(source, None).map(|(report, _)| report)
+    }
+
+    /// [`Self::validate`], also returning what preparing the effective schema
+    /// found, from the same preparation.
+    ///
+    /// A caller that words its outcome by whether a schema applied (`md
+    /// schema validate`'s "doesn't have a schema definition") reads
+    /// [`PreparationSummary::has_schema`] instead of preparing the schema a
+    /// second time with [`Self::effective_for`].
+    ///
+    /// ## Errors
+    ///
+    /// See [`Self::validate`].
+    pub fn validate_summarized(
+        &self,
+        source: &Markdown,
+    ) -> Result<(ValidationReport, PreparationSummary), SchemaError> {
+        self.validate_prepared(source, None)
     }
 
     /// [`Self::validate`], also returning the request's stage timings.
@@ -876,18 +888,36 @@ impl DarkmatterSchemas {
         source: &Markdown,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
+        self.validate_prepared(source, Some(phase)).map(|(report, _)| report)
+    }
+
+    /// The one place a document's [`ValidationReport`] is produced: prepares
+    /// the effective schema once and judges the frontmatter against it,
+    /// unphased or at `phase`. Every document-level validation entry point
+    /// delegates here.
+    ///
+    /// Source positions are built only when the report holds a problem, once,
+    /// and shared by all of its problems ([`positions::ProblemPositions`]).
+    fn validate_prepared(
+        &self,
+        source: &Markdown,
+        phase: Option<SchemaPhase>,
+    ) -> Result<(ValidationReport, PreparationSummary), SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
-        let positions = positions_for(source);
-        let mut report = match self.effective_for(source)? {
-            Some(effective) => effective.validate_for_phase_with_positions(
-                &frontmatter_value,
-                &positions,
-                phase,
-            )?,
-            None => ValidationReport::vacuous(),
+        let positions = ProblemPositions::deferred(source);
+        let effective = self.effective_for(source)?;
+        let summary = PreparationSummary { has_schema: effective.is_some() };
+        let mut report = match (effective, phase) {
+            (Some(effective), None) => {
+                effective.validate_converted(&frontmatter_value, &frontmatter_value, &positions)
+            }
+            (Some(effective), Some(phase)) => {
+                effective.validate_for_phase_located(&frontmatter_value, &positions, phase)?
+            }
+            (None, _) => ValidationReport::vacuous(),
         };
         report.trigger_findings = self.discovery_findings().to_vec();
-        Ok(report)
+        Ok((report, summary))
     }
 
     /// Returns a shared reference to the underlying validator cache. Useful
@@ -1194,13 +1224,13 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
-        self.validate_converted(frontmatter, frontmatter, positions)
+        self.validate_converted(frontmatter, frontmatter, &ProblemPositions::Built(positions))
     }
 
     /// [`Self::validate_with_positions`] of `frontmatter`, whose templates
     /// are found in `stored`, its form before literal tokens were decoded,
     /// so decoded literal text is never taken for a template.
-    fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &PositionMap) -> ValidationReport {
+    fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &ProblemPositions<'_>) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
         if self.accepts_as_is(frontmatter) {
             return self.validate_instance(frontmatter, frontmatter, stored, positions, &coerce::NestedTemplates::default());
@@ -1237,9 +1267,20 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
+        self.validate_for_phase_located(frontmatter, &ProblemPositions::Built(positions), phase)
+    }
+
+    /// [`Self::validate_for_phase_with_positions`] locating its problems with
+    /// `positions`.
+    fn validate_for_phase_located(
+        &self,
+        frontmatter: &Value,
+        positions: &ProblemPositions<'_>,
+        phase: SchemaPhase,
+    ) -> Result<ValidationReport, SchemaError> {
         let projected = self.phase_projection(phase)?;
         Ok(match phase {
-            SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
+            SchemaPhase::Launch => projected.validate_converted(frontmatter, frontmatter, positions),
             // Raw, as `validate_raw` is, but nested templates at `deferred`
             // places are deferred as in every phase.
             SchemaPhase::Completion => {
@@ -1278,12 +1319,12 @@ impl EffectiveSchema {
             }
             None => self,
         };
-        Ok(schema.judge_stored(stored, positions, phase == Some(SchemaPhase::Completion)))
+        Ok(schema.judge_stored(stored, &ProblemPositions::Built(positions), phase == Some(SchemaPhase::Completion)))
     }
 
     /// [`Self::validate_stored`] against this schema as it is: converted
     /// first, or raw (`completion`) as the completion phase judges.
-    fn judge_stored(&self, stored: &Value, positions: &PositionMap, completion: bool) -> ValidationReport {
+    fn judge_stored(&self, stored: &Value, positions: &ProblemPositions<'_>, completion: bool) -> ValidationReport {
         let decoded = crate::markdown::literal_token::decode_literal_tokens(stored).ok();
         let decoded = decoded.as_ref().unwrap_or(stored);
         if completion {
@@ -1355,7 +1396,13 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
-        self.validate_instance(frontmatter, frontmatter, frontmatter, positions, &coerce::NestedTemplates::default())
+        self.validate_instance(
+            frontmatter,
+            frontmatter,
+            frontmatter,
+            &ProblemPositions::Built(positions),
+            &coerce::NestedTemplates::default(),
+        )
     }
 
     /// The nested templates of `authored` that this schema marks `deferred`
@@ -1381,12 +1428,15 @@ impl EffectiveSchema {
     /// is a syntax problem whatever its type accepts; operands are scanned
     /// for one in `stored`, `authored` as loaded with its literal tokens
     /// still encoded.
+    ///
+    /// Problems are located with `positions` once the report is settled, so a
+    /// valid instance never asks for a position map.
     fn validate_instance(
         &self,
         instance: &Value,
         authored: &Value,
         stored: &Value,
-        positions: &PositionMap,
+        positions: &ProblemPositions<'_>,
         templates: &coerce::NestedTemplates,
     ) -> ValidationReport {
         let bound = self
@@ -1424,10 +1474,10 @@ impl EffectiveSchema {
                         discriminant::select_literal_discriminant_arm(root_arms, instance)
                     }) {
                     Some(idx) => validate::collect_arm_problems_with_anchors(
-                        &arms[idx], instance, positions, anchors, idx,
+                        &arms[idx], instance, anchors, idx,
                     ),
                     None => validate::collect_root_union_problems_with_anchors(
-                        arms, instance, positions, anchors,
+                        arms, instance, anchors,
                     ),
                 }
             }
@@ -1438,13 +1488,11 @@ impl EffectiveSchema {
                 let problems = validate::collect_problems_with_anchors(
                     validator,
                     instance,
-                    positions,
                     anchors,
                 );
                 validate::narrow_discriminated_union_problems(
                     &self.json_schema,
                     instance,
-                    positions,
                     anchors,
                     problems,
                 )
@@ -1463,9 +1511,10 @@ impl EffectiveSchema {
         // After the enrichment: a binder's problem names its call, and the
         // description found at its place would be an arbitrary arm's.
         if let Some(bound) = &bound {
-            bound.report_malformed(&mut problems, positions);
-            bound.report_rejections(&mut problems, positions);
+            bound.report_malformed(&mut problems);
+            bound.report_rejections(&mut problems);
         }
+        positions.locate_all(&mut problems);
         ValidationReport {
             valid: problems.is_empty(),
             problems,
@@ -1500,7 +1549,7 @@ impl EffectiveSchema {
         positions: &PositionMap,
         options: &ValidationOptions,
     ) -> ValidationReport {
-        let mut report = self.judge_stored(frontmatter, positions, false);
+        let mut report = self.judge_stored(frontmatter, &ProblemPositions::Built(positions), false);
         let pending = scan_pending_values(frontmatter);
         let shell_pending_keys: HashSet<&str> = pending
             .iter()
@@ -1633,14 +1682,7 @@ impl EffectiveSchema {
                 changed: false,
             };
         };
-        rewrite::rewrite_eager_file_values(
-            &self.json_schema,
-            frontmatter,
-            base_dir,
-            self.file_ref_fallback_dir.as_deref(),
-            composition_pending,
-            &self.file_resolution_context,
-        )
+        rewrite::rewrite_for_effective(self, frontmatter, base_dir, composition_pending)
     }
 }
 
@@ -1675,6 +1717,17 @@ pub struct ValidationReport {
     /// [`DarkmatterSchemas::validate_for_phase`] whether or not an effective
     /// schema exists; empty from an [`EffectiveSchema`]'s own validation.
     pub trigger_findings: Vec<triggers::InvalidTriggerFinding>,
+}
+
+/// What preparing a document's effective schema found, returned beside the
+/// [`ValidationReport`] the same preparation produced (see
+/// [`DarkmatterSchemas::validate_summarized`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PreparationSummary {
+    /// Whether any schema layer (baseline, matching trigger, or document
+    /// `$schema`) applied. When `false` the report is vacuously valid.
+    pub has_schema: bool,
 }
 
 impl ValidationReport {

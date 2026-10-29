@@ -1,9 +1,8 @@
 use clap::Parser;
 use clap_complete::engine::ArgValueCompleter;
-use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::{
-    CliFill, CodeBlockArg, Feature, OutputFormat, PageAlignmentArg, PageBackgroundArg,
-    complete_markdown_files, complete_theme_names, parse_cli_fill, parse_max_width,
+    CliFill, CodeBlockArg, PageAlignmentArg, PageBackgroundArg,
+    complete_theme_names, parse_cli_fill, parse_max_width,
     parse_theme_name, reject_width_flag,
 };
 use darkmatter::markdown::highlighting::ThemePair;
@@ -17,9 +16,9 @@ use std::path::PathBuf;
 #[command(name = "md", about = "Darkmatter CLI", version)]
 #[command(subcommand_precedence_over_arg = true, disable_help_subcommand = true)]
 pub struct Cli {
-    /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
-    #[arg(add = ArgValueCompleter::new(complete_markdown_files))]
-    pub input: Option<PathBuf>,
+    /// Options used when no subcommand is supplied.
+    #[command(flatten)]
+    pub render: crate::args::RenderOptions,
 
     /// Theme for prose content (kebab-case name)
     #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
@@ -38,14 +37,6 @@ pub struct Cli {
     #[arg(long)]
     pub list_themes: bool,
 
-    /// Output format for top-level render mode (when no subcommand given)
-    #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
-    pub output: OutputFormat,
-
-    /// Open selected output in the default app using a temp file
-    #[arg(long)]
-    pub show: bool,
-
     /// Shorthand for `clean --save` with top-level [INPUT]
     #[arg(long)]
     pub save: bool,
@@ -54,18 +45,6 @@ pub struct Cli {
     /// where the terminal shows no images; other diagrams stay code blocks.
     #[arg(long)]
     pub mermaid: bool,
-
-    /// Turn on a named feature (repeatable and comma-separated; names are
-    /// case-insensitive)
-    #[arg(
-        long = "feature",
-        value_name = "NAME",
-        value_enum,
-        value_delimiter = ',',
-        ignore_case = true,
-        action = clap::ArgAction::Append
-    )]
-    pub features: Vec<Feature>,
 
     // ── Layout flags (Phase 5) ──────────────────────────────────────────
     /// Margin on all sides (cells)
@@ -241,16 +220,6 @@ pub struct Cli {
     #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_code_blocks: Option<CliFill>,
 
-    /// Make the selected diagnostics blocking (repeatable): `style` or `all`
-    #[arg(
-        long = "deny",
-        value_name = "ID",
-        value_parser = PolicyValueParser::new(PolicyCommand::Render, PolicyVerb::Deny),
-        long_help = policy::long_help(PolicyCommand::Render, PolicyVerb::Deny),
-        add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Render, PolicyVerb::Deny, current))
-    )]
-    pub deny: Vec<PolicySelector>,
-
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
         short = 'v',
@@ -286,6 +255,21 @@ pub struct Cli {
     /// Subcommand (read, clean, compose, toc, delta)
     #[command(subcommand)]
     pub command: Option<crate::args::Command>,
+}
+
+impl Cli {
+    /// Normalizes default rendering to `render`, combining top-level and
+    /// subcommand features once before dispatch.
+    pub fn command_or_render(&self) -> crate::args::Command {
+        match self.command.clone() {
+            Some(crate::args::Command::Render(mut options)) => {
+                options.features.splice(0..0, self.render.features.iter().copied());
+                crate::args::Command::Render(options)
+            }
+            Some(command) => command,
+            None => crate::args::Command::Render(self.render.clone()),
+        }
+    }
 }
 
 #[cfg(test)]

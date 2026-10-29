@@ -33,8 +33,9 @@
 //! [`ResolutionContext`]: crate::markdown::compose::expression::ResolutionContext
 //! [`make_portable_relative`]: crate::markdown::compose::expression::path_projection::make_portable_relative
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use biscuit_file::FileReference;
 use jsonschema::Validator;
@@ -42,7 +43,7 @@ use serde_json::{Map, Value};
 
 use super::format::DARKMATTER_FILE_FORMAT;
 use super::scope::SchemaScope;
-use super::validate::{self, error_top_level_key};
+use super::validate::{self, CallerOrigins, ValidatorCache, error_top_level_key};
 use crate::markdown::compose::expression::path_projection::make_portable_relative_in_context;
 use crate::markdown::compose::expression::resolve_ctx::{
     is_remote_url, normalize_path_arg, resolve_document_file_ref,
@@ -67,8 +68,8 @@ pub struct NormalizationOutcome {
 /// Pure: never mutates inputs. `base_dir` is the prompt document directory the
 /// eager-`file` format validator resolves against, so the rewrite resolves
 /// through the identical document-first-then-repository order the read side uses.
-/// `fallback` (the launch area) is threaded for structural parity with the
-/// validator but is not a resolution input (D2).
+/// `fallback` (the launch area) is part of the arm validators' cache identity
+/// but is not a resolution input (D2).
 ///
 /// `composition_pending` carries the set of top-level keys still holding a
 /// `$(...)` shell expression (compose pre-shell stage). The rewrite skips
@@ -79,6 +80,10 @@ pub struct NormalizationOutcome {
 /// the (already-converted) instance and is committed only when those arms
 /// agree on the result, so the written order of the arms never matters
 /// (Decision #8/#9).
+///
+/// Union arms are judged with validators from the process-wide
+/// [`ValidatorCache`] (see [`ArmValidators`]); every value, and every file's
+/// existence, is still judged afresh on each call.
 pub fn rewrite_eager_file_values(
     json_schema: &Value,
     instance: &Value,
@@ -87,13 +92,51 @@ pub fn rewrite_eager_file_values(
     composition_pending: &HashSet<String>,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
-    if let Some(arms) = json_schema.get("anyOf").and_then(Value::as_array) {
+    let mut cache = super::SHARED_VALIDATOR_CACHE.clone();
+    if let Some(fallback) = fallback {
+        cache = cache.with_file_ref_fallback_dir(fallback);
+    }
+    let mut arms = ArmValidators::new(&cache, None, base_dir, request_context);
+    rewrite_with(json_schema, instance, base_dir, composition_pending, request_context, &mut arms)
+}
+
+/// [`rewrite_eager_file_values`] for an effective schema: its root-union arms
+/// are judged with the validators its own validation compiled (the same
+/// wrapped arms, fallback, and caller origins), so they are cache hits. A
+/// property-level union arm is judged from the origin of the top-level
+/// property it sits under, so a caller-supplied value selects the arm its
+/// validation accepted.
+pub(super) fn rewrite_for_effective(
+    effective: &super::EffectiveSchema,
+    instance: &Value,
+    base_dir: &Path,
+    composition_pending: &HashSet<String>,
+) -> NormalizationOutcome {
+    let mut cache = super::SHARED_VALIDATOR_CACHE.clone().with_caller_origins(effective.caller_origins.clone());
+    if let Some(fallback) = effective.file_ref_fallback_dir.as_deref() {
+        cache = cache.with_file_ref_fallback_dir(fallback);
+    }
+    let context = &effective.file_resolution_context;
+    let wrapped = super::wrapped_root_arms(&effective.json_schema);
+    let mut arms = ArmValidators::new(&cache, wrapped, base_dir, context);
+    rewrite_with(&effective.json_schema, instance, base_dir, composition_pending, context, &mut arms)
+}
+
+fn rewrite_with(
+    json_schema: &Value,
+    instance: &Value,
+    base_dir: &Path,
+    composition_pending: &HashSet<String>,
+    request_context: &biscuit_file::FileResolutionContext,
+    arms: &mut ArmValidators<'_>,
+) -> NormalizationOutcome {
+    if let Some(root_arms) = json_schema.get("anyOf").and_then(Value::as_array) {
         return rewrite_root_union(
-            arms,
+            root_arms,
             json_schema,
             instance,
             base_dir,
-            fallback,
+            arms,
             composition_pending,
             request_context,
         );
@@ -102,11 +145,120 @@ pub fn rewrite_eager_file_values(
         json_schema,
         instance,
         base_dir,
-        fallback,
+        arms,
         composition_pending,
         request_context,
         json_schema,
     )
+}
+
+/// The union-arm validators of one rewrite invocation.
+///
+/// Each arm's validator is taken from the [`ValidatorCache`] at most once per
+/// invocation and origin, and its handle retained, so a list of union items
+/// costs one lookup per distinct arm and origin, not one per item. A
+/// validator is compiled for a complete arm schema carrying its root's
+/// `$defs`, never for a fragment with dangling references, and the cache keys
+/// it by the document directory, fallback, request context, and caller
+/// origins it judges with. Only compiled validators are shared: no verdict is
+/// retained, so each value and each file's existence is judged on every call.
+struct ArmValidators<'a> {
+    /// Judges root-union arms, which see the whole instance, so each
+    /// caller-supplied top-level property is judged from its own origin.
+    root_cache: ValidatorCache,
+    /// The origin of the top-level property being walked, as the origins of
+    /// a validator whose whole instance is a value inside it (see
+    /// [`Self::enter_property`]). A property-level arm compiles alone below
+    /// that property, so its location no longer names it; the arm is judged
+    /// from the property's origin instead, as the surrounding validation
+    /// judged it.
+    owner: CallerOrigins,
+    /// The root arms as the effective schema's validators were compiled from
+    /// (shared allocations whose digests the cache already holds), if known.
+    wrapped_root_arms: Option<Arc<[Arc<Value>]>>,
+    base_dir: &'a Path,
+    context: &'a biscuit_file::FileResolutionContext,
+    /// By arm address, then owning property's origin: the arm's validator,
+    /// or `None` for an arm without the eager marker or one that does not
+    /// compile. Every arm is borrowed from the invocation's schema, so an
+    /// address names one arm for the whole invocation; the same arm reached
+    /// under properties of different origins judges with different
+    /// validators.
+    property_arms: HashMap<*const Value, Vec<RetainedArm>>,
+}
+
+/// A property-level arm's validator for one owning-property origin.
+type RetainedArm = (CallerOrigins, Option<Arc<Validator>>);
+
+impl<'a> ArmValidators<'a> {
+    fn new(
+        cache: &ValidatorCache,
+        wrapped_root_arms: Option<Arc<[Arc<Value>]>>,
+        base_dir: &'a Path,
+        context: &'a biscuit_file::FileResolutionContext,
+    ) -> Self {
+        Self {
+            root_cache: cache.clone(),
+            owner: CallerOrigins::default(),
+            wrapped_root_arms,
+            base_dir,
+            context,
+            property_arms: HashMap::new(),
+        }
+    }
+
+    /// The validator for root-union arm `index`, or `None` when it does not
+    /// compile (the surrounding validation reports that).
+    fn root_arm(&self, index: usize, arm: &Value, root: &Value) -> Option<Arc<Validator>> {
+        let wrapped = self.wrapped_root_arms.as_deref().and_then(|wrapped| wrapped.get(index));
+        let looked_up = match wrapped {
+            Some(wrapped) => self
+                .root_cache
+                .validator_for_reporting_compile(wrapped, Some(self.base_dir), self.context),
+            None => self.root_cache.validator_for_reporting_compile(
+                &validate::wrap_arm_as_root_schema(arm, root),
+                Some(self.base_dir),
+                self.context,
+            ),
+        };
+        Self::note(looked_up)
+    }
+
+    /// Judges the property-level arms met from here on from the origin of
+    /// top-level property `name`.
+    fn enter_property(&mut self, name: &str) {
+        self.owner = CallerOrigins::whole_instance(self.root_cache.caller_origins().origin_of(name));
+    }
+
+    /// The validator for an eligible property-level arm, judged from the
+    /// current property's origin, or `None` for an ineligible arm or one that
+    /// does not compile.
+    fn property_arm(&mut self, arm: &Value, root: &Value) -> Option<Arc<Validator>> {
+        let retained = self.property_arms.entry(std::ptr::from_ref(arm)).or_default();
+        if let Some((_, validator)) = retained.iter().find(|(origin, _)| *origin == self.owner) {
+            return validator.clone();
+        }
+        let validator = contains_eager_file_fragment(arm, root)
+            .then(|| {
+                let cache = self.root_cache.clone().with_caller_origins(self.owner.clone());
+                Self::note(cache.validator_for_reporting_compile(
+                    &super::scope::with_root_definitions(arm, root),
+                    Some(self.base_dir),
+                    self.context,
+                ))
+            })
+            .flatten();
+        retained.push((self.owner.clone(), validator.clone()));
+        validator
+    }
+
+    fn note(looked_up: Result<(Arc<Validator>, bool), super::errors::SchemaError>) -> Option<Arc<Validator>> {
+        let (validator, compiled) = looked_up.ok()?;
+        if compiled {
+            crate::note_work!(RewriteArmCompile);
+        }
+        Some(validator)
+    }
 }
 
 /// Root-union pass: rewrite through each arm that accepts the
@@ -117,27 +269,19 @@ pub fn rewrite_eager_file_values(
 /// Rewriting against an arm the validator never accepted would normalize a
 /// value under the wrong declaration, so only accepting arms take part.
 fn rewrite_root_union(
-    arms: &[Value],
+    root_arms: &[Value],
     root: &Value,
     instance: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     composition_pending: &HashSet<String>,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
     let mut agreed: Option<NormalizationOutcome> = None;
-    for arm in arms {
-        let wrapped = validate::wrap_arm_as_root_schema(arm, root);
+    for (index, arm) in root_arms.iter().enumerate() {
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
-        // Preserve the production validator's request-scoped candidate plan
-        // during arm selection; do not rebuild from ambient CWD.
-        let Ok(validator) = validate::build_validator_in_context(
-            &wrapped,
-            Some(base_dir),
-            fallback,
-            request_context,
-        ) else {
+        let Some(validator) = arms.root_arm(index, arm, root) else {
             continue;
         };
         if !arm_accepts(&validator, instance, composition_pending) {
@@ -147,7 +291,7 @@ fn rewrite_root_union(
             arm,
             instance,
             base_dir,
-            fallback,
+            arms,
             composition_pending,
             request_context,
             root,
@@ -207,7 +351,7 @@ fn rewrite_object(
     schema: &Value,
     instance: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     composition_pending: &HashSet<String>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
@@ -235,11 +379,12 @@ fn rewrite_object(
         let Some(prop_schema) = props.get(name) else {
             continue;
         };
+        arms.enter_property(name);
         if let Some(rewritten) = rewrite_property(
             prop_schema,
             value,
             base_dir,
-            fallback,
+            arms,
             request_context,
             root,
             &mut active,
@@ -292,7 +437,7 @@ fn rewrite_property(
     prop_schema: &Value,
     value: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
     active: &mut ActiveReferences,
@@ -310,7 +455,7 @@ fn rewrite_property(
         return None;
     };
     if through.is_empty() {
-        return rewrite_shape(effective, value, base_dir, fallback, request_context, root, active);
+        return rewrite_shape(effective, value, base_dir, arms, request_context, root, active);
     }
     let location = (std::ptr::from_ref::<Value>(target), std::ptr::from_ref(value));
     if active.contains(&location) {
@@ -323,7 +468,7 @@ fn rewrite_property(
             hop,
             current.as_ref().unwrap_or(value),
             base_dir,
-            fallback,
+            arms,
             request_context,
             root,
             active,
@@ -336,7 +481,7 @@ fn rewrite_property(
         target,
         current.as_ref().unwrap_or(value),
         base_dir,
-        fallback,
+        arms,
         request_context,
         root,
         active,
@@ -351,7 +496,7 @@ fn rewrite_shape(
     effective: &Value,
     value: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
     active: &mut ActiveReferences,
@@ -359,20 +504,20 @@ fn rewrite_shape(
     // Union (property-level, item-level, or an arm's own sentinel wrapper).
     // Rewrite only through the one validating arm that carries the eager-file
     // marker (Decision #9: "no guessing").
-    if let Some(arms) = effective.get("anyOf").and_then(Value::as_array) {
-        return rewrite_property_union(arms, value, base_dir, fallback, request_context, root, active);
+    if let Some(union_arms) = effective.get("anyOf").and_then(Value::as_array) {
+        return rewrite_property_union(union_arms, value, base_dir, arms, request_context, root, active);
     }
 
     // Direct eager-file marker on the effective schema.
     if is_eager_file_fragment(effective) {
-        return rewrite_file_value(value, base_dir, fallback, request_context);
+        return rewrite_file_value(value, base_dir, request_context);
     }
 
     // Array of eager-file elements: descend through `items`.
     if effective.get("type").and_then(Value::as_str) == Some("array")
         && let Some(items_schema) = effective.get("items")
     {
-        return rewrite_array_items(items_schema, value, base_dir, fallback, request_context, root, active);
+        return rewrite_array_items(items_schema, value, base_dir, arms, request_context, root, active);
     }
 
     // Inline object with declared sub-properties: descend into each present
@@ -380,7 +525,7 @@ fn rewrite_shape(
     if effective.get("type").and_then(Value::as_str) == Some("object")
         && let Some(sub_props) = effective.get("properties").and_then(Value::as_object)
     {
-        return rewrite_inline_object(sub_props, value, base_dir, fallback, request_context, root, active);
+        return rewrite_inline_object(sub_props, value, base_dir, arms, request_context, root, active);
     }
 
     None
@@ -400,29 +545,17 @@ fn rewrite_shape(
 /// eager-file-typed. The eligible arm is then walked by [`rewrite_property`],
 /// so object arms rewrite only their own eager fields.
 fn rewrite_property_union(
-    arms: &[Value],
+    union_arms: &[Value],
     value: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
     active: &mut ActiveReferences,
 ) -> Option<Value> {
     let mut selected: Option<&Value> = None;
-    for arm in arms {
-        if !contains_eager_file_fragment(arm, root) {
-            continue;
-        }
-        // Preserve the production validator's request-scoped candidate plan
-        // during arm acceptance; do not rebuild from ambient CWD.
-        // The arm compiles alone, so it takes its root's definitions.
-        crate::note_work!(RewriteArmCompile);
-        let Ok(validator) = validate::build_validator_in_context(
-            &super::scope::with_root_definitions(arm, root),
-            Some(base_dir),
-            fallback,
-            request_context,
-        ) else {
+    for arm in union_arms {
+        let Some(validator) = arms.property_arm(arm, root) else {
             continue;
         };
         if validator.is_valid(value) {
@@ -433,7 +566,7 @@ fn rewrite_property_union(
             selected = Some(arm);
         }
     }
-    rewrite_property(selected?, value, base_dir, fallback, request_context, root, active)
+    rewrite_property(selected?, value, base_dir, arms, request_context, root, active)
 }
 
 /// Rewrites a single present eager-file value to its document-relative resolved
@@ -450,7 +583,6 @@ fn rewrite_property_union(
 fn rewrite_file_value(
     value: &Value,
     base_dir: &Path,
-    _fallback: Option<&Path>,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
     let Value::String(raw) = value else {
@@ -500,7 +632,7 @@ fn rewrite_array_items(
     items_schema: &Value,
     value: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
     active: &mut ActiveReferences,
@@ -511,7 +643,7 @@ fn rewrite_array_items(
     let mut out = Vec::with_capacity(items.len());
     let mut changed = false;
     for item in items {
-        match rewrite_property(items_schema, item, base_dir, fallback, request_context, root, active) {
+        match rewrite_property(items_schema, item, base_dir, arms, request_context, root, active) {
             Some(rewritten) => {
                 out.push(rewritten);
                 changed = true;
@@ -529,7 +661,7 @@ fn rewrite_inline_object(
     sub_props: &Map<String, Value>,
     value: &Value,
     base_dir: &Path,
-    fallback: Option<&Path>,
+    arms: &mut ArmValidators<'_>,
     request_context: &biscuit_file::FileResolutionContext,
     root: &Value,
     active: &mut ActiveReferences,
@@ -544,7 +676,7 @@ fn rewrite_inline_object(
             continue;
         };
         if let Some(rewritten) =
-            rewrite_property(sub_schema, sub_value, base_dir, fallback, request_context, root, active)
+            rewrite_property(sub_schema, sub_value, base_dir, arms, request_context, root, active)
         {
             out.insert(name.clone(), rewritten);
             changed = true;
@@ -1306,6 +1438,53 @@ mod tests {
 
         assert_eq!(outcome.value["looped"], json!("./spec.md"));
         assert_eq!(outcome.value["spec"], json!("spec.md"));
+    }
+
+    /// R1-F2.11: one union arm, reached under a document-authored property
+    /// and a caller-supplied one, is judged from each property's own origin.
+    /// `other` is walked first; a validator retained by arm address alone
+    /// would judge `spec` from the document's folder too, where `./*.md`
+    /// does not admit `launch/a.md`.
+    #[test]
+    fn a_shared_arm_is_judged_from_each_owning_property_origin() {
+        let repo = repo_fixture();
+        let root = biscuit_file::canonicalize_simplified(repo.path()).unwrap();
+        let launch = root.join("launch");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::write(root.join("a.md"), "# A\n").unwrap();
+        std::fs::write(launch.join("a.md"), "# launch A\n").unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "other": {"$ref": "#/$defs/pick"},
+                "spec": {"$ref": "#/$defs/pick"}
+            },
+            "$defs": {
+                "pick": {"anyOf": [
+                    {
+                        "type": "string",
+                        "format": DARKMATTER_FILE_FORMAT,
+                        "x-darkmatter-match": ["./*.md"]
+                    },
+                    {"type": "number"}
+                ]}
+            }
+        });
+        let launch_file = biscuit_file::to_portable_string(&launch.join("a.md"));
+        let instance = json!({"other": "./a.md", "spec": launch_file});
+        let context = biscuit_file::FileResolutionContext::new(&root);
+        let cache = ValidatorCache::new().with_caller_origins(CallerOrigins::new([(
+            "spec".to_string(),
+            biscuit_file::FileResolutionContext::new(&launch),
+        )]));
+        let mut arms = ArmValidators::new(&cache, None, &root, &context);
+
+        let outcome = rewrite_with(&schema, &instance, &root, &HashSet::new(), &context, &mut arms);
+
+        assert_eq!(outcome.value["other"], json!("a.md"));
+        assert_eq!(outcome.value["spec"], json!("launch/a.md"));
+        let retained = arms.property_arms.values().map(Vec::len).max();
+        assert_eq!(retained, Some(2), "the file arm is retained once per origin");
     }
 
     /// Sanity: a non-object instance (e.g. a bare string at the root) is
