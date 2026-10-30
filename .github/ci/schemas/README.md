@@ -21,6 +21,11 @@ proves it did it.
 so Rust tooling can assert against it without running Python. Regenerate it with
 `python3 scripts/ci/schema.py`; `scripts/ci/test_schema.py` fails when it drifts.
 
+For a readable SimplifiedSchema description of validation receipts and
+observation collections, see [`schemas/ci-evidence.yaml`](../../../schemas/ci-evidence.yaml)
+and its [usage and verification notes](../../../docs/cicd/evidence.md). This
+catalog documents the current format; it does not replace the runtime validator.
+
 `archive_guard_cases.json` is the second cross-language document here, and the
 only hand-authored one: an accept/reject corpus for the plan's `archive_guard`
 scope. Each case carries the scope fragment, whether the contract accepts it,

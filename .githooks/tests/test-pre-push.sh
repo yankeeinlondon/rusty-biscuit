@@ -1425,6 +1425,19 @@ test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed() {
     fi
 }
 
+# The same promise in the default (strict) mode, which reaches the gates. A
+# tag-only push once printed "triggers no run" and then ran the full local
+# gates, L2 included, against the working tree (2026-10-04).
+test_a_tag_only_push_in_strict_mode_runs_no_gate() {
+    local tmpdir="$1"
+    make_fake_just "$tmpdir" 1
+    run_hook_with_ref_line "$tmpdir" strict \
+        "refs/tags/v1 $(git -C "$tmpdir/repo" rev-parse HEAD 2>/dev/null || echo 0) refs/tags/v1 0000000000000000000000000000000000000000"
+    assert_exit "tag only" "$tmpdir" 0 || return 1
+    assert_contains "nothing to review" "$tmpdir/out" "triggers no run and there is no plan to review" || return 1
+    assert_log_lacks "no gate" "$tmpdir" "pre-push" || return 1
+}
+
 # ---------- every pushed branch, under its own identity (review-3) ----------
 #
 # Git hands the hook one line per ref update plus the remote it is pushing to.
@@ -2576,6 +2589,7 @@ run_test "an unstaged policy edit never reaches the plan or receipt"  test_an_un
 run_test "a clean checkout is planned in place"                       test_a_clean_checkout_is_planned_in_place
 run_test "a push that does not carry HEAD reviews the pushed revision" test_a_push_that_does_not_carry_head_reviews_the_pushed_revision
 run_test "a deletion-only push triggers nothing and is not reviewed"  test_a_deletion_only_push_triggers_nothing_and_is_not_reviewed
+run_test "a tag-only push in strict mode runs no gate"              test_a_tag_only_push_in_strict_mode_runs_no_gate
 run_test "a prohibition on the pushed branch blocks, whatever is checked out" test_a_prohibition_on_the_pushed_branch_blocks_whatever_is_checked_out
 run_test "a prohibition on the checked-out branch does not bind another push" test_a_prohibition_on_the_checked_out_branch_does_not_bind_another_branch_push
 run_test "every pushed branch is planned with its own path set"       test_every_pushed_branch_is_planned_with_its_own_path_set

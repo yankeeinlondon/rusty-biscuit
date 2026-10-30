@@ -41,7 +41,7 @@ the `rust-testing` skill; graph tests are in [git-graph.md](git-graph.md#tests).
 `-E '<filterset>'` breaks the recipe's bash. Run one binary directly:
 
 ```sh
-BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli \
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p git-wt-cli \
   --features terminal-tests -E 'binary(level2_remove)'
 ```
 
@@ -98,7 +98,7 @@ The variable turns a missing-backend skip into a failure.
     in place, not a refusal).
   - It needs no terminal backend, so **CI never runs it**: `windows-latest`
     hosts none of `l2-backends` and the L2 cell is an accepted gap. Run it with
-    `./scripts/cross-check.sh --os windows worktree-cli --features terminal-tests level2_powershell`
+    `./scripts/cross-check.sh --os windows git-wt-cli --features terminal-tests level2_powershell`
     and read the durations (7–8 s each since the removal lifecycle, measured
     2026-10-12; a skip is 0.0x s).
 

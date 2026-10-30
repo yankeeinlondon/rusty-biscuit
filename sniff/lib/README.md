@@ -1337,7 +1337,7 @@ cargo bench -p sniff --features network --bench perf -- ^filesystem_docs
 cargo bench -p sniff --features network --bench perf -- '^(programs|programs_bulk_lookup|programs_fanout)/'
 
 # PATH-length scaling on the compiled CLI (requires hyperfine)
-cargo build --release -p sniff-cli
+cargo build --release -p sniff-detection-cli
 SNIFF_BIN="$(cargo metadata --format-version 1 --no-deps \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release/sniff"
 SHORT_PATH="/usr/bin:/bin"
@@ -1347,12 +1347,12 @@ hyperfine --warmup 3 \
     -n full_path  "PATH=${LONG_PATH}  ${SNIFF_BIN} software --json >/dev/null"
 
 # Flamegraph the high-fan-out CLI commands
-cargo flamegraph --profile profiling -p sniff-cli -- repo git-status
-cargo flamegraph --profile profiling -p sniff-cli -- software --json
+cargo flamegraph --profile profiling -p sniff-detection-cli -- repo git-status
+cargo flamegraph --profile profiling -p sniff-detection-cli -- software --json
 
 # Compile-time / symbol-cost baselines for Phase 5.3
-cargo bloat -p sniff-cli --release --bin sniff
-cargo llvm-lines -p sniff-cli --release
+cargo bloat -p sniff-detection-cli --release --bin sniff
+cargo llvm-lines -p sniff-detection-cli --release
 ```
 
 ## Design Principles

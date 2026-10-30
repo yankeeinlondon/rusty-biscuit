@@ -7,7 +7,7 @@ adopt. The CLIs surveyed:
 | Area | Crate | Binary | Module split | Color lib | Error reporting |
 |------|-------|--------|--------------|-----------|-----------------|
 | `darkmatter/cli` | `darkmatter-cli` | `md` | args/commands/output/main | biscuit-terminal `Prose` | `color_eyre` + `Prose` styled |
-| `sniff/cli` | `sniff-cli` | `sniff` | args/commands/output/main | biscuit-terminal `Prose` | `Box<dyn Error>`, `"Error: {e}"` |
+| `sniff/cli` | `sniff-detection-cli` | `sniff` | args/commands/output/main | biscuit-terminal `Prose` | `Box<dyn Error>`, `"Error: {e}"` |
 | `biscuit-terminal/cli` | `biscuit-terminal-cli` | `bt` | args/commands/output/main | biscuit-terminal `Prose` | `color_eyre` default (backtrace) |
 | `playa/cli` | `playa-cli` | `playa` | monolithic `main.rs` (~1.8k loc) | biscuit-terminal `Prose` | `Prose` styled, no eyre |
 | `biscuit-speaks/cli` | `biscuit-speaks-cli` | `so-you-say` | monolithic `main.rs` (~2.1k loc) | **owo-colors** | owo-colors styled, no eyre |

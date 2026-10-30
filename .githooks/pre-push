@@ -601,6 +601,10 @@ done <"$REF_UPDATES_FILE"
 if [ "$REVIEWED" -eq 0 ]; then
     echo ""
     echo "This push updates no branch, so it triggers no run and there is no plan to review."
+    # Nothing was reviewed, so no scope was recorded and there is no head
+    # whose evidence a gate could publish. Running the gates here only tested
+    # the working tree (a tag-only push once ran the full L2 tier).
+    exit 0
 fi
 if [ "$SCOPE_RECORDED" -eq 1 ]; then
     publish_scope_evidence

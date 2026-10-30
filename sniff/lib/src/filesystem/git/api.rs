@@ -1,7 +1,7 @@
 //! Backend-neutral, path-based git queries for CLI consumers.
 //!
 //! These wrap the git helpers behind plain path arguments and plain return
-//! types so `sniff-cli` needs no git backend dependency (no `git2`/`gix`
+//! types so `sniff-detection-cli` needs no git backend dependency (no `git2`/`gix`
 //! imports). All helpers open through the centralized trusted gix discovery
 //! ([`open::trusted_discover`]), so trust/permission/I/O/corruption failures
 //! surface distinctly from genuine repository absence.

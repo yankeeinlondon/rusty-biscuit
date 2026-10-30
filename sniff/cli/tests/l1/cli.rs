@@ -7165,7 +7165,7 @@ fn test_recent_commits_package_filters_and_attribution_in_a_monorepo() {
 }
 
 /// A workspace with `worktree/lib` (`worktree`), `worktree/cli`
-/// (`worktree-cli`), and `other/lib` (`other`), and commits touching shared
+/// (`git-wt-cli`), and `other/lib` (`other`), and commits touching shared
 /// area files, look-alike paths, and a misleading scope. Returns the commit
 /// ids oldest first, labeled `C0`..=`C9` in the assertions.
 fn create_area_membership_repo() -> (tempfile::TempDir, PathBuf, Vec<String>) {
@@ -7175,7 +7175,7 @@ fn create_area_membership_repo() -> (tempfile::TempDir, PathBuf, Vec<String>) {
     git2::Repository::init(dir.path()).unwrap();
     let path = dir.path().to_path_buf();
     let worktree_manifest = format!("{PACKAGE}\"worktree\"\n");
-    let cli_manifest = format!("{PACKAGE}\"worktree-cli\"\n");
+    let cli_manifest = format!("{PACKAGE}\"git-wt-cli\"\n");
     let other_manifest = format!("{PACKAGE}\"other\"\n");
     let history: [(&[(&str, &str)], &str); 10] = [
         (
@@ -7244,7 +7244,7 @@ fn test_recent_commits_package_area_selects_shared_area_files_by_location() {
 
     let package = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree", "--json"]);
     assert_eq!(hashes(&package), pick(&[1, 0]), "the planning commit touches no package");
-    let cli = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree-cli", "--json"]);
+    let cli = run_commit_json(&path, &["recent-commits", "50", "--package", "git-wt-cli", "--json"]);
     assert_eq!(hashes(&cli), pick(&[8, 0]));
 
     // Attribution comes from the files, not from the filter being present.
@@ -10049,7 +10049,7 @@ fn test_repo_worktrees_detached_head() {
 ///
 /// - `homelab/lib`        → area `homelab`,        name `homelab-lib`
 /// - `homelab/server/srv` → area `homelab/server`, name `homelab-srv`
-/// - `sniff/cli`          → area `sniff`,          name `sniff-cli`
+/// - `sniff/cli`          → area `sniff`,          name `sniff-detection-cli`
 fn create_cli_monorepo_with_nested_areas() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
@@ -10069,7 +10069,7 @@ members = ["homelab/lib", "homelab/server/srv", "sniff/cli"]
     let members = [
         ("homelab/lib", "homelab-lib"),
         ("homelab/server/srv", "homelab-srv"),
-        ("sniff/cli", "sniff-cli"),
+        ("sniff/cli", "sniff-detection-cli"),
     ];
     for (rel, name) in &members {
         let pkg = dir.path().join(rel);
@@ -10122,7 +10122,7 @@ fn test_repo_package_flag_returns_single_package() {
             "repo",
             "packages",
             "--package",
-            "sniff-cli",
+            "sniff-detection-cli",
             "--list",
             "--plain",
         ])
@@ -10130,7 +10130,7 @@ fn test_repo_package_flag_returns_single_package() {
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert_eq!(stdout.trim(), "sniff-cli");
+    assert_eq!(stdout.trim(), "sniff-detection-cli");
 }
 
 /// Spec §6.2 — `--package-area homelab` matches both `homelab` and
@@ -10198,7 +10198,7 @@ fn test_repo_package_and_area_flags_non_overlap_errors() {
             "repo",
             "packages",
             "--package",
-            "sniff-cli",
+            "sniff-detection-cli",
             "--package-area",
             "homelab",
         ])
@@ -10207,7 +10207,7 @@ fn test_repo_package_and_area_flags_non_overlap_errors() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
-        stderr.contains("sniff-cli"),
+        stderr.contains("sniff-detection-cli"),
         "intersection error must name the package, got:\n{stderr}"
     );
     assert!(
@@ -10247,7 +10247,7 @@ fn test_repo_unknown_package_errors_with_valid_list() {
         "error must mention valid package names, got:\n{stderr}"
     );
     assert!(
-        stderr.contains("sniff-cli") && stderr.contains("homelab-lib"),
+        stderr.contains("sniff-detection-cli") && stderr.contains("homelab-lib"),
         "error must list the actual valid package names, got:\n{stderr}"
     );
 }
@@ -10315,12 +10315,12 @@ fn test_repo_positional_filter_and_package_flag_combine() {
 /// Spec §6.8 — `-p` short flag works on a `FileListArgs`-based command.
 ///
 /// Stage and modify a file under `sniff/cli` so `dirty-files` has something
-/// to report, then verify `-p sniff-cli` scopes the result to that package.
+/// to report, then verify `-p sniff-detection-cli` scopes the result to that package.
 #[test]
 fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    // Mark the sniff-cli source file dirty (untracked modification of an
+    // Mark the sniff-detection-cli source file dirty (untracked modification of an
     // already-tracked file).
     std::fs::write(
         path.join("sniff/cli/src/lib.rs"),
@@ -10335,7 +10335,7 @@ fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
             "repo",
             "dirty-files",
             "-p",
-            "sniff-cli",
+            "sniff-detection-cli",
             "--list",
             "--plain",
         ])

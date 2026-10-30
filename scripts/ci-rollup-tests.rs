@@ -855,7 +855,7 @@ fn a_producer_failure_downgrades_a_green_report() {
 #[test]
 fn a_producer_success_never_upgrades_a_failing_cell() {
     let statuses = vec![ProducerStatus {
-        package: "sniff-cli".to_owned(),
+        package: "sniff-detection-cli".to_owned(),
         job: "L1".to_owned(),
         result: "success".to_owned(),
         environment: Some("ubuntu-latest".to_owned()),
@@ -868,12 +868,12 @@ fn a_producer_success_never_upgrades_a_failing_cell() {
         timings: None,
     }];
     let expected_tests = BTreeMap::new();
-    let mut rec = passing_record("sniff-cli", "ubuntu-latest", Tier::L1);
+    let mut rec = passing_record("sniff-detection-cli", "ubuntu-latest", Tier::L1);
     rec.counts.failed = 1;
-    rec.failed_tests = vec!["sniff-cli::x".into()];
+    rec.failed_tests = vec!["sniff-detection-cli::x".into()];
 
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
+        expected: &[expectation("sniff-detection-cli", "ubuntu-latest", Tier::L1)],
         records: &[rec],
         statuses: &statuses,
         builds: &BTreeMap::new(),
@@ -1150,7 +1150,7 @@ fn status_cells_map_each_job_result_to_a_cell_state() {
 fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
     let statuses = vec![
         ProducerStatus {
-            package: "sniff-cli".to_owned(),
+            package: "sniff-detection-cli".to_owned(),
             job: "L1".to_owned(),
             result: "failure".to_owned(),
             environment: Some("ubuntu-latest".to_owned()),
@@ -1176,7 +1176,7 @@ fn status_cells_skip_test_tiers_and_out_of_scope_packages() {
         timings: None,
         },
     ];
-    let cells = status_cells(&statuses, &scope_of(&["sniff-cli"]), &[], &[policy("x")], &[]);
+    let cells = status_cells(&statuses, &scope_of(&["sniff-detection-cli"]), &[], &[policy("x")], &[]);
     assert!(cells.is_empty(), "no status cell may appear: {cells:#?}");
 }
 
@@ -1674,10 +1674,10 @@ fn missing_and_policy_gap_cells_block_on_their_own() {
 // tests all early-return for want of a backend.
 // ---------------------------------------------------------------------------
 
-/// Build the `sniff-cli`-shaped Windows L2 cell: L2 tier, tmux-only backend,
+/// Build the `sniff-detection-cli`-shaped Windows L2 cell: L2 tier, tmux-only backend,
 /// and whatever gap governance and evidence the caller supplies.
 fn windows_l2_gap_cell(governed: Option<DeclaredGap>, records: &[RunRecord]) -> Cell {
-    let mut expectation = expectation("sniff-cli", "windows-latest", Tier::L2);
+    let mut expectation = expectation("sniff-detection-cli", "windows-latest", Tier::L2);
     expectation.backends = vec!["tmux".to_owned()];
     expectation.gap = match governed {
         Some(gap) => Some(GapStatus::Governed(gap)),
@@ -1688,7 +1688,7 @@ fn windows_l2_gap_cell(governed: Option<DeclaredGap>, records: &[RunRecord]) -> 
 }
 
 fn gap_verdict(cell: Cell, today: Option<&str>) -> Vec<Finding> {
-    verdict(&rollup_of(vec![cell], &["sniff-cli"]), &Baseline::default(), today)
+    verdict(&rollup_of(vec![cell], &["sniff-detection-cli"]), &Baseline::default(), today)
 }
 
 /// The defect this file's policy-gap rules exist to fix: every L2-owning
@@ -1716,7 +1716,7 @@ fn an_accepted_policy_gap_still_renders_policy_gap_never_pass() {
     assert_eq!(cell.state, CellState::PolicyGap);
     assert_ne!(cell.state, CellState::Pass);
 
-    let rollup = rollup_of(vec![cell], &["sniff-cli"]);
+    let rollup = rollup_of(vec![cell], &["sniff-detection-cli"]);
     let grid = render_grid(&rollup);
     assert!(grid.contains("POLICY GAP"), "{grid}");
     assert!(!grid.contains("PASS"), "{grid}");
@@ -1747,7 +1747,7 @@ fn an_expired_policy_gap_blocks() {
 fn an_ungoverned_policy_gap_still_blocks() {
     let cell = windows_l2_gap_cell(
         None,
-        &[passing_record("sniff-cli", "windows-latest", Tier::L2)],
+        &[passing_record("sniff-detection-cli", "windows-latest", Tier::L2)],
     );
     assert_eq!(cell.state, CellState::PolicyGap);
     assert!(cell.declared_gap.is_none());
@@ -1764,12 +1764,12 @@ fn an_ungoverned_policy_gap_still_blocks() {
 /// `Fail` above `PolicyGap`, so the cell never reaches the acceptance path.
 #[test]
 fn a_governed_gap_with_real_failures_still_surfaces_them() {
-    let mut expectation = expectation("sniff-cli", "windows-latest", Tier::L2);
+    let mut expectation = expectation("sniff-detection-cli", "windows-latest", Tier::L2);
     expectation.gap = Some(GapStatus::Governed(gap()));
 
-    let mut rec = passing_record("sniff-cli", "windows-latest", Tier::L2);
+    let mut rec = passing_record("sniff-detection-cli", "windows-latest", Tier::L2);
     rec.counts.failed = 1;
-    rec.failed_tests = vec!["sniff-cli::level2_probe".into()];
+    rec.failed_tests = vec!["sniff-detection-cli::level2_probe".into()];
 
     let cell = only_cell(classify_simple(&[expectation], &[rec]));
     assert_eq!(cell.state, CellState::Fail);
@@ -1779,7 +1779,7 @@ fn a_governed_gap_with_real_failures_still_surfaces_them() {
     assert!(
         findings
             .iter()
-            .any(|f| f.detail.contains("sniff-cli::level2_probe")),
+            .any(|f| f.detail.contains("sniff-detection-cli::level2_probe")),
         "the failing identity must reach the verdict: {findings:#?}"
     );
     assert!(!findings.iter().any(|f| f.rule == "policy-gap-accepted"));
@@ -1792,12 +1792,12 @@ fn a_governed_gap_with_real_failures_still_surfaces_them() {
 /// would block precisely the case the gap exists to describe.
 #[test]
 fn a_governed_gap_whose_tests_all_early_returned_is_still_accepted() {
-    let mut expectation = expectation("sniff-cli", "windows-latest", Tier::L2);
+    let mut expectation = expectation("sniff-detection-cli", "windows-latest", Tier::L2);
     expectation.gap = Some(GapStatus::Governed(gap()));
 
     let cell = only_cell(classify_simple(
         &[expectation],
-        &[passing_record("sniff-cli", "windows-latest", Tier::L2)],
+        &[passing_record("sniff-detection-cli", "windows-latest", Tier::L2)],
     ));
     assert_eq!(cell.state, CellState::PolicyGap, "never PASS, even so");
 
@@ -1826,7 +1826,7 @@ fn an_unattributable_or_undated_policy_gap_blocks(#[case] field: &str, #[case] v
 /// is made on absent data.
 #[test]
 fn a_governed_gap_round_trips_through_the_result_document() {
-    let rollup = rollup_of(vec![windows_l2_gap_cell(Some(gap()), &[])], &["sniff-cli"]);
+    let rollup = rollup_of(vec![windows_l2_gap_cell(Some(gap()), &[])], &["sniff-detection-cli"]);
     let json = serde_json::to_string(&rollup).unwrap();
     let parsed: Rollup = serde_json::from_str(&json).unwrap();
 
@@ -5583,12 +5583,12 @@ fn a_failed_l1_command_is_always_blocking() {
 #[test]
 fn a_folded_failure_status_downgrades_a_green_report_without_a_detail() {
     let temp = TempDir::new("normalized-green-junit");
-    normalized_failure_status(temp.path(), "sniff-cli", "L1", "ubuntu-latest");
+    normalized_failure_status(temp.path(), "sniff-detection-cli", "L1", "ubuntu-latest");
     let statuses = read_producer_statuses(temp.path()).unwrap();
 
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[expectation("sniff-cli", "ubuntu-latest", Tier::L1)],
-        records: &[passing_record("sniff-cli", "ubuntu-latest", Tier::L1)],
+        expected: &[expectation("sniff-detection-cli", "ubuntu-latest", Tier::L1)],
+        records: &[passing_record("sniff-detection-cli", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
         builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
@@ -5689,9 +5689,9 @@ fn classify_with_builds(
 #[test]
 fn a_cell_whose_build_failed_is_missing_and_names_the_build() {
     let cell = only_cell(classify_with_builds(
-        &[consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def")],
+        &[consuming("sniff-detection-cli", "ubuntu-latest", Tier::L1, "abc0123456789def")],
         &[],
-        &[build_status("abc0123456789def", "sniff-cli", "failure", "compile")],
+        &[build_status("abc0123456789def", "sniff-detection-cli", "failure", "compile")],
     ));
     assert_eq!(cell.state, CellState::Missing);
     assert!(
@@ -5706,7 +5706,7 @@ fn a_cell_whose_build_failed_is_missing_and_names_the_build() {
     // MISSING blocks, and the skip baseline judges skipped test identities
     // only — so a failed build can never be excused into a merge.
     let findings = verdict(
-        &rollup_of(vec![cell], &["sniff-cli"]),
+        &rollup_of(vec![cell], &["sniff-detection-cli"]),
         &Baseline::default(),
         None,
     );
@@ -5738,14 +5738,14 @@ fn a_cancelled_or_unuploaded_build_blocks_its_cells_just_as_a_failed_one_does() 
 fn a_successful_build_leaves_its_consumers_exactly_as_they_were() {
     let cells = classify_with_builds(
         &[
-            consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def"),
-            consuming("sniff-cli", "wsl2-ubuntu", Tier::L1, "abc0123456789def"),
+            consuming("sniff-detection-cli", "ubuntu-latest", Tier::L1, "abc0123456789def"),
+            consuming("sniff-detection-cli", "wsl2-ubuntu", Tier::L1, "abc0123456789def"),
         ],
         &[
-            passing_record("sniff-cli", "ubuntu-latest", Tier::L1),
-            passing_record("sniff-cli", "wsl2-ubuntu", Tier::L1),
+            passing_record("sniff-detection-cli", "ubuntu-latest", Tier::L1),
+            passing_record("sniff-detection-cli", "wsl2-ubuntu", Tier::L1),
         ],
-        &[build_status("abc0123456789def", "sniff-cli", "success", "produce")],
+        &[build_status("abc0123456789def", "sniff-detection-cli", "success", "produce")],
     );
     assert_eq!(cells.len(), 2, "one build, two result cells");
     for cell in &cells {
@@ -5762,16 +5762,16 @@ fn a_successful_build_leaves_its_consumers_exactly_as_they_were() {
 fn a_failed_build_leaves_an_unrelated_cell_untouched() {
     let cells = classify_with_builds(
         &[
-            consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def"),
+            consuming("sniff-detection-cli", "ubuntu-latest", Tier::L1, "abc0123456789def"),
             consuming("queue", "ubuntu-latest", Tier::L1, "4444555566667777"),
         ],
         &[passing_record("queue", "ubuntu-latest", Tier::L1)],
         &[
-            build_status("abc0123456789def", "sniff-cli", "failure", "compile"),
+            build_status("abc0123456789def", "sniff-detection-cli", "failure", "compile"),
             build_status("4444555566667777", "queue", "success", "produce"),
         ],
     );
-    let blocked = cells.iter().find(|cell| cell.key.package == "sniff-cli").unwrap();
+    let blocked = cells.iter().find(|cell| cell.key.package == "sniff-detection-cli").unwrap();
     let healthy = cells.iter().find(|cell| cell.key.package == "queue").unwrap();
     assert_eq!(blocked.state, CellState::Missing);
     assert_eq!(healthy.state, CellState::Pass);
@@ -5819,16 +5819,16 @@ fn a_reused_cell_consumes_no_build_and_cannot_be_blocked_by_one() {
     // constructing the expectation by hand.
     let plan: ResolvedPlan = serde_json::from_value(json!({
         "schema_version": PLAN_SCHEMA_VERSION,
-        "packages": [{"package": "sniff-cli"}],
+        "packages": [{"package": "sniff-detection-cli"}],
         "cells": [
             {
-                "package": "sniff-cli", "area": "sniff", "environment": "ubuntu-latest",
+                "package": "sniff-detection-cli", "area": "sniff", "environment": "ubuntu-latest",
                 "gate": "L1", "execution": "reuse", "origin": "local", "state": "reused",
                 "build": "abc0123456789def",
                 "evidence": {"outcome": "pass", "ref": "refs/notes/ci-local/ubuntu-latest"},
             },
             {
-                "package": "sniff-cli", "area": "sniff", "environment": "wsl2-ubuntu",
+                "package": "sniff-detection-cli", "area": "sniff", "environment": "wsl2-ubuntu",
                 "gate": "L1", "execution": "execute", "origin": "ci", "state": "pending",
                 "build": "abc0123456789def",
             },
@@ -5850,7 +5850,7 @@ fn a_reused_cell_consumes_no_build_and_cannot_be_blocked_by_one() {
     let cells = classify_with_builds(
         &expected,
         &[],
-        &[build_status("abc0123456789def", "sniff-cli", "failure", "compile")],
+        &[build_status("abc0123456789def", "sniff-detection-cli", "failure", "compile")],
     );
     let reused_cell = cells
         .iter()
@@ -5875,16 +5875,16 @@ fn a_rerun_that_publishes_both_attempts_keeps_the_failure() {
     for (dir, result) in [("attempt-1", "failure"), ("attempt-2", "success")] {
         let directory = temp
             .path()
-            .join(format!("build-status-sniff-cli-ubuntu-latest-abc0123456789def-{dir}"));
+            .join(format!("build-status-sniff-detection-cli-ubuntu-latest-abc0123456789def-{dir}"));
         fs::create_dir_all(&directory).unwrap();
         fs::write(
             directory.join("build-status.json"),
             serde_json::to_string(&json!({
                 "schema_version": 1,
                 "key": "abc0123456789def",
-                "package": "sniff-cli",
+                "package": "sniff-detection-cli",
                 "producer": "ubuntu-latest",
-                "artifact": "build-sniff-cli-ubuntu-latest-abc0123456789def",
+                "artifact": "build-sniff-detection-cli-ubuntu-latest-abc0123456789def",
                 "result": result,
                 "stage": "produce",
                 "consumers": [],
@@ -5905,7 +5905,7 @@ fn a_rerun_that_publishes_both_attempts_keeps_the_failure() {
 #[test]
 fn a_consumer_reports_the_planned_key_and_realized_digest_it_ran() {
     let statuses = vec![ProducerStatus {
-        package: "sniff-cli".to_owned(),
+        package: "sniff-detection-cli".to_owned(),
         job: "L1".to_owned(),
         result: "success".to_owned(),
         environment: Some("ubuntu-latest".to_owned()),
@@ -5922,8 +5922,8 @@ fn a_consumer_reports_the_planned_key_and_realized_digest_it_ran() {
         timings: None,
     }];
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[consuming("sniff-cli", "ubuntu-latest", Tier::L1, "abc0123456789def")],
-        records: &[passing_record("sniff-cli", "ubuntu-latest", Tier::L1)],
+        expected: &[consuming("sniff-detection-cli", "ubuntu-latest", Tier::L1, "abc0123456789def")],
+        records: &[passing_record("sniff-detection-cli", "ubuntu-latest", Tier::L1)],
         statuses: &statuses,
         builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
@@ -5944,7 +5944,7 @@ fn a_consumer_reports_the_planned_key_and_realized_digest_it_ran() {
 #[test]
 fn a_consumer_that_refused_its_build_reports_the_refusal() {
     let statuses = vec![ProducerStatus {
-        package: "sniff-cli".to_owned(),
+        package: "sniff-detection-cli".to_owned(),
         job: "L1".to_owned(),
         result: "failure".to_owned(),
         environment: Some("wsl2-ubuntu".to_owned()),
@@ -5962,14 +5962,14 @@ fn a_consumer_that_refused_its_build_reports_the_refusal() {
         timings: None,
     }];
     let cell = only_cell(classify(&ClassifyInputs {
-        expected: &[consuming("sniff-cli", "wsl2-ubuntu", Tier::L1, "abc0123456789def")],
+        expected: &[consuming("sniff-detection-cli", "wsl2-ubuntu", Tier::L1, "abc0123456789def")],
         records: &[],
         statuses: &statuses,
         // The owner delivered: the refusal is the consumer's, and the cell must
         // still name the build rather than read as an unexplained absence.
         builds: &BTreeMap::from([(
             "abc0123456789def".to_owned(),
-            build_status("abc0123456789def", "sniff-cli", "success", "produce"),
+            build_status("abc0123456789def", "sniff-detection-cli", "success", "produce"),
         )]),
         expected_tests: &BTreeMap::new(),
     }));
@@ -5989,7 +5989,7 @@ fn a_consumer_that_refused_its_build_reports_the_refusal() {
         cell.reasons
     );
     let findings = verdict(
-        &rollup_of(vec![cell], &["sniff-cli"]),
+        &rollup_of(vec![cell], &["sniff-detection-cli"]),
         &Baseline::default(),
         None,
     );
@@ -6008,7 +6008,7 @@ fn a_consumer_that_refused_its_build_reports_the_refusal() {
 /// A consumer status carrying both the build it ran and what its stages cost.
 fn measured_consumer(environment: &str, timings: ConsumerTimings) -> ProducerStatus {
     ProducerStatus {
-        package: "sniff-cli".to_owned(),
+        package: "sniff-detection-cli".to_owned(),
         job: "L1".to_owned(),
         result: "success".to_owned(),
         environment: Some(environment.to_owned()),
@@ -6028,8 +6028,8 @@ fn measured_consumer(environment: &str, timings: ConsumerTimings) -> ProducerSta
 
 fn measured_cell(environment: &str, timings: ConsumerTimings) -> Cell {
     only_cell(classify(&ClassifyInputs {
-        expected: &[consuming("sniff-cli", environment, Tier::L1, "abc0123456789def")],
-        records: &[passing_record("sniff-cli", environment, Tier::L1)],
+        expected: &[consuming("sniff-detection-cli", environment, Tier::L1, "abc0123456789def")],
+        records: &[passing_record("sniff-detection-cli", environment, Tier::L1)],
         statuses: &[measured_consumer(environment, timings)],
         builds: &BTreeMap::new(),
         expected_tests: &BTreeMap::new(),
@@ -6062,11 +6062,11 @@ fn an_executing_cell_displays_its_key_digest_producer_and_every_stage_apart() {
         })
     );
 
-    let summary = render_grid(&rollup_of(vec![cell], &["sniff-cli"]));
+    let summary = render_grid(&rollup_of(vec![cell], &["sniff-detection-cli"]));
     assert!(summary.contains("### Build provenance"), "{summary}");
     assert!(
         summary.contains(
-            "| `sniff-cli/ubuntu-latest/L1` | `abc0123456789def` | `fedcba9876543210` | \
+            "| `sniff-detection-cli/ubuntu-latest/L1` | `abc0123456789def` | `fedcba9876543210` | \
              ubuntu-latest | 7s | 3s | 0.8s | 41s |"
         ),
         "every stage is its own column, and none of them is test time: {summary}"
@@ -6083,13 +6083,13 @@ fn a_stage_nothing_measured_renders_absent_rather_than_zero() {
         timings: None,
         ..build
     });
-    let summary = render_grid(&rollup_of(vec![blank], &["sniff-cli"]));
+    let summary = render_grid(&rollup_of(vec![blank], &["sniff-detection-cli"]));
     assert!(
         summary.contains("| — | — | — | — |"),
         "an unmeasured stage is blank: {summary}"
     );
 
-    let measured = render_grid(&rollup_of(vec![cell], &["sniff-cli"]));
+    let measured = render_grid(&rollup_of(vec![cell], &["sniff-detection-cli"]));
     assert!(
         measured.contains("| 0s | 0s | 0.0s | 0s |"),
         "a stage that finished inside one tick measured zero: {measured}"
@@ -6119,14 +6119,14 @@ fn two_environments_consuming_one_build_each_report_the_same_key_and_digest() {
             execute_seconds: 95,
         },
     );
-    let summary = render_grid(&rollup_of(vec![linux, guest], &["sniff-cli"]));
+    let summary = render_grid(&rollup_of(vec![linux, guest], &["sniff-detection-cli"]));
     assert_eq!(
         summary.matches("`abc0123456789def` | `fedcba9876543210`").count(),
         2,
         "both cells ran one build: {summary}"
     );
-    assert!(summary.contains("| `sniff-cli/ubuntu-latest/L1` |"), "{summary}");
-    assert!(summary.contains("| `sniff-cli/wsl2-ubuntu/L1` |"), "{summary}");
+    assert!(summary.contains("| `sniff-detection-cli/ubuntu-latest/L1` |"), "{summary}");
+    assert!(summary.contains("| `sniff-detection-cli/wsl2-ubuntu/L1` |"), "{summary}");
     // Separate result cells, unchanged: the shared build is reporting only.
     assert!(summary.contains("### L1"), "{summary}");
 }
@@ -6135,7 +6135,7 @@ fn two_environments_consuming_one_build_each_report_the_same_key_and_digest() {
 fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
     let mut rollup = rollup_of(
         vec![measured_cell("ubuntu-latest", ConsumerTimings::default())],
-        &["sniff-cli"],
+        &["sniff-detection-cli"],
     );
     rollup.builds = build_reports(&BTreeMap::from([(
         "abc0123456789def".to_owned(),
@@ -6153,7 +6153,7 @@ fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
                 total_ms: 185_770,
             }),
             digest: Some("fedcba9876543210".to_owned()),
-            ..build_status("abc0123456789def", "sniff-cli", "success", "produce")
+            ..build_status("abc0123456789def", "sniff-detection-cli", "success", "produce")
         },
     )]));
 
@@ -6161,7 +6161,7 @@ fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
     assert!(summary.contains("### Build records"), "{summary}");
     assert!(
         summary.contains(
-            "| `abc0123456789def` | `sniff-cli` | ubuntu-latest | success (produce) | 18s | \
+            "| `abc0123456789def` | `sniff-detection-cli` | ubuntu-latest | success (produce) | 18s | \
              184.0s | 26s |"
         ),
         "queue, compile+archive, and upload are each their own column: {summary}"
@@ -6171,15 +6171,15 @@ fn an_owner_legs_queue_compile_and_upload_are_reported_apart() {
 #[test]
 fn an_unreported_owner_stage_is_blank_and_a_build_is_never_a_result_cell() {
     let cell = measured_cell("ubuntu-latest", ConsumerTimings::default());
-    let mut rollup = rollup_of(vec![cell], &["sniff-cli"]);
+    let mut rollup = rollup_of(vec![cell], &["sniff-detection-cli"]);
     rollup.builds = build_reports(&BTreeMap::from([(
         "abc0123456789def".to_owned(),
-        build_status("abc0123456789def", "sniff-cli", "failure", "compile"),
+        build_status("abc0123456789def", "sniff-detection-cli", "failure", "compile"),
     )]));
 
     let summary = render_grid(&rollup);
     assert!(
-        summary.contains("| `abc0123456789def` | `sniff-cli` | ubuntu-latest | failure (compile) | — | — | — |"),
+        summary.contains("| `abc0123456789def` | `sniff-detection-cli` | ubuntu-latest | failure (compile) | — | — | — |"),
         "{summary}"
     );
     // A failed owner in the reporting table creates no cell and no finding of

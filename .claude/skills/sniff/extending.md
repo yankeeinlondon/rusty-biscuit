@@ -85,7 +85,7 @@ pub fn detect_my_programs() -> Vec<MyProgram> {
 
 ```bash
 cargo test -p sniff                  # All lib tests
-cargo test -p sniff-cli              # All CLI tests
+cargo test -p sniff-detection-cli              # All CLI tests
 cargo test -p sniff programs::       # Program module
 cargo test -p sniff services::       # Services module
 ```

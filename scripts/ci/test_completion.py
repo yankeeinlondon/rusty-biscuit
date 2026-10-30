@@ -1759,10 +1759,10 @@ class ShippedSelectionTests(unittest.TestCase):
                 self.assert_canonical(self.tier_filter(tier), tier, tier)
 
     def test_the_per_package_and_slow_variants_are_canonical(self):
-        # The two documented refinements of L1: `worktree-cli` drops its `perf_`
+        # The two documented refinements of L1: `git-wt-cli` drops its `perf_`
         # SLA tests, and `l1-include-slow` keeps `slow_` in.
         self.assert_canonical(
-            self.tier_filter("L1", "worktree-cli"), "L1", "worktree-cli L1"
+            self.tier_filter("L1", "git-wt-cli"), "L1", "git-wt-cli L1"
         )
         self.assert_canonical(
             self.tier_filter("L1", BISCUIT_L1_INCLUDE_SLOW="1"), "L1", "l1-include-slow"

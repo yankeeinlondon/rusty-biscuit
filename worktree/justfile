@@ -26,7 +26,7 @@ CYAN := '\033[36m'
 
 PACKAGE := "Worktree"
 LIBRARY := lowercase(PACKAGE)
-CLI := lowercase(PACKAGE) + "-cli"
+CLI := "git-wt-cli"
 DOCS := ""
 TODAY := `date +%F`
 
@@ -49,7 +49,7 @@ default:
 build *args="":
     @just _build biscuit-terminal "Biscuit Terminal" {{ args }}
     @just _build worktree "Worktree Library" {{ args }}
-    @just _build worktree-cli "Worktree CLI" {{ args }}
+    @just _build git-wt-cli "Worktree CLI" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
@@ -107,7 +107,7 @@ test-perf *args="":
 # Lint both the library and CLI
 lint:
     @just _lint worktree
-    @just _lint worktree-cli
+    @just _lint git-wt-cli
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
@@ -150,7 +150,7 @@ all:
 # Lint (and fix) both the library and CLI
 lint-fix:
     @just _lint worktree || just _fix_lint worktree
-    @just _lint worktree-cli || just _fix_lint worktree-cli
+    @just _lint git-wt-cli || just _fix_lint git-wt-cli
 
 # install the worktree CLI binary (wt)
 install *args="":

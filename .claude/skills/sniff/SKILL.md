@@ -322,7 +322,7 @@ coverage. Cross-platform compile guards must enable the same feature.
 passes over warnings in `#[cfg(test)]` modules and test targets that CI's
 shared `_lint` (`--all-targets -D warnings`, no features) rejects. Before
 handoff, also run `cargo clippy -p sniff --all-targets -- -D warnings` and the
-same for `sniff-cli`.
+same for `sniff-detection-cli`.
 
 Read [testing.md](testing.md) for the CLI `test-fixtures` feature, suite
 audits, regression-input rules, real-tool lockfile fixtures, and the L1/L2

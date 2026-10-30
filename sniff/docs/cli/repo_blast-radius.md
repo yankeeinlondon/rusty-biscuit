@@ -76,7 +76,7 @@ sniff blast-radius last-commit  # Files changed in the HEAD commit
 In monorepos, `--package` and `--package-area` limit which changed files are considered. The document scan is always repo-wide -- only the source file set is narrowed:
 
 ```bash
-sniff blast-radius --package sniff-cli       # Only changes in sniff/cli/
+sniff blast-radius --package sniff-detection-cli       # Only changes in sniff/cli/
 sniff blast-radius --package-area homelab    # Only changes in homelab/
 ```
 

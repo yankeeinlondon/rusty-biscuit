@@ -3,7 +3,7 @@ name = "biscuit-file"
 version = "0.1.0"
 edition = "2024"
 description = "File format utilities for PDF, TOML, and YAML"
-license = "MIT"
+license = "AGPL-3.0-only"
 autotests = false
 
 [lib]

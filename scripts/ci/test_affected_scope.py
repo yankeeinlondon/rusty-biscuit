@@ -1319,23 +1319,23 @@ class PackageExecutionTests(unittest.TestCase):
 
     def test_features_become_qualified_check_and_test_args(self) -> None:
         policy = {"features": ["test-fixtures"], "all_features": False}
-        features = feature_args(policy, "sniff-cli")
+        features = feature_args(policy, "sniff-detection-cli")
         self.assertEqual(features, "--features test-fixtures")
         self.assertEqual(
-            check_arguments("sniff-cli", ["lib"], features), "-p sniff-cli --features test-fixtures"
+            check_arguments("sniff-detection-cli", ["lib"], features), "-p sniff-detection-cli --features test-fixtures"
         )
         contracts = resolved_contracts(
             plan_package(
-                package="sniff-cli",
+                package="sniff-detection-cli",
                 tiers=["L1", "L2"],
                 l2_backends=["tmux"],
                 test_args=features,
-                check_args=check_arguments("sniff-cli", ["lib"], features),
+                check_args=check_arguments("sniff-detection-cli", ["lib"], features),
             )
         )
         # Every producer is handed the plan's feature contract; none re-derives it.
         for cell, contract in contracts.items():
-            self.assertEqual("-p sniff-cli --features test-fixtures", contract["check_args"], cell)
+            self.assertEqual("-p sniff-detection-cli --features test-fixtures", contract["check_args"], cell)
             self.assertEqual("--features test-fixtures", contract["test_args"], cell)
             self.assertEqual("", contract["requires_node"], cell)
         self.assertEqual(
@@ -4652,7 +4652,7 @@ class AreaDriftFlagTests(unittest.TestCase):
 
     Scoped in both directions on purpose. Too narrow and a real divergence
     schedules the contract nowhere, which is silent; too broad and every pull
-    request pays for a release `sniff-cli`.
+    request pays for a release `sniff-detection-cli`.
     """
 
     def setUp(self) -> None:
@@ -6151,11 +6151,11 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
         self.assertEqual(["messenger-cli", "test-toolkit"], sorted(gates_by_package(plan)))
 
-    def test_workspace_excluded_zed_extension_selects_dmls_companion(self) -> None:
+    def test_workspace_excluded_zed_extension_selects_darkmatter_lsp_companion(self) -> None:
         plan = self.plan("darkmatter/dmls/zed-dmls/src/lib.rs")
-        self.assertEqual(["dmls", "test-toolkit"], legacy_scope_document(plan)["packages"])
-        self.assertEqual(["dmls", "test-toolkit"], sorted(gates_by_package(plan)))
-        contracts = producer_contracts(plan, "dmls")
+        self.assertEqual(["darkmatter-lsp", "test-toolkit"], legacy_scope_document(plan)["packages"])
+        self.assertEqual(["darkmatter-lsp", "test-toolkit"], sorted(gates_by_package(plan)))
+        contracts = producer_contracts(plan, "darkmatter-lsp")
         self.assertTrue(contracts)
         for cell, contract in contracts.items():
             self.assertEqual(["neovim", "zed-extension"], json.loads(contract["runner_tools"]), cell)
@@ -6222,7 +6222,8 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "claudine-gen",
                 "darkmatter",
                 "darkmatter-cli",
-                "dmls",
+                "darkmatter-lsp",
+                "git-wt-cli",
                 "messenger",
                 "messenger-cli",
                 "model-citizen",
@@ -6234,12 +6235,11 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 # promoted to a gating package; `drift` links sniff.
                 "repo-deps",
                 "research",
-                "sniff-cli",
+                "sniff-detection-cli",
                 # `hug --changed` asks sniff which paths Git reports changed.
                 "tree-hugger-cli",
                 "unchained-ai",
                 "worktree",
-                "worktree-cli",
                 "zed-dmls-cli",
             ],
             computed,
@@ -6278,7 +6278,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(pattern, current)
         self.assertIn("github-token: ${{ github.token }}", newest)
         self.assertIn("run-id: ${{ github.run_id }}", newest)
-        self.assertIn(pattern, newest)
+        # The overlay spends the run's shared REST budget per artifact, so it
+        # runs only on a rerun and fetches only this area's packages.
+        overlay_step = rollup_downloads.split(
+            "- name: Overlay newest run-wide result and status artifacts", 1
+        )[1]
+        self.assertIn("if: ${{ github.run_attempt > 1 }}", overlay_step.split("uses:", 1)[0])
+        self.assertIn("pattern: ${{ steps.area.outputs.overlay }}", newest)
+        self.assertIn('"build-status-*"', plan)
 
 
 # --- helpers ---------------------------------------------------------------

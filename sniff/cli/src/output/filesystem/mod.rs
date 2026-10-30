@@ -2411,7 +2411,7 @@ mod tests {
 
         #[test]
         fn name_substring_no_match() {
-            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let pkg = make_package("sniff-detection-cli", "sniff", &[]);
             let f = RepoFilter::parse("biscuit");
             assert!(!f.matches(&pkg));
         }
@@ -2425,14 +2425,14 @@ mod tests {
 
         #[test]
         fn area_match() {
-            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let pkg = make_package("sniff-detection-cli", "sniff", &[]);
             let f = RepoFilter::parse("@sniff");
             assert!(f.matches(&pkg));
         }
 
         #[test]
         fn area_no_match() {
-            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let pkg = make_package("sniff-detection-cli", "sniff", &[]);
             let f = RepoFilter::parse("@biscuit");
             assert!(!f.matches(&pkg));
         }
@@ -2446,7 +2446,7 @@ mod tests {
 
         #[test]
         fn negated_includes_non_matching() {
-            let pkg = make_package("sniff-cli", "sniff", &[]);
+            let pkg = make_package("sniff-detection-cli", "sniff", &[]);
             let f = RepoFilter::parse("!biscuit");
             assert!(f.matches(&pkg));
         }
@@ -2469,7 +2469,7 @@ mod tests {
         fn name_filter() {
             let packages = vec![
                 make_package("biscuit-hash", "biscuit-hash", &[]),
-                make_package("sniff-cli", "sniff", &[]),
+                make_package("sniff-detection-cli", "sniff", &[]),
                 make_package("biscuit-file", "biscuit-file", &[]),
             ];
             let result = filter_packages(&packages, &["biscuit".to_string()]);
@@ -2480,7 +2480,7 @@ mod tests {
         #[test]
         fn area_filter() {
             let packages = vec![
-                make_package("sniff-cli", "sniff", &[]),
+                make_package("sniff-detection-cli", "sniff", &[]),
                 make_package("sniff-lib", "sniff", &[]),
                 make_package("biscuit-hash", "biscuit-hash", &[]),
             ];
@@ -2493,7 +2493,7 @@ mod tests {
         fn multiple_filters_with_or_logic() {
             let packages = vec![
                 make_package("biscuit-hash", "biscuit-hash", &[]),
-                make_package("sniff-cli", "sniff", &[]),
+                make_package("sniff-detection-cli", "sniff", &[]),
                 make_package("darkmatter-lib", "darkmatter", &[]),
                 make_package("playa-cli", "playa", &[]),
             ];
@@ -3169,7 +3169,7 @@ mod tests {
             let packages = vec![
                 make_package("speaks-cli", "biscuit-speaks", &["speaks-lib"]),
                 make_package("speaks-lib", "biscuit-speaks", &[]),
-                make_package("sniff-cli", "sniff", &["sniff-lib"]),
+                make_package("sniff-detection-cli", "sniff", &["sniff-lib"]),
                 make_package("sniff-lib", "sniff", &[]),
             ];
             let result = build_deps_dot(&packages, None).unwrap();

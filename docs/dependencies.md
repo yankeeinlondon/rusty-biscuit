@@ -183,9 +183,17 @@
   `system-proxy` (`hyper-util/client-proxy-system`), which removed
   `system-configuration`, `system-configuration-sys`, `windows-registry`, and
   `core-foundation 0.9` from the graph. **`default-tls` is re-listed
-  deliberately** — it resolves to rustls under reqwest 0.13 and to native-tls
-  under 0.12 (`messenger/lib`), so dropping it would silently switch a TLS
-  backend. What `system-proxy` provided was narrow: a *manually* configured
+  deliberately** — it resolves to rustls (with `rustls-platform-verifier`, so
+  the OS trust store) under reqwest 0.13 and to native-tls under 0.12, so
+  dropping it would silently switch a TLS backend. `messenger/lib` moved to
+  0.13 on 2026-10-03, which took native-tls out of the workspace graph and
+  OpenSSL out of every shipped CLI on every target; that is what lets
+  `claudine-cli` build for Linux, musl included, with no `libssl`.
+  `openssl-sys` remains only on Linux, through `git2`'s HTTPS transport, a
+  dev-dependency of `darkmatter` (check with
+  `cargo tree --workspace --target all -e normal,build,dev -i openssl-sys`). reqwest 0.12 remains only in
+  `biscuit-location`, `schematic-oauth` (pinned by `oauth2 5.0`), and
+  `chromiumoxide 0.7`, all on rustls. What `system-proxy` provided was narrow: a *manually* configured
   HTTP/HTTPS `host:port` from macOS System Settings or the Windows
   `Internet Settings` registry key. It never read PAC/auto-configuration, WPAD,
   SOCKS, Keychain credentials, or — on macOS only — the system bypass list, so
@@ -288,7 +296,7 @@
   `expectrl` 0.8 is a unix-only development dependency for
   `kache_init_contracts`, which answers `_ensure-kache`'s below-floor `[y/N]`
   prompt through a PTY (the prompt appears only when stdin is a terminal).
-  `claudine-cli`, `sniff-cli`, `biscuit-tui-cli`, and `biscuit-terminal`
+  `claudine-cli`, `sniff-detection-cli`, `biscuit-tui-cli`, and `biscuit-terminal`
   already build the same version.
 - `biscuit-speaks-cli` uses `fs4` and `sysinfo` as development dependencies
   to wait for detached audio test ownership and terminate only fixture-owned
@@ -509,7 +517,7 @@
 - `darkmatter/lib` takes a direct `base64` dependency (already in the tree) for
   the payload of the `{{!data:v1:…}}` literal token, which stores one
   frontmatter string as data (unpadded URL-safe alphabet).
-- `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
+- `darkmatter/dmls` (`darkmatter-lsp`) is the Darkmatter Language Server. Protocol
   stack: `lsp-server` (stdio framing, in-memory test connections) +
   `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family
   `lsp-server` exposes; worker pool later). `line-index` (rust-analyzer's
@@ -555,7 +563,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
-- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`darkmatter-lsp`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash, rusqlite bundled)
 - `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
@@ -701,7 +709,7 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, markdown_
 
-- [dmls](./darkmatter/dmls) _v0.1.0_
+- [darkmatter-lsp](./darkmatter/dmls) _v0.1.0_
 
     _Darkmatter Language Server: LSP 3.17 over stdio for Markdown, Darkmatter DSL, and SimplifiedSchema frontmatter._
 
@@ -815,7 +823,7 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, library, system, detection_
 
-- [sniff-cli](./sniff/cli) _v0.1.0_
+- [sniff-detection-cli](./sniff/cli) _v0.1.0_
 
     _System discovery CLI._
 

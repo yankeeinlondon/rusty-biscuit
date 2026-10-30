@@ -2770,7 +2770,7 @@ dependencies = [
  "bitflags 2.11.1",
  "core-foundation",
  "core-graphics-types",
- "foreign-types 0.5.0",
+ "foreign-types",
  "libc",
 ]
 
@@ -3289,6 +3289,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkmatter-lsp"
+version = "0.1.0"
+dependencies = [
+ "biscuit-file",
+ "biscuit-hash",
+ "biscuit-test-harness",
+ "crossbeam-channel",
+ "darkmatter",
+ "globset",
+ "ignore",
+ "line-index",
+ "lsp-server",
+ "lsp-types",
+ "rlsp-yaml-parser",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sniff",
+ "tempfile",
+ "test-toolkit",
+ "thiserror 2.0.21",
+ "toml 1.1.2+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-test",
+ "unicode-normalization",
+ "url",
+ "wait-timeout",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3628,38 +3660,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "dmls"
-version = "0.1.0"
-dependencies = [
- "biscuit-file",
- "biscuit-hash",
- "biscuit-test-harness",
- "crossbeam-channel",
- "darkmatter",
- "globset",
- "ignore",
- "line-index",
- "lsp-server",
- "lsp-types",
- "rlsp-yaml-parser",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sniff",
- "tempfile",
- "test-toolkit",
- "thiserror 2.0.21",
- "toml 1.1.2+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "tracing-test",
- "unicode-normalization",
- "url",
- "wait-timeout",
 ]
 
 [[package]]
@@ -4471,21 +4471,12 @@ dependencies = [
 
 [[package]]
 name = "foreign-types"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
-dependencies = [
- "foreign-types-shared 0.1.1",
-]
-
-[[package]]
-name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d737d9aa519fb7b749cbc3b962edcf310a8dd1f4b67c91c4f83975dbdd17d965"
 dependencies = [
  "foreign-types-macros",
- "foreign-types-shared 0.3.1",
+ "foreign-types-shared",
 ]
 
 [[package]]
@@ -4498,12 +4489,6 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
-
-[[package]]
-name = "foreign-types-shared"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "foreign-types-shared"
@@ -5080,6 +5065,34 @@ dependencies = [
  "libc",
  "system-deps",
  "winapi 0.3.9",
+]
+
+[[package]]
+name = "git-wt-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "base64 0.22.1",
+ "biscuit-terminal",
+ "biscuit-test-harness",
+ "biscuit-visualized",
+ "chrono",
+ "clap 4.6.1",
+ "clap_complete",
+ "ctrlc",
+ "dirs",
+ "image",
+ "inquire",
+ "insta",
+ "predicates",
+ "serde_json",
+ "serial_test",
+ "sniff",
+ "sysinfo",
+ "tempfile",
+ "test-toolkit",
+ "worktree",
+ "xpty",
 ]
 
 [[package]]
@@ -6493,22 +6506,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "tokio",
- "tower-service",
-]
-
-[[package]]
-name = "hyper-tls"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
-dependencies = [
- "bytes",
- "http-body-util",
- "hyper",
- "hyper-util",
- "native-tls",
- "tokio",
- "tokio-native-tls",
  "tower-service",
 ]
 
@@ -8480,7 +8477,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-user-notifications",
  "pulldown-cmark",
- "reqwest 0.12.28",
+ "reqwest 0.13.2",
  "rustls",
  "secrecy",
  "serde",
@@ -8717,23 +8714,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
  "getrandom 0.2.17",
-]
-
-[[package]]
-name = "native-tls"
-version = "0.2.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2"
-dependencies = [
- "libc",
- "log",
- "openssl",
- "openssl-probe 0.2.1",
- "openssl-sys",
- "schannel",
- "security-framework",
- "security-framework-sys",
- "tempfile",
 ]
 
 [[package]]
@@ -9458,32 +9438,6 @@ dependencies = [
  "indexmap 2.14.2",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "openssl"
-version = "0.10.78"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38c4372413cdaaf3cc79dd92d29d7d9f5ab09b51b10dded508fb90bb70b9222"
-dependencies = [
- "bitflags 2.11.1",
- "cfg-if",
- "foreign-types 0.3.2",
- "libc",
- "once_cell",
- "openssl-macros",
- "openssl-sys",
-]
-
-[[package]]
-name = "openssl-macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -11583,22 +11537,15 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "encoding_rs",
  "futures-core",
- "futures-util",
- "h2",
  "http 1.4.0",
  "http-body",
  "http-body-util",
  "hyper",
  "hyper-rustls",
- "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
- "mime",
- "mime_guess",
- "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -11609,7 +11556,6 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
- "tokio-native-tls",
  "tokio-rustls",
  "tower",
  "tower-http",
@@ -13258,7 +13204,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sniff-cli"
+name = "sniff-detection-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
@@ -14795,16 +14741,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "tokio-native-tls"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
-dependencies = [
- "native-tls",
- "tokio",
 ]
 
 [[package]]
@@ -17688,34 +17624,6 @@ dependencies = [
  "thiserror 2.0.21",
  "which 8.0.2",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "worktree-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "base64 0.22.1",
- "biscuit-terminal",
- "biscuit-test-harness",
- "biscuit-visualized",
- "chrono",
- "clap 4.6.1",
- "clap_complete",
- "ctrlc",
- "dirs",
- "image",
- "inquire",
- "insta",
- "predicates",
- "serde_json",
- "serial_test",
- "sniff",
- "sysinfo",
- "tempfile",
- "test-toolkit",
- "worktree",
- "xpty",
 ]
 
 [[package]]

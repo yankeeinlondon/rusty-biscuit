@@ -1,0 +1,243 @@
+# Structural description of current CI evidence; runtime validators remain
+# authoritative. See docs/cicd/evidence.md for cross-field and reuse rules.
+kind: schema
+types:
+    git_object: string(pattern('^[0-9a-f]{40}$'))
+    identity: string(pattern('^[0-9a-f]{8,64}$'))
+    sha256: string(pattern('^[0-9a-f]{64}$'))
+    environment: enum(ubuntu-latest,windows-latest,macos-latest,wsl2-ubuntu)
+    gate: enum(lint,check,L1,L2,browser)
+    completion: enum(complete,interrupted,partial)
+    outcome: enum(pass,fail)
+    count: number(integer;min(0))
+
+    counts:
+        # Test-result totals for one cell, including every test case and how many passed, failed, were skipped, or errored.
+        total: |-
+            count(required) ->
+            Total test cases recorded in the cell's reports. This equals the sum of passed, failed, skipped, and errored tests.
+        passed: |-
+            count(required) ->
+            Test cases that ran and passed.
+        failed: |-
+            count(required) ->
+            Test cases marked as failed in the reports.
+        skipped: |-
+            count(required) ->
+            Test cases marked as skipped. These tests did not run.
+        errored: |-
+            count(required) ->
+            Test cases marked as errored, meaning an error interrupted their execution rather than an ordinary test failure being reported.
+
+    build:
+        # Identifies the planned build and the realized archive manifest whose binaries a cell executed.
+        key: |-
+            identity(required) ->
+            Planned key identifying the build archive whose binaries the cell executed.
+        digest: |-
+            identity(required) ->
+            Realized digest of the verified build manifest. It identifies the archive and build inputs the cell actually used.
+
+    receipt_cell:
+        # The measured result of one package and gate in a validation run, including its outcome, test counts, execution inputs, and report location.
+        package: |-
+            string(required;not-empty) ->
+            Cargo package name, exactly as declared by the package. This is never a package area name.
+        gate: |-
+            gate(required) ->
+            Validation gate this result covers: linting, compile checking, or the L1, L2, or browser test tier.
+        outcome: |-
+            outcome(required) ->
+            Whether the gate passed or failed. This is distinct from whether the run completed.
+        exit_code: |-
+            number(required;integer) ->
+            Exit code returned by the gate command. Zero means the command succeeded.
+        completion: |-
+            completion(required) ->
+            Whether this cell finished with usable measurements: `complete`, `interrupted`, or `partial`. Partial and interrupted cells cannot be reused as passing evidence.
+        counts: |-
+            counts(required) ->
+            Test result totals read from the cell's reports.
+        duration_s: |-
+            number(required;min(0)) ->
+            Elapsed time spent executing this cell, in seconds.
+        gate_input_identity: |-
+            identity(required) ->
+            Identity of the source inputs and gate recipes this result depends on. The verifier recomputes it before allowing a result from another commit to be reused.
+        backends: |-
+            string[](required) ->
+            Required terminal backends proven to have run at least one test. The list is empty when no backend proof was required or obtained.
+        report: |-
+            string(required) ->
+            Path of the cell's JUnit XML report within the producer's report storage. A partial run with no usable report carries an empty string.
+        failed_tests: |-
+            string[](max(20)) ->
+            Names of failed or errored tests, capped at 20. Omitted when no failures were reported.
+        failure_detail_truncated: |-
+            boolean ->
+            True when failure details were shortened to fit the receipt; the full details remain in the report. Omitted otherwise.
+        build: |-
+            build ->
+            Planned key and realized digest of the build archive used for this cell. Omitted when the cell compiled in place.
+        test_filter: |-
+            string(pattern('\\S')) ->
+            Non-empty nextest filter selecting a narrowed set of L1 tests. The result proves only those tests on the exact tree, never the whole tier.
+
+    receipt_host:
+        # The host that produced a validation receipt and the directory where that run's reports were retained.
+        os: |-
+            enum(Darwin,Linux,Windows;required) ->
+            Operating system reported by the producing host: `Darwin` for macOS, `Linux` for Linux and WSL2, or `Windows` for native Windows.
+        kernel: |-
+            string(required) ->
+            Kernel version or host-environment description recorded by the producer.
+        report_dir: |-
+            string(required) ->
+            Directory on the producing host where the run's reports are retained. Readers do not assume this path exists on their own host.
+
+    validation_receipt:
+        # A version-2 record of one host's validation run on an exact commit, containing the measured result for each package and gate.
+        schema_version: |-
+            literal(2;required) ->
+            Receipt format version. Version 2 records outcomes and measurements per cell.
+        environment: |-
+            environment(required) ->
+            CI environment in which all cells in this receipt ran.
+        base: |-
+            git_object(required) ->
+            Git commit used as the comparison base when resolving the plan for this run.
+        head: |-
+            git_object(required) ->
+            Git commit whose source was validated by this run.
+        tree: |-
+            git_object(required) ->
+            Git tree object of `head`, binding the receipt to the exact file contents that were tested.
+        scope_identity: |-
+            identity(required) ->
+            Content identity of the canonical resolved plan used for the run. It ties the cells to the exact scheduled work and execution inputs.
+        completion: |-
+            completion(required) ->
+            Completion of the whole run, independent of each cell's completion. Only complete runs can contribute reusable passing cells.
+        host: |-
+            receipt_host(required) ->
+            Host details and retained report location for the run.
+        cells: |-
+            receipt_cell[](required;min(1)) ->
+            Measured result for each package and gate covered by the run. A receipt contains at least one cell.
+
+    observation_host:
+        # The host that produced an observation, including its operating system details, an optional label, and any directory used to retain reports and proof documents.
+        os: |-
+            string(required;not-empty) ->
+            Operating system name reported by the producing host.
+        kernel: |-
+            string(required;not-empty) ->
+            Kernel version or host-environment description reported by the producer.
+        label: |-
+            string ->
+            Optional human-readable host label. Hosted observations use the CI environment name so their report artifacts can be located.
+        report_dir: |-
+            string ->
+            Directory on the producing host that retains `host-dir` reports and proof documents. Required and non-empty whenever the observation uses `host-dir` storage.
+
+    producer:
+        # The system that produced an observation and the host or run identifiers needed to trace its origin.
+        kind: |-
+            enum(hook,rig,hosted,seed;required) ->
+            System that created the observation: `hook` for a local pre-push run, `rig` for a cross-check test rig, `hosted` for a workflow run, or `seed` for a pre-nightly seed run.
+        host: |-
+            observation_host(required) ->
+            Operating system, host metadata, and any local storage used by the producer.
+        workflow: |-
+            string ->
+            Repository path of the GitHub Actions workflow that produced the observation. Required for hosted producers.
+        run_id: |-
+            string ->
+            Identifier of the producing run, stored as a string. Required for hosted producers.
+        attempt: |-
+            number(integer;min(1)) ->
+            One-based attempt number of the hosted workflow run. Required for hosted producers.
+        seed_id: |-
+            string ->
+            Identifier of the seed pass, derived from the pinned commit and resolved plan. Required for seed producers.
+
+    proof:
+        # Evidence that a non-hook producer ran the work scheduled for a cell, linking the test runner, expected-test listing, and completion record.
+        nextest_version: |-
+            string(required;not-empty) ->
+            Version of the nextest binary that listed and ran the cell's tests.
+        target: |-
+            string(required;not-empty) ->
+            Rust target triple for which the listed test binaries were compiled. In an archive run, this is the build target rather than the consumer's host.
+        expected_listing_digest: |-
+            string(required;not-empty) ->
+            SHA-256 digest of the expected-test manifest listing the tests the producer was required to run.
+        completion_record_digest: |-
+            string(not-empty) ->
+            SHA-256 digest of the record proving that every scheduled test and requirement was accounted for. Required for passing non-hook observations.
+
+    report_reference:
+        # An immutable reference to a report's location and exact content, including its SHA-256 digest and byte size.
+        path: |-
+            string(required;not-empty) ->
+            Path of the report within its store, such as a relative path in the host report directory or a member path in a workflow artifact.
+        sha256: |-
+            sha256(required) ->
+            SHA-256 digest of the report's exact bytes. The verifier uses it to detect altered content.
+        bytes: |-
+            count(required) ->
+            Size of the report in bytes, checked alongside its digest when the report is retrieved.
+        store: |-
+            enum(host-dir,artifact;required) ->
+            Where the report bytes are retained: `host-dir` for the producer's report directory or `artifact` for a workflow artifact.
+
+    observation:
+        # One immutable attempt to validate one package and gate, recording its producer, result, reports, and any explicit retry relationship.
+        observation_id: |-
+            identity(required) ->
+            Content identity of every other field. It makes the observation immutable and detects conflicting content published under the same ID.
+        retry_of: |-
+            identity ->
+            ID of an earlier observation of the same cell in this collection that this attempt replaces. Omitted when the observation is not a retry.
+        producer: |-
+            producer(required) ->
+            Origin and host of this attempt, including workflow or seed identifiers when applicable.
+        base: |-
+            git_object(required) ->
+            Git commit used as the comparison base when resolving the plan for this attempt.
+        scope_identity: |-
+            identity(required) ->
+            Content identity of the canonical resolved plan that scheduled this attempt.
+        completion: |-
+            completion(required) ->
+            Completion of the whole run. The cell carries its own separate completion status.
+        cell: |-
+            receipt_cell(required) ->
+            Measured result of this attempt, using the same cell shape as a version-2 receipt.
+        proof: |-
+            proof ->
+            Expected-test and completion evidence for this attempt. Forbidden for hook observations and required for every passing non-hook observation.
+        reports: |-
+            report_reference[](required) ->
+            Immutable path, digest, size, and storage location for each report. A complete cell's own report must appear in this list.
+        features: |-
+            string ->
+            Exact isolated Cargo feature arguments used for this attempt. Omitted means no feature arguments; reuse requires an exact match with the plan.
+
+    observation_collection:
+        # The top-level evidence record stored in Git notes for one commit and CI environment, containing immutable observations of individual validation cells.
+        schema_version: |-
+            literal(3;required) ->
+            Collection format version. Version 3 stores immutable per-cell observations.
+        environment: |-
+            environment(required) ->
+            CI environment shared by every observation in this collection.
+        head: |-
+            git_object(required) ->
+            Git commit to which this collection is attached.
+        tree: |-
+            git_object(required) ->
+            Git tree object of `head`, identifying the exact file contents associated with the collection.
+        observations: |-
+            observation[](required) ->
+            Unique observations sorted by `observation_id`. An empty list means the collection proves no cells.

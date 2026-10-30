@@ -210,29 +210,16 @@ jobs:
           path: ci-artifacts/ci-resolved-plan
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
-      # The in-run artifact service sees the current attempt atomically; the
-      # run-wide overlay then lets a current result win when a rerun produced
-      # the same artifact name twice. `completion-*` is each executing cell's
-      # proof: without it every executing cell reads as unproven.
-      - name: Download current-attempt result and status artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: '{junit-*,status-*,build-status-*,completion-*}'
-          path: ci-artifacts
-          merge-multiple: false
-      - name: Overlay newest run-wide result and status artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: '{junit-*,status-*,build-status-*,completion-*}'
-          path: ci-artifacts
-          merge-multiple: false
-          github-token: ${{ github.token }}
-          run-id: ${{ github.run_id }}
       # This area's scheduled packages, read from the PLAN rather than from the
       # execution rows: an all-reused or gap-only area dispatches no row and
       # still owns every package whose cells the audit must account for. A
       # `gates = false` package has a record and an empty gate list, which is
       # what separates "selected" from "scheduled".
+      #
+      # `overlay` is the same set as a download pattern. `junit-`, `status-`,
+      # and `completion-` names all lead with the package; `build-status-`
+      # names lead with the build owner, which need not be in this area, so
+      # that kind stays run-wide (one per build, a small set).
       - name: Resolve this area's packages
         id: area
         shell: bash
@@ -240,10 +227,44 @@ jobs:
           AREA: ${{ inputs.area }}
         run: |
           set -euo pipefail
+          plan=ci-artifacts/ci-resolved-plan/resolved-plan.json
           packages="$(jq -r --arg area "$AREA" \
             '[.packages[] | select(.area == $area and (.gates | length) > 0) | .package] | join(",")' \
-            ci-artifacts/ci-resolved-plan/resolved-plan.json)"
+            "$plan")"
+          overlay="$(jq -r --arg area "$AREA" \
+            '[.packages[] | select(.area == $area and (.gates | length) > 0) | .package
+              | "junit-\(.)-*", "status-\(.)-*", "completion-\(.)-*"]
+             + ["build-status-*"] | "{" + join(",") + "}"' \
+            "$plan")"
           echo "packages=$packages" >>"$GITHUB_OUTPUT"
+          echo "overlay=$overlay" >>"$GITHUB_OUTPUT"
+      # The in-run artifact service sees the current attempt atomically.
+      # `completion-*` is each executing cell's proof: without it every
+      # executing cell reads as unproven.
+      - name: Download current-attempt result and status artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: '{junit-*,status-*,build-status-*,completion-*}'
+          path: ci-artifacts
+          merge-multiple: false
+      # The run-wide overlay lets a current result win when a rerun produced
+      # the same artifact name twice, so attempt 1 has nothing to overlay.
+      #
+      # It goes through the REST API on the run's installation token (1,000
+      # requests an hour, shared by every job in the run): one request per
+      # listed page and one per artifact downloaded. A full-scope run carries
+      # ~350 artifacts across ~30 areas, so an unnarrowed overlay in every
+      # area cost ~7,500 requests and failed the nightly audits — and the
+      # `ci-infra-retry` that followed them — on the exhausted budget.
+      - name: Overlay newest run-wide result and status artifacts
+        if: ${{ github.run_attempt > 1 }}
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ${{ steps.area.outputs.overlay }}
+          path: ci-artifacts
+          merge-multiple: false
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
       # A producer whose hosted runner died never reached its status step, so
       # it uploaded nothing and the rollup could only say "produced no report
       # at all". `--package` keeps the synthesis inside this area: a job name

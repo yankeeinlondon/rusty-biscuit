@@ -77,7 +77,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = (
     "claudine-cli", "darkmatter", "darkmatter-cli", "biscuit-terminal",
     "tree-hugger", "claudine", "sniff", "biscuit-file", "schematic-gen",
-    "biscuit-terminal-cli", "claudine-gen", "dmls", "sniff-cli", "biscuit-tui-cli",
+    "biscuit-terminal-cli", "claudine-gen", "darkmatter-lsp", "sniff-detection-cli", "biscuit-tui-cli",
 )
 
 #: Every `--features` value a package's canonical recipes pass, plus the CI
@@ -100,15 +100,25 @@ PACKAGE_FEATURE_SETS: dict[str, tuple[tuple[str, ...], ...]] = {
     "claudine": ((), ("work-counters",)),
     # `remote` implies `network`, but `test-real` builds `network` alone.
     "sniff": ((), ("remote",), ("network",)),
-    "sniff-cli": ((), ("test-fixtures",)),
+    "sniff-detection-cli": ((), ("test-fixtures",)),
     "biscuit-file": ((), ("fetch",)),
     "schematic-gen": ((), ("terminal-tests",)),
     "biscuit-terminal-cli": ((), ("terminal-tests",)),
     "claudine-gen": ((), ("terminal-tests",)),
-    "dmls": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
+    "darkmatter-lsp": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
     "biscuit-tui-cli": ((), ("terminal-tests",)),
 }
 WAVE_2_PACKAGES = PACKAGES[4:]
+
+#: Packages renamed after the wave-2 self-proof was frozen (2026-10-03). The
+#: frozen captures and inventory keep the old names; every table here keys on
+#: the current one, so lookups go through [`current_name`].
+RENAMED = {"dmls": "darkmatter-lsp", "sniff-cli": "sniff-detection-cli", "worktree-cli": "git-wt-cli"}
+
+
+def current_name(package: str) -> str:
+    return RENAMED.get(package, package)
+
 
 #: Old targets whose consolidated target a ruling decides, overriding the
 #: tier-by-name default (`2026-09-22-consolidated-test-binaries-wave-2`
@@ -121,7 +131,7 @@ RULED_TARGETS: dict[str, dict[str, tuple[str | None, str]]] = {
         "real_terminal_render": ("level2", "R4/R5: its tests are level2_; as `real` its target would be stranded (F4)"),
         "windows_captured_stdout": ("level2", "R4: an L1 test requiring terminal-tests joins that feature's target (F5)"),
     },
-    "sniff-cli": {"level2_recent_commits_rendering": ("level2", "R14: #![cfg(feature = \"test-fixtures\")] gates every item")},
+    "sniff-detection-cli": {"level2_recent_commits_rendering": ("level2", "R14: #![cfg(feature = \"test-fixtures\")] gates every item")},
     "sniff": {"fixtures": (None, "R19: a child module of integration with no test of its own")},
 }
 
@@ -133,8 +143,8 @@ INCLUDE_SLOW_SELECTOR = "L1-include-slow"
 #: Tier markers as `_tier_filter` anchors them. Used to name targets and
 #: derive aliases, never to select tests.
 MARKER_TIERS = (("level2_", "L2"), ("level3_", "L3"), ("browser_", "browser"), ("real_", "real"), ("slow_", "L1"))
-#: `_tier_filter` adds `perf_` to the L1 exclusion for worktree-cli only.
-PACKAGE_MARKERS = {"worktree-cli": ("perf_",)}
+#: `_tier_filter` adds `perf_` to the L1 exclusion for git-wt-cli only.
+PACKAGE_MARKERS = {"git-wt-cli": ("perf_",)}
 TIER_TARGET_NAMES = {"L1": "l1", "L2": "level2", "L3": "level3", "browser": "browser", "real": "real"}
 #: Keys Cargo honors on a `[[test]]` entry. Any key other than name/path is a
 #: target-wide setting (R3).
@@ -635,7 +645,7 @@ def name_marker(package: str, name: str) -> str | None:
     for marker, _tier in MARKER_TIERS:
         if name.startswith(marker):
             return marker
-    for marker in PACKAGE_MARKERS.get(package, ()):
+    for marker in PACKAGE_MARKERS.get(current_name(package), ()):
         if name.startswith(marker):
             return marker
     return None
@@ -941,7 +951,7 @@ def plan_package(
                 tests_by_binary[binary_id].update(suite["tests"])
 
     features_by_capture = {feature_set: set(capture["features"]) for (_h, p, feature_set), capture in captures.items() if p == package}
-    ruled = RULED_TARGETS.get(package, {})
+    ruled = RULED_TARGETS.get(current_name(package), {})
     contracts: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
     assigned: list[tuple[dict[str, Any], str, str]] = []
     dropped: list[dict[str, Any]] = []
@@ -1170,7 +1180,7 @@ def capture_package(
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
 ) -> list[Path]:
     """List every selector for every feature set; write one capture per set."""
-    sets = tuple(feature_sets) if feature_sets is not None else PACKAGE_FEATURE_SETS.get(package)
+    sets = tuple(feature_sets) if feature_sets is not None else PACKAGE_FEATURE_SETS.get(current_name(package))
     if sets is None:
         raise ToolError(f"no feature sets are known for {package}; pass --feature-set")
     metadata = cargo_metadata(repo)

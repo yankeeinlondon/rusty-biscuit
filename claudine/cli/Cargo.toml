@@ -180,7 +180,7 @@ tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "net", "t
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 
 # A windowless Windows console (ConPTY) for the typed Ctrl+C drain test; already
-# built for unchained-ai and worktree-cli.
+# built for unchained-ai and git-wt-cli.
 [target.'cfg(windows)'.dev-dependencies]
 xpty = "0.3.6"
 

@@ -19,10 +19,10 @@ use cargo_metadata::{Metadata, MetadataCommand, PackageId};
 use serde_json::Value;
 use sniff::filesystem::{detect_repo, RepoInfo};
 
-const AGENT_SKILLS_PROMPT: &str = ".ai/prompts/agent-skills.md";
-const REFRESH_DOCUMENTATION_CODEX_PROMPT: &str = ".ai/prompts/refresh_documentation_codex.md";
-const REFRESH_DOCUMENTATION_CLAUDE_PROMPT: &str = ".ai/prompts/refresh_documentation_claude.md";
-const CLAUDE_MD_UPDATE_PROMPT: &str = ".ai/prompts/refresh_claude_md.md";
+const AGENT_SKILLS_PROMPT: &str = "_/prompts/agent-skills.md";
+const REFRESH_DOCUMENTATION_CODEX_PROMPT: &str = "_/prompts/refresh_documentation_codex.md";
+const REFRESH_DOCUMENTATION_CLAUDE_PROMPT: &str = "_/prompts/refresh_documentation_claude.md";
+const CLAUDE_MD_UPDATE_PROMPT: &str = "_/prompts/refresh_claude_md.md";
 const MAX_SKILL_PROMPT_CHARS: usize = 28_000;
 const MAX_SKILL_SUMMARY_LINES: usize = 220;
 const MAX_SKILL_SUMMARY_CHARS: usize = 16_000;
@@ -565,7 +565,10 @@ fn resolve_agent_preference(value: Option<&str>) -> Agent {
 
 fn build_package_context(metadata: &Metadata, package_area: &str) -> PackageContext {
     let workspace_package_names = workspace_package_names(metadata);
-    let (library, cli) = infer_area_packages(package_area, &workspace_package_names);
+    let (library, inferred_cli) = infer_area_packages(package_area, &workspace_package_names);
+    // A CLI's package name need not be `<area>-cli` (`worktree/cli` is
+    // `git-wt-cli`), but its manifest always lives at `<area>/cli/`.
+    let cli = area_cli_package(metadata, package_area).unwrap_or(inferred_cli);
     let dependency_lines = workspace_dependency_lines(metadata);
     let dependency_context = dependency_lines
         .get(&library)
@@ -589,6 +592,21 @@ fn workspace_package_names(metadata: &Metadata) -> Vec<String> {
         .filter(|pkg| workspace_ids.contains(&pkg.id))
         .map(|pkg| pkg.name.clone())
         .collect()
+}
+
+/// The workspace member whose manifest is `<area>/cli/Cargo.toml`, if any.
+fn area_cli_package(metadata: &Metadata, package_area: &str) -> Option<String> {
+    let manifest = metadata
+        .workspace_root
+        .join(package_area)
+        .join("cli")
+        .join("Cargo.toml");
+    let workspace_ids: BTreeSet<&PackageId> = metadata.workspace_members.iter().collect();
+    metadata
+        .packages
+        .iter()
+        .find(|pkg| workspace_ids.contains(&pkg.id) && pkg.manifest_path == manifest)
+        .map(|pkg| pkg.name.to_string())
 }
 
 fn infer_area_packages(package_area: &str, workspace_package_names: &[String]) -> (String, String) {
@@ -861,7 +879,7 @@ fn current_date() -> Result<String> {
 }
 
 fn build_log_paths(workspace_root: &Path, date: &str, library: &str) -> LogPaths {
-    let logs_root = workspace_root.join(".ai/logs");
+    let logs_root = workspace_root.join("_/logs");
 
     LogPaths {
         docs_prompt: logs_root.join(format!("{date}. docs_prompt_for_{library}_docs_prompt.md")),
@@ -2061,25 +2079,25 @@ mod tests {
         assert_eq!(
             paths.docs_prompt,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. docs_prompt_for_claudine_docs_prompt.md"
+                "/tmp/workspace/_/logs/2026-02-14. docs_prompt_for_claudine_docs_prompt.md"
             )
         );
         assert_eq!(
             paths.skill_prompt,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. skill_prompt_for_claudine_skill_prompt.md"
+                "/tmp/workspace/_/logs/2026-02-14. skill_prompt_for_claudine_skill_prompt.md"
             )
         );
         assert_eq!(
             paths.claude_md_prompt,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. claude_md_prompt_for_claudine_claude_md_prompt.md"
+                "/tmp/workspace/_/logs/2026-02-14. claude_md_prompt_for_claudine_claude_md_prompt.md"
             )
         );
         assert_eq!(
             paths.docs_summary,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. doc_update_summary_for_claudine_docs_summary.md"
+                "/tmp/workspace/_/logs/2026-02-14. doc_update_summary_for_claudine_docs_summary.md"
             )
         );
     }
@@ -2299,12 +2317,12 @@ mod tests {
     fn osc8_file_link_uses_relative_label_and_file_uri() {
         let test_root = unique_temp_root();
         let workspace_root = test_root.join("workspace");
-        let logs_path = workspace_root.join(".ai/logs/2026-02-14. docs prompt.md");
+        let logs_path = workspace_root.join("_/logs/2026-02-14. docs prompt.md");
         fs::create_dir_all(logs_path.parent().unwrap()).unwrap();
         fs::write(&logs_path, "content").unwrap();
 
         let link = osc8_file_link(&workspace_root, &logs_path);
-        assert!(link.contains(".ai/logs/2026-02-14. docs prompt.md"));
+        assert!(link.contains("_/logs/2026-02-14. docs prompt.md"));
         assert!(link.contains("file:///"));
         assert!(link.contains("%20"));
 

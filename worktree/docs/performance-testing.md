@@ -439,7 +439,7 @@ The dated samples on this page use the report's row names of their date. Their c
 Run the perf tests with:
 
 ```sh
-cargo nextest run -p worktree-cli -E 'test(/perf_/)' --nocapture
+cargo nextest run -p git-wt-cli -E 'test(/perf_/)' --nocapture
 ```
 
 For contention-free wall-clock measurement of the SLA, run perf tests serially via `just test-perf`.

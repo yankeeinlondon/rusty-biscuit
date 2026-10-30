@@ -855,11 +855,11 @@ fn package_metadata_carries_the_native_and_tier_policy() {
         "playa must declare its Linux native audio prerequisites in its manifest"
     );
 
-    // Tier ownership is package-scoped: sniff-cli owns the area's L2 tier.
+    // Tier ownership is package-scoped: sniff-detection-cli owns the area's L2 tier.
     let sniff_cli = fs::read_to_string(repo_root().join("sniff/cli/Cargo.toml")).unwrap();
     assert!(
         sniff_cli.contains("\"L2\"") && sniff_cli.contains("tmux"),
-        "sniff-cli must declare the L2 tier and its tmux backend"
+        "sniff-detection-cli must declare the L2 tier and its tmux backend"
     );
 
     // Feature contracts are declared per package and forwarded consistently
@@ -2171,7 +2171,7 @@ fn every_producer_job_emits_an_explicit_status_artifact() {
 /// gate command is a test, lint, or compile command whose failure must fail the
 /// producer while its status artifact retains the cell-level diagnosis.
 const GATE_STEPS: [(&str, &str, &str, &str); 8] = [
-    ("_package-ci.yml", "  check:", "check", "cargo check (declared example/bench kinds)"),
+    ("_package-ci.yml", "  check:", "check", "cargo check (declared kinds no test gate compiles)"),
     ("_package-ci.yml", "  check:", "dependents", "Compile unchanged dependents"),
     ("_package-ci.yml", "  test:", "gate", "Tests"),
     ("_package-ci.yml", "  test:", "companion", "Companion suites"),
@@ -4624,7 +4624,7 @@ fn the_area_drift_contract_is_enforced_on_the_merge_path() {
         "the area-drift job must be gated on the scope-derived flag"
     );
     assert!(
-        leg.contains("cargo build -p sniff-cli --release"),
+        leg.contains("cargo build -p sniff-detection-cli --release"),
         "the area-drift job must build the area authority it compares against"
     );
     // The guard turns an unprovisioned binary into a failure. Without it the
@@ -5766,7 +5766,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (
             ".github/ci/README.md",
             "exactly six top-level jobs",
-            "`ci.yml` defines eight top-level jobs",
+            "`ci.yml` defines ten top-level jobs",
         ),
         (
             ".github/ci/README.md",
@@ -5781,7 +5781,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (
             "docs/topics/ci-cd.md",
             "exactly six top-level jobs",
-            "`ci.yml` defines eight top-level jobs",
+            "`ci.yml` defines ten top-level jobs",
         ),
         (
             "docs/topics/ci-cd.md",
@@ -5791,7 +5791,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (
             ".claude/skills/rust-devops/ci-cd.md",
             "exactly six top-level jobs",
-            "`ci.yml` defines eight top-level jobs",
+            "`ci.yml` defines ten top-level jobs",
         ),
     ];
     for (file, phrase, why) in RETIRED {
@@ -5823,9 +5823,6 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         ("docs/topics/ci-cd.md", "ci-reporting"),
         ("docs/topics/ci-cd.md", "SUITE_REGISTRY"),
         ("docs/topics/ci-cd.md", "change inventory"),
-        ("docs/topics/ci-cd.md", "exactly eight top-level jobs"),
-        (".github/ci/README.md", "exactly eight top-level jobs"),
-        (".claude/skills/rust-devops/ci-cd.md", "exactly eight top-level jobs"),
         (".claude/skills/rust-devops/ci-cd.md", "ci-reporting"),
         (".claude/skills/rust-devops/ci-cd.md", "change_inventory"),
         (".claude/skills/rust-testing/verification-scope.md", "repo-deps"),
@@ -5840,6 +5837,18 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         assert!(
             source.contains(phrase),
             "{file} must state {phrase:?} — see fixes/2026-09-11-cicd-cleanup/spec.md AC14"
+        );
+    }
+
+    let job_count = top_level_job_ids("ci.yml").len();
+    for file in [
+        "docs/topics/ci-cd.md",
+        ".github/ci/README.md",
+        ".claude/skills/rust-devops/ci-cd.md",
+    ] {
+        assert!(
+            read(file).contains(&format!("exactly {job_count} top-level jobs")),
+            "{file} must state the current workflow's job count ({job_count})"
         );
     }
 

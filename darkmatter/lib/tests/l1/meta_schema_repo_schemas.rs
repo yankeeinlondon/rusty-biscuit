@@ -67,13 +67,14 @@ fn repo_root_schemas_all_classify_as_standalone_schemas() {
         let document = parse_standalone_schema_document(&source, path)
             .unwrap_or_else(|error| panic!("{} must classify: {error}", path.display()))
             .unwrap_or_else(|| panic!("{} must be a standalone schema", path.display()));
-        // Both shipped review schemas migrated to the pure `$schema` envelope.
-        assert_eq!(
-            document.envelope,
-            StandaloneSchemaEnvelope::Pure,
-            "{} must be a pure `$schema` envelope",
-            path.display()
-        );
+        // The review schemas use the pure `$schema` envelope; a type catalog
+        // such as `ci-evidence.yaml` declares `kind: schema`, the tagged one.
+        let expected = if source.lines().any(|line| line.trim_end() == "kind: schema") {
+            StandaloneSchemaEnvelope::Tagged
+        } else {
+            StandaloneSchemaEnvelope::Pure
+        };
+        assert_eq!(document.envelope, expected, "{} has the wrong envelope", path.display());
         classified += 1;
     }
     assert!(classified >= 2, "expected both shipped review schemas, saw {classified}");

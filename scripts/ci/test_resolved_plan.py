@@ -73,7 +73,7 @@ def producer_contracts(plan: dict, package: str) -> dict[tuple[str, str], dict[s
 
 #: The one workspace member where `sniff repo package-area` disagrees with
 #: sniff's own area universe, measured 2026-09-11 over all 73 members and
-#: re-measured 2026-09-15 against a release `sniff-cli` built from this
+#: re-measured 2026-09-15 against a release `sniff-detection-cli` built from this
 #: worktree, which answers identically.
 #:
 #: `sniff repo package-area` run from `biscuit-test-harness/` answers
@@ -90,11 +90,11 @@ SNIFF_SELF_INCONSISTENT = {"biscuit-test-harness": ("root", "biscuit-test-harnes
 #: Named because a skip that says only "requires sniff" claims nothing about
 #: where the invariant IS checked, and AC15 had no written answer to that.
 #: `ci-tooling` and `preflight` both run this suite and neither provisions the
-#: binary: a release `sniff-cli` costs 4m25s cold and 1m39s with a warm
+#: binary: a release `sniff-detection-cli` costs 4m25s cold and 1m39s with a warm
 #: dependency cache, measured in
 #: `reviews/2026-09-15-python-test-code/spike-4-results.md`.
 SNIFF_ENFORCED_BY = (
-    "`ci.yml`'s `area-drift` job, which builds sniff-cli, sets "
+    "`ci.yml`'s `area-drift` job, which builds sniff-detection-cli, sets "
     "BISCUIT_REQUIRE_SNIFF, and whose result `ci-gate` folds"
 )
 SNIFF_DETAIL = (
@@ -408,7 +408,7 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
 class DependentSeamTests(PlannerFixture):
     """Open Question 1, Option B, against the real workspace graph.
 
-    A darkmatter change compiles its unchanged direct dependents (`dmls` and
+    A darkmatter change compiles its unchanged direct dependents (`darkmatter-lsp` and
     `darkmatter-cli` among them) inside darkmatter's own `ubuntu-latest` check
     cell; those dependents still receive no job, area, or cell.
     """
@@ -417,7 +417,7 @@ class DependentSeamTests(PlannerFixture):
         plan = self.plan("darkmatter/lib/src/lib.rs")
         record = self.package_record(plan, "darkmatter")
         seam = record["dependent_seam"]
-        self.assertLessEqual({"dmls", "darkmatter-cli"}, set(seam["dependents"]))
+        self.assertLessEqual({"darkmatter-lsp", "darkmatter-cli"}, set(seam["dependents"]))
         self.assertEqual(sorted(seam["dependents"]), seam["dependents"])
         self.assertLessEqual(set(seam["dependents"]), set(plan["reverse_dependencies"]))
         self.assertEqual(
@@ -468,12 +468,12 @@ class AreaGroupingTests(PlannerFixture):
             ["claudine/rendezvous", "tools"], self.selected_areas(plan)
         )
 
-    def test_the_dmls_crate_belongs_to_the_darkmatter_area(self) -> None:
+    def test_the_darkmatter_lsp_crate_belongs_to_the_darkmatter_area(self) -> None:
         # Measured, not assumed: `sniff repo package-area` run from
         # `darkmatter/dmls` answers `darkmatter`, because the area is the
         # manifest directory's parent. `darkmatter/dmls` IS an area in sniff's
         # universe — it is the area of `darkmatter/dmls/zed-dmls-cli`, not of
-        # the `dmls` crate itself. AC15 makes sniff the authority, so the
+        # the `darkmatter-lsp` package itself. AC15 makes sniff the authority, so the
         # planner must reproduce this rather than the intuitive grouping.
         plan = self.plan("darkmatter/dmls/src/lib.rs")
         self.assertEqual(["darkmatter", "tools"], self.selected_areas(plan))
@@ -502,7 +502,7 @@ class AreaGroupingTests(PlannerFixture):
         for name in (
             "claudine",  # area/lib
             "rendezvous-core",  # nested area/component
-            "dmls",  # manifest directory IS the nested area
+            "darkmatter-lsp",  # manifest directory IS the nested area
             "test-toolkit",  # grouped under a shared `tools` area
             "biscuit-visualized",  # area/src
         ):

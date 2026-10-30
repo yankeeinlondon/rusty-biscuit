@@ -61,7 +61,7 @@ install *args="":
 # declares no `default` feature set. `image` gates the resvg rasterization
 # tests, and `serde` gates the horizontal-rule serialization tests. Every
 # consumer that renders artifacts enables `image` — biscuit-terminal-cli,
-# darkmatter, worktree-cli, sniff-cli — so the no-feature build is a
+# darkmatter, git-wt-cli, sniff-detection-cli — so the no-feature build is a
 # configuration nobody ships.
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.

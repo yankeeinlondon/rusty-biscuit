@@ -35,6 +35,12 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
   path in the pathspec, or only the addition lands. Verify with
   `git show --name-status <hash>` showing an `R` row, and `git ls-files
   <old-path>` returning nothing.
+- A staged deletion of a file that still exists on disk (newly ignored or
+  untracked leftover) is turned into a modification by `--only`, which reads
+  the working tree. Commit it plainly after confirming
+  `git diff --cached --name-status` holds only the intended paths, or remove
+  the file first. After any `--only`, check that the `git show --name-status`
+  letters match the staged letters, not just the file list.
 - `--pathspec-from-file` silently drops rename destinations. Use it only for
   batches with no renames. For renames use the inline `-- <old> <new> …`
   form; it copes with hundreds of pairs, so check `wc -c` of the argument

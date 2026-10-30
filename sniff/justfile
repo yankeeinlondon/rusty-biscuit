@@ -23,7 +23,7 @@ RED := '\033[31m'
 DOCS := ""
 PACKAGE := "sniff"
 LIB := lowercase(PACKAGE)
-CLI := LIB + "-cli"
+CLI := "sniff-detection-cli"
 
 default:
     #!/usr/bin/env bash
@@ -42,14 +42,14 @@ build *args="":
     @echo "Building ..."
     @echo
     @cargo build -p sniff {{ args }}
-    @cargo build -p sniff-cli {{ args }}
+    @cargo build -p sniff-detection-cli {{ args }}
     @echo
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity_all "sniff --features remote; sniff-cli --features test-fixtures"
+    @just _sanity_all "sniff --features remote; sniff-detection-cli --features test-fixtures"
 
 # run cargo check to do a quick validation that code can be built
 #
@@ -58,7 +58,7 @@ sanity:
 # `remote` is required for the same reason as `lint`: without it the provider
 # and remote-observation modules are never handed to rustc at all.
 check *args="":
-    @cargo check -p sniff --features remote -p sniff-cli {{ args }}
+    @cargo check -p sniff --features remote -p sniff-detection-cli {{ args }}
 
 # Type-check the library and CLI *including test targets* for Windows.
 #
@@ -80,7 +80,7 @@ check-windows:
     export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/windows-check}"
     export CFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
     export CXXFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
-    cargo check -p sniff --features remote -p sniff-cli --tests --target x86_64-pc-windows-gnu
+    cargo check -p sniff --features remote -p sniff-detection-cli --tests --target x86_64-pc-windows-gnu
 
 # test library and CLI
 #
@@ -95,19 +95,19 @@ test *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
-        just _test_all "sniff --features remote; sniff-cli --features test-fixtures" {{ args }}
+        just _test_all "sniff --features remote; sniff-detection-cli --features test-fixtures" {{ args }}
     else
-        just _test_local_all "sniff --features remote; sniff-cli" {{ args }}
+        just _test_local_all "sniff --features remote; sniff-detection-cli" {{ args }}
     fi
 
 # List every test Nextest marks SLOW (see the shared `_slow_tests`).
 slow-tests *args="":
     @just _slow_tests {{ args }}
 
-# Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.
+# Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-detection-cli.
 # `--features test-fixtures` builds the `render_cicd_fixture` helper the test spawns.
 test-l2 *args="":
-    @just _test_l2 sniff-cli --features test-fixtures {{ args }}
+    @just _test_l2 sniff-detection-cli --features test-fixtures {{ args }}
 
 # not applicable: sniff has no OS-keyboard-injection (Level-3) tests
 test-l3:
@@ -120,24 +120,24 @@ test-browser:
 # Real-resource tests (network probes, host filesystem). Skip-clean when absent.
 test-real *args="":
     @just _test_real sniff --features network {{ args }}
-    @just _test_real sniff-cli {{ args }}
+    @just _test_real sniff-detection-cli {{ args }}
 
 # lint with clippy
 #
 # `remote` is required for the same reason as `test`: without it the provider
 # and remote-observation modules are never handed to clippy at all.
 lint *args="":
-    @cargo clippy -p sniff --features remote -p sniff-cli -- {{ args }}
+    @cargo clippy -p sniff --features remote -p sniff-detection-cli -- {{ args }}
 
 # Per-package LCOV coverage.
 coverage *args="":
     @just _coverage sniff --features remote {{ args }}
-    @just _coverage sniff-cli --features test-fixtures {{ args }}
+    @just _coverage sniff-detection-cli --features test-fixtures {{ args }}
 
 # Doctests.
 doctest *args="":
     @just _doctest sniff --features remote {{ args }}
-    @just _doctest sniff-cli --features test-fixtures {{ args }}
+    @just _doctest sniff-detection-cli --features test-fixtures {{ args }}
 
 # not applicable: sniff has no cargo-fuzz targets
 fuzz:
@@ -161,7 +161,7 @@ install *args="":
     @cargo build --release -p sniff  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing Sniff CLI{{ RESET }}"
-    @cargo build --release -p sniff-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo build --release -p sniff-detection-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
     @cargo install --locked --path cli {{ args }}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo -e "{{ BOLD }}{{ BLUE }}Sniff CLI Installed{{ RESET }}"
@@ -228,7 +228,7 @@ bench-cli:
         echo "Install it with 'brew install hyperfine' or 'cargo install hyperfine'."
         exit 1
     fi
-    cargo build --release -p sniff-cli
+    cargo build --release -p sniff-detection-cli
     SNIFF_BIN="$(cargo metadata --format-version 1 --no-deps \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release/sniff"
     hyperfine --warmup 3 \
@@ -263,7 +263,7 @@ profile-cli *args="":
         echo "Install it with 'cargo install flamegraph'."
         exit 1
     fi
-    cargo flamegraph --profile profiling -p sniff-cli -- {{ args }}
+    cargo flamegraph --profile profiling -p sniff-detection-cli -- {{ args }}
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 

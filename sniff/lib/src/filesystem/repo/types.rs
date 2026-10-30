@@ -784,7 +784,7 @@ mod tests {
                     path: PathBuf::from("/repo/sniff/cli"),
                     relative: "sniff/cli".to_string(),
                     package_area: "sniff".to_string(),
-                    name: "sniff-cli".to_string(),
+                    name: "sniff-detection-cli".to_string(),
                     ..Package::default()
                 },
                 Package {

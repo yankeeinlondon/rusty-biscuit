@@ -40,7 +40,7 @@ Outputs one file path per line, relative to the repository root. Paths are rende
 In monorepos, `--package` and `--package-area` limit which staged files are shown:
 
 ```bash
-sniff repo staged-files --package sniff-cli       # Files staged in sniff/cli/
+sniff repo staged-files --package sniff-detection-cli       # Files staged in sniff/cli/
 sniff repo staged-files --package-area homelab    # Files staged in homelab/
 ```
 

@@ -22,7 +22,7 @@ unchained-ai -- ./unchained-ai/lib/Cargo.toml:
 	tracing-subscriber
 model_id -- ./unchained-ai/model_id/Cargo.toml:
 	proc-macro2
-worktree-cli -- ./worktree/cli/Cargo.toml:
+git-wt-cli -- ./worktree/cli/Cargo.toml:
 	dirs
 model-citizen -- ./model-citizen/lib/Cargo.toml:
 	schematic-schema

@@ -889,8 +889,8 @@ _run_all recipe specs *args="":
     #
     # A per-package `--features X` is NOT a reason to give up the shared scope:
     # Cargo accepts package-qualified features in a multi-package invocation, so
-    # `sniff --features remote; sniff-cli --features test-fixtures` becomes
-    # `-p sniff -p sniff-cli -F sniff/remote -F sniff-cli/test-fixtures` —
+    # `sniff --features remote; sniff-detection-cli --features test-fixtures` becomes
+    # `-p sniff -p sniff-detection-cli -F sniff/remote -F sniff-detection-cli/test-fixtures` —
     # identical semantics, one feature resolution.
     #
     # `--all-features` and `--no-default-features` have no package-qualified
@@ -1078,8 +1078,8 @@ _test_local_all specs *args="": _storage_preflight
 
     if "${nextest_bin[@]}" --version >/dev/null 2>&1; then
         filter="$(just _tier_filter L1)"
-        if [[ -z "${BISCUIT_TEST_FILTER:-}" ]] && printf '%s\n' "${package_names[@]}" | grep -Fxq worktree-cli; then
-            filter="(${filter}) & !(package(worktree-cli) & test(/(^|::)perf_/))"
+        if [[ -z "${BISCUIT_TEST_FILTER:-}" ]] && printf '%s\n' "${package_names[@]}" | grep -Fxq git-wt-cli; then
+            filter="(${filter}) & !(package(git-wt-cli) & test(/(^|::)perf_/))"
         fi
         "${nextest_bin[@]}" run "${selected[@]}" -E "${filter}" --no-tests=pass \
             ${forwarded[@]+"${forwarded[@]}"}
@@ -1193,7 +1193,7 @@ _backend_proof command:
 # chosen by the same expression — and a hand-maintained second copy of these
 # strings is precisely the drift that would make an expected-test manifest lie.
 #
-# `pkg` matters only for L1: `worktree-cli` additionally excludes its `perf_` SLA
+# `pkg` matters only for L1: `git-wt-cli` additionally excludes its `perf_` SLA
 # tests, which assert wall-clock budgets and belong to `just test-perf`.
 # `BISCUIT_TEST_FILTER` replaces the L1 expression wholesale — only areas whose
 # L1 contract genuinely differs should set it. `BISCUIT_L1_INCLUDE_SLOW=1`
@@ -1220,7 +1220,7 @@ _tier_filter tier pkg="":
     case '{{ tier }}' in
         L1|l1)
             filter="${base}"
-            if [[ '{{ pkg }}' == "worktree-cli" ]]; then
+            if [[ '{{ pkg }}' == "git-wt-cli" ]]; then
                 filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/) + test(/(^|::)perf_/))'
             elif [[ "${BISCUIT_L1_INCLUDE_SLOW:-}" == "1" ]]; then
                 filter='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
@@ -1438,7 +1438,7 @@ _test pkg *args="": _storage_preflight
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
         skip_args=(--skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_)
-        if [[ "{{ pkg }}" == "worktree-cli" ]]; then
+        if [[ "{{ pkg }}" == "git-wt-cli" ]]; then
             skip_args+=(--skip perf_)
         fi
         cargo test -p {{ pkg }} {{ args }} -- "${skip_args[@]}" || exit_code=$?
@@ -2683,7 +2683,8 @@ _coverage pkg *args="": _storage_preflight
 # Run a cargo-fuzz target. Requires nightly toolchain pinned in the
 # package's `fuzz/rust-toolchain.toml`.
 #
-# Usage: `just _fuzz <pkg-fuzz-dir> <target> [-- libfuzzer-args]`
+# Usage: `just _fuzz <crate-dir> <target> [-- libfuzzer-args]`, where
+# `<crate-dir>` is the crate holding the `fuzz/` workspace (e.g. `lib`).
 _fuzz fuzz_dir target *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2691,6 +2692,9 @@ _fuzz fuzz_dir target *args="": _storage_preflight
     echo -e "🦠 Fuzzing {{ bold }}{{ target }}{{ reset }} {{ dim }}({{ fuzz_dir }}){{ reset }}"
     echo
     cd "{{ fuzz_dir }}"
+    # The fuzz crate is its own workspace; seeding its lock from the root one
+    # fuzzes the dependency versions that ship (see `.gitignore`).
+    cp "$(git rev-parse --show-toplevel)/Cargo.lock" fuzz/Cargo.lock
     cargo +nightly fuzz run "{{ target }}" {{ args }}
 
 # Composite "everything that is part of the PR gate" runner.

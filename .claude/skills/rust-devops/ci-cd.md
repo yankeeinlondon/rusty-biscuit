@@ -2,14 +2,16 @@
 
 This page records the non-obvious decisions an agent needs before changing the
 repository's CI, pre-push hook, or release automation. The live authorities are
-`docs/topics/ci-cd.md`, `.github/ci/README.md`, package
+`docs/topics/ci-cd.md`, `docs/releases.md`, `.github/ci/README.md`, package
 `[package.metadata.ci]`, and `.github/ci/environments.json`.
 
-## The eight jobs of `ci.yml`
+## The jobs of `ci.yml`
 
-`ci.yml` defines exactly eight top-level jobs and a contract test pins the set:
+`ci.yml` defines exactly 10 top-level jobs and a contract test pins the set:
 `validation`, `scope`, `preflight`, `build`, `area-ci`, `area-drift`, `ci-gate`,
-`ci-reporting`. The first seven block; `ci-reporting` is advisory and carries
+`certify-nightly`, `publish-observations`, and `ci-reporting`. The first seven
+block merges; certification and observation publication are outside the gate
+but can fail the scheduled run. `ci-reporting` is advisory and carries
 `continue-on-error: true`.
 
 **No job owns a test suite on CI's behalf.** `preflight` is bootstrap
@@ -802,7 +804,7 @@ That is not an oversight: it is the always-runs merge-gate binary, it links none
 of the monorepo's crates, and its only output target is GitHub's own renderer.
 `ci-plan` and `ci-build` do render through `TerminalRenderable`.
 
-## Two traps in the workflow files themselves
+## Traps in the workflow files themselves
 
 `actionlint`'s `github` context model **does not include `run_started_at`**,
 even though GitHub documents and populates it. A workflow that reads it lints
@@ -838,6 +840,20 @@ workspace entry, so its `SUITE_REGISTRY` entry `artifact-publisher` is the only
 thing that schedules it. The fixture lives outside `scripts/ci/` because
 `build_baseline_revision.py` carries it with the instrument and refuses a
 constructed revision that adds a `scripts/ci/` path.
+
+**Every job in a run shares one REST budget.** `github.token` is an
+installation token limited to 1,000 REST requests an hour for the whole run,
+plus a secondary limit on bursts. `actions/download-artifact` with `run-id:`
+and `github-token:` costs one request per listed page **and one per artifact
+downloaded**; the tokenless in-run form does not touch that budget. A
+full-scope nightly run carries ~350 artifacts across ~30 areas, and an
+unnarrowed run-wide overlay in every area's `coverage-audit` spent ~7,500
+requests. That failed the nightly audits and then the `ci-infra-retry` that
+read the same run (2026-09-28 → 2026-10-03). So the overlay runs only when
+`github.run_attempt > 1` and downloads only the area's own packages, and
+`runner_loss.py` classifies only the area's jobs and waits out a rate limit
+(15 minutes at most) instead of failing. Scale any new REST-reading step by
+area count × artifact count before adding it.
 
 ## Where CI's own suites run, and where area drift is enforced
 
@@ -906,11 +922,11 @@ The sniff area contracts (`scripts/ci/test_resolved_plan.py`, class
 `AreaGroupingTests`) are enforced **on the merge path**, by `ci.yml`'s own
 `area-drift` job:
 `ci-gate` folds `needs.area-drift.result` like every other blocking job. The
-job builds `sniff-cli` once behind a `rust-cache` entry, puts it on `PATH`, and
+job builds `sniff-detection-cli` once behind a `rust-cache` entry, puts it on `PATH`, and
 sets `BISCUIT_REQUIRE_SNIFF=1` so an absent sniff **fails** rather than skips.
 
 It is a job of its own rather than a companion suite because a release
-`sniff-cli` measures 264.6s cold / 99.5s warm, and because a sniff compile
+`sniff-detection-cli` measures 264.6s cold / 99.5s warm, and because a sniff compile
 error would then redden a package's ordinary test cell rather than the check
 that exists to report it. What makes the cost acceptable is scope. A
 second planner flag, `area_drift`, schedules the job, and it is true for
@@ -1310,6 +1326,11 @@ Do not introduce a second version authority, publish from a feature branch, or
 silently turn on crates.io. A new registry, installer generator, signing path,
 or binary matrix is a separate design decision whose credentials, target
 coverage, checksums, and rollback behavior must be explicit.
+
+**Planned:** installable binaries (GitHub Release archives, cargo-binstall,
+Homebrew, shell/PowerShell, npm, PyPI) built by `dist` from release-plz's
+tags, and crates.io publication where a crate's name is free. The design and
+its open questions are in `2026-10-03-binary-releases`.
 
 ## Verification boundaries
 

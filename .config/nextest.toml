@@ -43,7 +43,7 @@ command = 'sh -c "echo CFProcessPath=/usr/bin/true >> $NEXTEST_ENV"'
 
 [[profile.default.scripts]]
 platform = { host = "cfg(target_os = \"macos\")" }
-filter = 'package(worktree-cli) & (test(/^commands::git_graph::tests::gathered_graph_lays_out_/) | test(=commands::git_graph::tests::the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60) | test(=commands::list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal))'
+filter = 'package(git-wt-cli) & (test(/^commands::git_graph::tests::gathered_graph_lays_out_/) | test(=commands::git_graph::tests::the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60) | test(=commands::list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal))'
 setup = 'coretext-small-bundle'
 
 # Every biscuit-visualized render over the host's fonts asks fontique, so the
@@ -213,7 +213,7 @@ slow-timeout = { period = "60s", terminate-after = 6 }
 # The 30s×3 = 90s ceiling leaves the test's own upper bound (60 s plus 3 s) in
 # charge. It runs only in `just test-perf` (`perf_`), serially.
 [[profile.default.overrides]]
-filter = 'package(worktree-cli) & test(=perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline)'
+filter = 'package(git-wt-cli) & test(=perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # The graph-stage timings run `wt list` in a pseudo-terminal that never
@@ -222,7 +222,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # 10-sample run about 120 s. The 60s×5 = 300s ceiling covers the recorded run.
 # It runs only in `just test-perf` (`perf_`), serially.
 [[profile.default.overrides]]
-filter = 'package(worktree-cli) & test(=perf_graph_stages_are_reported_for_every_graph_fixture)'
+filter = 'package(git-wt-cli) & test(=perf_graph_stages_are_reported_for_every_graph_fixture)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 # The Kitty graph tests skip, with the reason on stderr, when the host cannot
@@ -231,7 +231,7 @@ slow-timeout = { period = "60s", terminate-after = 5 }
 # that reason (and the kept evidence paths) visible in `just test-l2` and
 # pre-push runs.
 [[profile.default.overrides]]
-filter = 'package(worktree-cli) & binary(level2_graph_in_kitty)'
+filter = 'package(git-wt-cli) & binary(level2_graph_in_kitty)'
 success-output = "final"
 
 # Every `slow_` test in schematic-gen's L1 binary generates a client crate and
@@ -306,7 +306,7 @@ test-group = 'claudine-l1'
 
 [[profile.ci.overrides]]
 platform = { host = "cfg(windows)" }
-filter = 'package(sniff) + package(sniff-cli)'
+filter = 'package(sniff) + package(sniff-detection-cli)'
 test-group = 'sniff-windows-l1'
 
 # The wall-clock performance assertion needs an otherwise idle CI runner to
