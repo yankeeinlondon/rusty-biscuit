@@ -94,21 +94,40 @@ behavior.
 
 ## Schemas and references
 
-- `DarkmatterSchemas` loads and merges document and baseline schemas and owns
-  the validator cache.
-- `StandaloneSchemaDocument` is the passive product of
-  `parse_standalone_schema_document`.
+The SimplifiedSchema language is the `simplified-schema` crate
+(`simplified-schema/lib/src/`, imported as `simplified_schema`); load the
+`simplified-schema` skill for it. Import its types from `simplified_schema`
+directly: `darkmatter::markdown::schemas` does not re-export them.
+
+- Library-owned (edit in `simplified-schema/lib/src/`): the parsed `$schema`
+  AST (`SchemaRoot`, `SchemaShape`, `PropertyDef`, `TypeExpr`), the grammar,
+  `parse_standalone_schema_document` and its passive product
+  `StandaloneSchemaDocument`, named-type resolution, JSON Schema lowering,
+  subtyping, the conversion engine, `ValidatorCache`, `SchemaError`,
+  `ValidationProblem`, `SchemaOriginMap`, `SchemaPhase`, and the standalone
+  facade `simplified_schema::SimplifiedSchema` (with `Prepared`,
+  `validate_strict`/`validate_soft`, and layering). Darkmatter must not
+  redefine any of these names
+  (`lib/tests/l1/schema_language_ownership_guard.rs`).
+- Darkmatter-owned (`darkmatter/lib/src/markdown/schemas/`):
+  `DarkmatterSchemas` loads and merges document, trigger, and baseline schemas
+  for a Markdown document; `EffectiveSchema`, `ValidationOptions`, and
+  `PendingPolicy`; the shipped baseline and global catalog; schema roots and
+  trigger discovery; the `schemas::resolve` wrappers that pass
+  `embedded::SHIPPED_SOURCES`; `TriggerOrigin`; `ProblemPositions`.
 - `ValidationProblem` carries legacy message/kind fields plus typed code,
   instance/schema paths, offending property, source location, and optional
   file-reference detail.
 - `SchemaOriginMap` records the owner of each effective top-level property.
-- `effective_property_shape`, `property_def_at_path`, `nested_property_shape`,
-  `expression_atom`, and `frontmatter_expression_values` are the passive
-  authority for which property definition governs a frontmatter key path and
-  which values are Expression-typed. DMLS completion, hover, and
-  `dm.expression.*` diagnostics and the corpus gate share them; do not
-  re-derive arm selection or the Expression check elsewhere. Trigger payloads
-  and pattern-dictionary keys contribute no definitions here.
+- `simplified_schema::{layered_property_shape, property_def_at_path,
+  nested_property_shape, expression_atom, frontmatter_expression_values}` and
+  Darkmatter's `schemas::effective_property_shape` (`schemas/frontmatter_shape.rs`,
+  which layers Darkmatter's baseline) are the passive authority for which property
+  definition governs a frontmatter key path and which values are
+  Expression-typed. DMLS completion, hover, and `dm.expression.*` diagnostics
+  and the corpus gate share them; do not re-derive arm selection or the
+  Expression check elsewhere. Trigger payloads and pattern-dictionary keys
+  contribute no definitions here.
 - Reference graph nodes retain origin, dependency, identity, and freshness
   information; do not collapse these to plain paths.
 
@@ -137,11 +156,14 @@ behavior.
 
 | Package | Responsibility |
 |---|---|
-| `darkmatter` | Parsing, composition, schemas, references, hashing, rendering |
+| `simplified-schema` | The SimplifiedSchema language: grammar, resolution, conversion, validation, JSON Schema lowering, passive expression syntax (no Markdown dependency) |
+| `darkmatter` | Parsing, composition, schema policy (baseline, roots, triggers), references, hashing, rendering |
 | `darkmatter-cli` | The `md` CLI and presentation/orchestration policy |
 | `dmls` | Language Server Protocol implementation over passive Darkmatter APIs |
 | `zed-dmls` | Zed extension integration for DMLS |
 
 Keep CLI-only parsing and flags out of the library. Keep editor transport and
-workspace state in DMLS, while grammar, schema, expression, and validation
-authority remains in `darkmatter`.
+workspace state in DMLS, while document, composition, and schema-policy
+authority remains in `darkmatter`. The schema language and passive expression
+syntax belong to `simplified-schema`, which never depends on Darkmatter, DMLS,
+Claudine, or a CLI (`simplified-schema/lib/tests/l1/dependency_direction_guard.rs`).

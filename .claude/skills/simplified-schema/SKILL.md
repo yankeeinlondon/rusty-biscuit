@@ -1,0 +1,178 @@
+---
+name: simplified-schema
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+last_updated: 2026-10-30T00:00:00Z
+---
+
+# simplified-schema
+
+The SimplifiedSchema language as a standalone crate (`simplified-schema/lib`,
+imported as `simplified_schema`). It parses, resolves, converts, validates, and
+lowers schemas to Draft 2020-12 JSON Schema, and has no dependency on any
+Markdown host. Darkmatter, its CLI, DMLS, Claudine, and Messenger (`research`
+feature) depend on it directly.
+
+## Library or Darkmatter?
+
+| Lives in `simplified-schema/lib/src/` | Stays in `darkmatter/lib/src/markdown/schemas/` |
+|---|---|
+| AST and grammar (`simplified/`: `SchemaRoot`, `SchemaShape`, `PropertyDef`, `PropertyAtom`, `TypeExpr`, `DefinitionTable`) | `DarkmatterSchemas`, `EffectiveSchema`, `ValidationOptions`, `PendingPolicy` (`mod.rs`) |
+| Named-type resolution, cycles, use-site merges, `merge_baseline` (`resolve.rs`, `resolve/`) | The shipped baseline and global catalog (`catalog.rs`, `embedded.rs::SHIPPED_SOURCES`) |
+| JSON Schema lowering, subtyping, queries, serialization | Schema roots (`roots.rs`) and trigger discovery/matching (`triggers/`) |
+| Conversion engine (`coercion/`, `coerce.rs`), numeric model (`numeric.rs`) | Pending classification (`coerce.rs::nested_templates`) and eager-file rewrite (`rewrite.rs`) |
+| Validators, formats, `x-darkmatter-*` keywords (`validate.rs`, `format.rs`, `file_match.rs`) | `ProblemPositions` (`positions.rs`), completion over an `EffectiveSchema` |
+| `SchemaError`, `ValidationProblem`, `SchemaPhase`, `SchemaOrigin`, `ValidationTimings` | `md schema` CLI, compose integration, DMLS projection |
+| Passive expression syntax (`expression/`), literal-token codec (`pending.rs`) | Expression evaluation and the function registry |
+| The `SimplifiedSchema` facade object (`schema/`) | `schemas::resolve` wrappers that pass `SHIPPED_SOURCES` so `Name@darkmatter:<stem>` resolves |
+
+Rule of thumb: if it answers "what does this schema text mean, and does this
+value satisfy it?", it belongs in the library. If it answers "which schemas
+apply to this Markdown document, and what do we do about it?", it is
+Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
+[schema.md](../darkmatter/schema.md).
+
+## Core Principles
+
+- **Content is never a path.** `SimplifiedSchema::try_from(&str)` reads
+  document text (standalone schema YAML, Markdown with a frontmatter `$schema`,
+  or raw JSON Schema), opens no file, and captures no context.
+- **One capture.** Only a *raw* `SchemaSource` (a bare path or reference string)
+  reads the process: `schema/capture.rs::request_context` takes cwd, home,
+  env, and repository topology (`sniff`) once at factory entry. A host that
+  already has a request context passes `SchemaSource::from(path).bound(ctx)`
+  and nothing is captured.
+- **Validation is passive.** Parsing, resolution of supplied text, conversion,
+  lookup, and export perform no I/O beyond reading referenced schema files
+  through the bound context. No expression is ever evaluated.
+- **Strict never converts; soft converts a copy.** The input `Value` is never
+  mutated; `ValidationSuccess::value` is `Cow::Borrowed` when accepted as
+  written.
+- **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
+  or not at all, with whole-property replacement.
+- **One implementation.** Darkmatter calls the library; it never redefines a
+  library-owned item (see the guards below).
+- **The library sits below its hosts.** It never depends on Darkmatter, DMLS,
+  Claudine, Content Policy, or any CLI, in any manifest table or source.
+
+## Quick Reference
+
+```rust
+use serde_json::json;
+use simplified_schema::SimplifiedSchema;
+
+let schema = SimplifiedSchema::try_from("$schema:\n  name: string(required)\n  count: number\n")?;
+
+let input = json!({ "name": "Ada", "count": "4" });
+assert!(schema.validate_strict(&input).is_err());          // "4" is not a number as written
+let accepted = schema.validate_soft(&input).unwrap();       // converted copy
+assert!(accepted.is_converted());
+assert_eq!(accepted.value["count"], json!(4));
+
+let name = schema.query("name").unwrap().unwrap();          // TypeDefinition view
+assert!(name.is_required());
+let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::Value>
+# Ok::<(), simplified_schema::SimplifiedSchemaError>(())
+```
+
+| Need | API |
+|---|---|
+| Build from text | `SimplifiedSchema::try_from(&str)` |
+| Build from a file (`file` feature) | `try_from_yaml`, `try_from_markdown`, `try_from_json_schema`, `resolve` (by extension), each taking `impl Into<SchemaSource>` |
+| Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
+| One named type as its own schema | `schema.select("Person")` |
+| Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |
+| Layer | `layer_under(&[&s])`, `layer_over(&[&s])`, `as_base`, `override_with` |
+| Inspect | `query(path)`, `property`, `properties`, `named_type` → `TypeDefinition`; `FunctionView` |
+| Export | `to_json_schema()`, `to_simplified_yaml()`; `provenance()` lists files read |
+| Lower-level compile once | `Prepared::new(Arc<Value>, base_dir, ctx)` then `validate_strict`/`validate_soft` |
+| Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_property_definition`, `parse_standalone_schema_document` |
+| Lower only | `to_json_schema`, `to_json_schema_with_definitions` (needed once a `TypeExpr::Ref` exists) |
+
+`ValidationFailure` is `#[non_exhaustive]`: `InvalidData { problems }`,
+`UnavailableCheck { problems }` (a check this build or an in-memory schema
+cannot run, such as a file check without a file context), and
+`Unprepared { error }` (the schema itself cannot be prepared).
+
+## Features
+
+| Feature | Default | Adds |
+|---|---|---|
+| `file` | yes | File factories, `SchemaSource`, `repository_scope_catalog`; pulls `biscuit-file/file-reference` and `sniff` |
+| `terminal` | no | `biscuit-terminal` `BlockError` rendering of `SchemaError` (Darkmatter enables it) |
+| `work-counters` | no | Test-only `work_counters` module for complexity regressions |
+
+Without `file`, the crate depends on `biscuit-file` with
+`file-reference-syntax` only (no `gix`/`walkdir`/`sniff`); file-backed checks
+fail with `FileReferenceError::ResolutionUnavailable` or
+`ValidationFailure::UnavailableCheck`, never pass.
+
+```toml
+[dependencies]
+simplified-schema = { path = "../../simplified-schema/lib" }                            # default
+simplified-schema = { path = "../../simplified-schema/lib", default-features = false } # text only
+```
+
+## Boundary Guards
+
+| Guard | Fails when | Satisfy it by |
+|---|---|---|
+| `simplified-schema/lib/tests/l1/context_construction_guard.rs` | Production code outside `schema/capture.rs` calls `std::env::current_dir`, `biscuit_file::home_dir`, `capture_env`, or `FileResolutionContext::from_snapshot` (besides the one empty `content_context` in `schema/layer.rs`), or adds a second optional context besides `SchemaSource`'s | Take a `FileResolutionContext` parameter; only extend `ALLOWLIST` (exact file, identifier, count, reason) for a genuinely new capture |
+| `simplified-schema/lib/tests/l1/dependency_direction_guard.rs` | Any manifest table (dev included, followed through path deps) reaches `darkmatter`, `dmls`, `content-policy`, `claudine*`, `rendezvous-*`, `zed-dmls`, a `*-cli`, or a crate under those dirs; or source names one of their crates | Move the host-specific code to the host; invert the dependency |
+| `simplified-schema/lib/tests/l1/path_lookup_guard.rs` | Raw `canonicalize` or home lookup | `biscuit_file::canonicalize_simplified`, `biscuit_file::home_dir` |
+| `darkmatter/lib/tests/l1/schema_language_ownership_guard.rs` | Darkmatter lib, CLI, or DMLS production source *defines* (`fn`/`struct`/`enum`/`trait`/`type`/`union`) an owned name (`to_json_schema`, `is_subtype`, `parse_yaml_schema`, `SchemaRoot`, `Lexer`, `format_number`, `ConversionError`, ...); or the listed library file no longer defines a name | Call the library instead of re-implementing; when renaming or moving an owned item in the library, update the guard's owner table and Darkmatter's `[package.metadata.ci.tests] source-inputs` |
+| `darkmatter/lib/tests/l1/glob_implementation_guard.rs` | `simplified-schema/lib/src` reaches a glob library directly or its manifest names one | Match through `biscuit_file::GlobReference` only |
+
+The guards reuse Darkmatter's shared engines by `#[path]`
+(`darkmatter/cli/tests/common/{context_guard,path_lookup_guard,source_scan}.rs`,
+`darkmatter/lib/tests/common/dependency_graph.rs`); they are declared in this
+crate's `source-inputs`, so editing them schedules this crate's tests.
+
+## Testing
+
+Run from `simplified-schema/`:
+
+- `just test` — L1 (`--features work-counters,terminal`), then `test-minimal`
+  (`--no-default-features`).
+- `just lint` — clippy for the default build, `work-counters,terminal`, and
+  `--no-default-features`.
+- Doctests are **not** part of `just test`: run `just doctest` or
+  `cargo test -p simplified-schema --doc`.
+- All tests live in the single `l1` binary (`tests/l1/main.rs`,
+  `autotests = false`); a new test file must be added as a module there.
+  `tests/l1/shipped_corpus.rs` parses every shipped schema artifact.
+- After a change visible to Darkmatter, also run the Darkmatter guard and
+  parity tests (`cargo nextest run -p darkmatter --test l1 -E 'test(schema_language_ownership_guard) | test(effective_schema_layering)'`)
+  or `just test` in `darkmatter/`. Load the `rust-testing` skill for tiers and
+  CI test-input rules.
+
+## Documentation
+
+- [README](../../../simplified-schema/README.md) — overview and install
+- [The `SimplifiedSchema` object](../../../simplified-schema/docs/topics/schema-object.md) — build, validate, layer, inspect, export
+- [Strict and soft validation](../../../simplified-schema/docs/topics/validation.md) — `Prepared`, success and failure shapes
+- [Conversion](../../../simplified-schema/docs/topics/conversion.md) — coercion rules, unions, function binding, type errors
+- [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md) — located failures and the error model
+- [Language core](../../../simplified-schema/docs/topics/language-core.md) — modules, supplied sources, what a host keeps
+- [Features](../../../simplified-schema/docs/topics/features.md) · [Foundations](../../../simplified-schema/docs/topics/foundations.md) · [Expression syntax](../../../simplified-schema/docs/topics/expression-syntax.md)
+
+Language reference (`simplified-schema/docs/topics/language/`):
+
+- [Index](../../../simplified-schema/docs/topics/language/index.md) — start here
+- [Types and constraints](../../../simplified-schema/docs/topics/language/types.md) — grammar, built-in types, files, tuples, `null`/`unknown`
+- [Objects and named types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md) — imports, recursive and shared types, dictionaries
+- [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) — `|`, named union references, root unions, narrowing
+- [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) — resolution, standalone envelopes, raw JSON Schema
+- [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md)
+- [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md)
+
+Darkmatter integration: [definition.md](../../../darkmatter/docs/topics/schemas/definition.md).
+
+## Related Skills
+
+- **darkmatter** — the host: baseline, triggers, schema roots, `md schema`,
+  DMLS. Its [schema.md](../darkmatter/schema.md) holds implementation notes for
+  both sides.
+- **biscuit-file** — `FileReference`, `FileResolutionContext`,
+  `GlobReference`, the `file-reference-syntax` / `file-reference` split, and
+  the frontmatter envelope helper this crate uses.
+- **rust-testing** — test tiers, `just` recipes, CI test-input rules.

@@ -53,14 +53,16 @@ assert!(person.validate_strict(&json!({ "age": -1 })).is_err());
 The lower-level pieces are public too:
 
 ```rust
+use std::sync::Arc;
+use biscuit_file::FileResolutionContext;
 use serde_json::json;
-use simplified_schema::{parse_yaml_schema, to_json_schema, validate::build_structural_validator};
+use simplified_schema::{Prepared, parse_yaml_schema, to_json_schema};
 
 let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("name: string(required)\nage: number(min(0))").unwrap();
 let schema = to_json_schema(&parse_yaml_schema(&yaml).unwrap()).unwrap();
-let validator = build_structural_validator(&schema).unwrap();
-assert!(validator.is_valid(&json!({ "name": "Ada", "age": 36 })));
-assert!(!validator.is_valid(&json!({ "age": -1 })));
+let prepared = Prepared::new(Arc::new(schema), None, FileResolutionContext::new("/work")).unwrap();
+assert!(prepared.validate_strict(&json!({ "name": "Ada", "age": 36 })).is_ok());
+assert!(prepared.validate_strict(&json!({ "age": -1 })).is_err());
 ```
 
 The foundations work on their own:
@@ -78,6 +80,17 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 
 ## Documentation
 
+- [Authoring a schema](./docs/topics/language/index.md): what a schema looks
+  like, its main forms, the language reference, and its limitations.
+- [Conversion](./docs/topics/conversion.md): which almost-right values soft
+  validation converts.
+- [Diagnostics](./docs/topics/diagnostics.md): typed errors, where each
+  points, and where a schema came from.
+- [Custom vocabulary](./docs/topics/custom-vocabulary.md): the
+  `darkmatter-*` formats and `x-darkmatter-*` keywords in a lowered schema,
+  and what other JSON Schema validators miss.
+- [Host capabilities](./docs/topics/host-capabilities.md): which checks need
+  a file system, and when the library reads the running process.
 - [The `SimplifiedSchema` object](./docs/topics/schema-object.md): building,
   validating, layering, querying, and exporting a schema.
 - [Language core](./docs/topics/language-core.md): the modules, the

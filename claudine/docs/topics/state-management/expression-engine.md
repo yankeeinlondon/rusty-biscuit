@@ -188,7 +188,7 @@ with a type error instead of guessing:
 ```
 
 The same rules convert frontmatter values to their schema types. Darkmatter's
-[Type Coercion](../../../../darkmatter/docs/topics/schemas/definition.md#type-coercion)
+[Type Coercion](../../../../simplified-schema/docs/topics/conversion.md#type-coercion)
 lists them, and [Numbers](../../../../darkmatter/docs/topics/numbers.md)
 describes how numbers are held and displayed.
 

@@ -113,6 +113,34 @@ let pretty: String = to_json5_pretty(&serde_json_value);
 let compact: String = to_json5_compact(&serde_json_value);
 ```
 
+## Frontmatter Envelope
+
+Feature `yaml`. Locates a Markdown document's leading `---` block and reports
+byte spans into the exact source (CRLF and a leading BOM preserved) without
+parsing the YAML. Source: `biscuit-file/lib/src/frontmatter.rs`.
+
+```rust
+use biscuit_file::frontmatter::{extract_frontmatter_block, FrontmatterEnvelopeError};
+
+let source = "---\ntitle: Hello\n---\n\n# Body\n";
+let extraction = extract_frontmatter_block(source)?.expect("has frontmatter");
+assert_eq!(extraction.yaml, "title: Hello\n");
+assert_eq!(extraction.yaml_base_line, 2); // project YAML-relative lines back into the document
+assert_eq!(&source[extraction.body_span.clone()], "\n# Body\n");
+# Ok::<(), FrontmatterEnvelopeError>(())
+```
+
+| Item | Purpose |
+|---|---|
+| `extract_frontmatter_block(&str)` | `Ok(Some(FrontmatterExtraction))`, `Ok(None)` (no opening `---` or no closing fence), or `Err(FenceMismatch)` |
+| `FrontmatterExtraction<'a>` | `yaml`, `yaml_span`, `block_span`, `body_span`, `opening_line`, `closing_line`, `yaml_base_line` |
+| `FrontmatterEnvelopeError::FenceMismatch { found, line }` | A dash-only fence longer than `---` that encloses a YAML mapping |
+| `line_spans(&str)` / `LineSpan { start, content_end, end }` | LF/CRLF/CR-aware line splitting without losing offsets |
+| `detect_near_miss_fence(&[&str])` | The near-miss check `extract_frontmatter_block` applies |
+
+Darkmatter and `simplified-schema` share this reader; do not add a second
+fence scanner.
+
 ## PDF
 Source: `biscuit-file/lib/src/pdf/types.rs`
 

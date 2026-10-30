@@ -402,7 +402,7 @@ file that exists is a valid file reference, but a valid file reference may name
 a file that is missing, so a false result removes nothing. The fact is declared
 by the function's `narrows(...)` clause in its signature, which is the
 authority for the grammar and its rules; see
-[Function Signatures](./schemas/definition.md#narrowing-facts). A host's facts
+[Function Signatures](../../../simplified-schema/docs/topics/language/unions.md#narrowing-facts). A host's facts
 reach the editor through the function catalog and a generated facts artifact;
 see [Host Expression Functions](./host-functions.md).
 
@@ -1001,7 +1001,7 @@ repository root to refresh it after changing the catalog.
 The catalog's other `types:` entries are named helper types that signatures
 use: `agentic-cli`, `ip-address`, and `recent-commits`. A schema imports one as
 `Name@darkmatter:functions` (see
-[Reserved Darkmatter References](schemas/definition.md#reserved-darkmatter-references-namedarkmatterstem)).
+[Reserved Darkmatter References](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem)).
 `ctx.recent_commits` is declared that way, so it and the return of
 `recent_commits(count)` are the one `recent-commits` type, a `string[]`:
 

@@ -62,7 +62,10 @@ definitions away from their references or replace them with placeholders.
 | Parser details | [pulldown-cmark.md](pulldown-cmark.md) |
 | Frontmatter ecosystem comparison | [frontmatter-crates.md](frontmatter-crates.md) |
 
-Load only the topic needed for the task. For render-tree implementation work,
+Load only the topic needed for the task. For the SimplifiedSchema language
+itself (grammar, named types, conversion, `SimplifiedSchema`/`Prepared`
+validation, layering), load the `simplified-schema` skill
+([SKILL.md](../simplified-schema/SKILL.md)). For render-tree implementation work,
 also load the `renderable` skill; for terminal components, load
 `biscuit-terminal`; for file-reference or JSON/YAML/TOML conversion work, load
 `biscuit-file`.
@@ -109,7 +112,8 @@ context property, cache key, transclusion directive, or file-resolution path.
 
 ## Schema authority
 
-Darkmatter uses `SimplifiedSchema`, compiled to Draft 2020-12 JSON Schema.
+Darkmatter uses the SimplifiedSchema language (the `simplified-schema` crate),
+compiled to Draft 2020-12 JSON Schema.
 `DarkmatterSchemas` owns baseline merging and validator caching. The standalone
 classifier is `parse_standalone_schema_document`; it recognizes either a pure
 root `$schema` document or a `kind: schema` document with a `types` mapping.

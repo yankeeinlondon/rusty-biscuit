@@ -597,7 +597,7 @@ JSON Schema's `$defs` section and points to them with local `$ref` values.
 It stores the repeated structured helpers there too, such as the action
 categories, the loop helpers, and the verb short forms, because each is used
 from two or more places in one trigger payload (see
-[Shared Named Types](../../../darkmatter/docs/topics/schemas/definition.md#shared-named-types)).
+[Shared Named Types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types)).
 Some uses are still copied: a union named as an arm of another union (such as
 `entry` inside `item` in `lifecycle.yaml`) and any type used only once. The
 bundles are copied for that reason: each is written once, inside `entry`,
@@ -1204,7 +1204,7 @@ parser still enforces the execution rules.
 ## Schema Reference Docs
 
 - [Authoring Schemas](^darkmatter/docs/topics/schemas/authoring-schemas.md)
-    - [Schema Types](^darkmatter/docs/topics/schemas/schema-types.md)
+    - [Schema Types](^simplified-schema/docs/topics/language/schema-types.md)
     - [Schema Constraints](^darkmatter/docs/topics/schemas)
     - [Schema Triggering](^darkmatter/docs/topics/schemas/)
 - [CLI Validation](../../../darkmatter/docs/topics/schemas/definition.md#cli-md-schema-validate)

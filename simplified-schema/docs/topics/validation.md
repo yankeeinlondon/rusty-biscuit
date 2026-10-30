@@ -31,6 +31,39 @@ assert_eq!(*accepted.value, json!({ "v": 4 }));
 assert_eq!(input, json!({ "v": "4" })); // the input is never changed
 ```
 
+## From schema to verdict
+
+A `SimplifiedSchema` does its work in two stages. Building it parses the
+text, resolves its named types and imports, and lowers it to JSON Schema; a
+definition that cannot be lowered is kept as an error rather than failing the
+build. The first validation then prepares it: it compiles the validators
+(through a process-wide cache shared by equal schemas) and the conversion
+plan. That preparation, or its error, is kept and reused by every later
+validation until a layering call changes the definition.
+
+```mermaid
+flowchart TD
+    build["build: parse, resolve imports,<br/>lower to JSON Schema"] --> first{"first validation<br/>of this revision?"}
+    first -- yes --> prepare["prepare: compile validators<br/>and conversion plan; keep the result"]
+    first -- no --> cached["reuse the kept result"]
+    prepare --> ready{"prepared?"}
+    cached --> ready
+    ready -- "no: not lowered,<br/>or not compiled" --> unprepared["Err: ValidationFailure::Unprepared"]
+    ready -- yes --> mode{"method"}
+    mode -- validate_strict --> judge["judge the value as written"]
+    mode -- validate_soft --> soft["judge as written;<br/>if rejected, convert a copy"]
+    soft --> judge2["judge the converted copy"]
+    judge --> verdict{"problems?"}
+    judge2 --> verdict
+    verdict -- none --> success["Ok: ValidationSuccess"]
+    verdict -- "only unavailable checks" --> unavailable["Err: ValidationFailure::UnavailableCheck"]
+    verdict -- "any decided violation" --> invalid["Err: ValidationFailure::InvalidData"]
+```
+
+A `Prepared` built directly with `Prepared::new` starts at the "prepare"
+step: you lower and compile once yourself, and an error is returned from
+`Prepared::new` instead of being kept.
+
 ## What each method returns
 
 Both take the value by reference and return

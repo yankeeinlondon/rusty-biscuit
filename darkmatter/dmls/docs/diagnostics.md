@@ -466,7 +466,7 @@ severity. That is why the editor and composition agree: an
 `incompatible_call` error appears on exactly the calls that make `md compose`
 reject the document, and composition rejects nothing the editor shows as a
 warning or leaves silent. How each type converts to another is described in
-[Type Coercion](../../docs/topics/schemas/definition.md#type-coercion).
+[Type Coercion](../../../simplified-schema/docs/topics/conversion.md#type-coercion).
 
 The message names the function, the parameter, both types, and the category
 with its reason:
@@ -600,7 +600,7 @@ Some diagnostics attach secondary locations:
   declared as bare `alphanumeric` has no option token, so its related
   location is the type's definition. The values use the same excerpt as the
   library's message (see
-  [Merging use-site constraints](../../docs/topics/schemas/definition.md#merging-use-site-constraints)).
+  [Merging use-site constraints](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#merging-use-site-constraints)).
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 
 ## Configuration

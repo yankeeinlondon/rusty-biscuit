@@ -66,7 +66,7 @@ Then there the more esoteric or "meta" types like:
 
 - `schema` and `expression`
 
-The full list of _types_ can be found at: [`SimplifiedSchema` Types](./definition.md#types) but for now here's a simple example of using _types_ to define a schema:
+The full list of _types_ can be found at: [`SimplifiedSchema` Types](../../../../simplified-schema/docs/topics/language/types.md#types) but for now here's a simple example of using _types_ to define a schema:
 
 ```yaml
 $schema:
@@ -81,10 +81,10 @@ $schema:
 
 A **constraint** is the a way to further _constrain_ a base type. There are some constraints that are available to _all_ types and others which can only be used with a subset of types:
 
-- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](./definition.md#null-admitting-properties))
+- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
-For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./definition.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
+For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
 
 ```yaml
 $schema:
@@ -182,7 +182,7 @@ types:
     notice: communicate@darkmatter:lifecycle   # one say/info/warn/… action
 ```
 
-See [Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem)
+See [Reserved Darkmatter References](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem)
 for the rules, and [Lifecycle Event Typing](./definition.md#lifecycle-event-typing)
 for the lifecycle types Darkmatter ships.
 
@@ -194,7 +194,7 @@ document that uses `recipient: address@./address-types.yaml` gains a
 Built-in names such as `string` keep their normal meaning. If you give a local
 type the same name as a built-in, use `string@this` to select your definition.
 A misspelled or missing type is an error at the reference, not a new type
-created automatically. See [Local Type References](./local-type-references.md)
+created automatically. See [Local Type References](../../../../simplified-schema/docs/topics/language/local-type-references.md)
 for where local names live and how they resolve.
 
 #### Presence travels with the type
@@ -204,7 +204,7 @@ and `generated`. If you define `code: string(required)`, every property that
 uses `code`, `code@this`, or `code@./types.yaml` is required; you don't need to
 write `code(required)` again. Use-site constraints add to the inherited ones
 and never remove them. See
-[Inheriting Constraints](./local-type-references.md#inheriting-constraints)
+[Inheriting Constraints](../../../../simplified-schema/docs/topics/language/local-type-references.md#inheriting-constraints)
 for how they combine.
 
 Presence belongs to the value it is declared on. Requiring a field inside an
@@ -235,7 +235,7 @@ types:
 Do not define the variant as `draft_owner: owner`: an alias inherits
 `required` again. A union with `null` does make it optional:
 `draft_owner: [owner, null]` accepts `null`, an omitted value, or a valid
-`owner` (see [Null-Admitting Properties](./definition.md#null-admitting-properties)).
+`owner` (see [Null-Admitting Properties](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties)).
 
 An inherited `generated` keeps its usual meaning. It does not create a value
 provider. Checking an authored document, as `md schema validate` and DMLS do,
@@ -244,7 +244,7 @@ supplies the value later. Runtime checks use two phases: launch requires an
 inherited `required` value immediately only when it is also `eager`;
 completion requires it after the work finishes. Supplied values are checked
 at both phases. A type that admits `null` remains optional regardless of
-these markers. See [Universal Constraints](./definition.md#universal-constraints).
+these markers. See [Universal Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints).
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 
@@ -293,7 +293,7 @@ $schema:
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
-A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](./definition.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
+A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
 
 #### Passive Activation Expressions
 
@@ -440,9 +440,9 @@ A value that already matches an option is kept as written: `"4"` against
 the one option it can reach: `"1"` against `number(min(5)) | boolean` becomes
 `true`, because `1` fails `min(5)`. The order of the options never matters.
 The full rule, including how ties are settled, is in
-[Choosing a Union Option](./definition.md#choosing-a-union-option); the
-grammar is in [The `|` Operator and Grouping](./definition.md#the--operator-and-grouping)
-and [Tuples](./definition.md#tuples).
+[Choosing a Union Option](../../../../simplified-schema/docs/topics/conversion.md#choosing-a-union-option); the
+grammar is in [The `|` Operator and Grouping](../../../../simplified-schema/docs/topics/language/unions.md#the--operator-and-grouping)
+and [Tuples](../../../../simplified-schema/docs/topics/language/types.md#tuples).
 
 ### Recursive Types
 
@@ -474,7 +474,7 @@ and is a schema error that names each reference in the cycle.
 The definition describes the value. Whether a property using it is
 `required`, `eager`, or nullable is decided where the type is used, so
 `plan: step(required)` and `draft: step` can share one definition. See
-[Recursive Named Types](./definition.md#recursive-named-types) for the full
+[Recursive Named Types](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#recursive-named-types) for the full
 rules.
 
 ### Examples: using Inline Syntax
@@ -515,7 +515,7 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    A tagged schema file has `kind: schema`, a `types` mapping, an optional `$schema` export, and optionally a [`categories:` list](./definition.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
+    A tagged schema file has `kind: schema`, a `types` mapping, an optional `$schema` export, and optionally a [`categories:` list](../../../../simplified-schema/docs/topics/language/schema-documents.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
     
   ```yaml
   kind: schema

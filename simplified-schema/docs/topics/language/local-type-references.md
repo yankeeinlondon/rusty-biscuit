@@ -23,11 +23,11 @@ Besides `this`, one other right-hand side is a reserved word rather than a
 file: `darkmatter:<stem>` names a type in one of the schema partials
 Darkmatter ships, such as `count@darkmatter:lifecycle`. It resolves the same
 from any schema, on disk or embedded, and never reads the disk; see
-[Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem).
+[Reserved Darkmatter References](objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem).
 
-See [External Schemas](./authoring-schemas.md#external-schemas) for an
+See [External Schemas](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md#external-schemas) for an
 authoring walkthrough and
-[Cross-File Named-Type Imports](./definition.md#cross-file-named-type-imports-namefile)
+[Cross-File Named-Type Imports](objects-and-named-types.md#cross-file-named-type-imports-namefile)
 for the full reference grammar.
 
 ## Where Local Names Live
@@ -55,7 +55,7 @@ them is a schema error.
 ## Resolving a Name
 
 - **Built-in keywords win.** `string`, `email`, `file`, and the other
-  [built-in types](./definition.md#types) keep their meaning. If you define a
+  [built-in types](types.md#types) keep their meaning. If you define a
   local type with a built-in's name, select it with `@this`: `string` is the
   built-in, `string@this` is your type. This includes `unknown` (and its
   alias `any`), `null`, `alphanumeric`, and `shell`, so a schema with its own
@@ -149,7 +149,7 @@ for a number, and an item count when the named type is already an array. If
 constraints, such as an inherited `min(10)` with a use-site `max(5)`, are a
 `SchemaError::ConstraintConflict` naming both declarations instead of silently
 dropping either one. The full set of merge rules is in
-[Merging use-site constraints](./definition.md#merging-use-site-constraints).
+[Merging use-site constraints](objects-and-named-types.md#merging-use-site-constraints).
 
 Constraints on array elements and on the array itself keep their own
 meanings. A named `string(min(3))` used as `label[]` requires each item to
@@ -160,20 +160,20 @@ An `alphanumeric` type's options are part of its identity, not constraints
 to merge. A use site may repeat them exactly, but a different option set,
 such as `slug(allow-periods)` over `slug: alphanumeric(allow-dashes)`, is a
 `SchemaError::ConstraintConflict` (see
-[Alphanumeric Strings](./definition.md#alphanumeric-strings)).
+[Alphanumeric Strings](types.md#alphanumeric-strings)).
 
 The one way to make a reused required type optional is a union with `null`:
 `draft_code: [code, null]` accepts `null`, omission, or a valid `code`,
 whatever `code`'s inherited `required` says (see
-[Null-Admitting Properties](./definition.md#null-admitting-properties)).
+[Null-Admitting Properties](types.md#null-admitting-properties)).
 
-This is different from [Schema Layering](./authoring-schemas.md#schema-layering).
+This is different from [Schema Layering](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md#schema-layering).
 Reusing a type combines its constraints with the property's additional
 constraints. Layering separate schemas chooses the whole property definition
 from the higher-precedence schema.
 
 For how presence inheritance interacts with optional values and `generated`,
-see [Presence travels with the type](./authoring-schemas.md#presence-travels-with-the-type).
+see [Presence travels with the type](../../../../darkmatter/docs/topics/schemas/authoring-schemas.md#presence-travels-with-the-type).
 
 ## Descriptions and Editor Assistance
 
@@ -196,7 +196,7 @@ collides with a built-in. Hover shows the selected definition, and
 go-to-definition opens its defining key. If two declarations introduce
 contradictory constraints, the diagnostic identifies the consuming reference
 and links to both declarations. Editing an imported definition refreshes the
-documents that use it. See [DMLS Schema Support](./dmls-schema-support.md#named-type-references)
+documents that use it. See [DMLS Schema Support](../../../../darkmatter/docs/topics/schemas/dmls-schema-support.md#named-type-references)
 for the diagnostics and editor limits.
 
 ## Recursive Named Types
@@ -241,7 +241,7 @@ trigger's `item` even when the document or another trigger declares one too.
 The child-value
 rule, the error a rejected cycle reports, and how recursion reaches
 validation, phases, conversion, and editors are described in
-[Recursive Named Types](./definition.md#recursive-named-types).
+[Recursive Named Types](objects-and-named-types.md#recursive-named-types).
 
 ## Shared Named Types
 
@@ -282,7 +282,7 @@ Which places count follows the same identity rules as recursive types:
   recursive one.
 
 The full eligibility, counting, and fallback rules are in
-[Shared Named Types](./definition.md#shared-named-types).
+[Shared Named Types](objects-and-named-types.md#shared-named-types).
 
 ## Serialization
 

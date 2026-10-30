@@ -7,7 +7,7 @@
 | `base64` | The literal-token payload codec. |
 | `thiserror` | Error types. |
 | `tracing` | Debug events from the expression scan. |
-| `sniff` (optional, `file`) | Repository discovery for path-based schema factories. |
+| `sniff` (optional, `file`) | Repository discovery for path-based schema factories. Through `sniff`'s own dependencies the default build also compiles `reqwest` and `tokio`; the library never makes a network call, and a `default-features = false` build holds neither (of the resolver crates it keeps only `globset`, through `biscuit-file`'s passive glob grammar). |
 | `jsonschema` | Compiles and runs the lowered JSON Schema (default features off, as in Darkmatter). |
 | `fancy-regex`, `regex` | Pattern-key precedence needs lookaround (`fancy-regex`, already compiled through `jsonschema`); `regex` escapes and checks emitted patterns. |
 | `indexmap` | Declaration-ordered maps in the AST and source maps. |
@@ -21,4 +21,5 @@
 Dev-only: `proptest` (codec and grammar round trips), `biscuit-test-harness`
 and `test-toolkit` (the test-layout gate, `manifest_dir!`), `tempfile`
 (schema-file fixtures), `serial_test` (tests that read process environment),
-`gix` (repository fixtures for resolution tests).
+`gix` (repository fixtures for resolution tests), `toml` (the
+dependency-direction guard reads Cargo manifests).

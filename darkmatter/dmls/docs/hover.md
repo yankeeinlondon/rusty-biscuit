@@ -135,7 +135,7 @@ A property below the recursion (`value` four levels down) hovers exactly as
 it does at the top level.
 
 The same named form describes a property typed by a
-[shared named type](../../docs/topics/schemas/definition.md#shared-named-types),
+[shared named type](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types),
 an acyclic object, dictionary, tuple, or list that the schema stores once
 because two or more places use it: `` `entry` is defined as: … ``. A stored
 **union**, recursive or shared, is the exception. It hovers exactly as the

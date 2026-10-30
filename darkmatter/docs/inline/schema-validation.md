@@ -54,7 +54,7 @@ $schema:
 ---
 ```
 
-All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
+All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../../../simplified-schema/docs/topics/language/types.md#types).
 
 ### 2. File reference
 
@@ -152,7 +152,7 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
   `null` is tolerated at launch and fails at completion. A null-admitting
   property (`null`, `unknown`, or a union with such an arm) is the exception:
   it is optional at both phases, whatever `required`, `eager`, or `generated`
-  says (see [Null-Admitting Properties](../topics/schemas/definition.md#null-admitting-properties)).
+  says (see [Null-Admitting Properties](../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties)).
 - Both phases are **passive**: no mutation, no coercion, no expression or shell
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
@@ -492,7 +492,7 @@ cfg:
   counts: [three, "{{ x }}"]   # fails fast at /cfg/counts/0; /cfg/counts/1 waits
 ```
 
-Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../topics/schemas/definition.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
+Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../../../simplified-schema/docs/topics/language/types.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
 
 The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--disable schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
 
@@ -525,7 +525,7 @@ and `"pear"` against `number` is an error. Conversion is always on, and
 function arguments use the same engine. The rules (what converts, what never
 converts, unions, nested values, raw JSON Schema, and the changes from
 earlier releases) are described once, in
-[Type Coercion](../topics/schemas/definition.md#type-coercion).
+[Type Coercion](../../../simplified-schema/docs/topics/conversion.md#type-coercion).
 
 Two consequences matter:
 
@@ -687,7 +687,7 @@ of the arm the path selected. Identical globs and globs declared in just one
 arm are enforced too, including beside a raw JSON Schema arm. A missing file
 and template or shell syntax are never judged; the comparison uses `/`
 spelling relative to the launch directory, where completion walks the glob.
-The full rule is in [Defining Schemas — Files](../topics/schemas/definition.md#files).
+The full rule is in [Defining Schemas — Files](../../../simplified-schema/docs/topics/language/types.md#files).
 
 ## Interaction With `--set` and `--state`
 

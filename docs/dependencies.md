@@ -8,7 +8,7 @@
 ## Recent Dependency Notes
 
 - `simplified-schema/lib` is a new workspace crate (2026-10-30) that owns the
-  SimplifiedSchema language as it moves out of Darkmatter. It depends on
+  SimplifiedSchema language, extracted from Darkmatter. It depends on
   `biscuit-file` (`yaml`, `json5`, `file-reference-syntax`; full
   `file-reference` with its default `file` feature), `serde`, `serde_json`,
   `base64`, `thiserror`, `tracing`, and optionally `sniff`; all were already

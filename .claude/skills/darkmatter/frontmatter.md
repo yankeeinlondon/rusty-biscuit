@@ -43,8 +43,8 @@ Two traps keep that order intact:
 - **Remove with `shift_remove`.** Under `preserve_order`, `serde_json::Map::remove`
   (and `IndexMap::remove`) is a *swap* remove: the last key jumps into the
   removed key's slot. Any removal from frontmatter or effective state uses
-  `shift_remove`, and so does schema lowering (`schemas/simplified/convert.rs`,
-  `schemas/resolve.rs`, `schemas/scope.rs`), whose JSON Schema key order is
+  `shift_remove`, and so does schema lowering (`simplified-schema/lib/src/simplified/convert.rs`,
+  `resolve.rs`, `scope.rs` in the same crate), whose JSON Schema key order is
   pinned byte for byte by the convert snapshots and the
   `recursive_schema_golden` goldens (re-bless with
   `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1` only after showing the change is
@@ -327,7 +327,7 @@ text-preserving writer. Do not build another YAML editor.
   `[don't, "{{x}}"]`, `{a: say "hi, b: '{{x}}'}`, `[a:'b, "{{x}}"]`, and
   `{a:'b: "{{x}}"}` split as YAML does. Raw YAML flow text goes through
   `flow_collection_end` and `split_flow_entries` in
-  `schemas/simplified/source.rs`, both built on `scan_raw_yaml`: a quote opens
+  `simplified-schema/lib/src/simplified/source.rs`, both built on `scan_raw_yaml`: a quote opens
   only at a scalar's start, and a `:` starts a new scalar only as a value
   indicator (followed by whitespace or a flow indicator, or right after a
   quoted or collection key as in `{"a":b}`). Inside a plain scalar such as

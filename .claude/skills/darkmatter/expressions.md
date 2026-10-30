@@ -126,7 +126,7 @@ parameter only through an explicit `| null`. `and`/`or` are lazy
 ones it evaluates. Callback registrations bind the source through the same
 engine; the evaluator owns item frames and body execution, with no eager
 callback handler. User docs: "Function Calls: Bind, Then Compute" in
-`darkmatter/docs/topics/schemas/definition.md`.
+`simplified-schema/docs/topics/conversion.md`.
 
 **Inserted text is data.** Every authored span is scanned once. Produced text
 is never scanned again. This covers expression results, file reads, shell
@@ -204,7 +204,7 @@ function's signature by `narrows(param: T; kind)` / `narrows(param; kind)`
 (`file_exists` and `is_file_type` are `true-implies` `file`; `is_empty` is
 presence-only `false-implies`) and compiled at registration, so a built-in, a
 test function, and a host function narrow alike. Declaration validity is
-schema-owned (`schemas/simplified/narrowing.rs`: `clause_problem`,
+schema-owned (`simplified-schema/lib/src/simplified/narrowing.rs`: `clause_problem`,
 `declaration_problem`, `overload_arms_problem`, plus the pure family
 predicates `scope/shape.rs` imports); the grammar, catalog loading, and
 `compile_declared_fact` all apply it, and registration only lowers. Never add

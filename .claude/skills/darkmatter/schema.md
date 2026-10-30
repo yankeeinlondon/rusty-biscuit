@@ -3,6 +3,44 @@
 Use this reference for SimplifiedSchema parsing, validation, triggers, imports,
 and DMLS schema behavior.
 
+## Where the code lives
+
+The SimplifiedSchema language was extracted into the `simplified-schema` crate
+(`simplified-schema/lib/src/`, imported as `simplified_schema`); Darkmatter
+depends on it and keeps only its policy. For the language itself (grammar,
+named types, conversion, `SimplifiedSchema`/`Prepared` validation, layering,
+features, boundary guards) load the **`simplified-schema`** skill
+([SKILL.md](../simplified-schema/SKILL.md)); its user docs are
+`simplified-schema/docs/topics/` and the language reference
+`simplified-schema/docs/topics/language/`.
+`darkmatter/docs/topics/schemas/definition.md` now covers only Darkmatter
+integration (baseline, `md schema`, compose, library API).
+
+Path shorthand in this file:
+
+- **Darkmatter** (`darkmatter/lib/src/markdown/schemas/`): `schemas/…`,
+  `triggers/…`, `roots.rs`, `catalog.rs`, `embedded.rs`, `rewrite.rs`,
+  `bound_operands.rs`, `schemas/positions.rs` (`ProblemPositions`),
+  `discovery.rs`, `assemble.rs`,
+  `finding.rs`, and `mod.rs` (`DarkmatterSchemas`, `EffectiveSchema`,
+  `ValidationOptions`, `PendingPolicy`, `merged_trigger_schema`,
+  `phase_json_schema`, `validate_timed`).
+- **Library** (`simplified-schema/lib/src/`): `simplified/…` (`convert.rs`,
+  `subtype.rs`, `source.rs`, `cursor.rs`, `serialize.rs`, `yaml_scalar.rs`,
+  `signature.rs`, `narrowing.rs`, `standalone.rs`, `grammar.rs`), `resolve.rs`
+  and `resolve/…`, `scope.rs`, `validate.rs`, `prepared.rs`, `coerce.rs`,
+  `coercion/`, `phase.rs`, `file_match.rs`, `json_shape.rs`, `completion.rs`
+  (the passive helpers; Darkmatter's `schemas/completion.rs` re-exports them
+  and adds `for_list_item`/`for_property_value`/`for_path` over an
+  `EffectiveSchema`), `positions.rs` (`PositionMap`, `build_position_map`),
+  `timings.rs`, `errors.rs`
+  (`SchemaError`), `pending.rs` (re-exported as
+  `darkmatter::markdown::literal_token`).
+- The parsed `$schema` AST enum is `simplified_schema::SchemaRoot`; the
+  standalone facade object is `simplified_schema::SimplifiedSchema`.
+  `darkmatter::markdown::schemas::resolve` wraps the library resolver to pass
+  Darkmatter's shipped sources (`embedded::SHIPPED_SOURCES`).
+
 ## Contents
 
 - [Document kinds](#document-kinds)
@@ -172,7 +210,7 @@ validation report, shared by every problem and root-union arm):
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
   a constructed `Markdown` is located in its serialized YAML view.
   `PositionMap::new()` (and `EffectiveSchema::validate`) is source-free: no
-  positions. `validate::build_position_map(yaml)` is slice-relative (line 1
+  positions. `simplified_schema::positions::build_position_map(yaml)` is slice-relative (line 1
   = first YAML line). `PositionMap` is opaque, not an `IndexMap`.
 - `md schema validate` prints `(at line L, column C)`; the compose block
   prints ` at L:C`; DMLS ranges start at the same nodes.
@@ -188,7 +226,7 @@ validation report, shared by every problem and root-union arm):
   pointer segment for display.
 
 **Stage timings.** `DarkmatterSchemas::validate_timed` returns `validate`'s
-result unchanged plus a `ValidationTimings` (`schemas/timings.rs`):
+result unchanged plus a `ValidationTimings` (library `timings.rs`):
 non-overlapping `ValidationStage`s `discover`/`match`/`resolve`/`compile`/
 `validate`, `total()`, `unassigned()`, `compile_cache()` (`Hit`, `Miss`,
 `NotRequested`), and `matched_triggers()` (file names). A thread-local stack
@@ -205,7 +243,7 @@ nest (the innermost wins) and never carry values or schema bodies. A new
 validator build path must go through `build_validator_with` or open
 `timings::compiling()` itself. `md schema validate -vv` renders it; a
 host's request is every schema call it makes for the document, so record each
-one (`validate.rs::validate_one` records discovery, the pre-assignment
+one (`cli/src/commands/schema/validate.rs::validate_one` records discovery, the pre-assignment
 `effective_for`, and validation plus its presence lookup) or the first build
 lands outside the report and a cold request reads as a `hit`.
 
@@ -325,11 +363,11 @@ holds the parity table, whose `short`/`arm-<i>` probes strip the marker to
 judge the projected structure alone. `lib/tests/l1/lifecycle_schema_parity.rs`
 derives events, action types, the open arm's exclusions, and the bare-verb
 `suggest` list from the md registry and parser. The inlined stacks cost about
-70–90 ms per debug validation; the regex memo in `convert.rs` and the import
+70–90 ms per debug validation; the regex memo in `simplified/convert.rs` and the import
 engine's `expanded_cache` keep it there.
 
 User docs: `darkmatter/docs/topics/schemas/definition.md` (The Built-in
-Baseline, Selecting the Baseline); Content Policy's typing limits are in the
+Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typing limits are in the
 `content-policy` skill.
 
 ## Imports and dictionaries
@@ -433,7 +471,8 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `to_json_schema` errors on a `Ref`. Every typed and JSON walker follows a
   `Ref` (see the reference-aware entry points under "Named union
   references" and "Conversion engine"); none treats it as opaque. User docs:
-  `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
+  `simplified-schema/docs/topics/language/objects-and-named-types.md`
+  "Recursive Named Types" (child-value rule,
   definition vs use site, errors, reach) and "Shared Named Types"
   (eligibility, counting, per-use fallback, output) are the one description;
   other pages link there. A stored union hovers in DMLS as its alternatives
@@ -469,7 +508,7 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   property-keyed map or with no origins
   (`schemas_rewrite_arm_validators::caller_origin_*`). Compatibility tests:
   `schema_cache_validity::acyclic_match_*` (six shapes, five routes, phases).
-- **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
+- **`$defs` across merges** (library `scope.rs`). `$defs` live only at a
   schema's root. A sub-schema compiled alone (a root-union arm, a
   discriminated arm, a property union arm, an example target) goes through
   `with_root_definitions` / `wrap_arm_as_root_schema(arm, root)`; never
@@ -553,7 +592,7 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 
 ## Named union references
 
-User docs: `darkmatter/docs/topics/schemas/definition.md` (Named Union
+User docs: `simplified-schema/docs/topics/language/unions.md` (Named Union
 References; Choosing an Arm: Reporting versus Changing Data).
 
 - A reference to a union-typed named type (bare, `@this`, `@file`, all
@@ -599,7 +638,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   use-site description) goes on the property only. A nested postfixed arm
   flattens into the one `anyOf`, its markers hoisted to the property.
 - Consumers must not read `properties` off an `anyOf` wrapper. Use
-  `schemas::flattened_alternatives(def)` (`Alternative { atom, arm,
+  `simplified_schema::flattened_alternatives(def)` (`Alternative { atom, arm,
   is_array }`) for typed-tree walks and `completion::alternative_accepts(atom,
   value)` to judge a present value (so `null` matches only a null-accepting
   arm). Editors use `completion::{for_list_item, for_property_value,
@@ -636,7 +675,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   acceptance. A raw cycle that never descends stays validation-only; grammar
   `TooDeep` (32) remains only for over-deep acyclic chains and loops that
   never descend.
-- `schemas/coerce.rs` decides only what is committed: an instance the complete
+- The library's `coerce.rs` decides only what is committed: an instance the complete
   schema accepts is kept; else the whole converted document if the complete
   schema accepts it; else each top-level property that converts cleanly
   (root unions keep the whole-document rule). Never reintroduce per-surface
@@ -650,15 +689,16 @@ References; Choosing an Arm: Reporting versus Changing Data).
   2^64, a custom keyword in `validate.rs`); raw `integer` has no ceiling.
   `numberlike`/`boolish` lower to the `darkmatter-numberlike`/`-boolish`
   formats and are kept as written.
-- User docs: the one rule list is `topics/schemas/definition.md` "Type
-  Coercion" (interfaces, actions, conversions, unions, containers, function
+- User docs: the one rule list is `simplified-schema/docs/topics/conversion.md`
+  "Type Coercion" (interfaces, actions, conversions, unions, containers, function
   binding, type errors, changes for existing documents); other pages link
   there. Change it there, not in a second copy.
 
 ## Tuples, functions, `|`, and categories
 
-User docs: `darkmatter/docs/topics/schemas/definition.md` (Tuples; The `|`
-Operator and Grouping; Function Signatures; Categories).
+User docs: `simplified-schema/docs/topics/language/types.md` (Tuples),
+`language/unions.md` (The `|` Operator and Grouping; Function Signatures), and
+`language/schema-documents.md` (Categories).
 
 - `grammar::parse_type_definition` reads a `|` union into the same
   `PropertyDef::Union` the YAML list produces; `parse_type_expr` is the
@@ -699,9 +739,9 @@ They do not perform imports, I/O, matching side effects, or rewrites.
 
 ## Core types (`unknown`, `null`, `alphanumeric`, `shell`)
 
-User docs: `darkmatter/docs/topics/schemas/definition.md` (`unknown` and
-`null`; Null-Admitting Properties; Alphanumeric Strings; Shell Commands;
-Subtype Relation). All four are built-in keywords, so a same-named local type
+User docs: `simplified-schema/docs/topics/language/types.md` (`unknown` and
+`null`; Null-Admitting Properties; Alphanumeric Strings; Shell Commands) and
+`language/subtyping.md` (Subtype Relation). All four are built-in keywords, so a same-named local type
 needs `@this`.
 
 - `SimplifiedType::Unknown` is canonical; `any` parses to it
@@ -794,12 +834,12 @@ source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
 mid-line value spans with `overlay::frontmatter::line_aligned_span`. Never add
 a third locator. The authored boundary is documented in
-`darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
+`simplified-schema/docs/topics/language/types.md` (Source-Aware Presentation
 Boundary).
 
 Definition failures are located, never guessed (user-facing reference:
-`darkmatter/docs/topics/schemas/definition.md` § Source-Aware Parsing and
-Located Failures, and `dmls/docs/diagnostics.md` § Ranging). The shared parser
+`simplified-schema/docs/topics/diagnostics.md` § Source-Aware Parsing and
+Located Failures, and `darkmatter/dmls/docs/diagnostics.md` § Ranging). The shared parser
 (`simplified/mod.rs`, crate-private `DefinitionFailure`) records the
 `SchemaSourcePath` of the node it rejected: property keys literally, sequence
 members and root-union arms by index, `$constraints` entries by key, and
@@ -881,6 +921,11 @@ For grammar or schema changes, cover:
   artifact.
 - Imported dependency/cycle errors and source spans.
 - Read/write/read repetition when composition persists normalized values.
+
+A change to the language itself is tested in the library first (`just test` and
+`just doctest` in `simplified-schema/`; see the `simplified-schema` skill),
+then through Darkmatter's consumers. A Darkmatter item named like a
+library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
 
 ## Schema roots and `$path` triggers
 
@@ -1071,4 +1116,4 @@ md event's stack DMLS uses that event's registry `BindingView`
   (`simplified/signature.rs`): boolean returns, a declared non-rest parameter,
   a self-contained single-type target (no union or named reference), `true-iff`
   only for `null` and bare families, and all overloads agreeing. Docs:
-  `docs/topics/schemas/definition.md#narrowing-facts`.
+  `simplified-schema/docs/topics/language/unions.md#narrowing-facts`.

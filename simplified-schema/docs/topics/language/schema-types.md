@@ -6,7 +6,7 @@ kind: canonical-documentation
 A SimplifiedSchema type describes the values a frontmatter property accepts.
 Use a concrete type when a consumer needs a particular shape, and `unknown`
 when the value is deliberately unrestricted. This guide explains the main
-choices; the [complete type reference](./definition.md#types) lists every
+choices; the [complete type reference](types.md#types) lists every
 built-in type and its constraints.
 
 ```yaml
@@ -47,7 +47,7 @@ it does not execute it.
 
 `function(...)`, `type-definition`, and `schema` serve schema authors and
 library integrations rather than ordinary text fields. See the
-[reference](./definition.md#types) for their placement and validation rules.
+[reference](types.md#types) for their placement and validation rules.
 Named types reuse these shapes; a bare name selects a local definition unless
 it is a built-in keyword. Use `shell@this`, for example, to select a local
 type named `shell` rather than the built-in command type.
@@ -86,8 +86,8 @@ $schema:
 ```
 
 Exactly one file must be supplied; the other may be omitted or null. See
-[Null-Admitting Properties](./definition.md#null-admitting-properties) and
-[Root-Level Unions](./definition.md#root-level-unions) for the complete rules.
+[Null-Admitting Properties](types.md#null-admitting-properties) and
+[Root-Level Unions](unions.md#root-level-unions) for the complete rules.
 
 ## Identifiers and command text
 
@@ -102,7 +102,7 @@ The empty string is allowed unless a constraint rejects it. Non-ASCII
 letters, tabs, and newlines are never accepted. Native numbers and booleans
 are type mismatches, so quote digit-only identifiers in YAML. Defaults and
 suggestions must themselves satisfy the type. The
-[alphanumeric reference](./definition.md#alphanumeric-strings) explains all
+[alphanumeric reference](types.md#alphanumeric-strings) explains all
 nine options, canonical ordering, and named-type compatibility.
 
 `shell` accepts text containing at least one non-whitespace character. It
@@ -110,17 +110,17 @@ checks neither shell syntax nor authorization: `echo ready | cat` is valid
 command text, and validation runs nothing. Native boolean and numeric values
 use the same text coercion as `expression`. Exported JSON Schema uses the
 custom format `darkmatter-shell`; external validators must enforce that
-format to reject blank strings. See [Shell Commands](./definition.md#shell-commands).
+format to reject blank strings. See [Shell Commands](types.md#shell-commands).
 
 ## Inspect types from the CLI or editor
 
 Run `md schema about` for the implementation's type and option catalog.
 DMLS offers the same keywords while editing schemas, labels `any` as an
 alias, and explains the effective character set of an `alphanumeric` type on
-hover. See [DMLS Schema Support](./dmls-schema-support.md).
+hover. See [DMLS Schema Support](../../../../darkmatter/docs/topics/schemas/dmls-schema-support.md).
 
 Library callers can compare resolved types with
-[`is_subtype`](./definition.md#subtype-relation-is_subtype), for example to
+[`is_subtype`](subtyping.md#subtype-relation-is_subtype), for example to
 ask whether an `alphanumeric` argument fits a rule allowing slashes. That
 comparison ignores ordinary constraints and property presence; callers still
 validate actual values and apply their own shell quoting and path policy.

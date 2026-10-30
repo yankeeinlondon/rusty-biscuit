@@ -272,7 +272,7 @@ same type as the cursor moves into children.
 The recursive type must eventually check a child value: an object property,
 dictionary value, array item, or tuple slot. A cycle made only of aliases or
 union alternatives is rejected. See
-[Recursive Named Types](./definition.md#recursive-named-types) for the full
+[Recursive Named Types](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#recursive-named-types) for the full
 rule, including cycles across files and definition-versus-use-site behavior.
 
 ## Keeping document layers separate
@@ -284,7 +284,7 @@ for the complete precedence rules.
 
 A type belongs to the source that declares it. A `node` in this trigger and a
 `node` in the document's own `$schema` remain different types. Recursive
-definitions, and [shared](./definition.md#shared-named-types) structured types
+definitions, and [shared](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types) structured types
 that one payload uses in two or more places, are stored once in JSON Schema's
 `$defs`, with references from their uses. Each payload is resolved on its
 own, so its uses are counted on their own too: a type that this trigger and

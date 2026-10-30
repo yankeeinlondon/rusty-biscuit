@@ -7,14 +7,16 @@ or decides which values are still waiting on a template: a host (Darkmatter)
 owns those decisions and calls in here.
 
 ```rust
+use std::sync::Arc;
+use biscuit_file::FileResolutionContext;
 use serde_json::json;
-use simplified_schema::{parse_yaml_schema, to_json_schema, validate::build_structural_validator};
+use simplified_schema::{Prepared, parse_yaml_schema, to_json_schema};
 
 let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("name: string(required)\nage: number(min(0))").unwrap();
 let root = parse_yaml_schema(&yaml).unwrap();          // a SchemaRoot
 let schema = to_json_schema(&root).unwrap();            // Draft 2020-12
-let validator = build_structural_validator(&schema).unwrap();
-assert!(validator.is_valid(&json!({ "name": "Ada", "age": 36 })));
+let prepared = Prepared::new(Arc::new(schema), None, FileResolutionContext::new("/work")).unwrap();
+assert!(prepared.validate_strict(&json!({ "name": "Ada", "age": 36 })).is_ok());
 ```
 
 ## Modules
