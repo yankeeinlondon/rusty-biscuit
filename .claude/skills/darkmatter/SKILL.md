@@ -133,19 +133,25 @@ Important contracts:
   `const`; quoted and native YAML forms are observably different.
 - `expression`, `yaml`, and `json` are passive content formats. They parse or
   coerce but never execute.
-- One coercion engine (`markdown::coercion`) converts frontmatter and binds
-  function arguments; numbers enter only through `markdown::numeric` as exact
+- One coercion engine (`simplified_schema::coercion`, re-exported as
+  `markdown::coercion`) converts frontmatter and binds function arguments; numbers enter only through `markdown::numeric` as exact
   `f64`s. See [schema.md](schema.md#conversion-engine) and
   [expressions.md](expressions.md).
-- The SimplifiedSchema language is moving into the `simplified-schema` crate
-  (no Markdown dependency). `markdown::numeric`, `markdown::span`,
-  `markdown::literal_token`, the plain `{{ }}` scan behind
-  `ExpressionFinder`, and the expression syntax in `compose::expression`
-  (`ast`, `parser`, and the `Lexer`/`Token` half of `lexer`) are already
-  re-exports of `simplified_schema::{numeric, span, pending, expression}`:
-  edit the code there; the Darkmatter paths name the same types. The parse
-  count `work_counters::Work::ExpressionParse` is recorded by the library and
-  folded into Darkmatter's snapshot.
+- The SimplifiedSchema language lives in the `simplified-schema` crate (no
+  Markdown dependency): the AST and grammar (`schemas::simplified`,
+  `SchemaRoot` is the parsed `$schema` enum), resolution, conversion,
+  validators, formats, `SchemaError`, `ValidationProblem`, plus
+  `markdown::{numeric, span, literal_token, coercion, MappingOrders}` and the
+  expression syntax. Darkmatter's paths re-export the library's: edit the
+  code in `simplified-schema/lib/src/`. What stays in Darkmatter:
+  `DarkmatterSchemas`/`EffectiveSchema`, the baseline, schema roots
+  (`SchemaSearchRoot`), triggers (`TriggerOrigin` maps a `SchemaOrigin` to its
+  `TriggerSource`), the shipped catalog (`embedded::SHIPPED_SOURCES`, which
+  `schemas::resolve` wrappers pass to the library resolver so
+  `Name@darkmatter:<stem>` resolves), pending classification
+  (`coerce::nested_templates`), `ProblemPositions`, and completion over an
+  `EffectiveSchema`. Work counters for moved code are recorded by the library
+  and folded into `darkmatter::work_counters::snapshot()`.
 - `type-definition` and `schema` meta-types delegate to the same passive
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a

@@ -13,7 +13,7 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, PropertyDef, SchemaConstraintConflictKind, SchemaError,
-    SchemaSourceId, SchemaSourcePath, SchemaUnionRejection, SimplifiedSchema, TypeExpr,
+    SchemaSourceId, SchemaSourcePath, SchemaUnionRejection, SchemaRoot, TypeExpr,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
@@ -56,7 +56,7 @@ fn unwrap_optional(schema: &Value) -> &Value {
 }
 
 fn simplified_property<'a>(resolved: &'a ResolvedSchema, name: &str) -> &'a PropertyDef {
-    let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+    let Some(SchemaRoot::Single(shape)) = &resolved.simplified else {
         panic!("expected a single-shape schema");
     };
     shape.properties.get(name).expect("property is declared")
@@ -527,7 +527,7 @@ fn programmatic_array_defaults(
 ) -> Result<darkmatter::markdown::schemas::resolve::NamedTypeExpansion, SchemaError> {
     let value = serde_yaml_ng::from_str("choice: [string, number]\np: choice[]\n").unwrap();
     let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
-    let SimplifiedSchema::Single(shape) = &mut schema else {
+    let SchemaRoot::Single(shape) = &mut schema else {
         panic!("single shape");
     };
     let PropertyDef::Union(arms) = shape.properties.get_mut("choice").unwrap() else {
@@ -558,7 +558,7 @@ fn inherited_array_defaults_lift_once_and_merge_with_equal_container_defaults() 
     let array = unwrap_optional(container);
     assert_eq!(array["type"], "array");
     assert_eq!(array["items"]["anyOf"], json!([{"type": "string"}, {"type": "number"}]));
-    let SimplifiedSchema::Single(shape) = &expansion.schema else {
+    let SchemaRoot::Single(shape) = &expansion.schema else {
         panic!("single shape");
     };
     let PropertyDef::Single(atom) = &shape.properties["p"] else {

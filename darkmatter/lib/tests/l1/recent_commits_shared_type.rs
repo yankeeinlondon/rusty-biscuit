@@ -6,7 +6,7 @@
 use darkmatter::markdown::compose::expression::{expression_function_catalog, function_descriptors};
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
 use darkmatter::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SimplifiedSchema, SimplifiedType, TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, SchemaRoot, SimplifiedType, TypeExpr,
     parse_standalone_schema_document,
 };
 
@@ -26,7 +26,7 @@ fn authored_types(source: &str, path: &str) -> darkmatter::markdown::schemas::Sc
         .expect("the shipped partial parses")
         .expect("the shipped partial is a schema document");
     match document.schema() {
-        Some(SimplifiedSchema::Single(shape)) => shape.clone(),
+        Some(SchemaRoot::Single(shape)) => shape.clone(),
         other => panic!("{path}: expected a `types:` mapping, got {other:?}"),
     }
 }

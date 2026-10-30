@@ -591,9 +591,9 @@ impl<'d> TypeScope<'d> {
 mod tests {
     use super::*;
     use crate::markdown::compose::expression::{DeclaredTypes, parse, parse_callback, parse_callback_spanned, parse_spanned};
-    use crate::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+    use crate::markdown::schemas::{SchemaRoot, parse_yaml_schema};
 
-    fn schema(yaml: &str) -> SimplifiedSchema {
+    fn schema(yaml: &str) -> SchemaRoot {
         parse_yaml_schema(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap()
     }
 

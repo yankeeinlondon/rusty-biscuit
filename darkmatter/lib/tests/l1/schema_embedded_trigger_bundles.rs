@@ -9,6 +9,7 @@
 //! `build_resolution_context` from a `RequestSnapshot` with an empty fixture
 //! `HOME` and no environment.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

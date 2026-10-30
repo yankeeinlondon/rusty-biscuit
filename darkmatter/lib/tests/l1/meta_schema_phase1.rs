@@ -7,7 +7,7 @@ use biscuit_file::FileReference;
 use darkmatter::markdown::{
     Markdown,
     schemas::{
-        Constraint, DarkmatterSchemas, PropertyDef, SimplifiedSchema, TypeExpr,
+        Constraint, DarkmatterSchemas, PropertyDef, SchemaRoot, TypeExpr,
         ValidationReport, darkmatter_base_json_schema, parse_standalone_schema_document,
         parse_yaml_schema, schema_type_descriptors,
         simplified::{grammar::MAX_INLINE_OBJECT_DEPTH, grammar::parse_type_expr,
@@ -331,7 +331,7 @@ fn existing_source_projection_covers_union_quote_crlf_and_utf8_variants() {
     );
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).expect("YAML");
     let schema = parse_yaml_schema_with_source(&yaml, source, 11).expect("source projection");
-    let SimplifiedSchema::Single(shape) = schema else {
+    let SchemaRoot::Single(shape) = schema else {
         panic!("expected one schema shape");
     };
     let mut atoms = Vec::new();

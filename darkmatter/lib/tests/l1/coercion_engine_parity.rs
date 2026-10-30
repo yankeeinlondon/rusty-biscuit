@@ -196,7 +196,7 @@ fn nested_tuple_spreads_keep_optional_slots_distinct_from_null() {
 /// deleted; frontmatter goes through `markdown::coercion`.
 #[test]
 fn old_frontmatter_rule_code_is_gone() {
-    let source = include_str!("../../src/markdown/schemas/coerce.rs");
+    let source = include_str!("../../../../simplified-schema/lib/src/coerce.rs");
     for retired in [
         "CoercionTarget",
         "fn coercion_target",
@@ -208,7 +208,7 @@ fn old_frontmatter_rule_code_is_gone() {
         "BOOLISH_VALUES",
         "NUMBERLIKE_PATTERN",
     ] {
-        assert!(!source.contains(retired), "schemas/coerce.rs still holds `{retired}`");
+        assert!(!source.contains(retired), "simplified-schema coerce.rs still holds `{retired}`");
     }
     assert!(source.contains("coercion::"), "frontmatter conversion must go through the core");
 }

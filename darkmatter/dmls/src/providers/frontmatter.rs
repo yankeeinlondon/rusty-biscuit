@@ -19,7 +19,7 @@ use darkmatter::markdown::schemas::completion::{
 use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
-    SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+    SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
     DecodedScalar, decode_plain_scalar_node, decode_scalar, locate_schema_declaration_cursor,
     locate_schema_declaration_cursor_in_scalar, mapping_separator, locate_type_definition_cursor,
     locate_type_definition_cursor_in_scalar, parse_property_definition, parse_schema_declaration,
@@ -688,10 +688,10 @@ fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
     names
 }
 
-fn collect_schema_property_names(schema: &SimplifiedSchema, names: &mut BTreeSet<String>) {
+fn collect_schema_property_names(schema: &SchemaRoot, names: &mut BTreeSet<String>) {
     match schema {
-        SimplifiedSchema::Single(shape) => names.extend(shape.properties.keys().cloned()),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => names.extend(shape.properties.keys().cloned()),
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(shape) = arm {
                     names.extend(shape.properties.keys().cloned());
@@ -1051,8 +1051,8 @@ pub(crate) fn expression_property_keys(ctx: &DocumentContext) -> Vec<String> {
     let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
     let schema = bundle.and_then(|bundle| bundle.effective.simplified.as_ref());
     let declared: Vec<String> = match schema {
-        Some(SimplifiedSchema::Single(document)) => document.properties.keys().cloned().collect(),
-        Some(SimplifiedSchema::Union(arms)) => merged_root_arm_shape(arms).properties.into_keys().collect(),
+        Some(SchemaRoot::Single(document)) => document.properties.keys().cloned().collect(),
+        Some(SchemaRoot::Union(arms)) => merged_root_arm_shape(arms).properties.into_keys().collect(),
         None => Vec::new(),
     };
     for name in declared {
@@ -4826,7 +4826,7 @@ mod tests {
 
     #[test]
     fn test_base_style_schema_exposes_nested_completion_shapes() {
-        let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+        let darkmatter::markdown::schemas::SchemaRoot::Single(root) =
             darkmatter::markdown::schemas::darkmatter_base_schema()
         else {
             panic!("base schema must be a single object shape");

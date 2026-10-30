@@ -13,14 +13,14 @@ use darkmatter::markdown::compose::shell_expansion::template::{
     ApprovalType, CommandTemplate, HoleError, HoleTiming, RejectReason, TemplateShape, fill_template,
     parse_authored, resolve_late_values, rule_covers,
 };
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 
 const SCHEMA: &str = "target: [string, number, \"null\"]\nmode: \"enum(release, debug, test; required)\"\n";
 
-fn schema() -> SimplifiedSchema {
+fn schema() -> SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(SCHEMA).expect("schema YAML");
     parse_yaml_schema(&value).expect("schema parses")
 }

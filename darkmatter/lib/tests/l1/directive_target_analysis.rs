@@ -1,3 +1,4 @@
+use darkmatter::markdown::schemas::TriggerOrigin;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use darkmatter::markdown::compose::directive_targets::{
@@ -7,7 +8,7 @@ use darkmatter::markdown::compose::directive_targets::{
 use darkmatter::markdown::compose::directives_api::DirectiveKind;
 use darkmatter::markdown::compose::expression::parse;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, SchemaOrigin, SimplifiedSchema, parse_yaml_schema,
+    DarkmatterSchemas, EffectiveSchema, SchemaOrigin, SchemaRoot, parse_yaml_schema,
 };
 use serde_json::{Value, json};
 
@@ -176,7 +177,7 @@ fn classifies_schema_frontmatter_and_context_nullability_without_guessing() {
     let union_yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str("- optional: file\n- optional: file(required)\n").unwrap();
     let union = parse_yaml_schema(&union_yaml).unwrap();
-    assert!(matches!(union, SimplifiedSchema::Union(_)));
+    assert!(matches!(union, SchemaRoot::Union(_)));
     // The arms fold to `file | null`: optional in one arm, so nullable.
     let mut root_union = effective.clone();
     root_union.simplified = Some(union);

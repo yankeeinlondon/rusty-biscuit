@@ -597,17 +597,15 @@ fn with_members(atom: &PropertyAtom, members: Vec<String>) -> PropertyAtom {
     atom
 }
 
-impl Family {
-    /// The family of a non-null value.
-    fn of(value: &Value) -> Option<Self> {
-        match value {
-            Value::String(_) => Some(Self::String),
-            Value::Number(_) => Some(Self::Number),
-            Value::Bool(_) => Some(Self::Boolean),
-            Value::Array(_) => Some(Self::Array),
-            Value::Object(_) => Some(Self::Object),
-            Value::Null => None,
-        }
+/// The family of a non-null value.
+fn family_of(value: &Value) -> Option<Family> {
+    match value {
+        Value::String(_) => Some(Family::String),
+        Value::Number(_) => Some(Family::Number),
+        Value::Bool(_) => Some(Family::Boolean),
+        Value::Array(_) => Some(Family::Array),
+        Value::Object(_) => Some(Family::Object),
+        Value::Null => None,
     }
 }
 
@@ -618,7 +616,7 @@ fn pinned_atom(value: &Value) -> PropertyAtom {
     match value {
         Value::String(_) | Value::Bool(_) => literal_atom(value.clone()),
         Value::Number(_) => pinned_number(value).unwrap_or_else(|| PropertyAtom::bare(SimplifiedType::Number)),
-        _ => Family::of(value).unwrap_or(Family::Object).bare_atom(),
+        _ => family_of(value).unwrap_or(Family::Object).bare_atom(),
     }
 }
 
@@ -656,7 +654,7 @@ fn arm_equal(arm: &PropertyAtom, value: &Value) -> Option<PropertyAtom> {
     if let Some(literal) = arm.literal_value() {
         return values_equal(literal, value).then(|| arm.clone());
     }
-    if !families(arm).contains(&Family::of(value)?) {
+    if !families(arm).contains(&family_of(value)?) {
         return None;
     }
     let plain = !has_ordinary_constraints(arm);

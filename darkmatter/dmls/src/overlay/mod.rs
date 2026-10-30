@@ -1038,7 +1038,7 @@ impl OverlayCache {
         });
         if let Some(types) = &model.local_types {
             suggestions.extend(suggestions::reference_lints(
-                &darkmatter::markdown::schemas::SimplifiedSchema::Single(types.clone()), Some(types), base_dir, Some(path), &schema_roots, context,
+                &darkmatter::markdown::schemas::SchemaRoot::Single(types.clone()), Some(types), base_dir, Some(path), &schema_roots, context,
             ));
         }
         let deps = hash_files(imports.iter().chain(named_types.dependencies()));
@@ -1332,7 +1332,7 @@ fn deps_unchanged(deps: &[(PathBuf, u64)]) -> bool {
 mod tests {
     use super::*;
 
-    use darkmatter::markdown::schemas::{SchemaSourcePath, SchemaSpanKind, SimplifiedSchema};
+    use darkmatter::markdown::schemas::{SchemaSourcePath, SchemaSpanKind, SchemaRoot};
 
     fn uri(s: &str) -> Uri {
         s.parse().unwrap()
@@ -1784,7 +1784,7 @@ mod tests {
                 .first()
                 .expect("type-keyword span");
             assert!(matches!(&text[type_span.clone()], "string" | "number"));
-            assert!(matches!(model.schema(), Some(SimplifiedSchema::Single(_))));
+            assert!(matches!(model.schema(), Some(SchemaRoot::Single(_))));
         }
     }
 

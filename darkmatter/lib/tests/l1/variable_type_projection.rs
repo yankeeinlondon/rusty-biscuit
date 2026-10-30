@@ -17,13 +17,13 @@ use darkmatter::markdown::compose::expression::{
     ScopeId, Shape, TypeScope, UnavailabilityReason, check_expression_calls, expression_type, parse, parse_spanned,
 };
 use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 use tempfile::TempDir;
 
 use ArgumentCategory::{Compatible, NullableMatch, Unknown};
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 
@@ -84,7 +84,7 @@ fn markdown_at(path: &Path) -> Markdown {
 
 /// The motivating root union of the declarations design, arms and keys in
 /// the given order.
-fn motivating(reversed: bool) -> SimplifiedSchema {
+fn motivating(reversed: bool) -> SchemaRoot {
     let specification = "- spec: file(required)\n  design: file\n  plan: file(required)\n  area: string\n";
     let review = "- area: string\n  plan: file(required)\n  review: file(required)\n";
     schema(&if reversed { format!("{review}{specification}") } else { format!("{specification}{review}") })
@@ -127,7 +127,7 @@ mod root_unions {
         assert_eq!(text(&ty_in(&schema)), "number | string | null");
     }
 
-    fn ty_in(schema: &SimplifiedSchema) -> Shape {
+    fn ty_in(schema: &SchemaRoot) -> Shape {
         type_of(&DeclaredTypes::new(Some(schema)), "x")
     }
 }
@@ -325,7 +325,7 @@ mod layers {
     }
 
     fn shape_of(def: &darkmatter::markdown::schemas::PropertyDef) -> Shape {
-        let schema = SimplifiedSchema::Single({
+        let schema = SchemaRoot::Single({
             let mut shape = darkmatter::markdown::schemas::SchemaShape::new();
             shape.properties.insert("x".to_string(), def.clone());
             shape

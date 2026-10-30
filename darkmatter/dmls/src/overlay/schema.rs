@@ -23,7 +23,7 @@ use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
     SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage,
+    SchemaRoot, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage,
     darkmatter_base_json_schema_ref, effective_property_shape, mapping_separator,
     triggers::TriggerRegistry,
 };
@@ -74,12 +74,12 @@ pub struct SemanticTypeRegion {
 
 /// Projects every complete definition in a parsed schema as a semantic region.
 pub fn semantic_type_regions(
-    schema: &SimplifiedSchema,
+    schema: &SchemaRoot,
     source_map: &SchemaSourceMap,
 ) -> Vec<SemanticTypeRegion> {
     let mut regions = Vec::new();
     match schema {
-        SimplifiedSchema::Single(shape) => {
+        SchemaRoot::Single(shape) => {
             collect_semantic_type_regions(
                 shape,
                 &SchemaSourcePath::root(),
@@ -87,7 +87,7 @@ pub fn semantic_type_regions(
                 &mut regions,
             );
         }
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Union(arms) => {
             for (index, arm) in arms.iter().enumerate() {
                 if let SchemaArm::Inline(shape) = arm {
                     collect_semantic_type_regions(
@@ -107,7 +107,7 @@ pub fn semantic_type_regions(
 pub fn standalone_type_regions(model: &StandaloneSchemaDocument) -> Vec<SemanticTypeRegion> {
     let mut regions = model.schema().map_or_else(Vec::new, |schema| semantic_type_regions(schema, &model.source_map));
     if let (Some(types), Some(source_map)) = (&model.local_types, &model.local_type_source_map) {
-        regions.extend(semantic_type_regions(&SimplifiedSchema::Single(types.clone()), source_map));
+        regions.extend(semantic_type_regions(&SchemaRoot::Single(types.clone()), source_map));
     }
     regions
 }
@@ -1065,7 +1065,7 @@ fn combined_baseline(
             continue;
         }
         let resolved = load_extension_schema(extension, workspace_roots, context)?;
-        if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
+        if let Some(SchemaRoot::Single(shape)) = &resolved.simplified {
             shapes.push(shape.clone());
             if !resolved.definitions.is_empty() {
                 definitions.push(Arc::clone(&resolved.definitions));

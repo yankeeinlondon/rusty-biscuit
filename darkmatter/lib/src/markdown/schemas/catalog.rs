@@ -47,7 +47,7 @@ use thiserror::Error;
 use super::embedded::{self, EmbeddedDocument};
 use super::errors::SchemaError;
 use super::resolve::{self, describe_yaml};
-use super::{DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr};
+use super::{DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr};
 
 /// Virtual path of Darkmatter's global catalog.
 pub const DARKMATTER_CATALOG_PATH: &str = "darkmatter/schemas/darkmatter.yaml";
@@ -417,10 +417,10 @@ impl GlobalCatalog {
     /// is Darkmatter's catalog. Lower the pair with
     /// [`to_json_schema_with_definitions`](super::to_json_schema_with_definitions).
     /// `None` for a catalog that declares no `fm`.
-    pub fn baseline(&self) -> Option<(SimplifiedSchema, Arc<DefinitionTable>)> {
+    pub fn baseline(&self) -> Option<(SchemaRoot, Arc<DefinitionTable>)> {
         let fm = self.global("fm")?;
         let shape = fm.shape()?.clone();
-        Some((SimplifiedSchema::Single(shape), Arc::clone(&fm.definitions)))
+        Some((SchemaRoot::Single(shape), Arc::clone(&fm.definitions)))
     }
 }
 
@@ -1071,7 +1071,7 @@ fn resolve_declaration(
     }
     .map_err(|error| CatalogErrorReason::Resolve(Box::new(error)))?;
     match resolved.simplified {
-        Some(SimplifiedSchema::Single(mut shape)) => shape
+        Some(SchemaRoot::Single(mut shape)) => shape
             .properties
             .shift_remove(name)
             .map(|definition| (definition, resolved.definitions))
@@ -1089,7 +1089,7 @@ fn resolve_declaration(
 ///
 /// When the compiled-in declaration does not resolve: a library bug, which
 /// a test catches.
-pub(crate) fn darkmatter_inline_baseline() -> SimplifiedSchema {
+pub(crate) fn darkmatter_inline_baseline() -> SchemaRoot {
     let fail = |reason: &dyn std::fmt::Display| -> ! { panic!("the embedded baseline must resolve inline: {reason}") };
     let document =
         embedded::find(embedded::SHIPPED, DARKMATTER_CATALOG_PATH).unwrap_or_else(|| fail(&"the catalog is missing"));
@@ -1107,12 +1107,12 @@ pub(crate) fn darkmatter_inline_baseline() -> SimplifiedSchema {
         resolve::Sharing::Off,
     )
     .unwrap_or_else(|error| fail(&error));
-    let Some(SimplifiedSchema::Single(mut shape)) = resolved.simplified else {
+    let Some(SchemaRoot::Single(mut shape)) = resolved.simplified else {
         fail(&"`fm` is not a single definition");
     };
     let definition = shape.properties.shift_remove("fm").unwrap_or_else(|| fail(&"`fm` is missing"));
     match resolved_atom(&definition, &resolved.definitions).map(|atom| &atom.ty) {
-        Some(TypeExpr::InlineObject(shape)) => SimplifiedSchema::Single(shape.clone()),
+        Some(TypeExpr::InlineObject(shape)) => SchemaRoot::Single(shape.clone()),
         _ => fail(&"`fm` is not an object shape"),
     }
 }

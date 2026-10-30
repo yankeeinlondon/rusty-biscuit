@@ -7,11 +7,13 @@
 //! remaining tests exercise [`super`] validation, resolution, and
 //! effective-schema assembly.
 
+mod baseline_grammar;
 mod clean_quoting;
 mod clean_suggestions;
 #[path = "../../../../tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
 mod embedded_sources;
+mod host_file_formats;
 mod lazy_positions;
 mod positions;
 mod reset_process_caches;
@@ -100,7 +102,7 @@ fn bare_sidecar_advisory_survives_baseline_and_reference_assembly() {
     )
     .expect("write schema");
     let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: unchanged\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut properties = indexmap::IndexMap::new();
             properties.insert(
@@ -165,7 +167,7 @@ fn excluded_bare_sidecar_shapes_remain_advisory_free_through_validation() {
 #[test]
 fn baseline_applies_when_document_has_no_schema() {
     let md = md_with_schema("title: hi\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut m = indexmap::IndexMap::new();
             m.insert(
@@ -196,7 +198,7 @@ fn baseline_applies_when_document_has_no_schema() {
 #[test]
 fn baseline_merges_with_document_schema() {
     let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut m = indexmap::IndexMap::new();
             m.insert(
@@ -277,7 +279,7 @@ fn coerces_baseline_merged_field_without_document_schema() {
     // baseline. Coercion reads the post-merge json_schema, so it fires even
     // though the document's `simplified` AST never declares `enabled`.
     let md = md_with_schema("enabled: \"false\"\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut m = indexmap::IndexMap::new();
             m.insert(
@@ -804,8 +806,8 @@ fn validate_root_union_eager_file_arm_does_not_mutate_input() {
 // cleanly (spec semantics point 1), while a wrongly-typed `ctx.today`
 // value fails type validation (point 3).
 
-/// Builds a baseline `SimplifiedSchema` from a YAML body.
-fn baseline_from_yaml(yaml_body: &str) -> SimplifiedSchema {
+/// Builds a baseline `SchemaRoot` from a YAML body.
+fn baseline_from_yaml(yaml_body: &str) -> SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_body).expect("yaml parse");
     super::simplified::parse_yaml_schema(&value).expect("baseline schema parse")
 }
@@ -887,7 +889,7 @@ fn baseline_generated_ctx_accepts_correctly_typed_value() {
 fn darkmatter_base_schema_returns_expected_properties() {
     let schema = super::darkmatter_base_schema();
     let shape = match schema {
-        super::SimplifiedSchema::Single(s) => s,
+        super::SchemaRoot::Single(s) => s,
         other => panic!("expected Single, got {other:?}"),
     };
     assert!(

@@ -16,7 +16,7 @@ use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
 use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
 use darkmatter::markdown::schemas::simplified::serialize_property_def;
 use darkmatter::markdown::schemas::{
-    PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, TypeExpr, is_definition_subtype_with_definitions,
+    PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, TypeExpr, is_definition_subtype_with_definitions,
     is_subtype_with_definitions, nested_property_shape, property_def_at_path, property_def_at_path_with_definitions,
 };
 use serde_json::json;
@@ -47,7 +47,7 @@ fn resolve(dir: &Path, schema: &str) -> ResolvedSchema {
 
 fn root(resolved: &ResolvedSchema) -> &SchemaShape {
     match &resolved.simplified {
-        Some(SimplifiedSchema::Single(shape)) => shape,
+        Some(SchemaRoot::Single(shape)) => shape,
         other => panic!("expected a single shape, got {other:?}"),
     }
 }

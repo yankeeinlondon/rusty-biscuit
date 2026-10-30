@@ -111,7 +111,7 @@ fn load_document(
 fn emit_schema(
     format: SchemaDetectFormat,
     sources: &[PathBuf],
-    schema: &darkmatter::markdown::schemas::SimplifiedSchema,
+    schema: &darkmatter::markdown::schemas::SchemaRoot,
 ) {
     match format {
         SchemaDetectFormat::Yaml => {

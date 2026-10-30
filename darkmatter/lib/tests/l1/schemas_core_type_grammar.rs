@@ -13,7 +13,7 @@ use darkmatter::markdown::schemas::simplified::serialize_property_atom;
 use darkmatter::markdown::schemas::{
     AlphanumericOption, AlphanumericOptions, Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef,
     SchemaConstraintConflictKind, SchemaError, SchemaSourceId, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition,
+    SchemaRoot, SimplifiedType, TypeExpr, parse_property_definition,
     parse_property_definition_with_source, parse_yaml_schema,
 };
 use serde_json::json;
@@ -35,7 +35,7 @@ fn resolve_inline(dir: &Path, schema: &str) -> Result<ResolvedSchema, SchemaErro
 }
 
 fn atom<'a>(resolved: &'a ResolvedSchema, property: &str) -> &'a PropertyAtom {
-    let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+    let Some(SchemaRoot::Single(shape)) = &resolved.simplified else {
         panic!("expected a single simplified shape");
     };
     match &shape.properties[property] {
@@ -96,7 +96,7 @@ fn every_native_null_spelling_is_the_null_type_at_a_property() {
     for spelling in ["null", "Null", "NULL", "~", "", "'null'", "\"null\""] {
         let schema = parse_yaml_schema(&yaml(&format!("review: {spelling}\n")))
             .unwrap_or_else(|error| panic!("`review: {spelling}` parses: {error}"));
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!("single shape expected");
         };
         assert_eq!(
@@ -113,7 +113,7 @@ fn native_null_is_a_union_arm_and_a_nested_property() {
         "draft: [string, null]\nblock:\n  - number\n  - ~\nmeta:\n  gone:\n",
     ))
     .expect("parses");
-    let SimplifiedSchema::Single(shape) = schema else {
+    let SchemaRoot::Single(shape) = schema else {
         panic!("single shape expected");
     };
     for property in ["draft", "block"] {

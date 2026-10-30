@@ -16,7 +16,7 @@ use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use darkmatter::markdown::schemas::triggers::{MatchExpr, PathSubject, matches};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, DetectOptions, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaPhase, SimplifiedSchema, TypeExpr, darkmatter_base_schema,
+    SchemaPhase, SchemaRoot, TypeExpr, darkmatter_base_schema,
     DefinitionTable, detect_schema, effective_property_shape, expression_atom,
     frontmatter_expression_values_with_definitions, nested_property_shape_with_definitions,
     parse_yaml_schema, property_def_at_path_with_definitions, schema_shape_descriptors, schema_to_yaml,
@@ -36,7 +36,7 @@ fn temp_root() -> (tempfile::TempDir, PathBuf) {
 }
 
 /// The resolved shape of an inline `$schema` mapping body read from `dir`.
-fn resolved_shape(dir: &Path, schema: &str) -> SimplifiedSchema {
+fn resolved_shape(dir: &Path, schema: &str) -> SchemaRoot {
     let value: YamlValue = serde_yaml_ng::from_str(schema).expect("fixture YAML parses");
     resolve_yaml_schema(&value, dir, &context_at(dir))
         .expect("fixture schema resolves")
@@ -46,15 +46,15 @@ fn resolved_shape(dir: &Path, schema: &str) -> SimplifiedSchema {
 
 /// [`resolved_shape`] with the definitions its references point into: a
 /// type the schema uses at two places is stored once and referenced.
-fn resolved_with_definitions(dir: &Path, schema: &str) -> (SimplifiedSchema, DefinitionTable) {
+fn resolved_with_definitions(dir: &Path, schema: &str) -> (SchemaRoot, DefinitionTable) {
     let value: YamlValue = serde_yaml_ng::from_str(schema).expect("fixture YAML parses");
     let resolved = resolve_yaml_schema(&value, dir, &context_at(dir)).expect("fixture schema resolves");
     let definitions = (*resolved.definitions).clone();
     (resolved.simplified.expect("a SimplifiedSchema"), definitions)
 }
 
-fn single_atom<'a>(schema: &'a SimplifiedSchema, name: &str) -> &'a PropertyAtom {
-    let SimplifiedSchema::Single(shape) = schema else {
+fn single_atom<'a>(schema: &'a SchemaRoot, name: &str) -> &'a PropertyAtom {
+    let SchemaRoot::Single(shape) = schema else {
         panic!("expected a single-shape schema");
     };
     match shape.properties.get(name) {
@@ -65,7 +65,7 @@ fn single_atom<'a>(schema: &'a SimplifiedSchema, name: &str) -> &'a PropertyAtom
 
 /// The Content Policy acceptance fixture written into `dir`, resolved as
 /// `content_policy: policy[](min(1))@./content-policy.yaml`.
-fn content_policy_schema(dir: &Path, shipped: &str) -> SimplifiedSchema {
+fn content_policy_schema(dir: &Path, shipped: &str) -> SchemaRoot {
     write_files(dir, &[(CONTENT_POLICY_FILE, &content_policy_union_schema(shipped))]);
     resolved_shape(dir, &format!("content_policy: \"{CONTENT_POLICY_LIST}\"\n"))
 }
@@ -525,7 +525,7 @@ fn detection_never_produces_a_union_type_and_its_yaml_parses_back() {
     let other: Markdown = "---\nitems: [b]\nvalue: text\n---\n".into();
     let (_dir, root) = temp_root();
     let detected = detect_schema(&[&mixed, &other], DetectOptions { merge: true }, &context_at(&root));
-    let SimplifiedSchema::Single(shape) = &detected else {
+    let SchemaRoot::Single(shape) = &detected else {
         panic!("detection yields one shape");
     };
     let atoms: Vec<&PropertyAtom> = shape
@@ -545,7 +545,7 @@ fn detection_never_produces_a_union_type_and_its_yaml_parses_back() {
 
 #[test]
 fn the_ctx_catalog_projects_no_union_type() {
-    let SimplifiedSchema::Single(root) = darkmatter_base_schema() else {
+    let SchemaRoot::Single(root) = darkmatter_base_schema() else {
         panic!("the base schema is one shape");
     };
     let Some(PropertyDef::Single(ctx)) = root.properties.get("ctx") else {

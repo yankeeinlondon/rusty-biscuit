@@ -517,7 +517,7 @@ mod prepared_parity {
         PreparedInterpolation::new(text)
     }
 
-    fn schema(yaml: &str) -> crate::markdown::schemas::SimplifiedSchema {
+    fn schema(yaml: &str) -> crate::markdown::schemas::SchemaRoot {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("schema YAML");
         crate::markdown::schemas::parse_yaml_schema(&value).expect("schema parses")
     }

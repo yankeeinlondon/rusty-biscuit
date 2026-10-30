@@ -10,7 +10,7 @@
 //!
 //! ## Module layout
 //!
-//! - [`simplified::types`] — [`SimplifiedSchema`], [`PropertyDef`],
+//! - [`simplified::types`] — [`SchemaRoot`], [`PropertyDef`],
 //!   [`SimplifiedType`], [`Constraint`].
 //! - [`simplified::grammar`] — type-and-constraint string parser.
 //! - [`simplified::convert`] — [`to_json_schema`] lowers a parsed schema to
@@ -46,7 +46,7 @@
 //! See `darkmatter/features/2026-05-11-schemas/spec.md` for the full
 //! specification.
 //!
-//! [`SimplifiedSchema`]: crate::markdown::schemas::simplified::SimplifiedSchema
+//! [`SchemaRoot`]: crate::markdown::schemas::simplified::SchemaRoot
 //! [`PropertyDef`]: crate::markdown::schemas::simplified::PropertyDef
 //! [`SimplifiedType`]: crate::markdown::schemas::simplified::SimplifiedType
 //! [`Constraint`]: crate::markdown::schemas::simplified::Constraint
@@ -54,31 +54,24 @@
 
 pub mod about;
 pub mod catalog;
-mod advisory;
 mod bound_operands;
 pub mod clean;
 pub mod coerce;
 pub mod completion;
 pub mod detect;
-pub mod discriminant;
-pub mod errors;
-pub mod example;
-pub mod file_match;
-pub mod format;
 mod frontmatter_shape;
-mod json_shape;
-mod phase;
-mod reference;
-pub(crate) mod scope;
 pub mod resolve;
 pub mod rewrite;
 pub mod roots;
-pub mod simplified;
-mod timings;
 pub mod triggers;
-pub mod validate;
 mod positions;
 pub(crate) mod embedded;
+
+// The SimplifiedSchema language lives in `simplified-schema`; these keep its
+// modules at their Darkmatter paths for unmoved callers.
+// migration: removed in Phase 7
+pub use simplified_schema::{discriminant, errors, example, file_match, format, simplified, validate};
+pub(crate) use simplified_schema::{phase, scope, timings};
 
 use std::sync::OnceLock;
 use std::{
@@ -101,26 +94,29 @@ pub use about::{
     schema_type_descriptors, validation_behavior_descriptors, match_safe_constraint_descriptors,
     trigger_grammar_descriptors,
 };
-pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
+// migration: removed in Phase 7
+pub use simplified_schema::{
+    CallerFileReferenceProvenance, CycleReference, FileReferenceDiagnostic, FrontmatterExpressionValue,
+    GrammarRelated, JsonPointer, SCHEMA_CONSTRAINT_CODE, SCHEMA_INVALID_FILE_REFERENCE_CODE,
+    SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE, SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE,
+    SchemaAdvisory, SchemaAdvisoryKind, SchemaError, SchemaOrigin, SchemaOriginKind, SchemaOriginMap, SchemaPhase,
+    SchemaReference, SchemaReferenceKind, ValidationProblem, ValidationProblemCode, ValidationProblemKind,
+    authored_node_at, classify_schema_reference, expression_atom, frontmatter_expression_values,
+    frontmatter_expression_values_with_definitions, nested_property_shape, nested_property_shape_with_definitions,
+    property_def_at_path, property_def_at_path_with_definitions, select_literal_discriminant_arm,
+    shape_from_json_schema,
+};
+pub use completion::{CompletionKind, CompletionSuggestion};
 pub use clean::{
     CleanBaselineSchema, CleanSchemaConfig, CleanSchemaContext, SchemaCleanAnalysis,
     analyze_frontmatter, schema_result_set_identical,
 };
-pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{
     DetectOptions, detect_from_document, detect_schema,
     detect_schema_with_contexts, schema_to_yaml,
 };
-pub use discriminant::select_literal_discriminant_arm;
-pub use errors::{CycleReference, GrammarRelated, SchemaError};
-pub use json_shape::shape_from_json_schema;
-pub use frontmatter_shape::{
-    FrontmatterExpressionValue, effective_property_shape, expression_atom,
-    frontmatter_expression_values, frontmatter_expression_values_with_definitions, nested_property_shape, nested_property_shape_with_definitions, property_def_at_path,
-    property_def_at_path_with_definitions,
-};
-pub use phase::SchemaPhase;
-pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
+pub use frontmatter_shape::effective_property_shape;
+pub use triggers::TriggerOrigin;
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
     AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, DefKey,
@@ -131,7 +127,7 @@ pub use simplified::{
     SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,
     SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind, SchemaValueNode,
-    SimplifiedSchema,
+    SchemaRoot,
     SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
     decode_plain_scalar_node, decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions, is_union_arm_path, lint_suggestions, mapping_separator,
@@ -148,7 +144,7 @@ pub use simplified::{
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
 pub use roots::{
-    InvalidSchemasDir, SCHEMAS_DIR_VARIABLE, SchemaRoot, SchemaRootKind, SchemaRootState,
+    InvalidSchemasDir, SCHEMAS_DIR_VARIABLE, SchemaSearchRoot, SchemaRootKind, SchemaRootState,
     SchemaRoots, SearchedRoot,
 };
 pub use embedded::EmbeddedSchemaBundle;
@@ -158,15 +154,15 @@ pub use triggers::{
     TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
-pub use timings::{CompileCache, ValidationStage, ValidationTimings};
-pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+pub use simplified_schema::{CompileCache, ValidationStage, ValidationTimings};
+pub use simplified_schema::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 use positions::ProblemPositions;
 
 /// The runtime baseline, prepared from the embedded table: its typed form with
 /// every import expanded, the shared definitions its references point into,
 /// and the pair lowered to JSON Schema.
 struct ShippedBaseline {
-    schema: SimplifiedSchema,
+    schema: SchemaRoot,
     definitions: Arc<DefinitionTable>,
     json_schema: Arc<Value>,
 }
@@ -175,7 +171,7 @@ struct ShippedBaseline {
 static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
 
 /// [`darkmatter_base_schema`]'s definition-free form, resolved on first use.
-static INLINE_BASELINE: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
+static INLINE_BASELINE: std::sync::OnceLock<SchemaRoot> = std::sync::OnceLock::new();
 
 fn shipped_baseline() -> &'static ShippedBaseline {
     BASELINE.get_or_init(|| {
@@ -190,12 +186,12 @@ fn shipped_baseline() -> &'static ShippedBaseline {
 
 /// The runtime baseline with the shared definitions its references point
 /// into: the form validation lowers ([`darkmatter_base_json_schema`]).
-pub(crate) fn darkmatter_shared_baseline() -> (&'static SimplifiedSchema, &'static Arc<DefinitionTable>) {
+pub(crate) fn darkmatter_shared_baseline() -> (&'static SchemaRoot, &'static Arc<DefinitionTable>) {
     let baseline = shipped_baseline();
     (&baseline.schema, &baseline.definitions)
 }
 
-fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
+fn darkmatter_base_schema_ref() -> &'static SchemaRoot {
     INLINE_BASELINE.get_or_init(catalog::darkmatter_inline_baseline)
 }
 
@@ -203,7 +199,7 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
     &shipped_baseline().json_schema
 }
 
-/// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
+/// Returns the Darkmatter baseline frontmatter schema as a [`SchemaRoot`].
 ///
 /// The baseline is the resolved `fm` definition of Darkmatter's global
 /// catalog, `darkmatter/schemas/darkmatter.yaml`, compiled into the library
@@ -229,7 +225,7 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 ///
 /// Panics if the compiled-in baseline or a schema it imports cannot be
 /// prepared. This is a library bug, not an author error.
-pub fn darkmatter_base_schema() -> SimplifiedSchema {
+pub fn darkmatter_base_schema() -> SchemaRoot {
     darkmatter_base_schema_ref().clone()
 }
 
@@ -314,13 +310,7 @@ use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 /// unchanged; a reset makes the next lookup of each cache a miss.
 #[doc(hidden)]
 pub fn reset_process_caches_for_bench() {
-    SHARED_VALIDATOR_CACHE.clear();
-    coerce::reset_process_caches();
-    completion::reset_process_caches();
-    example::reset_process_caches();
-    json_shape::reset_process_caches();
-    simplified::convert::reset_process_caches();
-    resolve::reset_process_caches();
+    simplified_schema::reset_process_caches();
     triggers::assemble::reset_process_caches();
     triggers::discovery::reset_process_caches();
     triggers::matcher::reset_thread_caches();
@@ -425,7 +415,7 @@ impl DarkmatterSchemas {
     /// JSON Schema, or [`SchemaError::Baseline`] if the resulting JSON Schema
     /// is not a simple object schema (rooted at `"type": "object"` with only
     /// `properties` / `required`).
-    pub fn with_baseline(self, schema: SimplifiedSchema) -> Result<Self, SchemaError> {
+    pub fn with_baseline(self, schema: SchemaRoot) -> Result<Self, SchemaError> {
         self.with_baseline_and_definitions(&schema, &DefinitionTable::default())
     }
 
@@ -433,7 +423,7 @@ impl DarkmatterSchemas {
     /// references into `definitions`.
     pub(crate) fn with_baseline_and_definitions(
         mut self,
-        schema: &SimplifiedSchema,
+        schema: &SchemaRoot,
         definitions: &DefinitionTable,
     ) -> Result<Self, SchemaError> {
         let json = to_json_schema_with_definitions(schema, definitions).map_err(|err| SchemaError::Baseline {
@@ -915,12 +905,12 @@ impl DarkmatterSchemas {
         &self.cache
     }
 
-    /// Detects a [`SimplifiedSchema`] from one or more documents through this
+    /// Detects a [`SchemaRoot`] from one or more documents through this
     /// instance's context, which must admit every source (see
     /// [`detect::detect_from_document`]); use
     /// [`detect::detect_schema_with_contexts`] for documents that each carry
     /// their own context. See [`detect::detect_schema`] for the algorithm.
-    pub fn detect(&self, sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSchema {
+    pub fn detect(&self, sources: &[&Markdown], opts: DetectOptions) -> SchemaRoot {
         detect::detect_schema(sources, opts, &self.file_resolution_context)
     }
 }
@@ -980,7 +970,7 @@ pub struct EffectiveSchema {
     /// property names, optional-binding materialization) read this field. The
     /// editor's full property shape, with matching trigger payloads layered
     /// in, is [`Self::property_shape`].
-    pub simplified: Option<SimplifiedSchema>,
+    pub simplified: Option<SchemaRoot>,
     /// The cyclic named types [`Self::simplified`] reaches through
     /// [`TypeExpr::Ref`]; empty when nothing recurses.
     definitions: Arc<DefinitionTable>,
@@ -1395,9 +1385,9 @@ impl EffectiveSchema {
     }
 
     /// The nested templates of `authored` that this schema marks `deferred`
-    /// ([`coerce::NestedTemplates::find`]).
+    /// ([`coerce::nested_templates`]).
     fn nested_templates(&self, authored: &Value) -> coerce::NestedTemplates {
-        coerce::NestedTemplates::find(self.conversion(), &self.json_schema, authored)
+        coerce::nested_templates(self.conversion(), &self.json_schema, authored)
     }
 
     /// Shared validation body over an already-prepared instance. Callers
@@ -2352,7 +2342,7 @@ mod claudine_compat_tests {
     #[test]
     fn baseline_applies_when_document_has_no_schema() {
         let md = md_with_schema("title: hi\n");
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties: {
                 let mut m = indexmap::IndexMap::new();
                 m.insert(
@@ -2383,7 +2373,7 @@ mod claudine_compat_tests {
     #[test]
     fn baseline_merges_with_document_schema() {
         let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties: {
                 let mut m = indexmap::IndexMap::new();
                 m.insert(
@@ -2459,7 +2449,7 @@ mod claudine_compat_tests {
         // baseline. Coercion reads the post-merge json_schema, so it fires even
         // though the document's `simplified` AST never declares `enabled`.
         let md = md_with_schema("enabled: \"false\"\n");
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties: {
                 let mut m = indexmap::IndexMap::new();
                 m.insert(
@@ -2984,8 +2974,8 @@ mod claudine_compat_tests {
     // cleanly (spec semantics point 1), while a wrongly-typed `ctx.today`
     // value fails type validation (point 3).
 
-    /// Builds a baseline `SimplifiedSchema` from a YAML body.
-    fn baseline_from_yaml(yaml_body: &str) -> SimplifiedSchema {
+    /// Builds a baseline `SchemaRoot` from a YAML body.
+    fn baseline_from_yaml(yaml_body: &str) -> SchemaRoot {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_body).expect("yaml parse");
         super::simplified::parse_yaml_schema(&value).expect("baseline schema parse")
     }
@@ -3067,7 +3057,7 @@ mod claudine_compat_tests {
     fn darkmatter_base_schema_returns_expected_properties() {
         let schema = super::darkmatter_base_schema();
         let shape = match schema {
-            super::SimplifiedSchema::Single(s) => s,
+            super::SchemaRoot::Single(s) => s,
             other => panic!("expected Single, got {other:?}"),
         };
         assert!(
@@ -3530,7 +3520,7 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties: {
                 let mut m = indexmap::IndexMap::new();
                 m.insert(
@@ -4186,7 +4176,7 @@ mod phase4_trigger_assembly {
         );
 
         // Baseline declares the same `model` property.
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties: {
                 let mut m = indexmap::IndexMap::new();
                 m.insert(
@@ -4302,7 +4292,7 @@ mod phase4_trigger_assembly {
         assert_eq!(declared(&shape, "shared"), Some(("boolean", "authored".into())));
         assert_eq!(declared(&shape, "alpha"), Some(("string", "from a".into())));
         assert_eq!(declared(&shape, "beta"), Some(("boolean", "from b".into())));
-        let Some(SimplifiedSchema::Single(authored)) = &effective.simplified else {
+        let Some(SchemaRoot::Single(authored)) = &effective.simplified else {
             panic!("the authored `$schema` is a single object");
         };
         let authored_keys: Vec<&str> = authored.properties.keys().map(String::as_str).collect();
@@ -4315,7 +4305,7 @@ mod phase4_trigger_assembly {
     fn property_shape_puts_triggers_over_the_base_and_extension_layers() {
         let repo = three_trigger_repo();
         let (effective, frontmatter) = effective_of(repo.path(), "prompt: hi\n");
-        let SimplifiedSchema::Single(extension) =
+        let SchemaRoot::Single(extension) =
             simplified::parse_yaml_schema(
                 &serde_yaml_ng::from_str("alpha: 'number -> extension'\ndelta: 'string -> extension'\n").unwrap(),
             )
@@ -4323,7 +4313,7 @@ mod phase4_trigger_assembly {
         else {
             panic!("a single-object extension");
         };
-        let SimplifiedSchema::Single(base) = darkmatter_base_schema() else {
+        let SchemaRoot::Single(base) = darkmatter_base_schema() else {
             panic!("the base is a single object");
         };
 

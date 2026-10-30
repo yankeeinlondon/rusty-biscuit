@@ -17,7 +17,7 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::schemas::{
-    Constraint, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SuggestionLintProblem,
+    Constraint, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SuggestionLintProblem,
     TypeExpr,
 };
 use darkmatter::markdown::span::SourceSpan;
@@ -48,7 +48,7 @@ pub fn inline_lints(text: &str, ast: Option<&FrontmatterAst>) -> SuggestionState
 /// The inline `$schema` mapping of a Markdown document, parsed with its
 /// `suggest(...)` candidate spans in document offsets; `None` when there is
 /// no inline mapping or it does not parse.
-pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<SimplifiedSchema> {
+pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<SchemaRoot> {
     let schema_entry = ast?.schema_entry()?;
     if schema_entry.kind != crate::overlay::FmValueKind::Mapping {
         return None;
@@ -74,7 +74,7 @@ pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<Simplif
 /// such candidate is not expanded at all, and a schema whose references fail
 /// to resolve reports nothing here, because resolution reports that failure.
 pub fn reference_lints(
-    schema: &SimplifiedSchema,
+    schema: &SchemaRoot,
     local_types: Option<&SchemaShape>,
     base_dir: &Path,
     defining_file: Option<&Path>,
@@ -102,7 +102,7 @@ pub fn reference_lints(
 
 /// `(span, decoded)` of every `suggest(...)` candidate written on a
 /// named-type reference.
-fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(SourceSpan, String)>) {
+fn collect_reference_candidates(schema: &SchemaRoot, out: &mut Vec<(SourceSpan, String)>) {
     fn walk_shape(shape: &SchemaShape, out: &mut Vec<(SourceSpan, String)>) {
         let definitions = shape
             .properties
@@ -137,8 +137,8 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
         }
     }
     match schema {
-        SimplifiedSchema::Single(root) => walk_shape(root, out),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(root) => walk_shape(root, out),
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(root) = arm {
                     walk_shape(root, out);

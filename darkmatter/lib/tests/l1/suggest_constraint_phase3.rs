@@ -8,7 +8,7 @@ use darkmatter::markdown::{
 use insta::assert_snapshot;
 use serde_json::{Value, json};
 
-fn parse(yaml: &str) -> darkmatter::markdown::schemas::SimplifiedSchema {
+fn parse(yaml: &str) -> darkmatter::markdown::schemas::SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
     parse_yaml_schema(&value).unwrap()
 }

@@ -54,7 +54,7 @@ fn resolved_root_with_definitions(path: &Path) -> (SchemaShape, Definitions) {
     )
     .unwrap_or_else(|error| panic!("{} resolves: {error}", path.display()));
     match resolved.simplified {
-        Some(SimplifiedSchema::Single(shape)) => (shape, Definitions(resolved.definitions)),
+        Some(SchemaRoot::Single(shape)) => (shape, Definitions(resolved.definitions)),
         other => panic!("{} is a single shape: {other:?}", path.display()),
     }
 }

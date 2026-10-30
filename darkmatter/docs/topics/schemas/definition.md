@@ -4400,9 +4400,9 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 
 ```rust
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
-use darkmatter::markdown::schemas::SimplifiedSchema;
+use darkmatter::markdown::schemas::SchemaRoot;
 
-let baseline: SimplifiedSchema = /* ... */;
+let baseline: SchemaRoot = /* ... */;
 
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);

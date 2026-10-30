@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::simplified::{Constraint, PropertyDef, SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::simplified::{Constraint, PropertyDef, SchemaRoot, parse_yaml_schema};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaError, SchemaPhase, ValidationReport, to_json_schema};
 use serde_json::{Value, json};
 
@@ -191,7 +191,7 @@ fn block_and_postfix_key_bounds_merge_as_one_scope() {
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str("meta:\n  \"<string>\": any\n  $constraints:\n    min-keys: 1\n    max-keys: 3\n")
             .unwrap();
-    let SimplifiedSchema::Single(mut shape) = parse_yaml_schema(&value).unwrap() else {
+    let SchemaRoot::Single(mut shape) = parse_yaml_schema(&value).unwrap() else {
         panic!("single schema");
     };
     let Some(PropertyDef::Single(atom)) = shape.properties.get_mut("meta") else {
@@ -199,7 +199,7 @@ fn block_and_postfix_key_bounds_merge_as_one_scope() {
     };
     // The postfix form on the same object, as a constrained reuse produces.
     atom.constraints.extend([Constraint::MinKeys(2), Constraint::MaxKeys(4)]);
-    let schema = to_json_schema(&SimplifiedSchema::Single(shape.clone())).unwrap();
+    let schema = to_json_schema(&SchemaRoot::Single(shape.clone())).unwrap();
     let object = &schema["properties"]["meta"]["anyOf"][1];
     assert_eq!((&object["minProperties"], &object["maxProperties"]), (&json!(2), &json!(3)));
 
@@ -207,7 +207,7 @@ fn block_and_postfix_key_bounds_merge_as_one_scope() {
         unreachable!()
     };
     atom.constraints.push(Constraint::MaxKeys(1));
-    let error = to_json_schema(&SimplifiedSchema::Single(shape)).unwrap_err();
+    let error = to_json_schema(&SchemaRoot::Single(shape)).unwrap_err();
     assert!(error.to_string().contains("`min-keys(2)` is greater than `max-keys(1)`"), "{error}");
 }
 

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use darkmatter::markdown::schemas::{
     SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, StandaloneSchemaEnvelope, parse_schema_declaration,
+    SchemaRoot, StandaloneSchemaEnvelope, parse_schema_declaration,
     parse_standalone_schema_document,
 };
 
@@ -365,5 +365,5 @@ fn standalone_root_union_of_valid_references_is_accepted() {
     let SchemaDeclaration::Schema(_) = &document.declaration else {
         panic!("a sequence payload is a schema declaration");
     };
-    assert!(matches!(schema, SimplifiedSchema::Union(arms) if arms.len() == 2));
+    assert!(matches!(schema, SchemaRoot::Union(arms) if arms.len() == 2));
 }

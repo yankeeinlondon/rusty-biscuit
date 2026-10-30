@@ -357,13 +357,13 @@ fn subtype_relation_is_reachable_through_the_public_schema_api() {
 /// enum, or union admits it (`2026-10-16-type-narrowing` acceptance 5).
 #[test]
 fn narrowed_literals_and_unions_satisfy_their_parameter_types_structurally() {
-    use darkmatter::markdown::schemas::{PropertyDef, SimplifiedSchema, is_definition_subtype, is_subtype};
+    use darkmatter::markdown::schemas::{PropertyDef, SchemaRoot, is_definition_subtype, is_subtype};
     let atom = |text: &str| parse_type_expr("p", text).expect("parses");
     let declared = |body: &str| -> PropertyDef {
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(body).expect("schema YAML");
         match parse_yaml_schema(&yaml).expect("schema parses") {
-            SimplifiedSchema::Single(shape) => shape.properties["p"].clone(),
-            SimplifiedSchema::Union(_) => panic!("a single shape"),
+            SchemaRoot::Single(shape) => shape.properties["p"].clone(),
+            SchemaRoot::Union(_) => panic!("a single shape"),
         }
     };
 

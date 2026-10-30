@@ -9,7 +9,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, DefNamespace, PropertyDef, SchemaConstraintConflictKind, SchemaError,
-    SchemaSourceId, SimplifiedSchema, TypeExpr, ValidationProblemKind, ValidationReport,
+    SchemaSourceId, SchemaRoot, TypeExpr, ValidationProblemKind, ValidationReport,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
@@ -428,7 +428,7 @@ fn definition_presence_and_annotations_move_to_each_use() {
     // Inside the body `kids: node[]` inherits `required` like an inlined use.
     assert_eq!(body["required"], json!(["kids"]));
 
-    let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else { panic!("single shape") };
+    let Some(SchemaRoot::Single(shape)) = &resolved.simplified else { panic!("single shape") };
     let PropertyDef::Single(timed) = &shape.properties["d"] else { panic!("single atom") };
     assert!(matches!(timed.ty, TypeExpr::Ref(_)));
     assert!(timed.constraints.contains(&Constraint::Eager), "{timed:?}");

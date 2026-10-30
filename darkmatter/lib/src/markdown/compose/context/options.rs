@@ -439,7 +439,7 @@ pub struct ComposeOptions {
     /// Optional baseline schema merged with any document `$schema`
     /// before validation runs. When both baseline and document declare
     /// the same property, the document wins.
-    pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+    pub(crate) baseline_schema: Option<crate::markdown::schemas::SchemaRoot>,
 
     /// The stored definitions `baseline_schema`'s references point into:
     /// the shipped baseline's shared types, or empty for a caller-supplied
@@ -1858,7 +1858,7 @@ impl ComposeOptions {
         self
     }
 
-    /// Attach a baseline `SimplifiedSchema` that is merged with any
+    /// Attach a baseline `SchemaRoot` that is merged with any
     /// `$schema` declared in the document before validation runs.
     ///
     /// Callers (e.g. claudine) can register a workspace-wide schema
@@ -1869,7 +1869,7 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_baseline_schema(
         mut self,
-        schema: crate::markdown::schemas::SimplifiedSchema,
+        schema: crate::markdown::schemas::SchemaRoot,
     ) -> Self {
         self.baseline_schema = Some(schema);
         self.baseline_definitions = std::sync::Arc::default();
@@ -1884,7 +1884,7 @@ impl ComposeOptions {
     #[must_use]
     pub(crate) fn with_baseline_schema_and_definitions(
         self,
-        schema: crate::markdown::schemas::SimplifiedSchema,
+        schema: crate::markdown::schemas::SchemaRoot,
         definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
     ) -> Self {
         let mut opts = self.with_baseline_schema(schema);
@@ -2772,7 +2772,7 @@ static DEFAULT_BASELINE_CANONICAL_JSON: std::sync::OnceLock<String> = std::sync:
 /// semantic distinction. The definition-free `schemas::darkmatter_base_schema()`
 /// lowers to different bytes, so it fingerprints as a different baseline.
 fn baseline_canonical_json(
-    schema: &crate::markdown::schemas::SimplifiedSchema,
+    schema: &crate::markdown::schemas::SchemaRoot,
     definitions: &crate::markdown::schemas::DefinitionTable,
     is_darkmatter_default: bool,
 ) -> std::borrow::Cow<'static, str> {

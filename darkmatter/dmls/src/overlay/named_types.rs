@@ -23,7 +23,7 @@ use darkmatter::markdown::schemas::{
     LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError,
     SchemaShape, SchemaSourceMap, SourceAware,
     SchemaSourcePath,
-    SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
+    SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
     parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
 
@@ -130,8 +130,8 @@ impl AuthoredDeclaration {
             return None;
         };
         match schema {
-            SimplifiedSchema::Single(shape) => Some((shape, SchemaSourcePath::root())),
-            SimplifiedSchema::Union(arms) => {
+            SchemaRoot::Single(shape) => Some((shape, SchemaSourcePath::root())),
+            SchemaRoot::Union(arms) => {
                 let Some(SchemaSourcePathSegment::UnionArm(index)) = path.segments().first() else {
                     return None;
                 };
@@ -235,7 +235,7 @@ impl NamedTypeCatalog {
             collect_schema_targets(schema, &mut targets);
         }
         if let Some(types) = &model.local_types {
-            collect_schema_targets(&SimplifiedSchema::Single(types.clone()), &mut targets);
+            collect_schema_targets(&SchemaRoot::Single(types.clone()), &mut targets);
         }
         Self::read(targets, base_dir, schema_roots, context)
     }
@@ -331,10 +331,10 @@ fn collect_yaml_targets(value: &serde_yaml_ng::Value, targets: &mut BTreeSet<Str
     }
 }
 
-fn collect_schema_targets(schema: &SimplifiedSchema, targets: &mut BTreeSet<String>) {
+fn collect_schema_targets(schema: &SchemaRoot, targets: &mut BTreeSet<String>) {
     match schema {
-        SimplifiedSchema::Single(shape) => collect_shape_targets(shape, targets),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => collect_shape_targets(shape, targets),
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(shape) = arm {
                     collect_shape_targets(shape, targets);

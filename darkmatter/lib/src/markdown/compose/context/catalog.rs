@@ -440,10 +440,10 @@ mod tests {
     /// helpers, so a projection bug (reading the wrong field) fails here.
     #[test]
     fn projected_descriptors_match_base_schema() {
-        use crate::markdown::schemas::{SimplifiedSchema, darkmatter_base_schema};
+        use crate::markdown::schemas::{SchemaRoot, darkmatter_base_schema};
 
         let schema = darkmatter_base_schema();
-        let SimplifiedSchema::Single(root) = &schema else {
+        let SchemaRoot::Single(root) = &schema else {
             panic!("base schema must be a single object shape");
         };
         let PropertyDef::Single(ctx_atom) =

@@ -23,13 +23,13 @@ use darkmatter::markdown::compose::expression::{
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
 use darkmatter::markdown::schemas::simplified::{PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 use tempfile::TempDir;
 
 use ArgumentCategory::{Compatible, Incompatible, NullableMatch, Uncertain, Unknown};
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 
@@ -584,7 +584,7 @@ mod declared_builtin_facts {
         assert_eq!(narrowed(&declared, "is_object(v)", Polarity::False, "v"), "string | unknown[]");
     }
 
-    fn schema_with_object_and_array() -> SimplifiedSchema {
+    fn schema_with_object_and_array() -> SchemaRoot {
         schema("v:\n  - string(required)\n  - unknown[](required)\n  - \"{ a: string }\"\n")
     }
 

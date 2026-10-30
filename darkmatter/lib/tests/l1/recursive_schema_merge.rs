@@ -647,10 +647,10 @@ const LEFT_RIGHT_DOCUMENT: &str = "---\nprompt: x\nleft: {}\nright: {}\n---\nbod
 /// The keys completion offers for the value of top-level `property`, through
 /// the layered property shape every editor walk starts from.
 fn completion_keys(effective: &EffectiveSchema, frontmatter: &Value, property: &str) -> Vec<String> {
-    use darkmatter::markdown::schemas::SimplifiedSchema;
+    use darkmatter::markdown::schemas::SchemaRoot;
     use darkmatter::markdown::schemas::completion::{PathStep, for_path_in};
 
-    let shape = SimplifiedSchema::Single(effective.property_shape(&[], frontmatter));
+    let shape = SchemaRoot::Single(effective.property_shape(&[], frontmatter));
     let completion =
         for_path_in(&shape, effective, frontmatter, &[PathStep::Key(property)]).unwrap_or_else(|| panic!("{property}"));
     completion.keys.iter().map(|key| key.name.clone()).collect()

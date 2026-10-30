@@ -18,7 +18,7 @@ use crate::markdown::schemas::embedded::{self, EmbeddedDocument};
 use crate::markdown::schemas::catalog::{DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog};
 use crate::markdown::schemas::resolve::{ResolvedSchema, prepare_embedded_inline_schema, prepare_embedded_schema};
 use crate::markdown::schemas::{
-    DarkmatterSchemas, PropertyDef, SchemaError, SchemaSourceId, SimplifiedSchema, TypeExpr,
+    DarkmatterSchemas, PropertyDef, SchemaError, SchemaSourceId, SchemaRoot, TypeExpr,
 };
 
 const IMPORTER: &str = "schemas/main.yaml";
@@ -52,7 +52,7 @@ fn importer_message(error: SchemaError) -> String {
 
 fn property<'a>(resolved: &'a ResolvedSchema, name: &str) -> &'a PropertyDef {
     match resolved.simplified.as_ref().expect("simplified") {
-        SimplifiedSchema::Single(shape) => &shape.properties[name],
+        SchemaRoot::Single(shape) => &shape.properties[name],
         other => panic!("expected a single shape, got {other:?}"),
     }
 }

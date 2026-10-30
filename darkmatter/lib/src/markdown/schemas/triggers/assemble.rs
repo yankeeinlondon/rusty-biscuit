@@ -702,11 +702,11 @@ mod tally {
 /// A gated payload is never a root union, so only a single-object projection
 /// is kept.
 fn payload_shape(
-    simplified: Option<crate::markdown::schemas::SimplifiedSchema>,
+    simplified: Option<crate::markdown::schemas::SchemaRoot>,
 ) -> Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>> {
     match simplified? {
-        crate::markdown::schemas::SimplifiedSchema::Single(shape) => Some(std::sync::Arc::new(shape)),
-        crate::markdown::schemas::SimplifiedSchema::Union(_) => None,
+        crate::markdown::schemas::SchemaRoot::Single(shape) => Some(std::sync::Arc::new(shape)),
+        crate::markdown::schemas::SchemaRoot::Union(_) => None,
     }
 }
 

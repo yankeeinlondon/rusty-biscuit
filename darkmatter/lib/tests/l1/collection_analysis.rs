@@ -24,7 +24,7 @@ use darkmatter::markdown::compose::policy::BlockingPolicy;
 use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions};
 use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
 use darkmatter::markdown::{Markdown, MarkdownError, SourceRef};
 use serde_json::json;
 use tempfile::TempDir;
@@ -52,7 +52,7 @@ fn failing_host() {
     let _ = install_host_functions(host);
 }
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 

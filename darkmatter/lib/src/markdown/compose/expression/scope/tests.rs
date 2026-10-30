@@ -51,9 +51,9 @@ mod lexical {
 
     use super::*;
     use crate::markdown::compose::expression::{BindingId, parse};
-    use crate::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+    use crate::markdown::schemas::{SchemaRoot, parse_yaml_schema};
 
-    fn schema() -> SimplifiedSchema {
+    fn schema() -> SchemaRoot {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str("person: string\nother: string\n").unwrap();
         parse_yaml_schema(&value).unwrap()
     }

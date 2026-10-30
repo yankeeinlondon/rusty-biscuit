@@ -22,7 +22,7 @@ use darkmatter::markdown::compose::shell_expansion::types::{
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SimplifiedSchema};
+use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SchemaRoot};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -41,7 +41,7 @@ fn typed(command: &str, declarations: &[(&str, &str)]) -> CommandTemplate {
             .insert((*name).to_string(), PropertyDef::Single(parse_type_expr(name, ty).unwrap()));
     }
     let mut template = parse_authored(command).unwrap();
-    let schema = SimplifiedSchema::Single(shape);
+    let schema = SchemaRoot::Single(shape);
     let declared = DeclaredTypes::new(Some(&schema));
     template.project_types(&TypeScope::unguarded(&declared));
     template

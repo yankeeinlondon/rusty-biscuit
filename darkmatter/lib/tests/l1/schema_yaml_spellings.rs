@@ -946,11 +946,11 @@ fn strict_source_aware_parsing_keeps_every_other_presentation_closed() {
 /// The authored spans of each `suggest(...)` candidate of the single-atom
 /// top-level property `name`.
 fn suggestion_spans(
-    schema: &darkmatter::markdown::schemas::SimplifiedSchema,
+    schema: &darkmatter::markdown::schemas::SchemaRoot,
     name: &str,
 ) -> Vec<std::ops::Range<usize>> {
-    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
-    let SimplifiedSchema::Single(shape) = schema else {
+    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SchemaRoot};
+    let SchemaRoot::Single(shape) = schema else {
         panic!("expected a single root shape");
     };
     let PropertyDef::Single(atom) = &shape.properties[name] else {
@@ -1020,8 +1020,8 @@ fn a_suggestion_candidate_crossing_a_fold_projects_one_authored_range() {
         let candidate = start..end;
         assert_eq!(suggestion_spans(schema, "mode"), [candidate], "{newline:?}");
 
-        use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
-        let SimplifiedSchema::Single(shape) = schema else { panic!("single root shape") };
+        use darkmatter::markdown::schemas::{Constraint, PropertyDef, SchemaRoot};
+        let SchemaRoot::Single(shape) = schema else { panic!("single root shape") };
         let PropertyDef::Single(atom) = &shape.properties["mode"] else { panic!("single atom") };
         let decoded: Vec<&str> = atom
             .constraints
@@ -1195,14 +1195,14 @@ fn a_cursor_on_a_continuation_line_reads_the_authored_token() {
 /// (not source order) can tell the two occurrences apart.
 #[test]
 fn a_pattern_key_before_an_identical_property_keeps_its_own_suggestion_spans() {
-    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
+    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SchemaRoot};
 
     for newline in ["\n", "\r\n"] {
         let source = format!(
             "$schema:{newline}  \"<starting::x>\": string(suggest(a,{newline}    b)){newline}  k: string(suggest(a,{newline}    b)){newline}"
         );
         let document = load(&source);
-        let SimplifiedSchema::Single(shape) = document.schema().expect("schema") else {
+        let SchemaRoot::Single(shape) = document.schema().expect("schema") else {
             panic!("expected a single root shape");
         };
         let pattern_line = source.find("<starting").expect("pattern key");

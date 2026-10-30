@@ -48,17 +48,13 @@
 //! }
 //! ```
 
-use std::sync::Arc;
-
 use serde_json::Value;
 
 use super::EffectiveSchema;
 pub use simplified_schema::completion::*;
-use simplified_schema::simplified::query::{
-    Alternative, SuggestionItem, resolved_alternatives, suggestions_by_resolved_alternative,
-};
+use simplified_schema::simplified::query::{Alternative, resolved_alternatives};
 use simplified_schema::simplified::{
-    Constraint, DefKey, Definition, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
+    Constraint, DefKey, Definition, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
 };
 
 /// Resolves a reference in the document's table or a trigger payload's, as
@@ -405,7 +401,7 @@ pub fn for_path(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathSt
 mod tests {
     use super::*;
     use crate::markdown::Markdown;
-    use crate::DarkmatterSchemas;
+    use crate::markdown::schemas::DarkmatterSchemas;
 
     fn effective(yaml_body: &str) -> EffectiveSchema {
         let md_text = format!("---\n{yaml_body}---\nbody\n");

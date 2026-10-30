@@ -1,6 +1,6 @@
 use darkmatter::markdown::schemas::{
     PropertyDef, SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath,
-    SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, parse_property_definition,
+    SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot, parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, parse_yaml_schema,
     classify_schema_reference, resolve::resolve_schema_with_roots,
@@ -15,7 +15,7 @@ fn yaml(source: &str) -> YamlValue {
 fn property_from_schema(value: &YamlValue) -> PropertyDef {
     let mut mapping = serde_yaml_ng::Mapping::new();
     mapping.insert(YamlValue::String("candidate".into()), value.clone());
-    let SimplifiedSchema::Single(mut shape) =
+    let SchemaRoot::Single(mut shape) =
         parse_yaml_schema(&YamlValue::Mapping(mapping)).expect("schema parser must accept value")
     else {
         panic!("one property must produce one schema shape");

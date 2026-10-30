@@ -108,7 +108,7 @@ pub enum SchemaRootState {
 
 /// One of the five schema roots and what it contributes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemaRoot {
+pub struct SchemaSearchRoot {
     /// Which root this is.
     pub kind: SchemaRootKind,
     /// What it contributes.
@@ -133,7 +133,7 @@ pub struct SearchedRoot {
 /// The five schema roots of one document, in search order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaRoots {
-    entries: Vec<SchemaRoot>,
+    entries: Vec<SchemaSearchRoot>,
     searched: Vec<SearchedRoot>,
     search_paths: Vec<PathBuf>,
 }
@@ -208,7 +208,7 @@ impl SchemaRoots {
                     }
                 }
             };
-            entries.push(SchemaRoot { kind, state });
+            entries.push(SchemaSearchRoot { kind, state });
         }
         let search_paths = searched.iter().map(|root| root.path.clone()).collect();
         Ok(Self {
@@ -231,7 +231,7 @@ impl SchemaRoots {
     /// All five roots in search order, including the ones that contribute
     /// nothing, for `md schema triggers`.
     #[must_use]
-    pub fn entries(&self) -> &[SchemaRoot] {
+    pub fn entries(&self) -> &[SchemaSearchRoot] {
         &self.entries
     }
 

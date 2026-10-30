@@ -15,7 +15,7 @@ use darkmatter::markdown::schemas::completion::{
     for_property_value,
 };
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PropertyDef, SimplifiedSchema, SuggestionLintReason,
+    DarkmatterSchemas, EffectiveSchema, PropertyDef, SchemaRoot, SuggestionLintReason,
     SuggestionQuery, TypeExpr, darkmatter_base_schema, flattened_alternatives, lint_suggestions,
     parse_standalone_schema_document, parse_yaml_schema, suggestions_for_def, suggestions_for_path,
 };
@@ -89,7 +89,7 @@ fn item(effective: &EffectiveSchema, property: &str, value: &Value) -> Alternati
 }
 
 fn property_def<'a>(effective: &'a EffectiveSchema, name: &str) -> &'a PropertyDef {
-    let Some(SimplifiedSchema::Single(shape)) = &effective.simplified else {
+    let Some(SchemaRoot::Single(shape)) = &effective.simplified else {
         panic!("expected a single-shape schema");
     };
     shape.properties.get(name).expect("property is declared")
@@ -448,7 +448,7 @@ fn disk_imported_policy_schema_suggests_like_the_embedded_baseline() {
     let disk = effective.simplified.as_ref().expect("simplified schema");
     let embedded = &darkmatter_base_schema();
     let disk_def = property_def(&effective, "content_policy");
-    let SimplifiedSchema::Single(embedded_shape) = embedded else {
+    let SchemaRoot::Single(embedded_shape) = embedded else {
         panic!("the baseline is a single shape");
     };
     let embedded_def = &embedded_shape.properties["content_policy"];
@@ -481,7 +481,7 @@ fn the_shipped_policy_schema_loads_without_suggestion_lints() {
     assert!(document.suggestion_lints.is_empty(), "{:?}", document.suggestion_lints);
 }
 
-fn inline(yaml: &str) -> SimplifiedSchema {
+fn inline(yaml: &str) -> SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml");
     parse_yaml_schema(value.get("$schema").expect("$schema")).expect("schema parses")
 }
@@ -503,7 +503,7 @@ fn union_suggestions_are_judged_against_every_alternative_at_their_site() {
     assert_eq!(rejected, [("3", SuggestionLintReason::Pattern), ("huge", SuggestionLintReason::Pattern)]);
     assert_eq!(problems[0].property_arm, Some(0));
     assert_eq!(suggestion_labels(suggestions_for_path(&property_union, &["size"])), ["small", "large"]);
-    let SimplifiedSchema::Single(shape) = &property_union else {
+    let SchemaRoot::Single(shape) = &property_union else {
         panic!("single shape");
     };
     assert_eq!(suggestion_labels(suggestions_for_def("size", &shape.properties["size"])), ["small", "large"]);

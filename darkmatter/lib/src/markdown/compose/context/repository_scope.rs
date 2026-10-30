@@ -351,7 +351,6 @@ mod tests {
             "markdown/schemas/resolve.rs",
             "markdown/schemas/rewrite.rs",
             "markdown/schemas/detect.rs",
-            "markdown/schemas/format.rs",
             "markdown/compose/expression/path_projection.rs",
             "markdown/compose/expression/functions/mod.rs",
         ] {
@@ -360,6 +359,17 @@ mod tests {
             assert!(
                 !source.contains("find_git_root_from"),
                 "resolver `{relative}` must consume the request snapshot"
+            );
+        }
+
+        // The schema resolver and file formats moved into simplified-schema.
+        let library = biscuit_test_harness::manifest_dir!().join("../../simplified-schema/lib/src");
+        for relative in ["format.rs", "file_context.rs", "file_match.rs", "resolve.rs"] {
+            let source = std::fs::read_to_string(library.join(relative))
+                .unwrap_or_else(|error| panic!("read simplified-schema {relative}: {error}"));
+            assert!(
+                !source.contains("find_git_root_from"),
+                "resolver simplified-schema `{relative}` must consume the request snapshot"
             );
         }
     }

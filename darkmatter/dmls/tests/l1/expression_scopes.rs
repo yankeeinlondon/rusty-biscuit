@@ -23,7 +23,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaRoot, parse_yaml_schema};
 use dmls::overlay::expressions::type_text;
 use serde_json::{Value, json};
 
@@ -50,7 +50,7 @@ fn document(extra: &str, body: &str) -> String {
     format!("---\n$schema:\n{schema}{extra}---\n\n{body}")
 }
 
-fn schema() -> SimplifiedSchema {
+fn schema() -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(SCHEMA).unwrap()).unwrap()
 }
 
@@ -539,7 +539,7 @@ fn every_dmls_site_has_an_explicit_state() {
     }
 }
 
-fn cases_schema() -> SimplifiedSchema {
+fn cases_schema() -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(cases::SCHEMA).unwrap()).unwrap()
 }
 

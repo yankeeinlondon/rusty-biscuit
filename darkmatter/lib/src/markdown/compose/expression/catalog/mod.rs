@@ -21,7 +21,7 @@ use serde_json::Value;
 use crate::catalog::{Described, Example, ExampleVerification};
 use crate::markdown::compose::expression::call_binding::TypeResolver;
 use crate::markdown::schemas::simplified::{
-    Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SimplifiedSchema,
+    Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaRoot,
     StandaloneSchemaEnvelope, TypeExpr, parse_standalone_schema_document, serialize_property_def,
 };
 
@@ -310,7 +310,7 @@ pub(crate) fn load_catalog(
     let Some(categories) = document.categories.as_ref() else {
         return Err(invalid("missing the `categories:` list".into()));
     };
-    let Some(SimplifiedSchema::Single(types)) = document.schema() else {
+    let Some(SchemaRoot::Single(types)) = document.schema() else {
         return Err(invalid("`types:` must be a mapping of named types".into()));
     };
     let raw_entries = raw_type_entries(source);

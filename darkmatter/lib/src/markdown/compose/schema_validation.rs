@@ -47,7 +47,7 @@ use crate::markdown::compose::ComposeReport;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{
     CallerFileReferenceProvenance, DarkmatterSchemas, EffectiveSchema, FileReferenceDiagnostic,
-    JsonPointer, SchemaOriginKind, SimplifiedSchema, ValidationProblem, ValidationProblemCode,
+    JsonPointer, SchemaOriginKind, SchemaRoot, ValidationProblem, ValidationProblemCode,
     ValidationProblemKind,
 };
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
@@ -345,7 +345,7 @@ pub(crate) fn prepare_schemas(
 /// 2. Builds `DarkmatterSchemas::new(context)` over the request's context plus
 ///    the baseline: the process-cached
 ///    compiled JSON Schema when the baseline is the Darkmatter default (F9),
-///    else `.with_baseline(...)` for a caller-supplied `SimplifiedSchema`.
+///    else `.with_baseline(...)` for a caller-supplied `SchemaRoot`.
 /// 3. Resolves the effective schema once and materializes absent, optional,
 ///    no-default top-level bindings owned by a document or referenced-file
 ///    SimplifiedSchema as JSON `null`.
@@ -666,7 +666,7 @@ pub(crate) fn verify_projection_stability(
 /// `null` and other falsey values; repeated schema passes are therefore
 /// idempotent.
 fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &EffectiveSchema) {
-    let Some(SimplifiedSchema::Single(shape)) = effective.simplified.as_ref() else {
+    let Some(SchemaRoot::Single(shape)) = effective.simplified.as_ref() else {
         return;
     };
 
@@ -1825,7 +1825,7 @@ mod tests {
             .into_owned()
     }
     use crate::markdown::schemas::{
-        Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+        Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
     };
     use indexmap::IndexMap;
 
@@ -1840,7 +1840,7 @@ mod tests {
         md.with_source(ComposeSource::File(path.into()))
     }
 
-    fn baseline_required_string(property: &str) -> SimplifiedSchema {
+    fn baseline_required_string(property: &str) -> SchemaRoot {
         let mut properties = IndexMap::new();
         properties.insert(
             property.into(),
@@ -1852,7 +1852,7 @@ mod tests {
                 description: None,
             }),
         );
-        SimplifiedSchema::Single(SchemaShape {
+        SchemaRoot::Single(SchemaShape {
             properties,
             ..Default::default()
         })
@@ -1944,10 +1944,10 @@ mod tests {
             .unwrap()
             .unwrap();
         let expected_order = match effective.simplified.as_ref().unwrap() {
-            SimplifiedSchema::Single(shape) => {
+            SchemaRoot::Single(shape) => {
                 shape.properties.keys().map(String::as_str).collect::<Vec<_>>()
             }
-            SimplifiedSchema::Union(_) => panic!("expected a single schema shape"),
+            SchemaRoot::Union(_) => panic!("expected a single schema shape"),
         };
 
         assert!(run(&mut md, &options).is_ok());
@@ -2012,7 +2012,7 @@ mod tests {
     #[test]
     fn non_document_owned_and_nested_properties_do_not_materialize() {
         let mut baseline_only = md_with_schema("title: hi\n");
-        let baseline = SimplifiedSchema::Single({
+        let baseline = SchemaRoot::Single({
             let mut shape = SchemaShape::new();
             shape.properties.insert(
                 "baseline_optional".into(),
@@ -2352,7 +2352,7 @@ mod tests {
                 description: None,
             }),
         );
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties: baseline_props,
             ..Default::default()
         });
@@ -2924,7 +2924,7 @@ mod tests {
     fn baseline_two_string_properties(
         required: &str,
         optional: &str,
-    ) -> SimplifiedSchema {
+    ) -> SchemaRoot {
         let mut properties = IndexMap::new();
         properties.insert(
             required.into(),
@@ -2946,7 +2946,7 @@ mod tests {
                 description: None,
             }),
         );
-        SimplifiedSchema::Single(SchemaShape {
+        SchemaRoot::Single(SchemaShape {
             properties,
             ..Default::default()
         })

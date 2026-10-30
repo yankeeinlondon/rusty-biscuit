@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaOriginKind, SimplifiedSchema, TypeExpr,
+    Constraint, DarkmatterSchemas, PropertyDef, SchemaOriginKind, SchemaRoot, TypeExpr,
     ValidationProblemKind, ValidationReport, darkmatter_base_json_schema_ref,
     darkmatter_base_schema, lint_suggestions, suggestions_for_def, suggestions_for_path,
 };
@@ -172,7 +172,7 @@ fn declarations_meet_their_baseline_expectations_through_the_embedded_baseline()
 #[test]
 fn the_typed_baseline_carries_the_policy_definitions() {
     let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
-    let SimplifiedSchema::Single(shape) = darkmatter_base_schema() else {
+    let SchemaRoot::Single(shape) = darkmatter_base_schema() else {
         panic!("the baseline is a single shape");
     };
     let PropertyDef::Single(list) = &shape.properties["content_policy"] else {
@@ -349,8 +349,8 @@ fn triggers_and_documents_override_the_embedded_declaration_without_name_collisi
 
 /// The baseline's `content_policy` list definition and its long-form `rule`
 /// definition.
-fn policy_and_rule_defs(schema: &SimplifiedSchema) -> (&PropertyDef, &PropertyDef) {
-    let SimplifiedSchema::Single(shape) = schema else {
+fn policy_and_rule_defs(schema: &SchemaRoot) -> (&PropertyDef, &PropertyDef) {
+    let SchemaRoot::Single(shape) = schema else {
         panic!("the baseline is a single shape");
     };
     let policy = &shape.properties["content_policy"];

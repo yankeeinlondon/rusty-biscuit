@@ -900,7 +900,7 @@ mod tests {
     use super::super::simplified::types::{Constraint, SimplifiedType};
     use crate::markdown::schemas::simplified::parse_yaml_schema;
     use crate::markdown::schemas::simplified::grammar;
-    use crate::markdown::schemas::simplified::{PropertyDef, SimplifiedSchema, TypeExpr};
+    use crate::markdown::schemas::simplified::{PropertyDef, SchemaRoot, TypeExpr};
     use std::collections::HashSet;
 
     /// The array-level constraint set the catalog publishes is the set a
@@ -1137,7 +1137,7 @@ mod tests {
         let Ok(schema) = parse_yaml_schema(&yaml) else {
             return false;
         };
-        let SimplifiedSchema::Single(shape) = &schema else {
+        let SchemaRoot::Single(shape) = &schema else {
             return false;
         };
         let Some(PropertyDef::Single(atom)) = shape.properties.get("p") else {
@@ -1390,7 +1390,7 @@ mod tests {
     }
 
     /// Descriptor examples in the shape catalog parse to a
-    /// `SimplifiedSchema` without error. The shape catalog's examples are
+    /// `SchemaRoot` without error. The shape catalog's examples are
     /// chosen to match the catalog label: the `Single object` example is a
     /// YAML mapping, the `Root-level union` and `Property-level union`
     /// examples are YAML sequences, and the `Inline object literal` example
@@ -1405,7 +1405,7 @@ mod tests {
                     let schema = parse_yaml_schema(&value)
                         .expect("single-mapping example must parse as a SimplifiedSchema");
                     assert!(
-                        matches!(schema, SimplifiedSchema::Single(_)),
+                        matches!(schema, SchemaRoot::Single(_)),
                         "Single object example did not parse as Single: {schema:?}"
                     );
                 }
@@ -1415,7 +1415,7 @@ mod tests {
                     let schema = parse_yaml_schema(&value)
                         .expect("root-union example must parse as a SimplifiedSchema");
                     assert!(
-                        matches!(schema, SimplifiedSchema::Union(_)),
+                        matches!(schema, SchemaRoot::Union(_)),
                         "Root-level union example did not parse as Union: {schema:?}"
                     );
                 }
@@ -1445,7 +1445,7 @@ mod tests {
                     let schema = parse_yaml_schema(&value)
                         .expect("property-union example must parse as a SimplifiedSchema");
                     let shape = match schema {
-                        SimplifiedSchema::Single(s) => s,
+                        SchemaRoot::Single(s) => s,
                         other => panic!("expected Single, got {other:?}"),
                     };
                     let prop = shape.properties.get("x").expect("x property");
@@ -1473,7 +1473,7 @@ mod tests {
                     let schema = parse_yaml_schema(&value)
                         .expect("nested-mapping example must parse as a SimplifiedSchema");
                     let shape = match schema {
-                        SimplifiedSchema::Single(s) => s,
+                        SchemaRoot::Single(s) => s,
                         other => panic!("expected Single, got {other:?}"),
                     };
                     let prop = shape
@@ -1498,7 +1498,7 @@ mod tests {
                         serde_yaml_ng::from_str(d.example).expect("yaml must parse");
                     let schema = parse_yaml_schema(&value)
                         .expect("named-union example must parse as a SimplifiedSchema");
-                    let SimplifiedSchema::Single(shape) = schema else {
+                    let SchemaRoot::Single(shape) = schema else {
                         panic!("expected Single, got {schema:?}");
                     };
                     let (_, reference) = shape

@@ -5,7 +5,7 @@ use biscuit_file::frontmatter::{FrontmatterEnvelopeError, detect_near_miss_fence
 pub use biscuit_file::frontmatter::FrontmatterExtraction;
 use biscuit_terminal::errors::SourceContext;
 
-use super::mapping_orders::MappingOrders;
+use simplified_schema::MappingOrders;
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
 use serde::Serialize;

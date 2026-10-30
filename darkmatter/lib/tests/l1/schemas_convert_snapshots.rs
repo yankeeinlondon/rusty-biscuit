@@ -6,7 +6,7 @@
 //! `cargo insta`.
 
 use darkmatter::markdown::schemas::{
-    PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, parse_yaml_schema,
+    PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, parse_yaml_schema,
     simplified::{grammar::parse_type_expr, to_json_schema},
 };
 use insta::assert_snapshot;
@@ -28,7 +28,7 @@ fn convert_atom(type_expr: &str) -> String {
     shape
         .properties
         .insert("field".to_string(), PropertyDef::Single(atom));
-    let schema = SimplifiedSchema::Single(shape);
+    let schema = SchemaRoot::Single(shape);
     let value = to_json_schema(&schema).expect("convert");
     serde_json::to_string_pretty(&value).expect("serialize")
 }

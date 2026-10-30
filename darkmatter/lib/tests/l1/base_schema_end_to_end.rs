@@ -98,7 +98,7 @@ fn base_schema_file_parses_and_converts() {
     let json = darkmatter_base_json_schema();
 
     match schema {
-        darkmatter::markdown::schemas::SimplifiedSchema::Single(shape) => {
+        darkmatter::markdown::schemas::SchemaRoot::Single(shape) => {
             assert!(shape.properties.contains_key("$schema"));
             assert!(shape.properties.contains_key("title"));
             assert!(shape.properties.contains_key("ctx"));
@@ -117,7 +117,7 @@ fn base_schema_file_parses_and_converts() {
 
 #[test]
 fn shipped_base_schema_exposes_the_nullable_generated_ctx_cwd_contract() {
-    let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+    let darkmatter::markdown::schemas::SchemaRoot::Single(root) =
         darkmatter_base_schema()
     else {
         panic!("base schema must be a single object shape");
@@ -148,7 +148,7 @@ fn shipped_base_schema_exposes_the_nullable_generated_ctx_cwd_contract() {
 
 #[test]
 fn base_style_schema_matches_runtime_descriptor() {
-    let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+    let darkmatter::markdown::schemas::SchemaRoot::Single(root) =
         darkmatter_base_schema()
     else {
         panic!("base schema must be a single object shape");

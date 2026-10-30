@@ -25,7 +25,7 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
 use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_schema};
 use darkmatter::markdown::schemas::simplified::{
-    DefinitionTable, PropertyDef, SchemaDeclaration, SimplifiedSchema, StandaloneSchemaEnvelope, grammar,
+    DefinitionTable, PropertyDef, SchemaDeclaration, SchemaRoot, StandaloneSchemaEnvelope, grammar,
     parse_property_definition, parse_standalone_schema_document, parse_yaml_schema, serialize_property_def, TypeExpr,
 };
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaError, SchemaPhase};
@@ -506,7 +506,7 @@ mod yaml_loader_matrix {
     fn schema_body_scalar_is_a_grammar_error() {
         assert!(matches!(parse_yaml_schema(&yaml("42")), Err(SchemaError::Grammar { .. })));
         assert!(matches!(parse_yaml_schema(&yaml("string")), Err(SchemaError::Grammar { .. })));
-        assert!(matches!(parse_yaml_schema(&yaml("{}")), Ok(SimplifiedSchema::Single(_))));
+        assert!(matches!(parse_yaml_schema(&yaml("{}")), Ok(SchemaRoot::Single(_))));
     }
 
     /// The loader as the file resolver uses it: a `.yaml` reference in a
@@ -742,18 +742,18 @@ items: "{ name: string(suggest(x)) }[]"
 pick: "boolean | string(suggest(s))"
 "#;
 
-    fn schema() -> SimplifiedSchema {
+    fn schema() -> SchemaRoot {
         parse_yaml_schema(&yaml(SCHEMA)).expect("query schema parses")
     }
 
-    fn root_shape(schema: &SimplifiedSchema) -> &darkmatter::markdown::schemas::simplified::SchemaShape {
+    fn root_shape(schema: &SchemaRoot) -> &darkmatter::markdown::schemas::simplified::SchemaShape {
         match schema {
-            SimplifiedSchema::Single(shape) => shape,
-            SimplifiedSchema::Union(_) => panic!("query schema is a single shape"),
+            SchemaRoot::Single(shape) => shape,
+            SchemaRoot::Union(_) => panic!("query schema is a single shape"),
         }
     }
 
-    fn at(schema: &SimplifiedSchema, path: &[PathStep<'_>]) -> Option<(String, AlternativeSite)> {
+    fn at(schema: &SchemaRoot, path: &[PathStep<'_>]) -> Option<(String, AlternativeSite)> {
         def_at_path(schema, &DefinitionTable::default(), &Value::Null, path)
             .map(|(def, site)| (serialize_property_def(&def), site))
     }
@@ -844,7 +844,7 @@ pick: "boolean | string(suggest(s))"
     #[test]
     fn root_union_key_resolves_to_the_union_of_declaring_arms() {
         let schema = parse_yaml_schema(&yaml("- { k: string, x: boolean }\n- { k: number }\n")).expect("root union");
-        assert!(matches!(schema, SimplifiedSchema::Union(_)));
+        assert!(matches!(schema, SchemaRoot::Union(_)));
         let definitions = DefinitionTable::default();
         let (def, site) = def_at_path(&schema, &definitions, &Value::Null, &[PathStep::Key("k")]).expect("k");
         assert!(matches!(def, Cow::Owned(PropertyDef::Union(_))), "got {def:?}");

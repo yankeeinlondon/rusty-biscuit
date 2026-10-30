@@ -26,7 +26,7 @@ use darkmatter::markdown::compose::expression::{
     validate_expression,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -71,7 +71,7 @@ fn test_host(catalog: &str) -> HostFunctions {
         .expect("the test host registers")
 }
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 

@@ -9,7 +9,7 @@ use darkmatter::markdown::schemas::resolve::{ResolvedSchema, expand_named_types,
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef, SchemaConstraintConflictKind,
     SchemaConstraintParticipant,
-    SchemaError, SchemaPhase, SchemaSourceId, SchemaSourcePath, SimplifiedSchema,
+    SchemaError, SchemaPhase, SchemaSourceId, SchemaSourcePath, SchemaRoot,
     SuggestionLintReason, ValidationProblemCode, lint_suggestions,
     parse_standalone_schema_document,
 };
@@ -77,7 +77,7 @@ fn required(resolved: &ResolvedSchema) -> Vec<String> {
 
 /// The resolved single atom of a top-level property.
 fn atom<'a>(resolved: &'a ResolvedSchema, property: &str) -> &'a PropertyAtom {
-    let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+    let Some(SchemaRoot::Single(shape)) = &resolved.simplified else {
         panic!("expected a single simplified shape");
     };
     match &shape.properties[property] {
@@ -542,7 +542,7 @@ fn programmatic_defaults_merge_when_their_lowered_numbers_are_equal() {
         let dir = TempDir::new().expect("tempdir");
         let value: YamlValue = serde_yaml_ng::from_str("base: unknown\ncopy: base\n").unwrap();
         let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
-        let SimplifiedSchema::Single(shape) = &mut schema else {
+        let SchemaRoot::Single(shape) = &mut schema else {
             panic!("single schema");
         };
         // Programmatic callers can supply floats directly; authored literals have
@@ -571,7 +571,7 @@ fn a_programmatic_float_at_the_signed_boundary_does_not_equal_the_smaller_intege
     let dir = TempDir::new().expect("tempdir");
     let value: YamlValue = serde_yaml_ng::from_str("base: unknown\ncopy: base\n").unwrap();
     let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
-    let SimplifiedSchema::Single(shape) = &mut schema else {
+    let SchemaRoot::Single(shape) = &mut schema else {
         panic!("single schema");
     };
     for (name, default) in [("base", json!(i64::MAX)), ("copy", json!(9_223_372_036_854_775_808.0))] {

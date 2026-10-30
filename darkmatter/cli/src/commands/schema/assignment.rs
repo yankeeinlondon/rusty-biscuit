@@ -16,7 +16,7 @@
 
 use darkmatter::markdown::FrontmatterMap;
 use darkmatter::markdown::schemas::{
-    DefKey, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+    DefKey, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot,
     SimplifiedType, TypeExpr,
 };
 use serde_json::{Map, Value};
@@ -170,8 +170,8 @@ fn force_string_for_path(path: &[String], schema: Option<&EffectiveSchema>) -> b
         return false;
     };
     let authored = match effective.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(shape)) => lookup_property(shape, &path[0]),
-        Some(SimplifiedSchema::Union(_)) => return false,
+        Some(SchemaRoot::Single(shape)) => lookup_property(shape, &path[0]),
+        Some(SchemaRoot::Union(_)) => return false,
         None => None,
     };
     let Some(def) = authored.or_else(|| {

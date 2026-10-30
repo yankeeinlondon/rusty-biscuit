@@ -222,13 +222,13 @@ impl HoleType {
     /// ```
     /// use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
     /// use darkmatter::markdown::compose::shell_expansion::template::project_hole;
-    /// use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SimplifiedSchema};
+    /// use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SchemaRoot};
     /// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
     ///
     /// let mut shape = SchemaShape::new();
     /// let count = PropertyDef::Single(parse_type_expr("count", "number(min(1))").unwrap());
     /// shape.properties.insert("count".into(), count);
-    /// let schema = SimplifiedSchema::Single(shape);
+    /// let schema = SchemaRoot::Single(shape);
     /// let declared = DeclaredTypes::new(Some(&schema));
     /// let hole = project_hole("count", &TypeScope::unguarded(&declared));
     /// assert_eq!(hole.display_type(), "string (validated as number(min(1)))");

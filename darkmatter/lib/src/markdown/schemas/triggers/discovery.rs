@@ -44,6 +44,7 @@
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
+use simplified_schema::{SchemaOrigin, SchemaOriginKind};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -104,6 +105,50 @@ impl TriggerSource {
         match self {
             Self::File(path) => SchemaSourceId::File(path.clone()),
             Self::Embedded { bundle, name } => SchemaSourceId::Embedded(format!("{bundle}/{name}")),
+        }
+    }
+}
+
+/// The trigger side of a [`SchemaOrigin`]: building the origin of a
+/// trigger payload's property and recovering the declaring trigger from one.
+/// [`SchemaOrigin`] is the library's; these read Darkmatter's
+/// [`TriggerSource`], so they live here as an extension trait.
+pub trait TriggerOrigin: Sized {
+    /// A schema-trigger-payload origin carrying the envelope file path.
+    fn trigger(path: impl Into<PathBuf>) -> Self;
+
+    /// A schema-trigger-payload origin for the envelope at `source`.
+    fn for_trigger(source: &TriggerSource) -> Self;
+
+    /// The declaring trigger of a [`SchemaOriginKind::Trigger`] origin.
+    fn trigger_source(&self) -> Option<TriggerSource>;
+}
+
+impl TriggerOrigin for SchemaOrigin {
+    fn trigger(path: impl Into<PathBuf>) -> Self {
+        Self::for_trigger(&TriggerSource::File(path.into()))
+    }
+
+    fn for_trigger(source: &TriggerSource) -> Self {
+        Self::trigger_layer(source.source_id())
+    }
+
+    fn trigger_source(&self) -> Option<TriggerSource> {
+        if self.kind != SchemaOriginKind::Trigger {
+            return None;
+        }
+        match self.source.as_ref()? {
+            SchemaSourceId::File(path) => Some(TriggerSource::File(path.clone())),
+            // Bundle names are one path segment, so the first `/` splits
+            // `{bundle}/{name}` unambiguously.
+            SchemaSourceId::Embedded(virtual_path) => {
+                let (bundle, name) = virtual_path.split_once('/')?;
+                Some(TriggerSource::Embedded {
+                    bundle: bundle.to_string(),
+                    name: name.to_string(),
+                })
+            }
+            SchemaSourceId::InlineDocument => None,
         }
     }
 }

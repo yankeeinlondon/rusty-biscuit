@@ -530,10 +530,10 @@ fn single_shape_from_yaml(
     name: &str,
     value: &YamlValue,
 ) -> Result<crate::markdown::schemas::simplified::SchemaShape, SchemaError> {
-    use crate::markdown::schemas::simplified::{SimplifiedSchema, parse_yaml_schema};
+    use crate::markdown::schemas::simplified::{SchemaRoot, parse_yaml_schema};
     match parse_yaml_schema(value)? {
-        SimplifiedSchema::Single(shape) => Ok(shape),
-        SimplifiedSchema::Union(_) => Err(SchemaError::TriggerMatch {
+        SchemaRoot::Single(shape) => Ok(shape),
+        SchemaRoot::Union(_) => Err(SchemaError::TriggerMatch {
             message: format!(
                 "property `{name}` inline object must be a single mapping shape",
             ),
@@ -542,17 +542,17 @@ fn single_shape_from_yaml(
 }
 
 fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>, SchemaError> {
-    use crate::markdown::schemas::simplified::{SimplifiedSchema, parse_yaml_schema};
+    use crate::markdown::schemas::simplified::{SchemaRoot, parse_yaml_schema};
     let items = value.as_sequence().expect("sequence checked by caller");
     let mut atoms = Vec::with_capacity(items.len());
     for item in items {
         match item {
             YamlValue::String(s) => atoms.push(parse_type_expr(name, s)?),
             YamlValue::Mapping(_) => match parse_yaml_schema(item)? {
-                SimplifiedSchema::Single(shape) => {
+                SchemaRoot::Single(shape) => {
                     atoms.push(PropertyAtom::bare_inline_object(shape));
                 }
-                SimplifiedSchema::Union(_) => {
+                SchemaRoot::Union(_) => {
                     return Err(SchemaError::TriggerMatch {
                         message: format!("property `{name}` union arm must be a single shape",),
                     });

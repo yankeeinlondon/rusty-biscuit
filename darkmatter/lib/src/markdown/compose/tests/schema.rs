@@ -376,12 +376,12 @@ mod schema_validation_integration {
     fn baseline_cache_does_not_reuse_across_distinct_baselines() {
         use crate::markdown::compose::CacheAccessMode;
         use crate::markdown::schemas::{
-            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot,
             SimplifiedType, TypeExpr,
         };
         use indexmap::IndexMap;
 
-        fn baseline_required(prop: &str) -> SimplifiedSchema {
+        fn baseline_required(prop: &str) -> SchemaRoot {
             let mut properties = IndexMap::new();
             properties.insert(
                 prop.into(),
@@ -393,7 +393,7 @@ mod schema_validation_integration {
                     description: None,
                 }),
             );
-            SimplifiedSchema::Single(SchemaShape {
+            SchemaRoot::Single(SchemaShape {
                 properties,
                 ..Default::default()
             })
@@ -786,7 +786,7 @@ mod schema_validation_integration {
     #[test]
     fn baseline_file_projection_layers_with_document_schema_and_skips_absent_optional() {
         use crate::markdown::schemas::{
-            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot,
             SimplifiedType, TypeExpr,
         };
         use indexmap::IndexMap;
@@ -822,7 +822,7 @@ mod schema_validation_integration {
                 description: None,
             }),
         );
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties,
             ..Default::default()
         });

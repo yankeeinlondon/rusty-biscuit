@@ -3,7 +3,7 @@
 use darkmatter::markdown::{
     Markdown,
     schemas::{
-        DetectOptions, PropertyDef, SimplifiedSchema, SimplifiedType, TypeExpr,
+        DetectOptions, PropertyDef, SchemaRoot, SimplifiedType, TypeExpr,
         detect_schema, schema_to_yaml, schema_type_descriptors,
         simplified::{grammar::parse_type_expr, serialize_property_atom},
     },
@@ -141,7 +141,7 @@ fn schema_detection_preserves_carrier_only_inference() {
         "---\nBody\n",
     ));
     let detected = detect_schema(&[&markdown], DetectOptions::default(), &crate::request_support::cwd_context());
-    let SimplifiedSchema::Single(shape) = &detected else {
+    let SchemaRoot::Single(shape) = &detected else {
         panic!("one document must detect as one schema shape")
     };
 

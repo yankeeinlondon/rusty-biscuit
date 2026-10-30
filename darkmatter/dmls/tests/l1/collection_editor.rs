@@ -13,7 +13,7 @@ use crate::common::{LspFixture, LspWorkspace};
 use darkmatter::markdown::compose::collection_blocks::BodyScopes;
 use darkmatter::markdown::compose::expression::{DeclaredTypes, Expr, SourceProjection, TypeScope};
 use darkmatter::markdown::compose::ComposeOperationSet;
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
 use dmls::overlay::expressions::{shape_text, type_text};
 use serde_json::{Value, json};
 
@@ -26,7 +26,7 @@ const SCHEMA: &str = concat!(
     "  note: string\n",
 );
 
-fn schema() -> SimplifiedSchema {
+fn schema() -> SchemaRoot {
     let yaml: String = SCHEMA.lines().map(|line| format!("{}\n", line.trim_start())).collect();
     parse_yaml_schema(&serde_yaml_ng::from_str(&yaml).unwrap()).unwrap()
 }

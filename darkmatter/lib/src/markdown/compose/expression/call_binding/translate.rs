@@ -1,4 +1,4 @@
-//! The grammar translator: SimplifiedSchema type descriptors → coercion
+//! The grammar translator: SchemaRoot type descriptors → coercion
 //! [`Shape`]s.
 //!
 //! It maps syntax only; the coercion core alone decides keep, convert, or
@@ -47,7 +47,7 @@ use crate::markdown::schemas::format::{
 };
 use crate::markdown::schemas::simplified::{
     AlphanumericOptions, Constraint, DefKey, DefinitionOuter, DefinitionTable, PatternKey, PropertyAtom, PropertyDef,
-    SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType, TupleType, TypeExpr,
+    SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TupleType, TypeExpr,
 };
 use crate::markdown::schemas::validate::ValidatorCache;
 
@@ -201,7 +201,7 @@ pub fn property_shape_from_def_with_definitions(
 ///
 /// As [`shape_from_property_def`], plus an unresolved root-union file arm.
 pub fn shape_from_simplified_schema(
-    schema: &SimplifiedSchema,
+    schema: &SchemaRoot,
     resolver: &dyn TypeResolver,
 ) -> Result<Shape, TranslateError> {
     shape_from_simplified_schema_with_definitions(schema, resolver, &NO_DEFINITIONS)
@@ -216,14 +216,14 @@ pub fn shape_from_simplified_schema(
 /// As [`shape_from_simplified_schema`], plus [`TranslateError::Invalid`] for
 /// a reference whose definition `definitions` does not hold.
 pub fn shape_from_simplified_schema_with_definitions(
-    schema: &SimplifiedSchema,
+    schema: &SchemaRoot,
     resolver: &dyn TypeResolver,
     definitions: &DefinitionTable,
 ) -> Result<Shape, TranslateError> {
     let mut translator = Translator::new(resolver, definitions);
     match schema {
-        SimplifiedSchema::Single(shape) => translator.root_object(shape),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => translator.root_object(shape),
+        SchemaRoot::Union(arms) => {
             let mut options = Vec::with_capacity(arms.len());
             for (index, arm) in arms.iter().enumerate() {
                 match arm {

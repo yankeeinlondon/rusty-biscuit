@@ -18,7 +18,7 @@ use crate::markdown::compose::expression::{
 use crate::markdown::schemas::catalog::GlobalCatalog;
 use crate::markdown::schemas::{
     DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, TypeExpr,
+    SchemaRoot, TypeExpr,
 };
 
 /// The declarations one owner's sites share: its schema projection, its
@@ -33,7 +33,7 @@ use crate::markdown::schemas::{
 /// the baseline and every raw JSON Schema layer.
 #[derive(Debug, Clone, Copy)]
 pub struct DeclaredTypes<'s> {
-    schema: Option<&'s SimplifiedSchema>,
+    schema: Option<&'s SchemaRoot>,
     trigger_shapes: &'s [Arc<SchemaShape>],
     raw: Option<&'s RawDeclarations>,
     definitions: Option<&'s DefinitionTable>,
@@ -196,7 +196,7 @@ impl<'s> DeclaredTypes<'s> {
     /// The declared layer of an owner whose only layer is `schema`, with no
     /// static frontmatter and no host roots. [`Self::for_schema`] is the
     /// complete projection of an effective schema.
-    pub const fn new(schema: Option<&'s SimplifiedSchema>) -> Self {
+    pub const fn new(schema: Option<&'s SchemaRoot>) -> Self {
         Self {
             schema,
             trigger_shapes: &[],
@@ -209,7 +209,7 @@ impl<'s> DeclaredTypes<'s> {
     }
 
     /// The declared layer of every layer of `schema`, after resolution and
-    /// merging: the authored SimplifiedSchema, the matching trigger shapes,
+    /// merging: the authored SchemaRoot, the matching trigger shapes,
     /// and the merged JSON Schema's [`RawDeclarations`], with recursive
     /// references resolving in [`EffectiveSchema::layered_definitions`].
     /// `None` is an owner with no schema.
@@ -396,12 +396,12 @@ impl<'s> DeclaredTypes<'s> {
     /// [`Shape::union`]. An `unknown` result is [`Declaration::NoProjection`].
     pub(crate) fn declaration(&self, key: &str) -> Declaration<'s> {
         match self.schema {
-            Some(SimplifiedSchema::Single(shape)) => {
+            Some(SchemaRoot::Single(shape)) => {
                 if let Some(def) = shape.properties.get(key) {
                     return Declaration::Found(Cow::Borrowed(def));
                 }
             }
-            Some(SimplifiedSchema::Union(arms)) => {
+            Some(SchemaRoot::Union(arms)) => {
                 if let Some(folded) = self.root_union_declaration(arms, key) {
                     return folded;
                 }
@@ -478,8 +478,8 @@ impl<'s> DeclaredTypes<'s> {
         let mut names: Vec<&str> = Vec::new();
         match self.schema {
             None => {}
-            Some(SimplifiedSchema::Single(shape)) => names.extend(shape.properties.keys().map(String::as_str)),
-            Some(SimplifiedSchema::Union(arms)) => {
+            Some(SchemaRoot::Single(shape)) => names.extend(shape.properties.keys().map(String::as_str)),
+            Some(SchemaRoot::Union(arms)) => {
                 for arm in arms {
                     if let SchemaArm::Inline(shape) = arm {
                         names.extend(shape.properties.keys().map(String::as_str));

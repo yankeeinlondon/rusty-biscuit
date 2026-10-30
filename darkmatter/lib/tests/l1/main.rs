@@ -6,7 +6,6 @@
 //! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
-mod coercion_core;
 mod coercion_engine_parity;
 mod coercion_translator_conformance;
 mod function_call_binding;

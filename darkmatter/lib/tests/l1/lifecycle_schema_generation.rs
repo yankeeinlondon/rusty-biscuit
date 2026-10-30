@@ -17,7 +17,7 @@ use darkmatter::markdown::compose::expression::{
     ExpressionFunctionDescriptor, expression_function_catalog, expression_function_descriptors,
 };
 use darkmatter::markdown::schemas::simplified::{
-    PropertyAtom, PropertyDef, SimplifiedSchema, TypeExpr, parse_standalone_schema_document,
+    PropertyAtom, PropertyDef, SchemaRoot, TypeExpr, parse_standalone_schema_document,
 };
 
 const PARTIAL: &str = "darkmatter/schemas/partials/lifecycle.yaml";
@@ -32,7 +32,7 @@ fn types_of(text: &str) -> indexmap::IndexMap<String, PropertyDef> {
         .expect("the partial parses")
         .expect("the partial is a schema document");
     match document.schema() {
-        Some(SimplifiedSchema::Single(shape)) => shape.properties.clone(),
+        Some(SchemaRoot::Single(shape)) => shape.properties.clone(),
         other => panic!("`types:` is not one mapping: {other:?}"),
     }
 }

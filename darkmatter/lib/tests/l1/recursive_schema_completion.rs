@@ -17,7 +17,7 @@ use darkmatter::markdown::schemas::completion::{
 use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef,
-    SimplifiedSchema, TypeExpr,
+    SchemaRoot, TypeExpr,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -52,7 +52,7 @@ fn effective(dir: &TempDir, schema: &str) -> EffectiveSchema {
         .expect("the document declares a schema")
 }
 
-fn simplified(effective: &EffectiveSchema) -> &SimplifiedSchema {
+fn simplified(effective: &EffectiveSchema) -> &SchemaRoot {
     effective.simplified.as_ref().expect("a SimplifiedSchema projection")
 }
 
@@ -208,7 +208,7 @@ fn a_missing_definition_offers_nothing() {
         assert_eq!(for_path_in(schema, &empty, &Value::Null, &tree_path(depth)), None, "level {depth}");
     }
 
-    let SimplifiedSchema::Single(shape) = schema else { panic!("a single shape") };
+    let SchemaRoot::Single(shape) = schema else { panic!("a single shape") };
     let PropertyDef::Single(tree) = &shape.properties["tree"] else { panic!("a single atom") };
     assert!(matches!(tree.ty, TypeExpr::Ref(_)), "{tree:?}");
     let node = json!({ "value": "a", "children": [] });
@@ -249,7 +249,7 @@ fn a_recursive_discriminated_union_narrows_at_every_level() {
     let below_empty = [root, kids, PathStep::Index(0), kids, PathStep::Index(1), kids, PathStep::Index(0)];
     assert_eq!(keys(&at(&below_empty).expect("an unnarrowed element")), ["kind", "text", "kids"]);
 
-    let SimplifiedSchema::Single(shape) = simplified(&effective) else { panic!("a single shape") };
+    let SchemaRoot::Single(shape) = simplified(&effective) else { panic!("a single shape") };
     let alternatives = resolved_alternatives(&shape.properties["root"], &effective);
     assert_eq!(alternatives.len(), 2, "the reference opens to both arms");
     let branch = alternatives[1].atom;
@@ -262,7 +262,7 @@ fn a_recursive_discriminated_union_narrows_at_every_level() {
 
 /// The `index`th alternative `root` opens to in `effective`.
 fn root_alternative(effective: &EffectiveSchema, index: usize) -> &PropertyAtom {
-    let SimplifiedSchema::Single(shape) = simplified(effective) else { panic!("a single shape") };
+    let SchemaRoot::Single(shape) = simplified(effective) else { panic!("a single shape") };
     resolved_alternatives(&shape.properties["root"], effective)[index].atom
 }
 

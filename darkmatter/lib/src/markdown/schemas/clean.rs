@@ -39,7 +39,7 @@ use serde_json::Value;
 
 use super::scope::SchemaScope;
 use super::{
-    DarkmatterSchemas, EffectiveSchema, SchemaError, SimplifiedSchema, ValidationProblem,
+    DarkmatterSchemas, EffectiveSchema, SchemaError, SchemaRoot, ValidationProblem,
     ValidationProblemCode, ValidationReport, validate,
 };
 use crate::markdown::Markdown;
@@ -58,7 +58,7 @@ pub enum CleanBaselineSchema {
     /// No baseline at all.
     Disabled,
     /// A caller-parsed SimplifiedSchema baseline.
-    Schema(SimplifiedSchema),
+    Schema(SchemaRoot),
     /// A baseline loaded from a SimplifiedSchema (or raw JSON Schema) file.
     File(PathBuf),
 }
@@ -98,7 +98,7 @@ impl CleanSchemaConfig {
     /// Replaces the default baseline with a caller-parsed SimplifiedSchema
     /// (the library form of `--baseline-schema PATH`).
     #[must_use]
-    pub fn with_baseline_schema(mut self, schema: SimplifiedSchema) -> Self {
+    pub fn with_baseline_schema(mut self, schema: SchemaRoot) -> Self {
         self.baseline = CleanBaselineSchema::Schema(schema);
         self
     }

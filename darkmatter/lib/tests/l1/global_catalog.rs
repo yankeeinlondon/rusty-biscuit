@@ -18,7 +18,7 @@ use darkmatter::markdown::schemas::catalog::{
     CatalogError, CatalogErrorReason, DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog,
 };
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaError, SchemaOriginKind, SimplifiedSchema, SimplifiedType,
+    Constraint, DarkmatterSchemas, PropertyDef, SchemaError, SchemaOriginKind, SchemaRoot, SimplifiedType,
     TypeExpr, darkmatter_base_json_schema, darkmatter_base_schema, to_json_schema, to_json_schema_with_definitions,
 };
 
@@ -145,7 +145,7 @@ fn the_runtime_baseline_is_the_catalogs_fm_definition() {
     assert_eq!(to_json_schema_with_definitions(&baseline, &definitions).expect("lowers"), darkmatter_base_json_schema());
     // The definition-free form declares the same members, every acyclic use
     // expanded.
-    let (SimplifiedSchema::Single(shared), SimplifiedSchema::Single(inline)) = (&baseline, &darkmatter_base_schema())
+    let (SchemaRoot::Single(shared), SchemaRoot::Single(inline)) = (&baseline, &darkmatter_base_schema())
     else {
         panic!("the baseline is an object shape");
     };
