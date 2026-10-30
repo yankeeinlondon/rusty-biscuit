@@ -25,19 +25,24 @@ pub mod error;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 mod glob;
+mod lexical;
 mod parse;
 mod portable;
+#[cfg(feature = "file-reference")]
 mod resolve;
 
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
-pub use glob::{GlobListing, GlobReference, GlobReferenceError, PreparedGlobReference, SkippedEntry};
+pub use glob::{GlobReference, GlobReferenceError};
+#[cfg(feature = "file-reference")]
+pub use glob::{GlobListing, PreparedGlobReference, SkippedEntry};
+pub use portable::{IntentForms, PathIdentity, PortabilityPreference, RelativeRoute};
+#[cfg(feature = "file-reference")]
 pub use portable::{
     Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
-    IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PathIdentity,
-    PortabilityPreference, PortablePath, PortablePathError, PortableReference, ProbeError,
-    RelativeRoute, ResolutionProblem, SpellingProblem,
+    InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortablePath, PortablePathError,
+    PortableReference, ProbeError, ResolutionProblem, SpellingProblem,
 };
 
 #[cfg(feature = "fetch")]
@@ -48,9 +53,11 @@ pub use error::FetchError;
 /// `prompts/` directories) around the resolver's intrinsic scope roots.
 pub use context::{
     BaseDirOrigin, ContextAnchor, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
-    RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, capture_env, find_git_root,
+    RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, capture_env,
     home_dir, user_cache_dir, user_cache_dir_from,
 };
+#[cfg(feature = "file-reference")]
+pub use context::find_git_root;
 
 /// The classified kind of a file reference.
 ///
@@ -153,12 +160,14 @@ pub enum MagicPathTier {
 /// without re-deriving the chain. A configured root carries
 /// [`RootProvenance::Magic`]; the intrinsic roots carry their kind
 /// provenances.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MagicSearchRoot {
     path: PathBuf,
     provenance: RootProvenance,
 }
 
+#[cfg(feature = "file-reference")]
 impl MagicSearchRoot {
     /// The normalized, absolute root directory.
     pub fn path(&self) -> &Path {
@@ -171,6 +180,7 @@ impl MagicSearchRoot {
     }
 }
 
+#[cfg(feature = "file-reference")]
 pub(crate) fn make_magic_search_root(
     path: PathBuf,
     provenance: RootProvenance,
@@ -179,6 +189,7 @@ pub(crate) fn make_magic_search_root(
 }
 
 /// Ordering policy for an unprobed candidate plan.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum CandidatePlanOrder {
     /// Preserve the reference kind's normal resolution order.
@@ -211,6 +222,7 @@ impl ResolutionCandidate {
     }
 }
 
+#[cfg(feature = "file-reference")]
 pub(crate) fn make_candidate(path: PathBuf, provenance: RootProvenance) -> ResolutionCandidate {
     ResolutionCandidate { path, provenance }
 }
@@ -221,6 +233,7 @@ pub(crate) fn make_candidate(path: PathBuf, provenance: RootProvenance) -> Resol
 /// disposition stops it (the underlying error is retained on the
 /// [`DetailedResolution`]). `SearchRoot` marks a recursive search root rather
 /// than a directly probed file.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeDisposition {
     /// The path does not exist.
@@ -236,12 +249,14 @@ pub enum ProbeDisposition {
 }
 
 /// One attempted candidate paired with its probe disposition.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbedCandidate {
     candidate: ResolutionCandidate,
     disposition: ProbeDisposition,
 }
 
+#[cfg(feature = "file-reference")]
 impl ProbedCandidate {
     /// The candidate that was probed.
     pub fn candidate(&self) -> &ResolutionCandidate {
@@ -254,6 +269,7 @@ impl ProbedCandidate {
     }
 }
 
+#[cfg(feature = "file-reference")]
 pub(crate) fn make_probed(
     candidate: ResolutionCandidate,
     disposition: ProbeDisposition,
@@ -309,6 +325,7 @@ impl ResolutionFailure {
 }
 
 /// The terminal outcome of a detailed resolution.
+#[cfg(feature = "file-reference")]
 #[derive(Debug)]
 pub enum DetailedOutcome {
     /// A candidate matched; carries the resolved absolute path.
@@ -328,6 +345,7 @@ pub enum DetailedOutcome {
 ///
 /// A no-match is a typed [`DetailedOutcome::Failed`] carrying
 /// [`ResolutionFailure::NoMatch`], never a silent `Ok(None)`.
+#[cfg(feature = "file-reference")]
 #[derive(Debug)]
 pub struct DetailedResolution {
     raw: String,
@@ -341,6 +359,7 @@ pub struct DetailedResolution {
     error: Option<FileReferenceError>,
 }
 
+#[cfg(feature = "file-reference")]
 impl DetailedResolution {
     /// The raw authored reference string.
     pub fn raw(&self) -> &str {
@@ -458,6 +477,7 @@ const GLOB_HINT: &str = "`*`, `?`, and `[` are literal in a file reference; \
 ///
 /// Corresponds to the subset of [`FileReferenceKind`] variants that
 /// [`FileReference::complete_partial`] supports.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionEntryForm {
     /// `@`-prefixed magic path. Roots follow the `@` chain's tier order:
@@ -481,6 +501,7 @@ pub enum CompletionEntryForm {
 /// supported entry forms. Exposes the absolute directories a completion
 /// consumer should enumerate, the partial filename being matched, and the
 /// prefix the shell will re-insert in front of each emitted candidate.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone)]
 pub struct PartialCompletion {
     entry_form: CompletionEntryForm,
@@ -489,6 +510,7 @@ pub struct PartialCompletion {
     rendered_prefix: String,
 }
 
+#[cfg(feature = "file-reference")]
 impl PartialCompletion {
     /// The classified entry form of the token.
     pub fn entry_form(&self) -> CompletionEntryForm {
@@ -524,6 +546,7 @@ impl PartialCompletion {
     }
 }
 
+#[cfg(feature = "file-reference")]
 pub(crate) fn make_partial_completion(
     entry_form: CompletionEntryForm,
     roots: Vec<PathBuf>,
@@ -542,6 +565,7 @@ pub(crate) fn make_partial_completion(
 ///
 /// Distinguishes between local filesystem paths and remote URLs so callers
 /// can handle each appropriately.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolved {
     /// A local filesystem path.
@@ -602,7 +626,10 @@ pub enum PathPosition {
 pub struct FileReference {
     raw: String,
     parsed: ParsedReference,
+    // Only resolution reads the configured roots.
+    #[cfg_attr(not(feature = "file-reference"), allow(dead_code))]
     magic_paths: MagicPathList,
+    #[cfg_attr(not(feature = "file-reference"), allow(dead_code))]
     vault_roots: Vec<PathBuf>,
 }
 
@@ -693,7 +720,10 @@ impl FileReference {
         self.vault_roots.push(path.into());
         self
     }
+}
 
+#[cfg(feature = "file-reference")]
+impl FileReference {
     /// Resolve the reference to an absolute filesystem path.
     ///
     /// Uses the ambient process working directory for relative, `@`, `&`, and

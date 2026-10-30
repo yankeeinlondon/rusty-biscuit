@@ -118,7 +118,7 @@ as `/`.
 
 Because rendering is lossy, rendered text is never a comparison key. To ask
 "is this path inside that directory?" or "what is the relative route from here
-to there?", use `PathIdentity` (feature `file-reference`), which compares whole
+to there?", use `PathIdentity` (feature `file-reference-syntax`), which compares whole
 components losslessly:
 
 ```rust
@@ -138,7 +138,7 @@ whenever a canonical path is returned, stored, shown, or parsed again; a raw
 `canonicalize` belongs only inside a comparison where both sides are
 canonicalized the same way.
 
-`home_dir()` (feature `file-reference`) is the one home reader: `HOME` on macOS
+`home_dir()` (feature `file-reference-syntax`) is the one home reader: `HOME` on macOS
 and Linux, `USERPROFILE` on native Windows (setting only `HOME` there changes
 nothing), the platform profile lookup when the variable is unset, and `None`
 for a relative value. The result is used as spelled, never canonicalized.

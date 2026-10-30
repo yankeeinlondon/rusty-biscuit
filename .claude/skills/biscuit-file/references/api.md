@@ -183,9 +183,9 @@ A short root can simplify while its long descendant cannot.
 ```rust
 // Unfeatured. `dunce::canonicalize`: std's result, minus a reducible `\\?\`.
 let real: std::io::Result<PathBuf> = biscuit_file::canonicalize_simplified(path);
-// Feature `file-reference`. HOME (POSIX) / USERPROFILE (Windows), relative → None.
+// Feature `file-reference-syntax`. HOME (POSIX) / USERPROFILE (Windows), relative → None.
 let home: Option<PathBuf> = biscuit_file::home_dir();
-// Feature `file-reference`. Per-user cache root; None when it cannot be named.
+// Feature `file-reference-syntax`. Per-user cache root; None when it cannot be named.
 let cache: Option<PathBuf> = biscuit_file::user_cache_dir();
 // The same rules over an injected env lookup and home (a request snapshot's).
 let cache: Option<PathBuf> = biscuit_file::user_cache_dir_from(|name| env.get(name).map(Into::into), home.as_deref());
@@ -207,7 +207,7 @@ let cache: Option<PathBuf> = biscuit_file::user_cache_dir_from(|name| env.get(na
   uses it instead of reading the process.
 
 ## Path Identity
-Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference`)
+Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference-syntax`)
 
 ```rust
 use std::path::Path;
@@ -246,7 +246,7 @@ re-parses and rejects `Unrenderable` (non-Unicode), `ChangesComponents` (Unix
 `NoPortableSpelling`.
 
 ## Portable References: `PortablePath`
-Source: `biscuit-file/lib/src/file_reference/portable/{evaluate,strategy,env_anchor,diagnostics}.rs` (feature `file-reference`)
+Source: `biscuit-file/lib/src/file_reference/portable/{evaluate,strategy,env_anchor,diagnostics}.rs` (feature `file-reference`; `PortabilityPreference` and `IntentForms` need only `file-reference-syntax`)
 
 ```rust
 use biscuit_file::{FileReference, PortabilityPreference as P, PortablePath, PortablePathError};

@@ -105,6 +105,7 @@ impl GlobReferenceError {
 
     /// Attach `pattern` to a resolution error, giving the tree-escape and
     /// missing-repository failures their own variants.
+    #[cfg(feature = "file-reference")]
     pub(crate) fn from_reference(pattern: &str, source: FileReferenceError) -> Self {
         match source {
             FileReferenceError::RelativeTreeEscape {
@@ -134,6 +135,7 @@ impl GlobReferenceError {
     /// The single-file error a recursive (`%`) reference reports for this
     /// failure. The `%` search builds its glob itself, so only resolution
     /// failures reach here.
+    #[cfg(feature = "file-reference")]
     pub(crate) fn into_reference_error(self) -> FileReferenceError {
         match self {
             Self::RelativeTreeEscape {

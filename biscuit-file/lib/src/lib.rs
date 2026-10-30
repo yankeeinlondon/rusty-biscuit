@@ -9,6 +9,8 @@
 //! - **PDF**: Extract text, convert to Markdown, extract table of contents
 //! - **FileReference**: Parse compact file descriptors (`@`, `&`, `^`, `vault:`, `%`,
 //!   `{{ENV}}`) and resolve them lazily against runtime context
+//! - **Frontmatter**: Locate a Markdown document's leading `---` block with byte
+//!   spans, without parsing it (`frontmatter`, needs `yaml`)
 //! - **Fetch**: Feature-gated HTTP fetch primitive with policy-enforcing host
 //!   allowlists, conditional request headers, and structured responses
 //!
@@ -22,8 +24,9 @@
 //! | `extract` | Yes | PDF text extraction via pdf-extract |
 //! | `lopdf` | Yes | PDF TOC extraction via lopdf |
 //! | `pdfium` | No | High-fidelity PDF extraction via pdfium-render |
-//! | `file-reference` | Yes | File reference parsing and resolution |
-//! | `url` | Yes (via `file-reference`) | URL classification for remote references |
+//! | `file-reference-syntax` | Yes (via `file-reference`) | Passive file and glob reference grammar, its types, and `FileResolutionContext` as data; no `gix` or `walkdir` |
+//! | `file-reference` | Yes | File reference resolution, glob listing, portable references, and git root discovery |
+//! | `url` | Yes (via `file-reference-syntax`) | URL classification for remote references |
 //! | `fetch` | No | HTTP fetch primitive with host policy enforcement |
 //! | `schema` | No | JSON Schema validation for TOML/YAML |
 //! | `full` | No | All features enabled |
@@ -113,13 +116,18 @@ pub mod toml_impl;
 #[cfg(feature = "yaml")]
 pub mod yaml;
 
+// The frontmatter envelope reader needs YAML only to recognize a near-miss
+// `----` fence that encloses a mapping.
+#[cfg(feature = "yaml")]
+pub mod frontmatter;
+
 #[cfg(feature = "json5")]
 pub mod json5;
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub mod pdf;
 
-#[cfg(feature = "file-reference")]
+#[cfg(feature = "file-reference-syntax")]
 pub mod file_reference;
 
 // Re-export core error type
@@ -159,27 +167,29 @@ pub use self::json5::{Json5, Json5Error, Json5Source};
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 
+#[cfg(feature = "file-reference-syntax")]
+pub use self::file_reference::{
+    BaseDirOrigin, ContextAnchor, FileReference, FileReferenceClass, FileReferenceError,
+    FileReferenceKind, FileResolutionContext, GlobReference, GlobReferenceError, IntentForms,
+    LaunchMagicScope, MagicPathRegistration, MagicPathTier, PackageAreaFallback, PathIdentity,
+    PathPosition, PortabilityPreference, RelativeRoute, RepositoryScope, RepositoryScopeCatalog,
+    RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure, RootProvenance,
+    capture_env, home_dir, user_cache_dir, user_cache_dir_from,
+};
+
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    BaseDirOrigin, CandidatePlanOrder, CompletionEntryForm, ContextAnchor, DetailedOutcome, DetailedResolution, FileReference,
-    FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
-    GlobListing, GlobReference, GlobReferenceError, PreparedGlobReference, SkippedEntry,
-    LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
-    PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
-    RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,
-    RelativeRoute, RootProvenance, capture_env, find_git_root, home_dir, user_cache_dir, user_cache_dir_from,
+    CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, GlobListing,
+    MagicSearchRoot, PartialCompletion, PreparedGlobReference, ProbeDisposition, ProbedCandidate,
+    Resolved, SkippedEntry, find_git_root,
 };
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
     Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
-    IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortabilityPreference,
-    PortablePath, PortablePathError, PortableReference, ProbeError, ResolutionProblem,
-    SpellingProblem,
+    InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortablePath, PortablePathError,
+    PortableReference, ProbeError, ResolutionProblem, SpellingProblem,
 };
-
-#[cfg(feature = "url")]
-pub use self::file_reference::Resolved;
 
 #[cfg(feature = "fetch")]
 pub use self::file_reference::{

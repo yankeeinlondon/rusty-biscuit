@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use super::ResolutionFailure;
+
 #[derive(Debug, thiserror::Error)]
 pub enum FileReferenceError {
     #[error("file reference syntax is invalid: {0}")]
@@ -19,6 +21,7 @@ pub enum FileReferenceError {
     #[error("could not determine the current working directory: {0}")]
     CurrentDirectory(#[source] std::io::Error),
 
+    #[cfg(feature = "file-reference")]
     #[error("could not inspect git repository state: {0}")]
     Git(#[source] Box<gix::discover::Error>),
 
@@ -122,6 +125,52 @@ pub enum FileReferenceError {
     #[cfg(feature = "url")]
     #[error("invalid URL: {0}")]
     InvalidUrl(String),
+}
+
+impl FileReferenceError {
+    /// The [`ResolutionFailure`] class of this error.
+    ///
+    /// This is the same classification
+    /// [`DetailedResolution`](crate::file_reference::DetailedResolution) reports for a
+    /// failed outcome. It is never [`ResolutionFailure::NoMatch`], which is an
+    /// outcome without an error.
+    #[must_use]
+    pub fn resolution_failure(&self) -> ResolutionFailure {
+        classify_error(self)
+    }
+}
+
+/// Map a typed [`FileReferenceError`] onto its resolution-failure class.
+///
+/// The class must not be re-derived from the reference kind downstream (D8);
+/// permission/I/O failures in particular must stay distinct from `no_match`.
+pub(crate) fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
+    use FileReferenceError as E;
+    match error {
+        E::RemoteNotLocal(_) => ResolutionFailure::UnsupportedRemote,
+        #[cfg(feature = "url")]
+        E::InvalidUrl(_) => ResolutionFailure::UnsupportedRemote,
+        E::InvalidSyntax(_)
+        | E::ForeignAbsolutePath { .. }
+        | E::UnsupportedScheme { .. }
+        | E::RepositoryEscape { .. }
+        | E::BoundaryEscape { .. }
+        | E::RelativeTreeEscape { .. }
+        | E::RelativePath { .. } => ResolutionFailure::InvalidReference,
+        E::MissingEnvironmentVariable { .. }
+        | E::VaultNotConfigured
+        | E::MissingHomeContext
+        | E::OutsideRepository { .. }
+        | E::UnsupportedUserHome(_)
+        | E::RepositoryRootNotContainingSource { .. }
+        | E::CwdOutsideBaseDir { .. }
+        | E::RelativeContextDirectory { .. }
+        | E::BaseDirNotRepositoryRoot { .. }
+        | E::BareRepository => ResolutionFailure::MissingContext,
+        #[cfg(feature = "file-reference")]
+        E::Git(_) => ResolutionFailure::MissingContext,
+        E::Io { .. } | E::CurrentDirectory(_) => ResolutionFailure::Io,
+    }
 }
 
 #[cfg(feature = "fetch")]
