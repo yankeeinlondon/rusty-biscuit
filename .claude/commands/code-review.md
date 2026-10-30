@@ -154,7 +154,7 @@ Highlight well-written code, good patterns, or thoughtful design decisions.
 
 ### **SAVE FILE**
 
-Save the file to the `.ai/code-reviews/` directory with the filename being `{YYYY}{MM}{DD}. {NAME}` where {NAME} is a short but informative name for the scope which was being reviewed.
+Save the file to the `_/code-reviews/` directory with the filename being `{YYYY}{MM}{DD}. {NAME}` where {NAME} is a short but informative name for the scope which was being reviewed.
 
 ## Feedback Style
 

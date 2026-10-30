@@ -19,10 +19,10 @@ use cargo_metadata::{Metadata, MetadataCommand, PackageId};
 use serde_json::Value;
 use sniff::filesystem::{detect_repo, RepoInfo};
 
-const AGENT_SKILLS_PROMPT: &str = ".ai/prompts/agent-skills.md";
-const REFRESH_DOCUMENTATION_CODEX_PROMPT: &str = ".ai/prompts/refresh_documentation_codex.md";
-const REFRESH_DOCUMENTATION_CLAUDE_PROMPT: &str = ".ai/prompts/refresh_documentation_claude.md";
-const CLAUDE_MD_UPDATE_PROMPT: &str = ".ai/prompts/refresh_claude_md.md";
+const AGENT_SKILLS_PROMPT: &str = "_/prompts/agent-skills.md";
+const REFRESH_DOCUMENTATION_CODEX_PROMPT: &str = "_/prompts/refresh_documentation_codex.md";
+const REFRESH_DOCUMENTATION_CLAUDE_PROMPT: &str = "_/prompts/refresh_documentation_claude.md";
+const CLAUDE_MD_UPDATE_PROMPT: &str = "_/prompts/refresh_claude_md.md";
 const MAX_SKILL_PROMPT_CHARS: usize = 28_000;
 const MAX_SKILL_SUMMARY_LINES: usize = 220;
 const MAX_SKILL_SUMMARY_CHARS: usize = 16_000;
@@ -879,7 +879,7 @@ fn current_date() -> Result<String> {
 }
 
 fn build_log_paths(workspace_root: &Path, date: &str, library: &str) -> LogPaths {
-    let logs_root = workspace_root.join(".ai/logs");
+    let logs_root = workspace_root.join("_/logs");
 
     LogPaths {
         docs_prompt: logs_root.join(format!("{date}. docs_prompt_for_{library}_docs_prompt.md")),
@@ -2079,25 +2079,25 @@ mod tests {
         assert_eq!(
             paths.docs_prompt,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. docs_prompt_for_claudine_docs_prompt.md"
+                "/tmp/workspace/_/logs/2026-02-14. docs_prompt_for_claudine_docs_prompt.md"
             )
         );
         assert_eq!(
             paths.skill_prompt,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. skill_prompt_for_claudine_skill_prompt.md"
+                "/tmp/workspace/_/logs/2026-02-14. skill_prompt_for_claudine_skill_prompt.md"
             )
         );
         assert_eq!(
             paths.claude_md_prompt,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. claude_md_prompt_for_claudine_claude_md_prompt.md"
+                "/tmp/workspace/_/logs/2026-02-14. claude_md_prompt_for_claudine_claude_md_prompt.md"
             )
         );
         assert_eq!(
             paths.docs_summary,
             PathBuf::from(
-                "/tmp/workspace/.ai/logs/2026-02-14. doc_update_summary_for_claudine_docs_summary.md"
+                "/tmp/workspace/_/logs/2026-02-14. doc_update_summary_for_claudine_docs_summary.md"
             )
         );
     }
@@ -2317,12 +2317,12 @@ mod tests {
     fn osc8_file_link_uses_relative_label_and_file_uri() {
         let test_root = unique_temp_root();
         let workspace_root = test_root.join("workspace");
-        let logs_path = workspace_root.join(".ai/logs/2026-02-14. docs prompt.md");
+        let logs_path = workspace_root.join("_/logs/2026-02-14. docs prompt.md");
         fs::create_dir_all(logs_path.parent().unwrap()).unwrap();
         fs::write(&logs_path, "content").unwrap();
 
         let link = osc8_file_link(&workspace_root, &logs_path);
-        assert!(link.contains(".ai/logs/2026-02-14. docs prompt.md"));
+        assert!(link.contains("_/logs/2026-02-14. docs prompt.md"));
         assert!(link.contains("file:///"));
         assert!(link.contains("%20"));
 

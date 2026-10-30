@@ -55,10 +55,7 @@ frontend/.vite-ssg-dist/**
 .tsbuildinfo
 trace/*
 .trace/*
-**/.ai/logs
-**/.ai/plans/archived
-**/.ai/code-reviews/archived
-**/.ai/prompts/archived
+/_/logs
 **/target/*
 *.afphoto~lock*
 .aider*
