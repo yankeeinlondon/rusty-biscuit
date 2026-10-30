@@ -33,9 +33,9 @@ AST              → evaluation
 
 | Stage | Document | Source |
 | --- | --- | --- |
-| 1. Scanning | [scanning.md](./scanning.md) | [`expression/lexer.rs`](../../../lib/src/markdown/compose/expression/lexer.rs) (`ExpressionFinder`) |
-| 2. Lexing | [lexing.md](./lexing.md) | [`expression/lexer.rs`](../../../lib/src/markdown/compose/expression/lexer.rs) (`Lexer`) |
-| 3. Grammar | [grammar.md](./grammar.md) | [`expression/parser.rs`](../../../lib/src/markdown/compose/expression/parser.rs) |
+| 1. Scanning | [scanning.md](./scanning.md) | Darkmatter [`expression/lexer.rs`](../../../../lib/src/markdown/compose/expression/lexer.rs) (`ExpressionFinder`) over simplified-schema [`expression/scan.rs`](../../../../../simplified-schema/lib/src/expression/scan.rs) |
+| 2. Lexing | [lexing.md](./lexing.md) | simplified-schema [`expression/lexer.rs`](../../../../../simplified-schema/lib/src/expression/lexer.rs) (`Lexer`) |
+| 3. Grammar | [grammar.md](./grammar.md) | simplified-schema [`expression/parser.rs`](../../../../../simplified-schema/lib/src/expression/parser.rs) |
 
 ## Not every surface runs every stage
 

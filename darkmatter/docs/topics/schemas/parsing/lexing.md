@@ -4,8 +4,9 @@ Lexing turns expression text into a token stream. It is purely lexical: the
 lexer never consults frontmatter, context, the filesystem, or the function
 catalog, so the same text always produces the same tokens.
 
-Implemented by `Lexer` in
-[`expression/lexer.rs`](../../../lib/src/markdown/compose/expression/lexer.rs).
+Implemented by `Lexer` in the `simplified-schema` library's
+[`expression/lexer.rs`](../../../../../simplified-schema/lib/src/expression/lexer.rs) (`simplified_schema::expression`),
+re-exported under `darkmatter::markdown::compose::expression`.
 
 ## Two entry points
 

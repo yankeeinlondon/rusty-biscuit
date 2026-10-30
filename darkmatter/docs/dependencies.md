@@ -130,13 +130,23 @@ features their tier requires.
 
 ## Literal Tokens
 
-- `base64` encodes the payload of the `{{!data:v1:…}}` literal token in
-  `markdown/literal_token.rs`. The token stores one frontmatter string as data,
-  so a later compose never scans it. The unpadded URL-safe alphabet holds no
-  brace, quote, `$`, `:`, or whitespace, so the token cannot close early, open
-  `$(`, or need YAML escaping. Canonical decoding rejects padding and stray
-  trailing bits, so each string has exactly one token. Already in the tree
-  through several workspace crates.
+- The `{{!data:v1:…}}` literal-token codec lives in `simplified-schema`
+  (`simplified_schema::pending`, which uses `base64` for the payload);
+  Darkmatter re-exports it as `markdown::literal_token`. The token stores one
+  frontmatter string as data, so a later compose never scans it. The unpadded
+  URL-safe alphabet holds no brace, quote, `$`, `:`, or whitespace, so the
+  token cannot close early, open `$(`, or need YAML escaping. Canonical
+  decoding rejects padding and stray trailing bits, so each string has exactly
+  one token. Darkmatter keeps its own `base64` dependency for SVG sanitizing.
+
+## SimplifiedSchema
+
+- `simplified-schema` (path dependency, default features) owns the
+  SimplifiedSchema language as it moves out of Darkmatter. It currently holds
+  the numeric model (`markdown::numeric`), span vocabulary (`markdown::span`),
+  the Markdown-free `{{ … }}` scan core under `ExpressionFinder`, and the
+  literal-token codec; Darkmatter re-exports each at its original path, so
+  the types are identical in both crates.
 
 ## Expression List Serialization
 

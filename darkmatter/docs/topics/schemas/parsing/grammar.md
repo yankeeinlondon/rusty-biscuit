@@ -5,10 +5,11 @@ function per precedence level. It produces a `SpannedExpr`; the span-erased
 `Expr` the evaluator consumes is derived from it by `SpannedExpr::erase`, so
 there is one grammar and the two AST forms can never disagree.
 
-Implemented in
-[`expression/parser.rs`](../../../lib/src/markdown/compose/expression/parser.rs);
+Implemented in the `simplified-schema` library's
+[`expression/parser.rs`](../../../../../simplified-schema/lib/src/expression/parser.rs) (`simplified_schema::expression`);
 the AST lives in
-[`expression/ast.rs`](../../../lib/src/markdown/compose/expression/ast.rs).
+[`expression/ast.rs`](../../../../../simplified-schema/lib/src/expression/ast.rs). Darkmatter re-exports both under
+`darkmatter::markdown::compose::expression`.
 
 ## The ladder
 

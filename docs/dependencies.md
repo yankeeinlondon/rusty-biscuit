@@ -7,6 +7,14 @@
 
 ## Recent Dependency Notes
 
+- `simplified-schema/lib` is a new workspace crate (2026-10-30) that owns the
+  SimplifiedSchema language as it moves out of Darkmatter. It depends on
+  `biscuit-file` (`yaml`, `json5`, `file-reference-syntax`; full
+  `file-reference` with its default `file` feature), `serde`, `serde_json`,
+  `base64`, `thiserror`, `tracing`, and optionally `sniff`; all were already
+  in the workspace graph, so the lockfile gains one package and no external
+  crate. `darkmatter` adds a path dependency on it. See
+  `simplified-schema/docs/dependencies.md`.
 - `schematic-define` adds `regex` 1 and `regex-syntax` 0.8 as production
   dependencies (2026-10-23) to decide which constraint patterns a generated
   client can enforce. Both were already in the workspace graph, so the root

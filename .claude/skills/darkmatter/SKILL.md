@@ -137,6 +137,15 @@ Important contracts:
   function arguments; numbers enter only through `markdown::numeric` as exact
   `f64`s. See [schema.md](schema.md#conversion-engine) and
   [expressions.md](expressions.md).
+- The SimplifiedSchema language is moving into the `simplified-schema` crate
+  (no Markdown dependency). `markdown::numeric`, `markdown::span`,
+  `markdown::literal_token`, the plain `{{ }}` scan behind
+  `ExpressionFinder`, and the expression syntax in `compose::expression`
+  (`ast`, `parser`, and the `Lexer`/`Token` half of `lexer`) are already
+  re-exports of `simplified_schema::{numeric, span, pending, expression}`:
+  edit the code there; the Darkmatter paths name the same types. The parse
+  count `work_counters::Work::ExpressionParse` is recorded by the library and
+  folded into Darkmatter's snapshot.
 - `type-definition` and `schema` meta-types delegate to the same passive
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a
