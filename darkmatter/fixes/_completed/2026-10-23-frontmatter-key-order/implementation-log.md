@@ -113,24 +113,6 @@ decisions_for_review:
         `md get`, `md set`, and `md rm`. The round-trip test drives those.
         `md set` treats a dotted name as a literal key, so nested edits are
         made by replacing the parent object; the test does exactly that.
-message_to_agent: |-
-    Phase 5 is done; `just test` in darkmatter is fully green (13768 passed).
-    For Phase 6 (docs and final gates):
-    - The 43 baseline failures were fixed by a parallel commit merged into
-      this branch (58e2a5790), not by this fix; Phase 5 reviewed them and
-      fixed the remaining swap-remove order in schema lowering (see the log).
-    - For `docs/cli/hash.md`: `--strict --save` over a baseline saved without
-      `--strict` (or vice versa) sees a changed hash and bumps
-      `last_updated`, because a stored hash does not record its mode. That is
-      the "normal save path" refresh for an affected strict baseline;
-      `--diff` never rewrites anything. The mixed-mode case was observed by
-      hand; the strict refresh and no-migration cases are tested in
-      `darkmatter-cli::l1 frontmatter_key_order::*`.
-    - The frontmatter commands are `md get|set|rm`, not `md frontmatter ...`;
-      write docs with the real spelling.
-    - `.claude/skills/darkmatter/schema.md` and several
-      `darkmatter/docs/topics/schemas/*.md` pages carry another session's
-      uncommitted edits; leave those hunks alone.
 source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
 docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
 docs_created_during_phase_3: []
@@ -143,6 +125,14 @@ source_files_during_phase_5: [darkmatter/lib/src/markdown/schemas/simplified/con
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: [.claude/skills/darkmatter/frontmatter.md]
+source_files_during_phase_6: []
+docs_updated_during_phase_6: [darkmatter/docs/cli/hash.md, darkmatter/docs/topics/frontmatter-recursion.md, darkmatter/docs/dependencies.md, darkmatter/README.md, darkmatter/cli/README.md]
+docs_created_during_phase_6: [darkmatter/docs/topics/frontmatter.md]
+skills_files_updated_during_phase_6: [.claude/skills/darkmatter/SKILL.md, .claude/skills/darkmatter/frontmatter.md]
+source_code: [biscuit-hash/justfile, biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/json.rs, biscuit-hash/lib/src/lib.rs, claudine/lib/src/composition/interpolation_conformance.rs, claudine/lib/src/composition/lifecycle/context/tests.rs, claudine/lib/src/composition/lifecycle/executor.rs, claudine/lib/src/composition/lifecycle/prewarm/classify.rs, claudine/lib/src/composition/preflight.rs, claudine/lib/src/composition/sequence/preflight/mod.rs, claudine/lib/src/composition/sequence/preflight/providers.rs, claudine/lib/src/composition/sequence/preflight/providers/tests.rs, claudine/lib/src/composition/sequence/preflight/reapproval.rs, claudine/lib/src/composition/sequence/task/tests.rs, darkmatter/cli/tests/l1/frontmatter_key_order.rs, darkmatter/cli/tests/l1/main.rs, darkmatter/dmls/src/overlay/mod.rs, darkmatter/lib/Cargo.toml, darkmatter/lib/benches/phase6_interpolation.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/conditions.rs, darkmatter/lib/src/markdown/compose/context/checked.rs, darkmatter/lib/src/markdown/compose/context/effective_state.rs, darkmatter/lib/src/markdown/compose/context/merge.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/lib/src/markdown/compose/expression/fm_namespace.rs, darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs, darkmatter/lib/src/markdown/compose/inline/replacement.rs, darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs, darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs, darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs, darkmatter/lib/src/markdown/compose/page_blocks/engine.rs, darkmatter/lib/src/markdown/compose/preflight/collect.rs, darkmatter/lib/src/markdown/compose/replacement.rs, darkmatter/lib/src/markdown/compose/subtree.rs, darkmatter/lib/src/markdown/compose/tests/frontmatter.rs, darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs, darkmatter/lib/src/markdown/compose/transclusion/engine.rs, darkmatter/lib/src/markdown/compose/util.rs, darkmatter/lib/src/markdown/frontmatter.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/mapping_orders.rs, darkmatter/lib/src/markdown/reference/graph.rs, darkmatter/lib/src/markdown/schemas/clean.rs, darkmatter/lib/src/markdown/schemas/resolve.rs, darkmatter/lib/src/markdown/schemas/scope.rs, darkmatter/lib/src/markdown/schemas/simplified/convert.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-style.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-yaml-spellings-root-union-conventional-schema-body.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-yaml-spellings-root-union-serialized-schema-body.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schemas-feature-review.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union-fileref.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union-none-match.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union.json, darkmatter/lib/tests/l1/binding_contract.rs, darkmatter/lib/tests/l1/compose_expression_failure_contract.rs, darkmatter/lib/tests/l1/frontmatter_merge_order.rs, darkmatter/lib/tests/l1/main.rs, darkmatter/lib/tests/l1/schema_json_key_order.rs, darkmatter/lib/tests/l1/shell_result_values.rs, darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap]
+documentation: [biscuit-hash/README.md, biscuit-hash/docs/json.md, darkmatter/README.md, darkmatter/cli/README.md, darkmatter/docs/cli/hash.md, darkmatter/docs/dependencies.md, darkmatter/docs/topics/frontmatter-recursion.md, darkmatter/docs/topics/frontmatter.md, docs/dependencies.md]
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-23-frontmatter-key-order (6 phases)
@@ -832,3 +822,105 @@ code first; each showed the misordered output.
   already carried another session's uncommitted edits when the phase
   started (see `git status` at start). This phase added only the
   `shift_remove` hunks to `resolve.rs` and touched none of the others.
+
+## Phase 6
+
+Documentation, final gates, and handoff. Run 2026-10-29 on macOS. The tree
+was clean at the start (every earlier phase committed), so the "other
+session's uncommitted edits" warned about in the Phase 5 handoff were no
+longer present.
+
+### Documentation
+
+- `darkmatter/docs/cli/hash.md`: new "Key Order and Stored Baselines"
+  section. A side-by-side pair of documents that differ only in key order
+  (equal non-strict hash), array order still significant, a non-strict
+  baseline surviving a reorder (`--diff` exits 0, `--save` writes nothing),
+  and the strict-baseline correction: strict follows author order at every
+  depth; strict hashes stored by older releases (nested maps sorted) can
+  differ; nothing is migrated; refresh with `--strict --diff` then
+  `--strict --save`. It also states the mixed-mode trap from the Phase 5
+  handoff (a stored hash does not record its mode).
+- New `darkmatter/docs/topics/frontmatter.md`: parsing (root mapping,
+  duplicate keys rejected at every depth, with the real error text), key
+  order as a contract with an edit-rule table and `md set`/`md rm` examples,
+  programmatic values keep producer order, and the shallow `merge_with` /
+  `set_defaults` merges: strategy table, ordering rules, a worked example, a
+  Mermaid flow, and the no-rollback note.
+- `darkmatter/docs/topics/frontmatter-recursion.md`: the opening section
+  (which was unfinished mid-sentence) is replaced by "Which Value Wins",
+  "Key Order" (receiving document first, with a parent/child example and its
+  rendered `{{ fm }}`), a Mermaid flow, "Directive `set` Values", and
+  "External State". Every example was checked against the current build
+  (`cargo run -p darkmatter-cli --bin md -- compose`) or the
+  `l1 frontmatter_merge_order` tests; the child-`null`-inherits-parent rule
+  was confirmed by composing it.
+- READMEs (overview links only): `darkmatter/README.md` (feature bullet and
+  topics list), `darkmatter/cli/README.md` (one line under the get/set/rm
+  examples).
+- `darkmatter/docs/dependencies.md`: new "Canonical JSON Hashing" section for
+  biscuit-hash `json`; the `preserve_order` paragraph no longer lists the
+  `md hash` frontmatter hash among the outputs that "sort explicitly" and
+  points to that section instead. Repo-level `docs/dependencies.md` and the
+  biscuit-hash README, `docs/json.md`, crate docs, and skill were already
+  complete from Phase 2; checked, not changed.
+- Skills: `.claude/skills/darkmatter/frontmatter.md` points at the three user
+  docs, and both it and `SKILL.md` spelled the commands `md frontmatter get|
+  set|rm`; corrected to the real `md get|set|rm`.
+
+### Comment pass
+
+Grepped the touched symbols' `///`/`//!` comments for sorted-order or
+`HashMap` claims and for references to the removed `canonical_json_sorted`:
+none left in source (only in closed specs, which are snapshots). The
+"keys sorted at every level" comments in `host/artifact.rs` and
+`lifecycle/host_profile.rs` are correct: both sort explicitly (`sorted(..)`).
+No docs page links to or names this fix. No drift found, so no source file
+changed this phase.
+
+### Phase gates
+
+- `darkmatter/`: `just lint` clean (exit 0); `just test` **13768 run, 13768
+  passed, 10 skipped** (68 s); `just check-tier-coverage darkmatter`: nothing
+  stranded.
+- `biscuit-hash/`: `just lint` clean; `just test` **90 run, 90 passed**.
+- biscuit-hash feature matrix (final gate, run once):
+  `cargo check -p biscuit-hash --no-default-features --features json`,
+  `json,xx_hash`, `json,blake3`, and the default build: all clean.
+- `cargo check --tests -p claudine -p claudine-cli`: clean (N8 API change).
+  No other dependent tests: this phase changed no source.
+- `cargo tree -e features -i serde_json -p darkmatter`: `serde_json feature
+  "preserve_order"` is requested by `darkmatter v0.1.0 (.../darkmatter/lib)`
+  directly (and by `merman-core`).
+- `git diff --stat`: 8 files, all docs, skills, and the plan; no
+  `cargo fmt` churn.
+- Scope calculator over the uncommitted tree
+  (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [darkmatter]`, `change_class: package` (a darkmatter test reads
+  one of the edited docs). Gates were run, not skipped.
+- No cross-OS run: documentation only.
+
+### Acceptance map (spec items 1-8)
+
+| Item | Evidence |
+|---|---|
+| 1. Benchmark manifest unchanged; fixed historical-format hash | `benchmark_fixtures::benchmark_manifest_matches_recorded_identities`; `hash::compute::tests::non_strict_frontmatter_hash_keeps_the_historical_entry_format` (Phase 3) |
+| 2. Reorder pairs: non-strict equal, strict differ, keys-only and body rules | `hash::compute::tests::frontmatter_hash_matrix_ignores_key_order_only_when_non_strict`, `non_strict_frontmatter_hash_changes_on_array_element_reorder` (Phase 3) |
+| 3. biscuit-hash renderer and hash conveniences | `biscuit-hash/lib/src/json.rs` tests (Phase 2); 90/90 this phase |
+| 4. TOC and schema identities | `toc::tests::normalized_frontmatter_hash_*`, `schemas::validate::tests::reordered_schema_keys_share_*` (Phase 3) |
+| 5. Shallow and recursive merges | `frontmatter::tests::merge_with_*`, `set_defaults_*`, `effective_state::tests::*`, `l1 frontmatter_merge_order::*` (Phase 4) |
+| 6. CLI round trip and hash baselines | `darkmatter-cli::l1 frontmatter_key_order::*` (Phase 5) |
+| 7. `cargo tree`, gates in both areas, feature matrix, lint covers `json` | this phase's gates above; lint recipe change in Phase 2 |
+| 8. Log records audit, output updates, strict correction, departures | Phase 3 "Hash audit (complete)"; Phase 5 "Starting state" and "Output updates"; Phase 5 and 6 strict-baseline sections; "Departures" in each phase and `decisions_for_review` |
+
+The N8 API change (`EffectiveState` and its builder carry
+`serde_json::Map`) and every Claudine site it touched are recorded in Phase 1
+(S1 list) and Phase 4 ("Ordered maps", "Claudine").
+
+### Departures
+
+- The plan's "Set spec status to `implemented`": the spec's `status` enum has
+  an `implemented` value, so `status` was set to it alongside the required
+  `implemented: true` and `implemented_by`.
+
+Implementation complete, ready for review.

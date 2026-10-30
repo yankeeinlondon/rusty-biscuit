@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: finalized-spec
+status: implemented
 $schema:
     status: |-
         enum(
@@ -24,8 +24,9 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-23
-review_iterations: 0
-implemented: false
+review_iterations: 2
+completed: true
+implemented: true
 clarified: false
 created: 2026-10-23
 owner: Ken Snyder <ken@ken.net>
@@ -37,6 +38,7 @@ related:
     - 2026-10-21-merman
 human_review: false
 needs_rulings: false
+implemented_by: "claude/opus"
 ---
 
 # Frontmatter key order: author order is the contract, the hash ignores it
