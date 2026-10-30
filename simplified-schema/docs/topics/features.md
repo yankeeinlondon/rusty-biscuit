@@ -15,7 +15,10 @@ Without `file`, nothing that needs a file on disk is judged to pass. A
 `$schema` file reference, a named-type import from a file, or an
 `example(...)` file fails with `SchemaError::Unresolved` whose source is
 `FileReferenceError::ResolutionUnavailable`; a `file(eager)` value and a
-`match(...)` glob never accept a value:
+`match(...)` glob never accept a value, and `validate_strict` /
+`validate_soft` report such a failure as
+`ValidationFailure::UnavailableCheck` (see
+[Strict and Soft Validation](./validation.md)):
 
 ```rust
 // Without `file`: `./types.yaml` is not resolved, it fails.

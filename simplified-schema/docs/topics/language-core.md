@@ -26,11 +26,13 @@ flowchart TD
     resolve["resolve: imports, cycles, merges"]
     coercion["coercion, coerce: conversion"]
     validate["validate, format, file_match: validators"]
+    prepared["prepared, outcome: strict and soft validation"]
     foundations --> simplified
     simplified --> resolve
     simplified --> coercion
     resolve --> validate
     coercion --> validate
+    validate --> prepared
 ```
 
 | Module | What it holds |
@@ -40,6 +42,7 @@ flowchart TD
 | `coercion` | The conversion engine over shapes (`bind`, `bind_with`, `check_exact`) |
 | `coerce` | Frontmatter conversion against a lowered JSON Schema (`coerce_frontmatter`) |
 | `validate`, `format`, `file_match` | Compiled validators and their cache, the `darkmatter-*` formats, the `x-darkmatter-*` keywords, and `file(match(...))` globs |
+| `prepared`, `outcome` | `Prepared` (a schema compiled once, with `validate_strict` and `validate_soft`), `ValidationSuccess`, `ValidationFailure`; see [Strict and Soft Validation](./validation.md) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text |
 | `completion`, `frontmatter_shape` | Which definition governs a frontmatter path, and union-aware completion choices |
 | `errors` | `SchemaError` |

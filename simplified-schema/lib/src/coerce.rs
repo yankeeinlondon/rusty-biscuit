@@ -35,6 +35,7 @@
 //! inputs. The rules were decided in `2026-10-28-schema-enhancements` ("The
 //! Coercion Engine", "Raw JSON Schema Conversion Boundaries").
 
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -566,13 +567,26 @@ pub fn validation_copy_with_plan(
     instance: &Value,
     templates: &NestedTemplates,
 ) -> Value {
+    validation_working_copy(plan, json_schema, instance, templates).into_owned()
+}
+
+/// [`validation_copy_with_plan`] that borrows `instance` whenever no value
+/// converted, so a caller can tell a converted copy from the input without
+/// comparing them.
+pub(crate) fn validation_working_copy<'input>(
+    plan: &ConversionPlan,
+    json_schema: &Value,
+    instance: &'input Value,
+    templates: &NestedTemplates,
+) -> Cow<'input, Value> {
     let none = HashSet::new();
     match convert(plan, json_schema, instance, &none, templates) {
-        Conversion::Converted(value) => value,
-        Conversion::Failed(error) => {
-            partial_copy(plan, json_schema, instance, &error, &none, templates).unwrap_or_else(|| instance.clone())
-        }
-        Conversion::Kept | Conversion::Rejected | Conversion::Unavailable => instance.clone(),
+        Conversion::Converted(value) => Cow::Owned(value),
+        Conversion::Failed(error) => match partial_copy(plan, json_schema, instance, &error, &none, templates) {
+            Some(copy) => Cow::Owned(copy),
+            None => Cow::Borrowed(instance),
+        },
+        Conversion::Kept | Conversion::Rejected | Conversion::Unavailable => Cow::Borrowed(instance),
     }
 }
 

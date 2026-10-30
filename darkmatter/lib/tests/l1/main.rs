@@ -174,6 +174,7 @@ mod schema_quoting_safety;
 mod schema_embedded_trigger_bundles;
 mod schema_enhancements_matrix;
 mod schema_extraction_characterization;
+mod validation_contract_parity;
 mod schema_expression_syntax_checks;
 mod schema_grammar_descriptors;
 mod schema_nested_template_deferral;

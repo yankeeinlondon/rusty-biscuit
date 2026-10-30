@@ -76,6 +76,26 @@ pub struct ValidationProblem {
     pub caller_file: Option<CallerFileReferenceProvenance>,
 }
 
+impl ValidationProblem {
+    /// Whether this problem comes from a required check this build cannot
+    /// run, rather than from the value: a file value's resolution or a
+    /// `match()` glob, without the `file` feature. Such a check fails rather
+    /// than passing silently, and this tells the two failures apart. Always
+    /// `false` with the `file` feature, where every check runs.
+    pub fn is_unavailable_check(&self) -> bool {
+        if cfg!(feature = "file") {
+            return false;
+        }
+        // Without `file`, every parsed file value's resolution fails as
+        // `ResolutionUnavailable` (class `MissingContext`), and a `match()`
+        // glob accepts nothing; malformed syntax is still judged.
+        matches!(self.file_reference, Some(FileReferenceDiagnostic::ResolutionFailed { .. }))
+            || self.schema_path.as_ref().is_some_and(|path| {
+                path.segments().last().map(String::as_str) == Some(crate::file_match::DARKMATTER_MATCH_KEYWORD)
+            })
+    }
+}
+
 /// Resolution evidence attached to a caller-owned file validation problem.
 #[derive(Debug, Clone)]
 pub struct CallerFileReferenceProvenance {

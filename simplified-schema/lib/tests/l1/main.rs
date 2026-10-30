@@ -8,3 +8,4 @@ mod expression_syntax;
 mod foundations;
 mod resolution_unavailable;
 mod test_layout;
+mod validation_contract;

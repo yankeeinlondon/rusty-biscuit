@@ -294,6 +294,7 @@ pub struct DarkmatterSchemas {
     file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
+use simplified_schema::prepared::{CompiledValidators, wrapped_root_arms};
 use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 
 /// Benchmarking seam: empties the process-wide schema caches so the next
@@ -316,7 +317,6 @@ pub fn reset_process_caches_for_bench() {
     triggers::matcher::reset_thread_caches();
     DERIVATIONS.lock().expect("phase schema memo poisoned").clear();
     MERGES.lock().expect("trigger merge memo poisoned").clear();
-    WRAPPED.lock().expect("root arm memo poisoned").clear();
 }
 
 #[derive(Clone)]
@@ -1054,10 +1054,7 @@ impl EffectiveSchema {
     /// Whether this schema's own compiled validators accept `instance`
     /// unchanged: such a value is kept, so conversion needs nothing else.
     fn accepts_as_is(&self, instance: &Value) -> bool {
-        match &self.validators {
-            CompiledValidators::Object(validator) => validator.is_valid(instance),
-            CompiledValidators::RootUnion(arms) => arms.iter().any(|arm| arm.is_valid(instance)),
-        }
+        self.validators.accepts(instance)
     }
 
     /// Whether this schema declares the top-level frontmatter property `name`:
@@ -1440,53 +1437,9 @@ impl EffectiveSchema {
             context: &self.file_resolution_context,
             excused: (!templates.is_empty()).then_some(&excused as &validate::Excused<'_>),
         };
-        let mut problems = match &self.validators {
-            // Root `anyOf` union. When a shared literal discriminant selects a
-            // single arm, report only that arm's problems; otherwise fall back
-            // to the closest-matching-arm report (byte-identical to before).
-            CompiledValidators::RootUnion(arms) => {
-                match self
-                    .json_schema
-                    .get("anyOf")
-                    .and_then(Value::as_array)
-                    .and_then(|root_arms| {
-                        discriminant::select_literal_discriminant_arm(root_arms, instance)
-                    }) {
-                    Some(idx) => validate::collect_arm_problems_with_anchors(
-                        &arms[idx], instance, anchors, idx,
-                    ),
-                    None => validate::collect_root_union_problems_with_anchors(
-                        arms, instance, anchors,
-                    ),
-                }
-            }
-            // Ordinary object schema. Narrow any discriminated union (property,
-            // item, or nested field) to its selected arm; other locations are
-            // untouched.
-            CompiledValidators::Object(validator) => {
-                let problems = validate::collect_problems_with_anchors(
-                    validator,
-                    instance,
-                    anchors,
-                );
-                validate::narrow_discriminated_union_problems(
-                    &self.json_schema,
-                    instance,
-                    anchors,
-                    problems,
-                )
-            }
-        };
+        let mut problems = self.validators.collect_problems(&self.json_schema, instance, anchors);
         coerce::annotate_problems(self.conversion(), &self.json_schema, instance, templates, &mut problems);
-        // Enrich each problem with its declared property description (Decision
-        // #2). Whitespace-only descriptions (#8) and descriptions identical to
-        // the rendered message (#9) are suppressed so the output stays additive.
-        for problem in &mut problems {
-            problem.description =
-                validate::resolve_problem_description(&self.json_schema, problem, instance)
-                    .filter(|desc| !desc.trim().is_empty())
-                    .filter(|desc| *desc != problem.message);
-        }
+        simplified_schema::prepared::describe_problems(&self.json_schema, instance, &mut problems);
         // After the enrichment: a binder's problem names its call, and the
         // description found at its place would be an arbitrary arm's.
         if let Some(bound) = &bound {
@@ -1922,62 +1875,6 @@ fn merged_trigger_schema(
     Ok(merged)
 }
 
-/// The validators an effective schema judges with.
-#[derive(Clone)]
-enum CompiledValidators {
-    /// An ordinary object schema's validator.
-    Object(Arc<Validator>),
-    /// One validator per arm of a root `anyOf` union. Validation reports per
-    /// arm, so the union as a whole is never compiled.
-    RootUnion(Vec<Arc<Validator>>),
-}
-
-impl CompiledValidators {
-    fn build(
-        schema: &Arc<Value>,
-        cache: &ValidatorCache,
-        base_dir: Option<&Path>,
-        context: &biscuit_file::FileResolutionContext,
-    ) -> Result<Self, SchemaError> {
-        match wrapped_root_arms(schema) {
-            Some(arms) => arms
-                .iter()
-                .map(|arm| cache.validator_for_shared(arm, base_dir, context))
-                .collect::<Result<Vec<_>, SchemaError>>()
-                .map(Self::RootUnion),
-            None => cache.validator_for_shared(schema, base_dir, context).map(Self::Object),
-        }
-    }
-}
-
-type Wrapped = (Arc<Value>, Arc<[Arc<Value>]>);
-const RECENT_SCHEMAS: usize = 8;
-/// [`wrapped_root_arms`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
-static WRAPPED: std::sync::Mutex<Vec<Wrapped>> = std::sync::Mutex::new(Vec::new());
-
-/// Each arm of `schema`'s root union, wrapped as a root schema, or `None` for
-/// a schema that is not a root union.
-///
-/// Memoized for the process over a few recent schemas (an entry holds its
-/// schema alive, so `Arc` identity is a sound key): a root union merged with
-/// a large trigger payload has megabyte-sized arms, and each verdict would
-/// otherwise copy and rehash them for the validator cache.
-fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
-    let arms = schema.get("anyOf").and_then(Value::as_array)?;
-    let mut wrapped = WRAPPED.lock().expect("root arm memo poisoned");
-    if let Some((_, hit)) = wrapped.iter().find(|(held, _)| Arc::ptr_eq(held, schema)) {
-        return Some(Arc::clone(hit));
-    }
-    let arms: Arc<[Arc<Value>]> = arms
-        .iter()
-        .map(|arm| Arc::new(validate::wrap_arm_as_root_schema(arm, schema)))
-        .collect();
-    if wrapped.len() == RECENT_SCHEMAS {
-        wrapped.remove(0);
-    }
-    wrapped.push((Arc::clone(schema), Arc::clone(&arms)));
-    Some(arms)
-}
 
 /// The top-level frontmatter key a problem is attributable to, mirroring the
 /// compose-time deferral rule: the first pointer segment, or the missing

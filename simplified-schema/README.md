@@ -69,5 +69,7 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
   expression scan, and the literal-token codec.
 - [Expression syntax](./docs/topics/expression-syntax.md): parsing
   expressions without evaluating them.
+- [Strict and soft validation](./docs/topics/validation.md): judging
+  values with a prepared schema, with or without conversion.
 - [Cargo features](./docs/topics/features.md)
 - [Dependencies](./docs/dependencies.md)

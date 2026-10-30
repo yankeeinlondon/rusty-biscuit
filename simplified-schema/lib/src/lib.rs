@@ -16,6 +16,9 @@
 //!   conversion against a JSON Schema;
 //! - [`validate`], [`format`], [`file_match`]: compiled validators, the
 //!   `darkmatter-*` formats, and `x-darkmatter-*` keywords;
+//! - [`prepared`] and [`outcome`]: a schema compiled once ([`Prepared`]) and
+//!   its strict and soft validation, which return
+//!   `Result<`[`ValidationSuccess`]`, `[`ValidationFailure`]`>`;
 //! - [`SchemaError`], in [`errors`].
 //!
 //! A host (Darkmatter) keeps its own policy — baseline selection, schema
@@ -39,9 +42,11 @@ pub mod json_shape;
 pub mod mapping_orders;
 pub mod numeric;
 pub mod origin;
+pub mod outcome;
 pub mod pending;
 pub mod phase;
 pub mod positions;
+pub mod prepared;
 pub mod reference;
 pub mod resolve;
 pub mod scope;
@@ -75,7 +80,9 @@ pub use frontmatter_shape::{
 pub use json_shape::shape_from_json_schema;
 pub use mapping_orders::MappingOrders;
 pub use origin::{SchemaOrigin, SchemaOriginKind, SchemaOriginMap};
+pub use outcome::{ValidationFailure, ValidationSuccess};
 pub use phase::SchemaPhase;
+pub use prepared::Prepared;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
@@ -113,7 +120,7 @@ pub use validation::{
 ///
 /// Cleared: the shared, conversion, completion-alternative, and
 /// example-target validator caches; the conversion-plan, format-validator,
-/// example-artifact, emitted-pattern, and named-type parse caches. A host
+/// example-artifact, emitted-pattern, named-type parse, and root-arm caches. A host
 /// clears its own memos beside this call.
 #[doc(hidden)]
 pub fn reset_process_caches() {
@@ -124,4 +131,5 @@ pub fn reset_process_caches() {
     json_shape::reset_process_caches();
     simplified::convert::reset_process_caches();
     resolve::reset_process_caches();
+    prepared::reset_process_caches();
 }

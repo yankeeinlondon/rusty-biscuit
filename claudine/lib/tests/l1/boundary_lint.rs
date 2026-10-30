@@ -166,7 +166,9 @@ fn darkmatter_compose_surfaces_route_through_file_reference() {
         "src/markdown/compose/expression/resolve_ctx.rs",
         "src/markdown/compose/link_resolve.rs",
         "src/markdown/compose/transclusion/resolver.rs",
-        "src/markdown/schemas/resolve.rs",
+        // The schema resolver moved into simplified-schema; read relative to
+        // `darkmatter/lib`.
+        "../../simplified-schema/lib/src/resolve.rs",
     ] {
         let src = read_darkmatter_source(module);
         assert!(
