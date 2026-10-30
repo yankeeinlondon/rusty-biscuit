@@ -4,13 +4,13 @@
 //! every option order, overlapping object declarations, exact checks,
 //! deferral, the depth bound, and error rendering.
 
-use darkmatter::markdown::coercion::{
+use simplified_schema::coercion::{
     Additional, ArrayShape, Assertion, BindOptions, Bound, Constraint, ContentFormat, ConversionError, FailureReason,
     IntegerRule, KeyMatcher, NumberShape, NumericBounds, ObjectShape, PathSegment, PatternScope, PatternSlot,
     PropertySlot, Shape, TextPattern, TextShape, TupleShape, TupleSlot, ValueKind, accepts_exactly, bind, bind_with,
     check_exact, render_path,
 };
-use darkmatter::markdown::numeric::NumericAdmissionError;
+use simplified_schema::numeric::NumericAdmissionError;
 use serde_json::{Value, json};
 
 // ── shape builders ──────────────────────────────────────────────────────────

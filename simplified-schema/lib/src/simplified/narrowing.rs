@@ -19,7 +19,7 @@ use crate::span::SourceSpan;
 
 /// One runtime value family, as the type predicates test it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Family {
+pub enum Family {
     String,
     Number,
     Boolean,
@@ -29,7 +29,7 @@ pub(crate) enum Family {
 
 impl Family {
     /// The bare type of the family: `unknown[]` for arrays.
-    pub(crate) fn bare_atom(self) -> PropertyAtom {
+    pub fn bare_atom(self) -> PropertyAtom {
         match self {
             Self::String => PropertyAtom::bare(SimplifiedType::String),
             Self::Number => PropertyAtom::bare(SimplifiedType::Number),
@@ -44,12 +44,12 @@ impl Family {
     }
 }
 
-pub(crate) const ALL_FAMILIES: &[Family] =
+pub const ALL_FAMILIES: &[Family] =
     &[Family::String, Family::Number, Family::Boolean, Family::Array, Family::Object];
 
 /// The runtime families an alternative's values may belong to. A type whose
 /// accepted values are not pinned to one family here keeps every family.
-pub(crate) fn families(atom: &PropertyAtom) -> &'static [Family] {
+pub fn families(atom: &PropertyAtom) -> &'static [Family] {
     if atom.is_array {
         return &[Family::Array];
     }
@@ -77,13 +77,13 @@ pub(crate) fn families(atom: &PropertyAtom) -> &'static [Family] {
     }
 }
 
-pub(crate) fn is_null_type(atom: &PropertyAtom) -> bool {
+pub fn is_null_type(atom: &PropertyAtom) -> bool {
     !atom.is_array && matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Null))
 }
 
 /// The family whose bare type `atom` is (`string`, `number`, `boolean`,
 /// `object`, `unknown[]`), with no constraints beyond markers.
-pub(crate) fn exact_family(atom: &PropertyAtom) -> Option<Family> {
+pub fn exact_family(atom: &PropertyAtom) -> Option<Family> {
     let [family] = families(atom) else {
         return None;
     };
@@ -100,7 +100,7 @@ pub(crate) fn is_exact_fact_type(atom: &PropertyAtom) -> bool {
 
 /// Constraints that restrict values beyond the type identity. Markers and
 /// annotations (`required`, defaults, suggestions, examples) do not.
-pub(crate) fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
+pub fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
     atom.constraints.iter().chain(&atom.array_constraints).any(|constraint| {
         !matches!(
             constraint,
@@ -120,7 +120,7 @@ pub(crate) fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
 /// annotations removed, since a shape carries presence in `nullable` and two
 /// arms that differ only there are one type. Nested object members keep
 /// theirs.
-pub(crate) fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
+pub fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
     let marker = |constraint: &Constraint| {
         matches!(
             constraint,
@@ -140,7 +140,7 @@ pub(crate) fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
 
 /// A target's spelling independent of its description, constraint order, and
 /// source location: what two overloads' facts are compared by.
-pub(crate) fn canonical_target(atom: &PropertyAtom) -> String {
+pub fn canonical_target(atom: &PropertyAtom) -> String {
     let mut atom = atom.clone();
     atom.description = None;
     atom.constraints.sort_by_key(|constraint| format!("{constraint:?}"));
@@ -150,7 +150,7 @@ pub(crate) fn canonical_target(atom: &PropertyAtom) -> String {
 
 /// Which declaration a [`NarrowsProblem`] belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ProblemScope {
+pub enum ProblemScope {
     /// One overload's clause is invalid on its own; the 0-based overload.
     Overload(usize),
     /// Two overloads disagree on the fact; 0-based, `first` before `later`.
@@ -166,7 +166,7 @@ pub(crate) enum ProblemScope {
 /// overload. A programmatically built declaration carries whatever spans it
 /// was given, which no consumer maps to a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NarrowsProblem {
+pub struct NarrowsProblem {
     pub scope: ProblemScope,
     pub message: String,
     /// The overload (index as in [`ProblemScope`]) whose text `span` is in.
@@ -179,7 +179,7 @@ pub(crate) struct NarrowsProblem {
 
 /// The second declaration of a [`ProblemScope::Overloads`] problem.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RelatedOverload {
+pub struct RelatedOverload {
     pub overload: usize,
     /// The overload's `narrows` clause; `None` when it declares none, so
     /// only the consumer that knows where each overload was written can
@@ -191,7 +191,7 @@ pub(crate) struct RelatedOverload {
 impl NarrowsProblem {
     /// The message with its overload numbering, for a consumer reporting
     /// the whole overload set at once (registration, catalog loading).
-    pub(crate) fn overload_message(&self) -> String {
+    pub fn overload_message(&self) -> String {
         match self.scope {
             ProblemScope::Overload(index) => format!("overload {}: {}", index + 1, self.message),
             ProblemScope::Overloads { .. } => self.message.clone(),
@@ -254,7 +254,7 @@ pub(crate) fn clause_problem(function: &FunctionType) -> Option<(String, SourceS
 /// overload declares a fact, every overload declares the same parameter at
 /// the same position, the same implication, and the same canonical target
 /// (or none).
-pub(crate) fn declaration_problem(overloads: &[FunctionType]) -> Option<NarrowsProblem> {
+pub fn declaration_problem(overloads: &[FunctionType]) -> Option<NarrowsProblem> {
     let indexed: Vec<(usize, &FunctionType)> = overloads.iter().enumerate().collect();
     declaration_problem_indexed(&indexed)
 }

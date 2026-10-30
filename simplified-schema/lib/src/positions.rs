@@ -117,7 +117,7 @@ impl PositionMap {
     /// mapping, or what it read does not match `orders` mapping for mapping or
     /// contains an alias: the parsed value then has a structure the source
     /// cannot be trusted to show.
-    pub(super) fn project(
+    pub fn project(
         text: &str,
         yaml: Range<usize>,
         base_line: u32,
@@ -144,7 +144,7 @@ impl PositionMap {
 
     /// Locates only the top-level keys of `yaml`, whose first line is
     /// `base_line`.
-    pub(super) fn top_level(yaml: &str, base_line: u32) -> Self {
+    pub fn top_level(yaml: &str, base_line: u32) -> Self {
         let mut keys = IndexMap::new();
         for (idx, line) in yaml.lines().enumerate() {
             let Some(first) = line.chars().next() else {

@@ -472,7 +472,7 @@ impl<'a, L: DefinitionLookup + ?Sized> Resolver<'a, L> {
 /// Lint-valid candidates of each suggest-bearing alternative of `def` and of
 /// each definition body in `bodies` (as [`resolve_with_bodies`] returns them),
 /// each judged against the definition that stores it.
-pub(crate) fn suggestions_by_resolved_alternative<'a>(
+pub fn suggestions_by_resolved_alternative<'a>(
     leaf: &str,
     def: &'a PropertyDef,
     bodies: &[&'a PropertyDef],
@@ -489,7 +489,7 @@ pub(crate) fn suggestions_by_resolved_alternative<'a>(
 ///
 /// This is the whole closure, as validating a value needs; completion's path
 /// descent never calls it.
-pub(crate) fn reachable_definitions<L>(atom: &PropertyAtom, definitions: &L) -> Option<DefinitionTable>
+pub fn reachable_definitions<L>(atom: &PropertyAtom, definitions: &L) -> Option<DefinitionTable>
 where
     L: DefinitionLookup + ?Sized,
 {

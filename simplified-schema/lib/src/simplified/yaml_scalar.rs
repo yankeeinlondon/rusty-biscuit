@@ -323,7 +323,7 @@ fn skip_node_properties(bytes: &[u8], start: usize) -> Option<usize> {
 
 /// The authored range of the alias token (`*name`) starting at `start`, without
 /// anything after the name. `None` when `start` does not begin an alias.
-pub(crate) fn alias_token(source: &str, start: usize) -> Option<Range<usize>> {
+pub fn alias_token(source: &str, start: usize) -> Option<Range<usize>> {
     let bytes = source.as_bytes();
     if bytes.get(start) != Some(&b'*') {
         return None;

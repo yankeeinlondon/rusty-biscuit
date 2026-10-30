@@ -553,7 +553,7 @@ impl SchemaError {
     /// The hint a wrapping error (a compose-time schema preparation failure)
     /// shows in place of its generic one: today only a claimed trigger
     /// envelope that is not valid YAML, directly or inside a trigger load.
-    pub(crate) fn preparation_hint(&self) -> Option<&'static str> {
+    pub fn preparation_hint(&self) -> Option<&'static str> {
         match self {
             SchemaError::TriggerEnvelopeYaml { .. } => Some(TRIGGER_YAML_HINT),
             SchemaError::TriggerLoad { source, .. } | SchemaError::EmbeddedTriggerLoad { source, .. } => {

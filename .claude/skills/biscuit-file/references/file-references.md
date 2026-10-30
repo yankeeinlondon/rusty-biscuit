@@ -326,6 +326,7 @@ BoundaryEscape { reference, boundary, escaped_candidate }
 RepositoryRootNotContainingSource { repository_root, source_path }
 RelativeContextDirectory { anchor, path }
 RelativePath { from, to }
+ResolutionUnavailable { reference }   # a syntax-only caller asked to resolve
 Io { path, source }
 RemoteNotLocal(String)
 InvalidUrl(String)                    # with `url`
@@ -333,6 +334,10 @@ InvalidUrl(String)                    # with `url`
 
 `InvalidSyntax` also covers rooted magic payloads and interpolation-injected
 sigils.
+`ResolutionUnavailable` is never produced by biscuit-file's own resolver: a
+caller built without resolution (simplified-schema without its `file`
+feature) returns it so a check it cannot run fails instead of passing. It
+classifies as `MissingContext`.
 `ForeignAbsolutePath` rejects an absolute path (authored or interpolated) that
 is not absolute on the resolving host (`C:\x` on POSIX, `/x` on Windows);
 nothing is translated between operating systems.

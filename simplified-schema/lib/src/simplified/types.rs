@@ -182,7 +182,7 @@ impl PropertyDef {
     /// Valid union defaults are identical and collapse to one value during
     /// lowering; conflicting defaults fail schema preparation before a
     /// consumer can query the effective schema.
-    pub(crate) fn has_default(&self) -> bool {
+    pub fn has_default(&self) -> bool {
         match self {
             Self::Single(atom) => atom.has_default(),
             Self::Union(atoms) => atoms.iter().any(PropertyAtom::has_default),
@@ -632,7 +632,7 @@ impl PropertyAtom {
 
     /// Iterates constraints that govern the containing property's presence
     /// and annotations, including constraints written after an array suffix.
-    pub(crate) fn property_constraints(&self) -> impl Iterator<Item = &Constraint> {
+    pub fn property_constraints(&self) -> impl Iterator<Item = &Constraint> {
         self.constraints.iter().chain(self.array_constraints.iter())
     }
 

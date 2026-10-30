@@ -36,7 +36,7 @@ mod error;
 mod shape;
 mod union;
 
-pub(crate) use shape::compact;
+pub use shape::compact;
 
 use serde_json::Value;
 

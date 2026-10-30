@@ -25,12 +25,12 @@ use serde_json::Value;
 use super::discriminant::select_literal_discriminant_arm;
 pub use super::simplified::query::DefinitionLookup;
 use super::simplified::query::{
-    Alternative, SuggestionItem, reachable_definitions, resolve_with_bodies, resolved_alternatives,
+    SuggestionItem, reachable_definitions, resolve_with_bodies, resolved_alternatives,
     suggestions_by_resolved_alternative, yaml_double_quote,
 };
 use super::simplified::{
-    Constraint, DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SchemaRoot, SimplifiedType, TypeExpr, to_json_schema_with_definitions,
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SchemaRoot, TypeExpr, to_json_schema_with_definitions,
 };
 use super::validate::ValidatorCache;
 

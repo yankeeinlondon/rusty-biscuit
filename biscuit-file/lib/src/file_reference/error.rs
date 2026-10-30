@@ -76,6 +76,12 @@ pub enum FileReferenceError {
     #[error("file tree `{base_dir}` does not contain the working directory `{cwd}`")]
     CwdOutsideBaseDir { base_dir: PathBuf, cwd: PathBuf },
 
+    /// A caller compiled without file-reference resolution (a passive,
+    /// syntax-only build) was asked to resolve `reference`. The reference is
+    /// not judged to exist or not: the check is unavailable in this build.
+    #[error("file reference `{reference}` cannot be resolved: this build has no file-reference resolution")]
+    ResolutionUnavailable { reference: String },
+
     /// A context directory or tree anchor is not an absolute host path.
     ///
     /// Probing a relative candidate would read the live process directory, so
@@ -166,7 +172,9 @@ pub(crate) fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         | E::CwdOutsideBaseDir { .. }
         | E::RelativeContextDirectory { .. }
         | E::BaseDirNotRepositoryRoot { .. }
-        | E::BareRepository => ResolutionFailure::MissingContext,
+        | E::BareRepository
+        // A build without resolution has no context to resolve in.
+        | E::ResolutionUnavailable { .. } => ResolutionFailure::MissingContext,
         #[cfg(feature = "file-reference")]
         E::Git(_) => ResolutionFailure::MissingContext,
         E::Io { .. } | E::CurrentDirectory(_) => ResolutionFailure::Io,

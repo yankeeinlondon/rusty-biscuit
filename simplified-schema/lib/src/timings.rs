@@ -289,7 +289,7 @@ thread_local! {
 
 /// Attributes the time until the guard drops to `stage` (see the module
 /// docs). Inert when no recording is open.
-pub(crate) fn stage(stage: ValidationStage) -> StageGuard {
+pub fn stage(stage: ValidationStage) -> StageGuard {
     let opened = RECORDERS.with_borrow_mut(|recorders| {
         let depth = recorders.len();
         let recorder = recorders.last_mut()?;
@@ -304,7 +304,7 @@ pub(crate) fn stage(stage: ValidationStage) -> StageGuard {
 }
 
 /// Closes a stage opened by [`stage`] and resumes the enclosing one.
-pub(crate) struct StageGuard {
+pub struct StageGuard {
     /// The depth and id of the recorder the stage was opened in.
     opened: Option<(usize, u64)>,
 }
@@ -342,7 +342,7 @@ pub(crate) fn looked_up_validator() {
 }
 
 /// Records a trigger whose conditions matched the document.
-pub(crate) fn matched_trigger(name: impl FnOnce() -> String) {
+pub fn matched_trigger(name: impl FnOnce() -> String) {
     with_recorder(|recorder| push_unique(&mut recorder.matched_triggers, name()));
 }
 

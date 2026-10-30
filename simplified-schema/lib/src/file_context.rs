@@ -43,7 +43,15 @@ pub fn resolve_document_file_ref(
     cwd: &Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
-    file_ref.resolve_in_context(&document_file_context(cwd, request_context))
+    #[cfg(feature = "file")]
+    return file_ref.resolve_in_context(&document_file_context(cwd, request_context));
+    // Without the `file` feature nothing is probed: the check is unavailable,
+    // never silently passed.
+    #[cfg(not(feature = "file"))]
+    {
+        let _ = (cwd, request_context);
+        Err(FileReferenceError::ResolutionUnavailable { reference: file_ref.raw().to_string() })
+    }
 }
 
 /// The context a document in `cwd` resolves through.

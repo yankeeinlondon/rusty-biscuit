@@ -140,8 +140,9 @@ pub fn resolve_schema(
     value: &Value,
     base_dir: &Path,
     context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_schema_with_roots(value, base_dir, &[], context)
+    resolve_schema_with_roots(value, base_dir, &[], context, shipped)
 }
 
 /// Same as [`resolve_schema`] but threads schema-root resolution context for
@@ -157,9 +158,10 @@ pub fn resolve_schema_with_roots(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let yaml = json_to_yaml(value);
-    resolve_yaml_schema_with_roots(&yaml, base_dir, schema_roots, request_context)
+    resolve_yaml_schema_with_roots(&yaml, base_dir, schema_roots, request_context, shipped)
 }
 
 /// Same as [`resolve_schema`] but takes a YAML value directly. Used by the
@@ -168,8 +170,9 @@ pub fn resolve_yaml_schema(
     value: &YamlValue,
     base_dir: &Path,
     context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_yaml_schema_with_roots(value, base_dir, &[], context)
+    resolve_yaml_schema_with_roots(value, base_dir, &[], context, shipped)
 }
 
 /// Same as [`resolve_yaml_schema`] but threads schema-root resolution context
@@ -179,15 +182,16 @@ pub fn resolve_yaml_schema_with_roots(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_yaml_schema_owned_by(value, InlineOwner::Document, base_dir, schema_roots, request_context)
+    resolve_yaml_schema_owned_by(value, InlineOwner::Document, base_dir, schema_roots, request_context, shipped)
 }
 
 /// Who authored an inline `$schema` mapping, which decides the
 /// [`DefNamespace`] its named types (and its root-union arms' named types)
 /// are stored under.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum InlineOwner<'a> {
+pub enum InlineOwner<'a> {
     /// The document being prepared.
     Document,
     /// The schema-trigger file at this path.
@@ -213,12 +217,13 @@ impl InlineOwner<'_> {
 /// [`resolve_yaml_schema_with_roots`] for an inline value authored by
 /// `owner`. A string reference resolves exactly as it does for a document;
 /// only the namespaces of inline named types differ.
-pub(crate) fn resolve_yaml_schema_owned_by(
+pub fn resolve_yaml_schema_owned_by(
     value: &YamlValue,
     owner: InlineOwner<'_>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut stack = ReferenceStack::default();
     match value {
@@ -229,6 +234,7 @@ pub(crate) fn resolve_yaml_schema_owned_by(
                 schema_roots,
                 request_context,
                 &mut stack,
+                shipped,
             )
         }
         YamlValue::Mapping(_) => resolve_inline_mapping(
@@ -237,9 +243,10 @@ pub(crate) fn resolve_yaml_schema_owned_by(
             base_dir,
             schema_roots,
             request_context,
+            shipped,
         ),
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack)
+            resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack, shipped)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -253,12 +260,13 @@ pub(crate) fn resolve_yaml_schema_owned_by(
 /// Resolves one global catalog declaration, `value` (a single-entry
 /// mapping), from schema files in `base_dir`. Its stored definitions, cyclic
 /// and shared, are returned with it, as for any inline `$schema` mapping.
-pub(crate) fn resolve_catalog_declaration(
+pub fn resolve_catalog_declaration(
     value: &YamlValue,
     base_dir: &Path,
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context)
+    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context, shipped)
 }
 
 /// Resolves the inline `$schema` mapping `value` authored by `owner`.
@@ -268,6 +276,7 @@ fn resolve_inline_mapping(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let schema = parse_yaml_schema(value)?;
     // Inline the definitions of any `Name@file` named-type imports
@@ -290,6 +299,7 @@ fn resolve_inline_mapping(
         Sharing::Automatic,
         &mut searched,
         &mut definitions,
+        shipped,
     )?;
     let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
     // Inline `$schema` mappings have no on-disk path, so `this` example
@@ -335,8 +345,9 @@ pub fn named_type_reference_path(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    if reference.trim() == "this" || embedded::reserved_stem(reference).is_some() {
+    if reference.trim() == "this" || shipped.reserved_stem(reference).is_some() {
         return Ok(None);
     }
     named_type_file_path(reference, base_dir, schema_roots, request_context, &mut BTreeSet::new())
@@ -380,8 +391,9 @@ pub fn expand_named_types(
     defining_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<NamedTypeExpansion, SchemaError> {
-    expand_named_types_with_locals(schema, None, base_dir, defining_file, schema_roots, request_context)
+    expand_named_types_with_locals(schema, None, base_dir, defining_file, schema_roots, request_context, shipped)
 }
 
 /// Expands a declaration using a separate local type table when supplied.
@@ -397,6 +409,7 @@ pub fn expand_named_types_with_locals(
     defining_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<NamedTypeExpansion, SchemaError> {
     let mut definitions = DefinitionTable::default();
     match schema {
@@ -415,6 +428,7 @@ pub fn expand_named_types_with_locals(
                 request_context,
                 &mut BTreeSet::new(),
                 &mut definitions,
+                shipped,
             )?;
             Ok(NamedTypeExpansion {
                 schema,
@@ -444,6 +458,7 @@ pub fn expand_named_types_with_locals(
                     request_context,
                     &mut BTreeSet::new(),
                     &mut definitions,
+                    shipped,
                 )?;
                 imports.extend(found);
                 let SchemaRoot::Single(shape) = schema else {
@@ -471,12 +486,14 @@ pub fn check_standalone_named_types(
     document: &StandaloneSchemaDocument,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let base_dir = document.path.parent().unwrap_or_else(|| Path::new("."));
     let mut imports = BTreeSet::new();
     if let Some(schema) = document.schema() {
         imports.extend(expand_named_types_with_locals(
             schema, document.local_types.as_ref(), base_dir, Some(&document.path), schema_roots, request_context,
+            shipped,
         )?.imports);
     }
     if let Some(types) = &document.local_types {
@@ -490,6 +507,7 @@ pub fn check_standalone_named_types(
             Sharing::Automatic,
             &mut BTreeSet::new(),
             &mut DefinitionTable::default(),
+            shipped,
         )?;
         imports.extend(read);
     }
@@ -503,6 +521,7 @@ fn resolve_root_union(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     if items.is_empty() {
         return Err(SchemaError::FrontmatterShape {
@@ -538,6 +557,7 @@ fn resolve_root_union(
                         request_context,
                         &mut searched,
                         &mut definitions,
+                        shipped,
                     )?;
                 imports.extend(arm_imports);
                 let mut arm_json = to_json_schema_with_definitions(&arm_schema, &definitions)?;
@@ -574,6 +594,7 @@ fn resolve_root_union(
                     schema_roots,
                     request_context,
                     stack,
+                    shipped,
                 )?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
@@ -756,14 +777,24 @@ fn try_bare_name_in_roots(
         source,
     };
     let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
-    for root in schema_roots {
-        let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
-        observed::probed(searched, detailed.probed_paths());
-        if let Some(path) = detailed.into_convenience().map_err(unresolved)? {
-            return Ok(Some(path));
-        }
+    #[cfg(not(feature = "file"))]
+    {
+        let _ = (explicit, schema_roots, request_context, searched);
+        Err(unresolved(biscuit_file::FileReferenceError::ResolutionUnavailable {
+            reference: file_ref.raw().to_string(),
+        }))
     }
-    Ok(None)
+    #[cfg(feature = "file")]
+    {
+        for root in schema_roots {
+            let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
+            observed::probed(searched, detailed.probed_paths());
+            if let Some(path) = detailed.into_convenience().map_err(unresolved)? {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
+    }
 }
 
 // ── `$schema` file-reference delegation guard ───────────────────────────────
@@ -843,6 +874,7 @@ fn resolve_reference_in_context(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let trimmed = reference.trim();
     let file_ref = FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
@@ -868,6 +900,7 @@ fn resolve_reference_in_context(
                 schema_roots,
                 request_context,
                 stack,
+                shipped,
             )?;
             attribute_origin(&mut resolved, &path);
             resolved.referenced_files = accumulate_referenced_file(
@@ -913,6 +946,7 @@ fn resolve_reference_in_context(
         schema_roots,
         request_context,
         stack,
+        shipped,
     )?;
     // The schema was loaded from a file — record the resolved path so
     // diagnostics can point `relatedInformation` at the referenced source.
@@ -932,6 +966,7 @@ fn load_guarded_in_context(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let canonical = canonical_path(path);
     stack.enter(&canonical)?;
@@ -940,6 +975,7 @@ fn load_guarded_in_context(
         schema_roots,
         request_context,
         stack,
+        shipped,
     )
     .map_err(|source| match source {
         SchemaError::Grammar { .. }
@@ -967,7 +1003,7 @@ fn load_guarded_in_context(
 /// missing file, refreshes the skipped trigger. Probes and reads are recorded
 /// into every collection running on the calling thread; with none running,
 /// nothing is recorded.
-pub(crate) mod observed {
+pub mod observed {
     use std::cell::RefCell;
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
@@ -978,15 +1014,15 @@ pub(crate) mod observed {
 
     /// What one [`collect`] call observed.
     #[derive(Debug, Default)]
-    pub(crate) struct Observed {
+    pub struct Observed {
         /// Files read successfully, normalized like `referenced_files`.
-        pub(crate) read: BTreeSet<PathBuf>,
+        pub read: BTreeSet<PathBuf>,
         /// Every location probed, present or absent.
-        pub(crate) searched: BTreeSet<PathBuf>,
+        pub searched: BTreeSet<PathBuf>,
     }
 
     /// Runs `resolve`, returning its result with everything it observed.
-    pub(crate) fn collect<T>(resolve: impl FnOnce() -> T) -> (T, Observed) {
+    pub fn collect<T>(resolve: impl FnOnce() -> T) -> (T, Observed) {
         struct Pop;
         impl Drop for Pop {
             fn drop(&mut self) {
@@ -1002,6 +1038,7 @@ pub(crate) mod observed {
     }
 
     /// Adds `probed` to `searched`, and records it.
+    #[cfg(feature = "file")]
     pub(super) fn probed(searched: &mut BTreeSet<PathBuf>, probed: impl Iterator<Item = PathBuf>) {
         let probed: Vec<PathBuf> = probed.collect();
         FRAMES.with_borrow_mut(|frames| {
@@ -1035,9 +1072,18 @@ fn resolve_file_reference_in_context(
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
-    let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
-    observed::probed(searched, detailed.probed_paths());
-    detailed.into_convenience()
+    #[cfg(feature = "file")]
+    {
+        let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
+        observed::probed(searched, detailed.probed_paths());
+        detailed.into_convenience()
+    }
+    // Without the `file` feature nothing is probed (see `file_context`).
+    #[cfg(not(feature = "file"))]
+    {
+        let _ = (base_dir, request_context, searched);
+        Err(biscuit_file::FileReferenceError::ResolutionUnavailable { reference: file_ref.raw().to_string() })
+    }
 }
 
 fn load_schema_from_path_in_context(
@@ -1045,6 +1091,7 @@ fn load_schema_from_path_in_context(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
@@ -1058,7 +1105,7 @@ fn load_schema_from_path_in_context(
 
     match extension.as_deref() {
         Some("json") => parse_raw_json_schema(path, &bytes),
-        _ => parse_yaml_referenced_file(path, &bytes, schema_roots, request_context, stack),
+        _ => parse_yaml_referenced_file(path, &bytes, schema_roots, request_context, stack, shipped),
     }
 }
 
@@ -1068,6 +1115,7 @@ fn parse_yaml_referenced_file(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
@@ -1076,7 +1124,7 @@ fn parse_yaml_referenced_file(
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
             SchemaDeclaration::Schema(schema) => {
-                resolve_standalone_schema(schema, document.local_types.as_ref(), path, schema_roots, request_context, stack)
+                resolve_standalone_schema(schema, document.local_types.as_ref(), path, schema_roots, request_context, stack, shipped)
             }
             SchemaDeclaration::Reference(reference) => {
                 let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -1086,6 +1134,7 @@ fn parse_yaml_referenced_file(
                     schema_roots,
                     request_context,
                     stack,
+                    shipped,
                 )
             }
         };
@@ -1231,6 +1280,7 @@ fn resolve_standalone_schema(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let key = DefNamespace::File(canonical_path(path));
@@ -1248,6 +1298,7 @@ fn resolve_standalone_schema(
                 request_context,
                 &mut searched,
                 &mut definitions,
+                shipped,
             )?;
             let mut json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
             let examples = resolve_document_examples(
@@ -1279,6 +1330,7 @@ fn resolve_standalone_schema(
                 schema_roots,
                 request_context,
                 stack,
+                shipped,
             )
         }
     }
@@ -1298,21 +1350,22 @@ fn resolve_standalone_schema(
 /// virtual path inside the repository root, a whole-file reference or
 /// root-union document, or an `example(...)` constraint (which would name a
 /// file on disk).
-#[cfg(test)]
-pub(crate) fn prepare_embedded_schema(
+pub fn prepare_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    prepare_embedded_schema_in(path, documents, "").map(|(resolved, _)| resolved)
+    prepare_embedded_schema_in(path, documents, "", shipped).map(|(resolved, _)| resolved)
 }
 
 /// [`prepare_embedded_schema`] with every import confined to `{bundle}/`
 /// (no confinement when `bundle` is empty), alongside the virtual paths of
 /// every document it read (`path` and its transitive imports).
-pub(crate) fn prepare_embedded_schema_in(
+pub fn prepare_embedded_schema_in(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
+    shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let unsupported = |message: &str| SchemaError::SchemaDocument {
         path: PathBuf::from(path),
@@ -1334,7 +1387,7 @@ pub(crate) fn prepare_embedded_schema_in(
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
     };
-    lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, bundle, Sharing::Automatic)
+    lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, bundle, Sharing::Automatic, shipped)
 }
 
 /// Prepares an inline `$schema` mapping authored in the embedded document
@@ -1345,11 +1398,12 @@ pub(crate) fn prepare_embedded_schema_in(
 ///
 /// As [`prepare_embedded_schema_in`]; a mapping that is not a single object
 /// schema is a [`SchemaError::SchemaDocument`] naming `importer`.
-pub(crate) fn prepare_embedded_inline_schema(
+pub fn prepare_embedded_inline_schema(
     value: &YamlValue,
     importer: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
+    shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SchemaRoot::Union(_)) {
@@ -1358,17 +1412,18 @@ pub(crate) fn prepare_embedded_inline_schema(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic)
+    lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic, shipped)
 }
 
 /// [`prepare_embedded_inline_schema`] for one global catalog declaration,
 /// expanded with `sharing`: [`Sharing::Automatic`] for the catalog itself,
 /// [`Sharing::Off`] for a definition-free projection of it.
-pub(crate) fn prepare_embedded_catalog_declaration(
+pub fn prepare_embedded_catalog_declaration(
     value: &YamlValue,
     importer: &str,
     documents: &[EmbeddedDocument<'_>],
     sharing: Sharing,
+    shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SchemaRoot::Union(_)) {
@@ -1377,7 +1432,7 @@ pub(crate) fn prepare_embedded_catalog_declaration(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, None, importer, documents, "", sharing)
+    lower_embedded_schema(schema, None, importer, documents, "", sharing, shipped)
 }
 
 /// Expands a single-object embedded schema authored at `path` and lowers it,
@@ -1389,6 +1444,7 @@ fn lower_embedded_schema(
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
     sharing: Sharing,
+    shipped: ShippedSources,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let mut definitions = DefinitionTable::default();
     let (schema, mut reads) = expand_imports(
@@ -1402,6 +1458,7 @@ fn lower_embedded_schema(
         // Embedded imports resolve lexically in the table and probe no disk.
         &mut BTreeSet::new(),
         &mut definitions,
+        shipped,
     )?;
     let json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
     if contains_example_annotation(&json_schema) {
@@ -1436,6 +1493,7 @@ fn contains_example_annotation(value: &Value) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
     local_types: Option<&SchemaShape>,
@@ -1444,6 +1502,7 @@ fn resolve_standalone_root_union(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
+    shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
     let mut any_of = Vec::with_capacity(arms.len());
     let mut simplified_arms = Vec::with_capacity(arms.len());
@@ -1472,6 +1531,7 @@ fn resolve_standalone_root_union(
                     request_context,
                     &mut searched,
                     &mut definitions,
+                    shipped,
                 )?;
                 imports.extend(arm_imports);
                 let SchemaRoot::Single(shape) = schema else {
@@ -1504,6 +1564,7 @@ fn resolve_standalone_root_union(
                     schema_roots,
                     request_context,
                     stack,
+                    shipped,
                 )?;
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
@@ -1974,18 +2035,19 @@ fn expand_document_imports(
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
+    shipped: ShippedSources,
 ) -> Result<(SchemaRoot, Vec<PathBuf>), SchemaError> {
     let source = NamespaceSource::Files {
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
     let root = if local_types.is_some() { SchemaSourcePath::root().property("$schema").join(root) } else { root.clone() };
-    expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions)
+    expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions, shipped)
 }
 
 /// Whether an expansion stores repeated acyclic structured definitions once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Sharing {
+pub enum Sharing {
     /// Store each definition discovery selects (see `graph`). Every
     /// resolution, global catalog declarations included, expands this way.
     Automatic,
@@ -2016,10 +2078,10 @@ fn expand_imports(
     key: DefNamespace,
     root: &SchemaSourcePath,
     source: NamespaceSource<'_>,
-    shipped: ShippedSources,
     sharing: Sharing,
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
+    shipped: ShippedSources,
 ) -> Result<(SchemaRoot, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
@@ -2797,7 +2859,7 @@ fn rehome_atom_examples(
 /// Canonicalizes `path` for stable cycle-detection identity, falling back to
 /// the given path when canonicalization fails (it should not, since the path
 /// was just resolved on disk).
-fn canonical_path(path: &Path) -> PathBuf {
+pub fn canonical_path(path: &Path) -> PathBuf {
     biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
@@ -4231,7 +4293,7 @@ pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, Sc
     Ok(Value::Object(document_obj))
 }
 
-pub(super) fn validate_baseline_schema(baseline: &Value) -> Result<(), SchemaError> {
+pub fn validate_baseline_schema(baseline: &Value) -> Result<(), SchemaError> {
     validate_simple_object_schema(baseline, "the baseline")
 }
 
@@ -4249,7 +4311,7 @@ pub(super) fn validate_baseline_schema(baseline: &Value) -> Result<(), SchemaErr
 /// stay in its own table ([`super::scope::check_joined_references`]). Every
 /// schema's `#/$defs/…` references must resolve in its own table; the other
 /// reference forms of a schema without `$defs` are not inspected, as before.
-pub(crate) fn validate_simple_object_schema(schema: &Value, label: &str) -> Result<(), SchemaError> {
+pub fn validate_simple_object_schema(schema: &Value, label: &str) -> Result<(), SchemaError> {
     let object = schema.as_object().ok_or_else(|| SchemaError::Baseline {
         message: format!("{label} must be an object schema"),
         source: None,
@@ -4330,7 +4392,7 @@ pub(super) fn validate_simple_object_root(schema: &Map<String, Value>) -> Result
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-pub(crate) fn describe_yaml(value: &YamlValue) -> &'static str {
+pub fn describe_yaml(value: &YamlValue) -> &'static str {
     match value {
         YamlValue::Null => "null",
         YamlValue::Bool(_) => "boolean",
@@ -4393,6 +4455,7 @@ pub fn shape_to_schema(shape: &SchemaShape) -> Result<Value, SchemaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "file")]
     use crate::SchemaAdvisoryKind;
     use serde_json::json;
 
@@ -4400,6 +4463,7 @@ mod tests {
         serde_yaml_ng::from_str(input).expect("yaml parse")
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn exported_schema_uses_local_and_imported_types_without_exporting_helpers() {
         let dir = tempfile::tempdir().unwrap();
@@ -4408,29 +4472,30 @@ mod tests {
         let body = "$schema:\n  rows: row[](required)\ntypes:\n  row:\n    id: identifier(required)@./shared.yaml\n";
         for prefix in ["", "kind: schema\n"] {
             fs::write(dir.path().join("contract.yaml"), format!("{prefix}{body}")).unwrap();
-            let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+            let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap();
             let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
             assert!(validator.is_valid(&json!({"rows": [{"id": "abc"}]})));
             assert!(!validator.is_valid(&json!({"rows": [{"id": "INVALID"}]})));
             assert!(!validator.is_valid(&json!({"rows": [{}]})));
             assert!(!validator.is_valid(&json!({})));
             assert!(resolved.json_schema["properties"].get("row").is_none());
-            let imported = resolve_yaml_schema(&yaml_value("item: row@./contract.yaml"), dir.path(), &context).unwrap();
+            let imported = resolve_yaml_schema(&yaml_value("item: row@./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap();
             assert!(jsonschema::validator_for(&imported.json_schema).unwrap().is_valid(&json!({"item": {"id": "abc"}})));
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn recursive_local_types_resolve_from_disk_and_embedded_documents() {
         let documents = [EmbeddedDocument {
             path: "bundle/contract.yaml",
             text: "$schema:\n  root: node(required)\ntypes:\n  node:\n    name: string(required)\n    children: node[]\n",
         }];
-        let (embedded, _) = prepare_embedded_schema_in("bundle/contract.yaml", &documents, "bundle").unwrap();
+        let (embedded, _) = prepare_embedded_schema_in("bundle/contract.yaml", &documents, "bundle", ShippedSources::NONE).unwrap();
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("contract.yaml"), documents[0].text).unwrap();
         let context = biscuit_file::FileResolutionContext::new(dir.path());
-        let disk = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+        let disk = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap();
         for resolved in [embedded, disk] {
             let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
             assert!(validator.is_valid(&json!({"root": {"name": "a", "children": [{"name": "b"}]}})));
@@ -4439,6 +4504,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn combined_local_names_preserve_errors_and_builtin_precedence() {
         let dir = tempfile::tempdir().unwrap();
@@ -4448,7 +4514,7 @@ mod tests {
             ("$schema:\n  value: first\ntypes:\n  first: second\n  second: first\n", true),
         ] {
             fs::write(dir.path().join("contract.yaml"), source).unwrap();
-            let error = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap_err();
+            let error = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap_err();
             let SchemaError::ReferencedSchema { source: error, .. } = error else { panic!("{error:?}") };
             if cycle {
                 assert!(matches!(*error, SchemaError::NonDescendingCycle { .. }), "{error:?}");
@@ -4459,19 +4525,20 @@ mod tests {
             }
         }
         fs::write(dir.path().join("contract.yaml"), "$schema:\n  builtin: string(required)\n  local: string@this\ntypes:\n  string: number(required)\n").unwrap();
-        let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+        let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap();
         let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
         assert!(validator.is_valid(&json!({"builtin": "abc", "local": 2})));
         assert!(!validator.is_valid(&json!({"builtin": 2, "local": "abc"})));
         assert!(!validator.is_valid(&json!({"builtin": "abc"})));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn exported_root_union_uses_its_local_types() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("contract.yaml"), "$schema:\n  - left: token(required)\n  - right: token(required)\ntypes:\n  token: string(pattern(^x$))\n").unwrap();
         let context = biscuit_file::FileResolutionContext::new(dir.path());
-        let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+        let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap();
         let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
         assert!(validator.is_valid(&json!({"left": "x"})));
         assert!(validator.is_valid(&json!({"right": "x"})));
@@ -4491,13 +4558,14 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn same_name_export_and_type_keep_distinct_constraint_locations() {
         let dir = tempfile::tempdir().unwrap();
         let source = "$schema:\n  size: size(min(5))\ntypes:\n  size: number(max(2))\n";
         fs::write(dir.path().join("contract.yaml"), source).unwrap();
         let context = biscuit_file::FileResolutionContext::new(dir.path());
-        let error = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap_err();
+        let error = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap_err();
         let SchemaError::ReferencedSchema { source: error, .. } = error else { panic!("{error:?}") };
         let SchemaError::ConstraintConflict { constraints, .. } = *error else { panic!("{error:?}") };
         let authored: Vec<_> = constraints.iter().map(|participant| {
@@ -4510,7 +4578,7 @@ mod tests {
     #[test]
     fn resolves_inline_mapping() {
         let v = yaml_value("title: 'string(required)'");
-        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap();
+        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new(".")), ShippedSources::NONE).unwrap();
         assert!(resolved.simplified.is_some());
         assert_eq!(resolved.json_schema["type"], "object");
         let required = resolved.json_schema["required"].as_array().unwrap();
@@ -4520,37 +4588,39 @@ mod tests {
     #[test]
     fn resolves_inline_root_union() {
         let v = yaml_value("- title: 'string(required)'\n- name: string");
-        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap();
+        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new(".")), ShippedSources::NONE).unwrap();
         assert!(resolved.json_schema["anyOf"].is_array());
     }
 
     #[test]
     fn remote_https_is_rejected() {
         let v = yaml_value("'https://example.com/schema.json'");
-        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap_err();
+        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new(".")), ShippedSources::NONE).unwrap_err();
         assert!(matches!(err, SchemaError::RemoteUnsupported { .. }));
     }
 
     #[test]
     fn remote_http_is_rejected() {
         let v = yaml_value("'http://example.com/schema.json'");
-        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap_err();
+        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new(".")), ShippedSources::NONE).unwrap_err();
         assert!(matches!(err, SchemaError::RemoteUnsupported { .. }));
     }
 
     #[test]
     fn unsupported_shape_is_rejected() {
         let v = yaml_value("42");
-        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap_err();
+        let err = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new(".")), ShippedSources::NONE).unwrap_err();
         assert!(matches!(err, SchemaError::FrontmatterShape { .. }));
     }
 
+    #[cfg(feature = "file")]
     fn write_schema_file(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, body).unwrap();
         path
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolves_simplified_yaml_file_reference() {
         let dir = tempfile::tempdir().unwrap();
@@ -4560,12 +4630,13 @@ mod tests {
             "$schema:\n  title: 'string(required)'\n",
         );
         let v = yaml_value("./schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert!(resolved.simplified.is_some());
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert_eq!(required[0], "title");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn referenced_file_is_recorded_as_dependency_edge() {
         // Editing `schema.yaml`'s own type must be able to invalidate a cached
@@ -4577,17 +4648,18 @@ mod tests {
             "$schema:\n  title: 'string(required)'\n",
         );
         let v = yaml_value("./schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert_eq!(resolved.referenced_files, vec![canonical_path(&path)]);
     }
 
     #[test]
     fn inline_mapping_records_no_referenced_files() {
         let v = yaml_value("title: 'string(required)'");
-        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new("."))).unwrap();
+        let resolved = resolve_yaml_schema(&v, Path::new("."), &biscuit_file::FileResolutionContext::new(Path::new(".")), ShippedSources::NONE).unwrap();
         assert!(resolved.referenced_files.is_empty());
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn root_union_string_arm_records_referenced_file() {
         // A root-union string arm's file is a dependency edge like a top-level
@@ -4599,10 +4671,11 @@ mod tests {
             "$schema:\n  title: 'string(required)'\n",
         );
         let v = yaml_value("- ./arm.yaml\n- name: string\n");
-        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert_eq!(resolved.referenced_files, vec![canonical_path(&arm)]);
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolves_raw_json_schema_file_reference() {
         let dir = tempfile::tempdir().unwrap();
@@ -4612,11 +4685,12 @@ mod tests {
             r#"{"type":"object","properties":{"x":{"type":"number"}}}"#,
         );
         let v = yaml_value("./schema.json");
-        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert!(resolved.simplified.is_none());
         assert_eq!(resolved.json_schema["properties"]["x"]["type"], "number");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn yaml_without_schema_key_is_treated_as_json_schema() {
         let dir = tempfile::tempdir().unwrap();
@@ -4626,10 +4700,11 @@ mod tests {
             "title: hello\nproperties:\n  x:\n    type: number\n",
         );
         let v = yaml_value("./no-schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert!(resolved.simplified.is_none());
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_simplified_map_remains_raw_json_schema_and_reports_advisory() {
         let dir = tempfile::tempdir().unwrap();
@@ -4638,7 +4713,7 @@ mod tests {
             "schema.yaml",
             "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
         );
-        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
 
         assert!(resolved.simplified.is_none());
         assert_eq!(resolved.json_schema["source_marker"], "string(required)");
@@ -4660,6 +4735,7 @@ mod tests {
         assert!(message.contains("`kind: schema` + `types:`"));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_map_advisory_excludes_json_schema_envelopes_and_invalid_maps() {
         let cases = [
@@ -4685,7 +4761,7 @@ mod tests {
         for (name, body) in cases {
             write_schema_file(dir.path(), name, body);
             let resolved =
-                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
             assert!(
                 resolved.advisories.is_empty(),
                 "unexpected advisory for {name}"
@@ -4699,10 +4775,11 @@ mod tests {
         );
         write_schema_file(dir.path(), "scalar.yaml", "$schema: ./target.yaml\n");
         let resolved =
-            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert!(resolved.advisories.is_empty());
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn root_union_sorts_and_deduplicates_schema_advisories() {
         let dir = tempfile::tempdir().unwrap();
@@ -4712,6 +4789,7 @@ mod tests {
             &yaml_value("- ./z.yaml\n- ./a.yaml\n- ./z.yaml\n"),
             dir.path(),
             &biscuit_file::FileResolutionContext::new(dir.path()),
+            ShippedSources::NONE,
         )
         .unwrap();
 
@@ -4729,7 +4807,7 @@ mod tests {
             "root.yaml",
             "$schema:\n  - ./z.yaml\n  - ./a.yaml\n  - ./z.yaml\n",
         );
-        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap();
+        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
         assert_eq!(
             nested
                 .advisories
@@ -4740,20 +4818,22 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn non_object_yaml_is_ambiguous() {
         let dir = tempfile::tempdir().unwrap();
         write_schema_file(dir.path(), "bad.yaml", "- one\n- two\n");
         let v = yaml_value("./bad.yaml");
-        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap_err();
+        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
         assert!(matches!(err, SchemaError::AmbiguousReferenced { .. }));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn missing_file_errors_with_no_match() {
         let dir = tempfile::tempdir().unwrap();
         let v = yaml_value("./nope.yaml");
-        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap_err();
+        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
         assert!(matches!(err, SchemaError::NoMatch { bare_name: false, .. }), "{err:?}");
         assert!(!err.to_string().contains("::file-links"), "a plain miss has no glob hint: {err}");
     }
@@ -4762,16 +4842,17 @@ mod tests {
     /// is a `NoMatch` carrying the literal-glob hint. A malformed reference is
     /// `Unresolved` with its syntax error and carries no hint, whatever its
     /// text.
+    #[cfg(feature = "file")]
     #[test]
     fn literal_glob_miss_hints_and_invalid_syntax_does_not() {
         let dir = tempfile::tempdir().unwrap();
         let context = biscuit_file::FileResolutionContext::new(dir.path());
 
-        let glob = resolve_yaml_schema(&yaml_value("./schemas/*.yaml"), dir.path(), &context).unwrap_err();
+        let glob = resolve_yaml_schema(&yaml_value("./schemas/*.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap_err();
         assert!(matches!(glob, SchemaError::NoMatch { .. }), "{glob:?}");
         assert!(glob.to_string().contains("::file-links"), "{glob}");
 
-        let malformed = resolve_yaml_schema(&yaml_value("~user/*.yaml"), dir.path(), &context).unwrap_err();
+        let malformed = resolve_yaml_schema(&yaml_value("~user/*.yaml"), dir.path(), &context, ShippedSources::NONE).unwrap_err();
         assert!(matches!(malformed, SchemaError::Unresolved { .. }), "{malformed:?}");
         assert!(!malformed.to_string().contains("::file-links"), "{malformed}");
     }
@@ -5006,11 +5087,12 @@ mod schema_plus_phase1 {
         let schema_value = fm
             .get("$schema")
             .expect("schema file must have a `$schema` key");
-        resolve_yaml_schema(schema_value, dir, &biscuit_file::FileResolutionContext::new(dir))
+        resolve_yaml_schema(schema_value, dir, &biscuit_file::FileResolutionContext::new(dir), ShippedSources::NONE)
     }
 
     // ── Feature B — `@` cross-file named-type import ─────────────────────
 
+    #[cfg(feature = "file")]
     #[test]
     fn expands_named_type_import() {
         let dir = tempfile::tempdir().unwrap();
@@ -5055,6 +5137,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn expands_array_named_type_import() {
         let dir = tempfile::tempdir().unwrap();
@@ -5091,6 +5174,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn import_of_missing_type_name_errors() {
         let dir = tempfile::tempdir().unwrap();
@@ -5114,6 +5198,7 @@ mod schema_plus_phase1 {
         assert_eq!(site.path, SchemaSourcePath::root().property("value"));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn import_cycle_is_detected() {
         let dir = tempfile::tempdir().unwrap();
@@ -5165,6 +5250,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn import_from_non_simplified_file_errors() {
         // A raw JSON Schema file exposes no named types, so importing from it is
@@ -5210,6 +5296,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn import_records_dependency_edge() {
         // The resolved product records the imported file as a dependency edge so
@@ -5240,6 +5327,7 @@ mod schema_plus_phase1 {
     const VALID_EXAMPLE: &str =
         "kind: example\ninvocation: \"{{ ctx.today }}\"\nreturns: \"2024-12-25\"\ndescription: d\n";
 
+    #[cfg(feature = "file")]
     #[test]
     fn example_resolves_and_emits_resolved_object() {
         let dir = tempfile::tempdir().unwrap();
@@ -5267,6 +5355,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn multiple_examples_resolve_to_multiple_objects() {
         let dir = tempfile::tempdir().unwrap();
@@ -5284,6 +5373,7 @@ mod schema_plus_phase1 {
         assert_eq!(examples.len(), 2, "both examples must resolve: {examples:?}");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn example_resolves_relative_subdirectory_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -5316,6 +5406,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn malformed_example_envelope_is_a_schema_load_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -5338,6 +5429,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn invalid_inherited_parameters_is_a_schema_load_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -5365,6 +5457,7 @@ mod schema_plus_phase1 {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn example_returns_matching_target_type_resolves() {
         // Positive guard: a required, concretely-typed property whose example
@@ -5389,6 +5482,7 @@ mod schema_plus_phase1 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn example_returns_wrong_target_type_is_a_schema_load_error() {
         // The core gap this fix closes: a well-formed envelope whose `returns`
@@ -5467,6 +5561,8 @@ mod schema_plus_phase1 {
     fn feature_dir() -> PathBuf {
         biscuit_test_harness::manifest_dir!()
             .join("..")
+            .join("..")
+            .join("darkmatter")
             .join("features")
             .join("_completed")
             .join("2026-07-08-schema-plus")
@@ -5501,7 +5597,7 @@ mod schema_plus_phase1 {
         let fm: YamlValue = serde_yaml_ng::from_str(&raw).expect("parse example.yaml");
         let schema_value = fm.get("$schema").expect("example.yaml has a `$schema` key");
         let fixture_json =
-            resolve_yaml_schema(schema_value, &dir, &biscuit_file::FileResolutionContext::new(&dir)).expect("example.yaml envelope must resolve");
+            resolve_yaml_schema(schema_value, &dir, &biscuit_file::FileResolutionContext::new(&dir), ShippedSources::NONE).expect("example.yaml envelope must resolve");
 
         let builtin: YamlValue = serde_yaml_ng::from_str(
             super::super::example::EXAMPLE_ENVELOPE_YAML,
@@ -5549,10 +5645,12 @@ mod bare_name_phase3 {
     use super::*;
     use std::path::PathBuf;
 
+    #[cfg(feature = "file")]
     fn write(dir: &Path, name: &str, body: &str) {
         std::fs::write(dir.join(name), body).unwrap();
     }
 
+    #[cfg(feature = "file")]
     fn yaml_value(input: &str) -> YamlValue {
         serde_yaml_ng::from_str(input).expect("yaml parse")
     }
@@ -5612,6 +5710,7 @@ mod bare_name_phase3 {
 
     // ── $schema bare-name resolution ────────────────────────────────────
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_resolves_nearest_root_first() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5640,7 +5739,7 @@ mod bare_name_phase3 {
         ];
         let v = yaml_value("claudine.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("pkg/docs"))).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("pkg/docs")), ShippedSources::NONE).expect("resolves");
 
         // Near root wins → `prompt` is required.
         let required = resolved.json_schema["required"].as_array().unwrap();
@@ -5662,6 +5761,7 @@ mod bare_name_phase3 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     #[serial_test::serial(schema_root_snapshot)]
     fn bare_name_root_probe_uses_captured_environment() {
@@ -5700,6 +5800,7 @@ mod bare_name_phase3 {
             &docs,
             std::slice::from_ref(&schemas),
             &request_context,
+            ShippedSources::NONE,
         );
 
         match prior_name {
@@ -5716,6 +5817,7 @@ mod bare_name_phase3 {
         assert!(required.iter().any(|value| value == "captured"));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_resolves_from_far_root_when_near_lacks_it() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5738,11 +5840,12 @@ mod bare_name_phase3 {
         ];
         let v = yaml_value("claudine.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("pkg/docs"))).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("pkg/docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("pkg/docs")), ShippedSources::NONE).expect("resolves");
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "title"));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_pins_to_schema_root_not_repository_root() {
         // The precedence flip made implicit resolution document-first. A
@@ -5778,7 +5881,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("schemas")];
         let v = yaml_value("schema.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).expect("resolves");
 
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(
@@ -5799,6 +5902,7 @@ mod bare_name_phase3 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_ordering_survives_repository_root_collision() {
         // Nearest-first ordering across multiple configured roots must hold even
@@ -5831,7 +5935,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("near"), root.join("far")];
         let v = yaml_value("schema.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).expect("resolves");
 
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(
@@ -5844,6 +5948,7 @@ mod bare_name_phase3 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn path_qualified_ref_unchanged_with_roots() {
         // A `./`-prefixed reference must NOT use schema roots.
@@ -5869,7 +5974,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("schemas")];
         let v = yaml_value("./local.yaml");
         let resolved =
-            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).expect("resolves");
+            resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).expect("resolves");
 
         // `./local.yaml` resolves to the sibling, not the root.
         let required = resolved.json_schema["required"].as_array().unwrap();
@@ -5879,6 +5984,7 @@ mod bare_name_phase3 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn sibling_only_bare_name_produces_suggestion() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5896,7 +6002,7 @@ mod bare_name_phase3 {
 
         let roots = vec![root.join("schemas")];
         let v = yaml_value("local.yaml");
-        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap_err();
+        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).unwrap_err();
 
         match err {
             SchemaError::BareNameSiblingExists {
@@ -5910,6 +6016,7 @@ mod bare_name_phase3 {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_not_found_no_sibling_is_no_match() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5920,10 +6027,11 @@ mod bare_name_phase3 {
 
         let roots = vec![root.join("schemas")];
         let v = yaml_value("nonexistent.yaml");
-        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap_err();
+        let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).unwrap_err();
         assert!(matches!(err, SchemaError::NoMatch { bare_name: true, .. }), "{err:?}");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn no_roots_preserves_legacy_behavior() {
         // Without schema_roots, a bare name resolves relative to base_dir
@@ -5938,13 +6046,14 @@ mod bare_name_phase3 {
         );
 
         let v = yaml_value("sibling.yaml");
-        let resolved = resolve_yaml_schema(&v, root, &biscuit_file::FileResolutionContext::new(root)).expect("resolves via legacy path");
+        let resolved = resolve_yaml_schema(&v, root, &biscuit_file::FileResolutionContext::new(root), ShippedSources::NONE).expect("resolves via legacy path");
         let required = resolved.json_schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "title"));
     }
 
     // ── Name@file import bare-name resolution ──────────────────────────
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_import_resolves_via_schema_roots() {
         let tmp = tempfile::tempdir().unwrap();
@@ -5971,7 +6080,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
+        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE)
             .expect("import resolves via roots");
 
         // `value` should have the inlined enum from types.yaml.
@@ -5983,6 +6092,7 @@ mod bare_name_phase3 {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_import_sibling_suggestion() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6008,7 +6118,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
+        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE)
             .unwrap_err();
         assert!(
             matches!(err, SchemaError::BareNameSiblingExists { .. }),
@@ -6018,6 +6128,7 @@ mod bare_name_phase3 {
 
     // ── example(...) bare-name resolution ──────────────────────────────
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_example_resolves_via_schema_roots() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6043,7 +6154,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
+        let resolved = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE)
             .expect("example resolves via roots");
 
         let examples = &resolved.json_schema["properties"]["demo"]["x-darkmatter-example"];
@@ -6054,6 +6165,7 @@ mod bare_name_phase3 {
         assert_eq!(examples[0]["kind"], "example");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn bare_name_example_sibling_suggestion() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6078,7 +6190,7 @@ mod bare_name_phase3 {
         let main_yaml: YamlValue = serde_yaml_ng::from_str(&main_raw).unwrap();
         let schema_value = main_yaml.get("$schema").unwrap();
 
-        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")))
+        let err = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE)
             .unwrap_err();
         assert!(
             matches!(err, SchemaError::BareNameSiblingExists { .. }),
@@ -6102,6 +6214,7 @@ mod bare_name_phase3 {
     /// Proves the three reference kinds (`$schema`, `Name@file`, `example(...)`)
     /// share a single resolution ladder — all three go through the same
     /// bare-name path when schema roots are configured.
+    #[cfg(feature = "file")]
     #[test]
     fn shared_ladder_proves_no_duplicate_resolver() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6121,7 +6234,7 @@ mod bare_name_phase3 {
 
         // 1. `$schema` bare-name reference.
         let v = yaml_value("shared.yaml");
-        let r1 = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
+        let r1 = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).unwrap();
         assert!(r1.referenced_files.len() == 1);
 
         // 2. `Name@file` bare-name import target.
@@ -6133,7 +6246,7 @@ mod bare_name_phase3 {
         let importer_raw = std::fs::read_to_string(root.join("docs/importer.yaml")).unwrap();
         let importer_yaml: YamlValue = serde_yaml_ng::from_str(&importer_raw).unwrap();
         let schema_value = importer_yaml.get("$schema").unwrap();
-        let r2 = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
+        let r2 = resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).unwrap();
         let expected = canonical_path(&root.join("schemas/shared.yaml"));
         assert!(
             r2.imports.contains(&expected),
@@ -6153,6 +6266,7 @@ mod bare_name_phase3 {
     /// Multiple `Name@file` imports targeting the same file all inline
     /// correctly and record the target as a single dependency edge — the
     /// per-run namespace cache (F27) must not change resolution semantics.
+    #[cfg(feature = "file")]
     #[test]
     fn multiple_imports_from_same_file_resolve_and_dedup() {
         let tmp = tempfile::tempdir().unwrap();
@@ -6174,7 +6288,7 @@ mod bare_name_phase3 {
         let importer: YamlValue = serde_yaml_ng::from_str(&raw).unwrap();
         let schema_value = importer.get("$schema").unwrap();
         let resolved =
-            resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &[], &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap();
+            resolve_yaml_schema_with_roots(schema_value, &root.join("docs"), &[], &biscuit_file::FileResolutionContext::new(root.join("docs")), ShippedSources::NONE).unwrap();
 
         // All three named types inlined to their declared shapes. `A` carries
         // `required`, which `first` inherits, so `first` is not null-wrapped;
@@ -6224,6 +6338,7 @@ mod shared_type_tables {
     use super::*;
     use serde_json::json;
 
+    #[cfg(feature = "file")]
     /// Writes `types.yaml` holding `body` (a two-space-indented mapping) as
     /// either a pure `$schema:` or a tagged `kind: schema` / `types:` envelope.
     fn write_types(dir: &Path, tagged: bool, body: &str) -> PathBuf {
@@ -6234,10 +6349,13 @@ mod shared_type_tables {
     }
 
     fn engine(dir: &Path) -> ImportEngine<'static> {
-        ImportEngine::new(NamespaceSource::Files {
-            schema_roots: Vec::new(),
-            context: Box::new(FileResolutionContext::new(dir)),
-        })
+        ImportEngine::new(
+            NamespaceSource::Files {
+                schema_roots: Vec::new(),
+                context: Box::new(FileResolutionContext::new(dir)),
+            },
+            ShippedSources::NONE,
+        )
     }
 
     fn root_namespace(dir: &Path, named_types: IndexMap<String, PropertyDef>) -> Namespace {
@@ -6250,12 +6368,13 @@ mod shared_type_tables {
 
     fn resolve_root(dir: &Path, schema: &str) -> ResolvedSchema {
         let value: YamlValue = serde_yaml_ng::from_str(schema).unwrap();
-        resolve_yaml_schema(&value, dir, &FileResolutionContext::new(dir))
+        resolve_yaml_schema(&value, dir, &FileResolutionContext::new(dir), ShippedSources::NONE)
             .expect("schema must resolve")
     }
 
     // ── Allocation identity ──────────────────────────────────────────────
 
+    #[cfg(feature = "file")]
     #[test]
     fn first_load_cache_and_later_imports_share_one_table() {
         for tagged in [false, true] {
@@ -6325,6 +6444,7 @@ mod shared_type_tables {
         assert!(engine.dependencies.is_empty(), "`@this` records no dependency");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn this_from_loaded_file_shares_that_files_table() {
         for tagged in [false, true] {
@@ -6349,6 +6469,7 @@ mod shared_type_tables {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn a_whole_file_reference_cannot_supply_a_cached_named_namespace() {
         let dir = tempfile::tempdir().unwrap();
@@ -6368,6 +6489,7 @@ mod shared_type_tables {
 
     // ── Use-site independence ────────────────────────────────────────────
 
+    #[cfg(feature = "file")]
     #[test]
     fn cross_file_type_imported_twice_keeps_each_use_independent() {
         for tagged in [false, true] {
@@ -6418,6 +6540,7 @@ mod shared_type_tables {
         assert!(resolved.imports.is_empty());
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn array_modifiers_do_not_change_another_use_of_the_shared_type() {
         for tagged in [false, true] {
@@ -6450,6 +6573,7 @@ mod shared_type_tables {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn this_inside_imported_file_selects_that_files_type() {
         for tagged in [false, true] {
@@ -6486,6 +6610,7 @@ mod shared_type_tables {
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn expand_named_types_reads_this_from_the_supplied_schema_not_the_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -6501,13 +6626,13 @@ mod shared_type_tables {
         .unwrap();
 
         let NamedTypeExpansion { schema: expanded, imports, .. } =
-            expand_named_types(&buffer, dir.path(), Some(&schema_file), &[], &context).unwrap();
+            expand_named_types(&buffer, dir.path(), Some(&schema_file), &[], &context, ShippedSources::NONE).unwrap();
         let SchemaRoot::Single(shape) = expanded else { panic!("single schema") };
         assert!(shape.properties["title"].is_required(), "`base` came from the buffer");
         assert_eq!(imports, vec![canonical_path(&dir.path().join("types.yaml"))]);
 
         let missing = parse_yaml_schema(&serde_yaml_ng::from_str("title: nope\n").unwrap()).unwrap();
-        let error = expand_named_types(&missing, dir.path(), Some(&schema_file), &[], &context)
+        let error = expand_named_types(&missing, dir.path(), Some(&schema_file), &[], &context, ShippedSources::NONE)
             .unwrap_err();
         let SchemaError::UnknownNamedType { name, namespace, site } = error else {
             panic!("unknown named type: {error:?}")
@@ -6516,26 +6641,27 @@ mod shared_type_tables {
         assert_eq!(namespace, SchemaSourceId::File(canonical_path(&schema_file)));
         assert_eq!(site.path, SchemaSourcePath::root().property("title"));
 
-        let inline = expand_named_types(&missing, dir.path(), None, &[], &context).unwrap_err();
+        let inline = expand_named_types(&missing, dir.path(), None, &[], &context, ShippedSources::NONE).unwrap_err();
         assert!(matches!(
             inline,
             SchemaError::UnknownNamedType { namespace: SchemaSourceId::InlineDocument, .. }
         ));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn named_type_reference_path_selects_the_resolver_target() {
         let dir = tempfile::tempdir().unwrap();
         let context = biscuit_file::FileResolutionContext::new(dir.path());
         let types = dir.path().join("types.yaml");
         std::fs::write(&types, "kind: schema\ntypes:\n  shared: number\n").unwrap();
-        assert_eq!(named_type_reference_path("this", dir.path(), &[], &context).unwrap(), None);
+        assert_eq!(named_type_reference_path("this", dir.path(), &[], &context, ShippedSources::NONE).unwrap(), None);
         assert_eq!(
-            named_type_reference_path("./types.yaml", dir.path(), &[], &context).unwrap(),
+            named_type_reference_path("./types.yaml", dir.path(), &[], &context, ShippedSources::NONE).unwrap(),
             Some(canonical_path(&types))
         );
         assert!(matches!(
-            named_type_reference_path("./missing.yaml", dir.path(), &[], &context),
+            named_type_reference_path("./missing.yaml", dir.path(), &[], &context, ShippedSources::NONE),
             Err(SchemaError::NoMatch { .. })
         ));
     }
@@ -6543,139 +6669,53 @@ mod shared_type_tables {
 
 #[cfg(test)]
 mod reserved_namespace {
-    //! `Name@darkmatter:<stem>` names a type of a shipped partial whoever
-    //! writes it: a disk schema, a Darkmatter embedded document, or a host
-    //! bundle document. References inside the partial resolve among the
-    //! shipped documents, also during a disk expansion.
+    //! A host's reserved namespace resolves among the documents it supplies;
+    //! without one, the same spelling is an ordinary file reference.
 
     use super::*;
+
+    const PARTIAL: &str = "kind: schema\ntypes:\n  greeting: \"{ say: string }\"\n  pair: \"{ left: greeting@./partials/other.yaml }\"\n";
+    const OTHER: &str = "kind: schema\ntypes:\n  greeting: \"{ wave: boolean }\"\n";
+    const DOCUMENTS: &[EmbeddedDocument<'static>] = &[
+        EmbeddedDocument { path: "host/partials/talk.yaml", text: PARTIAL },
+        EmbeddedDocument { path: "host/partials/partials/other.yaml", text: OTHER },
+    ];
+    const HOST: ShippedSources = ShippedSources::new("host:", "host/partials", DOCUMENTS);
 
     fn yaml(input: &str) -> YamlValue {
         serde_yaml_ng::from_str(input).expect("yaml parse")
     }
 
-    /// The property names of the object `json` lowers to, or of its
-    /// non-null `anyOf` arm.
-    fn keys(json: &Value) -> BTreeSet<String> {
-        let object = json["anyOf"]
-            .as_array()
-            .and_then(|arms| arms.iter().find(|arm| arm["type"] == "object"))
-            .unwrap_or(json);
-        object["properties"].as_object().expect("an object").keys().cloned().collect()
-    }
-
     #[test]
-    fn a_disk_schema_reaches_a_shipped_partial_and_records_no_file() {
+    fn a_supplied_namespace_resolves_among_its_documents_and_records_no_file() {
         let dir = tempfile::tempdir().unwrap();
         let context = FileResolutionContext::new(dir.path());
-        let resolved = resolve_yaml_schema(&yaml("talk: communicate@darkmatter:lifecycle\n"), dir.path(), &context)
-            .expect("the reserved reference resolves");
-        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("say"));
-        assert!(resolved.referenced_files.is_empty(), "{:?}", resolved.referenced_files);
-        assert!(resolved.imports.is_empty(), "a shipped partial is no file dependency: {:?}", resolved.imports);
-    }
-
-    #[test]
-    fn a_disk_library_file_reaches_a_shipped_partial_from_any_folder() {
-        let dir = tempfile::tempdir().unwrap();
-        let nested = dir.path().join("a/b");
-        std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(nested.join("types.yaml"), "kind: schema\ntypes:\n  tally: count@darkmatter:lifecycle\n").unwrap();
-        let context = FileResolutionContext::new(dir.path());
-        let resolved = resolve_yaml_schema(&yaml("n: tally@./a/b/types.yaml\n"), dir.path(), &context)
-            .expect("the library's reserved reference resolves");
-        let arms = resolved.json_schema["properties"]["n"]["anyOf"].as_array().expect("count is a union");
-        assert!(arms.iter().any(|arm| arm["type"] == "integer"), "{arms:?}");
-        assert!(arms.iter().any(|arm| arm["pattern"].is_string()), "count's `interpolation` arm resolved locally");
-        assert_eq!(resolved.imports, vec![canonical_path(&nested.join("types.yaml"))]);
-    }
-
-    #[test]
-    fn relative_references_inside_a_reached_partial_stay_in_the_shipped_table() {
-        // md-lifecycle.yaml names its verbs `info-short@./lifecycle.yaml`;
-        // the importer's folder holds a decoy that must not be read.
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("lifecycle.yaml"), "kind: schema\ntypes:\n  info-short: number\n").unwrap();
-        let context = FileResolutionContext::new(dir.path());
-        let resolved =
-            resolve_yaml_schema(&yaml("talk: md-communicate@darkmatter:md-lifecycle\n"), dir.path(), &context)
-                .expect("the partial's own imports resolve");
-        let talk = &resolved.json_schema["properties"]["talk"];
-        let object = talk["anyOf"].as_array().and_then(|arms| arms.iter().find(|arm| arm["type"] == "object")).unwrap_or(talk);
-        let info = object["properties"]["info"].to_string();
-        assert!(info.contains("\"string\"") && !info.contains("\"number\""), "{info}");
+        let resolved = resolve_yaml_schema(&yaml("x: greeting@host:talk\ny: pair@host:talk\n"), dir.path(), &context, HOST)
+            .expect("the supplied partial resolves");
+        // Optional properties lower to `anyOf: [null, object]`.
+        let object = |json: &Value| json["anyOf"][1]["properties"].clone();
+        let properties = &resolved.json_schema["properties"];
+        assert!(object(&properties["x"])["say"].is_object(), "{properties}");
+        assert!(object(&object(&properties["y"])["left"])["wave"].is_object(), "{properties}");
         assert!(resolved.imports.is_empty(), "{:?}", resolved.imports);
+        assert_eq!(named_type_reference_path("host:talk", dir.path(), &[], &context, HOST).unwrap(), None);
     }
 
     #[test]
-    fn a_darkmatter_embedded_document_reaches_a_shipped_partial() {
-        let (resolved, reads) = prepare_embedded_inline_schema(
-            &yaml("talk: communicate@darkmatter:lifecycle\n"),
-            embedded::SHIPPED[0].path,
-            embedded::SHIPPED,
-            "",
-        )
-        .expect("resolves in the shipped table");
-        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("info"));
-        assert!(reads.contains(&PathBuf::from("darkmatter/schemas/partials/lifecycle.yaml")), "{reads:?}");
-    }
-
-    #[test]
-    fn a_host_bundle_document_reaches_a_shipped_partial_outside_its_bundle() {
-        let documents = [EmbeddedDocument {
-            path: "host/actions.yaml",
-            text: "kind: schema\ntypes:\n  talk: communicate@darkmatter:lifecycle\n",
-        }];
-        let (resolved, _) = prepare_embedded_inline_schema(
-            &yaml("talk: talk@./actions.yaml\n"),
-            "host/trigger.yaml",
-            &documents,
-            "host",
-        )
-        .expect("the bundle's reserved reference resolves");
-        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("say"));
-        // A plain relative climb out of the bundle is still refused.
-        let escape = prepare_embedded_inline_schema(
-            &yaml("talk: communicate@../darkmatter/schemas/partials/lifecycle.yaml\n"),
-            "host/trigger.yaml",
-            &documents,
-            "host",
-        );
-        assert!(escape.is_err(), "{escape:?}");
-    }
-
-    #[test]
-    fn an_unknown_stem_is_an_error_naming_the_reference() {
+    fn without_a_supplied_namespace_the_spelling_is_a_file_reference() {
         let dir = tempfile::tempdir().unwrap();
         let context = FileResolutionContext::new(dir.path());
-        for reference in ["darkmatter:bogus", "darkmatter:", "darkmatter:../fm", "darkmatter:fm.yaml"] {
-            let error = resolve_yaml_schema(&yaml(&format!("x: \"t@{reference}\"\n")), dir.path(), &context)
-                .expect_err("an unknown stem fails");
-            let SchemaError::NoMatch { reference: named, .. } = &error else {
-                panic!("`{reference}`: {error:?}")
-            };
-            assert_eq!(named, reference);
-            assert!(error.to_string().contains(reference), "{error}");
-        }
-        let embedded = prepare_embedded_inline_schema(&yaml("x: t@darkmatter:bogus\n"), "host/a.yaml", &[], "host");
-        assert!(matches!(embedded, Err(SchemaError::NoMatch { .. })), "{embedded:?}");
-        let missing_type = resolve_yaml_schema(&yaml("x: nope@darkmatter:lifecycle\n"), dir.path(), &context);
-        assert!(
-            matches!(&missing_type, Err(SchemaError::UnknownNamedType { name, .. }) if name == "nope"),
-            "{missing_type:?}"
-        );
-    }
-
-    #[test]
-    fn a_reserved_reference_names_no_host_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let context = FileResolutionContext::new(dir.path());
-        assert_eq!(named_type_reference_path("darkmatter:lifecycle", dir.path(), &[], &context).unwrap(), None);
-        assert_eq!(named_type_reference_path(" darkmatter:bogus ", dir.path(), &[], &context).unwrap(), None);
+        let error = resolve_yaml_schema(&yaml("x: greeting@host:talk\n"), dir.path(), &context, ShippedSources::NONE)
+            .expect_err("no host namespace is supplied");
+        assert!(!matches!(error, SchemaError::UnknownNamedType { .. }), "{error:?}");
+        let unknown = resolve_yaml_schema(&yaml("x: greeting@host:bogus\n"), dir.path(), &context, HOST)
+            .expect_err("an unknown stem fails");
+        assert!(matches!(&unknown, SchemaError::NoMatch { reference, .. } if reference == "host:bogus"), "{unknown:?}");
     }
 }
 
-#[cfg(test)]
+// The cases probe files on disk, which needs the `file` feature.
+#[cfg(all(test, feature = "file"))]
 mod searched_tests;
 
 mod graph;
@@ -6701,7 +6741,7 @@ mod embedded_recursion {
                 text: "kind: schema\ntypes:\n  tree: item@./item.yaml\n  pair: a@./pair.yaml\n",
             },
         ];
-        let (resolved, reads) = prepare_embedded_schema_in("bundle/root.yaml", &documents, "bundle")
+        let (resolved, reads) = prepare_embedded_schema_in("bundle/root.yaml", &documents, "bundle", ShippedSources::NONE)
             .expect("embedded recursion resolves");
         assert!(resolved.imports.is_empty(), "embedded documents record no file edge");
         assert_eq!(reads.len(), 3, "{reads:?}");

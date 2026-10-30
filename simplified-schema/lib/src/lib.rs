@@ -16,7 +16,7 @@
 //!   conversion against a JSON Schema;
 //! - [`validate`], [`format`], [`file_match`]: compiled validators, the
 //!   `darkmatter-*` formats, and `x-darkmatter-*` keywords;
-//! - [`errors`]: [`SchemaError`].
+//! - [`SchemaError`], in [`errors`].
 //!
 //! A host (Darkmatter) keeps its own policy — baseline selection, schema
 //! roots, trigger discovery, pending classification — and calls in here. See

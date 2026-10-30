@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use serde_yaml_ng::Value as YamlValue;
 
-use super::{ResolvedSchema, SchemaError, canonical_path, resolve_yaml_schema_with_roots};
+use super::{ResolvedSchema, SchemaError, ShippedSources, canonical_path, resolve_yaml_schema_with_roots};
 
 const VALID_EXAMPLE: &str = "kind: example\ninvocation: \"x\"\nreturns: \"val\"\ndescription: d\n";
 
@@ -45,7 +45,7 @@ impl Repo {
     fn resolve(&self, reference: &str, roots: &[PathBuf]) -> Result<ResolvedSchema, SchemaError> {
         let base = self.path("schemas");
         let context = FileResolutionContext::new(&base).with_repository_root(self.root.clone());
-        resolve_yaml_schema_with_roots(&YamlValue::String(reference.into()), &base, roots, &context)
+        resolve_yaml_schema_with_roots(&YamlValue::String(reference.into()), &base, roots, &context, ShippedSources::NONE)
     }
 
     fn paths(&self, relatives: &[&str]) -> Vec<PathBuf> {
@@ -57,6 +57,7 @@ impl Repo {
 
 const FIELDS: &str = "$schema:\n  Fields:\n    type: object\n    properties:\n      shared: string\n";
 
+#[cfg(feature = "file")]
 #[test]
 fn implicit_import_records_its_absent_nearer_candidate_and_the_selection() {
     let repo = Repo::new();
@@ -75,6 +76,7 @@ fn implicit_import_records_its_absent_nearer_candidate_and_the_selection() {
     assert_eq!(resolved.referenced_files, vec![canonical_path(&repo.path("schemas/payload.yaml"))]);
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn nearer_candidate_that_is_a_directory_is_recorded_before_the_fallback() {
     let repo = Repo::new();
@@ -88,6 +90,7 @@ fn nearer_candidate_that_is_a_directory_is_recorded_before_the_fallback() {
     assert_eq!(resolved.imports, vec![canonical_path(&repo.path("shared/types.yaml"))]);
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn explicit_relative_references_record_only_their_one_location() {
     let repo = Repo::new();
@@ -99,6 +102,7 @@ fn explicit_relative_references_record_only_their_one_location() {
     assert_eq!(resolved.searched, repo.paths(&["schemas/payload.yaml", "shared/types.yaml"]));
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn bare_name_records_each_schema_root_tried_through_the_selection() {
     let repo = Repo::new();
@@ -114,6 +118,7 @@ fn bare_name_records_each_schema_root_tried_through_the_selection() {
     );
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn whole_file_delegation_merges_each_hop() {
     let repo = Repo::new();
@@ -128,6 +133,7 @@ fn whole_file_delegation_merges_each_hop() {
     );
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn root_union_arms_merge_their_searches() {
     let repo = Repo::new();
@@ -137,7 +143,7 @@ fn root_union_arms_merge_their_searches() {
     let context = FileResolutionContext::new(&base).with_repository_root(repo.root.clone());
     let union: YamlValue = serde_yaml_ng::from_str("[shared/one.yaml, shared/two.yaml]").unwrap();
 
-    let resolved = resolve_yaml_schema_with_roots(&union, &base, &[], &context).expect("union resolves");
+    let resolved = resolve_yaml_schema_with_roots(&union, &base, &[], &context, ShippedSources::NONE).expect("union resolves");
 
     assert_eq!(
         resolved.searched,
@@ -150,6 +156,7 @@ fn root_union_arms_merge_their_searches() {
     );
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn example_file_records_its_absent_nearer_candidate() {
     let repo = Repo::new();
@@ -165,6 +172,7 @@ fn example_file_records_its_absent_nearer_candidate() {
     assert_eq!(resolved.examples, vec![canonical_path(&repo.path("examples/demo.yaml"))]);
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn transitive_import_and_its_rehomed_example_are_recorded() {
     let repo = Repo::new();
@@ -198,6 +206,7 @@ fn transitive_import_and_its_rehomed_example_are_recorded() {
     );
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn second_import_of_a_cached_namespace_still_records_its_own_search() {
     let repo = Repo::new();
@@ -220,6 +229,7 @@ fn second_import_of_a_cached_namespace_still_records_its_own_search() {
     );
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn failed_resolution_still_errors_and_returns_no_partial_record() {
     let repo = Repo::new();
@@ -233,6 +243,7 @@ fn failed_resolution_still_errors_and_returns_no_partial_record() {
     );
 }
 
+#[cfg(feature = "file")]
 #[test]
 fn inline_mapping_records_the_searches_of_its_imports() {
     let repo = Repo::new();
@@ -241,7 +252,7 @@ fn inline_mapping_records_the_searches_of_its_imports() {
     let context = FileResolutionContext::new(&base).with_repository_root(repo.root.clone());
     let inline: YamlValue = serde_yaml_ng::from_str("fields: Fields@shared/types.yaml").unwrap();
 
-    let resolved = resolve_yaml_schema_with_roots(&inline, &base, &[], &context).expect("inline resolves");
+    let resolved = resolve_yaml_schema_with_roots(&inline, &base, &[], &context, ShippedSources::NONE).expect("inline resolves");
 
     assert_eq!(resolved.searched, repo.paths(&["schemas/shared/types.yaml", "shared/types.yaml"]));
     assert!(resolved.referenced_files.is_empty());

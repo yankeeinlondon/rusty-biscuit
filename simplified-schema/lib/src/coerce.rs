@@ -48,7 +48,7 @@ use super::validate::{self, ValidatorCache, error_top_level_key};
 use super::ValidationProblem;
 use crate::coercion::{
     Additional, BindOptions, Bound, ConversionError, Defer, FailureReason, ObjectShape, PathSegment, PatternSlot,
-    PropertySlot, RefSlot, Shape, ShapeRef, TupleShape, TupleSlot, ValueFailure, bind_with, bind_with_marked,
+    PropertySlot, RefSlot, Shape, ShapeRef, TupleShape, TupleSlot, ValueFailure, bind_with,
 };
 
 /// Process-wide cache of the structural validators conversion compiles to
@@ -72,7 +72,7 @@ pub(crate) fn reset_process_caches() {
 /// with nothing required, and its structural validator. A schema's content
 /// is hashed once to find its plan; an [`super::EffectiveSchema`] keeps its
 /// plan, so repeated validations of large schemas never hash them again.
-pub(crate) struct ConversionPlan {
+pub struct ConversionPlan {
     /// The schema's content hash, the key of its structural validator.
     key: u64,
     shape: OnceLock<Shape>,
@@ -86,13 +86,13 @@ pub(crate) struct ConversionPlan {
 
 impl ConversionPlan {
     /// The plan for `schema`, built once per distinct schema content.
-    pub(crate) fn for_schema(schema: &Value) -> Arc<Self> {
+    pub fn for_schema(schema: &Value) -> Arc<Self> {
         Self::for_hashed(validate::schema_content_hash(schema))
     }
 
     /// [`Self::for_schema`] for a schema whose content hash `key` is known.
     /// Each part is derived on first use, from the same schema.
-    pub(crate) fn for_hashed(key: u64) -> Arc<Self> {
+    pub fn for_hashed(key: u64) -> Arc<Self> {
         if let Some(plan) = PLAN_CACHE.lock().expect("plan cache poisoned").get(&key) {
             return plan.clone();
         }
@@ -112,20 +112,20 @@ impl ConversionPlan {
         plan
     }
 
-    fn shape(&self, schema: &Value) -> &Shape {
+    pub fn shape(&self, schema: &Value) -> &Shape {
         self.shape.get_or_init(|| shape_from_json_schema(schema))
     }
 
     /// Whether `schema` marks any node `deferred`, so validation has nested
     /// templates to look for.
-    fn marks_deferral(&self, schema: &Value) -> bool {
+    pub fn marks_deferral(&self, schema: &Value) -> bool {
         *self.deferral.get_or_init(|| marks_deferral(schema))
     }
 
     /// Whether `schema` types any value as a generated lifecycle verb's
     /// operands, so validation has calls to bind
     /// ([`super::bound_operands`]).
-    pub(super) fn marks_operands(&self, schema: &Value) -> bool {
+    pub fn marks_operands(&self, schema: &Value) -> bool {
         *self.operands.get_or_init(|| marks_operands(schema))
     }
 
@@ -284,7 +284,7 @@ fn is_pending(path: &[PathSegment], pending: &HashSet<String>) -> bool {
 /// aside exactly as a template is, but are not templates and are never
 /// reported as [`Self::pointers`].
 #[derive(Debug, Default, Clone)]
-pub(crate) struct NestedTemplates {
+pub struct NestedTemplates {
     /// Each template's path and its JSON Pointer, then each settled operand's.
     paths: Vec<(Vec<PathSegment>, String)>,
     /// How many leading entries of `paths` are templates.
@@ -316,7 +316,7 @@ impl NestedTemplates {
     /// runtime registration accepted: a problem the schema reports on one of
     /// them, or on a value holding it, is set aside unless the core still
     /// fails there with them all taken as matching.
-    pub(crate) fn with_settled(&self, settled: &[Vec<PathSegment>]) -> Self {
+    pub fn with_settled(&self, settled: &[Vec<PathSegment>]) -> Self {
         let mut widened = self.clone();
         for path in settled {
             if !widened.paths.iter().any(|(known, _)| known == path) {
@@ -327,11 +327,11 @@ impl NestedTemplates {
     }
 
     /// The JSON Pointer of every listed template.
-    pub(crate) fn pointers(&self) -> Vec<String> {
+    pub fn pointers(&self) -> Vec<String> {
         self.paths[..self.templates].iter().map(|(_, pointer)| pointer.clone()).collect()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.paths.is_empty()
     }
 
@@ -395,7 +395,7 @@ impl NestedTemplates {
     /// judged by its own place relative to the templates. `failures` caches
     /// the core's verdict, which is bound only once some problem is near a
     /// template.
-    pub(crate) fn excuses_problem(
+    pub fn excuses_problem(
         &self,
         problem: &ValidationProblem,
         plan: &ConversionPlan,
@@ -522,7 +522,7 @@ pub fn coerce_frontmatter_with_pending(
 }
 
 /// [`coerce_frontmatter_with_pending`] with the schema's plan already found.
-pub(crate) fn coerce_with_plan(
+pub fn coerce_with_plan(
     plan: &ConversionPlan,
     json_schema: &Value,
     instance: &Value,
@@ -548,7 +548,7 @@ pub fn coerce_value_against_schema(schema: &Value, value: &Value) -> Value {
 /// Never written back anywhere; compose writes back only what
 /// [`coerce_frontmatter_with_pending`] commits.
 #[cfg(test)]
-pub(super) fn validation_copy(json_schema: &Value, instance: &Value) -> Value {
+pub fn validation_copy(json_schema: &Value, instance: &Value) -> Value {
     validation_copy_with_plan(
         &ConversionPlan::for_schema(json_schema),
         json_schema,
@@ -560,7 +560,7 @@ pub(super) fn validation_copy(json_schema: &Value, instance: &Value) -> Value {
 /// [`validation_copy`] with the schema's plan already found; each value in
 /// `templates` is kept as written and does not keep its siblings from
 /// converting.
-pub(super) fn validation_copy_with_plan(
+pub fn validation_copy_with_plan(
     plan: &ConversionPlan,
     json_schema: &Value,
     instance: &Value,
@@ -729,7 +729,7 @@ fn relax(shape: &Shape, targets: &mut Vec<(ShapeRef, RefSlot)>) -> Shape {
 /// attempted on and failed (`"9007199254740993"` against `number`: "the
 /// number cannot be represented exactly"), so the report says why the text
 /// did not convert rather than only that its type is wrong.
-pub(super) fn annotate_problems(
+pub fn annotate_problems(
     plan: &ConversionPlan,
     json_schema: &Value,
     instance: &Value,

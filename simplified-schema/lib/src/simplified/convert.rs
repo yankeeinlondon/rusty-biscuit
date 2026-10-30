@@ -1536,7 +1536,7 @@ static COMPILED_PATTERNS: std::sync::OnceLock<std::sync::Mutex<std::collections:
 
 /// Empties this module's process-wide caches (see
 /// [`crate::reset_process_caches_for_bench`]).
-pub(crate) fn reset_process_caches() {
+pub fn reset_process_caches() {
     if let Some(compiled) = COMPILED_PATTERNS.get() {
         compiled.lock().expect("compiled pattern set poisoned").clear();
     }
@@ -2362,7 +2362,7 @@ fn check_alphanumeric_values(
 /// constraints (option pattern plus string constraints) shares one compile.
 /// Only the compiled validator is reused; each value is still judged fresh.
 fn alphanumeric_check_validator(target: &Value) -> Result<std::sync::Arc<jsonschema::Validator>, SchemaError> {
-    let cache = &*crate::SHARED_VALIDATOR_CACHE;
+    let cache = &*crate::validate::SHARED_VALIDATOR_CACHE;
     let content = crate::validate::schema_content_hash(target);
     if let Some(validator) = cache.cached_structural(content) {
         return Ok(validator);
@@ -2888,6 +2888,7 @@ flag:
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn file_lazy_eager_required_matrix() {
         // The full 4-cell matrix from the spec's semantics table. `eager` and
@@ -2953,6 +2954,7 @@ flag:
         }
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn file_array_lazy_accepts_missing_item_eager_rejects() {
         // Per-item posture: `file[]` accepts an array whose item is a

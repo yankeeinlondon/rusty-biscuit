@@ -47,9 +47,9 @@ sanity:
     @just _sanity {{ LIBRARY }}
 
 # run L1 tests for the library (default features plus the test-only
-# `work-counters`, then without default features)
+# `work-counters` and the opt-in `terminal`, then without default features)
 test *args="":
-    @just _test {{ LIBRARY }} --features work-counters {{args}}
+    @just _test {{ LIBRARY }} --features work-counters,terminal {{args}}
     @just test-minimal {{args}}
 
 # Proves the crate builds and passes its suite without the `file` feature,
@@ -93,11 +93,11 @@ test-browser:
 test-real:
     @echo "test-real: not applicable for simplified-schema"
 
-# run clippy on the library: default features, with `work-counters`, and
-# without default features
+# run clippy on the library: default features, with `work-counters` and
+# `terminal`, and without default features
 lint *args="":
     @just _lint {{ LIBRARY }} {{args}}
-    cargo clippy -p {{ LIBRARY }} --features work-counters --all-targets -- -D warnings
+    cargo clippy -p {{ LIBRARY }} --features work-counters,terminal --all-targets -- -D warnings
     cargo clippy -p {{ LIBRARY }} --no-default-features --all-targets -- -D warnings
 
 # not applicable: simplified-schema has no benchmarks yet

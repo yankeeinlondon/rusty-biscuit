@@ -13,7 +13,12 @@
   `file-reference` with its default `file` feature), `serde`, `serde_json`,
   `base64`, `thiserror`, `tracing`, and optionally `sniff`; all were already
   in the workspace graph, so the lockfile gains one package and no external
-  crate. `darkmatter` adds a path dependency on it. See
+  crate. `darkmatter` adds a path dependency on it. With the language core
+  (2026-10-30, later the same day) it also takes `jsonschema`,
+  `fancy-regex`, `regex`, `indexmap`, `serde_yaml_ng`, `biscuit-hash`,
+  `chrono` (`std` only), `url`, `renderable`, and an optional
+  `biscuit-terminal` (`terminal` feature, enabled by Darkmatter); every one
+  was already a Darkmatter dependency, so no external crate is added. See
   `simplified-schema/docs/dependencies.md`.
 - `schematic-define` adds `regex` 1 and `regex-syntax` 0.8 as production
   dependencies (2026-10-23) to decide which constraint patterns a generated

@@ -138,7 +138,7 @@ enum JudgedIn {
 }
 
 /// Where a top-level property's value came from (see [`CallerOrigins`]).
-pub(crate) enum ValueOrigin<'a> {
+pub enum ValueOrigin<'a> {
     /// Authored in the document: judged from the document's folder.
     Document,
     /// Supplied by a caller, who authored it in this context.
@@ -158,7 +158,7 @@ pub(crate) enum ValueOrigin<'a> {
 /// [`Self::whole_instance`]: the arm's location no longer names that
 /// property, so every value it judges takes the property's origin.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct CallerOrigins(Origins);
+pub struct CallerOrigins(Origins);
 
 #[derive(Clone, Debug, PartialEq)]
 enum Origins {
@@ -174,7 +174,7 @@ impl Default for Origins {
 }
 
 impl CallerOrigins {
-    pub(crate) fn new(
+    pub fn new(
         origins: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
     ) -> Self {
         Self(Origins::ByProperty(Arc::new(origins.into_iter().collect())))
@@ -183,7 +183,7 @@ impl CallerOrigins {
     /// Origins for a validator whose whole instance is the value of one
     /// top-level property that came from `origin`: a document origin is the
     /// empty map, a caller's applies to every keyword whatever its location.
-    pub(crate) fn whole_instance(origin: ValueOrigin<'_>) -> Self {
+    pub fn whole_instance(origin: ValueOrigin<'_>) -> Self {
         match origin {
             ValueOrigin::Document => Self::default(),
             ValueOrigin::Caller(context) => Self(Origins::WholeInstance(Arc::new(context.clone()))),
@@ -191,7 +191,7 @@ impl CallerOrigins {
     }
 
     /// Where `property`'s value came from.
-    pub(crate) fn origin_of(&self, property: &str) -> ValueOrigin<'_> {
+    pub fn origin_of(&self, property: &str) -> ValueOrigin<'_> {
         self.origin_at(Some(property))
     }
 
@@ -268,7 +268,7 @@ impl ValidatorCache {
     /// Records the contexts caller-supplied properties were authored in, so
     /// their `match()` globs are judged from there (see [`CallerOrigins`]).
     #[must_use]
-    pub(crate) fn with_caller_origins(mut self, origins: CallerOrigins) -> Self {
+    pub fn with_caller_origins(mut self, origins: CallerOrigins) -> Self {
         self.caller_origins = origins;
         self
     }
@@ -317,7 +317,7 @@ impl ValidatorCache {
 
     /// The content hash of a shared schema, computed once per allocation
     /// (see [`Self::validator_for_shared`]).
-    pub(crate) fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
+    pub fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
         self.shared_schema_digest(schema).hash
     }
 
@@ -342,7 +342,7 @@ impl ValidatorCache {
     /// ## Errors
     ///
     /// As [`Self::validator_for`].
-    pub(crate) fn validator_for_reporting_compile(
+    pub fn validator_for_reporting_compile(
         &self,
         schema: &Value,
         base_dir: Option<&Path>,
@@ -408,7 +408,7 @@ impl ValidatorCache {
 
     /// [`Self::structural_validator_for`] for a schema whose content hash is
     /// known.
-    pub(crate) fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
+    pub fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
         self.structural_lookup_or_compile(schema, content).map(|(validator, _)| validator)
     }
 
@@ -475,11 +475,11 @@ impl ValidatorCache {
 
     /// Returns the launch-area metadata configured for file-reference
     /// diagnostics, if any.
-    pub(super) fn file_ref_fallback_dir(&self) -> Option<&Path> {
+    pub fn file_ref_fallback_dir(&self) -> Option<&Path> {
         self.file_ref_fallback_dir.as_deref()
     }
 
-    pub(super) fn caller_origins(&self) -> &CallerOrigins {
+    pub fn caller_origins(&self) -> &CallerOrigins {
         &self.caller_origins
     }
 
@@ -501,7 +501,7 @@ impl ValidatorCache {
 
     /// Drops every cached validator and memoized schema digest, for every
     /// clone sharing this cache.
-    pub(crate) fn clear(&self) {
+    pub fn clear(&self) {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.entries.clear();
         guard.schema_hashes.clear();
@@ -552,7 +552,7 @@ pub(crate) fn build_structural_validator(schema: &Value) -> Result<Validator, Sc
 /// `match()` globs are judged from `base_dir` too. Threading `base_dir` lets
 /// schema validation agree with expression-side `file_exists`/`frontmatter`
 /// resolution on the same `file` value.
-pub(crate) fn build_validator_in_context(
+pub fn build_validator_in_context(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
@@ -569,7 +569,7 @@ pub(crate) fn build_validator_in_context(
 
 /// [`build_validator_in_context`] for a document some of whose top-level
 /// properties a caller supplied (see [`CallerOrigins`]).
-pub(crate) fn build_validator_with_callers(
+pub fn build_validator_with_callers(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
@@ -665,7 +665,7 @@ pub fn collect_problems(
 /// diagnostic launch metadata used by the validator. Problems carry no
 /// line/column: the caller locates its settled report
 /// ([`PositionMap::locate_all`]).
-pub(super) fn collect_problems_with_anchors(
+pub fn collect_problems_with_anchors(
     validator: &Validator,
     instance: &Value,
     anchors: FileRefAnchors<'_>,
@@ -697,7 +697,7 @@ pub fn collect_root_union_problems(
 /// Like [`collect_root_union_problems`] but carries the request-scoped document
 /// anchor and diagnostic launch metadata used by the validators. Problems
 /// carry no line/column, as [`collect_problems_with_anchors`]'s do.
-pub(super) fn collect_root_union_problems_with_anchors(
+pub fn collect_root_union_problems_with_anchors(
     arm_validators: &[Arc<Validator>],
     instance: &Value,
     anchors: FileRefAnchors<'_>,
@@ -970,7 +970,7 @@ fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
 /// Mirrors the [`FileValues`] the compiled validator was built with so the
 /// re-resolution reproduces the same failure mode.
 #[derive(Clone, Copy)]
-pub(super) enum FileRefAnchors<'a> {
+pub enum FileRefAnchors<'a> {
     /// A structural validator: only absolute paths were resolved.
     Syntax,
     /// A validator that resolved file values in a request's context.
@@ -993,7 +993,7 @@ pub(super) enum FileRefAnchors<'a> {
 }
 
 /// The `excused` predicate of [`FileRefAnchors::Resolved`].
-pub(super) type Excused<'a> = dyn Fn(&ValidationProblem) -> bool + 'a;
+pub type Excused<'a> = dyn Fn(&ValidationProblem) -> bool + 'a;
 
 impl FileRefAnchors<'_> {
     fn file_values(&self) -> FileValues {
@@ -1117,7 +1117,7 @@ fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
 /// Top-level frontmatter key a validation error is attributable to, if any:
 /// the first JSON-pointer segment, or the missing-property name for a
 /// `Required` failure on the root itself.
-pub(super) fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+pub fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
     identify_key(err.instance_path().as_str(), err.kind())
 }
 
@@ -1166,7 +1166,7 @@ fn unescape_pointer_segment(segment: &str) -> String {
 /// node is read with its reference targets, use site first, so a sibling
 /// description wins and a referenced union yields its articulation (Decision
 /// #6).
-pub(super) fn resolve_problem_description(
+pub fn resolve_problem_description(
     root: &Value,
     problem: &ValidationProblem,
     instance: &Value,
@@ -1391,7 +1391,7 @@ fn type_label(arm: &Value) -> Option<&'static str> {
 /// into, so it is left as-is and a caller's subsequent `properties`/`items`
 /// lookup fails. Description lookup does not use this; it looks through unions
 /// with [`schema_nodes_at`].
-pub(super) fn unwrap_nullable_arm(node: &Value) -> &Value {
+pub fn unwrap_nullable_arm(node: &Value) -> &Value {
     let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
         return node;
     };
@@ -1431,7 +1431,7 @@ pub fn wrap_arm_as_root_schema(arm: &Value, root: &Value) -> Value {
 /// with `arm_index`. Used to narrow a discriminated **root** union to the arm a
 /// shared literal discriminant selects, so only that arm's problems surface
 /// (instead of the closest-by-count arm the general union report picks).
-pub(super) fn collect_arm_problems_with_anchors(
+pub fn collect_arm_problems_with_anchors(
     validator: &Validator,
     instance: &Value,
     anchors: FileRefAnchors<'_>,
@@ -1469,7 +1469,7 @@ pub(super) fn collect_arm_problems_with_anchors(
 /// carries its `$defs`. Assertions beside the union at its location (a
 /// reference's or nullable wrapper's siblings) apply with the chosen arm; a
 /// reference that names nothing leaves its location's report ordinary.
-pub(super) fn narrow_discriminated_union_problems(
+pub fn narrow_discriminated_union_problems(
     schema: &Value,
     instance: &Value,
     anchors: FileRefAnchors<'_>,
@@ -1824,6 +1824,7 @@ mod tests {
     /// A validator compiled without a repository root must not answer for a
     /// request that has one: the shared cache would otherwise drop the
     /// repository tier of an implicit path for the rest of the process.
+    #[cfg(feature = "file")]
     #[test]
     fn cache_keeps_validators_for_different_resolution_contexts_apart() {
         let repo = tempfile::tempdir().expect("tempdir");
@@ -2371,6 +2372,7 @@ mod tests {
         })
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn darkmatter_file_format_error_surfaces_no_match_message() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2422,6 +2424,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn darkmatter_file_format_succeeds_for_existing_file() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2462,6 +2465,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "file")]
     fn darkmatter_file_match_schema() -> Value {
         // A single schema never lowers `match(...)`, so the eager existence
         // behavior here comes purely from `format: darkmatter-file`.
@@ -2476,6 +2480,7 @@ mod tests {
         })
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn darkmatter_file_match_missing_file_produces_one_file_reference_diagnostic() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2553,6 +2558,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn darkmatter_file_format_error_retains_nested_path() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2580,6 +2586,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn darkmatter_file_format_error_retains_array_path() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2605,6 +2612,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn root_union_preserves_arm_index_for_file_format_message() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3070,6 +3078,7 @@ mod tests {
         assert_eq!(unknown.offending_property.as_deref(), Some("bogus"));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn file_reference_diagnostic_classifies_no_match() {
         let dir = tempfile::tempdir().unwrap();

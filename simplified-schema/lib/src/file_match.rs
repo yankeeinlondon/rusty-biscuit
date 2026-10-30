@@ -45,9 +45,11 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{
-    FileResolutionContext, GlobReference, GlobReferenceError, PathIdentity, PreparedGlobReference,
-};
+#[cfg(feature = "file")]
+use biscuit_file::PreparedGlobReference;
+#[cfg(feature = "file")]
+use biscuit_file::PathIdentity;
+use biscuit_file::{FileResolutionContext, GlobReference, GlobReferenceError};
 use jsonschema::{Keyword, ValidationError, paths::Location};
 use serde_json::{Map, Value};
 
@@ -72,6 +74,7 @@ pub const DARKMATTER_MATCH_PROPERTY_KEYWORD: &str = "x-darkmatter-match-property
 /// (`*.md`, `^*.md`, `!_*.md`) also matches a file's bare name at any depth.
 #[derive(Debug, Clone)]
 pub struct FileMatchGlobs {
+    #[cfg_attr(not(feature = "file"), allow(dead_code))]
     globs: GlobReference,
 }
 
@@ -92,17 +95,41 @@ impl FileMatchGlobs {
     /// Whether `path` is accepted, judged without a walk; it need not exist.
     /// A relative path is read from `ctx`'s `cwd`, which is also where bare
     /// and `./` patterns start.
+    ///
+    /// Without the `file` feature no glob root can be resolved, so nothing
+    /// is accepted.
     #[must_use]
     pub fn matches(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
-        self.globs.matches(path, ctx)
+        #[cfg(feature = "file")]
+        return self.globs.matches(path, ctx);
+        #[cfg(not(feature = "file"))]
+        {
+            let _ = (path, ctx);
+            false
+        }
     }
 
     /// The globs resolved against `ctx` once, for a caller that walks their
     /// roots and judges each file it reaches (see
     /// [`GlobReference::prepare`]). `None` for an invalid context.
+    #[cfg(feature = "file")]
     #[must_use]
     pub fn prepare(&self, ctx: &FileResolutionContext) -> Option<PreparedGlobReference> {
         self.globs.prepare(ctx)
+    }
+}
+
+impl FileMatchGlobs {
+    /// Whether an existing `path` is accepted by its globs alone, with no
+    /// context; without the `file` feature nothing is accepted.
+    fn matches_without_context(&self, path: &Path) -> bool {
+        #[cfg(feature = "file")]
+        return self.globs.matches_without_context(path);
+        #[cfg(not(feature = "file"))]
+        {
+            let _ = path;
+            false
+        }
     }
 }
 
@@ -149,6 +176,7 @@ impl FileMatchGroups {
 
     /// Every group resolved against `ctx` once. `None` for an invalid
     /// context. Resolves roots only; never lists a directory.
+    #[cfg(feature = "file")]
     #[must_use]
     pub fn prepare(&self, ctx: &FileResolutionContext) -> Option<PreparedFileMatch> {
         let groups = self
@@ -162,12 +190,14 @@ impl FileMatchGroups {
 
 /// [`FileMatchGroups`] resolved against one context, for a caller that walks
 /// [`roots`](Self::roots) itself and must offer exactly the files every
-/// group would list.
+/// group would list. Needs the `file` feature.
+#[cfg(feature = "file")]
 pub struct PreparedFileMatch {
     /// One per group, in authored order; never empty.
     groups: Vec<PreparedGlobReference>,
 }
 
+#[cfg(feature = "file")]
 impl PreparedFileMatch {
     /// The first group's roots, in precedence order.
     ///
@@ -612,9 +642,7 @@ impl MatchKeyword {
         match &self.judged_in {
             JudgedIn::Syntax => super::format::context_free_path(value)
                 .filter(|path| path.exists())
-                .is_none_or(|path| {
-                    self.globs.groups.iter().all(|group| group.globs.matches_without_context(&path))
-                }),
+                .is_none_or(|path| self.globs.groups.iter().all(|group| group.matches_without_context(&path))),
             JudgedIn::Resolved { base_dir, fallback, context } => {
                 admits(&self.globs.groups, value, base_dir.as_deref(), fallback.as_deref(), context)
             }
@@ -653,7 +681,8 @@ impl<'i> Keyword<'i> for MatchKeyword {
     }
 }
 
-#[cfg(test)]
+// The cases judge files on disk, which needs the `file` feature.
+#[cfg(all(test, feature = "file"))]
 mod tests {
     use super::*;
     use crate::simplified::parse_yaml_schema;
@@ -958,6 +987,7 @@ mod tests {
             &value,
             dir.path(),
             &FileResolutionContext::new(dir.path()),
+            crate::embedded::ShippedSources::NONE,
         )
         .unwrap();
         let Some(crate::SchemaRoot::Union(mut arms)) = resolved.simplified else {

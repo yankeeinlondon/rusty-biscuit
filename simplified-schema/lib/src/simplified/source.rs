@@ -948,7 +948,7 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 ///
 /// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.
-pub(crate) fn locate_frontmatter_value(
+pub fn locate_frontmatter_value(
     yaml_source: &str,
     source_offset: usize,
 ) -> Option<SchemaValueNode> {

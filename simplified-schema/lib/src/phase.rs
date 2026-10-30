@@ -15,7 +15,7 @@ pub enum SchemaPhase {
     Completion,
 }
 
-pub(super) fn project(schema: &SchemaRoot, phase: SchemaPhase) -> SchemaRoot {
+pub fn project(schema: &SchemaRoot, phase: SchemaPhase) -> SchemaRoot {
     match schema {
         SchemaRoot::Single(shape) => SchemaRoot::Single(project_shape(shape, phase)),
         SchemaRoot::Union(arms) => SchemaRoot::Union(
@@ -36,7 +36,7 @@ pub(super) fn project(schema: &SchemaRoot, phase: SchemaPhase) -> SchemaRoot {
 /// them), so projecting it touches only the properties nested inside it,
 /// each timed by its own markers. One projected body therefore serves an
 /// eager use and a deferred use alike; the two differ only at their sites.
-pub(super) fn project_definitions(definitions: &DefinitionTable, phase: SchemaPhase) -> DefinitionTable {
+pub fn project_definitions(definitions: &DefinitionTable, phase: SchemaPhase) -> DefinitionTable {
     definitions.map_bodies(|body| {
         let mut body = body.clone();
         project_def(&mut body, phase);
@@ -53,7 +53,7 @@ pub(super) fn project_definitions(definitions: &DefinitionTable, phase: SchemaPh
 /// reaches the same keys: each projected body replaces its unprojected
 /// counterpart, and the definitions only a baseline or trigger layer reaches
 /// are kept under their merged keys.
-pub(super) fn merge_with_effective(
+pub fn merge_with_effective(
     effective: &Value,
     projected_document: Value,
 ) -> Result<Value, SchemaError> {
@@ -106,7 +106,7 @@ fn merge_layer(effective: &Value, projected: Value) -> Result<Value, SchemaError
 /// Removes the one validation format that probes the filesystem. Phase
 /// validation checks the already-stabilized working instance; eager file
 /// existence remains the responsibility of ordinary schema preparation.
-pub(super) fn make_passive(schema: &mut Value) {
+pub fn make_passive(schema: &mut Value) {
     match schema {
         Value::Object(map) => {
             if map.get("format").and_then(Value::as_str)

@@ -345,7 +345,7 @@ pub(crate) fn context_free_path(value: &str) -> Option<PathBuf> {
 /// reporting can target the right remediation hint (fix the syntax, fix
 /// the context that prevented resolution, or point at the missing file).
 #[derive(Debug)]
-pub(crate) enum FileReferenceFailure {
+pub enum FileReferenceFailure {
     /// The string is not a parseable file reference (e.g. an unterminated
     /// `vault:` prefix).
     InvalidSyntax {
@@ -422,7 +422,7 @@ impl fmt::Display for FileReferenceFailure {
 /// Returns the resolved path on success, or a [`FileReferenceFailure`]
 /// distinguishing the three failure modes so callers can render a
 /// situation-appropriate diagnostic.
-pub(crate) fn resolve_file_reference_in_context(
+pub fn resolve_file_reference_in_context(
     value: &str,
     base_dir: Option<&Path>,
     _fallback: Option<&Path>,
@@ -646,6 +646,7 @@ mod tests {
     /// repository of its own unless a catalog supplies one: a bare reference
     /// neither borrows the request repository nor rediscovers the child's.
     /// The request repository stays reachable through the launch `@` scope.
+    #[cfg(feature = "file")]
     #[test]
     fn eager_file_validation_of_an_external_document_keeps_only_the_launch_scope() {
         let request_repo = temp_dir();
@@ -704,6 +705,7 @@ mod tests {
         assert!(!valid_iso8601_time("noon"));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn file_format_accepts_existing_file() {
         let dir = temp_dir();
@@ -734,6 +736,7 @@ mod tests {
         assert!(FileReference::new("./does-not-exist.md").is_ok());
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn raw_json_schema_format_compat_eager_vs_lazy() {
         // Raw JSON Schema compatibility contract: `format: darkmatter-file`
@@ -813,6 +816,7 @@ mod tests {
         assert!(!eager.is_valid(&malformed), "eager must reject malformed syntax");
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_returns_path_for_existing_file() {
         let dir = temp_dir();
@@ -827,6 +831,7 @@ mod tests {
         assert_eq!(resolved.file_name(), path.file_name());
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_reports_missing_file() {
         let dir = temp_dir();
@@ -855,6 +860,7 @@ mod tests {
         assert!(matches!(err, FileReferenceFailure::InvalidSyntax { .. }));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_reports_resolution_error_for_unset_env_var() {
         let dir = temp_dir();
@@ -878,6 +884,7 @@ mod tests {
         assert!(matches!(err, FileReferenceFailure::Resolution { .. }));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_reports_resolution_error_for_unconfigured_vault() {
         let dir = temp_dir();
@@ -896,6 +903,7 @@ mod tests {
         assert!(matches!(err, FileReferenceFailure::Resolution { .. }));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_no_match_for_missing_absolute_path() {
         let dir = temp_dir();
@@ -915,6 +923,7 @@ mod tests {
         assert!(matches!(err, FileReferenceFailure::NoMatch { resolved_from: Some(_), .. }));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_no_match_for_missing_magic_path() {
         let dir = temp_dir();
@@ -945,6 +954,7 @@ mod tests {
         assert!(matches!(err, FileReferenceFailure::InvalidSyntax { .. }));
     }
 
+    #[cfg(feature = "file")]
     #[test]
     fn resolve_file_reference_no_match_for_missing_recursive_path() {
         let dir = temp_dir();

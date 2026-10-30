@@ -66,14 +66,14 @@ const SCOPE_KEYWORDS: &[&str] = &["$id", "$anchor", "$dynamicAnchor", "$dynamicR
 
 /// A schema document that local references resolve against.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SchemaScope<'a> {
+pub struct SchemaScope<'a> {
     root: &'a Value,
     label: &'a str,
 }
 
 impl<'a> SchemaScope<'a> {
     /// The scope rooted at `root`, named `the schema` in errors.
-    pub(crate) fn new(root: &'a Value) -> Self {
+    pub fn new(root: &'a Value) -> Self {
         Self { root, label: "the schema" }
     }
 
@@ -95,7 +95,7 @@ impl<'a> SchemaScope<'a> {
     ///
     /// [`SchemaError::UnresolvedReference`] when the reference is not a
     /// string or names nothing in the root.
-    pub(crate) fn resolve(&self, schema: &'a Value, location: &str) -> Result<Option<&'a Value>, SchemaError> {
+    pub fn resolve(&self, schema: &'a Value, location: &str) -> Result<Option<&'a Value>, SchemaError> {
         let Some(reference) = schema.get("$ref") else {
             return Ok(None);
         };
@@ -107,7 +107,7 @@ impl<'a> SchemaScope<'a> {
 
     /// [`Self::resolve`] for the text of a `$ref`, for a schema that does not
     /// live in this scope's root.
-    pub(crate) fn resolve_text(&self, text: &str, location: &str) -> Result<Option<&'a Value>, SchemaError> {
+    pub fn resolve_text(&self, text: &str, location: &str) -> Result<Option<&'a Value>, SchemaError> {
         let Some(pointer) = local_pointer(text) else {
             return Ok(None);
         };
@@ -127,7 +127,7 @@ impl<'a> SchemaScope<'a> {
     /// chain that revisits a schema without reaching one that is not a
     /// reference (`a → b → a`), which constrains nothing and must not be
     /// read as an unconstrained schema.
-    pub(crate) fn chain(&self, schema: &'a Value, location: &str) -> Result<Vec<&'a Value>, SchemaError> {
+    pub fn chain(&self, schema: &'a Value, location: &str) -> Result<Vec<&'a Value>, SchemaError> {
         let mut hops = vec![schema];
         let mut current = schema;
         while let Some(target) = self.resolve(current, location)? {
@@ -154,7 +154,7 @@ impl<'a> SchemaScope<'a> {
 /// keeps every `#/$defs/…` reference in scope. Generated keys live only at
 /// the root, so the root's table is the one those references meant; `sub`
 /// is returned unchanged when `root` has none.
-pub(crate) fn with_root_definitions(sub: &Value, root: &Value) -> Value {
+pub fn with_root_definitions(sub: &Value, root: &Value) -> Value {
     let mut sub = sub.clone();
     if let (Some(defs), Some(map)) = (root.get("$defs"), sub.as_object_mut()) {
         map.insert("$defs".into(), defs.clone());

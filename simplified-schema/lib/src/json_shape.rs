@@ -886,7 +886,7 @@ static FORMAT_VALIDATORS: LazyLock<Mutex<HashMap<String, Arc<Option<Validator>>>
 
 /// Empties this module's process-wide caches (see
 /// [`super::reset_process_caches_for_bench`]).
-pub(crate) fn reset_process_caches() {
+pub fn reset_process_caches() {
     FORMAT_VALIDATORS.lock().expect("format validator cache poisoned").clear();
 }
 

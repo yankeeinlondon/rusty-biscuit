@@ -220,7 +220,7 @@ impl DefinitionTable {
     ///
     /// The first definition named `item` gets `item`; a later, different key
     /// with the same name gets `item-2`, `item-3`, and so on.
-    pub(crate) fn insert(&mut self, key: DefKey, body: PropertyDef, origin: SchemaReferenceSite) -> String {
+    pub fn insert(&mut self, key: DefKey, body: PropertyDef, origin: SchemaReferenceSite) -> String {
         if let Some(existing) = self.entries.get(&key) {
             return existing.json_key.clone();
         }
@@ -270,7 +270,7 @@ impl DefinitionTable {
     /// Bodies refer to each other by [`DefKey`], so nothing inside them
     /// changes; a schema lowered against `other` has its `#/$defs/…`
     /// references renamed with the returned map.
-    pub(crate) fn absorb(&mut self, other: &DefinitionTable) -> BTreeMap<String, String> {
+    pub fn absorb(&mut self, other: &DefinitionTable) -> BTreeMap<String, String> {
         let mut renamed = BTreeMap::new();
         for (key, definition) in &other.entries {
             let json_key = match self.entries.get(key) {

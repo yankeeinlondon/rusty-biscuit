@@ -6,14 +6,21 @@ that Darkmatter, Claudine, and Messenger use to describe and check YAML and
 JSON data. The library has no dependency on any Markdown host; Darkmatter
 builds its document policy on top of it.
 
-The crate is being extracted from Darkmatter in stages. Today it holds the
-shared foundations every schema module builds on:
+The crate holds the language and everything that judges data with it:
 
-- `numeric`: admission of written numbers into finite `f64`s;
-- `span`: byte spans over the exact supplied text;
-- `expression`: passive expression syntax, never evaluated: the `{{ … }}` /
-  `{{{ … }}}` scanner, the token lexer, and the parser and AST;
-- `pending`: the `{{!data:v1:…}}` literal-token codec.
+- `simplified`: the AST (`SchemaRoot`, `SchemaShape`, `PropertyDef`, …), the
+  type grammar, source maps, cursors, queries, serializers, subtyping, and
+  lowering to Draft 2020-12 JSON Schema;
+- `resolve`: named-type imports, cycle checks, use-site merges, and layering,
+  over sources the caller supplies;
+- `validate`, `format`, `file_match`: compiled validators with the
+  `darkmatter-*` formats and `x-darkmatter-*` keywords;
+- `coercion`, `coerce`: the conversion engine and frontmatter conversion;
+- `numeric`, `span`, `expression` (passive `{{ … }}` syntax), and `pending`
+  (the `{{!data:v1:…}}` literal-token codec): the shared foundations.
+
+Darkmatter keeps its own policy (its baseline, schema roots, trigger
+discovery, and which values are still pending) and calls in here.
 
 ## Install
 
@@ -31,6 +38,19 @@ discovery.
 ## Example
 
 ```rust
+use serde_json::json;
+use simplified_schema::{parse_yaml_schema, to_json_schema, validate::build_structural_validator};
+
+let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("name: string(required)\nage: number(min(0))").unwrap();
+let schema = to_json_schema(&parse_yaml_schema(&yaml).unwrap()).unwrap();
+let validator = build_structural_validator(&schema).unwrap();
+assert!(validator.is_valid(&json!({ "name": "Ada", "age": 36 })));
+assert!(!validator.is_valid(&json!({ "age": -1 })));
+```
+
+The foundations work on their own:
+
+```rust
 use simplified_schema::numeric::admit_number_spelling;
 use simplified_schema::pending::{decode_leaf, encode};
 
@@ -43,6 +63,8 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 
 ## Documentation
 
+- [Language core](./docs/topics/language-core.md): the modules, the
+  resolver's supplied sources, and what stays in a host.
 - [Foundations](./docs/topics/foundations.md): the numeric model, spans, the
   expression scan, and the literal-token codec.
 - [Expression syntax](./docs/topics/expression-syntax.md): parsing
