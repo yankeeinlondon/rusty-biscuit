@@ -1,14 +1,18 @@
 //! Core expression parsing and evaluation foundation.
 //!
-//! This module provides the shared AST, lexer, parser, and lookup trait
-//! used by both interpolation and condition evaluation. It is the foundation
-//! for expression processing in the compose pipeline.
+//! This module evaluates expressions for both interpolation and conditions.
+//! It is the foundation for expression processing in the compose pipeline.
+//! The passive syntax (AST, lexer, parser) lives in
+//! [`simplified_schema::expression`] and is re-exported here under its old
+//! paths.
 //!
 //! ## Components
 //!
 //! - **AST** (`ast::Expr`) - Abstract syntax tree for expressions
 //! - **Lexer** (`lexer::Lexer`) - Tokenizes expression strings
 //! - **Parser** (`parser::Parser`) - Builds AST from tokens
+//! - **ExpressionFinder** (`lexer::ExpressionFinder`) - Locates `{{ … }}` in
+//!   Markdown, skipping code blocks
 //! - **EvaluationLookup** - Trait for resolving variable lookups
 //!
 //! ## Expression Syntax
@@ -65,7 +69,8 @@
 //! topic.
 
 pub(crate) mod absence;
-pub mod ast;
+// migration: removed in Phase 7
+pub use simplified_schema::expression::ast;
 pub mod binding;
 pub mod call_binding;
 pub mod call_check;
@@ -84,7 +89,8 @@ pub mod iteration;
 pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
-pub mod parser;
+// migration: removed in Phase 7
+pub use simplified_schema::expression::parser;
 pub mod prepared;
 pub mod resolve_ctx;
 pub mod scope;

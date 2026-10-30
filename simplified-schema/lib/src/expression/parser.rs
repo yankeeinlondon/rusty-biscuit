@@ -38,7 +38,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter::markdown::compose::expression::{parse, Expr};
+//! use simplified_schema::expression::{parse, Expr};
 //!
 //! // Simple variable
 //! let expr = parse("foo").unwrap();
@@ -58,18 +58,17 @@
 //! ```
 
 use super::{
-    LexerError, ParseMode, Token,
     ast::{
         BinaryOp, Callback, Expr, SpannedBindingPattern, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind,
     },
-    lexer::lex_spanned,
+    lexer::{LexerError, ParseMode, Token, lex_spanned},
 };
-use crate::markdown::span::Spanned;
+use crate::span::Spanned;
 use std::collections::HashSet;
 use std::fmt;
 
 #[cfg(test)]
-use super::ComparisonOp;
+use super::lexer::ComparisonOp;
 
 /// Error that can occur during parsing.
 #[derive(Debug, Clone, PartialEq)]
@@ -817,7 +816,7 @@ impl<'a> Parser<'a> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::expression::{parse, Expr};
+/// use simplified_schema::expression::{parse, Expr};
 ///
 /// let expr = parse("foo || \"default\"").unwrap();
 /// assert!(matches!(expr, Expr::Fallback { .. }));
@@ -840,7 +839,7 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::expression::{parse_spanned, SpannedExprKind};
+/// use simplified_schema::expression::{parse_spanned, SpannedExprKind};
 ///
 /// let expr = parse_spanned("foo || \"bar\"").unwrap();
 /// assert_eq!(expr.span, 0..12);
@@ -891,7 +890,7 @@ pub fn parse_callback_spanned(input: &str) -> Result<SpannedCallback, ParseError
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::expression::{parse_condition, Expr};
+/// use simplified_schema::expression::{parse_condition, Expr};
 ///
 /// let expr = parse_condition("a && b").unwrap();
 /// match expr {
@@ -925,14 +924,14 @@ pub fn parse_condition_spanned(input: &str) -> Result<SpannedExpr, ParseError> {
     Parser::with_mode(input, ParseMode::Condition)?.parse_spanned()
 }
 
-/// Precedence table shared with the semantics catalog.
+/// Precedence table shared with the host's operator catalog.
 ///
 /// Each entry is `(name, operators)` ordered from highest precedence to
-/// lowest. The `semantics` module mirrors this table so the parser remains
-/// the single source of truth for precedence while the report surface can
-/// iterate it.
-#[allow(dead_code)]
-pub(crate) const PRECEDENCE_TABLE: &[(&str, &str)] = &[
+/// lowest. Darkmatter's expression `semantics` catalog mirrors this table (a
+/// Darkmatter test compares the two) so the parser remains the single source
+/// of truth for precedence while the report surface can iterate it.
+#[doc(hidden)]
+pub const PRECEDENCE_TABLE: &[(&str, &str)] = &[
     ("Primary / member access", "literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)`"),
     ("Unary", "`!`, `-`"),
     ("Multiplicative", "`*`, `/`, `%`"),
@@ -949,7 +948,7 @@ mod tests {
 
     mod callbacks {
         use super::*;
-        use crate::markdown::compose::expression::BindingPattern;
+        use crate::expression::BindingPattern;
 
         fn var(name: &str) -> Expr {
             Expr::Variable(name.to_string())
@@ -2060,7 +2059,7 @@ mod tests {
 
     mod arithmetic {
         use super::*;
-        use crate::markdown::compose::expression::ast::BinaryOp;
+        use crate::expression::ast::BinaryOp;
 
         fn extract_binary(expr: &Expr) -> (BinaryOp, &Expr, &Expr) {
             match expr {
@@ -2501,7 +2500,7 @@ mod tests {
     /// Requirement 1 of the dasherized-identifiers spec at the parser level.
     mod dasherized_identifiers {
         use super::*;
-        use crate::markdown::compose::expression::ast::BinaryOp;
+        use crate::expression::ast::BinaryOp;
 
         fn assert_subtraction(src: &str) {
             match parse(src).unwrap_or_else(|error| panic!("{src:?} should parse: {error}")) {
@@ -2776,10 +2775,10 @@ mod tests {
         use super::*;
 
         const REVIEW_SPEC_INLINE: &str = include_str!(
-            "../../../../../../claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
+            "../../../../claudine/cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
         );
         const COMMIT: &str = include_str!(
-            "../../../../../../claudine/cli/tests/fixtures/nested_span_regression/commit.md"
+            "../../../../claudine/cli/tests/fixtures/nested_span_regression/commit.md"
         );
 
         /// Returns `(raw, decoded)` inner expression text for every `|-`

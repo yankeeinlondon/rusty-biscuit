@@ -31,7 +31,7 @@ fn admission_message(spelling: &str, reason: NumericAdmissionError) -> String {
 }
 
 /// Whether `error` is a YAML number-admission failure from this module.
-pub(crate) fn is_yaml_admission_error(error: &serde_yaml_ng::Error) -> bool {
+pub fn is_yaml_admission_error(error: &serde_yaml_ng::Error) -> bool {
     error.to_string().contains(QUOTE_HINT)
 }
 
@@ -43,7 +43,7 @@ pub(crate) fn is_yaml_admission_error(error: &serde_yaml_ng::Error) -> bool {
 /// property path, line, column, and reason. An integer too large for the
 /// value model (beyond `u64`/`i64`) fails the first parse; it is reported as
 /// an admission error when admission rejects it.
-pub(crate) fn load_admitted_yaml(text: &str) -> Result<serde_yaml_ng::Value, serde_yaml_ng::Error> {
+pub fn load_admitted_yaml(text: &str) -> Result<serde_yaml_ng::Value, serde_yaml_ng::Error> {
     let value = match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text) {
         Ok(value) => value,
         Err(error) => return Err(oversized_integer_error(text).unwrap_or(error)),
@@ -269,11 +269,12 @@ impl<'de> Visitor<'de> for OversizedScan {
 
 /// A JSON number that admission rejects.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct JsonNumberError {
+pub struct JsonNumberError {
     /// JSON Pointer to the number (`""` for a root number).
     pub pointer: String,
     /// The number as written.
     pub spelling: String,
+    /// Why admission rejected it.
     pub reason: NumericAdmissionError,
     /// 1-based line of the number's first character.
     pub line: usize,
@@ -301,7 +302,7 @@ impl fmt::Display for JsonNumberError {
 /// ## Errors
 ///
 /// The first number, in document order, that admission rejects.
-pub(crate) fn admit_json_text_numbers(text: &str) -> Result<(), JsonNumberError> {
+pub fn admit_json_text_numbers(text: &str) -> Result<(), JsonNumberError> {
     let Ok(root) = serde_json::from_str::<&RawValue>(text) else {
         return Ok(());
     };
@@ -398,13 +399,13 @@ impl<'de: 'a, 'a> Deserialize<'de> for JsonEntries<'a> {
 /// or a literal such as `1e400` that overflows).
 ///
 /// `serde_json::Value` cannot hold such a number, so [`biscuit_file::Json5`]
-/// silently stores `null` for it; callers that turn JSON5 text into Darkmatter
+/// silently stores `null` for it; callers that turn JSON5 text into admitted
 /// values check the document with this first.
 ///
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::numeric::reject_non_finite_json5;
+/// use simplified_schema::numeric::reject_non_finite_json5;
 ///
 /// let finite = biscuit_file::Json5::from_str("{ n: 1.5 }").unwrap();
 /// assert!(reject_non_finite_json5(&finite).is_ok());

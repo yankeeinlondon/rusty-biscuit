@@ -34,8 +34,8 @@
 //! }
 //! ```
 
-use super::ComparisonOp;
-use crate::markdown::span::{SourceSpan, Spanned};
+use super::lexer::ComparisonOp;
+use crate::span::{SourceSpan, Spanned};
 use std::fmt;
 
 /// Arithmetic binary operators supported by the expression evaluator.
@@ -191,7 +191,7 @@ impl fmt::Display for Expr {
         match self {
             Expr::Variable(name) => write!(f, "{}", name),
             Expr::StringLiteral(s) => write!(f, "\"{}\"", s),
-            Expr::NumberLiteral(n) => f.write_str(&crate::markdown::numeric::format_number(*n)),
+            Expr::NumberLiteral(n) => f.write_str(&crate::numeric::format_number(*n)),
             Expr::BoolLiteral(b) => write!(f, "{}", b),
             Expr::ArrayLiteral(items) => {
                 write!(f, "[")?;

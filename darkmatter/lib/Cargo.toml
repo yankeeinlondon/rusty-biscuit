@@ -36,8 +36,9 @@ effects-instrumentation = []
 # module, and `markdown::schemas::catalog::discovery_probe` (thread-local
 # observation of lifecycle discovery's reads and builds, and injected read
 # errors). Off by default; without it the counters and their accessors are
-# not compiled.
-work-counters = []
+# not compiled. Enables simplified-schema's counters, which `work_counters`
+# folds into its snapshot.
+work-counters = ["simplified-schema/work-counters"]
 # Test-only seam. Exposes `markdown::cleanup::test_hooks`, which corrupts the
 # body-cleanup candidate before the fidelity check so consumer suites (the CLI,
 # DMLS) can prove a broken pass is refused. Off by default; production builds
@@ -63,6 +64,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order", "raw_value", "float_roundtrip"] }
 indexmap = { version = "2", features = ["serde"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5", "file-reference", "fetch"] }
+# The SimplifiedSchema language and its shared foundations (numeric model,
+# spans, `{{ }}` scan, literal-token codec); Darkmatter re-exports them.
+simplified-schema = { path = "../../simplified-schema/lib" }
 # `EDITOR_SCHEMA`, which the embedded runtime baseline imports for its
 # `content_policy` typing. `file-adapter` stays off; Content Policy never
 # depends on Darkmatter.

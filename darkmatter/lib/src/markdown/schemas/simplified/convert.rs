@@ -49,7 +49,7 @@ use super::types::{
     SimplifiedType, TupleType, TypeExpr,
 };
 use crate::markdown::numeric::json_number;
-use crate::markdown::compose::expression::parse_condition;
+use simplified_schema::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::file_match::{
     DARKMATTER_MATCH_KEYWORD, DARKMATTER_MATCH_PROPERTY_KEYWORD, file_match_groups,

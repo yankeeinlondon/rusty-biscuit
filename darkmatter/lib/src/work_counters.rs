@@ -19,7 +19,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(usize)]
 pub enum Work {
-    /// An expression lexed and parsed by the expression parser.
+    /// An expression lexed and parsed by the expression parser. Counted by
+    /// simplified-schema, which owns the parser.
     ExpressionParse,
     /// A trigger-registry scan of a document's schema roots.
     TriggerDiscovery,
@@ -147,9 +148,25 @@ impl WorkSnapshot {
     }
 }
 
-/// The counters' current values.
+/// The counters' current values, with simplified-schema's counts folded into
+/// the kinds they share ([`Work::ExpressionParse`]).
 pub fn snapshot() -> WorkSnapshot {
-    WorkSnapshot { counts: COUNTS.iter().map(|count| count.load(Ordering::Relaxed)).collect() }
+    let library = simplified_schema::work_counters::snapshot();
+    WorkSnapshot {
+        counts: Work::ALL
+            .iter()
+            .map(|work| COUNTS[*work as usize].load(Ordering::Relaxed) + library_kind(*work).map_or(0, |kind| library.get(kind)))
+            .collect(),
+    }
+}
+
+/// The simplified-schema counter that records `work`, when that code moved
+/// into the library.
+fn library_kind(work: Work) -> Option<simplified_schema::work_counters::Work> {
+    match work {
+        Work::ExpressionParse => Some(simplified_schema::work_counters::Work::ExpressionParse),
+        _ => None,
+    }
 }
 
 /// The JSON values in `entries`' values, counting every nested value once: a

@@ -290,12 +290,12 @@ pub(crate) fn register_darkmatter_formats_with(
         .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
             // A stored literal token is data: its text is the final value.
             if let Some(Ok(decoded)) = crate::markdown::literal_token::decode_leaf(value) {
-                return crate::markdown::compose::expression::parse_condition(&decoded).is_ok();
+                return simplified_schema::expression::parse_condition(&decoded).is_ok();
             }
             if is_pending_expression_value(value) {
                 return true;
             }
-            crate::markdown::compose::expression::parse_condition(value).is_ok()
+            simplified_schema::expression::parse_condition(value).is_ok()
         })
         // The `shell` string type: passive, never parsed or executed. Literal
         // decoding and pending-value deferral mirror `expression`.

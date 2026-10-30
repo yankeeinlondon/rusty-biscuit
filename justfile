@@ -35,7 +35,7 @@ import "./just/spec.just"
 # Those four carry zero or one test, so a canonical recipe set would gate
 # nothing (`agent-sandbox` and `tabby` have no justfile at all). Add each one
 # here at the same time it gains a suite worth running.
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard simplified-schema"
 
 # The `areas :=` list above is a LOCAL convenience (canonical-recipe validation
 # and `_orchestrate` iteration). CI does not read it: CI selects and records

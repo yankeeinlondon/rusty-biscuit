@@ -99,7 +99,7 @@
 
 use std::{ops::Range, str::FromStr};
 
-use crate::markdown::compose::expression::{SpannedExpr, SpannedExprKind, parse_spanned};
+use simplified_schema::expression::{SpannedExpr, SpannedExprKind, parse_spanned};
 use crate::markdown::numeric::{
     NumberTextError, NumericAdmissionError, admit_number_spelling, format_number, json_number,
 };

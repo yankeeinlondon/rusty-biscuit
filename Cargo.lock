@@ -3234,6 +3234,7 @@ dependencies = [
  "serial_test",
  "shared_child",
  "similar",
+ "simplified-schema",
  "sniff",
  "syntect",
  "tempfile",
@@ -13145,6 +13146,22 @@ dependencies = [
  "log",
  "termcolor",
  "time",
+]
+
+[[package]]
+name = "simplified-schema"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "biscuit-file",
+ "biscuit-test-harness",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sniff",
+ "test-toolkit",
+ "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]
