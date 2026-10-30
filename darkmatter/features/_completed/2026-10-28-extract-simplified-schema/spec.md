@@ -31,7 +31,8 @@ clarified_by: codex/gpt-6.1-sol
 needs_rulings: false
 review_note: the clarification process served as a review
 implemented: true
-review_iterations: 0
+review_iterations: 3
+completed: true
 related:
     - 2026-05-11-schemas
     - 2026-07-08-schema-plus
@@ -411,9 +412,13 @@ usable without its resolution dependencies. Preserve reference grammar,
 capabilities when enabled, and the identity of its public types. The
 schema library's default-enabled file feature opts into resolution;
 existing host adapters enable the support they use. Verify that an isolated
-consumer with default features disabled excludes `gix`, `walkdir`, and
-`globset` resolver dependencies from its normal Cargo graph. YAML parsing
-and source-span dependencies may remain. This is a dependency-feature split,
+consumer with default features disabled excludes the `gix` and `walkdir`
+resolver dependencies from its normal Cargo graph. YAML parsing and
+source-span dependencies may remain, and so may `globset`: it performs no
+I/O and validates `match(...)` glob pattern text at parse time, so keeping it
+preserves identical schema parsing across builds (R3). _Amended 2026-10-30
+by the author's ruling on review 1, Human item 1; the original text also
+excluded `globset`._ This is a dependency-feature split,
 not a new reference implementation or remote-schema feature.
 
 ### R3. Preserve authored and semantic compatibility
@@ -844,8 +849,10 @@ The extraction is ready for review when:
     the one-argument file factories; minimal builds parse and validate
     in-memory data with passive reference syntax and no implicit I/O.
     Inspect the schema-only example's normal dependency graph in both
-    configurations: no Darkmatter/rendering/effect stack, and no `gix`,
-    `walkdir`, or `globset` resolver dependencies in the minimal build.
+    configurations: no Darkmatter/rendering/effect stack, and no `gix` or
+    `walkdir` resolver dependencies in the minimal build; `globset` is
+    permitted there as passive glob-pattern syntax validation (amended
+    2026-10-30 by the author's ruling on review 1, Human item 1).
     Preserve `biscuit-file` reference grammar and public type identity across
     the feature split. Content-only Markdown/schema extraction uses the
     shared passive envelope helper with file features disabled; HTTP(S)
