@@ -2071,7 +2071,7 @@ pub enum Sharing {
     Automatic,
     /// Store only cyclic definitions and inline every other use. Only the
     /// definition-free projection of the built-in baseline
-    /// ([`super::darkmatter_base_schema`]) expands this way: that public
+    /// (a host's, such as Darkmatter's `darkmatter_base_schema`) expands this way: that public
     /// convenience form carries no definition table, and the inline form an
     /// acyclic use takes is the resolver's to decide, so the projection is
     /// resolved rather than rebuilt from the shared form.

@@ -164,7 +164,7 @@ impl StandaloneSchemaDocument {
 /// binding contract, unparseable SimplifiedSchema payload, invalid or
 /// remote reference) returns
 /// `Err(SchemaError::SchemaDocument)`, as does a global catalog
-/// ([`crate::catalog`]), which is never a document schema.
+/// (as a host such as Darkmatter loads them), which is never a document schema.
 /// Invalid `suggest(...)` candidates
 /// within a valid envelope are returned as
 /// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not

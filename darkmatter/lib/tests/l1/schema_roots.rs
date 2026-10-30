@@ -1005,9 +1005,11 @@ fn no_doc_or_skill_names_the_singular_schema_variable() {
         root.join("darkmatter/docs"),
         root.join("claudine/docs"),
         root.join("biscuit-file/docs"),
+        root.join("simplified-schema/docs"),
         root.join(".claude/skills/darkmatter"),
         root.join(".claude/skills/claudine"),
         root.join(".claude/skills/biscuit-file"),
+        root.join(".claude/skills/simplified-schema"),
     ];
     let mut files = Vec::new();
     for dir in &dirs {

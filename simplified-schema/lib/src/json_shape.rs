@@ -15,7 +15,7 @@
 //!
 //! A recursive reference whose cycle passes through a value descent (a
 //! property, an item, a tuple slot, a pattern or additional property) becomes
-//! a reusable [`ShapeRef`] to its target, translated once, so declared
+//! a reusable [`ShapeRef`](crate::coercion::ShapeRef) to its target, translated once, so declared
 //! conversions apply at every depth the engine walks
 //! ([`crate::coercion::MAX_DEPTH`]); a value nested deeper fails
 //! with [`crate::coercion::FailureReason::ResourceLimit`].
@@ -885,7 +885,7 @@ static FORMAT_VALIDATORS: LazyLock<Mutex<HashMap<String, Arc<Option<Validator>>>
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Empties this module's process-wide caches (see
-/// [`super::reset_process_caches_for_bench`]).
+/// [`crate::reset_process_caches`]).
 pub fn reset_process_caches() {
     FORMAT_VALIDATORS.lock().expect("format validator cache poisoned").clear();
 }

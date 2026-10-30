@@ -4,10 +4,14 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod coercion_core;
+mod context_construction_guard;
+mod dependency_direction_guard;
 mod expression_syntax;
 mod foundations;
+mod path_lookup_guard;
 mod resolution_unavailable;
 mod schema_files;
 mod schema_object;
+mod shipped_corpus;
 mod test_layout;
 mod validation_contract;

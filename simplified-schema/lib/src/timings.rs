@@ -3,7 +3,8 @@
 //! A [`ValidationTimings`] splits the work of one request into five
 //! non-overlapping [`ValidationStage`]s, measured with [`Instant`]. The
 //! library marks its own stages; a caller only opens a recording, either
-//! with [`DarkmatterSchemas::validate_timed`] or around any work with
+//! with a host's timed validation (such as Darkmatter's
+//! `DarkmatterSchemas::validate_timed`) or around any work with
 //! [`ValidationTimings::record`].
 //!
 //! Time is attributed to the innermost open stage only: a validator compiled
@@ -13,8 +14,6 @@
 //!
 //! Recordings hold only durations, the compile-cache state, and trigger file
 //! names; never document values or schema bodies.
-//!
-//! [`DarkmatterSchemas::validate_timed`]: super::DarkmatterSchemas::validate_timed
 
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -104,7 +103,8 @@ impl CompileCache {
 
 /// The stage breakdown of one schema validation request.
 ///
-/// Obtained from [`DarkmatterSchemas::validate_timed`] (validation alone) or
+/// Obtained from a host's timed validation (such as Darkmatter's
+/// `DarkmatterSchemas::validate_timed`; validation alone) or
 /// [`ValidationTimings::record`] (any span of work). Partial timings of a
 /// request that failed are as complete as the work that ran.
 ///
@@ -120,14 +120,11 @@ impl CompileCache {
 ///
 /// ## Notes
 ///
-/// Trigger discovery usually runs when the [`DarkmatterSchemas`] is built
-/// ([`DarkmatterSchemas::with_trigger_discovery`]), not inside `validate`.
+/// Trigger discovery usually runs when a host builds its validator (such as
+/// Darkmatter's `DarkmatterSchemas::with_trigger_discovery`), not inside
+/// `validate`.
 /// Record that call separately and [`absorb`](Self::absorb) it into the
 /// validation's timings, or record both in one closure.
-///
-/// [`DarkmatterSchemas`]: super::DarkmatterSchemas
-/// [`DarkmatterSchemas::validate_timed`]: super::DarkmatterSchemas::validate_timed
-/// [`DarkmatterSchemas::with_trigger_discovery`]: super::DarkmatterSchemas::with_trigger_discovery
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ValidationTimings {
     stages: [Duration; 5],

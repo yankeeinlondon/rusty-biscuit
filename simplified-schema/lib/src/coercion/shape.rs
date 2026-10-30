@@ -45,12 +45,10 @@ pub enum Shape {
     Ref(ShapeRef),
     /// The inner shape at a place the schema marks `deferred`: a value here
     /// may be supplied later (a `{{ … }}` template). The engine treats a
-    /// value here as an exact match when [`BindOptions::defer_marked`]
-    /// accepts it, and otherwise binds it to the inner shape; without that
+    /// value here as an exact match when the `marked` predicate of
+    /// [`bind_with_marked`](super::bind_with_marked) accepts it, and otherwise binds it to the inner shape; without that
     /// predicate the wrapper changes nothing. It is described as its inner
     /// shape.
-    ///
-    /// [`BindOptions::defer_marked`]: super::BindOptions::defer_marked
     Deferrable(Box<Shape>),
 }
 

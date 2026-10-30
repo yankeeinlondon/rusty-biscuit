@@ -66,6 +66,8 @@ serial_test = "3.0"
 gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
 # `test_toolkit::test_layout`, for the layout gate in the `l1` binary.
 test-toolkit = { path = "../../tools/test-toolkit" }
+# Manifest parsing for the dependency-direction guard.
+toml = "1.0"
 
 # `autotests = false` above, so a `tests/` file reaches a binary only through
 # this root.
@@ -77,3 +79,11 @@ path = "tests/l1/main.rs"
 # The work-counter regressions (`work_counters`, the parser's parse count)
 # compile only with `work-counters`.
 features = ["work-counters", "terminal"]
+# The source guards load Darkmatter's shared engines by `#[path]` and spell
+# them with `include_str!` in their tests.
+source-inputs = [
+  "darkmatter/cli/tests/common/context_guard.rs",
+  "darkmatter/cli/tests/common/path_lookup_guard.rs",
+  "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/tests/common/dependency_graph.rs",
+]

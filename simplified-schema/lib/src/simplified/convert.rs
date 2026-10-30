@@ -34,8 +34,8 @@
 //!   with [`SchemaError::Convert`] — Phase 3's resolver is expected to inline
 //!   them before invoking the converter.
 //!
-//! See the mapping table in `darkmatter/features/2026-05-11-schemas/spec.md`
-//! for the full row-by-row contract; the [`tests::snapshots`] module in this
+//! See the mapping table in the `2026-05-11-schemas` spec
+//! for the full row-by-row contract; the `tests::snapshots` module in this
 //! file mirrors that table.
 
 use serde_json::{Map, Value, json};
@@ -1535,7 +1535,7 @@ static COMPILED_PATTERNS: std::sync::OnceLock<std::sync::Mutex<std::collections:
     std::sync::OnceLock::new();
 
 /// Empties this module's process-wide caches (see
-/// [`crate::reset_process_caches_for_bench`]).
+/// [`crate::reset_process_caches`]).
 pub fn reset_process_caches() {
     if let Some(compiled) = COMPILED_PATTERNS.get() {
         compiled.lock().expect("compiled pattern set poisoned").clear();

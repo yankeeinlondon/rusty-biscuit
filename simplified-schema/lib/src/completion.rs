@@ -104,7 +104,7 @@ pub struct AlternativeValue {
     pub arm: usize,
 }
 
-/// One step of a cursor path from the frontmatter root, as [`for_path`] and
+/// One step of a cursor path from the frontmatter root, as [`for_path_in`] and
 /// [`def_at_path`] read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathStep<'a> {
@@ -116,8 +116,8 @@ pub enum PathStep<'a> {
     Index(usize),
 }
 
-/// [`for_path`] over `schema`, resolving recursive references through
-/// `definitions`.
+/// The completion alternatives at `path` in `schema`, resolving recursive
+/// references through `definitions`.
 ///
 /// ## Notes
 ///
@@ -148,7 +148,7 @@ where
 /// The returned definition may itself be a reference (an element of `item[]`
 /// is the `Ref` of `item`); pass it with `definitions` to
 /// [`alternatives_for_def_in`] or [`resolved_alternatives`] to open it. Narrowing,
-/// laziness, and `None` are as for [`for_path`] and [`for_path_in`]. A key
+/// laziness, and `None` are as for [`for_path_in`]. A key
 /// that several unnarrowed object arms declare resolves to the union of their
 /// atoms.
 ///
@@ -230,7 +230,7 @@ fn instance_at<'v>(frontmatter: &'v Value, path: &[PathStep<'_>]) -> Option<&'v 
 }
 
 /// Whether `value` is a valid instance of one leaf alternative (an
-/// [`Alternative::atom`]), lowered on its own as a present value: the
+/// [`Alternative::atom`](crate::simplified::Alternative::atom)), lowered on its own as a present value: the
 /// optional-property null wrapper is never added, so `null` matches only an
 /// alternative that itself accepts `null`, as inside an item union.
 ///

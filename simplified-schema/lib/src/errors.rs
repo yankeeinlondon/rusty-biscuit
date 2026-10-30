@@ -423,7 +423,8 @@ pub enum SchemaError {
         source: Box<SchemaError>,
     },
 
-    /// A trigger in a host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle)
+    /// A trigger in a host's embedded schema bundle (such as Darkmatter's
+    /// `EmbeddedSchemaBundle`)
     /// claimed `kind: schema-trigger` but could not be loaded: a malformed
     /// envelope, or a payload that failed to resolve inside its bundle.
     /// `bundle` and `name` identify the embedded document; it has no host
@@ -436,9 +437,8 @@ pub enum SchemaError {
         source: Box<SchemaError>,
     },
 
-    /// A host's [`EmbeddedSchemaBundle`](super::EmbeddedSchemaBundle) has an
-    /// unusable name or file list (see
-    /// [`EmbeddedSchemaBundle::new`](super::EmbeddedSchemaBundle::new)).
+    /// A host's embedded schema bundle (such as Darkmatter's
+    /// `EmbeddedSchemaBundle`) has an unusable name or file list.
     #[error("embedded schema bundle `{bundle}` is invalid: {message}")]
     EmbeddedBundle { bundle: String, message: String },
 

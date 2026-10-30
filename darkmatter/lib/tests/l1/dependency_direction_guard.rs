@@ -15,184 +15,45 @@
 //!   crate in a path (`claudine::…`), a `use`, or an `extern crate`.
 //!
 //! Both checks run over in-memory inputs in the self-tests, so a passing
-//! guard proves the detectors fire.
+//! guard proves the detectors fire. The walk and the source detector are the
+//! shared engine in `tests/common/dependency_graph.rs`, which
+//! `simplified-schema`'s guard runs with its own forbidden set.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::{Component, Path, PathBuf};
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 #[allow(clippy::duplicate_mod)]
 #[path = "../../../cli/tests/common/source_scan.rs"]
 mod source_scan;
+#[path = "../common/dependency_graph.rs"]
+mod dependency_graph;
 
-use source_scan::{ident_offsets, is_ident, line_at, production_sources, sanitize};
+use dependency_graph::{Forbidden, Graph, normalize, workspace_dependencies};
+use source_scan::{production_sources, sanitize};
 
-/// Claudine's package names; any `rendezvous-*` package is Claudine's too.
-const CLAUDINE_PACKAGES: &[&str] =
-    &["claudine", "claudine-cli", "claudine-contract", "claudine-gen", "claudine-catalog-types"];
-
-/// The crate names a Rust path would spell for those packages.
-const CLAUDINE_CRATES: &[&str] = &[
-    "claudine",
-    "claudine_cli",
-    "claudine_contract",
-    "claudine_gen",
-    "claudine_catalog_types",
-    "rendezvous_core",
-    "rendezvous_daemon",
-    "rendezvous_client",
-];
-
-const ALL_TABLES: &[&str] = &["dependencies", "dev-dependencies", "build-dependencies"];
-const BUILT_TABLES: &[&str] = &["dependencies", "build-dependencies"];
-
-fn is_claudine_package(name: &str) -> bool {
-    CLAUDINE_PACKAGES.contains(&name) || name.starts_with("rendezvous-")
-}
-
-/// `path` with `.` and `..` resolved lexically.
-fn normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other),
-        }
-    }
-    normalized
-}
-
-/// A manifest graph rooted in a repository: `read` returns a manifest's text.
-struct Graph<'a> {
-    repo_root: PathBuf,
-    workspace: toml::Table,
-    read: &'a dyn Fn(&Path) -> Option<String>,
-}
-
-impl Graph<'_> {
-    fn under_claudine(&self, manifest_dir: &Path) -> bool {
-        manifest_dir.strip_prefix(&self.repo_root).is_ok_and(|relative| relative.starts_with("claudine"))
-    }
-
-    fn shown(&self, manifest: &Path) -> String {
-        manifest.strip_prefix(&self.repo_root).unwrap_or(manifest).to_string_lossy().replace('\\', "/")
-    }
-
-    /// Every Claudine dependency reachable from `roots` (manifest paths), as
-    /// `"<declaring manifest>: <dependency>"`.
-    fn violations(&self, roots: &[PathBuf]) -> Vec<String> {
-        self.walk(roots).0
-    }
-
-    /// The violations and every manifest the walk read.
-    fn walk(&self, roots: &[PathBuf]) -> (Vec<String>, BTreeSet<String>) {
-        let mut violations = Vec::new();
-        let mut visited = BTreeSet::new();
-        let mut pending: Vec<(PathBuf, &[&str])> = roots.iter().map(|root| (normalize(root), ALL_TABLES)).collect();
-        while let Some((manifest, tables)) = pending.pop() {
-            if !visited.insert(manifest.clone()) {
-                continue;
-            }
-            let Some(text) = (self.read)(&manifest) else {
-                violations.push(format!("{}: manifest is unreadable", self.shown(&manifest)));
-                continue;
-            };
-            let document: toml::Table = match toml::from_str(&text) {
-                Ok(document) => document,
-                Err(error) => {
-                    violations.push(format!("{}: manifest does not parse: {error}", self.shown(&manifest)));
-                    continue;
-                }
-            };
-            let manifest_dir = manifest.parent().expect("a manifest has a directory").to_path_buf();
-            let package = document.get("package").and_then(|package| package.get("name")).and_then(toml::Value::as_str);
-            if package.is_some_and(is_claudine_package) || self.under_claudine(&manifest_dir) {
-                violations.push(format!("{}: is a Claudine package ({})", self.shown(&manifest), package.unwrap_or("?")));
-                continue;
-            }
-            for (key, spec, base) in self.dependencies(&document, tables, &manifest_dir) {
-                let name = spec.get("package").and_then(toml::Value::as_str).unwrap_or(&key);
-                let path = spec.get("path").and_then(toml::Value::as_str).map(|path| normalize(&base.join(path)));
-                if is_claudine_package(name) || path.as_deref().is_some_and(|dir| self.under_claudine(dir)) {
-                    violations.push(format!("{}: depends on `{key}` ({name})", self.shown(&manifest)));
-                } else if let Some(dir) = path {
-                    pending.push((dir.join("Cargo.toml"), BUILT_TABLES));
-                }
-            }
-        }
-        violations.sort();
-        (violations, visited.iter().map(|manifest| self.shown(manifest)).collect())
-    }
-
-    /// `(key, spec, base directory for its path)` for every entry of `tables`,
-    /// top-level and under `target.*`, with `workspace = true` resolved.
-    fn dependencies(&self, document: &toml::Table, tables: &[&str], manifest_dir: &Path) -> Vec<(String, toml::Table, PathBuf)> {
-        let mut scopes = vec![document];
-        if let Some(targets) = document.get("target").and_then(toml::Value::as_table) {
-            scopes.extend(targets.values().filter_map(toml::Value::as_table));
-        }
-        let mut entries = Vec::new();
-        for scope in scopes {
-            for table in tables {
-                let Some(dependencies) = scope.get(*table).and_then(toml::Value::as_table) else { continue };
-                for (key, value) in dependencies {
-                    let mut spec = match value {
-                        toml::Value::Table(spec) => spec.clone(),
-                        // `name = "1.0"`: a registry version.
-                        _ => toml::Table::new(),
-                    };
-                    let mut base = manifest_dir.to_path_buf();
-                    // A version-only workspace entry has no path or rename to inherit.
-                    if spec.get("workspace").and_then(toml::Value::as_bool) == Some(true)
-                        && let Some(toml::Value::Table(inherited)) = self.workspace.get(key)
-                    {
-                        for (field, inherited) in inherited {
-                            spec.entry(field.clone()).or_insert_with(|| inherited.clone());
-                        }
-                        // A workspace entry's `path` is relative to the root.
-                        base.clone_from(&self.repo_root);
-                    }
-                    entries.push((key.clone(), spec, base));
-                }
-            }
-        }
-        entries
-    }
-}
-
-/// The root `[workspace.dependencies]` table, empty when there is none.
-fn workspace_dependencies(root_manifest: &str) -> toml::Table {
-    let root: toml::Table = toml::from_str(root_manifest).expect("the root Cargo.toml parses");
-    root.get("workspace")
-        .and_then(|workspace| workspace.get("dependencies"))
-        .and_then(toml::Value::as_table)
-        .cloned()
-        .unwrap_or_default()
-}
+/// Claudine's packages (any `rendezvous-*` package is Claudine's too), every
+/// manifest under `claudine/`, and the crate names a Rust path would spell.
+const CLAUDINE: Forbidden = Forbidden {
+    packages: &["claudine", "claudine-cli", "claudine-contract", "claudine-gen", "claudine-catalog-types"],
+    prefixes: &["rendezvous-"],
+    suffixes: &[],
+    dirs: &["claudine"],
+    crates: &[
+        "claudine",
+        "claudine_cli",
+        "claudine_contract",
+        "claudine_gen",
+        "claudine_catalog_types",
+        "rendezvous_core",
+        "rendezvous_daemon",
+        "rendezvous_client",
+    ],
+};
 
 /// `"<file>:<line>: <crate>"` for every Claudine crate a sanitized source
 /// names in a path, a `use`, or an `extern crate`.
 fn source_violations(file: &str, sanitized: &str) -> Vec<String> {
-    let mut violations = Vec::new();
-    for krate in CLAUDINE_CRATES {
-        for offset in ident_offsets(sanitized, krate) {
-            let before = sanitized[..offset].trim_end();
-            let after = sanitized[offset + krate.len()..].trim_start();
-            // `self::claudine::…` or `field.claudine` is a local name, not a crate.
-            let qualified = before.strip_suffix("::").is_some_and(|rest| rest.bytes().last().is_some_and(is_ident));
-            let member = before.ends_with('.');
-            let names_crate = after.starts_with("::")
-                || before.ends_with("extern crate")
-                || (before.strip_suffix("use").is_some_and(|rest| !rest.bytes().last().is_some_and(is_ident)));
-            if names_crate && !qualified && !member {
-                violations.push(format!("{file}:{}: names `{krate}`", line_at(sanitized, offset)));
-            }
-        }
-    }
-    violations.sort();
-    violations
+    dependency_graph::source_violations(file, sanitized, CLAUDINE.crates)
 }
 
 #[test]
@@ -210,7 +71,7 @@ fn darkmatter_manifests_never_reach_a_claudine_package() {
         biscuit_test_harness::manifest_dir!().join("../../Cargo.toml").parent().expect("the root manifest's directory"),
     );
     let read = |path: &Path| seeded.get(path).map(|text| (*text).to_string()).or_else(|| std::fs::read_to_string(path).ok());
-    let graph = Graph { repo_root, workspace: workspace_dependencies(root_manifest), read: &read };
+    let graph = Graph { repo_root, workspace: workspace_dependencies(root_manifest), read: &read, forbidden: &CLAUDINE };
     let roots: Vec<PathBuf> = seeded.keys().cloned().collect();
 
     let (violations, reached) = graph.walk(&roots);
@@ -222,8 +83,9 @@ fn darkmatter_manifests_never_reach_a_claudine_package() {
 #[test]
 fn darkmatter_sources_never_name_a_claudine_crate() {
     // Spelled for CI's test-input index, which does not count the `#[path]`
-    // include above.
+    // includes above.
     let _ = include_str!("../../../cli/tests/common/source_scan.rs");
+    let _ = include_str!("../common/dependency_graph.rs");
     let crates: BTreeMap<&str, PathBuf> = [
         ("darkmatter/lib/src", biscuit_test_harness::manifest_dir!().join("src")),
         ("darkmatter/cli/src", biscuit_test_harness::manifest_dir!().join("../cli/src")),
@@ -272,7 +134,7 @@ fn an_injected_claudine_dependency_is_detected() {
     let workspace = workspace_dependencies(
         "[workspace.dependencies]\ncontract = { package = \"claudine-contract\", path = \"claudine/contract\" }\n",
     );
-    let graph = Graph { repo_root: repo.clone(), workspace, read: &read };
+    let graph = Graph { repo_root: repo.clone(), workspace, read: &read, forbidden: &CLAUDINE };
 
     assert_eq!(
         graph.violations(&[repo.join("darkmatter/lib/Cargo.toml")]),

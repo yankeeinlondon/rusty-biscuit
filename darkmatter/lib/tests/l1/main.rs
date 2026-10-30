@@ -175,6 +175,8 @@ mod schema_embedded_trigger_bundles;
 mod effective_schema_layering;
 mod schema_enhancements_matrix;
 mod schema_extraction_characterization;
+mod schema_language_ownership_guard;
+mod shipped_corpus_invocation;
 mod validation_contract_parity;
 mod schema_expression_syntax_checks;
 mod schema_grammar_descriptors;

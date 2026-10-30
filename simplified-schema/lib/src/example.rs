@@ -124,7 +124,7 @@ fn example_cache() -> &'static Mutex<HashMap<u64, Value>> {
 }
 
 /// Empties this module's process-wide caches (see
-/// [`super::reset_process_caches_for_bench`]).
+/// [`crate::reset_process_caches`]).
 pub fn reset_process_caches() {
     RETURNS_TARGET_VALIDATOR_CACHE.clear();
     example_cache().lock().expect("example cache poisoned").clear();

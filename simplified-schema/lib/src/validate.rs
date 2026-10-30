@@ -68,7 +68,7 @@ pub static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
 /// and trades implementation complexity for predictable behaviour.
 ///
 /// The inner map is an `Arc<Mutex<..>>`, so cloning a cache shares its entries.
-/// [`DarkmatterSchemas::new`](super::DarkmatterSchemas::new) hands out clones of
+/// A host such as Darkmatter (`DarkmatterSchemas::new`) hands out clones of
 /// one process-wide cache, so validators compiled for one document (or one
 /// compose) are reused by the next — including the second `schema_validation`
 /// pass a schema-trigger compose runs after shell expansion.

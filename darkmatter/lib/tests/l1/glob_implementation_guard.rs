@@ -1,6 +1,6 @@
 //! Acceptance criterion 2 of `2026-09-30-glob-reference`: biscuit-file's
 //! `GlobReference` is the one glob implementation behind file references.
-//! Production code of the six packages that consume it reaches a glob library
+//! Production code of the seven packages that consume it reaches a glob library
 //! only from the files listed in [`SOURCE_ALLOWLIST`], at exactly the listed
 //! counts; a new file, a moved count, or a stale entry fails.
 //!
@@ -44,6 +44,13 @@ struct ScannedPackage {
 const SCANNED: &[ScannedPackage] = &[
     ScannedPackage { src: "biscuit-file/lib/src", manifest: "biscuit-file/lib/Cargo.toml", glob_dependencies: &["globset"] },
     ScannedPackage { src: "darkmatter/lib/src", manifest: "darkmatter/lib/Cargo.toml", glob_dependencies: &["globset"] },
+    // The schema language Darkmatter's `match(...)` and file-format checks
+    // moved into; it matches through `GlobReference` only.
+    ScannedPackage {
+        src: "simplified-schema/lib/src",
+        manifest: "simplified-schema/lib/Cargo.toml",
+        glob_dependencies: &[],
+    },
     ScannedPackage { src: "darkmatter/cli/src", manifest: "darkmatter/cli/Cargo.toml", glob_dependencies: &[] },
     ScannedPackage {
         src: "darkmatter/dmls/src",

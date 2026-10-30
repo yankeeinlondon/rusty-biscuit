@@ -71,8 +71,8 @@ pub(crate) fn reset_process_caches() {
 
 /// What conversion derives from one schema: its translated shape, that shape
 /// with nothing required, and its structural validator. A schema's content
-/// is hashed once to find its plan; an [`super::EffectiveSchema`] keeps its
-/// plan, so repeated validations of large schemas never hash them again.
+/// is hashed once to find its plan; a host that keeps a schema's plan (such
+/// as Darkmatter's `EffectiveSchema`) keeps its plan, so repeated validations of large schemas never hash them again.
 pub struct ConversionPlan {
     /// The schema's content hash, the key of its structural validator.
     key: u64,
@@ -124,8 +124,8 @@ impl ConversionPlan {
     }
 
     /// Whether `schema` types any value as a generated lifecycle verb's
-    /// operands, so validation has calls to bind
-    /// ([`super::bound_operands`]).
+    /// operands, so validation has calls to bind (a host such as Darkmatter
+    /// binds them).
     pub fn marks_operands(&self, schema: &Value) -> bool {
         *self.operands.get_or_init(|| marks_operands(schema))
     }
@@ -278,10 +278,10 @@ fn is_pending(path: &[PathSegment], pending: &HashSet<String>) -> bool {
 /// each as matching whatever its path declares and never evaluates it. A
 /// template anywhere else is ordinary text and is judged as written. A
 /// top-level value is never listed here: a whole top-level template keeps its
-/// pending-key rule ([`super::EffectiveSchema::validate_with_options`]).
+/// pending-key rule (a host such as Darkmatter applies it when validating).
 ///
 /// [`Self::with_settled`] adds the operands a generated lifecycle verb's
-/// runtime registration accepted ([`super::bound_operands`]); they are set
+/// runtime registration accepted (as a host such as Darkmatter binds them); they are set
 /// aside exactly as a template is, but are not templates and are never
 /// reported as [`Self::pointers`].
 #[derive(Debug, Default, Clone)]
@@ -297,7 +297,7 @@ impl NestedTemplates {
     /// template nested below a top-level key at a place the schema marks
     /// `deferred`. Deciding which values are such templates is the host's
     /// pending classification; the host walks the instance with
-    /// [`ConversionPlan::shape`] and [`bind_with_marked`] and hands the paths
+    /// [`ConversionPlan::shape`] and [`bind_with_marked`](crate::coercion::bind_with_marked) and hands the paths
     /// here.
     pub fn from_template_paths(paths: Vec<Vec<PathSegment>>) -> Self {
         let paths: Vec<_> = paths
@@ -558,9 +558,9 @@ pub fn validation_copy(json_schema: &Value, instance: &Value) -> Value {
     )
 }
 
-/// [`validation_copy`] with the schema's plan already found; each value in
-/// `templates` is kept as written and does not keep its siblings from
-/// converting.
+/// The working copy validation reports on, with the schema's plan already
+/// found; each value in `templates` is kept as written and does not keep its
+/// siblings from converting.
 pub fn validation_copy_with_plan(
     plan: &ConversionPlan,
     json_schema: &Value,

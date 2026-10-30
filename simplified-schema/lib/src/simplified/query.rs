@@ -341,7 +341,7 @@ fn push_alternatives<'a>(
 /// Reference-aware queries ask for one definition at a time, only when the
 /// position they are answering is a reference, so an implementation sees
 /// exactly the definitions a query needed. [`DefinitionTable`] and
-/// [`EffectiveSchema`](crate::EffectiveSchema) implement it;
+/// a host's resolved schema (such as Darkmatter's `EffectiveSchema`) implement it;
 /// a caller may wrap either to observe or restrict lookups.
 pub trait DefinitionLookup {
     /// The definition `key` names; `None` when it is not in scope, which a

@@ -48,6 +48,7 @@
 //!     options().with_draft(Draft::Draft202012),
 //!     None,
 //!     None,
+//!     context, // the request's `biscuit_file::FileResolutionContext`
 //! )
 //! .with_keyword("x-darkmatter-url-scheme", url_scheme_keyword_factory)
 //! .build(&schema)?;
@@ -148,8 +149,8 @@ pub const DARKMATTER_SHELL_FORMAT: &str = "darkmatter-shell";
 /// datetimes ISO 8601 permits (e.g. `2026-07-10T15:05:34`). This validator
 /// accepts both offset-bearing and offset-less ISO 8601 datetimes while still
 /// range-checking the value via `chrono` (so `2026-13-99T00:00:00` is rejected),
-/// keeping validation consistent with the offset-optional detection grammar in
-/// [`super::detect`].
+/// keeping validation consistent with the offset-optional detection grammar of
+/// a host's type detection (such as Darkmatter's `detect` module).
 pub const DARKMATTER_DATETIME_FORMAT: &str = "darkmatter-datetime";
 
 /// Format name registered for the `time` SimplifiedSchema type.
