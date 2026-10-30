@@ -5,7 +5,7 @@ use crate::cache::file_cache::take_stored_files;
 use crate::fonts::chain::take_default_chain_requests;
 use crate::mermaid::render::take_merman_calls;
 use crate::mermaid::{MermaidConfig, MermaidDiagram, MermaidError, MermaidTheme, Palette, QuadrantTheme};
-use crate::tests::{capture_warnings, isolated_cache_dir};
+use crate::tests::{capture_warnings, decode_png_straight, isolated_cache_dir};
 use serial_test::serial;
 
 const THEMES: [MermaidTheme; 4] = [
@@ -808,6 +808,48 @@ fn mermaid_natural_size_grows_with_commits() {
     .natural_size()
     .unwrap();
     assert!(long.width > short.width, "{long:?} vs {short:?}");
+}
+
+#[test]
+#[serial]
+fn mermaid_png_honors_width_scale_and_transparency() {
+    let _cache_dir = isolated_cache_dir();
+    let diagram = MermaidDiagram::new("flowchart LR\n    Start --> Finish");
+    let natural = diagram.natural_size().expect("natural size should measure");
+
+    // `target_width` wins over `scale`; height keeps the measured ratio.
+    let by_width = diagram
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 3,
+            target_width: Some(640),
+            background: Background::Theme,
+            ..RenderRequest::default()
+        })
+        .expect("PNG render at width should succeed");
+    let (w, h, pixels) = decode_png_straight(&std::fs::read(&by_width.path).unwrap());
+    assert_eq!(w, 640, "PNG must be exactly target_width wide, not scale-sized");
+    let exact_h = 640.0 * natural.height / natural.width;
+    assert!(
+        (h as f32 - exact_h).abs() <= 1.0,
+        "height {h} should be within one pixel of {exact_h}"
+    );
+    assert_eq!(pixels[0][3], 255, "opaque background must give an opaque corner");
+
+    // Without `target_width`, `scale` multiplies the natural size.
+    let by_scale = diagram
+        .render(&RenderRequest {
+            format: OutputFormat::Png,
+            scale: 2,
+            target_width: None,
+            background: Background::Transparent,
+            ..RenderRequest::default()
+        })
+        .expect("PNG render at scale should succeed");
+    let (w, h, pixels) = decode_png_straight(&std::fs::read(&by_scale.path).unwrap());
+    assert_eq!(w, (natural.width * 2.0).round() as u32);
+    assert_eq!(h, (natural.height * 2.0).round() as u32);
+    assert_eq!(pixels[0][3], 0, "transparent background must leave the corner transparent");
 }
 
 /// A solid background paints the theme's background color over, and every

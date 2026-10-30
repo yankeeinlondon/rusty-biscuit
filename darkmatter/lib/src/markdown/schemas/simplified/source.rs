@@ -347,6 +347,14 @@ pub struct SchemaSourceMap {
 }
 
 impl SchemaSourceMap {
+    /// Adds another mapping's spans under `prefix`, preserving byte offsets
+    /// in the shared source document.
+    pub fn extend_prefixed(&mut self, other: &Self, prefix: &SchemaSourcePath) {
+        for ((path, kind), spans) in &other.spans {
+            self.spans.entry((prefix.join(path), *kind)).or_default().extend(spans.iter().cloned());
+        }
+    }
+
     /// Returns every authored span recorded for `path` and `kind`.
     pub fn spans(&self, path: &SchemaSourcePath, kind: SchemaSpanKind) -> &[Range<usize>] {
         self.spans
@@ -514,13 +522,14 @@ pub fn parse_schema_declaration_with_source(
 ///
 /// ## Notes
 ///
-/// Passive: parses `source` once, parses the payload once, and locates the
+/// Passive: parses `source` once, parses each payload once, and locates the
 /// authored tree at most once; it reads no files, resolves no imports, and
 /// evaluates nothing.
 pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefinitionFailure> {
     let recognized = super::standalone::recognize_standalone(source).ok()??;
-    let payload = recognized.payload();
-    let failure = parse_schema_declaration_located(payload).err()?;
+    let (payload_key, payload, failure) = std::iter::once((recognized.payload_key(), recognized.payload()))
+        .chain(recognized.local_types().map(|types| ("types", types)))
+        .find_map(|(key, payload)| parse_schema_declaration_located(payload).err().map(|failure| (key, payload, failure)))?;
     // A failure on no property is the declaration's own shape, not a definition.
     if !failure
         .path
@@ -530,7 +539,6 @@ pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefin
     {
         return None;
     }
-    let payload_key = recognized.payload_key();
     let located = locate_yaml_value(source).ok();
     let located_payload = located.as_ref().and_then(|located| match &located.kind {
         LocatedKind::Mapping(pairs) => pairs

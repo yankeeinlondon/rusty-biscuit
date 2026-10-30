@@ -1,4 +1,5 @@
 use crate::raster::{rasterize_svg_to_png, rasterize_svg_to_png_bytes};
+use crate::tests::decode_png_straight;
 
 /// Read the PNG IHDR chunk and return (width, height).
 fn png_dims(bytes: &[u8]) -> (u32, u32) {
@@ -55,6 +56,65 @@ fn rasterize_at_width_and_at_scale_agree_when_target_matches_scale() {
     let (w_w, w_h) = png_dims(&by_width);
     let (s_w, s_h) = png_dims(&by_scale);
     assert_eq!((w_w, w_h), (s_w, s_h));
+}
+
+#[test]
+fn rasterize_at_width_rounds_height_for_non_integer_aspect_ratio() {
+    // 333×77 at 1000 px wide is 231.23 px tall: the height must stay within
+    // one pixel of the exact ratio, never stretch or squash the drawing.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="333" height="77" viewBox="0 0 333 77">
+        <rect width="333" height="77" fill="blue"/>
+    </svg>"#;
+    let png = rasterize_svg_to_png(svg, 1000).unwrap();
+    let (w, h) = png_dims(&png);
+    assert_eq!(w, 1000);
+    let exact = 1000.0 * 77.0 / 333.0;
+    assert!(
+        (h as f64 - exact).abs() <= 1.0,
+        "height {h} should be within one pixel of {exact}"
+    );
+}
+
+#[test]
+fn rasterize_leaves_uncovered_pixels_transparent_and_covered_pixels_opaque() {
+    // Only the left half is painted; the right half has no background.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50">
+        <rect width="50" height="50" fill="rgb(255,0,0)"/>
+    </svg>"#;
+    for png in [
+        rasterize_svg_to_png(svg, 200).unwrap(),
+        rasterize_svg_to_png_bytes(svg, 2).unwrap(),
+    ] {
+        let (w, _h, pixels) = decode_png_straight(&png);
+        let at = |x: u32, y: u32| pixels[(y * w + x) as usize];
+        assert_eq!(at(40, 40), [255, 0, 0, 255], "painted half must be opaque red");
+        assert_eq!(at(160, 40)[3], 0, "unpainted half must stay fully transparent");
+    }
+}
+
+#[test]
+fn rasterize_partially_transparent_shape_keeps_its_straight_color() {
+    // A half-opaque fill must decode to its own color at ~50% alpha. A
+    // premultiplied value leaking through would read as a darker color.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+        <rect width="20" height="20" fill="rgb(200,100,50)" fill-opacity="0.5"/>
+    </svg>"#;
+    let png = rasterize_svg_to_png(svg, 20).unwrap();
+    let (w, _h, pixels) = decode_png_straight(&png);
+    let [r, g, b, a] = pixels[(10 * w + 10) as usize];
+    assert!((127..=128).contains(&a), "alpha {a} should be half of 255");
+    for (actual, expected) in [(r, 200u8), (g, 100), (b, 50)] {
+        assert!(
+            actual.abs_diff(expected) <= 2,
+            "channel {actual} should be within rounding of {expected}"
+        );
+    }
+}
+
+#[test]
+fn rasterize_rejects_unparseable_svg() {
+    assert!(rasterize_svg_to_png("<not-an-svg>", 100).is_err());
+    assert!(rasterize_svg_to_png_bytes("<not-an-svg>", 1).is_err());
 }
 
 mod requests {

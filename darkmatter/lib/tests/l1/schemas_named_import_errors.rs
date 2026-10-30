@@ -82,7 +82,7 @@ fn an_import_target_that_cannot_supply_named_types_is_a_located_schema_document_
         (
             "unsupported envelope key",
             "kind: schema\ntypes:\n  name: string\nextra: 1\n",
-            "tagged schema documents support only `kind`, `types`, and `categories`",
+            "tagged schema documents support only `kind`, `types`, `$schema`, and `categories`",
         ),
         ("implicit null types", "kind: schema\ntypes:\n", "tagged schema document `types` must be a mapping"),
         (

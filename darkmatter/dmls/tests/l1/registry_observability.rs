@@ -352,6 +352,9 @@ fn a_cancelled_request_reports_its_parked_time() {
     fixture.notify("$/cancelRequest", json!({ "id": 901 }));
     let cancelled = fixture.expect_response(RequestId::from(901));
     assert_eq!(cancelled.error.map(|error| error.code), Some(REQUEST_CANCELED));
+    // The response arrives before the completion event is emitted. Drain
+    // that handler before advancing the clock beyond the request's lifetime.
+    fixture.round_trip();
     // Time after the answer is not part of the wait.
     clock.advance(Duration::from_millis(500));
     fixture.open_registry_gate();

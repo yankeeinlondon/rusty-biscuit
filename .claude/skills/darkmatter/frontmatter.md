@@ -2,7 +2,7 @@
 
 Darkmatter retains YAML frontmatter as structured values plus raw source needed
 for source-aware diagnostics. Use this topic for typed library access, merge
-policy, and the `md frontmatter` CLI. Use [schema.md](schema.md) for validation
+policy, and the `md get`/`set`/`rm` CLI. Use [schema.md](schema.md) for validation
 and coercion, and [rendering.md](rendering.md) when a `style:` value is being
 lowered into render policy.
 
@@ -43,7 +43,12 @@ Two traps keep that order intact:
 - **Remove with `shift_remove`.** Under `preserve_order`, `serde_json::Map::remove`
   (and `IndexMap::remove`) is a *swap* remove: the last key jumps into the
   removed key's slot. Any removal from frontmatter or effective state uses
-  `shift_remove`.
+  `shift_remove`, and so does schema lowering (`schemas/simplified/convert.rs`,
+  `schemas/resolve.rs`, `schemas/scope.rs`), whose JSON Schema key order is
+  pinned byte for byte by the convert snapshots and the
+  `recursive_schema_golden` goldens (re-bless with
+  `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1` only after showing the change is
+  order-only).
 - **Never round-trip through `HashMap`.** `EffectiveStateBuilder::with_frontmatter`
   and `EffectiveState::new` take a `serde_json::Map`; `EffectiveState::data()`
   and the frontmatter shell APIs use the ordered `SharedFrontmatter` view (see
@@ -97,6 +102,11 @@ receiving document as `base` and picks the value-winning side with
 reorders the result). This applies to external state (document first),
 transclusion inheritance (child first, parent keys appended), and `set`
 overrides (child first).
+User-facing authority: `darkmatter/docs/topics/frontmatter.md` (parsing, key
+order, shallow merges), `docs/topics/frontmatter-recursion.md` (what a child
+inherits and in which order), and `docs/cli/hash.md` "Key Order and Stored
+Baselines" (non-strict ignores order; strict baselines are refreshed with
+`--strict --save`, never migrated). Change those pages with the behavior.
 
 ## Shared Frontmatter Views
 
@@ -147,7 +157,7 @@ let meta: PostMeta = md.fm_parse()?;
 
 ## CLI Operations
 
-Use `md frontmatter get`, `set`, and `rm` for structured changes. `set` and
+Use `md get`, `md set`, and `md rm` (top-level commands) for structured changes. `set` and
 `rm` compute the edited document from the parsed frontmatter, then splice only
 the changed top-level properties into the loaded source with
 `restore_properties_text` (`Markdown::source_text()` is the loaded text), so

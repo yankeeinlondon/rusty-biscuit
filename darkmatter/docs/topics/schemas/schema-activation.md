@@ -16,10 +16,10 @@ The current trigger parser uses OR for a top-level list. The documented authorin
 model uses AND between top-level conditions and OR within an explicit `group`.
 Existing rules need a deliberate migration that preserves their meaning.
 
-The current tagged schema parser also treats `types` as its schema payload.
-The documented schema envelope instead separates an exported `$schema` from
-reusable `types`. Authoring definitions remain at their documented locations
-while parser support catches up; their presence does not establish support.
+Schema documents can separate an exported `$schema` from reusable `types`
+in the same file. Local references use that type table, while explicit
+imports can still reach types in another file. A tagged document without an
+explicit export retains its `types` mapping as the whole-file schema payload.
 
 Some predicate spellings are not finalized. The initial refresh policy is
 described below; it does not establish a fixed polling interval or editor

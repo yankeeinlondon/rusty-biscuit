@@ -228,6 +228,7 @@ words = [
     "woosh",
     "worktreeinclude",
     "worktrees",
+    "xhigh",
     "zmdi",
 ]
 ignore_paths = ["biscuit-tui/docs/style-guide/style-guide.yaml"]

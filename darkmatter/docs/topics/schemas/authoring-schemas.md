@@ -145,13 +145,14 @@ In a moment of "recursive truth" the external schema definition is defined as a 
 
 ::code ^darkmatter/docs/schemas/schema-definition.yaml
 
-A schema file holds one payload, in either of two equivalent envelopes:
+A schema file can export document properties and declare reusable types:
 
-- **pure**: `$schema` is the file's only top-level key, as in the example above
-- **tagged**: the file has exactly two keys, `kind: schema` and a `types` mapping
+- **pure**: `$schema` holds the export, with an optional sibling `types` mapping
+- **tagged**: `kind: schema` and `types`, with an optional `$schema` export and `categories` list
 
-A tagged file accepts no other keys: adding `$schema`, `description`, or
-anything else is a schema-document error. Whichever envelope you use, every
+A tagged file accepts no other keys. When a file has both `$schema` and
+`types`, only `$schema` defines document properties; `types` supplies local
+names and named imports. Without separate export and type tables, every
 top-level entry of the payload plays two roles. It is a property of the schema
 when a document references the whole file (`$schema: ./address-types.yaml`),
 and it is a **named type** that other definitions can reuse by name.
@@ -185,8 +186,8 @@ See [Reserved Darkmatter References](./definition.md#reserved-darkmatter-referen
 for the rules, and [Lifecycle Event Typing](./definition.md#lifecycle-event-typing)
 for the lifecycle types Darkmatter ships.
 
-Because every entry is also a property, keep helper types that should not
-become document properties in a separate file and import them by name. A
+To keep helper types out of document properties, put them in a sibling
+`types` table or a separate file and import them by name. A
 document that uses `recipient: address@./address-types.yaml` gains a
 `recipient` property, not an `address` one.
 
@@ -514,7 +515,7 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    A tagged schema file has `kind: schema`, a `types` mapping, and optionally a [`categories:` list](./definition.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Its `types` entries are both the schema's properties and its named types, exactly like the entries of a pure `$schema` file (see [External Schemas](#external-schemas)):
+    A tagged schema file has `kind: schema`, a `types` mapping, an optional `$schema` export, and optionally a [`categories:` list](./definition.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
     
   ```yaml
   kind: schema

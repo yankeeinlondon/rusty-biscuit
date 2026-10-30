@@ -65,17 +65,19 @@
   with `default-features = false` and features `svg`, `all-diagrams`, and
   `layout-cytoscape`; `png`, `native-fonts`, ELK, and `math` stay off. The
   lockfile drops `mermaid-rs-renderer`; no other package used it.
-- `resvg`/`usvg` move from 0.45 to 0.47 repo-wide (2026-10-22), in
+- `resvg`/`usvg` move to 0.48.1 repo-wide (2026-10-26), in
   `biscuit-terminal` and `biscuit-visualized` (both feature `image`). With
   them `tiny-skia` moves to 0.12, which encodes with `png` 0.18, so
   `biscuit-visualized`'s own `png` dependency moves to 0.18 as well (`ico`
   and `tauri-codegen` keep a separate `png` 0.17). The lockfile keeps one
-  copy each of `resvg`, `usvg`, `fontdb` (0.23), `tiny-skia` (0.12),
-  `rustybuzz` (0.20.1), and `ttf-parser` (0.25.1). `serde_json` resolves to
+  copy each of `resvg`, `usvg`, `fontdb` (0.24), `tiny-skia` (0.12),
+  `rustybuzz` (0.20.1), and `ttf-parser` (0.25.1). usvg 0.48.1 uses
+  `harfrust` 0.12 for drawing; the label measurer retains RustyBuzz and its
+  oracle compares widths and glyphs with the rasterizer. `serde_json` resolves to
   1.0.154.
 - `biscuit-visualized` adds, under its `image` feature (2026-10-22),
-  `rustybuzz` 0.20.1 and `ttf-parser` 0.25.1 (the versions `usvg` uses, so no
-  second copy), `unicode-bidi` 0.3 and `unicode-script` 0.5 (already in the
+  `rustybuzz` 0.20.1 and `ttf-parser` 0.25.1 (the font-table parser
+  RustyBuzz uses), `unicode-bidi` 0.3 and `unicode-script` 0.5 (already in the
   graph through `usvg`), and `fontique` 0.12.0 (`default-features = false`,
   features `system` and `fontconfig-dlopen`) for the OS's generic font
   family. `fontique` brings `read-fonts` 0.41, `font-types` 0.12,
@@ -1189,9 +1191,9 @@ This is a Rust workspace with the following modules:
 
 ### Image Processing
 
-- [resvg](https://github.com/linebender/resvg) _v0.47_ [📄](https://docs.rs/resvg)
+- [resvg](https://github.com/linebender/resvg) _v0.48.1_ [📄](https://docs.rs/resvg)
 
-    _SVG rendering and rasterization (with its `usvg` 0.47 parser, `fontdb` 0.23, and `tiny-skia` 0.12 backend). Used by `biscuit-terminal` and `biscuit-visualized` under their `image` features._
+    _SVG rendering and rasterization (with its `usvg` 0.48.1 parser, `fontdb` 0.24, and `tiny-skia` 0.12 backend). Used by `biscuit-terminal` and `biscuit-visualized` under their `image` features._
 
     _Tags: image, svg, rasterization_
 

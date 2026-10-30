@@ -188,7 +188,7 @@ themes, disclosure blocks, browser safety, or the render-tree fold.
 ## CLI orientation
 
 The binary is `md`: `compose`, `clean`, `read`, `toc`, `delta`, `schema
-validate|detect|about|triggers`, `hash`, `frontmatter get|set|rm`,
+validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter),
 `code-block`, `graph`, and reference commands.
 
 Checks are relaxed or tightened only through three verbs: `--allow <id|all>`

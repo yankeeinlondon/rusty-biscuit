@@ -1,6 +1,6 @@
 //! Picking a face within one family by stretch, style, and weight.
 //!
-//! A port of fontdb 0.23's private `find_best_match` (CSS Fonts 3, §5.2,
+//! A port of fontdb 0.24's private `find_best_match` (CSS Fonts 3, §5.2,
 //! steps 4a–4c), so the chain picks the face `fontdb::Database::query` would
 //! pick, but over a candidate list the chain chooses: fontdb's own `query`
 //! matches family names case-sensitively and cannot leave out the bundled

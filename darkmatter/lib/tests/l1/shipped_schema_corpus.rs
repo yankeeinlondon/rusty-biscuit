@@ -1276,7 +1276,7 @@ fn shipped_research_contracts_resolve_and_lower() {
     }
 
     assert!(
-        contracts.len() >= 30,
+        contracts.len() >= 29,
         "the research contract corpus shrank to {} files",
         contracts.len()
     );

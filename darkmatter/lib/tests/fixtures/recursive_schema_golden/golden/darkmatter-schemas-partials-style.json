@@ -4105,7 +4105,6 @@
                   "additionalProperties": false,
                   "properties": {
                     "frontmatter": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4118,10 +4117,10 @@
                           "const": false,
                           "description": "Leave the frontmatter block byte-for-byte."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "table-layout": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4134,10 +4133,10 @@
                           "const": false,
                           "description": "Leave table cells as authored."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "fixed-width": {
-                      "default": false,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4153,10 +4152,10 @@
                           "type": "boolean",
                           "description": "false: never re-wrap; true: re-wrap to 120."
                         }
-                      ]
+                      ],
+                      "default": false
                     },
                     "unwrap": {
-                      "default": false,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4169,10 +4168,10 @@
                           "const": false,
                           "description": "Keep authored line breaks (the default)."
                         }
-                      ]
+                      ],
+                      "default": false
                     },
                     "indentation": {
-                      "default": 4,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4193,10 +4192,10 @@
                           "const": 8,
                           "description": "Eight spaces per nested-list level."
                         }
-                      ]
+                      ],
+                      "default": 4
                     },
                     "ordered-lists": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4209,10 +4208,10 @@
                           "const": false,
                           "description": "Leave list numbers as authored."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "list-padding": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -4225,7 +4224,8 @@
                           "const": false,
                           "description": "Leave blank lines around lists as authored."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "list-item-padding": {
                       "anyOf": [
@@ -4261,7 +4261,6 @@
                       "description": "Blank lines between an item's first line and the blocks nested inside it."
                     },
                     "default-language": {
-                      "default": "text",
                       "anyOf": [
                         {
                           "type": "null"
@@ -4279,7 +4278,8 @@
                           "const": "",
                           "description": "Add no language."
                         }
-                      ]
+                      ],
+                      "default": "text"
                     }
                   }
                 }

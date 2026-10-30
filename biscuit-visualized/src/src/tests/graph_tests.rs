@@ -5,7 +5,7 @@ use crate::{
         EdgeKind, GraphBuilder, GraphColorTheme, GraphDiagram, GraphExpression, GraphInputSyntax,
         GraphOrientation,
     },
-    tests::{font_chain_tests::renamed, isolated_cache_dir},
+    tests::{decode_png_straight, font_chain_tests::renamed, isolated_cache_dir, svg_size},
 };
 use serial_test::serial;
 use std::sync::Arc;
@@ -381,6 +381,70 @@ fn graph_render_opaque_background_uses_theme_surface_color() {
 
     assert!(light_svg.contains("fill=\"#f8fafc\""));
     assert!(dark_svg.contains("fill=\"#020617\""));
+}
+
+fn graph_request(format: OutputFormat, scale: u32, target_width: Option<u32>, transparent: bool) -> RenderRequest {
+    RenderRequest {
+        format,
+        scale,
+        target_width,
+        background: if transparent { Background::Transparent } else { Background::Theme },
+        ..RenderRequest::default()
+    }
+}
+
+/// Renders `graph` as SVG and as PNG through the public API and checks the
+/// PNG against the SVG it was rasterized from: labels survive in the SVG, the
+/// PNG honors `target_width` over `scale`, keeps the aspect ratio, and its
+/// corner alpha follows the requested background.
+fn assert_graph_png_contract(graph: &GraphDiagram, labels: &[&str]) {
+    let svg_artifact = graph
+        .render(&graph_request(OutputFormat::Svg, 1, None, false))
+        .expect("SVG render should succeed");
+    let svg = std::fs::read_to_string(&svg_artifact.path).unwrap();
+    for label in labels {
+        assert!(svg.contains(label), "SVG should keep label {label:?}");
+    }
+    let (svg_w, svg_h) = svg_size(&svg);
+
+    // `target_width` wins over `scale`.
+    let by_width = graph
+        .render(&graph_request(OutputFormat::Png, 3, Some(500), false))
+        .expect("PNG render at width should succeed");
+    let (w, h, pixels) = decode_png_straight(&std::fs::read(&by_width.path).unwrap());
+    assert_eq!(w, 500, "PNG must be exactly target_width wide, not scale-sized");
+    let exact_h = 500.0 * svg_h / svg_w;
+    assert!(
+        (h as f32 - exact_h).abs() <= 1.0,
+        "height {h} should be within one pixel of {exact_h}"
+    );
+    assert_eq!(pixels[0][3], 255, "opaque background must give an opaque corner");
+
+    // Without `target_width`, `scale` multiplies the SVG's native size.
+    let by_scale = graph
+        .render(&graph_request(OutputFormat::Png, 2, None, true))
+        .expect("PNG render at scale should succeed");
+    let (w, h, pixels) = decode_png_straight(&std::fs::read(&by_scale.path).unwrap());
+    assert_eq!(w, (svg_w * 2.0).round() as u32);
+    assert_eq!(h, (svg_h * 2.0).round() as u32);
+    assert_eq!(pixels[0][3], 0, "transparent background must leave the corner transparent");
+}
+
+#[test]
+#[serial]
+fn graph_expression_png_honors_width_scale_and_transparency() {
+    let _cache_dir = isolated_cache_dir();
+    let graph = GraphDiagram::from_expression("alpha -> beta; beta -> gamma").unwrap();
+    assert_graph_png_contract(&graph, &["alpha", "beta", "gamma"]);
+}
+
+#[test]
+#[serial]
+fn graph_dot_png_honors_width_scale_and_transparency() {
+    let _cache_dir = isolated_cache_dir();
+    let graph =
+        GraphDiagram::from_dot("digraph G { left -> right; right -> bottom; }").unwrap();
+    assert_graph_png_contract(&graph, &["left", "right", "bottom"]);
 }
 
 /// A solid background replaces the theme's surface in the SVG, and every

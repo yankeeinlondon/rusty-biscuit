@@ -42,7 +42,7 @@ use crate::overlay::{
 use crate::overlay::FrontmatterAnalysis;
 use crate::overlay::analysis::{ArmAdmission, ExpressionTyping, ScalarTyping, baseline_root};
 use crate::overlay::named_types::AuthoredDeclaration;
-use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions};
+use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions, standalone_type_regions};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -181,8 +181,7 @@ fn block_cursor(
 ) -> Option<SemanticValueCursor> {
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
         &overlay.schema_authoring
-        && let Some(schema) = model.schema()
-        && let Some(region) = semantic_type_regions(schema, &model.source_map)
+        && let Some(region) = standalone_type_regions(model)
             .into_iter()
             .find(|region| {
                 region.definition_span.start <= offset && offset <= region.definition_span.end
@@ -354,25 +353,14 @@ fn meta_schema_kinds_for_line(
     sequence_item: bool,
 ) -> Option<Vec<MetaSchemaKind>> {
     match &overlay.schema_authoring {
-        SchemaAuthoringState::Standalone { envelope, .. } => {
-            let payload = match envelope {
-                darkmatter::markdown::schemas::StandaloneSchemaEnvelope::Pure => "$schema",
-                darkmatter::markdown::schemas::StandaloneSchemaEnvelope::Tagged => "types",
-            };
-            // A pure standalone document's whole payload may be a scalar
-            // reference (`$schema: ./other.yaml`), whose value sits on the
-            // top-level `$schema` line itself — a line `enclosing_path`
-            // correctly reports as having no ancestors.
-            if payload == "$schema" && !sequence_item && key == "$schema" && ancestors.is_empty() {
+        SchemaAuthoringState::Standalone { .. } => {
+            if !sequence_item && key == "$schema" && ancestors.is_empty() {
                 return Some(vec![MetaSchemaKind::Schema]);
             }
-            if ancestors.first().map(String::as_str) != Some(payload) {
-                return None;
-            }
-            if sequence_item && ancestors.len() == 1 && payload == "$schema" {
-                Some(vec![MetaSchemaKind::Schema])
-            } else {
-                Some(vec![MetaSchemaKind::TypeDefinition])
+            match ancestors.first().map(String::as_str) {
+                Some("$schema") if sequence_item && ancestors.len() == 1 => Some(vec![MetaSchemaKind::Schema]),
+                Some("$schema" | "types") => Some(vec![MetaSchemaKind::TypeDefinition]),
+                _ => None,
             }
         }
         SchemaAuthoringState::Frontmatter(values) => {
@@ -653,6 +641,12 @@ fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
     let Some(overlay) = ctx.overlay else {
         return names;
     };
+    if let SchemaAuthoringState::Standalone { model: Some(model), .. } = &overlay.schema_authoring
+        && let Some(types) = &model.local_types
+    {
+        names.extend(types.properties.keys().cloned());
+        return names;
+    }
     let schema = match &overlay.schema_authoring {
         // A whole-file reference document is active but declares no inline
         // properties, so it contributes no passive namespace names.
@@ -1642,8 +1636,7 @@ fn meta_schema_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
         &overlay.schema_authoring
-        && let Some(schema) = model.schema()
-        && let Some(region) = semantic_type_regions(schema, &model.source_map)
+        && let Some(region) = standalone_type_regions(model)
             .into_iter()
             .find(|region| {
                 region.key_span.contains(&offset) || region.definition_span.contains(&offset)

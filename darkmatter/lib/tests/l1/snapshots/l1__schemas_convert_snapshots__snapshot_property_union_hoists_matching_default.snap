@@ -8,7 +8,6 @@ expression: convert_yaml(yaml)
   "additionalProperties": true,
   "properties": {
     "flag": {
-      "default": true,
       "anyOf": [
         {
           "type": "null"
@@ -23,7 +22,8 @@ expression: convert_yaml(yaml)
           ],
           "format": "darkmatter-boolish"
         }
-      ]
+      ],
+      "default": true
     }
   }
 }

@@ -7,8 +7,7 @@
 # classifies this file as a SimplifiedSchema rather than raw JSON Schema
 # (a bare property mapping would validate vacuously).
 #
-# Nested shapes use quoted inline-object literals — YAML-native nested
-# mappings are rejected by the SimplifiedSchema parser today.
+# Reusable shapes are declared in the sibling types mapping below.
 $schema:
     created: date
     last_updated: date(required)
@@ -21,12 +20,12 @@ $schema:
     schema_url: url
 
     # One record per config file where model configuration can live.
-    model_config_paths: "{ scope: enum(user,repo,env; required), path: string(required), format: enum(json,jsonc,toml,yaml,other; required), notes: string }[]"
+    model_config_paths: model_config[]
 
     # One record per API standard the provider supports for user-added models.
     # `base_url_site` / `auth_site` name the config keys or env vars involved;
     # `adapter` names any extra shim mechanism (e.g. OpenCode's `npm` ai-sdk key).
-    api_standards: "{ standard: enum(openai_compatible,anthropic_compatible,bespoke; required), base_url_site: string(required), auth_site: string, adapter: string, notes: string }[]"
+    api_standards: api_standard[]
 
     # Per-model metadata keys a user may declare when adding a model
     # (e.g. name, cost, limit, modalities, reasoning).
@@ -48,19 +47,41 @@ $schema:
     # `standard` names the API standard the integration path rides on.
     # Runner-side facts (ports, endpoint paths, standards) come from the
     # local_runners research topic's frontmatter — the ground truth.
-    local_runners: "{ runner: enum(ollama,omlx,lmstudio,llamacpp,vllm,other; required), integration: enum(first_class,base_url_override,proxy_required,unsupported; required), standard: enum(openai_compatible,anthropic_compatible,bespoke), example: string, notes: string }[]"
+    local_runners: runner[]
 
     # Can the user route this provider at a DIFFERENT cloud vendor's API
     # (e.g. a non-OpenAI model on Codex) via the same override mechanisms?
-    cloud_bridge: "{ supported: boolean(required), mechanism: string, example: string }"
+    cloud_bridge:
+        supported: boolean(required)
+        mechanism: string
+        example: string
 
-    # Where the user pins their default model (config key, env var, flag).
-    default_model_site: string
+    default_model_site: string -> Where the user pins their default model (config key, env var, flag)
 
-    # Environment variables that redirect model endpoints or selection
-    # (e.g. ANTHROPIC_BASE_URL-style overrides).
-    env_vars: "{ name: string(required), effect: string(required) }[]"
+    env_vars: env_var[] -> Environment variables that redirect model endpoints or selection (e.g. ANTHROPIC_BASE_URL-style overrides)
 
     changes: string[]
     requires_claudine_update: boolean(required)
     reason: string
+# underlying types
+types:
+    env_var:
+        name: string(required)
+        effect: string(required)
+    runner:
+        runner: enum(ollama,omlx,lmstudio,llamacpp,vllm,other; required) -> the software used to run local models
+        integration: enum(first_class,base_url_override,proxy_required,unsupported; required)
+        standard: enum(openai_compatible,anthropic_compatible,bespoke)
+        example: string
+        notes: string[]
+    api_standard:
+        standard: enum(openai_compatible,anthropic_compatible,bespoke; required)
+        base_url_site: string(required)
+        auth_site: string
+        adapter: string
+        notes: string[]
+    model_config:
+        scope: enum(user,repo,env; required)
+        path: string(required)
+        format: enum(json,jsonc,toml,yaml,other; required)
+        notes: string[]

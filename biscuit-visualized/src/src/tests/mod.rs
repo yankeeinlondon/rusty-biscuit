@@ -82,6 +82,31 @@ pub(crate) fn isolated_cache_dir() -> TempDir {
     dir
 }
 
+/// Decodes a rendered PNG into straight (non-premultiplied) RGBA pixels,
+/// returned as `(width, height, pixels)` in row-major order.
+#[cfg(feature = "image")]
+fn decode_png_straight(png: &[u8]) -> (u32, u32, Vec<[u8; 4]>) {
+    let pixmap = resvg::tiny_skia::Pixmap::decode_png(png).expect("PNG should decode");
+    let pixels = pixmap
+        .pixels()
+        .iter()
+        .map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect();
+    (pixmap.width(), pixmap.height(), pixels)
+}
+
+/// Returns the user-unit size an SVG document declares, as the rasterizer
+/// sees it.
+#[cfg(feature = "image")]
+fn svg_size(svg: &str) -> (f32, f32) {
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+        .expect("SVG should parse");
+    (tree.size().width(), tree.size().height())
+}
+
 /// Runs `run` with a subscriber that records every `WARN` event's message,
 /// for tests that assert a warning is logged.
 #[cfg(feature = "image")]

@@ -14,7 +14,7 @@ relations gate also runs the generator over the document.
 | File | Holds |
 | --- | --- |
 | `docs/research/<topic>/_schema.yaml` | The properties of a research document |
-| `docs/research/<topic>/_types.yaml` | The topic's named types |
+| `docs/research/<topic>/_types.yaml` | The topic's named types when kept in a separate file |
 | `docs/research/_types.yaml` | Types every topic shares: identifier, version, pointer, evidence, the researchers |
 | `docs/research/<topic>/_relations.py` | The relations gate, until one configurable checker replaces it |
 | `docs/research/<topic>/_fleet.md` | Sequence coordinator; selects the shared task roster and topic prompt |
@@ -47,8 +47,9 @@ Logs are under `<repo>/.claudine/tmp/research-runs/<topic>/<time>/`.
    path, flag, or token has a `pattern`. A plain `string` is for text a
    person reads, and is `not-empty`. `unknown` is a member of a set wherever
    research may fail to establish the fact.
-2. **Named types, nested notation.** Every object is a named type in
-   `_types.yaml`, one property per line. Never a quoted `{ ... }` string.
+2. **Named types, nested notation.** Every object is a named type declared
+   in the contract's `types` table or imported from `_types.yaml`, one property
+   per line. Never a quoted `{ ... }` string.
 3. **A description on every property** that says something the name and type
    do not. Descriptions appear in validation errors, so the researcher reads
    them when a document is rejected.
@@ -69,7 +70,7 @@ Found with `md` 0.1.0. Several differ from the Darkmatter documentation.
 | --- | --- |
 | A `pattern(...)` with parentheses or a space does not parse | Use character classes: `^[a-z][a-z0-9-]*$`, `[.]` for a dot |
 | A multi-line inline object does not parse | Use a named type |
-| A file with `kind: schema` rejects `$schema` | Keep the contract and its types in two files |
+| A contract needs reusable types | Declare `types` beside `$schema`, or import a named type from a separate file; both forms can be mixed |
 | A mapping nested directly in another accepts unknown keys | Use a named type, which is closed |
 | A description containing a colon followed by a space breaks the file | Reword it |
 | `json` reads a bare string as encoded JSON | For a scalar, use a union of `string`, `number`, `boolean` |

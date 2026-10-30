@@ -335,7 +335,7 @@ impl<'a> NamedTypeScope<'a> {
         let span = file
             .document
             .as_ref()?
-            .source_map
+            .resolution_source_map()
             .spans(&site.path, SchemaSpanKind::ImportName)
             .first()?
             .clone();
@@ -362,7 +362,7 @@ impl<'a> NamedTypeScope<'a> {
         let span = file
             .document
             .as_ref()?
-            .source_map
+            .resolution_source_map()
             .spans(&definition.path, SchemaSpanKind::Definition)
             .first()?
             .clone();
@@ -400,7 +400,7 @@ impl<'a> NamedTypeScope<'a> {
         let span = origin
             .span
             .clone()
-            .or_else(|| span_in(&file.document.as_ref()?.source_map, &file.text))?;
+            .or_else(|| span_in(&file.document.as_ref()?.resolution_source_map(), &file.text))?;
         self.file_location(path, &file.text, span)
     }
 

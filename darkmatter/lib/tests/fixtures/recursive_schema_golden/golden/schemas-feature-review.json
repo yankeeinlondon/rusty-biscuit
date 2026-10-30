@@ -2,6 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
+      "type": "object",
+      "additionalProperties": true,
       "properties": {
         "description": {
           "anyOf": [
@@ -268,11 +270,11 @@
           ],
           "description": "the contested refresh decisions a human must make"
         }
-      },
-      "type": "object",
-      "additionalProperties": true
+      }
     },
     {
+      "type": "object",
+      "additionalProperties": true,
       "properties": {
         "description": {
           "anyOf": [
@@ -525,9 +527,7 @@
           ],
           "description": "the contested refresh decisions a human must make"
         }
-      },
-      "type": "object",
-      "additionalProperties": true
+      }
     }
   ]
 }

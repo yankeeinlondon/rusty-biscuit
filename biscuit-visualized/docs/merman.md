@@ -92,7 +92,7 @@ flowchart TD
 | 4 | Merman parses and lays the diagram out, asking [our measurer](#measuring-label-widths) for label widths and wrapping lines itself, and writes an SVG that keeps `<text>` elements and avoids features resvg cannot draw. All of it runs under the [time budget](#time-budget) | Merman; `biscuit-visualized` (measurer) |
 | 5 | The [post-process](#post-processing) repairs gradient strokes and gives unstyled text `sans-serif`, then the [accents](#accents) and the [contrast pass](#readable-text); an SVG for the [HTML static target](#html-static-target) also gets its two edits | `biscuit-visualized` |
 | 6 | [`RenderRequest`](../src/src/artifact.rs)'s `background` field decides what is painted behind the diagram: the palette's background, a solid color, or nothing | `biscuit-visualized` |
-| 7 | For PNG, usvg turns text into outlines through the same font chain and resvg 0.47 draws them | `biscuit-visualized` |
+| 7 | For PNG, usvg turns text into outlines through the same font chain and resvg 0.48.1 draws them | `biscuit-visualized` |
 | 8 | The [terminal components](./components/mermaid_diagram.md) size the PNG to whole cells and hand it to `biscuit-terminal`'s [`TerminalImage`](../../biscuit-terminal/docs/components/terminal_image.md), which sends it with the terminal's image protocol | `biscuit-visualized` components over `biscuit-terminal` |
 
 The terminal's colors are detected by `biscuit-terminal` and turned into a
@@ -561,6 +561,10 @@ which:
    italic, letter and word spacing, small caps);
 3. returns the sum of the glyph advances, in CSS pixels.
 
+The layout rules were ported from usvg 0.47. The rasterizer now uses usvg
+0.48.1 with HarfRust; the measurement oracle compares widths, glyphs, and
+faces against that rasterizer after upgrades.
+
 ```mermaid
 sequenceDiagram
     participant M as Merman layout
@@ -680,7 +684,7 @@ actually receive. It changes when any of these change:
 
 - the backend id ([`MERMAID_BACKEND`](../src/src/cache/file_cache.rs)),
   `merman@<first 12 characters of the pinned rev>+bv<n>`
-  (currently `merman@6e6b1e6554e8+bv6`). `<n>` versions this crate's own
+  (currently `merman@6e6b1e6554e8+bv7`). `<n>` versions this crate's own
   layer (source rewrites, post-process, accents, contrast pass, background)
   and is bumped whenever
   that layer changes output, so older artifacts are never served;

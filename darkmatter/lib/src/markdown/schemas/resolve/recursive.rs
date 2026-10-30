@@ -139,7 +139,7 @@ impl ImportEngine<'_> {
                 .get(&key.name)
                 .cloned()
                 .expect("a reached definition exists in its namespace");
-            let path = SchemaSourcePath::root().property(key.name.as_str());
+            let path = namespace.named_types.root.property(key.name.as_str());
             let body = match def {
                 PropertyDef::Single(atom) => self.expand_atom(atom, &namespace, &path)?,
                 PropertyDef::Union(arms) => self.expand_union_arms(arms, &namespace, &path)?.into_expanded(),
@@ -204,7 +204,7 @@ impl ImportEngine<'_> {
             let body = reached.body.expect("the final pass expanded every reached body");
             let origin = SchemaReferenceSite {
                 source: key.namespace.source_id(),
-                path: SchemaSourcePath::root().property(key.name.as_str()),
+                path: reached.namespace.named_types.root.property(key.name.as_str()),
             };
             definitions.insert(key, strip_use_site_markers(body), origin);
         }
@@ -298,7 +298,7 @@ impl ImportEngine<'_> {
         if let Some(summary) = summaries.get(key) {
             return Ok(summary.clone());
         }
-        let definition_path = SchemaSourcePath::root().property(key.name.as_str());
+        let definition_path = self.reached[key].namespace.named_types.root.property(key.name.as_str());
         let site = SchemaReferenceSite {
             source: key.namespace.source_id(),
             path: definition_path.clone(),
@@ -450,7 +450,7 @@ impl ImportEngine<'_> {
                 site: site.clone(),
                 definition: Box::new(SchemaReferenceSite {
                     source: target.namespace.source_id(),
-                    path: SchemaSourcePath::root().property(target.name.as_str()),
+                    path: self.reached[target].namespace.named_types.root.property(target.name.as_str()),
                 }),
             }),
             _ => Ok(()),

@@ -181,6 +181,7 @@ mod schema_yaml_spellings;
 mod schemas_conjunctive_lowering;
 mod schemas_constraints_block_matrix;
 mod schemas_convert_snapshots;
+mod schema_json_key_order;
 mod schemas_core_type_grammar;
 mod schemas_detect_table;
 mod schemas_grammar_proptest;

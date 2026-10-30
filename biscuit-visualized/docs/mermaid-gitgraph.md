@@ -166,8 +166,8 @@ to how spacing is computed changes output for the same input, so it bumps the
 every cache key starts from:
 
 ```text
-merman@6e6b1e6554e8+bv6    Merman commit 6e6b1e6554e8, this crate's layer at version 6
-merman@6e6b1e6554e8+bv7    after a spacing change: no artifact cached under bv6 is reused
+merman@6e6b1e6554e8+bv7    Merman commit 6e6b1e6554e8, this crate's layer at version 7
+merman@6e6b1e6554e8+bv8    after a future spacing change: no artifact cached under bv7 is reused
 ```
 
 `commitSpacing` is not a setting stock Merman reads. `biscuit-visualized`
