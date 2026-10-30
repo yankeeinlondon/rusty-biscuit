@@ -1,9 +1,9 @@
-//! Shapes one line of text with rustybuzz exactly as usvg 0.47 lays out a
-//! horizontal, single-span `<text>` chunk, so a measured width is the drawn
-//! width.
+//! Shapes a horizontal, single-span `<text>` chunk with RustyBuzz. The
+//! measurement oracle compares widths and glyphs with usvg 0.48.1, which
+//! draws with HarfRust.
 //!
-//! Every step mirrors a function in usvg 0.47's `src/text/layout.rs`, named
-//! at the step; a usvg bump must re-check them (the oracle test does). Out of
+//! Layout rules follow usvg's `src/text/layout.rs`, named at the step; a
+//! usvg bump must re-check them (the oracle test does). Out of
 //! scope, because Merman's labels do not use them: vertical writing, text on
 //! a path, `textLength`, `dx`/`dy`/`rotate`, and chunks of several spans.
 
@@ -46,9 +46,7 @@ impl ShapeParams {
                 value,
             });
         };
-        if query.weight != 400 {
-            push(b"wght", f32::from(query.weight));
-        }
+        push(b"wght", f32::from(query.weight));
         let width = match query.stretch {
             Stretch::UltraCondensed => 50.0,
             Stretch::ExtraCondensed => 62.5,

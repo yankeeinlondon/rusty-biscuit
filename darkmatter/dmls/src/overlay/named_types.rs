@@ -36,6 +36,7 @@ pub struct AuthoredDeclaration {
     pub declaration: SchemaDeclaration,
     /// Authored spans, in offsets of the document that holds the declaration.
     pub source_map: SchemaSourceMap,
+    local_types: Option<SchemaShape>,
 }
 
 /// The authored bytes of the frontmatter `$schema` value.
@@ -70,7 +71,8 @@ impl AuthoredDeclaration {
     pub fn standalone(model: &StandaloneSchemaDocument) -> Self {
         Self {
             declaration: model.declaration.clone(),
-            source_map: model.source_map.clone(),
+            source_map: model.resolution_source_map(),
+            local_types: model.local_types.clone(),
         }
     }
 
@@ -81,6 +83,7 @@ impl AuthoredDeclaration {
         Some(Self {
             declaration: parsed.value,
             source_map: parsed.source_map,
+            local_types: None,
         })
     }
 
@@ -117,9 +120,12 @@ impl AuthoredDeclaration {
 
     /// The local namespace a reference at `path` resolves in, with the path
     /// of that namespace's root: the top-level shape, or for a root union the
-    /// inline arm holding the reference (the resolver expands each arm with
-    /// its own properties as `this`).
+    /// inline arm holding the reference. An explicit local type table
+    /// supplies the namespace for every reference in the document.
     pub fn local_namespace(&self, path: &SchemaSourcePath) -> Option<(&SchemaShape, SchemaSourcePath)> {
+        if let Some(types) = &self.local_types {
+            return Some((types, SchemaSourcePath::root().property("types")));
+        }
         let SchemaDeclaration::Schema(schema) = &self.declaration else {
             return None;
         };
@@ -195,13 +201,10 @@ pub struct ExternalNamespace {
 
 impl ExternalNamespace {
     /// The named types the file exports: the properties of a single mapping
-    /// payload. A root union, a whole-file reference, or a raw JSON Schema
-    /// exports none, as the resolver refuses to import from them.
+    /// payload when there is no explicit `types` table. A root union or
+    /// whole-file reference without `types`, and raw JSON Schema, export none.
     pub fn exports(&self) -> Option<&SchemaShape> {
-        match &self.document.as_ref()?.declaration {
-            SchemaDeclaration::Schema(SimplifiedSchema::Single(shape)) => Some(shape),
-            _ => None,
-        }
+        self.document.as_ref()?.named_types()
     }
 
     /// The exported definition of `name` with the span of its key in
@@ -211,7 +214,7 @@ impl ExternalNamespace {
         let key = self
             .document
             .as_ref()?
-            .source_map
+            .named_type_source_map()
             .spans(&SchemaSourcePath::root().property(name), SchemaSpanKind::MappingKey)
             .first()?
             .clone();
@@ -220,6 +223,23 @@ impl ExternalNamespace {
 }
 
 impl NamedTypeCatalog {
+    /// Collects imports from both the export and the reusable type table.
+    pub fn standalone(
+        model: &StandaloneSchemaDocument,
+        base_dir: &Path,
+        schema_roots: &[PathBuf],
+        context: &FileResolutionContext,
+    ) -> Self {
+        let mut targets = BTreeSet::new();
+        if let Some(schema) = model.schema() {
+            collect_schema_targets(schema, &mut targets);
+        }
+        if let Some(types) = &model.local_types {
+            collect_schema_targets(&SimplifiedSchema::Single(types.clone()), &mut targets);
+        }
+        Self::read(targets, base_dir, schema_roots, context)
+    }
+
     /// Reads the file of every distinct explicit target `declaration`
     /// references, resolved as the named-type resolver resolves it from
     /// `base_dir`. A target that does not resolve or cannot be read is left

@@ -1,0 +1,6 @@
+kind: schema
+description: provides schema structures that are used _across_ the various fleet research topics
+$schema:
+    schema_revision: literal(2; required) -> The version of the schema contract being used
+
+type:

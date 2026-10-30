@@ -985,7 +985,6 @@
       "description": "the document's summary, shown by dry runs"
     },
     "initialize": {
-      "description": "actions run before preflight; shell-free",
       "anyOf": [
         {
           "type": "null"
@@ -1058,7 +1057,8 @@
         {
           "$ref": "#/$defs/initialize-bundle"
         }
-      ]
+      ],
+      "description": "actions run before preflight; shell-free"
     },
     "start": {
       "anyOf": [
@@ -1105,7 +1105,6 @@
       "description": "actions run after a failed run"
     },
     "cancelled": {
-      "description": "opt into cancellation; actions run when cancelled",
       "anyOf": [
         {
           "type": "null"
@@ -1390,7 +1389,8 @@
         {
           "$ref": "#/$defs/cancelled-bundle"
         }
-      ]
+      ],
+      "description": "opt into cancellation; actions run when cancelled"
     },
     "finalize": {
       "anyOf": [

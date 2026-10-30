@@ -4,7 +4,6 @@
   "additionalProperties": true,
   "properties": {
     "sequence": {
-      "description": "the sequence's steps: an inline list, or a reference to one",
       "anyOf": [
         {
           "type": "null"
@@ -85,7 +84,6 @@
                     "description": "a referenced task; the task parser checks its form"
                   },
                   "sequence": {
-                    "description": "a nested sequence",
                     "anyOf": [
                       {
                         "type": "null"
@@ -115,7 +113,8 @@
                         "type": "string",
                         "description": "a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
                       }
-                    ]
+                    ],
+                    "description": "a nested sequence"
                   },
                   "group": {
                     "anyOf": [
@@ -430,7 +429,8 @@
           "type": "string",
           "description": "a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
         }
-      ]
+      ],
+      "description": "the sequence's steps: an inline list, or a reference to one"
     },
     "template": {
       "anyOf": [
@@ -2619,7 +2619,6 @@
           "description": "a referenced task; the task parser checks its form"
         },
         "sequence": {
-          "description": "a nested sequence",
           "anyOf": [
             {
               "type": "null"
@@ -2649,7 +2648,8 @@
               "type": "string",
               "description": "a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
             }
-          ]
+          ],
+          "description": "a nested sequence"
         },
         "group": {
           "anyOf": [
@@ -4374,7 +4374,6 @@
           "description": "what to do when the provider reports a rate limit; a document loop only"
         },
         "gate": {
-          "description": "the lifecycle stack run after each iteration; never beside loose verb keys",
           "anyOf": [
             {
               "type": "null"
@@ -4450,7 +4449,8 @@
             {
               "$ref": "#/$defs/bundle"
             }
-          ]
+          ],
+          "description": "the lifecycle stack run after each iteration; never beside loose verb keys"
         },
         "no_error": {
           "anyOf": [

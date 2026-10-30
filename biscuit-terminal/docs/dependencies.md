@@ -263,7 +263,7 @@ recipes and CI feature policy.
 
 ### Image Rasterization
 
-- [resvg](https://github.com/linebender/resvg) _v0.47_ (feature: `image`)
+- [resvg](https://github.com/linebender/resvg) _v0.48.1_ (feature: `image`)
 
     _Rasterizes SVG images for `TerminalImage` and the graphical horizontal
     rules. It is the whole of the `image` feature: diagram rendering

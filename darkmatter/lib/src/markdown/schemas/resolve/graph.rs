@@ -149,7 +149,7 @@ impl ImportEngine<'_> {
                 .named_types
                 .get(&key.name)
                 .expect("a discovered definition exists in its namespace");
-            let path = SchemaSourcePath::root().property(key.name.as_str());
+            let path = namespace.named_types.root.property(key.name.as_str());
             self.discover_def(def, &namespace, &path, Position::TOP, Some(next), &mut graph);
             next += 1;
         }
@@ -359,7 +359,7 @@ impl Graph {
         if !visiting.insert(node) {
             return false;
         }
-        let path = SchemaSourcePath::root().property(key.name.as_str());
+        let path = namespace.named_types.root.property(key.name.as_str());
         let def = namespace
             .named_types
             .get(&key.name)
@@ -534,7 +534,7 @@ fn locate_reference_spans(cycles: &mut [Vec<CycleReference>]) {
         };
         let map = maps.entry(path.clone()).or_insert_with(|| {
             let text = fs::read_to_string(path).ok()?;
-            Some(parse_standalone_schema_document(&text, path).ok()??.source_map)
+            Some(parse_standalone_schema_document(&text, path).ok()??.resolution_source_map())
         });
         reference.span = map.as_ref().and_then(|map| first_span(map, &reference.site.path));
     }

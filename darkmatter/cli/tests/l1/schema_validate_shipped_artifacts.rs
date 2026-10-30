@@ -1,7 +1,8 @@
 //! `md schema validate` end to end against the real shipped artifacts migrated
 //! by `2026-10-16-core-schema-types`: the Claudine side-effect partial and the
-//! three dialect trigger fixtures, plus a test-owned schema for the presence of
-//! a `generated; required` object.
+//! three dialect trigger fixtures, research contracts with imported named
+//! types, and a test-owned schema for the presence of a `generated; required`
+//! object.
 //!
 //! Each test copies the artifacts into an isolated fixture directory, validates
 //! every document in one `md` run, and matches the NDJSON records back to their
@@ -18,6 +19,63 @@ use std::path::{Path, PathBuf};
 /// `(document name, frontmatter, expected validity, text a problem message
 /// must contain)`.
 type Case = (&'static str, String, bool, Option<&'static str>);
+
+#[test]
+fn model_config_research_contract_enforces_required_and_nested_properties() {
+    let process = CliProcessFixture::new();
+    let dir = process.cwd();
+    write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/model-config/_schema.yaml"));
+    let valid = "$schema: ./_schema.yaml\nlast_updated: 2026-10-29\nagent: codex\nmodel: gpt-6.1-sol\nhas_official_schema: none\nmerge_semantics: merge\nrequires_claudine_update: false\n";
+    let cases: Vec<Case> = vec![
+        ("valid.md", valid.into(), true, None),
+        ("missing.md", valid.replace("last_updated: 2026-10-29\n", ""), false, Some("last_updated")),
+        ("nested_valid.md", format!("{valid}model_config_paths:\n  - scope: user\n    path: config.json\n    format: json\n"), true, None),
+        ("nested_invalid.md", format!("{valid}model_config_paths:\n  - scope: invalid\n    path: config.json\n    format: json\n"), false, Some("\"invalid\" is not one of")),
+    ];
+    let documents = write_cases(dir, &cases);
+    assert_cases(&process, &["--disable", "schema-triggers"], &cases, &documents);
+}
+
+#[test]
+fn reasoning_level_research_contract_enforces_local_and_shared_types() {
+    let process = CliProcessFixture::new();
+    let dir = process.cwd().join("reasoning-level");
+    write(&dir.join("_schema.yaml"), include_str!("../../../../claudine/docs/research/reasoning-level/_schema.yaml"));
+    write(&process.cwd().join("_types.yaml"), include_str!("../../../../claudine/docs/research/_types.yaml"));
+    let valid = "\
+$schema: ./_schema.yaml
+schema_revision: 2
+provider: claude
+created: 2026-10-29
+last_updated: 2026-10-29
+agent: codex
+model: gpt-6.1-sol
+reasoning_effort: high
+versions_examined: []
+evidence: []
+support: none
+levels: []
+default_level: { decided_by: provider, evidence_ids: [] }
+controls: []
+precedence: []
+models: []
+invalid_level: { behavior: unknown, warns: unknown, evidence_ids: [] }
+reporting: { source: nowhere, evidence_ids: [] }
+reasoning_output: { reaches_caller: hidden, evidence_ids: [] }
+gaps: []
+changes: []
+requires_claudine_update: false
+reason: Test contract validation.
+";
+    let cases: Vec<Case> = vec![
+        ("valid.md", valid.into(), true, None),
+        ("missing.md", valid.replace("support: none\n", ""), false, Some("support")),
+        ("shared_invalid.md", valid.replace("provider: claude", "provider: INVALID"), false, Some("\"INVALID\" does not match")),
+        ("local_invalid.md", valid.replace("decided_by: provider", "decided_by: invalid"), false, Some("\"invalid\" is not one of")),
+    ];
+    let documents = write_cases(&dir, &cases);
+    assert_cases(&process, &["--disable", "schema-triggers"], &cases, &documents);
+}
 
 /// Writes each case under `dir` and returns the written paths.
 fn write_cases(dir: &Path, cases: &[Case]) -> Vec<PathBuf> {

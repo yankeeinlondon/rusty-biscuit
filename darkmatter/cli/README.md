@@ -253,6 +253,9 @@ md get doc.md title --yaml
 md get doc.md title --json5
 ```
 
+`set`, `rm`, and `get` keep the document's key order at every depth; see
+[Frontmatter](../docs/topics/frontmatter.md#key-order).
+
 ### Document Cleanup
 
 ```bash

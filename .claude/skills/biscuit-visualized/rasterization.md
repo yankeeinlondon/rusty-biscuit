@@ -107,6 +107,11 @@ let fonts = available_font_families();
 
 ## Font Database and Resolution
 
+The rasterizer uses resvg/usvg 0.48.1 and fontdb 0.24. usvg shapes with
+HarfRust; label measurement uses RustyBuzz and is checked against usvg by
+the width-and-glyph oracle. `RASTERIZER` in `cache/file_cache.rs` versions
+the PNG cache identity and must change with the rasterizer version.
+
 Text is drawn through the crate's one font-resolution chain
 (`fonts::FontChain`, crate-private, `image` feature), the same chain the
 Mermaid text measurer (`fonts::measure::LabelMeasurer`) resolves with:

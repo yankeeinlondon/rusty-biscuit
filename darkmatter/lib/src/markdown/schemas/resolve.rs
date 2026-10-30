@@ -46,7 +46,7 @@ use serde_yaml_ng::Value as YamlValue;
 
 use super::{
     SchemaAdvisory, SchemaArm,
-    embedded::{self, EmbeddedDocument}, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
+    embedded::{self, EmbeddedDocument}, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema, StandaloneSchemaDocument,
     errors::SchemaError,
     simplified::{
         AlphanumericOptions, DefKey, DefNamespace, DefinitionTable, SchemaConstraintConflictKind,
@@ -282,6 +282,7 @@ fn resolve_inline_mapping(
     };
     let (schema, imports) = expand_imports(
         schema,
+        None,
         base_dir,
         owner.root(),
         &SchemaSourcePath::root(),
@@ -380,6 +381,23 @@ pub fn expand_named_types(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<NamedTypeExpansion, SchemaError> {
+    expand_named_types_with_locals(schema, None, base_dir, defining_file, schema_roots, request_context)
+}
+
+/// Expands a declaration using a separate local type table when supplied.
+/// Local definitions remain outside the exported document properties.
+///
+/// # Errors
+///
+/// The same resolution errors as [`expand_named_types`].
+pub fn expand_named_types_with_locals(
+    schema: &SimplifiedSchema,
+    local_types: Option<&SchemaShape>,
+    base_dir: &Path,
+    defining_file: Option<&Path>,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<NamedTypeExpansion, SchemaError> {
     let mut definitions = DefinitionTable::default();
     match schema {
         SimplifiedSchema::Single(_) => {
@@ -389,6 +407,7 @@ pub fn expand_named_types(
             };
             let (schema, imports) = expand_document_imports(
                 schema.clone(),
+                local_types,
                 base_dir,
                 key,
                 &SchemaSourcePath::root(),
@@ -417,6 +436,7 @@ pub fn expand_named_types(
                 };
                 let (schema, found) = expand_document_imports(
                     SimplifiedSchema::Single(shape.clone()),
+                    local_types,
                     base_dir,
                     key,
                     &SchemaSourcePath::root().union_arm(index),
@@ -438,6 +458,42 @@ pub fn expand_named_types(
             })
         }
     }
+}
+
+/// Checks a standalone schema's exported declaration and every local type,
+/// including definitions the export does not reach. Returns imported files
+/// for editor dependency tracking without lowering helpers to document properties.
+///
+/// ## Errors
+///
+/// The same named-type resolution errors as [`expand_named_types`].
+pub fn check_standalone_named_types(
+    document: &StandaloneSchemaDocument,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<Vec<PathBuf>, SchemaError> {
+    let base_dir = document.path.parent().unwrap_or_else(|| Path::new("."));
+    let mut imports = BTreeSet::new();
+    if let Some(schema) = document.schema() {
+        imports.extend(expand_named_types_with_locals(
+            schema, document.local_types.as_ref(), base_dir, Some(&document.path), schema_roots, request_context,
+        )?.imports);
+    }
+    if let Some(types) = &document.local_types {
+        let (_, read) = expand_imports(
+            SimplifiedSchema::Single(types.clone()),
+            Some(types),
+            base_dir,
+            DefNamespace::File(canonical_path(&document.path)),
+            &SchemaSourcePath::root().property("types"),
+            NamespaceSource::Files { schema_roots: schema_roots.to_vec(), context: Box::new(request_context.clone()) },
+            Sharing::Automatic,
+            &mut BTreeSet::new(),
+            &mut DefinitionTable::default(),
+        )?;
+        imports.extend(read);
+    }
+    Ok(imports.into_iter().collect())
 }
 
 fn resolve_root_union(
@@ -474,6 +530,7 @@ fn resolve_root_union(
                 let (arm_schema, arm_imports) =
                     expand_document_imports(
                         arm_schema,
+                        None,
                         base_dir,
                         owner.union_arm(index),
                         &SchemaSourcePath::root().union_arm(index),
@@ -596,7 +653,7 @@ fn resolve_root_union(
 /// Every inline arm of one union lowers against one table, so a key already
 /// present names the same definition.
 fn hoist_definitions(arm_json: &mut Value, root_defs: &mut Map<String, Value>) {
-    let Some(Value::Object(defs)) = arm_json.as_object_mut().and_then(|arm| arm.remove("$defs")) else {
+    let Some(Value::Object(defs)) = arm_json.as_object_mut().and_then(|arm| arm.shift_remove("$defs")) else {
         return;
     };
     for (key, body) in defs {
@@ -638,7 +695,7 @@ fn join_file_arm_definitions(
         return Ok(true);
     }
     let renamed = definitions.absorb(arm_definitions);
-    let Some(Value::Object(defs)) = arm_json.as_object_mut().and_then(|arm| arm.remove("$defs")) else {
+    let Some(Value::Object(defs)) = arm_json.as_object_mut().and_then(|arm| arm.shift_remove("$defs")) else {
         unreachable!("a lowered schema's `$defs` is an object");
     };
     if !renamed.is_empty() {
@@ -1019,7 +1076,7 @@ fn parse_yaml_referenced_file(
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
             SchemaDeclaration::Schema(schema) => {
-                resolve_standalone_schema(schema, path, schema_roots, request_context, stack)
+                resolve_standalone_schema(schema, document.local_types.as_ref(), path, schema_roots, request_context, stack)
             }
             SchemaDeclaration::Reference(reference) => {
                 let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -1169,6 +1226,7 @@ fn missing_simplified_envelope_advisory(
 
 fn resolve_standalone_schema(
     schema: SimplifiedSchema,
+    local_types: Option<&SchemaShape>,
     path: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -1182,6 +1240,7 @@ fn resolve_standalone_schema(
             let mut definitions = DefinitionTable::default();
             let (schema, imports) = expand_document_imports(
                 schema,
+                local_types,
                 file_dir,
                 key,
                 &SchemaSourcePath::root(),
@@ -1214,6 +1273,7 @@ fn resolve_standalone_schema(
         SimplifiedSchema::Union(arms) => {
             resolve_standalone_root_union(
                 arms,
+                local_types,
                 file_dir,
                 path,
                 schema_roots,
@@ -1274,7 +1334,7 @@ pub(crate) fn prepare_embedded_schema_in(
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
     };
-    lower_embedded_schema(schema, path, documents, bundle, Sharing::Automatic)
+    lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, bundle, Sharing::Automatic)
 }
 
 /// Prepares an inline `$schema` mapping authored in the embedded document
@@ -1298,7 +1358,7 @@ pub(crate) fn prepare_embedded_inline_schema(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, importer, documents, bundle, Sharing::Automatic)
+    lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic)
 }
 
 /// [`prepare_embedded_inline_schema`] for one global catalog declaration,
@@ -1317,13 +1377,14 @@ pub(crate) fn prepare_embedded_catalog_declaration(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, importer, documents, "", sharing)
+    lower_embedded_schema(schema, None, importer, documents, "", sharing)
 }
 
 /// Expands a single-object embedded schema authored at `path` and lowers it,
 /// alongside the virtual paths of `path` and every document it imported.
 fn lower_embedded_schema(
     schema: SimplifiedSchema,
+    local_types: Option<&SchemaShape>,
     path: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
@@ -1332,9 +1393,10 @@ fn lower_embedded_schema(
     let mut definitions = DefinitionTable::default();
     let (schema, mut reads) = expand_imports(
         schema,
+        local_types,
         Path::new(""),
         DefNamespace::Embedded(path.to_string()),
-        &SchemaSourcePath::root(),
+        &if local_types.is_some() { SchemaSourcePath::root().property("$schema") } else { SchemaSourcePath::root() },
         NamespaceSource::Embedded { documents, bundle },
         sharing,
         // Embedded imports resolve lexically in the table and probe no disk.
@@ -1376,6 +1438,7 @@ fn contains_example_annotation(value: &Value) -> bool {
 
 fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
+    local_types: Option<&SchemaShape>,
     base_dir: &Path,
     path: &Path,
     schema_roots: &[PathBuf],
@@ -1401,6 +1464,7 @@ fn resolve_standalone_root_union(
                 let schema = SimplifiedSchema::Single(shape);
                 let (schema, arm_imports) = expand_document_imports(
                     schema,
+                    local_types,
                     base_dir,
                     DefNamespace::FileRootUnionArm(canonical_path(path), index),
                     &SchemaSourcePath::root().union_arm(index),
@@ -1577,7 +1641,7 @@ struct Namespace {
     base_dir: PathBuf,
     /// The unexpanded top-level named types, shared with the namespace cache
     /// and every other resolution of the same namespace. Never mutated.
-    named_types: Arc<IndexMap<String, PropertyDef>>,
+    named_types: Arc<NamedTypes>,
 }
 
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
@@ -1608,11 +1672,11 @@ struct ImportEngine<'a> {
     /// they depend on are fixed for the engine's lifetime.
     selected_files: HashMap<(String, PathBuf), SelectedFile>,
     /// Parsed embedded namespaces keyed by virtual path.
-    embedded_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+    embedded_cache: HashMap<String, Arc<NamedTypes>>,
     /// Parsed shipped partials keyed by virtual path, apart from
     /// `embedded_cache`: a host table may register its own document under a
     /// shipped path.
-    shipped_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+    shipped_cache: HashMap<String, Arc<NamedTypes>>,
     /// Each named type expanded so far, by `(namespace, name)`, before any
     /// use-site postfix. A definition's expansion depends only on its own
     /// namespace, so a type inlined at many sites (the baseline's lifecycle
@@ -1698,7 +1762,7 @@ struct SelectedFile {
 
 struct CachedNamespace {
     base_dir: PathBuf,
-    named_types: Arc<IndexMap<String, PropertyDef>>,
+    named_types: Arc<NamedTypes>,
 }
 
 /// Where a named-type reference is used.
@@ -1899,6 +1963,7 @@ fn pattern_key_source_name(key: &PatternKey) -> String {
 #[allow(clippy::too_many_arguments)]
 fn expand_document_imports(
     schema: SimplifiedSchema,
+    local_types: Option<&SchemaShape>,
     base_dir: &Path,
     key: DefNamespace,
     root: &SchemaSourcePath,
@@ -1911,7 +1976,8 @@ fn expand_document_imports(
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    expand_imports(schema, base_dir, key, root, source, Sharing::Automatic, searched, definitions)
+    let root = if local_types.is_some() { SchemaSourcePath::root().property("$schema").join(root) } else { root.clone() };
+    expand_imports(schema, local_types, base_dir, key, &root, source, Sharing::Automatic, searched, definitions)
 }
 
 /// Whether an expansion stores repeated acyclic structured definitions once.
@@ -1942,6 +2008,7 @@ pub(crate) enum Sharing {
 #[allow(clippy::too_many_arguments)]
 fn expand_imports(
     schema: SimplifiedSchema,
+    local_types: Option<&SchemaShape>,
     base_dir: &Path,
     key: DefNamespace,
     root: &SchemaSourcePath,
@@ -1955,9 +2022,15 @@ fn expand_imports(
     }
     // `@this` resolves against the document's own (unexpanded) named types.
     // `schema` is consumed by expansion below, so this is the one copy.
-    let named_types = Arc::new(match &schema {
-        SimplifiedSchema::Single(shape) => shape.properties.clone(),
-        SimplifiedSchema::Union(_) => IndexMap::new(),
+    let named_types = Arc::new(NamedTypes {
+        root: if local_types.is_some() { SchemaSourcePath::root().property("types") } else { SchemaSourcePath::root() },
+        properties: match local_types {
+            Some(shape) => shape.properties.clone(),
+            None => match &schema {
+                SimplifiedSchema::Single(shape) => shape.properties.clone(),
+                SimplifiedSchema::Union(_) => IndexMap::new(),
+            },
+        },
     });
     let current = Namespace {
         key,
@@ -2238,7 +2311,7 @@ impl ImportEngine<'_> {
         };
 
         let frame = DefKey::new(target.key.clone(), reference.name.clone());
-        let definition_path = SchemaSourcePath::root().property(reference.name.as_str());
+        let definition_path = target.named_types.root.property(reference.name.as_str());
         let definition = SchemaReferenceSite {
             source: target.key.source_id(),
             path: definition_path.clone(),
@@ -2539,7 +2612,18 @@ static SHIPPED_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<&'stati
     std::sync::LazyLock::new(Default::default);
 
 /// A schema document's top-level named types, unexpanded.
-type NamedTypes = IndexMap<String, PropertyDef>;
+struct NamedTypes {
+    properties: IndexMap<String, PropertyDef>,
+    root: SchemaSourcePath,
+}
+
+impl std::ops::Deref for NamedTypes {
+    type Target = IndexMap<String, PropertyDef>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.properties
+    }
+}
 
 /// Empties the process-wide named-type parse memos (see
 /// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
@@ -2772,16 +2856,19 @@ struct FileTable {
     table: Arc<NamedTypes>,
 }
 
-/// The named types a schema document's text declares; `path` identifies the
-/// document in errors.
-fn named_types_from_text(text: &str, path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
+/// The explicit `types` table, or the mapping payload when no separate table
+/// exists; `path` identifies the document in errors.
+fn named_types_from_text(text: &str, path: &Path) -> Result<NamedTypes, SchemaError> {
     let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
         });
     };
+    if let Some(types) = document.local_types {
+        return Ok(NamedTypes { properties: types.properties, root: SchemaSourcePath::root().property("types") });
+    }
     match document.declaration {
-        SchemaDeclaration::Schema(SimplifiedSchema::Single(shape)) => Ok(shape.properties),
+        SchemaDeclaration::Schema(SimplifiedSchema::Single(shape)) => Ok(NamedTypes { properties: shape.properties, root: SchemaSourcePath::root() }),
         SchemaDeclaration::Schema(SimplifiedSchema::Union(_)) => Err(SchemaError::SchemaDocument {
             path: path.to_path_buf(),
             message: "root-union schema documents cannot supply named imports".into(),
@@ -2841,7 +2928,8 @@ fn locate_origin_spans<'a>(origins: impl Iterator<Item = &'a mut SchemaConstrain
         }
         let document = documents.entry(path.clone()).or_insert_with(|| {
             let text = fs::read_to_string(path).ok()?;
-            let source_map = parse_standalone_schema_document(&text, path).ok()??.source_map;
+            let model = parse_standalone_schema_document(&text, path).ok()??;
+            let source_map = model.resolution_source_map();
             Some((text, source_map))
         });
         if let Some((text, source_map)) = document {
@@ -3756,7 +3844,7 @@ fn resolve_examples_in_json(
                 // the property's value type, which each example's `returns` must
                 // match. Cloned before the annotation is overwritten below.
                 let mut target = map.clone();
-                target.remove("x-darkmatter-example");
+                target.shift_remove("x-darkmatter-example");
                 if let Some(definitions) = definitions {
                     target.insert("$defs".into(), definitions.clone());
                 }
@@ -4010,10 +4098,10 @@ fn move_baseline_definitions<'b>(
     let mut baseline = baseline.clone();
     super::scope::retain_reached_definitions(&mut baseline, |name| copied.contains(name));
     if baseline.get("$defs").and_then(Value::as_object).is_some_and(Map::is_empty) {
-        baseline.as_object_mut().expect("validated baseline must be an object").remove("$defs");
+        baseline.as_object_mut().expect("validated baseline must be an object").shift_remove("$defs");
         return Ok(std::borrow::Cow::Owned(baseline));
     }
-    let mut document_defs = match document_obj.remove("$defs") {
+    let mut document_defs = match document_obj.shift_remove("$defs") {
         Some(Value::Object(defs)) => defs,
         Some(other) => {
             document_obj.insert("$defs".into(), other);
@@ -4071,14 +4159,14 @@ pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, Sc
         .unwrap_or_default();
 
     let mut doc_props = document_obj
-        .remove("properties")
+        .shift_remove("properties")
         .and_then(|v| match v {
             Value::Object(m) => Some(m),
             _ => None,
         })
         .unwrap_or_default();
     let mut doc_required: Vec<String> = document_obj
-        .remove("required")
+        .shift_remove("required")
         .and_then(|v| match v {
             Value::Array(a) => Some(a),
             _ => None,
@@ -4112,7 +4200,7 @@ pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, Sc
         }
         document_obj.insert("required".into(), Value::Array(ordered));
     } else {
-        document_obj.remove("required");
+        document_obj.shift_remove("required");
     }
 
     // Ensure required fields like "$schema" and "type" survive — copy from
@@ -4279,7 +4367,7 @@ fn json_to_yaml(value: &Value) -> YamlValue {
 
 fn strip_schema_uri(value: Value) -> Value {
     if let Value::Object(mut map) = value {
-        map.remove("$schema");
+        map.shift_remove("$schema");
         Value::Object(map)
     } else {
         value
@@ -4302,6 +4390,113 @@ mod tests {
 
     fn yaml_value(input: &str) -> YamlValue {
         serde_yaml_ng::from_str(input).expect("yaml parse")
+    }
+
+    #[test]
+    fn exported_schema_uses_local_and_imported_types_without_exporting_helpers() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        fs::write(dir.path().join("shared.yaml"), "kind: schema\ntypes:\n  identifier: string(pattern(^[a-z]+$))\n").unwrap();
+        let body = "$schema:\n  rows: row[](required)\ntypes:\n  row:\n    id: identifier(required)@./shared.yaml\n";
+        for prefix in ["", "kind: schema\n"] {
+            fs::write(dir.path().join("contract.yaml"), format!("{prefix}{body}")).unwrap();
+            let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+            let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
+            assert!(validator.is_valid(&json!({"rows": [{"id": "abc"}]})));
+            assert!(!validator.is_valid(&json!({"rows": [{"id": "INVALID"}]})));
+            assert!(!validator.is_valid(&json!({"rows": [{}]})));
+            assert!(!validator.is_valid(&json!({})));
+            assert!(resolved.json_schema["properties"].get("row").is_none());
+            let imported = resolve_yaml_schema(&yaml_value("item: row@./contract.yaml"), dir.path(), &context).unwrap();
+            assert!(jsonschema::validator_for(&imported.json_schema).unwrap().is_valid(&json!({"item": {"id": "abc"}})));
+        }
+    }
+
+    #[test]
+    fn recursive_local_types_resolve_from_disk_and_embedded_documents() {
+        let documents = [EmbeddedDocument {
+            path: "bundle/contract.yaml",
+            text: "$schema:\n  root: node(required)\ntypes:\n  node:\n    name: string(required)\n    children: node[]\n",
+        }];
+        let (embedded, _) = prepare_embedded_schema_in("bundle/contract.yaml", &documents, "bundle").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("contract.yaml"), documents[0].text).unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let disk = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+        for resolved in [embedded, disk] {
+            let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
+            assert!(validator.is_valid(&json!({"root": {"name": "a", "children": [{"name": "b"}]}})));
+            assert!(!validator.is_valid(&json!({"root": {"name": "a", "children": [{}]}})));
+            assert!(resolved.json_schema["properties"].get("node").is_none());
+        }
+    }
+
+    #[test]
+    fn combined_local_names_preserve_errors_and_builtin_precedence() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        for (source, cycle) in [
+            ("$schema:\n  value: missing\ntypes:\n  known: number\n", false),
+            ("$schema:\n  value: first\ntypes:\n  first: second\n  second: first\n", true),
+        ] {
+            fs::write(dir.path().join("contract.yaml"), source).unwrap();
+            let error = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap_err();
+            let SchemaError::ReferencedSchema { source: error, .. } = error else { panic!("{error:?}") };
+            if cycle {
+                assert!(matches!(*error, SchemaError::NonDescendingCycle { .. }), "{error:?}");
+            } else {
+                let SchemaError::UnknownNamedType { name, site, .. } = *error else { panic!("{error:?}") };
+                assert_eq!(name, "missing");
+                assert_eq!(site.path.to_string(), "$schema.value");
+            }
+        }
+        fs::write(dir.path().join("contract.yaml"), "$schema:\n  builtin: string(required)\n  local: string@this\ntypes:\n  string: number(required)\n").unwrap();
+        let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+        let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
+        assert!(validator.is_valid(&json!({"builtin": "abc", "local": 2})));
+        assert!(!validator.is_valid(&json!({"builtin": 2, "local": "abc"})));
+        assert!(!validator.is_valid(&json!({"builtin": "abc"})));
+    }
+
+    #[test]
+    fn exported_root_union_uses_its_local_types() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("contract.yaml"), "$schema:\n  - left: token(required)\n  - right: token(required)\ntypes:\n  token: string(pattern(^x$))\n").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let resolved = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap();
+        let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
+        assert!(validator.is_valid(&json!({"left": "x"})));
+        assert!(validator.is_valid(&json!({"right": "x"})));
+        assert!(!validator.is_valid(&json!({"left": "wrong"})));
+    }
+
+    #[test]
+    fn malformed_local_types_are_schema_errors_with_authored_locations() {
+        let source = "$schema:\n  item: entry\ntypes:\n  entry: invalid(\n";
+        assert!(parse_standalone_schema_document(source, "contract.yaml").is_err());
+        let failure = super::super::locate_standalone_definition_failure(source).unwrap();
+        assert_eq!(failure.path.to_string(), "types.entry");
+        let span = failure.authored_span.or(failure.value_span).expect("located failure");
+        assert!(source[span].contains("invalid("));
+        for types in ["[]", "string", "null"] {
+            assert!(parse_standalone_schema_document(&format!("$schema: {{}}\ntypes: {types}\n"), "contract.yaml").is_err());
+        }
+    }
+
+    #[test]
+    fn same_name_export_and_type_keep_distinct_constraint_locations() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = "$schema:\n  size: size(min(5))\ntypes:\n  size: number(max(2))\n";
+        fs::write(dir.path().join("contract.yaml"), source).unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let error = resolve_yaml_schema(&yaml_value("./contract.yaml"), dir.path(), &context).unwrap_err();
+        let SchemaError::ReferencedSchema { source: error, .. } = error else { panic!("{error:?}") };
+        let SchemaError::ConstraintConflict { constraints, .. } = *error else { panic!("{error:?}") };
+        let authored: Vec<_> = constraints.iter().map(|participant| {
+            &source[participant.origin.span.clone().expect("authored constraint")]
+        }).collect();
+        assert!(authored.contains(&"min(5)"), "{authored:?}");
+        assert!(authored.contains(&"max(2)"), "{authored:?}");
     }
 
     #[test]
@@ -6041,7 +6236,7 @@ mod shared_type_tables {
         Namespace {
             key: DefNamespace::InlineRoot,
             base_dir: dir.to_path_buf(),
-            named_types: Arc::new(named_types),
+            named_types: Arc::new(NamedTypes { properties: named_types, root: SchemaSourcePath::root() }),
         }
     }
 

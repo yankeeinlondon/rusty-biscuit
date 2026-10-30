@@ -1290,7 +1290,6 @@
               "description": "what to do when the provider reports a rate limit; a document loop only"
             },
             "gate": {
-              "description": "the lifecycle stack run after each iteration; never beside loose verb keys",
               "anyOf": [
                 {
                   "type": "null"
@@ -1366,7 +1365,8 @@
                 {
                   "$ref": "#/$defs/bundle"
                 }
-              ]
+              ],
+              "description": "the lifecycle stack run after each iteration; never beside loose verb keys"
             },
             "no_error": {
               "anyOf": [

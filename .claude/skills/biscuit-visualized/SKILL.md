@@ -94,7 +94,7 @@ let req = RenderRequest::default().with_target_width(540).with_row_height(18); /
 `target_width` takes precedence over `scale`; `row_height` pads PNG height (ignored for SVG). `Background` is `Theme` (default) | `Transparent` | `Solid { r, g, b }`.
 
 - Cache location: `$TMPDIR/biscuit-visualized/v1/{mermaid|graph}/{svg|png}/` (or `$BISCUIT_VISUALIZED_CACHE_DIR/biscuit-visualized/v1/`)
-- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv6`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
+- Key: xxHash of `v2 | kind | source | options | backend_id | format`. Mermaid hashes the **rewritten** source, backend `merman@6e6b1e6554e8+bv7`, and options: styling hash (site config + compiled design + every palette color), font identity, title, and `RenderRequest::cache_identity()`. See [Artifacts & Caching](./artifacts-caching.md)
 - `RenderedArtifact.cache_hit` reports a hit; no automatic cleanup
 
 ## Relationship to biscuit-terminal
@@ -145,8 +145,8 @@ RasterError::{SvgParseFailed(String), RenderFailed(String), IoError(io::Error)}
 |-------|---------|
 | `merman` (git: `yankeeinlondon/merman`, rev `6e6b1e6554e8e75d468c1f991652c1c53a85bace`, branch `gitgraph-commit-spacing`) | Mermaid parse/layout/SVG; features `svg`, `ascii`, `all-diagrams`, `layout-cytoscape` (no `png`, `native-fonts`, ELK, `math`). The fork adds gitGraph `commitSpacing`. **Side effect:** `merman-core` enables serde_json's `preserve_order` (and `float_roundtrip`), and Cargo unifies it into every build that reaches this crate (darkmatter, sniff-cli, worktree-cli, claudine, …): `serde_json::Map` keeps insertion order instead of sorting, so code or tests that relied on sorted keys change. Merman needs it (its models iterate JSON maps in insertion order) |
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
-| `resvg` v0.47 | SVG-to-PNG rasterization |
-| `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution and text measurement for Merman layout and rasterization (feature `image`); rustybuzz and ttf-parser stay on usvg's versions |
+| `resvg` v0.48.1 | SVG-to-PNG rasterization |
+| `rustybuzz` 0.20.1, `ttf-parser` 0.25.1, `unicode-bidi`, `unicode-script`, `fontique` 0.12.0 | Font resolution and text measurement for Merman layout and rasterization (feature `image`); ttf-parser stays on RustyBuzz's version; the measurement oracle compares RustyBuzz output with usvg 0.48.1's HarfRust output |
 | `svgtypes` 0.16.1 | Parses the author's text colors (CSS names included) for the contrast pass (feature `image`; usvg's version) |
 | `allsorts` 0.17 (`default-features = false`, `flate2_rust`) | Subsets the embedded font (keeps `cmap`, `OS/2`, `name`; writes no `GPOS`/`GSUB`/`kern`). The default `flate2_zlib` would build the C library libz-sys |
 | `roxmltree` 0.21.1, `simplecss` 0.2.2, `base64` 0.22 | Read a static SVG's labels through its CSS cascade (usvg's versions), and encode the `data:font/ttf` URI (feature `image`) |

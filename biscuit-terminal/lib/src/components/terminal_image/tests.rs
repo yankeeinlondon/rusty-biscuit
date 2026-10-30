@@ -332,6 +332,39 @@ fn test_terminal_image_load_svg() {
 }
 
 #[test]
+#[cfg(feature = "image")]
+fn test_terminal_image_load_svg_demultiplies_partial_alpha() {
+    // A half-opaque shape over nothing: the loaded image must carry the
+    // shape's own color at ~50% alpha. Premultiplied channels leaking
+    // through would halve every channel and draw a dark fringe.
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("half.svg");
+    std::fs::write(
+        &file_path,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">
+            <rect width="10" height="10" fill="rgb(200,100,50)" fill-opacity="0.5"/>
+        </svg>"#,
+    )
+    .unwrap();
+
+    let loaded = TerminalImage::new(&file_path)
+        .unwrap()
+        .load_image()
+        .unwrap()
+        .to_rgba8();
+    assert_eq!((loaded.width(), loaded.height()), (20, 10));
+    let [r, g, b, a] = loaded.get_pixel(5, 5).0;
+    assert!((127..=128).contains(&a), "alpha {a} should be half of 255");
+    for (actual, expected) in [(r, 200u8), (g, 100), (b, 50)] {
+        assert!(
+            actual.abs_diff(expected) <= 2,
+            "channel {actual} should be within rounding of {expected}"
+        );
+    }
+    assert_eq!(loaded.get_pixel(15, 5).0[3], 0, "unpainted area stays transparent");
+}
+
+#[test]
 fn test_terminal_image_svg_invalid_returns_error() {
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("bad.svg");

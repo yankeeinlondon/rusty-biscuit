@@ -1,0 +1,9 @@
+stateDiagram-v2
+    state Fork <<fork>>
+    state Join <<join>>
+    [*] --> Fork
+    Fork --> Alpha
+    Fork --> Beta
+    Alpha --> Join
+    Beta --> Join
+    Join --> [*]

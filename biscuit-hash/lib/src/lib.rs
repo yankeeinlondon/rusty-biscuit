@@ -21,9 +21,12 @@
 //!
 //! ```rust
 //! // With default features (xx_hash)
+//! # #[cfg(feature = "xx_hash")]
+//! # {
 //! use biscuit_hash::xx_hash;
 //!
 //! let hash = xx_hash("Hello, World!");
+//! # }
 //! ```
 
 // Conditional module compilation based on features

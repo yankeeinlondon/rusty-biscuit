@@ -125,6 +125,73 @@ fn offset_of(text: &str, needle: &str) -> usize {
 }
 
 #[test]
+fn unused_local_types_are_checked_in_their_own_table() {
+    let workspace = LspWorkspace::new();
+    let schema = write(&workspace, "unused.yaml", "$schema:\n  title: string\ntypes:\n  unused: missing\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &schema);
+    let diagnostics = fixture.wait_for_diagnostics(&schema.uri);
+    let named = named_type_diagnostics(&diagnostics);
+    assert_eq!(named.len(), 1, "{diagnostics:?}");
+    assert_eq!(named[0]["range"], range_of(&schema.text, "missing", 0));
+    fixture.shutdown();
+}
+
+#[test]
+fn incomplete_combined_exports_and_local_types_keep_type_completion() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    for (index, text, marker) in [
+        (0, "$schema:\n  title: [\ntypes:\n  label: string\n", "title: ["),
+        (1, "kind: schema\n$schema:\n  title: [\ntypes:\n  label: string\n", "title: ["),
+        (2, "$schema:\n  title: label\ntypes:\n  label: [\n", "label: ["),
+        (3, "kind: schema\n$schema:\n  title: label\ntypes:\n  label: [\n", "label: ["),
+    ] {
+        let document = write(&workspace, &format!("partial-{index}.yaml"), text);
+        open(&fixture, &document);
+        let offset = offset_of(text, marker) + marker.len();
+        let items = completion_items(&mut fixture, &document, offset);
+        assert!(items.iter().any(|item| item["label"] == "string"), "{text}: {items:?}");
+    }
+    fixture.shutdown();
+}
+
+#[test]
+fn an_exported_schema_keeps_local_types_and_imports_available_to_the_editor() {
+    let workspace = LspWorkspace::new();
+    let external = write(&workspace, "shared.yaml", "kind: schema\ntypes:\n  shared: number\n");
+    let schema = write(&workspace, "contract.yaml", "$schema:\n  title: label(suggest(abc))\n  count: external\ntypes:\n  label: string(required)\n  external: shared@./shared.yaml\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &schema);
+    let diagnostics = fixture.wait_for_diagnostics(&schema.uri);
+    assert!(named_type_diagnostics(&diagnostics).is_empty(), "{diagnostics:?}");
+    let offset = offset_of(&schema.text, "title: label") + "title: ".len();
+    let hover = request_at(&mut fixture, "textDocument/hover", &schema, offset + 1);
+    assert!(hover["contents"]["value"].as_str().unwrap_or_default().contains("Declares: **string**"), "{hover}");
+    let locations = request_at(&mut fixture, "textDocument/definition", &schema, offset + 1);
+    assert_eq!(locations, json!([{ "uri": schema.uri, "range": range_of(&schema.text, "label", 1) }]));
+    let locations = request_at(&mut fixture, "textDocument/definition", &schema, offset_of(&schema.text, "shared@"));
+    assert_eq!(locations, json!([{ "uri": canonical_uri(&external.path), "range": range_of(&external.text, "shared", 0) }]));
+    let labels = reference_labels(&completion_items(&mut fixture, &schema, offset));
+    assert!(labels.iter().any(|label| label == "label"), "{labels:?}");
+    assert!(!labels.iter().any(|label| label == "title"), "exported properties are not helper types: {labels:?}");
+    let edited = schema.text.replace("label: string(required)", "label: number(required)");
+    fixture.notify("textDocument/didChange", json!({
+        "textDocument": { "uri": schema.uri, "version": 2 },
+        "contentChanges": [{ "text": edited }],
+    }));
+    let diagnostics = fixture.wait_for_diagnostics(&schema.uri);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic["code"] == "dm.schema.invalid_suggestion"), "{diagnostics:?}");
+    let hover = request_at(&mut fixture, "textDocument/hover", &schema, offset + 1);
+    assert!(hover["contents"]["value"].as_str().unwrap_or_default().contains("Declares: **number**"), "{hover}");
+    assert_eq!(std::fs::read_to_string(&schema.path).unwrap(), schema.text, "the edited namespace comes from the buffer");
+    fixture.shutdown();
+}
+
+#[test]
 fn completion_offers_local_names_bare_collisions_with_this_and_imports_with_their_target() {
     let workspace = LspWorkspace::new();
     write(
@@ -704,6 +771,19 @@ fn suggestions_on_a_reference_are_checked_against_the_resolved_target() {
     open(&fixture, &types);
     let diagnostics = fixture.wait_for_diagnostics(&types.uri);
     assert_eq!(invalid(&diagnostics), vec![range_of(&types.text, "abc", 0)], "{diagnostics:?}");
+
+    let combined = write(
+        &workspace,
+        "combined.yaml",
+        "$schema:\n  pick: label(suggest(toolong))\ntypes:\n  label: string(max(3))\n  alias: label(suggest(another))\n",
+    );
+    open(&fixture, &combined);
+    let diagnostics = fixture.wait_for_diagnostics(&combined.uri);
+    assert_eq!(
+        invalid(&diagnostics),
+        vec![range_of(&combined.text, "toolong", 0), range_of(&combined.text, "another", 0)],
+        "local references in both tables retain their authored suggestion spans: {diagnostics:?}",
+    );
 
     fixture.shutdown();
 }

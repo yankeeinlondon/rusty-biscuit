@@ -19,6 +19,9 @@ last_updated: 2026-10-22
   directly to the program; missing values stop composition.
 - YAML frontmatter rejects duplicate keys at every mapping depth; explicit
   document merges continue to use their selected conflict strategy
+- [Frontmatter](./docs/topics/frontmatter.md) keeps the key order you wrote at
+  every depth, through edits, merges, and [transclusion](./docs/topics/frontmatter-recursion.md);
+  the semantic `md hash` ignores key order
 - Validate frontmatter against a [schema](./docs/topics/schemas/definition.md); each problem points at the [offending YAML node](./docs/topics/schemas/definition.md#problem-locations), however deeply nested, as a line and column in the complete file:
 
   ```text
@@ -84,6 +87,7 @@ host OS input and take focus.
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
     - [Transclusion](./docs/topics/transclusion.md)
+    - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)
     - [Delta Processing](./docs/topics/delta.md)

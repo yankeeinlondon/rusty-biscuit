@@ -1,4 +1,4 @@
-//! The Merman text measurer against usvg 0.47's own text layout.
+//! The Merman text measurer against usvg 0.48.1's own text layout.
 //!
 //! - **Oracle (R-V8, AC-M1):** a label's measured width equals the width usvg
 //!   lays the same `<text>` out at, and its glyphs and faces are the drawn
@@ -137,7 +137,7 @@ fn escape(text: &str) -> String {
 /// id and face, in visual order.
 struct Drawn {
     width: f32,
-    glyphs: Vec<(u16, usvg::fontdb::ID)>,
+    glyphs: Vec<(u32, usvg::fontdb::ID)>,
 }
 
 fn drawn(text: &usvg::Text) -> Drawn {
@@ -186,10 +186,10 @@ fn compare_labels(chain: &Arc<FontChain>, labels: &[Label]) -> (Vec<String>, f32
             measurer.shape_with(label.text, &query, &params)
         };
         let drawn = drawn_label(chain, &label.svg());
-        let measured: Vec<(u16, usvg::fontdb::ID)> = shaped
+        let measured: Vec<(u32, usvg::fontdb::ID)> = shaped
             .glyphs
             .iter()
-            .map(|glyph| (glyph.id, glyph.face))
+            .map(|glyph| (u32::from(glyph.id), glyph.face))
             .collect();
 
         let diff = (shaped.bbox_width - drawn.width)
@@ -203,7 +203,7 @@ fn compare_labels(chain: &Arc<FontChain>, labels: &[Label]) -> (Vec<String>, f32
             ));
         }
         if measured != drawn.glyphs {
-            let names = |glyphs: &[(u16, usvg::fontdb::ID)]| {
+            let names = |glyphs: &[(u32, usvg::fontdb::ID)]| {
                 glyphs
                     .iter()
                     .map(|(id, face)| format!("{id}@{}", face_name(chain, *face)))
@@ -357,7 +357,7 @@ pub(super) fn compare_drawn_labels(
             );
             let shaped = measurer.shape_with(chunk.text(), &query, &params);
             width = width.max(shaped.bbox_width);
-            glyphs.extend(shaped.glyphs.iter().map(|glyph| (glyph.id, glyph.face)));
+            glyphs.extend(shaped.glyphs.iter().map(|glyph| (u32::from(glyph.id), glyph.face)));
         }
         compared += 1;
         let diff = (width - drawn.width).abs();
@@ -423,7 +423,7 @@ fn compare_faces(chain: &Arc<FontChain>, source: &str, name: &str) -> (Vec<Strin
             continue;
         }
         for (chunk, span) in chunk_spans.iter().zip(spans) {
-            let drawn: Vec<(u16, usvg::fontdb::ID)> = span
+            let drawn: Vec<(u32, usvg::fontdb::ID)> = span
                 .positioned_glyphs
                 .iter()
                 .map(|glyph| (glyph.id.0, glyph.font))

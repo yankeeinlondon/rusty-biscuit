@@ -37,15 +37,15 @@ clap = { version = "4", features = ["derive"], optional = true }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 thiserror = "2.0"
 tempfile = "3"
-resvg = { version = "0.47", optional = true }
+resvg = { version = "0.48.1", optional = true }
 # The PNG encoder resvg's tiny-skia already uses, configured for smaller output
 # (see `raster::png::encode_png`); keep it on tiny-skia's major version.
 png = { version = "0.18", optional = true }
 # Shapes labels for text measurement, so the measured face is the drawn face;
-# keep on the version usvg uses, so the lock holds one copy.
+# its oracle compares widths and glyphs against usvg's HarfRust output.
 rustybuzz = { version = "0.20.1", optional = true }
 # Reads font tables (names, OS/2 class, cmap) for font resolution; keep on the
-# version usvg uses, so the lock holds one copy.
+# version RustyBuzz uses, so the lock holds one copy.
 ttf-parser = { version = "0.25.1", optional = true }
 # Bidi runs and script itemization for shaping, as usvg's text layout does.
 unicode-bidi = { version = "0.3", optional = true }

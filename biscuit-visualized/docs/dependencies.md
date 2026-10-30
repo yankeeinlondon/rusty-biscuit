@@ -45,9 +45,9 @@ flowchart LR
 
 ## Optional Dependencies
 
-- [resvg](https://github.com/linebender/resvg) _v0.47_ (feature: `image`)
+- [resvg](https://github.com/linebender/resvg) _v0.48.1_ (feature: `image`)
 
-    _Rasterizes SVG to PNG (with `usvg` 0.47, `fontdb` 0.23, and `tiny-skia`
+    _Rasterizes SVG to PNG (with `usvg` 0.48.1, `fontdb` 0.24, and `tiny-skia`
     0.12)._
 
 - [png](https://github.com/image-rs/image-png) _v0.18_ (feature: `image`)
@@ -63,13 +63,13 @@ flowchart LR
 - [rustybuzz](https://github.com/harfbuzz/rustybuzz) _v0.20.1_ (feature: `image`)
 
     _Shapes label text to measure it, so the measured face is the face resvg
-    draws. Kept on the version `usvg` uses, so the lockfile holds one copy._
+    draws. The measurement oracle checks its widths and glyphs against usvg's
+    HarfRust shaper after rasterizer upgrades._
 
 - [ttf-parser](https://github.com/harfbuzz/ttf-parser) _v0.25.1_ (feature: `image`)
 
     _Reads font tables (family names, OS/2 class, character maps) for font
-    resolution. Kept on the version `usvg` uses, so the lockfile holds one
-    copy._
+    resolution. Uses the same version as RustyBuzz._
 
 - [unicode-bidi](https://github.com/servo/unicode-bidi) _v0.3_ and [unicode-script](https://github.com/unicode-rs/unicode-script) _v0.5_ (feature: `image`)
 

@@ -1353,7 +1353,7 @@ and the inline form on any other type is a schema-load error.
 
 ### Cross-File Named-Type Imports (`Name@file`)
 
-`Name@fileref` gives the use site the definition of the named type `Name` from the referenced file — structural substitution: each use validates exactly as if the definition were written there. In the generated JSON Schema most uses are such a copy. Two kinds of type are stored once and referenced instead: a type that refers back to itself (see [Recursive Named Types](#recursive-named-types)), and a structured type that two or more places use (see [Shared Named Types](#shared-named-types)). A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+`Name@fileref` gives the use site the definition of the named type `Name` from the referenced file — structural substitution: each use validates exactly as if the definition were written there. In the generated JSON Schema most uses are such a copy. Two kinds of type are stored once and referenced instead: a type that refers back to itself (see [Recursive Named Types](#recursive-named-types)), and a structured type that two or more places use (see [Shared Named Types](#shared-named-types)). A schema file's **`types` entries are its named types** when that table is present beside an exported `$schema`; without a separate table, the mapping payload's top-level entries serve as both properties and named types (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
 
 A type defined in the same schema may be referenced by its **bare name**: `type` and `type@this` are the same reference. See [Local Type References](./local-type-references.md) for where local names live, built-in collisions, and why a bare name inside an imported definition still resolves in its defining file.
 
@@ -2791,7 +2791,7 @@ A standalone YAML file can be a SimplifiedSchema authoring document, recognized 
 
 ### Pure Envelope
 
-A YAML mapping whose only top-level key is `$schema`:
+A YAML mapping with `$schema` and an optional reusable `types` mapping:
 
 ```yaml
 $schema:
@@ -2801,9 +2801,27 @@ $schema:
 
 The `$schema` value is the SimplifiedSchema payload. A mapping payload is usable both as a whole-file schema and as the namespace for `Name@fileref` named imports. A sequence payload is a root-level schema union for whole-file use only (it supplies no named-import namespace).
 
+When `types` is present, it supplies the local namespace and named imports
+instead. Its definitions do not become properties of documents using the
+exported `$schema`. Local definitions and cross-file imports can be used
+together:
+
+```yaml
+$schema:
+    contacts: person[]
+types:
+    person:
+        name: string(required)
+        id: identifier(required)@./shared.yaml
+```
+
+Here `person` is defined in this file and `identifier` is imported. A document
+using this file has a `contacts` property; it does not gain a `person` property.
+
 ### Tagged Envelope
 
-A YAML mapping containing exactly `kind: schema` and a `types` mapping:
+A YAML mapping containing `kind: schema`, a `types` mapping, and an optional
+exported `$schema`:
 
 ```yaml
 kind: schema
@@ -2812,7 +2830,9 @@ types:
     age: number(integer; min(0); suggest(21, 30, 40))
 ```
 
-The `types` mapping is semantically equivalent to a pure envelope's `$schema` mapping for whole-file use and named imports.
+Without an explicit `$schema`, the `types` mapping remains the whole-file
+payload as well as the named-import namespace. With `$schema`, only that
+export supplies document properties; `types` supplies reusable definitions.
 
 ### Categories
 

@@ -69,6 +69,13 @@ initialize:
           - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
+    - when: "!is_empty(frontmatter(plan, 'open_questions'))"
+      then:
+          - warn: |-
+                the plan `{{parent_dir(plan)}}` has **{{ length(frontmatter(plan, 'open_questions')) }}** open question(s); resolve them in the spec, then remove `open_questions` from {{link(plan)}}:
+
+                {{ as_ordered_list(frontmatter(plan, 'open_questions')) }}
+          - error: "the plan `{{parent_dir(plan)}}` has unresolved `open_questions`; implementation will not start until they are resolved"
     - when: "total_phases && phase > total_phases"
       then:
           - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total_phases}})"

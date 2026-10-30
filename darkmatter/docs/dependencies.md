@@ -10,9 +10,10 @@ on feature unification from other crates:
   `as_json5`, and SimplifiedSchema → JSON Schema output keep the order the
   author wrote. Cargo unifies the feature into every package that links
   `darkmatter`. Outputs that publish alphabetical keys sort explicitly:
-  `md schema validate --format json`, the non-strict frontmatter hash used by
-  `md hash`, Claudine's OpenCode/Kilo inline config, and `sniff`'s JSON
-  output. Insertion order is not always source order: a map a function
+  `md schema validate --format json`, Claudine's OpenCode/Kilo inline config,
+  and `sniff`'s JSON output. Hashes that must ignore key order (see
+  [Canonical JSON Hashing](#canonical-json-hashing)) sort through
+  `biscuit-hash` instead. Insertion order is not always source order: a map a function
   builds keeps the order it was built in. A new consumer that needs a stable
   order sorts explicitly rather than relying on the map.
   - Written order is intentional where a reader sees it:
@@ -31,6 +32,18 @@ on feature unification from other crates:
 - `raw_value` and `float_roundtrip` let the JSON loaders read each number's
   written text and parse it exactly, which numeric admission needs (see
   [Numbers](./topics/numbers.md)).
+
+## Canonical JSON Hashing
+
+`biscuit-hash` with the `json` feature renders a JSON value with its object
+keys sorted at every depth (array order kept) and hashes those bytes. Every
+Darkmatter hash that must not depend on key order goes through it: the
+non-strict frontmatter hash behind `md hash`, the TOC's normalized
+frontmatter hash, the schema validator cache keys, and the compose cache
+keys. Because the renderer is shared, these identities cannot drift from one
+another, and `preserve_order` (above) cannot leak into them. Strict
+`md hash` deliberately hashes the author's order instead; see
+[Key Order and Stored Baselines](./cli/hash.md#key-order-and-stored-baselines).
 
 ## Remote URL Referencing
 
