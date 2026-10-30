@@ -26,6 +26,7 @@ implemented: false
 created: 2026-10-16
 owner: Ken Snyder <ken@ken.net>
 packages:
+    - simplified-schema
     - darkmatter
     - dmls
     - claudine
@@ -105,8 +106,17 @@ A repository-wide search on 2026-10-16 of `when`, `while`, and `until`
 expressions in Markdown, YAML, and Rust (excluding `_completed/` specs and
 frozen fixtures) found no expression of the second kind. The one that existed,
 in `prompts/_implement/implement-plan.md`, was rewritten to `!is_empty(…)` the
-same day. The change therefore fixes the trap without altering any existing
-result, so it needs no deprecation period, transition warning, or opt-in.
+same day. The search was repeated on 2026-10-30 (101 condition lines
+containing `||`) with the same result. The change therefore fixes the trap
+without altering any existing result, so it needs no deprecation period,
+transition warning, or opt-in. Shipped prompts keep changing, so the
+implementation repeats the search before it lands.
+
+Static analysis already agrees: the shared narrowing facts
+(`assume` in `darkmatter/lib/src/markdown/compose/expression/scope/facts.rs`)
+treat `a || b` exactly as `or(a, b)` when it is used as a truth test. Unifying
+the operator brings the evaluator into line with what static analysis already
+assumes.
 
 ## Decisions
 
@@ -114,17 +124,23 @@ result, so it needs no deprecation period, transition warning, or opt-in.
 
 The parser lowers `||` to a dedicated node in every context; condition parsing
 no longer produces an `or(…)` call for infix `||`. The node is today's
-`Expr::Fallback` (and `SpannedExprKind::Fallback`), renamed `LogicalOr` with
-fields `left`/`right`, so its name says what the operator is. The evaluator's
-existing arm is the only implementation of `||`.
+`Expr::Fallback` (and `SpannedExprKind::Fallback`), defined in
+`simplified-schema/lib/src/expression/ast.rs` and re-exported by Darkmatter,
+renamed `LogicalOr` with fields `left`/`right`, so its name says what the
+operator is. The evaluator's existing arm
+(`darkmatter/lib/src/markdown/compose/expression/mod.rs`) is the only
+implementation of `||`.
 
 A node is kept rather than lowering to a function call because it carries what
 a call cannot without special cases:
 
-- **operand-specific absence scope:** only the left operand is an absence
-  check, and the right operand inherits the enclosing scope so a chain
-  `a || b || "d"` handles `b` too (see D3); a call's absence handling is one
-  switch for all its arguments (`AbsenceScope::call_argument`)
+- **operand-specific absence handling:** the left operand is an absence check,
+  and the right operand inherits the enclosing scope, so a chain
+  `a || b || "d"` handles `b` too (see D3). The operands of an `or(…)` call
+  are neither absence checks nor consumed values; they only inherit the
+  enclosing scope (see the `absence.rs` module docs), so `or(x, "d")` does not
+  handle `x`. Both forms already give a later operand the earlier operands'
+  false-side facts
 - **a value result:** the explicit `or(…)` function returns a boolean (D4);
   reusing it would change that contract
 - **source fidelity:** the tree matches what the author wrote, which the
@@ -143,18 +159,34 @@ a fallback into condition grammar). With one meaning for `||` the mode has no
 remaining purpose, so it is removed rather than left as a no-op:
 
 - `ParseMode`, `Token::OrOr`, `Lexer::with_mode`, `parse_condition`, and
-  `parse_condition_spanned` are deleted; their callers use `parse` and
-  `parse_spanned`
-- the callers are in `darkmatter` (conditions, transclusion conditions,
-  directive targets, frontmatter shell expansion, prepared expressions, lint,
-  schema format/convert), `dmls` (frontmatter diagnostics and providers,
-  overlay expressions, nested-span diagnostics), and `claudine` (dispatch
-  matcher and runner, looping, and the lifecycle parser/validator/bindings);
-  about 58 non-test call sites in all
+  `parse_condition_spanned` are deleted from
+  `simplified-schema/lib/src/expression/` and from Darkmatter's re-exports
+  (`darkmatter/lib/src/markdown/compose/expression/mod.rs`); their callers use
+  `parse` and `parse_spanned`
+- the callers are every use of those names in the workspace, in four crates
+  (re-count before implementing; the list grows):
+    - `simplified-schema`: schema `format` and `simplified/convert`
+    - `darkmatter`: conditions, call precheck, page-block guards,
+      `::map`/`::filter` parser and scopes, frontmatter shell expansion,
+      prepared expressions, call binding, lint, and the lifecycle
+      parser/validator (`darkmatter/lib/src/lifecycle/`)
+    - `dmls`: frontmatter diagnostics, DSL and semantic-token providers,
+      overlay expressions, nested-span diagnostics
+    - `claudine`: dispatch matcher, runner, and templates; looping; sequence
+      grammar, expressions, and preflight; lifecycle bindings, rename, binding
+      checks, and executor; benches
+- public signatures that take a mode lose it: `lint_expression(source, mode)`
+  becomes `lint_expression(source)`
+- the `expression` schema format validated "under either dialect" through a
+  condition-mode parse because that parse accepted a superset; it now uses
+  `parse`, and the reserved `expression(condition)` form is no longer reserved:
+  with one grammar a parameterized form has nothing to select, so
+  `expression(…)` stays rejected without a "reserved" explanation
 - the nested-span lint drops its per-mode reparse; the
   `fallback_span_in_condition_dialect_has_no_suggestion` case is now offered
   a suggestion, and its test is rewritten to assert that
 - a bare `|` keeps its error, worded once: "Unexpected '|'. Use '||'."
+  (today it has two wordings, one per mode)
 
 "Condition" remains a word for *where* an expression is used (a truth test)
 and for the `ConditionError` type that reports failures there. It stops being
@@ -220,7 +252,12 @@ but with `||` unified a well-formed fallback can no longer feed a boolean to
 3. Every existing test of condition outcomes passes unchanged, apart from
    tests that assert the AST shape (`FunctionCall { name: "or" }` from infix
    `||`, or the `Fallback` name) or the parse mode. Those are rewritten to
-   assert `LogicalOr`, never deleted.
+   assert `LogicalOr`, never deleted. This covers static verdicts as well as
+   runtime outcomes: the passive call check (`call_check.rs`), static
+   truthiness in frontmatter interpolation, preflight collection, and the DMLS
+   overlay already handle the `Fallback` node, and they now see it where they
+   used to see an `or(…)` call. Every shipped condition keeps its passive
+   call-check verdict, checked by the passive shipped-artifact corpus test.
 4. `ParseMode`, `Token::OrOr`, `parse_condition`, and `parse_condition_spanned`
    no longer exist, and a workspace build with every feature enabled passes.
 5. A left-operand undeclared bare variable in a condition `||` produces no
@@ -241,17 +278,33 @@ but with `||` unified a well-formed fallback can no longer feed a boolean to
   tables; correct the parsing summary that says both modes lower `||` into
   `or(…)`; state that `or(…)`/`and(…)` and `&&` return booleans and why `&&`
   differs (D4)
+- `simplified-schema/docs/topics/expression-syntax.md`: remove the
+  `parse_condition`/`parse_condition_spanned` rows and the `ParseMode` note
+  from the API table, replace the two-mode comparison table, and drop the
+  "condition mode accepts a superset" explanation of schema checks
+- `darkmatter/docs/topics/schemas/definition.md`: the `expression` format's
+  "two dialects" semantics paragraph (which also wrongly says the dialects
+  disagree on `&&`) and the `expression(condition)` reservation in its
+  limitations list (D2)
 - `darkmatter/docs/topics/schemas/parsing/{index,grammar,lexing}.md` and
-  `schema-targeting.md`: remove the parse-mode grammar branches and token, and
-  rename the `fallback` grammar rule to `logical_or`
+  `darkmatter/docs/topics/schemas/schema-targeting.md`: remove the parse-mode
+  grammar branches and token, and rename the `fallback` grammar rule to
+  `logical_or`
 - the operator descriptor in `darkmatter/lib/src/markdown/compose/expression/semantics.rs`
   (shown in DMLS hover): named "Logical OR", described as "returns the operand
   that decided the result: the first truthy operand, otherwise the last", with
-  no mode clause
+  no mode clause; likewise the precedence entry
+  `("Logical OR / Fallback", "`||` (mode-dependent)")` in
+  `simplified-schema/lib/src/expression/parser.rs`
+- the module docs of `simplified-schema/lib/src/expression/mod.rs` and
+  `darkmatter/lib/src/markdown/compose/expression/mod.rs`, which describe the
+  two parse modes
 - `claudine/docs/topics/flow-control/lifecycle.md` and
   `claudine/docs/topics/state-management/expression-engine.md`: remove
   "condition dialect" wording
-- the `darkmatter` and `claudine` skills, wherever they repeat the mode split
+- the `darkmatter` skill (including `expressions.md`, which names the
+  `Fallback` node) and the `claudine` skill, wherever they repeat the mode
+  split
 
 ## Out of Scope
 
