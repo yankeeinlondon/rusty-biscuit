@@ -3,12 +3,9 @@
 use std::fs;
 
 use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DarkmatterSchemas, ValidationProblemCode, darkmatter_base_json_schema,
-        resolve::resolve_schema_with_roots,
-    },
+    Markdown, schemas::{DarkmatterSchemas, darkmatter_base_json_schema, resolve::resolve_schema_with_roots},
 };
+use simplified_schema::ValidationProblemCode;
 use serde_json::{Value, json};
 
 fn property_contains(value: &Value, property: &str, key: &str) -> bool {

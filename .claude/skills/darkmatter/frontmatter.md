@@ -56,7 +56,7 @@ Two traps keep that order intact:
   that never reaches output (`presentation_values`, caches, memo tables).
 
 Numbers are admitted at load: the YAML loader reads every number through
-`markdown::numeric` (`numeric::load_admitted_yaml`), so an inexact whole
+`simplified_schema::numeric` (`load_admitted_yaml`), so an inexact whole
 number, an underflow, a non-finite `.inf`/`.nan`, or an integer beyond `u64`
 is a located load error whatever the property's type, and no fallback
 strategy can hide it.

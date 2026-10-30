@@ -8,9 +8,8 @@
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, SchemaPhase, ValidationProblemCode, ValidationReport,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{SchemaPhase, ValidationProblemCode};
 use std::path::Path;
 
 /// `code: string(required; generated)` reused through a bare name, `@this`,

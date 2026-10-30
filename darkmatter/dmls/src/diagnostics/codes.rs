@@ -99,19 +99,19 @@ pub mod code {
     /// A semantic `type-definition` value does not parse as one property definition.
     pub const SCHEMA_INVALID_TYPE_DEFINITION: &str = "dm.schema.invalid_type_definition";
     /// The schema could not be resolved, merged, or compiled.
-    pub const SCHEMA_PREPARE: &str = darkmatter::markdown::schemas::SCHEMA_PREPARE_CODE;
+    pub const SCHEMA_PREPARE: &str = simplified_schema::SCHEMA_PREPARE_CODE;
     /// A value did not match its declared type.
-    pub const SCHEMA_TYPE_MISMATCH: &str = darkmatter::markdown::schemas::SCHEMA_TYPE_MISMATCH_CODE;
+    pub const SCHEMA_TYPE_MISMATCH: &str = simplified_schema::SCHEMA_TYPE_MISMATCH_CODE;
     /// A non-type constraint (range, length, pattern, enum, …) failed.
-    pub const SCHEMA_CONSTRAINT: &str = darkmatter::markdown::schemas::SCHEMA_CONSTRAINT_CODE;
+    pub const SCHEMA_CONSTRAINT: &str = simplified_schema::SCHEMA_CONSTRAINT_CODE;
     /// A required key is absent.
-    pub const SCHEMA_MISSING_REQUIRED: &str = darkmatter::markdown::schemas::SCHEMA_MISSING_REQUIRED_CODE;
+    pub const SCHEMA_MISSING_REQUIRED: &str = simplified_schema::SCHEMA_MISSING_REQUIRED_CODE;
     /// A key the schema does not declare is present (strict mode).
-    pub const SCHEMA_UNKNOWN_KEY: &str = darkmatter::markdown::schemas::SCHEMA_UNKNOWN_KEY_CODE;
+    pub const SCHEMA_UNKNOWN_KEY: &str = simplified_schema::SCHEMA_UNKNOWN_KEY_CODE;
     /// A deprecated key is present.
     pub const SCHEMA_DEPRECATED_KEY: &str = "dm.schema.deprecated_key";
     /// A `file(...)`-typed value failed to parse, resolve, or match a file.
-    pub const SCHEMA_INVALID_FILE_REFERENCE: &str = darkmatter::markdown::schemas::SCHEMA_INVALID_FILE_REFERENCE_CODE;
+    pub const SCHEMA_INVALID_FILE_REFERENCE: &str = simplified_schema::SCHEMA_INVALID_FILE_REFERENCE_CODE;
     /// A `suggest(...)` candidate is invalid metadata: it fails its target
     /// schema's type, range, integer, length, not-empty, or pattern constraint,
     /// or uses invalid decimal syntax or an unsupported lossless representation.

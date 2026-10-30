@@ -598,7 +598,7 @@ pub fn build_schema_status_report_for_mode(
     let mut report = effective
         .validate_stored(
             &serde_json::Value::Object(fm_map.clone()),
-            &darkmatter::markdown::schemas::PositionMap::new(),
+            &simplified_schema::PositionMap::new(),
             phase,
         )
     .map_err(|error| {

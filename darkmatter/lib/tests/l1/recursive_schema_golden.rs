@@ -28,14 +28,10 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::{
-    Markdown,
-    compose::{RequestSnapshot, build_resolution_context},
-    schemas::{
-        DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema,
-        parse_trigger_envelope_from_str,
-        resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema, resolve_yaml_schema_with_roots},
-    },
+    Markdown, compose::{RequestSnapshot, build_resolution_context},
+    schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema, parse_trigger_envelope_from_str, resolve::{resolve_schema_with_roots, resolve_yaml_schema, resolve_yaml_schema_with_roots}},
 };
+use simplified_schema::resolve::ResolvedSchema;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;

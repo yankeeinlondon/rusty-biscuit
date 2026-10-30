@@ -10,7 +10,7 @@ use std::process::Command;
 use biscuit_file::{GlobReferenceError, ResolutionFailure};
 use darkmatter::markdown::compose::expression::ExpressionError;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeReport, ComposeWarning, FileLinksError};
-use darkmatter::markdown::schemas::file_match::file_match_admits;
+use simplified_schema::file_match::file_match_admits;
 use darkmatter::markdown::{Markdown, MarkdownError};
 use serde_json::{Value, json};
 
@@ -258,7 +258,7 @@ fn a_caller_value_below_a_recursive_reference_is_judged_from_the_launch_director
 fn match_rejects_patterns_that_are_not_glob_references() {
     let parse = |definition: &str| {
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&format!("spec: '{definition}'")).unwrap();
-        darkmatter::markdown::schemas::simplified::parse_yaml_schema(&yaml)
+        simplified_schema::simplified::parse_yaml_schema(&yaml)
     };
     parse("file(match(vault:notes/*.md))").expect("a vault prefix is valid");
     parse("file(match(^**/*spec*.md, !&**/_completed/**))").expect("control");

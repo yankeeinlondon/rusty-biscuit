@@ -4151,7 +4151,7 @@ approval for `alphanumeric(allow-slashes)` covers an argument typed
 
 ```rust
 use darkmatter::markdown::schemas::is_subtype;
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::grammar::parse_type_expr;
 
 let atom = |text| parse_type_expr("p", text).unwrap();
 let rule = atom("alphanumeric(allow-slashes)");
@@ -4400,7 +4400,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 
 ```rust
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
-use darkmatter::markdown::schemas::SchemaRoot;
+use simplified_schema::SchemaRoot;
 
 let baseline: SchemaRoot = /* ... */;
 

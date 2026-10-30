@@ -22,7 +22,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter::markdown::coercion::{bind, Shape};
+//! use simplified_schema::coercion::{bind, Shape};
 //! use serde_json::json;
 //!
 //! let value = json!(["1", "2"]);

@@ -13,9 +13,11 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaOriginKind, SchemaRoot, TypeExpr,
-    ValidationProblemKind, ValidationReport, darkmatter_base_json_schema_ref,
-    darkmatter_base_schema, lint_suggestions, suggestions_for_def, suggestions_for_path,
+    DarkmatterSchemas, ValidationReport, darkmatter_base_json_schema_ref, darkmatter_base_schema,
+};
+use simplified_schema::{
+    Constraint, PropertyDef, SchemaOriginKind, SchemaRoot, TypeExpr, ValidationProblemKind, lint_suggestions,
+    suggestions_for_def, suggestions_for_path,
 };
 
 use crate::content_policy_fixtures::{
@@ -370,7 +372,7 @@ fn policy_and_rule_defs(schema: &SchemaRoot) -> (&PropertyDef, &PropertyDef) {
     (policy, rule)
 }
 
-fn labels(query: Option<darkmatter::markdown::schemas::SuggestionQuery>) -> Vec<String> {
+fn labels(query: Option<simplified_schema::SuggestionQuery>) -> Vec<String> {
     query
         .expect("suggestions are declared")
         .items

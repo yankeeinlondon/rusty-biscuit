@@ -14,10 +14,8 @@ use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidTriggerFinding, SchemaAdvisory, SchemaError, ValidationProblem,
-    ValidationProblemKind, ValidationTimings,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, InvalidTriggerFinding};
+use simplified_schema::{SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemKind, ValidationTimings};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

@@ -4,7 +4,7 @@
 use super::super::cache::CacheStats;
 use super::super::perf::ComposePerfReport;
 use crate::markdown::normalize::NormalizationReport;
-use crate::markdown::schemas::SchemaAdvisory;
+use simplified_schema::SchemaAdvisory;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 

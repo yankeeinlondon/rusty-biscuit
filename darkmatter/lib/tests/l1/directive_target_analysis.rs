@@ -7,9 +7,8 @@ use darkmatter::markdown::compose::directive_targets::{
 };
 use darkmatter::markdown::compose::directives_api::DirectiveKind;
 use darkmatter::markdown::compose::expression::parse;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, SchemaOrigin, SchemaRoot, parse_yaml_schema,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{SchemaOrigin, SchemaRoot, parse_yaml_schema};
 use serde_json::{Value, json};
 
 fn document_with_schema(properties: &str, values: &str) -> (Markdown, EffectiveSchema, Value) {

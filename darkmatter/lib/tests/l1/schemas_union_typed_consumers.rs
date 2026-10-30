@@ -15,11 +15,13 @@ use darkmatter::markdown::compose::context::context_variable_descriptors;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use darkmatter::markdown::schemas::triggers::{MatchExpr, PathSubject, matches};
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, DetectOptions, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaPhase, SchemaRoot, TypeExpr, darkmatter_base_schema,
-    DefinitionTable, detect_schema, effective_property_shape, expression_atom,
-    frontmatter_expression_values_with_definitions, nested_property_shape_with_definitions,
-    parse_yaml_schema, property_def_at_path_with_definitions, schema_shape_descriptors, schema_to_yaml,
+    DarkmatterSchemas, DetectOptions, EffectiveSchema, darkmatter_base_schema, detect_schema,
+    effective_property_shape, schema_shape_descriptors, schema_to_yaml,
+};
+use simplified_schema::{
+    Constraint, PropertyAtom, PropertyDef, SchemaPhase, SchemaRoot, TypeExpr, DefinitionTable, expression_atom,
+    frontmatter_expression_values_with_definitions, nested_property_shape_with_definitions, parse_yaml_schema,
+    property_def_at_path_with_definitions,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;

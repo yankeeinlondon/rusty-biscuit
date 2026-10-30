@@ -17,7 +17,8 @@ use darkmatter::markdown::compose::expression::{
     ScopeId, Shape, TypeScope, UnavailabilityReason, check_expression_calls, expression_type, parse, parse_spanned,
 };
 use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaRoot, parse_yaml_schema};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -324,9 +325,9 @@ mod layers {
         assert!(checks(&declared, "min(flag, 5)")[0].is_rejected());
     }
 
-    fn shape_of(def: &darkmatter::markdown::schemas::PropertyDef) -> Shape {
+    fn shape_of(def: &simplified_schema::PropertyDef) -> Shape {
         let schema = SchemaRoot::Single({
-            let mut shape = darkmatter::markdown::schemas::SchemaShape::new();
+            let mut shape = simplified_schema::SchemaShape::new();
             shape.properties.insert("x".to_string(), def.clone());
             shape
         });

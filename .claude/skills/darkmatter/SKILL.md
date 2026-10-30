@@ -133,17 +133,19 @@ Important contracts:
   `const`; quoted and native YAML forms are observably different.
 - `expression`, `yaml`, and `json` are passive content formats. They parse or
   coerce but never execute.
-- One coercion engine (`simplified_schema::coercion`, re-exported as
-  `markdown::coercion`) converts frontmatter and binds function arguments; numbers enter only through `markdown::numeric` as exact
+- One coercion engine (`simplified_schema::coercion`) converts frontmatter and binds function arguments; numbers enter only through `simplified_schema::numeric` as exact
   `f64`s. See [schema.md](schema.md#conversion-engine) and
   [expressions.md](expressions.md).
 - The SimplifiedSchema language lives in the `simplified-schema` crate (no
-  Markdown dependency): the AST and grammar (`schemas::simplified`,
+  Markdown dependency): the AST and grammar (`simplified_schema::simplified`,
   `SchemaRoot` is the parsed `$schema` enum), resolution, conversion,
-  validators, formats, `SchemaError`, `ValidationProblem`, plus
-  `markdown::{numeric, span, literal_token, coercion, MappingOrders}` and the
-  expression syntax. Darkmatter's paths re-export the library's: edit the
-  code in `simplified-schema/lib/src/`. What stays in Darkmatter:
+  validators, formats, `SchemaError`, `ValidationProblem`, the numeric model,
+  `coercion`, `MappingOrders`, and the expression syntax. Import those from
+  `simplified_schema` (every consumer crate depends on it directly);
+  `darkmatter::markdown::schemas` no longer re-exports them. Darkmatter keeps
+  only `markdown::{span, literal_token}` and the expression items its
+  composition API names (`compose::expression::{Expr, Lexer, parse, …}`).
+  Edit the language in `simplified-schema/lib/src/`. What stays in Darkmatter:
   `DarkmatterSchemas`/`EffectiveSchema`, the baseline, schema roots
   (`SchemaSearchRoot`), triggers (`TriggerOrigin` maps a `SchemaOrigin` to its
   `TriggerSource`), the shipped catalog (`embedded::SHIPPED_SOURCES`, which
@@ -152,6 +154,17 @@ Important contracts:
   (`coerce::nested_templates`), `ProblemPositions`, and completion over an
   `EffectiveSchema`. Work counters for moved code are recorded by the library
   and folded into `darkmatter::work_counters::snapshot()`.
+- The library's standalone object is `simplified_schema::SimplifiedSchema`
+  (content and file factories, strict/soft validation, atomic layering, type
+  queries, export; `simplified-schema/docs/topics/schema-object.md`).
+  Darkmatter's own validation entry points do not route through it: the
+  effective schema merges the already lowered baseline, trigger, and
+  document layers with the same `merge_baseline` the object's `layer_under`
+  uses (memoized by `Arc` identity), and
+  `darkmatter/lib/tests/l1/effective_schema_layering.rs` pins the two
+  equal.
+  `compose::repository_scope_catalog` re-exports the library's projection,
+  the same one its raw-path factories capture with: edit it there.
 - `type-definition` and `schema` meta-types delegate to the same passive
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a

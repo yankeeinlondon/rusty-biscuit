@@ -8,8 +8,9 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::simplified::{Constraint, PropertyDef, SchemaRoot, parse_yaml_schema};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaError, SchemaPhase, ValidationReport, to_json_schema};
+use simplified_schema::simplified::{Constraint, PropertyDef, SchemaRoot, parse_yaml_schema};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{SchemaError, SchemaPhase, to_json_schema};
 use serde_json::{Value, json};
 
 use crate::request_support::context_at;

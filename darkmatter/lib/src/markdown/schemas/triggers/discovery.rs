@@ -51,9 +51,9 @@ use std::path::{Path, PathBuf};
 use biscuit_file::FileResolutionContext;
 
 use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
-use crate::markdown::schemas::errors::SchemaError;
+use simplified_schema::errors::SchemaError;
 use crate::markdown::schemas::roots::SchemaRoots;
-use crate::markdown::schemas::simplified::SchemaSourceId;
+use simplified_schema::simplified::SchemaSourceId;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
 use super::finding::InvalidTriggerFinding;
@@ -668,7 +668,7 @@ pub fn scan_with_source(
     bundles: &[EmbeddedSchemaBundle],
     source: &mut dyn SchemaRootSource,
 ) -> Result<TriggerRegistry, SchemaError> {
-    let _discover = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Discover);
+    let _discover = simplified_schema::timings::stage(simplified_schema::ValidationStage::Discover);
     crate::note_work!(TriggerDiscovery);
     let roots = SchemaRoots::for_document(context)?;
 
@@ -719,7 +719,7 @@ pub fn scan_with_source(
             pattern_cwd: pattern_cwd.to_path_buf(),
             bundle: None,
         };
-        let (payload, observed) = crate::markdown::schemas::resolve::observed::collect(|| {
+        let (payload, observed) = simplified_schema::resolve::observed::collect(|| {
             super::assemble::resolve_trigger_payload(&trigger, roots.search_paths(), context)
         });
         match payload {
@@ -754,7 +754,7 @@ pub fn scan_with_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::errors::SchemaError;
+    use simplified_schema::errors::SchemaError;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;

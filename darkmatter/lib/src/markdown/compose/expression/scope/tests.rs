@@ -51,7 +51,7 @@ mod lexical {
 
     use super::*;
     use crate::markdown::compose::expression::{BindingId, parse};
-    use crate::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+    use simplified_schema::{SchemaRoot, parse_yaml_schema};
 
     fn schema() -> SchemaRoot {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str("person: string\nother: string\n").unwrap();
@@ -134,7 +134,7 @@ mod lexical {
         let outside = TypeScope::unguarded(&declared);
         let layer = LexicalTypes::new_defining(
             vec![TypedLocal::new("person", string_shape(&outside))],
-            crate::markdown::schemas::DefinitionTable::default(),
+            simplified_schema::DefinitionTable::default(),
         );
         let scope = outside.within(Arc::clone(&layer));
         assert!(std::ptr::eq(scope.definitions(), layer.definitions().unwrap()));

@@ -37,9 +37,8 @@ use darkmatter::markdown::compose::expression::{
 use darkmatter::markdown::compose::{
     ComposeSource, FrontmatterShellBody, parse_frontmatter_shell_value_spanned,
 };
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, effective_property_shape, frontmatter_expression_values,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, effective_property_shape};
+use simplified_schema::frontmatter_expression_values;
 use serde_json::Value;
 
 /// The executable surface an expression was extracted from.

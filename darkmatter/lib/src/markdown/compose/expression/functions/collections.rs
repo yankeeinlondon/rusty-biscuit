@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use super::{FunctionBinding, bound, json_number, numberlike_value, scalar_string};
-use crate::markdown::coercion::ValueKind;
+use simplified_schema::coercion::ValueKind;
 use crate::markdown::compose::expression::call_binding::BoundCall;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[

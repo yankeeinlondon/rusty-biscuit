@@ -6,12 +6,12 @@ use super::GuardOrigin;
 use super::projection::DeclaredType;
 use crate::markdown::compose::expression::equality::values_equal;
 use crate::markdown::schemas::completion::alternative_accepts;
-use crate::markdown::schemas::simplified::narrowing::{
+use simplified_schema::simplified::narrowing::{
     ALL_FAMILIES, families, has_ordinary_constraints, is_null_type, type_identity,
 };
-pub(super) use crate::markdown::schemas::simplified::narrowing::{Family, exact_family};
-use crate::markdown::schemas::simplified::query::reachable_definitions;
-use crate::markdown::schemas::{
+pub(super) use simplified_schema::simplified::narrowing::{Family, exact_family};
+use simplified_schema::simplified::query::reachable_definitions;
+use simplified_schema::{
     Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, flattened_alternatives,
 };
 
@@ -240,7 +240,7 @@ impl Shape {
         if orderable {
             return SortKeySupport::Undecided;
         }
-        let mut parts: Vec<String> = arms.iter().map(crate::markdown::schemas::simplified::serialize_property_atom).collect();
+        let mut parts: Vec<String> = arms.iter().map(simplified_schema::simplified::serialize_property_atom).collect();
         if *nullable {
             parts.push("null".to_string());
         }
@@ -341,7 +341,7 @@ impl Shape {
             .into_iter()
             .map(|atom| {
                 let atom = type_identity(atom);
-                (crate::markdown::schemas::simplified::serialize_property_atom(&atom), atom)
+                (simplified_schema::simplified::serialize_property_atom(&atom), atom)
             })
             .collect();
         keyed.sort_by(|left, right| left.0.cmp(&right.0));
@@ -453,7 +453,7 @@ impl Shape {
             Self::Arms { arms, .. } => {
                 let reach = families(&target);
                 let kept = arms.iter().filter_map(|arm| {
-                    if crate::markdown::schemas::is_subtype_with_definitions(arm, &target, definitions)
+                    if simplified_schema::is_subtype_with_definitions(arm, &target, definitions)
                     {
                         Some(arm.clone())
                     } else if arm_families(arm, definitions).iter().any(|family| reach.contains(family)) {

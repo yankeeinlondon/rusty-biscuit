@@ -33,7 +33,7 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visit
 ///
 /// ```
 /// use biscuit_file::serde_yaml_ng;
-/// use darkmatter::markdown::MappingOrders;
+/// use simplified_schema::MappingOrders;
 ///
 /// let value: serde_yaml_ng::Value =
 ///     serde_yaml_ng::from_str("outer:\n  z: 1\n  a: 2\n").unwrap();
@@ -87,7 +87,7 @@ impl MappingOrders {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter::markdown::MappingOrders;
+    /// use simplified_schema::MappingOrders;
     ///
     /// assert_eq!(MappingOrders::child_pointer("", "start"), "/start");
     /// assert_eq!(MappingOrders::child_pointer("/a", "b/c"), "/a/b~1c");

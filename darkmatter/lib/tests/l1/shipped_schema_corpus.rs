@@ -32,12 +32,14 @@ use std::time::SystemTime;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
-    Constraint, MatchExpr, PathSubject, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError,
-    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr,
-    locate_standalone_definition_failure, parse_property_definition, parse_schema_declaration,
-    parse_schema_declaration_with_source, parse_standalone_schema_document,
-    parse_trigger_envelope_from_str,
-    resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema},
+    MatchExpr, PathSubject, parse_trigger_envelope_from_str,
+    resolve::{resolve_schema_with_roots, resolve_yaml_schema},
+};
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::{
+    Constraint, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError, SchemaShape, SimplifiedType,
+    StandaloneSchemaDocument, TypeExpr, locate_standalone_definition_failure, parse_property_definition,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
 use serde_yaml_ng::Value as YamlValue;
 

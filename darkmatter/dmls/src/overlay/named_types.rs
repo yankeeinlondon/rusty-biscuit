@@ -19,12 +19,11 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
-use darkmatter::markdown::schemas::{
-    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError,
-    SchemaShape, SchemaSourceMap, SourceAware,
-    SchemaSourcePath,
-    SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
-    parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
+use simplified_schema::{
+    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape,
+    SchemaSourceMap, SourceAware, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot,
+    StandaloneSchemaDocument, TypeExpr, flow_collection_end, parse_property_definition,
+    parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
 
 use super::FrontmatterAst;

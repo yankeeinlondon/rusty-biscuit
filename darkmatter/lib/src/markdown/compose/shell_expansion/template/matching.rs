@@ -12,7 +12,7 @@
 
 use super::{ApprovalType, FilledChain, FilledSegment, ShapeArg, ShapePart, ShapeSegment, TemplateShape};
 use crate::markdown::compose::shell_expansion::types::{ShellRuleEntry, ShellRuleSet};
-use crate::markdown::schemas::{is_string_like, is_subtype};
+use simplified_schema::{is_string_like, is_subtype};
 
 /// Whether a rule hole of type `rule` covers a candidate hole of type
 /// `declared`.

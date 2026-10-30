@@ -15,7 +15,7 @@ use darkmatter::markdown::compose::expression::{
     CallCheck, DeclaredTypes, ExpressionError, TypeScope, check_expression_calls, functions, parse_spanned,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::schemas::parse_yaml_schema;
+use simplified_schema::parse_yaml_schema;
 use darkmatter::markdown::{Markdown, MarkdownError};
 use serde_json::json;
 use tempfile::TempDir;

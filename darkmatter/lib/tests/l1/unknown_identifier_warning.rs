@@ -385,7 +385,7 @@ fn a_baseline_schema_property_is_known() {
     let dir = TempDir::new().unwrap();
     let path = write(dir.path(), "doc.md", "---\ntitle: T\n---\n[{{ from-baseline }}]\n");
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("from-baseline: string\n").unwrap();
-    let baseline = darkmatter::markdown::schemas::simplified::parse_yaml_schema(&yaml).unwrap();
+    let baseline = simplified_schema::simplified::parse_yaml_schema(&yaml).unwrap();
 
     let (content, report) = compose(&path, options(dir.path(), &path).with_baseline_schema(baseline));
 
@@ -469,7 +469,7 @@ fn pass_one_candidates_known_by_the_final_state_or_schema_are_dropped() {
         "---\n$schema:\n  declared: string\nlabel: \"{{ declared }}{{ baseline_only }}\"\n---\n[{{ label }}]\n",
     );
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("baseline_only: string\n").unwrap();
-    let baseline = darkmatter::markdown::schemas::simplified::parse_yaml_schema(&yaml).unwrap();
+    let baseline = simplified_schema::simplified::parse_yaml_schema(&yaml).unwrap();
 
     let (content, report) = compose(&path, options(dir.path(), &path).with_baseline_schema(baseline));
 

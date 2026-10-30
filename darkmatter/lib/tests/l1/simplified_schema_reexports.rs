@@ -8,16 +8,12 @@ use darkmatter::markdown::compose::expression::{
     self as expression, ExpressionFinder, ExpressionScanResult, LiteralTokenLocation,
 };
 use darkmatter::markdown::literal_token::{self, TokenError};
-use darkmatter::markdown::numeric::{self, NumericAdmissionError};
 
 #[test]
 fn the_darkmatter_paths_are_the_library_types() {
     let spanned: simplified_schema::Spanned<&str> = darkmatter::Spanned::new("v", 1..2);
     let back: darkmatter::markdown::span::Spanned<&str> = spanned;
     assert_eq!(back.span, 1..2);
-
-    let error: simplified_schema::numeric::NumericAdmissionError = NumericAdmissionError::Inexact;
-    assert_eq!(numeric::admit_integer((1 << 53) + 1), Err(error));
 
     let token_error: simplified_schema::pending::TokenError = TokenError::Embedded;
     assert_eq!(literal_token::decode_leaf("x {{!data:v1:YQ}}"), Some(Err(token_error)));
@@ -50,13 +46,13 @@ fn the_finder_skips_code_blocks_and_otherwise_matches_the_plain_scan() {
 fn the_darkmatter_expression_syntax_paths_are_the_library_parser() {
     let parsed: simplified_schema::expression::Expr = expression::parse("unknown_fn(1)").unwrap();
     assert_eq!(parsed, simplified_schema::expression::parse("unknown_fn(1)").unwrap());
-    let spanned: simplified_schema::expression::SpannedExpr = expression::ast::SpannedExpr::clone(
-        &expression::parser::parse_spanned("a || b").unwrap(),
+    let spanned: simplified_schema::expression::SpannedExpr = expression::SpannedExpr::clone(
+        &expression::parse_spanned("a || b").unwrap(),
     );
     assert_eq!(spanned.erase(), expression::parse("a || b").unwrap());
     let error: simplified_schema::expression::ParseError = expression::parse_condition("((").unwrap_err();
     assert_eq!(error.position, 2);
-    let token: simplified_schema::expression::Token = expression::lexer::Token::Pipe;
+    let token: simplified_schema::expression::Token = expression::Token::Pipe;
     let tokens = expression::Lexer::new("a || b").tokenize_all().unwrap();
     assert_eq!(tokens[1], token);
     let mode: simplified_schema::expression::ParseMode = expression::ParseMode::Condition;

@@ -4,19 +4,17 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{parse, parse_condition};
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, ValidationReport,
-    coerce::coerce_frontmatter,
-    parse_yaml_schema,
-    simplified::{grammar::parse_type_expr, serialize_property_atom},
-    to_json_schema,
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::coerce::coerce_frontmatter;
+use simplified_schema::{
+    parse_yaml_schema, simplified::{grammar::parse_type_expr, serialize_property_atom}, to_json_schema,
 };
 use serde_json::Value;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /// Parse a single type-expression string as the value of property `prop`.
-fn atom(input: &str) -> Result<darkmatter::markdown::schemas::PropertyAtom, String> {
+fn atom(input: &str) -> Result<simplified_schema::PropertyAtom, String> {
     parse_type_expr("prop", input).map_err(|e| e.to_string())
 }
 
@@ -725,7 +723,7 @@ fn literal_large_integer_frontmatter_value_must_be_exact() {
     for value in LARGE_INT_CASES
         .iter()
         .flat_map(|(lit, neighbor)| [*lit, *neighbor])
-        .filter(|value| darkmatter::markdown::numeric::admit_number_spelling(value).is_err())
+        .filter(|value| simplified_schema::numeric::admit_number_spelling(value).is_err())
     {
         let error = Markdown::try_from_content(format!("---\nversion: {value}\n---\nbody\n"))
             .expect_err("an inexact native integer must not load");
@@ -775,9 +773,8 @@ fn trigger_matcher_large_integer_literal_is_exact() {
     // schemas. A required literal gate must accept the exact large integer and
     // reject its f64-colliding off-by-one neighbor.
     use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
-    use darkmatter::markdown::schemas::{
-        Constraint, MatchExpr, PropertyAtom, SimplifiedType, TypeExpr,
-    };
+    use darkmatter::markdown::schemas::MatchExpr;
+use simplified_schema::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 
     fn version_frontmatter(value: &Value) -> Value {
         let mut map = serde_json::Map::new();

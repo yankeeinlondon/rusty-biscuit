@@ -141,12 +141,15 @@ features their tier requires.
 
 ## SimplifiedSchema
 
-- `simplified-schema` (path dependency, default features) owns the
-  SimplifiedSchema language as it moves out of Darkmatter. It currently holds
-  the numeric model (`markdown::numeric`), span vocabulary (`markdown::span`),
-  the Markdown-free `{{ … }}` scan core under `ExpressionFinder`, and the
-  literal-token codec; Darkmatter re-exports each at its original path, so
-  the types are identical in both crates.
+- `simplified-schema` (path dependency, `terminal` feature) owns the
+  SimplifiedSchema language: parsing, named-type resolution, conversion,
+  JSON Schema lowering, validation, the numeric model, and the passive
+  expression syntax. Darkmatter builds on it for document-, trigger-, and
+  composition-aware schema work, and callers import the language's types
+  from `simplified_schema` directly. Darkmatter re-exports only the span
+  vocabulary (`markdown::span`), the literal-token codec
+  (`markdown::literal_token`), and the expression syntax items its
+  composition API names (`compose::expression::{Expr, Lexer, parse, …}`).
 
 ## Expression List Serialization
 

@@ -23,9 +23,8 @@ use biscuit_file::FileResolutionContext;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
-use darkmatter::markdown::schemas::{
-    SchemaError, SchemaOriginKind, resolve::resolve_yaml_schema,
-};
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::{SchemaError, SchemaOriginKind};
 
 /// Mirrors the resolver's private `MAX_REFERENCE_DEPTH`. The depth tests
 /// assert the error's reported `limit` against this, so changing the

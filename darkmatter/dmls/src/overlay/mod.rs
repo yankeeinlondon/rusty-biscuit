@@ -40,10 +40,9 @@ use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
-use darkmatter::markdown::schemas::{
-    SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
-    ValidationStage,
-    StandaloneSchemaEnvelope,
+use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRootState, SchemaRoots};
+use simplified_schema::{
+    SchemaError, SchemaSourceId, StandaloneSchemaDocument, ValidationStage, StandaloneSchemaEnvelope,
     LocatedDefinitionFailure, SuggestionLintProblem, locate_standalone_definition_failure,
     parse_standalone_schema_document,
 };
@@ -1038,7 +1037,7 @@ impl OverlayCache {
         });
         if let Some(types) = &model.local_types {
             suggestions.extend(suggestions::reference_lints(
-                &darkmatter::markdown::schemas::SchemaRoot::Single(types.clone()), Some(types), base_dir, Some(path), &schema_roots, context,
+                &simplified_schema::SchemaRoot::Single(types.clone()), Some(types), base_dir, Some(path), &schema_roots, context,
             ));
         }
         let deps = hash_files(imports.iter().chain(named_types.dependencies()));
@@ -1332,7 +1331,7 @@ fn deps_unchanged(deps: &[(PathBuf, u64)]) -> bool {
 mod tests {
     use super::*;
 
-    use darkmatter::markdown::schemas::{SchemaSourcePath, SchemaSpanKind, SchemaRoot};
+    use simplified_schema::{SchemaSourcePath, SchemaSpanKind, SchemaRoot};
 
     fn uri(s: &str) -> Uri {
         s.parse().unwrap()

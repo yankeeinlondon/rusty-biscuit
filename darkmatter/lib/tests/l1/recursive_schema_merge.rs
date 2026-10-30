@@ -11,9 +11,8 @@ use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DefKey, DefNamespace, EffectiveSchema, SchemaError, SchemaPhase, ValidationReport,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
+use simplified_schema::{DefKey, DefNamespace, SchemaError, SchemaPhase};
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
 use tempfile::TempDir;
@@ -647,7 +646,7 @@ const LEFT_RIGHT_DOCUMENT: &str = "---\nprompt: x\nleft: {}\nright: {}\n---\nbod
 /// The keys completion offers for the value of top-level `property`, through
 /// the layered property shape every editor walk starts from.
 fn completion_keys(effective: &EffectiveSchema, frontmatter: &Value, property: &str) -> Vec<String> {
-    use darkmatter::markdown::schemas::SchemaRoot;
+    use simplified_schema::SchemaRoot;
     use darkmatter::markdown::schemas::completion::{PathStep, for_path_in};
 
     let shape = SchemaRoot::Single(effective.property_shape(&[], frontmatter));

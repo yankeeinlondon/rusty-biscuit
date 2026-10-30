@@ -6,11 +6,10 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::simplified::ExampleOutcome;
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, PropertyDef, SchemaError, TypeExpr, ValidationReport, parse_yaml_schema, to_json_schema,
-};
+use simplified_schema::simplified::ExampleOutcome;
+use simplified_schema::simplified::grammar::parse_type_definition;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{PropertyDef, SchemaError, TypeExpr, parse_yaml_schema, to_json_schema};
 use serde_json::json;
 
 use crate::request_support::context_at;

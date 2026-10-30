@@ -14,11 +14,9 @@ use darkmatter::markdown::schemas::completion::{
     alternative_accepts_in, alternative_fingerprint, def_at_path, for_list_item, for_path, for_path_in,
     for_property_value,
 };
-use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaRoot, TypeExpr,
-};
+use simplified_schema::simplified::query::resolved_alternatives;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaRoot, TypeExpr};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

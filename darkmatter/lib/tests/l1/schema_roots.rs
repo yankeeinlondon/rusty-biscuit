@@ -13,12 +13,13 @@ use std::process::Command;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::file_match::FileMatchGlobs;
+use simplified_schema::file_match::FileMatchGlobs;
 use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidSchemasDir, MatchExpr, PathGlobs, SchemaError, SchemaRootKind,
-    SchemaRootState, SchemaRoots, TriggerSource,
+    DarkmatterSchemas, InvalidSchemasDir, MatchExpr, PathGlobs, SchemaRootKind, SchemaRootState, SchemaRoots,
+    TriggerSource,
 };
+use simplified_schema::SchemaError;
 use darkmatter::markdown::Markdown;
 use serde_json::json;
 

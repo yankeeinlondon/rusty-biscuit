@@ -20,6 +20,12 @@
   `biscuit-terminal` (`terminal` feature, enabled by Darkmatter); every one
   was already a Darkmatter dependency, so no external crate is added. See
   `simplified-schema/docs/dependencies.md`.
+- `darkmatter-cli`, `dmls`, `claudine`, `claudine-cli`, `claudine-gen`, and
+  `messenger` (its `research` feature, optional) add a path dependency on
+  `simplified-schema/lib` (2026-10-30): Darkmatter no longer re-exports the
+  SimplifiedSchema language, so they import its types from the owning
+  crate. It was already in each graph through `darkmatter`; no package is
+  added.
 - `schematic-define` adds `regex` 1 and `regex-syntax` 0.8 as production
   dependencies (2026-10-23) to decide which constraint patterns a generated
   client can enforce. Both were already in the workspace graph, so the root

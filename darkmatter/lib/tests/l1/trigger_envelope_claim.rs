@@ -10,7 +10,8 @@
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
-use darkmatter::markdown::schemas::{SchemaError, TriggerEnvelope, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::{TriggerEnvelope, parse_trigger_envelope_from_str};
+use simplified_schema::SchemaError;
 
 /// A valid envelope; every unparseable cell appends [`BROKEN`] or edits it.
 const CONTROL: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  model: string\n";

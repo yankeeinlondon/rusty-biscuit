@@ -33,6 +33,7 @@ test-fixtures = ["dep:test-toolkit"]
 
 [dependencies]
 darkmatter = { path = "../lib" }
+simplified-schema = { path = "../../simplified-schema/lib" }
 renderable = { path = "../../renderable" }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["json5", "yaml", "toml", "file-reference"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }

@@ -11,8 +11,8 @@ use super::{
     TemplateShape,
 };
 use crate::markdown::compose::shell_expansion::types::ChainOperator;
-use crate::markdown::schemas::simplified::grammar::parse_type_expr;
-use crate::markdown::schemas::{Constraint, SimplifiedType, TypeExpr};
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::{Constraint, SimplifiedType, TypeExpr};
 use std::fmt::Write;
 
 /// Why a `template` rule line was rejected. The loader adds the file and line.

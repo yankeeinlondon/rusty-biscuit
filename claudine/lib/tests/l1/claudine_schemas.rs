@@ -24,8 +24,9 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
-use darkmatter::markdown::schemas::validate::build_position_map;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError, ValidationReport};
+use simplified_schema::validate::build_position_map;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, ValidationReport};
+use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 
 /// One bundle file: its name in `schemas/` and its text.

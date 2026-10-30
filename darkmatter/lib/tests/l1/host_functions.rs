@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::coercion::ValueKind;
+use simplified_schema::coercion::ValueKind;
 use darkmatter::markdown::compose::expression::call_binding::{EvaluationMode, FactKind};
 use darkmatter::markdown::compose::expression::host::FactsArtifact;
 use darkmatter::markdown::compose::expression::{
@@ -26,7 +26,7 @@ use darkmatter::markdown::compose::expression::{
     validate_expression,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -950,7 +950,7 @@ fn a_function_catalog_in_a_schema_root_is_never_a_document_schema() {
         .with_source(darkmatter::markdown::compose::ComposeSource::File(doc));
     let effective = api.effective_for(&markdown).expect("prepares").expect("baseline");
     assert!(
-        effective.origins.values().all(|origin| origin.kind == darkmatter::markdown::schemas::SchemaOriginKind::Baseline),
+        effective.origins.values().all(|origin| origin.kind == simplified_schema::SchemaOriginKind::Baseline),
         "only the baseline applies"
     );
     assert!(!effective.declares_top_level_property("is_project_file"));

@@ -65,7 +65,8 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use darkmatter::markdown::schemas::completion::{
     AlternativeMatcher, DefinitionLookup, alternative_fingerprint,
 };
-use darkmatter::markdown::schemas::{PropertyAtom, PropertyDef, SchemaShape, effective_property_shape};
+use darkmatter::markdown::schemas::effective_property_shape;
+use simplified_schema::{PropertyAtom, PropertyDef, SchemaShape};
 use std::fmt::Write as _;
 use std::hash::Hasher as _;
 use serde_json::Value;

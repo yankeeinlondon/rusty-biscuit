@@ -193,7 +193,7 @@ fn nested_tuple_spreads_keep_optional_slots_distinct_from_null() {
 
 /// The frontmatter-only rule list (`CoercionTarget`, the regex number test,
 /// the first-arm root-union and exactly-one property-union pickers) is
-/// deleted; frontmatter goes through `markdown::coercion`.
+/// deleted; frontmatter goes through `simplified_schema::coercion`.
 #[test]
 fn old_frontmatter_rule_code_is_gone() {
     let source = include_str!("../../../../simplified-schema/lib/src/coerce.rs");

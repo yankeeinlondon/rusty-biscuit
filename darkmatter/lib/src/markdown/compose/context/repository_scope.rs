@@ -3,42 +3,13 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{
-    PackageAreaFallback, RepositoryScopeCatalog, RepositoryScopeCatalogError,
-};
+use biscuit_file::{PackageAreaFallback, RepositoryScopeCatalog};
 use sniff::filesystem::repo::RepoInfo;
 
-/// Project a retained Sniff repository observation into pure file-reference scope data.
-///
-/// `repository_root` is the request's spelling of the observed repository root.
-/// Package and area roots are rebuilt from repository-relative identities so
-/// equivalent canonical or symlinked root spellings do not get mixed.
-pub fn repository_scope_catalog(
-    repo: &RepoInfo,
-    repository_root: &Path,
-) -> Result<RepositoryScopeCatalog, RepositoryScopeCatalogError> {
-    let packages = repo.packages.as_deref().unwrap_or_default();
-    let package_roots = packages
-        .iter()
-        .map(|package| repository_root.join(&package.relative))
-        .collect();
-    let package_area_roots = packages
-        .iter()
-        .filter_map(|package| package_area_root(repository_root, &package.package_area))
-        .collect();
-    let fallback = if repo.is_monorepo {
-        PackageAreaFallback::FirstComponent
-    } else {
-        PackageAreaFallback::None
-    };
-
-    RepositoryScopeCatalog::new(
-        repository_root,
-        package_area_roots,
-        package_roots,
-        fallback,
-    )
-}
+/// Project a retained Sniff repository observation into pure file-reference
+/// scope data: the one projection `simplified-schema`'s raw-path factories
+/// also capture with.
+pub use simplified_schema::repository_scope_catalog;
 
 /// One request's repository as a capture observed it: the root the discovery
 /// found and the topology walked under it (decision D3).
@@ -161,14 +132,6 @@ impl PackageLookup {
             package: name(&self.package_names, scope.package_root()),
             area: name(&self.area_names, scope.package_area_root()),
         })
-    }
-}
-
-fn package_area_root(repository_root: &Path, area: &str) -> Option<PathBuf> {
-    if area.is_empty() {
-        None
-    } else {
-        Some(repository_root.join(area))
     }
 }
 

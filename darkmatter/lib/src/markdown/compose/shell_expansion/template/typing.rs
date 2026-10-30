@@ -17,9 +17,9 @@
 use crate::markdown::compose::expression::scope::{Declaration, VariableClass};
 use crate::markdown::compose::expression::{Expr, GuardOrigin, TypeScope, parse};
 use crate::markdown::schemas::completion::alternative_accepts_in;
-use crate::markdown::schemas::simplified::query::{reachable_definitions, resolved_alternatives};
-use crate::markdown::schemas::simplified::serialize_property_atom;
-use crate::markdown::schemas::{
+use simplified_schema::simplified::query::{reachable_definitions, resolved_alternatives};
+use simplified_schema::simplified::serialize_property_atom;
+use simplified_schema::{
     Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, is_string_like,
 };
 use serde_json::Value;
@@ -222,8 +222,8 @@ impl HoleType {
     /// ```
     /// use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
     /// use darkmatter::markdown::compose::shell_expansion::template::project_hole;
-    /// use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SchemaRoot};
-    /// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
+    /// use simplified_schema::{PropertyDef, SchemaShape, SchemaRoot};
+    /// use simplified_schema::simplified::grammar::parse_type_expr;
     ///
     /// let mut shape = SchemaShape::new();
     /// let count = PropertyDef::Single(parse_type_expr("count", "number(min(1))").unwrap());

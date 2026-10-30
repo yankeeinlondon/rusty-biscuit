@@ -16,15 +16,14 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::schemas::completion::{
     AlternativeKey, AlternativeSite, DefinitionLookup, alternatives_for_def_in,
 };
-use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
-use darkmatter::markdown::schemas::{
-    Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
-    SchemaCursorRole, SchemaDeclaration, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
-    DecodedScalar, decode_plain_scalar_node, decode_scalar, locate_schema_declaration_cursor,
-    locate_schema_declaration_cursor_in_scalar, mapping_separator, locate_type_definition_cursor,
-    locate_type_definition_cursor_in_scalar, parse_property_definition, parse_schema_declaration,
-    schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
-    flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
+use simplified_schema::simplified::query::resolved_alternatives;
+use darkmatter::markdown::schemas::{schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors};
+use simplified_schema::{
+    Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
+    SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
+    locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar, mapping_separator,
+    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_property_definition,
+    parse_schema_declaration, flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -42,7 +41,9 @@ use crate::overlay::{
 use crate::overlay::FrontmatterAnalysis;
 use crate::overlay::analysis::{ArmAdmission, ExpressionTyping, ScalarTyping, baseline_root};
 use crate::overlay::named_types::AuthoredDeclaration;
-use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions, standalone_type_regions};
+use crate::overlay::schema::{
+    FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions, standalone_type_regions,
+};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -2063,7 +2064,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
         TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
-            let spelled = darkmatter::markdown::schemas::simplified::serialize_property_atom(&PropertyAtom {
+            let spelled = simplified_schema::simplified::serialize_property_atom(&PropertyAtom {
                 description: None,
                 ..atom.clone()
             });
@@ -2092,7 +2093,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
         && !described_by_alternatives
         && let Some(definition) = definitions.lookup_definition(key)
     {
-        let body = darkmatter::markdown::schemas::simplified::serialize_property_def(&definition.body);
+        let body = simplified_schema::simplified::serialize_property_def(&definition.body);
         lines.push(format!("`{}` is defined as: `{body}`", key.name));
     }
 
@@ -4826,7 +4827,7 @@ mod tests {
 
     #[test]
     fn test_base_style_schema_exposes_nested_completion_shapes() {
-        let darkmatter::markdown::schemas::SchemaRoot::Single(root) =
+        let simplified_schema::SchemaRoot::Single(root) =
             darkmatter::markdown::schemas::darkmatter_base_schema()
         else {
             panic!("base schema must be a single object shape");

@@ -27,12 +27,15 @@ flowchart TD
     coercion["coercion, coerce: conversion"]
     validate["validate, format, file_match: validators"]
     prepared["prepared, outcome: strict and soft validation"]
+    object["schema: the SimplifiedSchema object"]
     foundations --> simplified
     simplified --> resolve
     simplified --> coercion
     resolve --> validate
     coercion --> validate
     validate --> prepared
+    prepared --> object
+    resolve --> object
 ```
 
 | Module | What it holds |
@@ -42,6 +45,7 @@ flowchart TD
 | `coercion` | The conversion engine over shapes (`bind`, `bind_with`, `check_exact`) |
 | `coerce` | Frontmatter conversion against a lowered JSON Schema (`coerce_frontmatter`) |
 | `validate`, `format`, `file_match` | Compiled validators and their cache, the `darkmatter-*` formats, the `x-darkmatter-*` keywords, and `file(match(...))` globs |
+| `schema` | `SimplifiedSchema` (build from content or a file, validate, layer, query, export), `SchemaSource`, `TypeDefinition`, `FunctionView`, `SimplifiedSchemaError`; see [The `SimplifiedSchema` Object](./schema-object.md) |
 | `prepared`, `outcome` | `Prepared` (a schema compiled once, with `validate_strict` and `validate_soft`), `ValidationSuccess`, `ValidationFailure`; see [Strict and Soft Validation](./validation.md) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text |
 | `completion`, `frontmatter_shape` | Which definition governs a frontmatter path, and union-aware completion choices |
@@ -81,8 +85,9 @@ An `http://` or `https://` schema, import, or example reference is
 ## What a Host Keeps
 
 - **Baseline and layering policy.** Which schemas layer under a document, and
-  in what order, is the host's; `resolve::merge_baseline` and
-  `layered_property_shape` do the merging it asks for.
+  in what order, is the host's; `SimplifiedSchema::layer_under` /
+  `layer_over`, `resolve::merge_baseline`, and `layered_property_shape` do the
+  merging it asks for.
 - **Pending values.** The host decides which `{{ … }}` templates are still
   pending and hands their paths in (`coerce::NestedTemplates`); the library
   never asks.

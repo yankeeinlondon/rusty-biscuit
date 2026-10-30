@@ -11,9 +11,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use darkmatter::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType,
-    TypeExpr, parse_standalone_schema_document, parse_yaml_schema,
+use simplified_schema::{
+    Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
+    parse_standalone_schema_document, parse_yaml_schema,
 };
 
 use crate::errors::GenError;

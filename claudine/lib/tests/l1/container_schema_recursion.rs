@@ -18,7 +18,8 @@ use biscuit_file::serde_yaml_ng;
 use claudine::composition::{CompositionError, resolve_composition_source_in_context, resolve_sequence_plan};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaPhase};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaPhase;
 use serde_json::{Map, Value, json};
 
 use crate::claudine_schemas::{Discovered, SchemaRepo, problems, shipped_bundle};

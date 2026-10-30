@@ -269,7 +269,7 @@ compare `Value`s with `==` or through rendered text for an expression
 `==`/`!=`; ordering (`<`, `>=`, …) still coerces to numbers. User docs:
 [What a Guard Proves](../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
 
-Numbers enter Darkmatter only through `markdown::numeric` (`admit_number_spelling`
+Numbers enter Darkmatter only through `simplified_schema::numeric` (`admit_number_spelling`
 for loader/lexer text, `admit_number_text` for the one lenient text parser,
 `admit_json_number`/`admit_f64` for values without a spelling). A whole number
 must be exact in every spelling, decimals round, underflow and non-finite are

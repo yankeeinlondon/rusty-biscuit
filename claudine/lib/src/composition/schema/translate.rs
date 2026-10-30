@@ -312,7 +312,7 @@ pub(super) fn resolution_failures(problems: &[ValidationProblem]) -> Vec<biscuit
     problems
         .iter()
         .filter_map(|problem| problem.file_reference.as_ref())
-        .map(darkmatter::markdown::schemas::FileReferenceDiagnostic::resolution_failure)
+        .map(simplified_schema::FileReferenceDiagnostic::resolution_failure)
         .collect()
 }
 

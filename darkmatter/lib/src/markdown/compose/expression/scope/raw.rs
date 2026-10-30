@@ -22,9 +22,7 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use super::Shape;
-use crate::markdown::schemas::{
-    PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr,
-};
+use simplified_schema::{PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr};
 
 /// How deep the projection descends before a value is `unknown`.
 const DEPTH_LIMIT: usize = 32;

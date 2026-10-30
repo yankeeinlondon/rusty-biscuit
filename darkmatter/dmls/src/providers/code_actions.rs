@@ -272,7 +272,7 @@ fn add_missing_required_keys(ctx: &DocumentContext, diagnostics: &[Diagnostic]) 
 /// The YAML value text to seed a missing required top-level `key` with when the
 /// schema types it as a single `literal(x)`, else `None` (an empty scaffold).
 fn literal_scaffold(
-    shape: &darkmatter::markdown::schemas::SchemaShape,
+    shape: &simplified_schema::SchemaShape,
     key: &str,
     definitions: &dyn darkmatter::markdown::schemas::completion::DefinitionLookup,
 ) -> Option<String> {
@@ -557,9 +557,7 @@ mod tests {
 
     #[test]
     fn test_literal_scaffold_inserts_value_with_yaml_quoting() {
-        use darkmatter::markdown::schemas::{
-            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
-        };
+        use simplified_schema::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType};
 
         let literal = |value: serde_json::Value| {
             let mut atom = PropertyAtom::bare(SimplifiedType::Literal);

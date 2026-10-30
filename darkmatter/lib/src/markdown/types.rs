@@ -12,7 +12,7 @@ use thiserror::Error;
 
 use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::errors::blocks;
-use crate::markdown::schemas::ValidationProblem;
+use simplified_schema::ValidationProblem;
 
 use biscuit_terminal::errors::SourceContext;
 
@@ -310,7 +310,7 @@ pub enum MarkdownError {
         ///
         /// Boxed as `dyn Error` rather than `Box<SchemaError>` so that
         /// [`std::error::Error::source`] yields the inner
-        /// [`SchemaError`](crate::markdown::schemas::SchemaError) directly:
+        /// [`SchemaError`](simplified_schema::SchemaError) directly:
         /// `err.source().and_then(|e| e.downcast_ref::<SchemaError>())`
         /// recovers the original. A `Box<SchemaError>` field would surface the
         /// `Box` itself as the trait object, so that downcast would miss.
@@ -832,8 +832,8 @@ impl BlockError for MarkdownError {
             } => {
                 let hint = source
                     .as_deref()
-                    .and_then(|source| source.downcast_ref::<crate::markdown::schemas::SchemaError>())
-                    .and_then(crate::markdown::schemas::SchemaError::preparation_hint);
+                    .and_then(|source| source.downcast_ref::<simplified_schema::SchemaError>())
+                    .and_then(simplified_schema::SchemaError::preparation_hint);
                 blocks::schema_validation_failed_block(path, problems, summary, description, hint)
             }
             MarkdownError::CallerFileClassificationChanged { property } => {

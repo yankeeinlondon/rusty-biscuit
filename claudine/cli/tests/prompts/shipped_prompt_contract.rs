@@ -2,7 +2,8 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{ExpressionFinder, parse_condition};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaPhase};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaPhase;
 use ignore::WalkBuilder;
 use serde_json::Value;
 use std::path::{Path, PathBuf};

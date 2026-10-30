@@ -24,7 +24,8 @@ use claudine::composition::schema::globals::{
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::catalog::{CatalogError, CatalogErrorReason, GlobalCatalog};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, PatternKey};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::PatternKey;
 use serde_json::{Value, json};
 
 fn load(text: &str) -> Result<GlobalCatalog, CatalogError> {
@@ -74,12 +75,12 @@ fn every_shape_matches_the_runtime_value() {
     let settled = Value::Object(group.event_value(LifecycleSignal::Finalize));
     assert_eq!(members(catalog, "group"), keys(&settled));
     let legs = catalog.global("group").and_then(|group| group.member("legs")).expect("legs");
-    let darkmatter::markdown::schemas::PropertyDef::Single(legs) = legs else { panic!("legs is one atom") };
-    let darkmatter::markdown::schemas::TypeExpr::InlineObject(legs) = &legs.ty else { panic!("legs is a shape") };
+    let simplified_schema::PropertyDef::Single(legs) = legs else { panic!("legs is one atom") };
+    let simplified_schema::TypeExpr::InlineObject(legs) = &legs.ty else { panic!("legs is a shape") };
     let leg = &legs.pattern_keys.first().expect("legs are keyed by name");
     assert_eq!(leg.key, PatternKey::CatchAll);
-    let darkmatter::markdown::schemas::PropertyDef::Single(leg) = &leg.def else { panic!("a leg is one atom") };
-    let darkmatter::markdown::schemas::TypeExpr::InlineObject(leg) = &leg.ty else { panic!("a leg is a shape") };
+    let simplified_schema::PropertyDef::Single(leg) = &leg.def else { panic!("a leg is one atom") };
+    let simplified_schema::TypeExpr::InlineObject(leg) = &leg.ty else { panic!("a leg is a shape") };
     let declared: BTreeSet<_> = leg.properties.keys().cloned().collect();
     assert_eq!(declared, keys(&settled["legs"]["lint"]));
     for global in ["seq", "group"] {

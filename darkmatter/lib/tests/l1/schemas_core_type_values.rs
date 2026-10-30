@@ -5,12 +5,10 @@
 //! JSON Schema agrees with the typed model.
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-use darkmatter::markdown::schemas::{
-    AlphanumericOption, AlphanumericOptions, DarkmatterSchemas, EffectiveSchema, SchemaError,
-    parse_yaml_schema, to_json_schema,
-};
+use simplified_schema::coerce::coerce_frontmatter;
+use simplified_schema::simplified::grammar::parse_type_expr;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{AlphanumericOption, AlphanumericOptions, SchemaError, parse_yaml_schema, to_json_schema};
 use serde_json::{Value, json};
 
 fn effective(schema: &str) -> Result<EffectiveSchema, SchemaError> {
@@ -342,7 +340,7 @@ fn null_is_never_coerced() {
 
 #[test]
 fn subtype_relation_is_reachable_through_the_public_schema_api() {
-    use darkmatter::markdown::schemas::is_subtype;
+    use simplified_schema::is_subtype;
     let atom = |text: &str| parse_type_expr("p", text).expect("parses");
     let rule = atom("alphanumeric(allow-slashes)");
     assert!(is_subtype(&atom("alphanumeric(allow-slashes)"), &rule));
@@ -357,7 +355,7 @@ fn subtype_relation_is_reachable_through_the_public_schema_api() {
 /// enum, or union admits it (`2026-10-16-type-narrowing` acceptance 5).
 #[test]
 fn narrowed_literals_and_unions_satisfy_their_parameter_types_structurally() {
-    use darkmatter::markdown::schemas::{PropertyDef, SchemaRoot, is_definition_subtype, is_subtype};
+    use simplified_schema::{PropertyDef, SchemaRoot, is_definition_subtype, is_subtype};
     let atom = |text: &str| parse_type_expr("p", text).expect("parses");
     let declared = |body: &str| -> PropertyDef {
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(body).expect("schema YAML");

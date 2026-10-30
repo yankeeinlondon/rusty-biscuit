@@ -2,10 +2,9 @@
 
 use std::path::Path;
 
-use darkmatter::markdown::schemas::{
-    SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath, SchemaSpanKind,
-    SchemaRoot, StandaloneSchemaEnvelope, parse_schema_declaration,
-    parse_standalone_schema_document,
+use simplified_schema::{
+    SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath, SchemaSpanKind, SchemaRoot,
+    StandaloneSchemaEnvelope, parse_schema_declaration, parse_standalone_schema_document,
 };
 
 #[test]

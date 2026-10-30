@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, DefNamespace, PropertyDef, SchemaConstraintConflictKind, SchemaError,
-    SchemaSourceId, SchemaRoot, TypeExpr, ValidationProblemKind, ValidationReport,
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{
+    Constraint, DefNamespace, PropertyDef, SchemaConstraintConflictKind, SchemaError, SchemaSourceId, SchemaRoot,
+    TypeExpr, ValidationProblemKind,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;

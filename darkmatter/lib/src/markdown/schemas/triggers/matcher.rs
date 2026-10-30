@@ -37,7 +37,7 @@ use std::path::Path;
 use biscuit_file::FileResolutionContext;
 use serde_json::Value;
 
-use crate::markdown::schemas::simplified::{
+use simplified_schema::simplified::{
     Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_property_definition,
     parse_schema_declaration,
 };
@@ -280,8 +280,8 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
             };
             for (name, def) in &shape.properties {
                 let atom = match def {
-                    crate::markdown::schemas::simplified::PropertyDef::Single(a) => a,
-                    crate::markdown::schemas::simplified::PropertyDef::Union(arms) => {
+                    simplified_schema::simplified::PropertyDef::Single(a) => a,
+                    simplified_schema::simplified::PropertyDef::Union(arms) => {
                         let v = map.get(name);
                         match v {
                             None => {
@@ -539,7 +539,7 @@ fn regex_match(pattern: &str, input: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::simplified::{
+    use simplified_schema::simplified::{
         Constraint, PropertyAtom, SimplifiedType, TypeExpr,
     };
     use crate::markdown::schemas::triggers::grammar::{MatchExpr, PathGlobs};

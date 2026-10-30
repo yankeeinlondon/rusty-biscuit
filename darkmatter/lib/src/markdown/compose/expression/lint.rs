@@ -10,9 +10,9 @@
 
 use std::collections::HashMap;
 
-use super::ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
-use super::lexer::{ExpressionFinder, ExpressionLocation, Lexer, ParseMode, Token};
-use super::parser::{parse_condition_spanned, parse_spanned};
+use simplified_schema::expression::ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
+use super::{ExpressionFinder, ExpressionLocation, Lexer, ParseMode, Token};
+use simplified_schema::expression::parser::{parse_condition_spanned, parse_spanned};
 use crate::markdown::span::SourceSpan;
 
 /// A syntactic defect found in authored expression source.
@@ -509,8 +509,8 @@ fn substitute(expr: &SpannedExpr, replacements: &HashMap<usize, Expr>) -> Expr {
         SpannedExprKind::CallbackCall { name, args } => Expr::CallbackCall {
             name: name.clone(),
             args: args.iter().map(|arg| match arg {
-                super::ast::SpannedCallArgument::Value(value) => super::ast::CallArgument::Value(substitute(value, replacements)),
-                super::ast::SpannedCallArgument::Callback(callback) => super::ast::CallArgument::Callback(super::ast::Callback {
+                simplified_schema::expression::ast::SpannedCallArgument::Value(value) => simplified_schema::expression::ast::CallArgument::Value(substitute(value, replacements)),
+                simplified_schema::expression::ast::SpannedCallArgument::Callback(callback) => simplified_schema::expression::ast::CallArgument::Callback(simplified_schema::expression::ast::Callback {
                     pattern: callback.pattern.erase(),
                     body: substitute(&callback.body, replacements),
                 }),

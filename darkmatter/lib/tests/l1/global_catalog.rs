@@ -10,16 +10,19 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use darkmatter::lifecycle::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticSnapshot, LifecycleErrorInfo, LifecycleTiming};
+use darkmatter::lifecycle::{
+    DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticSnapshot, LifecycleErrorInfo, LifecycleTiming,
+};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::context::context_variable_descriptors;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::schemas::catalog::{
     CatalogError, CatalogErrorReason, DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog,
 };
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaError, SchemaOriginKind, SchemaRoot, SimplifiedType,
-    TypeExpr, darkmatter_base_json_schema, darkmatter_base_schema, to_json_schema, to_json_schema_with_definitions,
+use darkmatter::markdown::schemas::{DarkmatterSchemas, darkmatter_base_json_schema, darkmatter_base_schema};
+use simplified_schema::{
+    Constraint, PropertyDef, SchemaError, SchemaOriginKind, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema,
+    to_json_schema_with_definitions,
 };
 
 use crate::request_support::context_at;
@@ -82,7 +85,7 @@ fn shape_keys(catalog: &GlobalCatalog, global: &str) -> Vec<String> {
         .collect()
 }
 
-fn single(def: &PropertyDef) -> &darkmatter::markdown::schemas::PropertyAtom {
+fn single(def: &PropertyDef) -> &simplified_schema::PropertyAtom {
     match def {
         PropertyDef::Single(atom) => atom,
         PropertyDef::Union(_) => panic!("expected a single atom: {def:?}"),

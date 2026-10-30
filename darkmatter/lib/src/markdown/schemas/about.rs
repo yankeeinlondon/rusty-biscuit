@@ -898,9 +898,9 @@ pub struct MatchSafeConstraintDescriptor {
 mod tests {
     use super::*;
     use super::super::simplified::types::{Constraint, SimplifiedType};
-    use crate::markdown::schemas::simplified::parse_yaml_schema;
-    use crate::markdown::schemas::simplified::grammar;
-    use crate::markdown::schemas::simplified::{PropertyDef, SchemaRoot, TypeExpr};
+    use simplified_schema::simplified::parse_yaml_schema;
+    use simplified_schema::simplified::grammar;
+    use simplified_schema::simplified::{PropertyDef, SchemaRoot, TypeExpr};
     use std::collections::HashSet;
 
     /// The array-level constraint set the catalog publishes is the set a
@@ -1028,7 +1028,7 @@ mod tests {
     /// for every one of the 512 option sets.
     #[test]
     fn alphanumeric_option_descriptors_match_the_typed_options() {
-        use crate::markdown::schemas::simplified::{AlphanumericOption, AlphanumericOptions};
+        use simplified_schema::simplified::{AlphanumericOption, AlphanumericOptions};
 
         let described: Vec<AlphanumericOption> =
             alphanumeric_option_descriptors().iter().map(|d| d.option).collect();
@@ -1144,7 +1144,7 @@ mod tests {
             return false;
         };
         atom.constraints.iter().any(|c| catalog_keyword(c) == keyword)
-            && crate::markdown::schemas::simplified::to_json_schema(&schema).is_ok()
+            && simplified_schema::simplified::to_json_schema(&schema).is_ok()
     }
 
     /// Each type's published constraint list is exactly the set of catalog

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
-use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
+use simplified_schema::coerce::coerce_frontmatter;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
 use serde_json::{Value, json};
 

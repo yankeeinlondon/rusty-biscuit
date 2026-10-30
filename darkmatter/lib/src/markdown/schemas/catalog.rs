@@ -45,9 +45,12 @@ use serde_yaml_ng::{Mapping, Value as YamlValue};
 use thiserror::Error;
 
 use super::embedded::{self, EmbeddedDocument};
-use super::errors::SchemaError;
-use super::resolve::{self, describe_yaml};
-use super::{DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr};
+use simplified_schema::errors::SchemaError;
+use super::resolve;
+use simplified_schema::resolve::describe_yaml;
+use super::{
+    DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
+};
 
 /// Virtual path of Darkmatter's global catalog.
 pub const DARKMATTER_CATALOG_PATH: &str = "darkmatter/schemas/darkmatter.yaml";
@@ -1064,7 +1067,7 @@ fn resolve_declaration(
     let single = YamlValue::Mapping(single);
     let resolved = match source {
         Source::Embedded(documents) => {
-            resolve::prepare_embedded_catalog_declaration(&single, catalog, documents, resolve::Sharing::Automatic)
+            resolve::prepare_embedded_catalog_declaration(&single, catalog, documents, simplified_schema::resolve::Sharing::Automatic)
                 .map(|(resolved, _)| resolved)
         }
         Source::Disk { dir, context } => resolve::resolve_catalog_declaration(&single, dir, context),
@@ -1104,7 +1107,7 @@ pub(crate) fn darkmatter_inline_baseline() -> SchemaRoot {
         &YamlValue::Mapping(single),
         DARKMATTER_CATALOG_PATH,
         embedded::SHIPPED,
-        resolve::Sharing::Off,
+        simplified_schema::resolve::Sharing::Off,
     )
     .unwrap_or_else(|error| fail(&error));
     let Some(SchemaRoot::Single(mut shape)) = resolved.simplified else {

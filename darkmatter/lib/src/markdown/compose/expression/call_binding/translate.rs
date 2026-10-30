@@ -34,22 +34,22 @@ use std::sync::LazyLock;
 
 use serde_json::{Value, json};
 
-use crate::markdown::coercion::{
+use simplified_schema::coercion::{
     Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,
     ObjectShape, PatternScope, PatternSlot, PropertySlot, RefSlot, Shape, ShapeRef, TextPattern, TextShape,
     TupleShape, TupleSlot, accepts_exactly,
 };
-use crate::markdown::numeric::json_number;
-use crate::markdown::schemas::format::{
+use simplified_schema::numeric::json_number;
+use simplified_schema::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT,
     DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_SHELL_FORMAT, DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD,
     DARKMATTER_URL_SCHEME_KEYWORD,
 };
-use crate::markdown::schemas::simplified::{
+use simplified_schema::simplified::{
     AlphanumericOptions, Constraint, DefKey, DefinitionOuter, DefinitionTable, PatternKey, PropertyAtom, PropertyDef,
     SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TupleType, TypeExpr,
 };
-use crate::markdown::schemas::validate::ValidatorCache;
+use simplified_schema::validate::ValidatorCache;
 
 /// How many named-type references deep translation follows before failing.
 /// A recursive named type counts once per path, since its uses below a value

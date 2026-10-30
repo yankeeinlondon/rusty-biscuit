@@ -619,9 +619,9 @@ References; Choosing an Arm: Reporting versus Changing Data).
 
 ## Conversion engine
 
-- One rule core, `markdown::coercion` (`Shape`, `bind`, `bind_with`,
+- One rule core, `simplified_schema::coercion` (`Shape`, `bind`, `bind_with`,
   `check_exact`, `accepts_exactly`, `content_error`), serves frontmatter and
-  function calls. Translators only map syntax: `schemas::shape_from_json_schema`
+  function calls. Translators only map syntax: `simplified_schema::shape_from_json_schema`
   (compiled/raw JSON Schema; unmodeled keywords become `Assert`s) and
   `compose::expression::call_binding::shape_from_property_def` (grammar).
   `tests/l1/coercion_translator_conformance.rs` requires identical outcomes;
@@ -672,7 +672,7 @@ Operator and Grouping; Function Signatures; Categories).
   envelope's `categories:` list (`StandaloneSchemaDocument::categories`)
   limits names. Duplicate overloads are judged by
   `signature::duplicate_overload` over canonical binding contracts.
-- Numbers in schema metadata go through `markdown::numeric` admission; an
+- Numbers in schema metadata go through `simplified_schema::numeric` admission; an
   inexact whole number, infinity, or underflow is a grammar error.
 
 ## Special types

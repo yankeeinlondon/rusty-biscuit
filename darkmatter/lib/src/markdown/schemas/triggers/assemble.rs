@@ -13,7 +13,7 @@
 //!
 //! Shadowing is applied **before** matching (a shadowed trigger file is never
 //! in the registry). Later layers win per top-level property via the existing
-//! [`super::super::resolve::merge_baseline`] contract.
+//! [`simplified_schema::resolve::merge_baseline`] contract.
 //!
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
@@ -23,8 +23,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
 
-use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::resolve::{self, ResolvedSchema, validate_simple_object_schema};
+use simplified_schema::errors::SchemaError;
+use crate::markdown::schemas::resolve::{self};
+use simplified_schema::resolve::{ResolvedSchema, validate_simple_object_schema};
 
 use crate::markdown::schemas::roots::SchemaRoots;
 
@@ -209,16 +210,16 @@ pub(crate) struct ResolvedPayload {
     /// The payload's SimplifiedSchema object shape, retained so editor
     /// projections see the properties validation layers in. `None` for a raw
     /// JSON Schema payload, which has no SimplifiedSchema projection.
-    pub shape: Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>>,
+    pub shape: Option<std::sync::Arc<simplified_schema::SchemaShape>>,
     /// The cyclic named types `shape` reaches through
-    /// [`TypeExpr::Ref`](crate::markdown::schemas::simplified::TypeExpr::Ref);
+    /// [`TypeExpr::Ref`](simplified_schema::simplified::TypeExpr::Ref);
     /// empty for a raw payload or one that does not recurse.
-    pub definitions: std::sync::Arc<crate::markdown::schemas::simplified::DefinitionTable>,
+    pub definitions: std::sync::Arc<simplified_schema::simplified::DefinitionTable>,
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
     /// Every location probed while resolving the payload and its references
-    /// ([`ResolvedSchema::searched`](crate::markdown::schemas::resolve::ResolvedSchema::searched)):
+    /// ([`ResolvedSchema::searched`](simplified_schema::resolve::ResolvedSchema::searched)):
     /// lexical, sorted, deduplicated, and possibly absent, so it is never read
     /// or hashed as a dependency file. Empty for an embedded trigger.
     pub searched: Vec<PathBuf>,
@@ -268,7 +269,7 @@ pub(crate) fn resolve_trigger_payload(
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
-    let _resolve = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Resolve);
+    let _resolve = simplified_schema::timings::stage(simplified_schema::ValidationStage::Resolve);
     let source = match (&trigger.source, trigger.bundle) {
         (TriggerSource::File(path), _) => path,
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
@@ -305,7 +306,7 @@ fn resolve_file_payload(
     // definitions never share keys with the document's or another trigger's.
     let resolved = resolve::resolve_yaml_schema_owned_by(
         payload,
-        resolve::InlineOwner::Trigger(source),
+        simplified_schema::resolve::InlineOwner::Trigger(source),
         base_dir,
         schema_roots,
         context,
@@ -395,7 +396,7 @@ mod file_payload_memo {
     use serde_yaml_ng::Value as YamlValue;
 
     use super::{ResolvedPayload, resolve_file_payload, tally};
-    use crate::markdown::schemas::errors::SchemaError;
+    use simplified_schema::errors::SchemaError;
 
     /// Room for one DMLS workspace pass over this repository (18 distinct
     /// inputs before keys stopped naming the requester) with headroom.
@@ -702,11 +703,11 @@ mod tally {
 /// A gated payload is never a root union, so only a single-object projection
 /// is kept.
 fn payload_shape(
-    simplified: Option<crate::markdown::schemas::SchemaRoot>,
-) -> Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>> {
+    simplified: Option<simplified_schema::SchemaRoot>,
+) -> Option<std::sync::Arc<simplified_schema::SchemaShape>> {
     match simplified? {
-        crate::markdown::schemas::SchemaRoot::Single(shape) => Some(std::sync::Arc::new(shape)),
-        crate::markdown::schemas::SchemaRoot::Union(_) => None,
+        simplified_schema::SchemaRoot::Single(shape) => Some(std::sync::Arc::new(shape)),
+        simplified_schema::SchemaRoot::Union(_) => None,
     }
 }
 
@@ -738,7 +739,7 @@ fn resolve_embedded_payload(
     bundle: EmbeddedSchemaBundle,
     name: &str,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
-    let _resolve = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Resolve);
+    let _resolve = simplified_schema::timings::stage(simplified_schema::ValidationStage::Resolve);
     let importer = bundle.virtual_path(name);
     let importer_path = PathBuf::from(&importer);
     let Some(payload) = trigger.envelope.payload.as_ref() else {
@@ -781,7 +782,7 @@ fn resolve_embedded_payload(
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
                 "$schema must be a mapping, sequence, or string; got {}",
-                resolve::describe_yaml(other)
+                simplified_schema::resolve::describe_yaml(other)
             ),
         }),
     })?;
@@ -966,7 +967,7 @@ fn canonicalize(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::errors::SchemaError;
+    use simplified_schema::errors::SchemaError;
     use crate::markdown::schemas::triggers::discovery;
     use std::fs;
     use tempfile::TempDir;

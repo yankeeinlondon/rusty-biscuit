@@ -50,7 +50,7 @@ use lsp_types::{
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter::markdown::schemas::ValidationStage;
+use simplified_schema::ValidationStage;
 use darkmatter::markdown::schemas::triggers::{PayloadMemoCounts, PayloadMemoTally};
 use thiserror::Error;
 

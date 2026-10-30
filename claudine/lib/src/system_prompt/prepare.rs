@@ -1,7 +1,7 @@
 use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource, RequestSnapshot};
-use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use tracing::{info_span, warn};
 
 use crate::system_prompt::types::*;

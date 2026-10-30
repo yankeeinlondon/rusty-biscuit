@@ -380,7 +380,7 @@ fn format_raw_for_error(raw: &str, was_quoted: bool) -> String {
 /// non-finite number (`Infinity`, `NaN`, `1e400`) is an error, never `null`.
 fn parse_json5_value(raw: &str) -> Result<Value, String> {
     let json5 = biscuit_file::Json5::from_str(raw).map_err(|e| e.to_string())?;
-    crate::markdown::numeric::reject_non_finite_json5(&json5)
+    simplified_schema::numeric::reject_non_finite_json5(&json5)
         .map_err(|reason| format!("a number is {reason}"))?;
     Ok(json5.value().clone())
 }

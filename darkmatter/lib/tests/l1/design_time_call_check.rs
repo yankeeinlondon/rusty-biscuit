@@ -11,7 +11,7 @@ use darkmatter::markdown::compose::expression::{
     ArgumentCategory, ArgumentType, AuthoredMode, CallCheck, CallProblem, DeclaredTypes, Shape, TypeScope,
     check_expression_calls, check_prepared_calls, parse_spanned, prepare_value,
 };
-use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 
 use ArgumentCategory::{Compatible, Incompatible, NullableMatch, Uncertain, Unknown};
@@ -401,10 +401,10 @@ mod walk {
 mod preserved_text {
     use super::*;
 
-    use darkmatter::markdown::coercion::bind;
+    use simplified_schema::coercion::bind;
     use darkmatter::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
     use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
-    use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
+    use simplified_schema::simplified::grammar::parse_type_definition;
     use serde_json::Value;
 
     /// One test per `(source, parameter)` cell; the expected categories are

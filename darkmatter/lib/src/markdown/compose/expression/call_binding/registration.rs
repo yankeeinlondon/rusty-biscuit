@@ -8,13 +8,13 @@ use std::ops::Range;
 
 use super::signature::{CompiledParameter, CompiledSignature};
 use super::translate::{NoNamedTypes, TranslateError, TypeResolver};
-use crate::markdown::coercion::{Shape, ValueKind};
-use crate::markdown::schemas::simplified::{
+use simplified_schema::coercion::{Shape, ValueKind};
+use simplified_schema::simplified::{
     FunctionType, NarrowsKind, PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition,
     serialize_property_def,
 };
-use crate::markdown::schemas::simplified::narrowing;
-use crate::markdown::schemas::{GrammarRelated, SchemaError};
+use simplified_schema::simplified::narrowing;
+use simplified_schema::{GrammarRelated, SchemaError};
 
 /// When a function's arguments are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -107,7 +107,7 @@ impl NarrowingFact {
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RegistrationError {
     /// `span` and `related` are byte ranges in the signature text, as
-    /// [`SchemaError::Grammar`](crate::markdown::schemas::SchemaError::Grammar)
+    /// [`SchemaError::Grammar`](simplified_schema::SchemaError::Grammar)
     /// reports them.
     #[error("{function}: the signature does not parse: {message}")]
     Grammar {
@@ -440,7 +440,7 @@ fn reference_rule_index(
 /// Compiles the narrowing fact a function's `narrows(...)` clauses declare.
 ///
 /// Validity is decided by the schema-owned
-/// [`declaration_problem`](crate::markdown::schemas::simplified::narrowing::declaration_problem),
+/// [`declaration_problem`](simplified_schema::simplified::narrowing::declaration_problem),
 /// the same rules the grammar applies; registration re-checks because a
 /// programmatically built [`FunctionType`] never passed through the grammar.
 /// This only lowers a valid declaration. `Ok(None)` means no overload

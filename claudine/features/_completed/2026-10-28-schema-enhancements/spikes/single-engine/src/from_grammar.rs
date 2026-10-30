@@ -11,16 +11,16 @@ use serde_json::Value;
 use super::core::{
     Additional, NumberShape, ObjectShape, Pattern, Residual, Shape, TextKind, TextShape,
 };
-use crate::markdown::schemas::format::{
+use simplified_schema::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
     DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
     DARKMATTER_TIME_FORMAT, DARKMATTER_TYPE_DEFINITION_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
-use crate::markdown::schemas::simplified::{
+use simplified_schema::simplified::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
     SimplifiedType, TypeExpr,
 };
-use crate::markdown::schemas::validate::build_validator;
+use simplified_schema::validate::build_validator;
 
 pub fn translate_schema(schema: &SimplifiedSchema) -> Option<Shape> {
     match schema {

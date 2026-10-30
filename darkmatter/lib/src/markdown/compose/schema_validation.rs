@@ -45,12 +45,12 @@ pub(crate) static TRIGGER_DISCOVERY_COUNT: std::sync::atomic::AtomicUsize =
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeReport;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
-use crate::markdown::schemas::{
-    CallerFileReferenceProvenance, DarkmatterSchemas, EffectiveSchema, FileReferenceDiagnostic,
-    JsonPointer, SchemaOriginKind, SchemaRoot, ValidationProblem, ValidationProblemCode,
-    ValidationProblemKind,
+use crate::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{
+    CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SchemaOriginKind, SchemaRoot,
+    ValidationProblem, ValidationProblemCode, ValidationProblemKind,
 };
-use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
+use simplified_schema::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 use super::value_origin::{DataPaths, FrontmatterProvenance, ValuePathSegment};
 
@@ -111,7 +111,7 @@ impl PendingDeferral<'_> {
     /// naming no top-level key, or an absent one, is never deferred.
     fn defers_problem(
         &self,
-        problem: &crate::markdown::schemas::ValidationProblem,
+        problem: &simplified_schema::ValidationProblem,
         deferred: &[String],
         frontmatter: &indexmap::IndexMap<String, serde_json::Value>,
         data: &DataPaths,
@@ -500,7 +500,7 @@ pub(crate) fn run_with_registry(
             // contradictory provenance failure.
             if matches!(
                 p.code,
-                crate::markdown::schemas::ValidationProblemCode::InvalidFileReference
+                simplified_schema::ValidationProblemCode::InvalidFileReference
             ) && top_level_pointer_segment(&p.path)
                 .is_some_and(|name| projection.native.contains_key(&name))
             {
@@ -911,8 +911,8 @@ fn caller_input_records(options: &crate::markdown::compose::ComposeRequest) -> c
 /// `match()` judgment of its value.
 fn caller_origins(
     records: &crate::markdown::compose::CallerInputRecords,
-) -> crate::markdown::schemas::validate::CallerOrigins {
-    crate::markdown::schemas::validate::CallerOrigins::new(
+) -> simplified_schema::validate::CallerOrigins {
+    simplified_schema::validate::CallerOrigins::new(
         records
             .iter()
             .map(|(key, record)| (key.clone(), record.origin().clone())),
@@ -943,7 +943,7 @@ fn caller_reference_target<'r>(
     let Some(text) = schema.get("$ref").and_then(serde_json::Value::as_str) else {
         return Ok(None);
     };
-    let Some(target) = crate::markdown::schemas::scope::SchemaScope::new(root)
+    let Some(target) = simplified_schema::scope::SchemaScope::new(root)
         .resolve_text(text, "")
         .map_err(|_| ())?
     else {
@@ -982,10 +982,10 @@ fn select_file_mode_on_path<'r>(
         Ok(None) => {}
     }
     let mode = match schema.get("format").and_then(serde_json::Value::as_str) {
-        Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT) => {
+        Some(simplified_schema::format::DARKMATTER_FILE_FORMAT) => {
             Some(CallerFileMode::Eager)
         }
-        Some(crate::markdown::schemas::format::DARKMATTER_FILE_REFERENCE_FORMAT) => {
+        Some(simplified_schema::format::DARKMATTER_FILE_REFERENCE_FORMAT) => {
             Some(CallerFileMode::Lazy)
         }
         _ => None,
@@ -1012,8 +1012,8 @@ fn select_file_mode_on_path<'r>(
                     // `match`: an arm that glob rules out is still a file arm.
                     // The arm compiles alone, so it takes its root's
                     // definitions, whose enforcing copies carry `match` too.
-                    crate::markdown::schemas::validate::build_validator_in_context(
-                        &without_match_keyword(&crate::markdown::schemas::scope::with_root_definitions(arm, root)),
+                    simplified_schema::validate::build_validator_in_context(
+                        &without_match_keyword(&simplified_schema::scope::with_root_definitions(arm, root)),
                         Some(context.cwd()),
                         None,
                         context,
@@ -1035,7 +1035,7 @@ fn without_match_keyword(schema: &serde_json::Value) -> serde_json::Value {
         serde_json::Value::Object(map) => map
             .iter()
             .filter(|(key, _)| {
-                key.as_str() != crate::markdown::schemas::file_match::DARKMATTER_MATCH_KEYWORD
+                key.as_str() != simplified_schema::file_match::DARKMATTER_MATCH_KEYWORD
             })
             .map(|(key, value)| (key.clone(), without_match_keyword(value)))
             .collect(),
@@ -1216,7 +1216,7 @@ fn root_schema_arm_applies(
 ) -> RootArmApplicability {
     // The arm is judged alone, so it takes its root's definitions.
     let mut candidate = coerce_frontmatter_with_pending(
-        &crate::markdown::schemas::scope::with_root_definitions(arm, root),
+        &simplified_schema::scope::with_root_definitions(arm, root),
         instance,
         composition_pending,
     )
@@ -1224,8 +1224,8 @@ fn root_schema_arm_applies(
     if !project_root_arm_caller_values(&mut candidate, root, records, fragments_by_property) {
         return RootArmApplicability::None;
     }
-    let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm, root);
-    let Ok(validator) = crate::markdown::schemas::validate::build_validator_with_callers(
+    let wrapped = simplified_schema::validate::wrap_arm_as_root_schema(arm, root);
+    let Ok(validator) = simplified_schema::validate::build_validator_with_callers(
         &wrapped,
         Some(&document_context.cwd),
         None,
@@ -1824,9 +1824,7 @@ mod tests {
             .to_string_lossy()
             .into_owned()
     }
-    use crate::markdown::schemas::{
-        Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
-    };
+    use simplified_schema::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr};
     use indexmap::IndexMap;
 
     fn md_with_schema(yaml_body: &str) -> Markdown {
@@ -2527,7 +2525,7 @@ mod tests {
                 arm_index: None,
                 description: None,
                 code,
-                instance_path: crate::markdown::schemas::JsonPointer::parse(path),
+                instance_path: simplified_schema::JsonPointer::parse(path),
                 schema_path: None,
                 offending_property: None,
                 file_reference: None,
@@ -2612,12 +2610,12 @@ mod tests {
             .source()
             .expect("preparation failure should expose a source error");
         let schema_err = source
-            .downcast_ref::<crate::markdown::schemas::SchemaError>()
+            .downcast_ref::<simplified_schema::SchemaError>()
             .expect("source should downcast to SchemaError");
         assert!(
             matches!(
                 schema_err,
-                crate::markdown::schemas::SchemaError::FrontmatterShape { .. }
+                simplified_schema::SchemaError::FrontmatterShape { .. }
             ),
             "expected FrontmatterShape, got {schema_err:?}"
         );
@@ -3751,9 +3749,9 @@ mod tests {
                     "anyOf": [
                         {
                             "type": "string",
-                            "format": crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT,
-                            crate::markdown::schemas::file_match::DARKMATTER_MATCH_KEYWORD: ["./*.md"],
-                            crate::markdown::schemas::file_match::DARKMATTER_MATCH_PROPERTY_KEYWORD: "spec",
+                            "format": simplified_schema::format::DARKMATTER_FILE_FORMAT,
+                            simplified_schema::file_match::DARKMATTER_MATCH_KEYWORD: ["./*.md"],
+                            simplified_schema::file_match::DARKMATTER_MATCH_PROPERTY_KEYWORD: "spec",
                         },
                         {
                             "type": "object",

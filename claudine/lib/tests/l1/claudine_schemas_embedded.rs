@@ -38,15 +38,17 @@ use claudine::composition::{
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::simplified::{DefKey, DefNamespace};
+use simplified_schema::simplified::{DefKey, DefNamespace};
 use darkmatter::markdown::schemas::triggers::parse_trigger_envelope_from_str;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaOriginKind, SchemaRootKind, SchemaRoots,
-    StandaloneSchemaEnvelope, TriggerSource, parse_standalone_schema_document,
+    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaRootKind, SchemaRoots, TriggerSource,
 };
+use simplified_schema::{SchemaOriginKind, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
 use crate::claudine_schemas::{AC5_GROUPS, BundleFile, SchemaRepo, problems, shipped_bundle};
-use crate::claudine_schemas_matrix::{Origin, Shape, Syntax, assert_cells_are_the_shapes, assert_non_string_trigger_key_errors, column_names};
+use crate::claudine_schemas_matrix::{
+    Origin, Shape, Syntax, assert_cells_are_the_shapes, assert_non_string_trigger_key_errors, column_names,
+};
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -1492,8 +1494,8 @@ fn passive_parity_tests_cover_every_ac5_fixture() {
 /// every acyclic helper was inlined at each use.
 #[test]
 fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
-    use darkmatter::markdown::schemas::ValidationProblemCode::ConstraintViolation;
-    use darkmatter::markdown::schemas::validate::build_position_map;
+    use simplified_schema::ValidationProblemCode::ConstraintViolation;
+    use simplified_schema::validate::build_position_map;
 
     const BARE_VERB: &str = "a zero-argument verb written as a bare list item";
     let bare = Bare::new();

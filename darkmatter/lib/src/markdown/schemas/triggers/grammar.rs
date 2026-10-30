@@ -7,7 +7,7 @@
 //!
 //! Each property condition is `property: <type-expr>` where the type
 //! expression reuses the existing [`PropertyAtom`] / [`TypeExpr`] grammar
-//! from [`crate::markdown::schemas::simplified`]. Match loading rejects
+//! from [`simplified_schema::simplified`]. Match loading rejects
 //! constraints that resolve files, import types, load examples, provide
 //! defaults, or mark generated values (see [`is_match_safe_constraint`]).
 //!
@@ -29,8 +29,8 @@
 use biscuit_file::{FileReference, FileReferenceKind, GlobReference, GlobReferenceError};
 use serde_yaml_ng::Value as YamlValue;
 
-use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::simplified::{
+use simplified_schema::errors::SchemaError;
+use simplified_schema::simplified::{
     Constraint, PropertyAtom, PropertyDef, TypeExpr,
     grammar::parse_type_expr,
 };
@@ -529,8 +529,8 @@ fn parse_property_condition_def(name: &str, value: &YamlValue) -> Result<Propert
 fn single_shape_from_yaml(
     name: &str,
     value: &YamlValue,
-) -> Result<crate::markdown::schemas::simplified::SchemaShape, SchemaError> {
-    use crate::markdown::schemas::simplified::{SchemaRoot, parse_yaml_schema};
+) -> Result<simplified_schema::simplified::SchemaShape, SchemaError> {
+    use simplified_schema::simplified::{SchemaRoot, parse_yaml_schema};
     match parse_yaml_schema(value)? {
         SchemaRoot::Single(shape) => Ok(shape),
         SchemaRoot::Union(_) => Err(SchemaError::TriggerMatch {
@@ -542,7 +542,7 @@ fn single_shape_from_yaml(
 }
 
 fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>, SchemaError> {
-    use crate::markdown::schemas::simplified::{SchemaRoot, parse_yaml_schema};
+    use simplified_schema::simplified::{SchemaRoot, parse_yaml_schema};
     let items = value.as_sequence().expect("sequence checked by caller");
     let mut atoms = Vec::with_capacity(items.len());
     for item in items {

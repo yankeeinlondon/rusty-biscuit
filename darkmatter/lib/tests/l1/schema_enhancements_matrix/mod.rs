@@ -12,11 +12,8 @@ mod raw_schema;
 use std::path::Path;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::{
-    Markdown,
-    compose::ComposeSource,
-    schemas::{DarkmatterSchemas, SchemaError, ValidationReport},
-};
+use darkmatter::markdown::{Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, ValidationReport}};
+use simplified_schema::SchemaError;
 
 /// Validates `frontmatter` (YAML lines without fences) as `document.md` in
 /// `dir` through the public schema API, with no baseline configured.

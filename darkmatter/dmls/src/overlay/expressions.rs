@@ -21,9 +21,9 @@ use darkmatter::markdown::compose::expression::{
     parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
-use darkmatter::markdown::schemas::simplified::serialize_property_atom;
-use darkmatter::markdown::schemas::{PropertyDef, TypeExpr};
-use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
+use simplified_schema::simplified::serialize_property_atom;
+use simplified_schema::{PropertyDef, TypeExpr};
+use simplified_schema::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
 use serde::{Deserialize, Serialize};
 

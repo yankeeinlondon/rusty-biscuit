@@ -493,7 +493,7 @@ struct ParsedYaml {
 }
 
 fn parse_yaml_map_rejecting_duplicates(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
-    let value = super::numeric::load_admitted_yaml(yaml)?;
+    let value = simplified_schema::numeric::load_admitted_yaml(yaml)?;
     let mapping_orders = MappingOrders::collect(&value);
     let map = serde_yaml_ng::from_value(value)?;
     Ok(ParsedYaml { map, mapping_orders })
@@ -503,7 +503,7 @@ fn parse_yaml_map_rejecting_duplicates(yaml: &str) -> Result<ParsedYaml, YamlPar
 /// number is in the authored YAML itself, so a later fallback must not hide it.
 fn is_final_yaml_error(error: &YamlParseError) -> bool {
     error.to_string().contains("duplicate entry with key")
-        || super::numeric::is_yaml_admission_error(error)
+        || simplified_schema::numeric::is_yaml_admission_error(error)
 }
 
 /// Replaces `$(...)` shell command substitution bodies with safe placeholders.

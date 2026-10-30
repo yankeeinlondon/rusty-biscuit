@@ -20,15 +20,17 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::coercion::{self, Bound, ConversionError};
+use simplified_schema::coercion::{self, Bound, ConversionError};
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_schema};
-use darkmatter::markdown::schemas::simplified::{
+use darkmatter::markdown::schemas::resolve::resolve_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::simplified::{
     DefinitionTable, PropertyDef, SchemaDeclaration, SchemaRoot, StandaloneSchemaEnvelope, grammar,
     parse_property_definition, parse_standalone_schema_document, parse_yaml_schema, serialize_property_def, TypeExpr,
 };
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaError, SchemaPhase};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{SchemaError, SchemaPhase};
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
 
@@ -300,7 +302,7 @@ mod immutability {
         let _ = effective.validate_for_phase(&input, SchemaPhase::Launch);
         let _ = effective.validate_for_phase(&input, SchemaPhase::Completion);
         let coerced = effective.coerce_frontmatter_with_pending(&input, &HashSet::new());
-        let _ = darkmatter::markdown::schemas::coerce::coerce_frontmatter(&effective.json_schema, &input);
+        let _ = simplified_schema::coerce::coerce_frontmatter(&effective.json_schema, &input);
         assert_eq!(input, before, "frontmatter-level operations mutated their input");
         assert!(coerced.changed, "the probe must exercise a conversion, not only a keep");
 
@@ -732,8 +734,8 @@ mod frontmatter_schema_field {
 mod query_edge_cases {
     use super::*;
     use darkmatter::markdown::schemas::completion::{AlternativeSite, PathStep, def_at_path};
-    use darkmatter::markdown::schemas::property_def_at_path;
-    use darkmatter::markdown::schemas::simplified::suggestions_for_path;
+    use simplified_schema::property_def_at_path;
+    use simplified_schema::simplified::suggestions_for_path;
     use std::borrow::Cow;
 
     const SCHEMA: &str = r#"a: "{ b: number(max(0); suggest(1)) }"
@@ -746,7 +748,7 @@ pick: "boolean | string(suggest(s))"
         parse_yaml_schema(&yaml(SCHEMA)).expect("query schema parses")
     }
 
-    fn root_shape(schema: &SchemaRoot) -> &darkmatter::markdown::schemas::simplified::SchemaShape {
+    fn root_shape(schema: &SchemaRoot) -> &simplified_schema::simplified::SchemaShape {
         match schema {
             SchemaRoot::Single(shape) => shape,
             SchemaRoot::Union(_) => panic!("query schema is a single shape"),
@@ -860,7 +862,7 @@ pick: "boolean | string(suggest(s))"
 /// Function-schema parse and serialize round trip.
 mod function_schema {
     use super::*;
-    use darkmatter::markdown::schemas::simplified::{
+    use simplified_schema::simplified::{
         Constraint, FunctionParameters, FunctionType, PropertyAtom, to_json_schema,
     };
 

@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, PathIdentity, canonicalize_simplified};
 
-use crate::markdown::schemas::SchemaError;
+use simplified_schema::SchemaError;
 
 /// The environment variable naming the fourth schema root.
 pub const SCHEMAS_DIR_VARIABLE: &str = "SCHEMAS_DIR";

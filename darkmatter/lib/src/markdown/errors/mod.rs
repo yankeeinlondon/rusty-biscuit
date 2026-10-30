@@ -29,7 +29,7 @@ use crate::markdown::compose::transclusion::DeferredSetError;
 use crate::markdown::normalize::NormalizationError;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::file_tree::FileTreeError;
-use crate::markdown::schemas::SchemaError;
+use simplified_schema::SchemaError;
 use crate::mermaid::MermaidThemeError;
 use crate::render::image_ref::ImageRefError;
 use crate::render::link::LinkError;

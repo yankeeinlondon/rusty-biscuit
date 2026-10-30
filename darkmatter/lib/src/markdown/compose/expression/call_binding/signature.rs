@@ -7,8 +7,8 @@ use serde_json::Value;
 
 use super::error::{CallBindingError, ContractViolation};
 use super::translate::{TranslateError, TypeResolver, shape_from_property_def};
-use crate::markdown::coercion::{Shape, ValueKind, check_exact};
-use crate::markdown::schemas::simplified::{FunctionType, PropertyAtom, PropertyDef, TypeExpr, serialize_property_def};
+use simplified_schema::coercion::{Shape, ValueKind, check_exact};
+use simplified_schema::simplified::{FunctionType, PropertyAtom, PropertyDef, TypeExpr, serialize_property_def};
 
 /// One compiled parameter.
 #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ impl CompiledParameter {
     }
 
     /// The declared grammar type, before translation; design-time checks
-    /// compare it with [`is_subtype`](crate::markdown::schemas::is_subtype).
+    /// compare it with [`is_subtype`](simplified_schema::is_subtype).
     pub fn declared(&self) -> &PropertyDef {
         &self.declared
     }
@@ -117,7 +117,7 @@ impl CompiledSignature {
             let shape = if let Some(callback) = &callback {
                 Self::compile(function, callback, resolver).map_err(|error| prefix(&parameter.name, error))?;
                 // No JSON value can stand in for an inline callback.
-                Shape::Assert(Box::new(Shape::Any), crate::markdown::coercion::Assertion::new("inline callback", |_| false))
+                Shape::Assert(Box::new(Shape::Any), simplified_schema::coercion::Assertion::new("inline callback", |_| false))
             } else {
                 shape_from_property_def(&parameter.def, resolver).map_err(|error| prefix(&parameter.name, error))?
             };

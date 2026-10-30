@@ -19,6 +19,7 @@ mod positions;
 mod reset_process_caches;
 
 use super::*;
+use simplified_schema::{Constraint, SchemaOriginKind, to_json_schema};
 use crate::markdown::Markdown;
 
 fn md_with_schema(yaml_body: &str) -> Markdown {

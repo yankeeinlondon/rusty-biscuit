@@ -10,10 +10,12 @@ use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaConstraintConflictKind, SchemaError,
-    SchemaSourceId, SchemaSourcePath, SchemaUnionRejection, SchemaRoot, TypeExpr,
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{
+    Constraint, PropertyDef, SchemaConstraintConflictKind, SchemaError, SchemaSourceId, SchemaSourcePath,
+    SchemaUnionRejection, SchemaRoot, TypeExpr,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
@@ -524,9 +526,9 @@ fn programmatic_array_defaults(
     root: &Path,
     inherited: Value,
     supplied: Value,
-) -> Result<darkmatter::markdown::schemas::resolve::NamedTypeExpansion, SchemaError> {
+) -> Result<simplified_schema::resolve::NamedTypeExpansion, SchemaError> {
     let value = serde_yaml_ng::from_str("choice: [string, number]\np: choice[]\n").unwrap();
-    let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+    let mut schema = simplified_schema::parse_yaml_schema(&value).unwrap();
     let SchemaRoot::Single(shape) = &mut schema else {
         panic!("single shape");
     };
@@ -552,7 +554,7 @@ fn inherited_array_defaults_lift_once_and_merge_with_equal_container_defaults() 
     let (_dir, root) = temp_root();
     let expansion = programmatic_array_defaults(&root, json!(["a", 3]), json!(["a", 3.0]))
         .expect("equal array defaults merge after numeric normalization");
-    let lowered = darkmatter::markdown::schemas::to_json_schema(&expansion.schema).unwrap();
+    let lowered = simplified_schema::to_json_schema(&expansion.schema).unwrap();
     let container = &lowered["properties"]["p"];
     assert_eq!(container["default"], json!(["a", 3]));
     let array = unwrap_optional(container);
@@ -691,7 +693,7 @@ fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
     let err = resolve_inline(&root, "a: [\"b(required)\", number]\nb: a[]\n").expect_err("cycle");
     assert!(
         matches!(&err, SchemaError::UnionReference { rejection, .. }
-            if matches!(**rejection, darkmatter::markdown::schemas::SchemaUnionRejection::ArrayArm { arm: 0 })),
+            if matches!(**rejection, simplified_schema::SchemaUnionRejection::ArrayArm { arm: 0 })),
         "{err:?}"
     );
 
@@ -712,7 +714,7 @@ fn cycles_and_depth_limits_still_apply_through_union_postfixes() {
 
 #[test]
 fn authored_union_references_round_trip_and_union_arrays_share_one_spelling() {
-    use darkmatter::markdown::schemas::simplified::{grammar::parse_type_expr, serialize_property_atom};
+    use simplified_schema::simplified::{grammar::parse_type_expr, serialize_property_atom};
 
     for authored in [
         CONTENT_POLICY_LIST,

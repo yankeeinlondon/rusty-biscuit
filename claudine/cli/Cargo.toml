@@ -94,6 +94,7 @@ inquire = "0.9"
 ratatui = "0.30"
 crossterm = "0.29"
 darkmatter = { path = "../../darkmatter/lib" }
+simplified-schema = { path = "../../simplified-schema/lib" }
 darkmatter-cli = { path = "../../darkmatter/cli" }
 color-eyre = "0.6"
 indexmap = "2"

@@ -13,9 +13,10 @@ use darkmatter::markdown::compose::expression::{
     ArgumentCategory, CallCheck, DeclaredTypes, TypeScope, check_expression_calls, parse_spanned,
 };
 use darkmatter::markdown::schemas::catalog::{GlobalCatalog, GlobalRequirement};
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::simplified::serialize_property_def;
-use darkmatter::markdown::schemas::{
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::simplified::serialize_property_def;
+use simplified_schema::{
     PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, TypeExpr, is_definition_subtype_with_definitions,
     is_subtype_with_definitions, nested_property_shape, property_def_at_path, property_def_at_path_with_definitions,
 };

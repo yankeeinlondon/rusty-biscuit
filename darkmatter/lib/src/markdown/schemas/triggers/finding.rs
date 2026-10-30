@@ -9,8 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::markdown::schemas::SchemaAdvisory;
-use crate::markdown::schemas::errors::SchemaError;
+use simplified_schema::SchemaAdvisory;
+use simplified_schema::errors::SchemaError;
 
 use super::discovery::TriggerSource;
 
@@ -241,11 +241,11 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
 
 /// `source`'s host file when it is one other than `trigger`; never an
 /// embedded document, which names no host file.
-fn host_file(source: &crate::markdown::schemas::SchemaSourceId, trigger: &Path) -> Option<PathBuf> {
+fn host_file(source: &simplified_schema::SchemaSourceId, trigger: &Path) -> Option<PathBuf> {
     match source {
-        crate::markdown::schemas::SchemaSourceId::File(path) => other_file(path, trigger),
-        crate::markdown::schemas::SchemaSourceId::InlineDocument
-        | crate::markdown::schemas::SchemaSourceId::Embedded(_) => None,
+        simplified_schema::SchemaSourceId::File(path) => other_file(path, trigger),
+        simplified_schema::SchemaSourceId::InlineDocument
+        | simplified_schema::SchemaSourceId::Embedded(_) => None,
     }
 }
 

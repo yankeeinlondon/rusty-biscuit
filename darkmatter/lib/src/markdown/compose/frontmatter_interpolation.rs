@@ -585,12 +585,12 @@ impl FrontmatterExpressionLocation {
     /// the shared decoder does not model (a flow-collection member spread over
     /// several lines).
     pub(crate) fn project(&self, loaded: &str) -> Option<Range<usize>> {
-        use crate::markdown::schemas::SchemaValueKind;
-        use crate::markdown::schemas::decode_scalar_node;
-        use crate::markdown::schemas::simplified::yaml_scalar::alias_token;
+        use simplified_schema::SchemaValueKind;
+        use simplified_schema::decode_scalar_node;
+        use simplified_schema::simplified::yaml_scalar::alias_token;
 
         let block = crate::markdown::extract_frontmatter_block(loaded).ok()??;
-        let root = crate::markdown::schemas::simplified::locate_frontmatter_value(
+        let root = simplified_schema::simplified::locate_frontmatter_value(
             block.yaml,
             block.yaml_span.start,
         )?;

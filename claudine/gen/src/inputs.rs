@@ -20,9 +20,9 @@ use std::sync::{Arc, LazyLock};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PropertyDef, SchemaRoot, coerce,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::coerce;
+use simplified_schema::{PropertyDef, SchemaRoot};
 use serde_json::Value;
 
 use crate::errors::GenError;

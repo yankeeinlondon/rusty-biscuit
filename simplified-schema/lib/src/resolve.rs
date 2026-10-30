@@ -411,6 +411,24 @@ pub fn expand_named_types_with_locals(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<NamedTypeExpansion, SchemaError> {
+    expand_named_types_searched(
+        schema, local_types, base_dir, defining_file, schema_roots, request_context, shipped, &mut BTreeSet::new(),
+    )
+}
+
+/// [`expand_named_types_with_locals`], adding every location an import probed
+/// to `searched`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_named_types_searched(
+    schema: &SchemaRoot,
+    local_types: Option<&SchemaShape>,
+    base_dir: &Path,
+    defining_file: Option<&Path>,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+    searched: &mut BTreeSet<PathBuf>,
+) -> Result<NamedTypeExpansion, SchemaError> {
     let mut definitions = DefinitionTable::default();
     match schema {
         SchemaRoot::Single(_) => {
@@ -426,7 +444,7 @@ pub fn expand_named_types_with_locals(
                 &SchemaSourcePath::root(),
                 schema_roots,
                 request_context,
-                &mut BTreeSet::new(),
+                searched,
                 &mut definitions,
                 shipped,
             )?;
@@ -456,7 +474,7 @@ pub fn expand_named_types_with_locals(
                     &SchemaSourcePath::root().union_arm(index),
                     schema_roots,
                     request_context,
-                    &mut BTreeSet::new(),
+                    searched,
                     &mut definitions,
                     shipped,
                 )?;
@@ -514,7 +532,7 @@ pub fn check_standalone_named_types(
     Ok(imports.into_iter().collect())
 }
 
-fn resolve_root_union(
+pub(crate) fn resolve_root_union(
     items: &[YamlValue],
     owner: InlineOwner<'_>,
     base_dir: &Path,
@@ -810,7 +828,7 @@ const MAX_REFERENCE_DEPTH: usize = 32;
 /// resolution. Keeping only open frames permits repeated non-cyclic references
 /// while turning direct and transitive loops into structured errors.
 #[derive(Default)]
-struct ReferenceStack {
+pub(crate) struct ReferenceStack {
     frames: Vec<PathBuf>,
 }
 
@@ -868,7 +886,7 @@ fn attribute_origin(resolved: &mut ResolvedSchema, path: &Path) {
     }
 }
 
-fn resolve_reference_in_context(
+pub(crate) fn resolve_reference_in_context(
     reference: &str,
     base_dir: &Path,
     schema_roots: &[PathBuf],
@@ -1494,7 +1512,7 @@ fn contains_example_annotation(value: &Value) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn resolve_standalone_root_union(
+pub(crate) fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
     local_types: Option<&SchemaShape>,
     base_dir: &Path,
@@ -1631,7 +1649,7 @@ fn resolve_standalone_root_union(
 /// written value cannot be admitted (an inexact whole number or an
 /// underflow, which also names its JSON Pointer).
 /// [`SchemaError::AmbiguousReferenced`] when the value is not an object.
-fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
+pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
     let document_error = |message: String| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message,
@@ -3863,7 +3881,7 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
 ///
 /// Fast path: a schema with no `x-darkmatter-example` annotation returns an
 /// empty `Vec` and leaves `json` byte-equivalent.
-fn resolve_document_examples(
+pub(crate) fn resolve_document_examples(
     json: &mut Value,
     base_dir: &Path,
     this_file: Option<&Path>,

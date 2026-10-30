@@ -16,10 +16,8 @@ use crate::markdown::compose::expression::{
     Expr, FmPath, LOCAL_ROOT, fm_namespace_path, reserved_root_descriptors,
 };
 use crate::markdown::schemas::catalog::GlobalCatalog;
-use crate::markdown::schemas::{
-    DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SchemaRoot, TypeExpr,
-};
+use crate::markdown::schemas::EffectiveSchema;
+use simplified_schema::{DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, TypeExpr};
 
 /// The declarations one owner's sites share: its schema projection, its
 /// static frontmatter, and the host roots its expressions may read.

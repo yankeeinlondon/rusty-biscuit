@@ -4,8 +4,7 @@
 
 use serde_json::Value;
 
-// migration: removed in Phase 7
-pub use simplified_schema::coerce::*;
+use simplified_schema::coerce::{ConversionPlan, NestedTemplates};
 use simplified_schema::coercion::{BindOptions, PathSegment, bind_with_marked};
 use simplified_schema::pending::holds_pending_syntax;
 

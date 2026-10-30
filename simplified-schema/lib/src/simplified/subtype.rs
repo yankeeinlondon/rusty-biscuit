@@ -54,8 +54,8 @@ use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, Simplifie
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-/// use darkmatter::markdown::schemas::is_subtype;
+/// use simplified_schema::simplified::grammar::parse_type_expr;
+/// use simplified_schema::is_subtype;
 ///
 /// let atom = |text| parse_type_expr("p", text).unwrap();
 /// let rule = atom("alphanumeric(allow-slashes)");
@@ -85,14 +85,15 @@ pub fn is_subtype(a: &PropertyAtom, b: &PropertyAtom) -> bool {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
-/// use darkmatter::markdown::schemas::{PropertyDef, SchemaRoot, is_subtype_with_definitions};
+/// use simplified_schema::embedded::ShippedSources;
+/// use simplified_schema::resolve::resolve_yaml_schema;
+/// use simplified_schema::{PropertyDef, SchemaRoot, is_subtype_with_definitions};
 ///
 /// let dir = std::env::temp_dir();
 /// let context = biscuit_file::FileResolutionContext::new(&dir);
 /// let yaml = "data: [string, number, '{ items: data[] }']\nvalue: data\ntext: string\n";
 /// let yaml = serde_yaml_ng::from_str(yaml).unwrap();
-/// let resolved = resolve_yaml_schema(&yaml, &dir, &context).unwrap();
+/// let resolved = resolve_yaml_schema(&yaml, &dir, &context, ShippedSources::NONE).unwrap();
 /// let Some(SchemaRoot::Single(shape)) = &resolved.simplified else { unreachable!() };
 /// let atom = |name: &str| match &shape.properties[name] {
 ///     PropertyDef::Single(atom) => atom.clone(),
@@ -269,8 +270,8 @@ fn scalar_reference(atom: &PropertyAtom) -> Option<&DefKey> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-/// use darkmatter::markdown::schemas::{PropertyDef, is_definition_subtype};
+/// use simplified_schema::simplified::grammar::parse_type_expr;
+/// use simplified_schema::{PropertyDef, is_definition_subtype};
 ///
 /// let atom = |text| parse_type_expr("p", text).unwrap();
 /// let source = PropertyDef::Union(vec![atom("string"), atom("number")]);
@@ -302,8 +303,8 @@ pub fn is_definition_subtype_with_definitions(a: &PropertyDef, b: &PropertyDef, 
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-/// use darkmatter::markdown::schemas::is_string_like;
+/// use simplified_schema::simplified::grammar::parse_type_expr;
+/// use simplified_schema::is_string_like;
 ///
 /// let atom = |text| parse_type_expr("p", text).unwrap();
 /// assert!(is_string_like(&atom("alphanumeric(allow-slashes)")));

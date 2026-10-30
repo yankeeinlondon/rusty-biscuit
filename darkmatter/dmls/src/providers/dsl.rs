@@ -1183,7 +1183,7 @@ fn expression_diagnostics(
 pub(crate) struct KnownRoots<'a> {
     catalogs: Vec<darkmatter::markdown::schemas::catalog::GlobalCatalog>,
     ast: &'a crate::overlay::FrontmatterAst,
-    shape: &'a darkmatter::markdown::schemas::SchemaShape,
+    shape: &'a simplified_schema::SchemaShape,
 }
 
 impl<'a> KnownRoots<'a> {

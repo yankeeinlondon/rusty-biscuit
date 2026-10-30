@@ -83,12 +83,17 @@ impl ValidationProblem {
     /// than passing silently, and this tells the two failures apart. Always
     /// `false` with the `file` feature, where every check runs.
     pub fn is_unavailable_check(&self) -> bool {
-        if cfg!(feature = "file") {
-            return false;
-        }
-        // Without `file`, every parsed file value's resolution fails as
-        // `ResolutionUnavailable` (class `MissingContext`), and a `match()`
-        // glob accepts nothing; malformed syntax is still judged.
+        !cfg!(feature = "file") && self.is_file_check()
+    }
+
+    /// Whether this problem is a file value's resolution failure or a
+    /// `match()` glob rejection: the checks that need a file-resolution
+    /// context. Where no context exists (no `file` feature, or a schema built
+    /// from in-memory content) these are unavailable checks; malformed file
+    /// syntax is judged everywhere and is not one of them.
+    pub(crate) fn is_file_check(&self) -> bool {
+        // Without a context every parsed file value's resolution fails, and a
+        // `match()` glob accepts nothing.
         matches!(self.file_reference, Some(FileReferenceDiagnostic::ResolutionFailed { .. }))
             || self.schema_path.as_ref().is_some_and(|path| {
                 path.segments().last().map(String::as_str) == Some(crate::file_match::DARKMATTER_MATCH_KEYWORD)

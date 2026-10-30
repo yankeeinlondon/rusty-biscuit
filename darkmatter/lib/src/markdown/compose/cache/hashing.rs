@@ -393,9 +393,8 @@ mod tests {
 
     #[test]
     fn options_hash_sensitive_to_baseline_schema() {
-        use crate::markdown::schemas::{
-            Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType,
-            TypeExpr,
+        use simplified_schema::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
         };
         use indexmap::IndexMap;
 

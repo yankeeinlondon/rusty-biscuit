@@ -14,10 +14,10 @@ use darkmatter::markdown::schemas::completion::{
     AlternativeCompletion, CompletionKind, alternative_accepts, for_list_item, for_property,
     for_property_value,
 };
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PropertyDef, SchemaRoot, SuggestionLintReason,
-    SuggestionQuery, TypeExpr, darkmatter_base_schema, flattened_alternatives, lint_suggestions,
-    parse_standalone_schema_document, parse_yaml_schema, suggestions_for_def, suggestions_for_path,
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, darkmatter_base_schema};
+use simplified_schema::{
+    PropertyDef, SchemaRoot, SuggestionLintReason, SuggestionQuery, TypeExpr, flattened_alternatives,
+    lint_suggestions, parse_standalone_schema_document, parse_yaml_schema, suggestions_for_def, suggestions_for_path,
 };
 use serde_json::{Value, json};
 

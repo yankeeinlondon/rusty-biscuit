@@ -3,14 +3,14 @@
 //! This module evaluates expressions for both interpolation and conditions.
 //! It is the foundation for expression processing in the compose pipeline.
 //! The passive syntax (AST, lexer, parser) lives in
-//! [`simplified_schema::expression`] and is re-exported here under its old
-//! paths.
+//! [`simplified_schema::expression`]; its most-used items are re-exported
+//! here.
 //!
 //! ## Components
 //!
-//! - **AST** (`ast::Expr`) - Abstract syntax tree for expressions
-//! - **Lexer** (`lexer::Lexer`) - Tokenizes expression strings
-//! - **Parser** (`parser::Parser`) - Builds AST from tokens
+//! - **AST** (`Expr`) - Abstract syntax tree for expressions
+//! - **Lexer** (`Lexer`) - Tokenizes expression strings
+//! - **Parser** (`Parser`) - Builds AST from tokens
 //! - **ExpressionFinder** (`lexer::ExpressionFinder`) - Locates `{{ … }}` in
 //!   Markdown, skipping code blocks
 //! - **EvaluationLookup** - Trait for resolving variable lookups
@@ -69,8 +69,6 @@
 //! topic.
 
 pub(crate) mod absence;
-// migration: removed in Phase 7
-pub use simplified_schema::expression::ast;
 pub mod binding;
 pub mod call_binding;
 pub mod call_check;
@@ -89,8 +87,6 @@ pub mod iteration;
 pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
-// migration: removed in Phase 7
-pub use simplified_schema::expression::parser;
 pub mod prepared;
 pub mod resolve_ctx;
 pub mod scope;
@@ -101,7 +97,7 @@ pub use absence::{
     AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_callback_reads,
     static_variable_reads, static_variable_reads_in_scope,
 };
-pub use ast::{
+pub use simplified_schema::expression::ast::{
     BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedCallArgument, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
 };
 pub use binding::{
@@ -156,11 +152,11 @@ pub use scope::{
     WriteSet, project_pattern, project_source,
 };
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
-pub use lexer::{
-    ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
-    Lexer, LiteralTokenLocation, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
+pub use lexer::{ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral, LiteralTokenLocation};
+pub use simplified_schema::expression::lexer::{
+    ComparisonOp, Lexer, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
 };
-pub use parser::{
+pub use simplified_schema::expression::parser::{
     ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_condition, parse_condition_spanned,
     parse_spanned,
 };
@@ -173,7 +169,7 @@ pub use prepared::{
 use absence::{AbsenceScope, MissingRootObserver};
 use serde_json::Value;
 
-use crate::markdown::numeric::{self, NumberTextError, NumericAdmissionError};
+use simplified_schema::numeric::{self, NumberTextError, NumericAdmissionError};
 
 use crate::catalog::{describe_for_error, suggest};
 

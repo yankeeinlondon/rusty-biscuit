@@ -22,7 +22,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
-use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

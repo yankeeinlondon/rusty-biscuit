@@ -423,14 +423,14 @@ fn check_named_types(
 
 /// Calls `visit` with every atom of `def`, including those nested in inline
 /// objects, unions, tuples, and function signatures.
-fn visit_def(def: &PropertyDef, visit: &mut impl FnMut(&PropertyAtom)) {
+pub(crate) fn visit_def(def: &PropertyDef, visit: &mut impl FnMut(&PropertyAtom)) {
     match def {
         PropertyDef::Single(atom) => visit_atom(atom, visit),
         PropertyDef::Union(arms) => arms.iter().for_each(|atom| visit_atom(atom, visit)),
     }
 }
 
-fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAtom)) {
+pub(crate) fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAtom)) {
     visit(atom);
     match &atom.ty {
         TypeExpr::InlineObject(shape) => shape

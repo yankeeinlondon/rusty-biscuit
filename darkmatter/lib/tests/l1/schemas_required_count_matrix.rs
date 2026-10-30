@@ -21,9 +21,8 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, ValidationProblem, ValidationProblemCode,
-};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{ValidationProblem, ValidationProblemCode};
 
 /// Property names used by the matrix. None collide with the shipped baseline.
 const CANDIDATES: [&str; 4] = ["alpha", "bravo", "charlie", "delta"];

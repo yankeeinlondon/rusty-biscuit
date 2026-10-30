@@ -1,9 +1,8 @@
-use darkmatter::markdown::schemas::{
-    PropertyDef, SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath,
-    SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot, parse_property_definition,
-    parse_property_definition_with_source, parse_schema_declaration,
-    parse_schema_declaration_with_source, parse_yaml_schema,
-    classify_schema_reference, resolve::resolve_schema_with_roots,
+use darkmatter::markdown::schemas::resolve::resolve_schema_with_roots;
+use simplified_schema::{
+    PropertyDef, SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath, SchemaSourcePathSegment,
+    SchemaSpanKind, SchemaRoot, parse_property_definition, parse_property_definition_with_source,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema, classify_schema_reference,
     simplified::grammar::MAX_INLINE_OBJECT_DEPTH,
 };
 use serde_yaml_ng::Value as YamlValue;
@@ -895,7 +894,7 @@ fn expression_source_maps_follow_description_and_file_reference_modes() {
 /// Every authored span of `kind` at `path`, as authored text.
 fn span_texts<'a>(
     source: &'a str,
-    map: &darkmatter::markdown::schemas::SchemaSourceMap,
+    map: &simplified_schema::SchemaSourceMap,
     path: &SchemaSourcePath,
     kind: SchemaSpanKind,
 ) -> Vec<&'a str> {
@@ -984,7 +983,7 @@ fn bare_local_reference_in_a_schema_declaration_records_import_name_spans() {
 #[test]
 fn a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference() {
     use darkmatter::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves};
-    use darkmatter::markdown::schemas::simplified::{
+    use simplified_schema::simplified::{
         grammar::parse_type_expr, serialize_property_atom,
     };
 
@@ -1019,9 +1018,8 @@ fn a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference() {
 
 // ── Located definition failures ───────────────────────────────────────────
 
-use darkmatter::markdown::schemas::{
-    LocatedDefinitionFailure, locate_standalone_definition_failure,
-    parse_standalone_schema_document,
+use simplified_schema::{
+    LocatedDefinitionFailure, locate_standalone_definition_failure, parse_standalone_schema_document,
 };
 
 fn root() -> SchemaSourcePath {

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeSource};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
-use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
+use simplified_schema::coerce::coerce_frontmatter;
 use serde_json::{Value, json};
 
 use crate::request_support::{context_at, request};

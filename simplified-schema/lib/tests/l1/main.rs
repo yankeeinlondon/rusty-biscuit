@@ -7,5 +7,7 @@ mod coercion_core;
 mod expression_syntax;
 mod foundations;
 mod resolution_unavailable;
+mod schema_files;
+mod schema_object;
 mod test_layout;
 mod validation_contract;

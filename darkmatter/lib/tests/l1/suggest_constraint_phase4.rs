@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use darkmatter::markdown::schemas::{
-    SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document,
-    resolve::resolve_schema, to_json_schema,
-};
+use darkmatter::markdown::schemas::resolve::resolve_schema;
+use simplified_schema::{SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document, to_json_schema};
 use serde_json::json;
 
 fn write(path: &Path, contents: &str) {
@@ -13,7 +11,7 @@ fn write(path: &Path, contents: &str) {
     std::fs::write(path, contents).unwrap();
 }
 
-fn resolve_file(path: &Path) -> darkmatter::markdown::schemas::resolve::ResolvedSchema {
+fn resolve_file(path: &Path) -> simplified_schema::resolve::ResolvedSchema {
     let dir = path.parent().expect("schema file has a directory");
     resolve_schema(
         &json!(path.to_string_lossy()),

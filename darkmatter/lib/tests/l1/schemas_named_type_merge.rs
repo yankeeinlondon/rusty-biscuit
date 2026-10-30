@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, expand_named_types, resolve_yaml_schema};
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef, SchemaConstraintConflictKind,
-    SchemaConstraintParticipant,
-    SchemaError, SchemaPhase, SchemaSourceId, SchemaSourcePath, SchemaRoot,
-    SuggestionLintReason, ValidationProblemCode, lint_suggestions,
-    parse_standalone_schema_document,
+use darkmatter::markdown::schemas::resolve::{expand_named_types, resolve_yaml_schema};
+use simplified_schema::resolve::ResolvedSchema;
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{
+    Constraint, PropertyAtom, PropertyDef, SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaError,
+    SchemaPhase, SchemaSourceId, SchemaSourcePath, SchemaRoot, SuggestionLintReason, ValidationProblemCode,
+    lint_suggestions, parse_standalone_schema_document,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
@@ -541,7 +541,7 @@ fn programmatic_defaults_merge_when_their_lowered_numbers_are_equal() {
     ] {
         let dir = TempDir::new().expect("tempdir");
         let value: YamlValue = serde_yaml_ng::from_str("base: unknown\ncopy: base\n").unwrap();
-        let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+        let mut schema = simplified_schema::parse_yaml_schema(&value).unwrap();
         let SchemaRoot::Single(shape) = &mut schema else {
             panic!("single schema");
         };
@@ -561,7 +561,7 @@ fn programmatic_defaults_merge_when_their_lowered_numbers_are_equal() {
             &FileResolutionContext::new(dir.path()),
         )
         .expect("defaults lowering to the same number must merge");
-        let lowered = darkmatter::markdown::schemas::to_json_schema(&expansion.schema).unwrap();
+        let lowered = simplified_schema::to_json_schema(&expansion.schema).unwrap();
         assert_eq!(lowered["properties"]["copy"]["default"], inherited);
     }
 }
@@ -570,7 +570,7 @@ fn programmatic_defaults_merge_when_their_lowered_numbers_are_equal() {
 fn a_programmatic_float_at_the_signed_boundary_does_not_equal_the_smaller_integer() {
     let dir = TempDir::new().expect("tempdir");
     let value: YamlValue = serde_yaml_ng::from_str("base: unknown\ncopy: base\n").unwrap();
-    let mut schema = darkmatter::markdown::schemas::parse_yaml_schema(&value).unwrap();
+    let mut schema = simplified_schema::parse_yaml_schema(&value).unwrap();
     let SchemaRoot::Single(shape) = &mut schema else {
         panic!("single schema");
     };
@@ -1191,7 +1191,7 @@ fn option_conflicts_through_two_imports_carry_both_canonical_sets() {
     assert_eq!(constraints[0].origin.span, None, "bare `alphanumeric` has no option token");
     assert_inline(
         &constraints[1],
-        &Constraint::Options(vec![darkmatter::markdown::schemas::AlphanumericOption::AllowDashes]),
+        &Constraint::Options(vec![simplified_schema::AlphanumericOption::AllowDashes]),
         "allow-dashes",
         0,
     );
@@ -1207,7 +1207,7 @@ fn option_conflicts_through_two_imports_carry_both_canonical_sets() {
     let (display, _, constraints) = fixture.conflict("handle_mid(allow-periods, allow-dashes)@./near.yaml");
     fixture.assert_far(
         &constraints[0],
-        &Constraint::Options(vec![darkmatter::markdown::schemas::AlphanumericOption::AllowDashes]),
+        &Constraint::Options(vec![simplified_schema::AlphanumericOption::AllowDashes]),
         "handle",
         "allow-dashes",
         Some("allow-dashes"),

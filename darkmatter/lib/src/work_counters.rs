@@ -37,7 +37,7 @@ pub enum Work {
     /// miss in the shared structural cache (also counted as a
     /// [`Work::ValidatorCompile`]).
     AlphanumericCheckCompile,
-    /// A source [`PositionMap`](crate::markdown::schemas::PositionMap) built
+    /// A source [`PositionMap`](simplified_schema::PositionMap) built
     /// from a document, at most once per validation report and only for a
     /// report that holds a problem.
     PositionMapBuild,

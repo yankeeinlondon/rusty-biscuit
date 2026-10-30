@@ -295,7 +295,7 @@ pub fn definition_lookups() -> Vec<String> {
 }
 
 /// Records one recursive-definition lookup while a test is recording.
-pub(crate) fn note_definition_lookup(key: &darkmatter::markdown::schemas::DefKey) {
+pub(crate) fn note_definition_lookup(key: &simplified_schema::DefKey) {
     if RECORDING_DEFINITION_LOOKUPS.load(Ordering::Relaxed) {
         DEFINITION_LOOKUPS
             .lock()

@@ -1746,7 +1746,7 @@ fn sequence_content(content: &str) -> Option<usize> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::mapping_separator;
+/// use simplified_schema::mapping_separator;
 ///
 /// assert_eq!(mapping_separator("a:b: c", false), Some(3));
 /// assert_eq!(mapping_separator("'x: y': z", false), Some(6));

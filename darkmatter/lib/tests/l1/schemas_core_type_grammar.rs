@@ -7,14 +7,15 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-use darkmatter::markdown::schemas::simplified::serialize_property_atom;
-use darkmatter::markdown::schemas::{
-    AlphanumericOption, AlphanumericOptions, Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef,
-    SchemaConstraintConflictKind, SchemaError, SchemaSourceId, SchemaSourcePath, SchemaSpanKind,
-    SchemaRoot, SimplifiedType, TypeExpr, parse_property_definition,
-    parse_property_definition_with_source, parse_yaml_schema,
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::serialize_property_atom;
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{
+    AlphanumericOption, AlphanumericOptions, Constraint, PropertyAtom, PropertyDef, SchemaConstraintConflictKind,
+    SchemaError, SchemaSourceId, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType, TypeExpr,
+    parse_property_definition, parse_property_definition_with_source, parse_yaml_schema,
 };
 use serde_json::json;
 use serde_yaml_ng::Value as YamlValue;
@@ -348,12 +349,12 @@ fn equal_option_sets_at_a_use_site_resolve() {
     assert_eq!(
         b.constraints
             .iter()
-            .filter(|c| matches!(c, darkmatter::markdown::schemas::Constraint::Options(_)))
+            .filter(|c| matches!(c, simplified_schema::Constraint::Options(_)))
             .count(),
         1,
         "the repeated option list is not duplicated: {b:?}"
     );
-    assert!(b.constraints.contains(&darkmatter::markdown::schemas::Constraint::MaxLen(10)));
+    assert!(b.constraints.contains(&simplified_schema::Constraint::MaxLen(10)));
 }
 
 #[test]

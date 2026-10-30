@@ -58,7 +58,7 @@ use crate::lifecycle::{
     ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, operand_form, template_operands,
     validate_action_operands_with,
 };
-use crate::markdown::coercion::PathSegment;
+use simplified_schema::coercion::PathSegment;
 use crate::markdown::compose::expression::call_binding::{CallBindingError, CallErrorKind};
 use crate::markdown::compose::expression::{defer_templates, is_malformed_template};
 use crate::markdown::literal_token::decode_leaf;

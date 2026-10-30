@@ -377,7 +377,7 @@ pub fn build_yaml_position_map(yaml: &str) -> indexmap::IndexMap<String, StyleSp
         if content.is_empty() || content.starts_with('#') || content.starts_with('-') {
             continue;
         }
-        let Some(colon) = crate::markdown::schemas::mapping_separator(content, false) else {
+        let Some(colon) = simplified_schema::mapping_separator(content, false) else {
             continue;
         };
         let raw_key = content[..colon].trim();

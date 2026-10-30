@@ -13,11 +13,11 @@ use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ShellExpansionError};
-use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
+use simplified_schema::coerce::coerce_frontmatter;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PendingPolicy, PendingValueReason, PositionMap, ValidationOptions,
-    parse_yaml_schema, to_json_schema,
+    DarkmatterSchemas, EffectiveSchema, PendingPolicy, PendingValueReason, ValidationOptions,
 };
+use simplified_schema::{PositionMap, parse_yaml_schema, to_json_schema};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

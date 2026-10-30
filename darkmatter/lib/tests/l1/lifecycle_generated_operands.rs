@@ -19,12 +19,12 @@ use darkmatter::lifecycle::{OperandVerdict, validate_operands};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::functions::function_registration;
 use darkmatter::markdown::compose::expression::{CallErrorKind, FunctionRegistration};
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-use darkmatter::markdown::schemas::simplified::{
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::{
     Constraint, FunctionType, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, serialize_property_atom,
     serialize_property_def,
 };
-use darkmatter::markdown::schemas::validate::build_position_map;
+use simplified_schema::validate::build_position_map;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 use serde_json::{Value, json};
 use serde_yaml_ng::{Mapping, Value as YamlValue};
@@ -296,7 +296,7 @@ fn a_literal_token_keeps_the_conversion_and_template_controls() {
 
 #[test]
 fn the_phase_apis_keep_a_stored_token_apart_from_an_authored_template() {
-    use darkmatter::markdown::schemas::{PositionMap, SchemaPhase};
+    use simplified_schema::{PositionMap, SchemaPhase};
 
     let schema = host_schema();
     let token = darkmatter::markdown::literal_token::encode("{{ fm.count }}");

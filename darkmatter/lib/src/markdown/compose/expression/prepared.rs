@@ -39,12 +39,12 @@ use std::sync::OnceLock;
 use serde_json::Value;
 
 use super::absence::static_variable_reads_in_scope;
-use super::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::binding::{
     Availability, BindingError, BindingView, EvaluationSession, RootClass, UnavailableBinding,
 };
-use super::lexer::{ExpressionFinder, ExpressionLocation, ParseMode};
-use super::parser::{parse_condition_spanned, parse_spanned};
+use super::{ExpressionFinder, ExpressionLocation, ParseMode};
+use simplified_schema::expression::parser::{parse_condition_spanned, parse_spanned};
 use super::{ExpressionError, evaluate, functions, unknown_function_error};
 use crate::markdown::compose::interpolation::{Evaluator, ExpressionFailurePolicy, interpolate_value};
 use crate::markdown::span::SourceSpan;
@@ -578,7 +578,7 @@ pub fn validate_expression_in_scope(
     super::call_check::visit_call_nodes(expr, &mut |call| {
         let SpannedExprKind::CallbackCall { args, .. } = &call.kind else { return; };
         for argument in args {
-            let super::ast::SpannedCallArgument::Callback(callback) = argument else { continue; };
+            let simplified_schema::expression::ast::SpannedCallArgument::Callback(callback) = argument else { continue; };
             if let Err(error) = super::check_local_names(callback.pattern.erase().names(), Some(view)) {
                 diagnostics.push((callback.pattern_span.clone(), ExpressionError::InvalidCallback {
                     span: callback.pattern_span.clone(),

@@ -214,7 +214,7 @@ fn rule_types_keep_only_their_canonical_identity() {
 /// unchanged.
 #[test]
 fn rule_coverage_follows_the_structural_relation_for_string_like_holes() {
-    use crate::markdown::schemas::simplified::grammar::parse_type_expr;
+    use simplified_schema::simplified::grammar::parse_type_expr;
     let approval = |text: &str| {
         StringLikeType::from_atom(&parse_type_expr("p", text).unwrap())
             .map_or(ApprovalType::BroadString, ApprovalType::StringLike)
@@ -336,7 +336,7 @@ mod guarded_discovery {
     ) -> Result<ShellCandidate, ShellExpansionError> {
         let schema = schema.map(|yaml| {
             let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("schema YAML");
-            crate::markdown::schemas::parse_yaml_schema(&value).expect("schema parses")
+            simplified_schema::parse_yaml_schema(&value).expect("schema parses")
         });
         let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(host_globals);
         let site = TypeScope::unguarded(&declared);
@@ -517,9 +517,9 @@ mod prepared_parity {
         PreparedInterpolation::new(text)
     }
 
-    fn schema(yaml: &str) -> crate::markdown::schemas::SchemaRoot {
+    fn schema(yaml: &str) -> simplified_schema::SchemaRoot {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("schema YAML");
-        crate::markdown::schemas::parse_yaml_schema(&value).expect("schema parses")
+        simplified_schema::parse_yaml_schema(&value).expect("schema parses")
     }
 
     #[test]

@@ -10,9 +10,8 @@ use std::path::Path;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, ValidationProblem, ValidationProblemKind, ValidationReport,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{ValidationProblem, ValidationProblemKind};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -200,7 +199,8 @@ fn branch_chain_writes_the_documented_tree() {
 /// root-level missing key is still deferred when it is the pending one.
 #[test]
 fn a_nested_missing_property_is_not_hidden_by_a_pending_key_of_the_same_name() {
-    use darkmatter::markdown::schemas::{PendingPolicy, PositionMap, ValidationOptions};
+    use darkmatter::markdown::schemas::{PendingPolicy, ValidationOptions};
+use simplified_schema::PositionMap;
     use serde_json::json;
 
     let dir = TempDir::new().expect("tempdir");

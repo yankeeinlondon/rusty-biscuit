@@ -25,7 +25,7 @@ use crate::markdown::compose::expression::{
     Expr, ExpressionError, FileRefFailure, parse, suggest_sibling_files,
 };
 use crate::markdown::highlighting::highlight_yaml_lines;
-use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
+use simplified_schema::{ValidationProblem, ValidationProblemKind};
 use crate::markdown::types::{AuthoredSpan, SourceRef};
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
@@ -1252,8 +1252,8 @@ mod tests {
             column: Some(1),
             arm_index: None,
             description: description.map(String::from),
-            code: crate::markdown::schemas::ValidationProblemCode::TypeMismatch,
-            instance_path: crate::markdown::schemas::JsonPointer::parse("/title"),
+            code: simplified_schema::ValidationProblemCode::TypeMismatch,
+            instance_path: simplified_schema::JsonPointer::parse("/title"),
             schema_path: None,
             offending_property: None,
             file_reference: None,
@@ -1326,7 +1326,7 @@ mod tests {
             path: pointer.to_string(),
             kind,
             property: property.map(String::from),
-            instance_path: crate::markdown::schemas::JsonPointer::parse(pointer),
+            instance_path: simplified_schema::JsonPointer::parse(pointer),
             ..problem_with_description(None)
         };
         let problems = [

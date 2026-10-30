@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationProblemCode};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::ValidationProblemCode;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 

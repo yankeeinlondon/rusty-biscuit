@@ -15,7 +15,7 @@
 //! documents is exactly the false-positive surface the typed grammar exists
 //! to design away.
 
-use crate::markdown::schemas::errors::SchemaError;
+use simplified_schema::errors::SchemaError;
 
 use super::grammar::MatchConditions;
 
@@ -78,7 +78,7 @@ fn requires_presence(expr: &super::grammar::MatchExpr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::simplified::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
+    use simplified_schema::simplified::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
     use crate::markdown::schemas::triggers::grammar::{MatchConditions, MatchExpr, PathGlobs};
 
     fn required_prop(name: &str) -> MatchExpr {

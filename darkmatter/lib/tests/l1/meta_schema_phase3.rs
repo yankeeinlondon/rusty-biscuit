@@ -1,15 +1,11 @@
 //! Phase 3 contracts for the SimplifiedSchema semantic meta-type vocabulary.
 
-use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DetectOptions, PropertyDef, SchemaRoot, SimplifiedType, TypeExpr,
-        detect_schema, schema_to_yaml, schema_type_descriptors,
-        simplified::{grammar::parse_type_expr, serialize_property_atom},
-    },
-};
+use darkmatter::markdown::{Markdown, schemas::{DetectOptions, detect_schema, schema_to_yaml, schema_type_descriptors}};
+use simplified_schema::{PropertyDef, SchemaRoot, SimplifiedType, TypeExpr};
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::serialize_property_atom;
 
-fn parse(input: &str) -> darkmatter::markdown::schemas::PropertyAtom {
+fn parse(input: &str) -> simplified_schema::PropertyAtom {
     parse_type_expr("candidate", input).unwrap_or_else(|error| {
         panic!("expected {input:?} to parse, got {error}")
     })

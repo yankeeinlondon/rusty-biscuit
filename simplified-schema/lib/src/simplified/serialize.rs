@@ -41,7 +41,7 @@ impl Constraint {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter::markdown::schemas::simplified::Constraint;
+    /// use simplified_schema::simplified::Constraint;
     ///
     /// assert_eq!(Constraint::MinLen(10).to_schema_text(None), "min(10)");
     /// assert_eq!(Constraint::Options(vec![]).to_schema_text(None), "alphanumeric");
@@ -89,7 +89,7 @@ impl Constraint {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter::markdown::schemas::simplified::Constraint;
+    /// use simplified_schema::simplified::Constraint;
     ///
     /// let tab = Constraint::Default(serde_json::json!("a\tb"));
     /// assert_eq!(tab.diagnostic_excerpt(), r"default('a\tb')");

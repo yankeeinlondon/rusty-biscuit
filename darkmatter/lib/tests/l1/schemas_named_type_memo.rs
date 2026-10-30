@@ -9,8 +9,9 @@
 use std::path::Path;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::SchemaError;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
+use simplified_schema::SchemaError;
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
 

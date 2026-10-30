@@ -7,9 +7,8 @@
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, darkmatter_base_json_schema, resolve::merge_baseline,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, darkmatter_base_json_schema};
+use simplified_schema::resolve::merge_baseline;
 use serde_json::{Map, Value, json};
 use std::hint::black_box;
 

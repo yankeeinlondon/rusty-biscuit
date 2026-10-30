@@ -39,7 +39,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::markdown::compose::expression::Expr;
-use crate::markdown::schemas::DefinitionTable;
+use simplified_schema::DefinitionTable;
 use crate::markdown::span::SourceSpan;
 
 pub use iterable::{ItemFrame, PatternMismatch, SourceProjection, project_pattern, project_source};

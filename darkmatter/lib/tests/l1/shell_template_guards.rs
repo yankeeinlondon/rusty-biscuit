@@ -13,7 +13,7 @@ use darkmatter::markdown::compose::shell_expansion::template::{
     ApprovalType, CommandTemplate, HoleError, HoleTiming, RejectReason, TemplateShape, fill_template,
     parse_authored, resolve_late_values, rule_covers,
 };
-use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::{Value, json};
 use std::cell::RefCell;

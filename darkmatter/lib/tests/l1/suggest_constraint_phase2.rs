@@ -1,14 +1,11 @@
-use darkmatter::markdown::schemas::{
-    parse_yaml_schema,
-    resolve::resolve_schema,
-    simplified::{
+use darkmatter::markdown::schemas::resolve::resolve_schema;
+use simplified_schema::{parse_yaml_schema, simplified::{
         Constraint, PropertyDef, SchemaRoot, grammar::normalize_simple_decimal,
         parse_yaml_schema_with_source, serialize_property_atom, to_json_schema,
-    },
-};
+    }};
 use serde_json::{Value, json};
 
-fn suggestions(expression: &str) -> Vec<darkmatter::markdown::schemas::simplified::SuggestionCandidate> {
+fn suggestions(expression: &str) -> Vec<simplified_schema::simplified::SuggestionCandidate> {
     let yaml = format!("value: {expression}\n");
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).unwrap();
     let SchemaRoot::Single(shape) = parse_yaml_schema(&value).unwrap() else {
@@ -95,7 +92,7 @@ fn serializer_is_deterministic_and_reparses_suggestions() {
     };
     let serialized = serialize_property_atom(atom);
     assert_eq!(serialized, "number(integer;suggest(3.5,many))[]");
-    let reparsed = darkmatter::markdown::schemas::simplified::grammar::parse_type_expr(
+    let reparsed = simplified_schema::simplified::grammar::parse_type_expr(
         "value",
         &serialized,
     )

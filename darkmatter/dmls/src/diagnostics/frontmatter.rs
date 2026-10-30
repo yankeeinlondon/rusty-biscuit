@@ -12,15 +12,14 @@
 //! surface is the one exception (see `nested_span`).
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::format::is_pending_expression_value;
-use darkmatter::markdown::schemas::{
-    PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
-    ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
-    SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
-    SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value,
-    LocatedDefinitionFailure, LocatedRelated, locate_standalone_definition_failure, parse_property_definition,
-    parse_property_definition_with_source, parse_schema_declaration,
-    parse_schema_declaration_with_source, parse_yaml_schema,
+use simplified_schema::format::is_pending_expression_value;
+use darkmatter::markdown::schemas::{ValidationOptions, ValidationReport};
+use simplified_schema::{
+    PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason, ValidationProblem,
+    ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
+    SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
+    locate_standalone_definition_failure, parse_property_definition, parse_property_definition_with_source,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
 };
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};

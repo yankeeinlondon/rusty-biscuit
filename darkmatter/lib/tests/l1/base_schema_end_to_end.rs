@@ -1,13 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
 
 use darkmatter::markdown::{
-    Markdown,
-    compose::{RequestSnapshot, build_resolution_context},
-    schemas::{
-        DarkmatterSchemas, EmbeddedSchemaBundle, PropertyDef, SchemaShape, TypeExpr, darkmatter_base_json_schema,
-        darkmatter_base_schema, parse_yaml_schema, resolve::resolve_yaml_schema, to_json_schema,
-    },
+    Markdown, compose::{RequestSnapshot, build_resolution_context},
+    schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema, darkmatter_base_schema, resolve::resolve_yaml_schema},
 };
+use simplified_schema::{PropertyDef, SchemaShape, TypeExpr, parse_yaml_schema, to_json_schema};
 use biscuit_test_harness::manifest_dir;
 use serde_yaml_ng::Value as YamlValue;
 
@@ -98,7 +95,7 @@ fn base_schema_file_parses_and_converts() {
     let json = darkmatter_base_json_schema();
 
     match schema {
-        darkmatter::markdown::schemas::SchemaRoot::Single(shape) => {
+        simplified_schema::SchemaRoot::Single(shape) => {
             assert!(shape.properties.contains_key("$schema"));
             assert!(shape.properties.contains_key("title"));
             assert!(shape.properties.contains_key("ctx"));
@@ -117,7 +114,7 @@ fn base_schema_file_parses_and_converts() {
 
 #[test]
 fn shipped_base_schema_exposes_the_nullable_generated_ctx_cwd_contract() {
-    let darkmatter::markdown::schemas::SchemaRoot::Single(root) =
+    let simplified_schema::SchemaRoot::Single(root) =
         darkmatter_base_schema()
     else {
         panic!("base schema must be a single object shape");
@@ -134,21 +131,21 @@ fn shipped_base_schema_exposes_the_nullable_generated_ctx_cwd_contract() {
 
     assert!(matches!(
         cwd.ty,
-        TypeExpr::Primitive(darkmatter::markdown::schemas::SimplifiedType::String)
+        TypeExpr::Primitive(simplified_schema::SimplifiedType::String)
     ));
     assert!(cwd.constraints.iter().any(|constraint| matches!(
         constraint,
-        darkmatter::markdown::schemas::Constraint::Generated
+        simplified_schema::Constraint::Generated
     )));
     assert!(!cwd.constraints.iter().any(|constraint| matches!(
         constraint,
-        darkmatter::markdown::schemas::Constraint::Required
+        simplified_schema::Constraint::Required
     )));
 }
 
 #[test]
 fn base_style_schema_matches_runtime_descriptor() {
-    let darkmatter::markdown::schemas::SchemaRoot::Single(root) =
+    let simplified_schema::SchemaRoot::Single(root) =
         darkmatter_base_schema()
     else {
         panic!("base schema must be a single object shape");
@@ -374,7 +371,7 @@ fn schema_document_transcludes_same_file_as_library_source() {
     let (from_disk, definitions) = catalog.baseline().expect("the catalog declares `fm`");
     assert!(!definitions.is_empty(), "the disk baseline stores its shared types");
     assert_eq!(
-        darkmatter::markdown::schemas::to_json_schema_with_definitions(&from_disk, &definitions).expect("lowers"),
+        simplified_schema::to_json_schema_with_definitions(&from_disk, &definitions).expect("lowers"),
         darkmatter_base_json_schema()
     );
 }

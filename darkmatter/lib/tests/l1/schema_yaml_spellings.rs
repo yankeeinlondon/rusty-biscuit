@@ -19,14 +19,13 @@ use std::path::Path;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::{
-    Markdown,
-    compose::ComposeSource,
-    schemas::{
-        DarkmatterSchemas, SchemaError, SchemaSourcePath, SchemaSpanKind, StandaloneSchemaEnvelope,
-        parse_standalone_schema_document,
-        parse_yaml_schema, resolve::resolve_schema_with_roots, simplified::to_json_schema,
-    },
+    Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, resolve::resolve_schema_with_roots},
 };
+use simplified_schema::{
+    SchemaError, SchemaSourcePath, SchemaSpanKind, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    parse_yaml_schema,
+};
+use simplified_schema::simplified::to_json_schema;
 use serde_json::json;
 
 /// One edit applied to a seed. Keys are matched at the start of a line after
@@ -677,7 +676,7 @@ fn presentation_pairs_load_with_equal_semantics_and_keep_their_siblings() {
 /// The authored text of every span recorded for `path` and `kind`.
 fn span_texts<'a>(
     source: &'a str,
-    document: &darkmatter::markdown::schemas::StandaloneSchemaDocument,
+    document: &simplified_schema::StandaloneSchemaDocument,
     path: &SchemaSourcePath,
     kind: SchemaSpanKind,
 ) -> Vec<&'a str> {
@@ -692,7 +691,7 @@ fn span_texts<'a>(
 /// The union-arm span text of each of `count` arms under `path`.
 fn arm_texts<'a>(
     source: &'a str,
-    document: &darkmatter::markdown::schemas::StandaloneSchemaDocument,
+    document: &simplified_schema::StandaloneSchemaDocument,
     path: &SchemaSourcePath,
     count: usize,
 ) -> Vec<&'a str> {
@@ -701,7 +700,7 @@ fn arm_texts<'a>(
         .collect()
 }
 
-fn load(source: &str) -> darkmatter::markdown::schemas::StandaloneSchemaDocument {
+fn load(source: &str) -> simplified_schema::StandaloneSchemaDocument {
     parse_standalone_schema_document(source, "/w/schema.yaml")
         .unwrap_or_else(|error| panic!("{source:?} must load: {error}"))
         .unwrap_or_else(|| panic!("{source:?} must be recognized"))
@@ -863,7 +862,7 @@ fn continued_scalars_project_byte_ranges_through_non_ascii_text() {
 /// once, after projecting through the fold.
 #[test]
 fn a_continued_definition_projects_through_a_caller_offset() {
-    use darkmatter::markdown::schemas::parse_property_definition_with_source;
+    use simplified_schema::parse_property_definition_with_source;
 
     for newline in ["\n", "\r\n"] {
         let yaml = format!("string(min(1);{newline}  max(5)) -> é{newline}");
@@ -946,10 +945,10 @@ fn strict_source_aware_parsing_keeps_every_other_presentation_closed() {
 /// The authored spans of each `suggest(...)` candidate of the single-atom
 /// top-level property `name`.
 fn suggestion_spans(
-    schema: &darkmatter::markdown::schemas::SchemaRoot,
+    schema: &simplified_schema::SchemaRoot,
     name: &str,
 ) -> Vec<std::ops::Range<usize>> {
-    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SchemaRoot};
+    use simplified_schema::{Constraint, PropertyDef, SchemaRoot};
     let SchemaRoot::Single(shape) = schema else {
         panic!("expected a single root shape");
     };
@@ -1020,7 +1019,7 @@ fn a_suggestion_candidate_crossing_a_fold_projects_one_authored_range() {
         let candidate = start..end;
         assert_eq!(suggestion_spans(schema, "mode"), [candidate], "{newline:?}");
 
-        use darkmatter::markdown::schemas::{Constraint, PropertyDef, SchemaRoot};
+        use simplified_schema::{Constraint, PropertyDef, SchemaRoot};
         let SchemaRoot::Single(shape) = schema else { panic!("single root shape") };
         let PropertyDef::Single(atom) = &shape.properties["mode"] else { panic!("single atom") };
         let decoded: Vec<&str> = atom
@@ -1058,7 +1057,7 @@ fn a_suggestion_candidate_crossing_a_fold_projects_one_authored_range() {
 /// offset applied exactly once.
 #[test]
 fn a_folded_suggestion_candidate_projects_through_a_caller_offset() {
-    use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+    use simplified_schema::simplified::parse_yaml_schema_with_source;
 
     const OFFSET: usize = 100;
     for newline in ["\n", "\r\n"] {
@@ -1094,7 +1093,7 @@ fn repeated_identical_definitions_keep_their_own_suggestion_spans() {
 /// with non-ASCII text before the candidate.
 #[test]
 fn folded_suggestions_project_through_a_caller_offset_and_non_ascii_text() {
-    use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+    use simplified_schema::simplified::parse_yaml_schema_with_source;
 
     for newline in ["\n", "\r\n"] {
         let yaml = format!("café: string -> naïve{newline}  text{newline}value: string(suggest(ünï,{newline}    beta)){newline}");
@@ -1144,9 +1143,7 @@ fn folded_values_decode_like_the_yaml_parser_and_match_single_line_semantics() {
 /// no scalar meaning the atom.
 #[test]
 fn a_source_that_disagrees_with_the_value_is_a_projection_error() {
-    use darkmatter::markdown::schemas::{
-        parse_property_definition_with_source, simplified::parse_yaml_schema_with_source,
-    };
+    use simplified_schema::{parse_property_definition_with_source, simplified::parse_yaml_schema_with_source};
 
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str("string(min(1)) -> one two").expect("YAML");
@@ -1167,7 +1164,7 @@ fn a_source_that_disagrees_with_the_value_is_a_projection_error() {
 /// single-line spelling, with a range on its authored line.
 #[test]
 fn a_cursor_on_a_continuation_line_reads_the_authored_token() {
-    use darkmatter::markdown::schemas::{SchemaCursorRole, locate_type_definition_cursor};
+    use simplified_schema::{SchemaCursorRole, locate_type_definition_cursor};
 
     for newline in ["\n", "\r\n"] {
         let value = format!("string(min(1);{newline}    ma");
@@ -1195,7 +1192,7 @@ fn a_cursor_on_a_continuation_line_reads_the_authored_token() {
 /// (not source order) can tell the two occurrences apart.
 #[test]
 fn a_pattern_key_before_an_identical_property_keeps_its_own_suggestion_spans() {
-    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SchemaRoot};
+    use simplified_schema::{Constraint, PropertyDef, SchemaRoot};
 
     for newline in ["\n", "\r\n"] {
         let source = format!(

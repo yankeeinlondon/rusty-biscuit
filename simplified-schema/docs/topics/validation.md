@@ -1,5 +1,9 @@
 # Strict and Soft Validation
 
+The [`SimplifiedSchema` object](./schema-object.md) has both methods and
+prepares itself; this page describes the contract they share, and the
+lower-level `Prepared` schema they run on.
+
 Compile a lowered schema once into a `Prepared` schema, then judge as many
 `serde_json::Value`s with it as you like. Pick the method by what you want
 done with a value that is almost right:
@@ -76,7 +80,15 @@ failure it is:
   be invalid. Without the default `file` feature, resolving a `file(eager)`
   value and a `match(...)` glob are such checks; malformed file-reference
   syntax is still judged. `ValidationProblem::is_unavailable_check` marks
-  each such problem, including beside a decided violation.
+  each such problem, including beside a decided violation. A
+  `SimplifiedSchema` built from in-memory content has no file context, so in
+  every build its `file(eager)` and `match(...)` checks are unavailable in
+  the same way.
+- `Unprepared`: the schema could not be prepared, so no value was judged.
+  It holds the shared `SchemaError` (`error`): the schema has a
+  function-typed property, `jsonschema` rejected its lowered form, or it is
+  content that names a file it cannot read. `problems()` is empty. `Prepared`
+  never returns it; a `SimplifiedSchema` does.
 
 ```rust
 match prepared.validate_soft(&value) {

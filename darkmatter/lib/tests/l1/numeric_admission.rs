@@ -4,11 +4,8 @@
 //! without integer casts, and rendered without a decimal suffix on a whole
 //! value.
 
-use darkmatter::markdown::{
-    Markdown, MarkdownError,
-    compose::ComposeOptions,
-    schemas::{DarkmatterSchemas, SchemaError},
-};
+use darkmatter::markdown::{Markdown, MarkdownError, compose::ComposeOptions, schemas::{DarkmatterSchemas}};
+use simplified_schema::SchemaError;
 use serde_json::json;
 
 const INEXACT: &str = "cannot be represented exactly";

@@ -38,10 +38,10 @@
 //! [Composition](../../../../docs/topics/composition.md).
 
 use darkmatter::markdown::MarkdownError;
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaError,
-    SchemaOriginKind, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, ValidationProblem,
-    ValidationProblemCode, ValidationProblemKind,
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{
+    Constraint, PropertyAtom, PropertyDef, SchemaError, SchemaOriginKind, SchemaShape, SchemaRoot, SimplifiedType,
+    TypeExpr, ValidationProblem, ValidationProblemCode, ValidationProblemKind,
 };
 
 use super::error::{
@@ -53,7 +53,8 @@ use super::prepare::{
     prepare_inline_selecting,
 };
 use super::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
-use darkmatter::markdown::schemas::{PositionMap, SchemaPhase, ValidationReport};
+use darkmatter::markdown::schemas::ValidationReport;
+use simplified_schema::{PositionMap, SchemaPhase};
 
 pub mod bundle;
 pub mod classify;
@@ -1322,7 +1323,7 @@ pub(super) fn is_composition_independent(
                     && !darkmatter::markdown::compose::expression::is_malformed_template(text)
             };
             data_keys.contains(&name)
-                || !darkmatter::markdown::schemas::authored_node_at(instance, &problem.path)
+                || !simplified_schema::authored_node_at(instance, &problem.path)
                     .is_some_and(|(pointer, node)| {
                         darkmatter::markdown::schemas::awaits_rendering(problem, node, &pointer, deferred, &holds)
                     })

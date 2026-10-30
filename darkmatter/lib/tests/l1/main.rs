@@ -172,6 +172,7 @@ mod request_context_epoch;
 mod schema_phase_validation;
 mod schema_quoting_safety;
 mod schema_embedded_trigger_bundles;
+mod effective_schema_layering;
 mod schema_enhancements_matrix;
 mod schema_extraction_characterization;
 mod validation_contract_parity;

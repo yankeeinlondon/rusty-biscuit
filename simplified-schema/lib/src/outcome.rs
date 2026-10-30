@@ -3,10 +3,11 @@
 //! [`crate::prepared::Prepared::validate_soft`]).
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::{SchemaAdvisory, ValidationProblem};
+use crate::{SchemaAdvisory, SchemaError, ValidationProblem};
 
 /// An accepted value and the non-fatal findings beside it.
 #[derive(Debug, Clone)]
@@ -40,28 +41,46 @@ pub enum ValidationFailure {
     },
     /// Validation could not be completed: every problem comes from a check
     /// the schema requires and this build cannot run
-    /// ([`ValidationProblem::is_unavailable_check`]), so the value is
-    /// neither accepted nor shown to be invalid.
+    /// ([`ValidationProblem::is_unavailable_check`]), or a file check of a
+    /// schema built from in-memory content, which has no file context to
+    /// resolve in. The value is neither accepted nor shown to be invalid.
     UnavailableCheck {
         /// The problems of the checks that could not run.
         problems: Vec<ValidationProblem>,
     },
+    /// The schema could not be prepared for validation, so no value was
+    /// judged: it does not lower to JSON Schema (a function-typed property),
+    /// `jsonschema` rejects the lowered form, or it names a file an in-memory
+    /// schema cannot read. Validation of every value fails the same way until
+    /// the schema changes.
+    Unprepared {
+        /// Why preparation failed; shared, so repeated validations report the
+        /// one error the schema holds.
+        error: Arc<SchemaError>,
+    },
 }
 
 impl ValidationFailure {
-    /// Classifies a non-empty problem list.
-    pub(crate) fn from_problems(problems: Vec<ValidationProblem>) -> Self {
-        if problems.iter().all(ValidationProblem::is_unavailable_check) {
+    /// Classifies a non-empty problem list. `file_checks` is whether file
+    /// values could be resolved at all; without it, file checks are
+    /// unavailable rather than violated.
+    pub(crate) fn from_problems(problems: Vec<ValidationProblem>, file_checks: bool) -> Self {
+        let unavailable = |problem: &ValidationProblem| {
+            problem.is_unavailable_check() || (!file_checks && problem.is_file_check())
+        };
+        if problems.iter().all(unavailable) {
             Self::UnavailableCheck { problems }
         } else {
             Self::InvalidData { problems }
         }
     }
 
-    /// The structured problems accumulated before failing.
+    /// The structured problems accumulated before failing; empty for
+    /// [`Self::Unprepared`], which judged no value.
     pub fn problems(&self) -> &[ValidationProblem] {
         match self {
             Self::InvalidData { problems } | Self::UnavailableCheck { problems } => problems,
+            Self::Unprepared { .. } => &[],
         }
     }
 
@@ -69,6 +88,7 @@ impl ValidationFailure {
     pub fn into_problems(self) -> Vec<ValidationProblem> {
         match self {
             Self::InvalidData { problems } | Self::UnavailableCheck { problems } => problems,
+            Self::Unprepared { .. } => Vec::new(),
         }
     }
 }

@@ -2,11 +2,13 @@
 
 | Feature | Default | What it adds |
 | --- | --- | --- |
-| `file` | yes | Full file-reference resolution (`biscuit-file/file-reference`) and repository discovery through `sniff`, for factories that load a schema from a path. |
+| `file` | yes | Full file-reference resolution (`biscuit-file/file-reference`) and repository discovery through `sniff`, for the file factories (`SimplifiedSchema::try_from_yaml`, `try_from_markdown`, `try_from_json_schema`, `resolve`), `SchemaSource`, and `repository_scope_catalog`. |
 | `terminal` | no | The terminal presentation of `SchemaError` (its `biscuit-terminal` `BlockError` implementation). A host that renders schema errors in a terminal enables it; Darkmatter does. |
 | `work-counters` | no | Test-only instrumentation: the process-wide `work_counters` module (for example, how many expressions were parsed), read by complexity regressions. Darkmatter's `work-counters` feature enables it and folds the counts into `darkmatter::work_counters`. |
 
-With `default-features = false` the crate works on supplied text only. Its
+With `default-features = false` the crate works on supplied text only:
+`SimplifiedSchema::try_from(text)` parses and validates in-memory data, and
+references are parsed but never resolved. Its
 dependency graph then holds no `gix`, `walkdir`, or `sniff`; it still holds
 `globset`, because glob patterns written in a schema are checked while the
 schema is parsed, in every build.

@@ -16,7 +16,7 @@ use darkmatter::lifecycle::schema_projection::{
 use darkmatter::markdown::compose::expression::{
     ExpressionFunctionDescriptor, expression_function_catalog, expression_function_descriptors,
 };
-use darkmatter::markdown::schemas::simplified::{
+use simplified_schema::simplified::{
     PropertyAtom, PropertyDef, SchemaRoot, TypeExpr, parse_standalone_schema_document,
 };
 

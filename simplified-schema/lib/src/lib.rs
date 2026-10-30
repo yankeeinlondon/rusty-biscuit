@@ -19,6 +19,9 @@
 //! - [`prepared`] and [`outcome`]: a schema compiled once ([`Prepared`]) and
 //!   its strict and soft validation, which return
 //!   `Result<`[`ValidationSuccess`]`, `[`ValidationFailure`]`>`;
+//! - [`schema`]: the [`SimplifiedSchema`] object, which builds from content
+//!   or a file, validates strictly or softly without a compile step, layers,
+//!   answers type queries, and exports;
 //! - [`SchemaError`], in [`errors`].
 //!
 //! A host (Darkmatter) keeps its own policy — baseline selection, schema
@@ -49,6 +52,7 @@ pub mod positions;
 pub mod prepared;
 pub mod reference;
 pub mod resolve;
+pub mod schema;
 pub mod scope;
 pub mod simplified;
 pub mod span;
@@ -84,6 +88,11 @@ pub use outcome::{ValidationFailure, ValidationSuccess};
 pub use phase::SchemaPhase;
 pub use prepared::Prepared;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
+pub use schema::{
+    FunctionView, PathSyntaxError, SchemaProvenance, SimplifiedSchema, SimplifiedSchemaError, TypeDefinition,
+};
+#[cfg(feature = "file")]
+pub use schema::{SchemaSource, repository_scope_catalog};
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
 pub use simplified::{

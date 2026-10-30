@@ -12,6 +12,7 @@ use biscuit_file::{YamlCertainty, YamlDiagnosticCode, apply_edit_set};
 use tempfile::TempDir;
 
 use super::super::*;
+use simplified_schema::parse_yaml_schema;
 use crate::markdown::{Markdown, extract_frontmatter_block};
 
 /// The context for a document with no path of its own.

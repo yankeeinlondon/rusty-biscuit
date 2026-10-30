@@ -14,10 +14,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, PreparationSummary, SchemaError, SchemaPhase, ValidationReport,
-    ValidationTimings,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, PreparationSummary, ValidationReport};
+use simplified_schema::{SchemaError, SchemaPhase, ValidationTimings};
 use serde_json::json;
 
 /// A canonical temp repository root; the guard keeps it alive.

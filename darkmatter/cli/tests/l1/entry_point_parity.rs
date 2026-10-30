@@ -1071,9 +1071,10 @@ fn detection_surfaces_infer_through_the_context_they_are_given() {
     use darkmatter::markdown::Markdown;
     use darkmatter::markdown::compose::RequestSnapshot;
     use darkmatter::markdown::schemas::{
-        DarkmatterSchemas, DetectOptions, SchemaRoot, detect_from_document, detect_schema,
-        detect_schema_with_contexts, schema_to_yaml,
+        DarkmatterSchemas, DetectOptions, detect_from_document, detect_schema, detect_schema_with_contexts,
+        schema_to_yaml,
     };
+use simplified_schema::SchemaRoot;
     use darkmatter_cli::request::MdRequest;
 
     let cli = CliProcessFixture::named("detection_surfaces");

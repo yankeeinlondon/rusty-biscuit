@@ -12,10 +12,9 @@ use std::path::{Path, PathBuf};
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::validate::build_position_map;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, SchemaOriginKind, ValidationProblemCode, ValidationReport,
-};
+use simplified_schema::validate::build_position_map;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
+use simplified_schema::{SchemaOriginKind, ValidationProblemCode};
 use serde_json::json;
 use tempfile::TempDir;
 

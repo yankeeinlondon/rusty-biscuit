@@ -15,9 +15,8 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::triggers::{
     self, PayloadMemoCounts, PayloadMemoTally, TriggerRegistry,
 };
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, SchemaError, TriggerSource,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, TriggerSource};
+use simplified_schema::SchemaError;
 
 /// A valid trigger selecting documents with a `title`, layering `level: number`.
 const GOOD_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema:\n  level: number\n";

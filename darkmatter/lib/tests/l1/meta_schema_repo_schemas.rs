@@ -11,13 +11,9 @@
 use std::fs;
 
 use darkmatter::markdown::{
-    Markdown,
-    compose::ComposeSource,
-    schemas::{
-        DarkmatterSchemas, StandaloneSchemaEnvelope, parse_standalone_schema_document,
-        resolve::resolve_schema_with_roots,
-    },
+    Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, resolve::resolve_schema_with_roots},
 };
+use simplified_schema::{StandaloneSchemaEnvelope, parse_standalone_schema_document};
 use biscuit_test_harness::manifest_dir;
 use serde_json::json;
 

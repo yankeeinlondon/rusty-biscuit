@@ -95,7 +95,7 @@ pub struct SchemaCursor {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::{
+/// use simplified_schema::{
 ///     SchemaCursorRole, locate_type_definition_cursor,
 /// };
 ///

@@ -178,7 +178,7 @@ impl AsciiCharSet {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::{AlphanumericOption, AlphanumericOptions};
+/// use simplified_schema::{AlphanumericOption, AlphanumericOptions};
 ///
 /// let options: AlphanumericOptions =
 ///     [AlphanumericOption::AllowDashes, AlphanumericOption::AllowWhitespace].into_iter().collect();

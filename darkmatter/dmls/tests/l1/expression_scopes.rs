@@ -23,7 +23,8 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaRoot, parse_yaml_schema};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use dmls::overlay::expressions::type_text;
 use serde_json::{Value, json};
 

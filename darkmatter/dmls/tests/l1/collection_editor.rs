@@ -13,7 +13,7 @@ use crate::common::{LspFixture, LspWorkspace};
 use darkmatter::markdown::compose::collection_blocks::BodyScopes;
 use darkmatter::markdown::compose::expression::{DeclaredTypes, Expr, SourceProjection, TypeScope};
 use darkmatter::markdown::compose::ComposeOperationSet;
-use darkmatter::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use dmls::overlay::expressions::{shape_text, type_text};
 use serde_json::{Value, json};
 

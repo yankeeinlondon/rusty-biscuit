@@ -11,9 +11,8 @@ use std::path::PathBuf;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    CompileCache, DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError, SchemaPhase, parse_yaml_schema,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
+use simplified_schema::{CompileCache, SchemaError, SchemaPhase, parse_yaml_schema};
 use serde_json::json;
 
 /// A temporary repository root (with `.git`), canonical so the paths

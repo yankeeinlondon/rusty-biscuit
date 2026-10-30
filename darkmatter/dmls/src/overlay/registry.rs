@@ -67,9 +67,8 @@ use darkmatter::markdown::schemas::triggers::{
     InvalidTriggerFinding, SchemaRootSource, TriggerRegistry, TriggerSource, enumerate_root_files,
     parse_trigger_envelope_from_str, scan_with_source,
 };
-use darkmatter::markdown::schemas::{
-    SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, parse_standalone_schema_document,
-};
+use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRootState, SchemaRoots};
+use simplified_schema::{SchemaError, parse_standalone_schema_document};
 
 use super::TriggerDiagnosticTransition;
 use crate::work_counters;

@@ -3,8 +3,8 @@
 //! [`ExpressionFinder`] skips fenced and indented code blocks (inline code
 //! spans are scanned) and hands the remaining text to
 //! [`simplified_schema::expression::scan`]. The expression token lexer
-//! (`Lexer`, `Token`, …) moved to [`simplified_schema::expression::lexer`] and
-//! is re-exported here under its old paths.
+//! (`Lexer`, `Token`, …) is [`simplified_schema::expression::lexer`]'s;
+//! [`crate::markdown::compose::expression`] re-exports it.
 //!
 //! ## Examples
 //!
@@ -30,10 +30,6 @@
 
 pub use simplified_schema::expression::scan::{
     ExpressionLocation, ExpressionScanResult, InterpolationLiteral, LiteralTokenLocation,
-};
-// migration: removed in Phase 7
-pub use simplified_schema::expression::lexer::{
-    ComparisonOp, Lexer, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
 };
 
 /// Finds interpolation expressions in markdown content.

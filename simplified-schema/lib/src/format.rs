@@ -40,7 +40,7 @@
 //!
 //! ```ignore
 //! use jsonschema::{Draft, options};
-//! use darkmatter::markdown::schemas::format::{
+//! use simplified_schema::format::{
 //!     register_darkmatter_formats, url_scheme_keyword_factory,
 //! };
 //!

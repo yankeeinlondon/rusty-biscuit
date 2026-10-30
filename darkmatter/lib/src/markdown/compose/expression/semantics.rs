@@ -1048,7 +1048,7 @@ mod tests {
     /// precedence table.
     #[test]
     fn operator_precedence_matches_parser() {
-        use crate::markdown::compose::expression::parser::PRECEDENCE_TABLE;
+        use simplified_schema::expression::parser::PRECEDENCE_TABLE;
 
         assert_eq!(
             OPERATOR_DESCRIPTORS.len(),

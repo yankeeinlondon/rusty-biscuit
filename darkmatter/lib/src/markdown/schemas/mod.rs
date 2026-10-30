@@ -1,33 +1,26 @@
-//! Schema authoring, detection, and validation for Markdown frontmatter.
+//! Darkmatter's schema host: document-, trigger-, and composition-aware
+//! schema work for Markdown frontmatter.
 //!
-//! This subsystem implements the SimplifiedSchema authoring grammar, JSON
-//! Schema conversion, validator caching, schema resolution, and (in later
-//! phases) a `md schema` CLI surface.
-//!
-//! Phase 3 lands the runtime: validator caching, `$schema` resolution
-//! (inline, file references, root unions), baseline merging, and the public
-//! [`DarkmatterSchemas`] entry point.
+//! The SimplifiedSchema language itself (grammar, named-type resolution,
+//! conversion, JSON Schema lowering, validator caching) is the
+//! [`simplified_schema`] crate's, and callers import its types from there.
+//! This module adds Darkmatter's policy around it: the shipped baseline,
+//! schema roots and trigger discovery, the effective schema of a document
+//! ([`DarkmatterSchemas`], [`EffectiveSchema`]), pending and deferred values,
+//! eager-file normalization, and the `md schema` surfaces.
 //!
 //! ## Module layout
 //!
-//! - [`simplified::types`] — [`SchemaRoot`], [`PropertyDef`],
-//!   [`SimplifiedType`], [`Constraint`].
-//! - [`simplified::grammar`] — type-and-constraint string parser.
-//! - [`simplified::convert`] — [`to_json_schema`] lowers a parsed schema to
-//!   Draft 2020-12 JSON Schema.
-//! - [`simplified`] — YAML-shape layer over `serde_yaml_ng::Value`.
-//! - [`format`] — custom format validators (`darkmatter-file` eager,
-//!   `darkmatter-file-reference` lazy) plus URL-scheme and passive semantic
-//!   meta-type keyword validators.
-//! - [`file_match`] — `file(match(...))` globs: completion candidates, and an
-//!   constraint on each declaring root-union arm.
-//! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
+//! - [`resolve`] — `$schema` resolution with Darkmatter's shipped schema
+//!   documents (`Name@darkmatter:<stem>`).
+//! - [`catalog`] and [`roots`] — the global catalog and schema search roots.
+//! - [`triggers`] — schema-trigger discovery, matching, and payloads.
 //! - [`rewrite`] — eager-`file` value normalization: rewrites a present
 //!   `file(eager)`-typed value to its document-relative resolved path after
 //!   validation accepts it.
-//! - [`resolve`] — `$schema` resolution and baseline merge.
 //! - [`about`] — typed descriptor catalog that backs `md schema about`.
-//! - [`errors`] — [`SchemaError`].
+//! - [`detect`], [`clean`], [`completion`] — `md schema detect`, frontmatter
+//!   cleanup, and editor completion.
 //!
 //! ## Example
 //!
@@ -46,17 +39,12 @@
 //! See `darkmatter/features/2026-05-11-schemas/spec.md` for the full
 //! specification.
 //!
-//! [`SchemaRoot`]: crate::markdown::schemas::simplified::SchemaRoot
-//! [`PropertyDef`]: crate::markdown::schemas::simplified::PropertyDef
-//! [`SimplifiedType`]: crate::markdown::schemas::simplified::SimplifiedType
-//! [`Constraint`]: crate::markdown::schemas::simplified::Constraint
-//! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
 pub mod about;
 pub mod catalog;
 mod bound_operands;
 pub mod clean;
-pub mod coerce;
+pub(crate) mod coerce;
 pub mod completion;
 pub mod detect;
 mod frontmatter_shape;
@@ -67,11 +55,9 @@ pub mod triggers;
 mod positions;
 pub(crate) mod embedded;
 
-// The SimplifiedSchema language lives in `simplified-schema`; these keep its
-// modules at their Darkmatter paths for unmoved callers.
-// migration: removed in Phase 7
-pub use simplified_schema::{discriminant, errors, example, file_match, format, simplified, validate};
-pub(crate) use simplified_schema::{phase, scope, timings};
+use simplified_schema::{
+    phase, scope, simplified, timings, validate,
+};
 
 use std::sync::OnceLock;
 use std::{
@@ -94,17 +80,8 @@ pub use about::{
     schema_type_descriptors, validation_behavior_descriptors, match_safe_constraint_descriptors,
     trigger_grammar_descriptors,
 };
-// migration: removed in Phase 7
-pub use simplified_schema::{
-    CallerFileReferenceProvenance, CycleReference, FileReferenceDiagnostic, FrontmatterExpressionValue,
-    GrammarRelated, JsonPointer, SCHEMA_CONSTRAINT_CODE, SCHEMA_INVALID_FILE_REFERENCE_CODE,
-    SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE, SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE,
-    SchemaAdvisory, SchemaAdvisoryKind, SchemaError, SchemaOrigin, SchemaOriginKind, SchemaOriginMap, SchemaPhase,
-    SchemaReference, SchemaReferenceKind, ValidationProblem, ValidationProblemCode, ValidationProblemKind,
-    authored_node_at, classify_schema_reference, expression_atom, frontmatter_expression_values,
-    frontmatter_expression_values_with_definitions, nested_property_shape, nested_property_shape_with_definitions,
-    property_def_at_path, property_def_at_path_with_definitions, select_literal_discriminant_arm,
-    shape_from_json_schema,
+use simplified_schema::{
+    JsonPointer, SchemaAdvisory, SchemaError, SchemaOrigin, SchemaOriginMap, SchemaPhase, ValidationProblem, ValidationProblemCode, ValidationProblemKind, authored_node_at,
 };
 pub use completion::{CompletionKind, CompletionSuggestion};
 pub use clean::{
@@ -118,31 +95,9 @@ pub use detect::{
 pub use frontmatter_shape::effective_property_shape;
 pub use triggers::TriggerOrigin;
 pub use rewrite::NormalizationOutcome;
-pub use simplified::{
-    AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, DefKey,
-    DefNamespace, Definition, DefinitionOuter, DefinitionTable, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
-    SchemaArm,
-    LocatedDefinitionFailure, LocatedRelated, SchemaConstraintConflictKind, SchemaConstraintOrigin,
-    SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole,
-    SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
-    SchemaSourcePath, SchemaSourcePathSegment,
-    SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind, SchemaValueNode,
-    SchemaRoot,
-    SimplifiedType, SourceAware, SuggestionItem,
-    SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
-    decode_plain_scalar_node, decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions, is_union_arm_path, lint_suggestions, mapping_separator,
-    locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar,
-    locate_schema_value, locate_standalone_definition_failure,
-    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar,
-    parse_property_definition,
-    parse_property_definition_with_source, parse_schema_declaration,
-    parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
-    Alternative, flattened_alternatives,
-    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
-    parse_yaml_schema, to_json_schema, to_json_schema_with_definitions,
+use simplified::{
+    DefKey, Definition, DefinitionOuter, DefinitionTable, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema_with_definitions,
 };
-#[cfg(feature = "work-counters")]
-pub use simplified::alias_search_work;
 pub use roots::{
     InvalidSchemasDir, SCHEMAS_DIR_VARIABLE, SchemaSearchRoot, SchemaRootKind, SchemaRootState,
     SchemaRoots, SearchedRoot,
@@ -154,8 +109,12 @@ pub use triggers::{
     TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
-pub use simplified_schema::{CompileCache, ValidationStage, ValidationTimings};
-pub use simplified_schema::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+use simplified_schema::{
+    ValidationStage, ValidationTimings,
+};
+use simplified_schema::{
+    PositionMap, ValidatorCache,
+};
 use positions::ProblemPositions;
 
 /// The runtime baseline, prepared from the embedded table: its typed form with
@@ -494,7 +453,7 @@ impl DarkmatterSchemas {
     /// simple object schema. This indicates a library defect.
     pub fn with_darkmatter_baseline_json_schema(mut self) -> Result<Self, SchemaError> {
         let json_schema = Arc::clone(darkmatter_base_json_schema_arc());
-        resolve::validate_baseline_schema(&json_schema)?;
+        simplified_schema::resolve::validate_baseline_schema(&json_schema)?;
         self.baseline = Some(BaselineSchema {
             json_schema,
             advisories: Vec::new(),
@@ -507,7 +466,7 @@ impl DarkmatterSchemas {
         value: Value,
         advisories: Vec<SchemaAdvisory>,
     ) -> Result<(), SchemaError> {
-        resolve::validate_baseline_schema(&value)?;
+        simplified_schema::resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
             advisories,
@@ -1019,7 +978,7 @@ pub struct EffectiveSchema {
     /// referenced files, sorted and deduplicated by semantic kind and path.
     advisories: Vec<SchemaAdvisory>,
     /// The conversion plan for [`Self::json_schema`], found on first use.
-    conversion: OnceLock<Arc<coerce::ConversionPlan>>,
+    conversion: OnceLock<Arc<simplified_schema::coerce::ConversionPlan>>,
     /// [`Self::layered_definitions`], merged on first use.
     layered_definitions: OnceLock<Arc<DefinitionTable>>,
     /// [`Self::raw_declarations`], projected on first use.
@@ -1028,27 +987,27 @@ pub struct EffectiveSchema {
 
 impl EffectiveSchema {
     /// The conversion plan for [`Self::json_schema`].
-    fn conversion(&self) -> &coerce::ConversionPlan {
+    fn conversion(&self) -> &simplified_schema::coerce::ConversionPlan {
         self.conversion.get_or_init(|| {
-            coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema))
+            simplified_schema::coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema))
         })
     }
 
     /// Converts `instance` against [`Self::json_schema`] as
-    /// [`coerce::coerce_frontmatter_with_pending`] does, reusing this
+    /// [`simplified_schema::coerce::coerce_frontmatter_with_pending`] does, reusing this
     /// schema's conversion plan.
     pub fn coerce_frontmatter_with_pending(
         &self,
         instance: &Value,
         composition_pending: &HashSet<String>,
-    ) -> coerce::CoercionOutcome {
+    ) -> simplified_schema::coerce::CoercionOutcome {
         if self.accepts_as_is(instance) {
-            return coerce::CoercionOutcome {
+            return simplified_schema::coerce::CoercionOutcome {
                 value: instance.clone(),
                 changed: false,
             };
         }
-        coerce::coerce_with_plan(self.conversion(), &self.json_schema, instance, composition_pending)
+        simplified_schema::coerce::coerce_with_plan(self.conversion(), &self.json_schema, instance, composition_pending)
     }
 
     /// Whether this schema's own compiled validators accept `instance`
@@ -1173,7 +1132,7 @@ impl EffectiveSchema {
     /// `arm_index`.
     ///
     /// The instance is converted against the schema by the conversion core
-    /// (see [`coerce::coerce_frontmatter`]) on a working copy before
+    /// (see [`simplified_schema::coerce::coerce_frontmatter`]) on a working copy before
     /// validation, so the report reflects post-conversion validity. When some
     /// value cannot convert, every other value that converts on its own is
     /// still converted in the working copy, so the report names only the
@@ -1209,10 +1168,10 @@ impl EffectiveSchema {
     fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &ProblemPositions<'_>) -> ValidationReport {
         let _validate = timings::stage(ValidationStage::Validate);
         if self.accepts_as_is(frontmatter) {
-            return self.validate_instance(frontmatter, frontmatter, stored, positions, &coerce::NestedTemplates::default());
+            return self.validate_instance(frontmatter, frontmatter, stored, positions, &simplified_schema::coerce::NestedTemplates::default());
         }
         let templates = self.nested_templates(stored);
-        let working_copy = coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, &templates);
+        let working_copy = simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, &templates);
         self.validate_instance(&working_copy, frontmatter, stored, positions, &templates)
     }
 
@@ -1377,13 +1336,13 @@ impl EffectiveSchema {
             frontmatter,
             frontmatter,
             &ProblemPositions::Built(positions),
-            &coerce::NestedTemplates::default(),
+            &simplified_schema::coerce::NestedTemplates::default(),
         )
     }
 
     /// The nested templates of `authored` that this schema marks `deferred`
     /// ([`coerce::nested_templates`]).
-    fn nested_templates(&self, authored: &Value) -> coerce::NestedTemplates {
+    fn nested_templates(&self, authored: &Value) -> simplified_schema::coerce::NestedTemplates {
         coerce::nested_templates(self.conversion(), &self.json_schema, authored)
     }
 
@@ -1413,7 +1372,7 @@ impl EffectiveSchema {
         authored: &Value,
         stored: &Value,
         positions: &ProblemPositions<'_>,
-        templates: &coerce::NestedTemplates,
+        templates: &simplified_schema::coerce::NestedTemplates,
     ) -> ValidationReport {
         let bound = self
             .conversion()
@@ -1438,7 +1397,7 @@ impl EffectiveSchema {
             excused: (!templates.is_empty()).then_some(&excused as &validate::Excused<'_>),
         };
         let mut problems = self.validators.collect_problems(&self.json_schema, instance, anchors);
-        coerce::annotate_problems(self.conversion(), &self.json_schema, instance, templates, &mut problems);
+        simplified_schema::coerce::annotate_problems(self.conversion(), &self.json_schema, instance, templates, &mut problems);
         simplified_schema::prepared::describe_problems(&self.json_schema, instance, &mut problems);
         // After the enrichment: a binder's problem names its call, and the
         // description found at its place would be an arbitrary arm's.
@@ -1557,7 +1516,7 @@ impl EffectiveSchema {
     /// Top-level keys still holding a `$(...)` shell expression or unresolved
     /// `{{ ... }}` template (compose pre-shell stage) are skipped verbatim —
     /// they are re-resolved at post-shell re-validation. Pass the same
-    /// `composition_pending` set [`coerce::coerce_frontmatter_with_pending`]
+    /// `composition_pending` set [`simplified_schema::coerce::coerce_frontmatter_with_pending`]
     /// consumes.
     ///
     /// ## Examples
@@ -1811,6 +1770,13 @@ static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
 /// The merge of `baseline`, the trigger `layers` (in order), and the document
 /// schema `doc`, highest precedence last.
 ///
+/// This is the library's generic layering,
+/// `doc.layer_under([baseline, ...layers])` on
+/// [`simplified_schema::SimplifiedSchema`], done here over the already
+/// lowered layers with the same merge ([`merge_baseline`](simplified_schema::resolve::merge_baseline)) so a hit can be
+/// matched by `Arc` identity and the baseline and payloads are never rebuilt
+/// as schema objects per page.
+///
 /// Memoized for the process over a few recent merges. Trigger payloads are
 /// large (a host bundle can resolve to megabytes) and the same document is
 /// judged several times per run, so re-merging them would dominate every
@@ -1851,9 +1817,9 @@ fn merged_trigger_schema(
     let mut higher = rest.iter().map(|layer| layer.json_schema.as_ref().clone()).chain(doc.clone());
     let merged = match (lowest, higher.next()) {
         (Some(lowest), Some(next)) => {
-            let mut acc = resolve::merge_baseline(lowest, next)?;
+            let mut acc = simplified_schema::resolve::merge_baseline(lowest, next)?;
             for layer in higher {
-                acc = resolve::merge_baseline(&acc, layer)?;
+                acc = simplified_schema::resolve::merge_baseline(&acc, layer)?;
             }
             Arc::new(acc)
         }
@@ -2003,7 +1969,7 @@ fn value_contains_marker(value: &Value, marker: &str) -> bool {
 /// Root-union schemas (no top-level `properties`) yield an empty map — per-arm
 /// provenance is not modelled in v1.
 fn build_origin_map_with_triggers(
-    resolved: Option<&resolve::ResolvedSchema>,
+    resolved: Option<&simplified_schema::resolve::ResolvedSchema>,
     trigger_layers: &[TriggerLayer],
     _has_baseline: bool,
     merged: &Value,
@@ -2045,7 +2011,7 @@ fn build_origin_map_with_triggers(
 /// trigger's envelope + payload dependencies. An embedded trigger adds none:
 /// it cannot change while the host runs. Sorted and deduplicated.
 fn build_dependencies(
-    resolved: Option<&resolve::ResolvedSchema>,
+    resolved: Option<&simplified_schema::resolve::ResolvedSchema>,
     trigger_layers: &[TriggerLayer],
 ) -> Vec<PathBuf> {
     let mut deps: Vec<PathBuf> = Vec::new();
@@ -2066,7 +2032,7 @@ fn build_dependencies(
 fn build_advisories(
     baseline: Option<&BaselineSchema>,
     trigger_layers: &[TriggerLayer],
-    resolved: Option<&resolve::ResolvedSchema>,
+    resolved: Option<&simplified_schema::resolve::ResolvedSchema>,
 ) -> Vec<SchemaAdvisory> {
     let mut advisories = BTreeSet::new();
     if let Some(baseline) = baseline {
@@ -2202,6 +2168,7 @@ mod tests;
 #[cfg(test)]
 mod claudine_compat_tests {
     use super::*;
+    use simplified_schema::{Constraint, SchemaOriginKind};
     use crate::markdown::Markdown;
 
     fn md_with_schema(yaml_body: &str) -> Markdown {
@@ -3337,6 +3304,7 @@ mod claudine_compat_tests {
 #[cfg(test)]
 mod phase4_trigger_assembly {
     use super::*;
+    use simplified_schema::{Constraint, SchemaOriginKind};
     use crate::markdown::Markdown;
     use std::fs;
     use tempfile::TempDir;

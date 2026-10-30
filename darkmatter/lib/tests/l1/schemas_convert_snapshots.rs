@@ -5,7 +5,7 @@
 //! `tests/snapshots/schemas_convert_snapshots__*.snap` and are reviewed via
 //! `cargo insta`.
 
-use darkmatter::markdown::schemas::{
+use simplified_schema::{
     PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, parse_yaml_schema,
     simplified::{grammar::parse_type_expr, to_json_schema},
 };

@@ -6,7 +6,10 @@ that Darkmatter, Claudine, and Messenger use to describe and check YAML and
 JSON data. The library has no dependency on any Markdown host; Darkmatter
 builds its document policy on top of it.
 
-The crate holds the language and everything that judges data with it:
+Most callers need one type, `SimplifiedSchema`: build it from text or a file,
+validate values strictly or softly, layer other schemas into it, query its
+types, and export it. Underneath, the crate holds the language and everything
+that judges data with it:
 
 - `simplified`: the AST (`SchemaRoot`, `SchemaShape`, `PropertyDef`, …), the
   type grammar, source maps, cursors, queries, serializers, subtyping, and
@@ -39,6 +42,18 @@ discovery.
 
 ```rust
 use serde_json::json;
+use simplified_schema::SimplifiedSchema;
+
+let person = SimplifiedSchema::try_from("$schema:\n  name: string(required)\n  age: number(min(0))\n")?;
+assert_eq!(person.query("age")?.unwrap().type_text(), "number(min(0))");
+assert!(person.validate_strict(&json!({ "name": "Ada", "age": 36 })).is_ok());
+assert!(person.validate_strict(&json!({ "age": -1 })).is_err());
+```
+
+The lower-level pieces are public too:
+
+```rust
+use serde_json::json;
 use simplified_schema::{parse_yaml_schema, to_json_schema, validate::build_structural_validator};
 
 let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("name: string(required)\nage: number(min(0))").unwrap();
@@ -63,6 +78,8 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 
 ## Documentation
 
+- [The `SimplifiedSchema` object](./docs/topics/schema-object.md): building,
+  validating, layering, querying, and exporting a schema.
 - [Language core](./docs/topics/language-core.md): the modules, the
   resolver's supplied sources, and what stays in a host.
 - [Foundations](./docs/topics/foundations.md): the numeric model, spans, the

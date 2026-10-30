@@ -3121,7 +3121,7 @@ pub enum SequenceLoadCause {
     /// Boxed to keep the enum small — `SchemaError` is by far its heaviest
     /// member.
     #[error(transparent)]
-    Schema(#[from] Box<darkmatter::markdown::schemas::SchemaError>),
+    Schema(#[from] Box<simplified_schema::SchemaError>),
     /// A generated step-state frontmatter could not be assembled for
     /// validation.
     #[error(transparent)]
@@ -3271,7 +3271,7 @@ pub struct MissingProperty {
 /// Widget mapping for interactively collecting a missing property value.
 ///
 /// Produced by the validation layer from the property's
-/// [`SimplifiedType`][darkmatter::markdown::schemas::SimplifiedType] plus
+/// [`SimplifiedType`][simplified_schema::SimplifiedType] plus
 /// any enum members. The CLI layer chooses the concrete `biscuit-tui`
 /// widget from this enum.
 #[derive(Debug, Clone, PartialEq)]

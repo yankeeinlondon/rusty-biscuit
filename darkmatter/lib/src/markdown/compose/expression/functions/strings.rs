@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use super::{FunctionBinding, remove_date_substrings, scalar_string};
 use crate::markdown::compose::expression::call_binding::BoundCall;
-use crate::markdown::numeric;
+use simplified_schema::numeric;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding::pure("starts_with", &["startswith"], starts_with),

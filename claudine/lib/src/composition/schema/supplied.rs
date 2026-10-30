@@ -2,14 +2,13 @@
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::CallerInputRecords;
-use darkmatter::markdown::schemas::file_match::{
+use simplified_schema::file_match::{
     FileAlternative, file_alternatives, file_match_admits, root_union_match_groups,
 };
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, ValidationProblem,
-    to_json_schema_with_definitions,
-    select_literal_discriminant_arm,
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SimplifiedType,
+    TypeExpr, ValidationProblem, to_json_schema_with_definitions, select_literal_discriminant_arm,
 };
 
 use super::{

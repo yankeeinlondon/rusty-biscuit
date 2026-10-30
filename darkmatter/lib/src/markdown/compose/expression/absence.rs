@@ -51,7 +51,9 @@
 //! is a variable plus the selectors applied to it, so `fm['key']` and
 //! `state.a[0]` keep the path they read.
 
-use super::ast::{CallArgument, SpannedCallArgument, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{
+    CallArgument, SpannedCallArgument, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
+};
 use super::scope::{DeclaredTypes, Polarity, TypeScope};
 use crate::markdown::span::SourceSpan;
 

@@ -17,11 +17,10 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use darkmatter::markdown::schemas::{
-    Constraint, SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaError,
-    SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
-    SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, StandaloneSchemaDocument,
-    parse_standalone_schema_document,
+use simplified_schema::{
+    Constraint, SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaError, SchemaReferenceSite,
+    SchemaSourceId, SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind,
+    StandaloneSchemaDocument, parse_standalone_schema_document,
 };
 use lsp_types::{Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range as LspRange, Uri};
 

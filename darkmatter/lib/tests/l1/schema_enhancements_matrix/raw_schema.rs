@@ -26,7 +26,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use darkmatter::markdown::schemas::SchemaError;
+use simplified_schema::SchemaError;
 
 use super::validate_document;
 
@@ -680,7 +680,7 @@ fn walk_conversions(format: Format, detected: &str, keywords: &str) {
             .expect("the control loads")
             .expect("a schema applies");
         let instance = serde_json::to_value(markdown.frontmatter().as_map()).expect("frontmatter JSON");
-        let outcome = darkmatter::markdown::schemas::coerce::coerce_frontmatter(&effective.json_schema, &instance);
+        let outcome = simplified_schema::coerce::coerce_frontmatter(&effective.json_schema, &instance);
         let property = cell.instance.split(':').next().expect("property");
         match cell.converts_to {
             Some(expected) => {

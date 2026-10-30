@@ -4,14 +4,10 @@
 
 use std::str::FromStr;
 
-use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DarkmatterSchemas, SchemaError, parse_yaml_schema,
-        resolve::resolve_schema,
-        simplified::{grammar::parse_type_expr, to_json_schema},
-    },
-};
+use darkmatter::markdown::{Markdown, schemas::{DarkmatterSchemas, resolve::resolve_schema}};
+use simplified_schema::{SchemaError, parse_yaml_schema};
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::to_json_schema;
 use serde_json::{Number, Value, json};
 
 fn schema_json(yaml: &str) -> Result<Value, SchemaError> {

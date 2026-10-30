@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 use biscuit_file::FileResolutionContext;
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
-// migration: removed in Phase 7
-pub use simplified_schema::resolve::*;
+use simplified_schema::resolve::*;
 use simplified_schema::{SchemaError, SchemaRoot, SchemaShape, StandaloneSchemaDocument, embedded::EmbeddedDocument};
 
 use super::embedded::SHIPPED_SOURCES;

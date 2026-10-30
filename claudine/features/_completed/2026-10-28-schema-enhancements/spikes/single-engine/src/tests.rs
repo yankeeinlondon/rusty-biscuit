@@ -18,9 +18,9 @@ use super::numberlike_format as nf;
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::schemas::DarkmatterSchemas;
-use crate::markdown::schemas::coerce::{coerce_frontmatter, coerce_frontmatter_with_pending};
-use crate::markdown::schemas::simplified::{parse_yaml_schema, to_json_schema};
-use crate::markdown::schemas::validate::{build_validator, error_top_level_key};
+use simplified_schema::coerce::{coerce_frontmatter, coerce_frontmatter_with_pending};
+use simplified_schema::simplified::{parse_yaml_schema, to_json_schema};
+use simplified_schema::validate::{build_validator, error_top_level_key};
 
 // ── case model ────────────────────────────────────────────────────────────
 
@@ -498,7 +498,7 @@ fn today(schema: &Value, instance: &Value, pending: &[String]) -> Out {
     } else if let Some(arms) = schema.get("anyOf").and_then(Value::as_array) {
         // mirror coerce.rs `arm_accepts`: some arm fails only on pending keys
         arms.iter().any(|arm| {
-            let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
+            let wrapped = simplified_schema::validate::wrap_arm_as_root_schema(arm);
             build_validator(&wrapped, None, None).is_ok_and(|val| pending_only(&val))
         })
     } else {

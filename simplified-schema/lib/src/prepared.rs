@@ -155,6 +155,9 @@ pub struct Prepared {
     /// when `None`.
     base_dir: Option<PathBuf>,
     context: biscuit_file::FileResolutionContext,
+    /// Whether `context` is one file values can resolve in; `false` for a
+    /// schema built from in-memory content, whose file checks are unavailable.
+    file_checks: bool,
     advisories: Vec<SchemaAdvisory>,
 }
 
@@ -185,8 +188,16 @@ impl Prepared {
             conversion,
             base_dir,
             context,
+            file_checks: true,
             advisories: Vec::new(),
         })
+    }
+
+    /// Marks this schema as having no file context: its file checks are
+    /// unavailable rather than violated.
+    pub(crate) fn without_file_checks(mut self) -> Self {
+        self.file_checks = false;
+        self
     }
 
     /// Reports `advisories` with every successful validation.
@@ -235,7 +246,7 @@ impl Prepared {
         if problems.is_empty() {
             Ok(self.accepted(instance))
         } else {
-            Err(ValidationFailure::from_problems(problems))
+            Err(ValidationFailure::from_problems(problems, self.file_checks))
         }
     }
 

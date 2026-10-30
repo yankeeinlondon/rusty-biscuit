@@ -6,9 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    CompileCache, DarkmatterSchemas, ValidationStage, ValidationTimings, reset_process_caches_for_bench,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, reset_process_caches_for_bench};
+use simplified_schema::{CompileCache, ValidationStage, ValidationTimings};
 
 const STAGE_NAMES: [&str; 5] = ["discover", "match", "resolve", "compile", "validate"];
 

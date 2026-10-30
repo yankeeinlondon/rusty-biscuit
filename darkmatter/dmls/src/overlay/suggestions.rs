@@ -16,16 +16,13 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::{
-    Constraint, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SuggestionLintProblem,
-    TypeExpr,
-};
+use simplified_schema::{Constraint, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SuggestionLintProblem, TypeExpr};
 use darkmatter::markdown::span::SourceSpan;
-use darkmatter::markdown::schemas::SchemaError;
-use darkmatter::markdown::schemas::StandaloneSchemaEnvelope;
-use darkmatter::markdown::schemas::lint_suggestions;
-use darkmatter::markdown::schemas::parse_standalone_schema_document;
-use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+use simplified_schema::SchemaError;
+use simplified_schema::StandaloneSchemaEnvelope;
+use simplified_schema::lint_suggestions;
+use simplified_schema::parse_standalone_schema_document;
+use simplified_schema::simplified::parse_yaml_schema_with_source;
 
 use crate::overlay::FrontmatterAst;
 use crate::overlay::SuggestionState;

@@ -20,11 +20,11 @@ use std::sync::Arc;
 
 use super::projection::item_shape;
 use super::{LexicalTypes, Polarity, Shape, TypeScope, TypedLocal};
-use crate::markdown::compose::expression::ast::{BindingPattern, Callback, SpannedBindingPattern, SpannedCallback};
+use simplified_schema::expression::ast::{BindingPattern, Callback, SpannedBindingPattern, SpannedCallback};
 use crate::markdown::compose::expression::binding::{LocalId, next_frame_id};
 use crate::markdown::compose::expression::{Expr, expression_type};
-use crate::markdown::schemas::simplified::serialize_property_atom;
-use crate::markdown::schemas::{
+use simplified_schema::simplified::serialize_property_atom;
+use simplified_schema::{
     Constraint, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr,
     flattened_alternatives,
 };
@@ -590,8 +590,10 @@ impl<'d> TypeScope<'d> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::expression::{DeclaredTypes, parse, parse_callback, parse_callback_spanned, parse_spanned};
-    use crate::markdown::schemas::{SchemaRoot, parse_yaml_schema};
+    use crate::markdown::compose::expression::{
+        DeclaredTypes, parse, parse_callback, parse_callback_spanned, parse_spanned,
+    };
+    use simplified_schema::{SchemaRoot, parse_yaml_schema};
 
     fn schema(yaml: &str) -> SchemaRoot {
         parse_yaml_schema(&serde_yaml_ng::from_str(yaml).unwrap()).unwrap()

@@ -140,8 +140,8 @@ const OBJECT_KEYWORDS: &[&str] = &[
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::coercion::bind;
-/// use darkmatter::markdown::schemas::shape_from_json_schema;
+/// use simplified_schema::coercion::bind;
+/// use simplified_schema::shape_from_json_schema;
 /// use serde_json::json;
 ///
 /// let schema = json!({

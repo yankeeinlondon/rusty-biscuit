@@ -7,14 +7,14 @@
 //! side, its lowered `$defs` on the JSON Schema side.
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::coercion::{BindOptions, Bound, ConversionError, PathSegment, Shape, bind, bind_with_marked};
+use simplified_schema::coercion::{BindOptions, Bound, ConversionError, PathSegment, Shape, bind, bind_with_marked};
 use darkmatter::markdown::compose::expression::call_binding::{
     NoNamedTypes, shape_from_simplified_schema, shape_from_simplified_schema_with_definitions,
 };
 use darkmatter::markdown::compose::expression::is_deferred_template;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
-use darkmatter::markdown::schemas::shape_from_json_schema;
-use darkmatter::markdown::schemas::simplified::{parse_yaml_schema, to_json_schema};
+use simplified_schema::shape_from_json_schema;
+use simplified_schema::simplified::{parse_yaml_schema, to_json_schema};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

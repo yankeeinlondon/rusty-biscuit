@@ -28,8 +28,8 @@ use crate::markdown::compose::body_origin::DataRanges;
 use crate::markdown::compose::directives_api::{
     BlockScanError, DirectiveKind, ParsedDirective, read_key_token, scan_darkmatter_directives_in,
 };
-use crate::markdown::compose::expression::lexer::{ParseMode, Token, lex_spanned};
-use crate::markdown::compose::expression::parser::{parse_callback_spanned, parse_condition};
+use crate::markdown::compose::expression::{ParseMode, Token, lex_spanned};
+use simplified_schema::expression::parser::{parse_callback_spanned, parse_condition};
 use crate::markdown::compose::parse_utils::{Cursor, strip_blockquote_prefix};
 use crate::markdown::compose::pipeline::operations::{ComposeOperation, ComposeOperationSet};
 use crate::markdown::span::Spanned;

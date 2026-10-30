@@ -18,14 +18,17 @@ use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::completion::DefinitionLookup;
-use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
-use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
+use darkmatter::markdown::schemas::resolve::resolve_schema;
+use simplified_schema::resolve::merge_baseline;
+use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
-    SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
-    SchemaRoot, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage,
-    darkmatter_base_json_schema_ref, effective_property_shape, mapping_separator,
+    DarkmatterSchemas, EffectiveSchema, darkmatter_base_json_schema_ref, effective_property_shape,
     triggers::TriggerRegistry,
+};
+use simplified_schema::{
+    DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
+    SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType,
+    StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage, mapping_separator,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -268,7 +271,7 @@ pub fn frontmatter_authoring(
 ///
 /// This recognizes only top-level YAML mapping entries, in either block or
 /// flow presentation — the authoritative parser
-/// ([`parse_standalone_schema_document`](darkmatter::markdown::schemas::parse_standalone_schema_document))
+/// ([`parse_standalone_schema_document`](simplified_schema::parse_standalone_schema_document))
 /// accepts a mapping regardless of presentation, so a claim that saw only
 /// block style would drop the retained model of a flow-authored document at
 /// the first malformed keystroke.
@@ -1099,7 +1102,7 @@ fn load_extension_schema(
     extension: &SchemaExtensionConfig,
     workspace_roots: &[PathBuf],
     context: &FileResolutionContext,
-) -> Result<darkmatter::markdown::schemas::resolve::ResolvedSchema, SchemaError> {
+) -> Result<simplified_schema::resolve::ResolvedSchema, SchemaError> {
     let path = resolve_extension_path(&extension.path, workspace_roots);
     let base_dir = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
     // Drive resolution through the same file-reference path a `$schema` string
@@ -1271,7 +1274,7 @@ mod tests {
             "    - string\n",
             "    - item: boolean\n",
         );
-        let model = darkmatter::markdown::schemas::parse_standalone_schema_document(
+        let model = simplified_schema::parse_standalone_schema_document(
             source,
             Path::new("/w/schema.yaml"),
         )
@@ -1368,7 +1371,7 @@ mod tests {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1423,7 +1426,7 @@ mod tests {
             concat!("kind: schema\n", "types:\n", "  title: foo-\"bar\n"),
         ] {
             assert!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     carrier,
                     Path::new("/w/schema.yaml"),
                 )
@@ -1444,7 +1447,7 @@ mod tests {
         let top_level_poison =
             concat!("description: foo-\"bar\n", "kind: schema\n", "types:\n", "  x: string\n");
         assert!(
-            darkmatter::markdown::schemas::parse_standalone_schema_document(
+            simplified_schema::parse_standalone_schema_document(
                 top_level_poison,
                 Path::new("/w/schema.yaml"),
             )
@@ -1477,7 +1480,7 @@ mod tests {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1501,7 +1504,7 @@ mod tests {
             r#"{kind: schema, types: {title: foo- "bar}}"#,
         ] {
             assert!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     carrier,
                     Path::new("/w/schema.yaml"),
                 )
@@ -1524,7 +1527,7 @@ mod tests {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1550,7 +1553,7 @@ mod tests {
                 panic!("block carrier must be valid YAML: {tagged:?}: {error}")
             });
             assert!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     &tagged,
                     Path::new("/w/schema.yaml"),
                 )
@@ -1569,7 +1572,7 @@ mod tests {
             });
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         &inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1617,7 +1620,7 @@ mod tests {
             ("\"a: b\": c\n$schema: ./a.yaml\n", None),
         ] {
             let recognized = !matches!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     text,
                     Path::new("/w/schema.yaml"),
                 ),
@@ -1661,7 +1664,7 @@ mod tests {
             "  \"<ending::.md>\": boolean\n",
             "  \"<pattern::[0-9_]$>\": string\n",
         );
-        let model = darkmatter::markdown::schemas::parse_standalone_schema_document(
+        let model = simplified_schema::parse_standalone_schema_document(
             source,
             Path::new("/w/schema.yaml"),
         )

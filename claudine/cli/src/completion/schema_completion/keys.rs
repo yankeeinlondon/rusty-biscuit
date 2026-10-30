@@ -7,9 +7,8 @@ use std::collections::HashSet;
 
 use biscuit_file::{FileReference, YamlValue};
 
-use darkmatter::markdown::schemas::{
-    EffectiveSchema, PropertyDef, SchemaArm, SchemaRoot,
-};
+use darkmatter::markdown::schemas::EffectiveSchema;
+use simplified_schema::{PropertyDef, SchemaArm, SchemaRoot};
 
 use crate::completion::fuzzy;
 use crate::completion::scopes::ScopeContext;

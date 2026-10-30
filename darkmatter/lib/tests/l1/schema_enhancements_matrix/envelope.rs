@@ -14,7 +14,7 @@
 
 use super::validate_document;
 use crate::schema_yaml_spellings::{Edit, Edit::*, apply};
-use darkmatter::markdown::schemas::{SchemaError, parse_standalone_schema_document};
+use simplified_schema::{SchemaError, parse_standalone_schema_document};
 
 /// The public outcome of one cell.
 #[derive(Clone, Copy)]

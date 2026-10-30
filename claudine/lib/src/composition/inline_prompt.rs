@@ -8,10 +8,8 @@
 
 use std::path::Path;
 
-use darkmatter::markdown::schemas::simplified::serialize_property_atom;
-use darkmatter::markdown::schemas::{
-    PropertyDef, SchemaShape, SchemaRoot,
-};
+use simplified_schema::simplified::serialize_property_atom;
+use simplified_schema::{PropertyDef, SchemaShape, SchemaRoot};
 
 use super::guardrails::document_path_span;
 use super::types::LaunchSchema;
@@ -89,7 +87,8 @@ fn def_is_required_at_completion(def: &PropertyDef) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaPhase};
+    use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaPhase;
     use darkmatter::markdown::Markdown;
     use serde_json::json;
 

@@ -5,15 +5,13 @@ use std::fs;
 
 use biscuit_file::FileReference;
 use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        Constraint, DarkmatterSchemas, PropertyDef, SchemaRoot, TypeExpr,
-        ValidationReport, darkmatter_base_json_schema, parse_standalone_schema_document,
-        parse_yaml_schema, schema_type_descriptors,
-        simplified::{grammar::MAX_INLINE_OBJECT_DEPTH, grammar::parse_type_expr,
-            parse_yaml_schema_with_source, serialize_property_atom},
-    },
+    Markdown, schemas::{DarkmatterSchemas, ValidationReport, darkmatter_base_json_schema, schema_type_descriptors},
 };
+use simplified_schema::{
+    Constraint, PropertyDef, SchemaRoot, TypeExpr, parse_standalone_schema_document, parse_yaml_schema,
+};
+use simplified_schema::simplified::grammar::{MAX_INLINE_OBJECT_DEPTH, parse_type_expr};
+use simplified_schema::simplified::{parse_yaml_schema_with_source, serialize_property_atom};
 use serde_json::{Value, json};
 
 fn validate_candidate(semantic_type: &str, candidate_yaml: &str) -> ValidationReport {
@@ -140,7 +138,7 @@ fn public_type_parser_rejects_true_iff_narrows_on_a_refinement() {
     for target in NARROWS_NOT_EXACT_FAMILIES {
         let text = narrows_function(target, "true-iff");
         let error = parse_type_expr("candidate", &text).expect_err(target);
-        let darkmatter::markdown::schemas::SchemaError::Grammar { message, span, .. } = &error else {
+        let simplified_schema::SchemaError::Grammar { message, span, .. } = &error else {
             panic!("{target}: a grammar error, found {error:?}");
         };
         assert!(message.contains("true-iff"), "{target}: {message}");
@@ -177,7 +175,7 @@ fn public_type_parser_rejects_named_types_nested_in_narrows_targets() {
     for target in NARROWS_NESTED_NAME_TARGETS {
         let text = narrows_function(target, "true-implies");
         let error = parse_type_expr("candidate", &text).expect_err(target);
-        let darkmatter::markdown::schemas::SchemaError::Grammar { message, span, .. } = &error else {
+        let simplified_schema::SchemaError::Grammar { message, span, .. } = &error else {
             panic!("{target}: a grammar error, found {error:?}");
         };
         assert!(message.contains("named type `Name"), "{target}: {message}");
@@ -480,7 +478,7 @@ fn shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance() {
 /// the whole first clause, as structured spans rather than message text.
 #[test]
 fn public_parser_relates_a_duplicate_narrows_clause_to_the_first() {
-    use darkmatter::markdown::schemas::{SchemaError, simplified::grammar::parse_type_definition};
+    use simplified_schema::{SchemaError, simplified::grammar::parse_type_definition};
     let first = "narrows(x: string; true-iff)";
     let text = format!("function(parameters(x: unknown | null); returns(boolean); {first}; narrows(x; false-implies))");
     let error = parse_type_definition("pred", &text).expect_err("two clauses");
@@ -503,7 +501,7 @@ fn public_parser_relates_a_duplicate_narrows_clause_to_the_first() {
 /// parser projects both into the authored file.
 #[test]
 fn public_parsers_relate_disagreeing_narrows_overloads_to_both_declarations() {
-    use darkmatter::markdown::schemas::{
+    use simplified_schema::{
         SchemaError, parse_property_definition_with_source, simplified::grammar::parse_type_definition,
     };
     let declaring = "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";

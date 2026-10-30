@@ -82,8 +82,8 @@ pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 /// ## Examples
 ///
 /// ```ignore
-/// # use darkmatter::markdown::schemas::simplified::parse_yaml_schema;
-/// # use darkmatter::markdown::schemas::simplified::convert::to_json_schema;
+/// # use simplified_schema::simplified::parse_yaml_schema;
+/// # use simplified_schema::simplified::convert::to_json_schema;
 /// let yaml = serde_yaml_ng::from_str("title: 'string(required)'").unwrap();
 /// let schema = parse_yaml_schema(&yaml).unwrap();
 /// let json = to_json_schema(&schema).unwrap();

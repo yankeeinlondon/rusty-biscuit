@@ -30,8 +30,6 @@
 pub mod block;
 pub mod cleanup;
 pub mod code_block;
-// migration: removed in Phase 7
-pub use simplified_schema::coercion;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -45,7 +43,6 @@ mod inline_html;
 pub mod language_grammar;
 pub mod literal_token;
 pub mod normalize;
-pub mod numeric;
 pub mod output;
 pub mod reference;
 pub mod render_tree;

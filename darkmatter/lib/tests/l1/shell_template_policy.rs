@@ -19,7 +19,8 @@ use darkmatter::markdown::compose::shell_expansion::types::{
 use darkmatter::markdown::compose::shell_expansion::{
     check_filled_chain, check_template_blacklist, check_user_blacklist, normalize_command,
 };
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaRoot};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaRoot;
 use serde_json::json;
 use std::path::Path;
 use tempfile::TempDir;

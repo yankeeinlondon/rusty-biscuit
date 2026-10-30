@@ -439,12 +439,12 @@ pub struct ComposeOptions {
     /// Optional baseline schema merged with any document `$schema`
     /// before validation runs. When both baseline and document declare
     /// the same property, the document wins.
-    pub(crate) baseline_schema: Option<crate::markdown::schemas::SchemaRoot>,
+    pub(crate) baseline_schema: Option<simplified_schema::SchemaRoot>,
 
     /// The stored definitions `baseline_schema`'s references point into:
     /// the shipped baseline's shared types, or empty for a caller-supplied
     /// baseline.
-    pub(crate) baseline_definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
+    pub(crate) baseline_definitions: std::sync::Arc<simplified_schema::DefinitionTable>,
 
     /// Whether `baseline_schema` is the authored Darkmatter baseline (set via
     /// [`ComposeOptions::with_darkmatter_baseline_schema`]). When true, schema
@@ -571,7 +571,7 @@ pub struct ComposeOptions {
     /// The runtime schema phase the compose-time verdict is judged at, when the
     /// caller is preparing a launch rather than validating an authored
     /// document. `None` keeps the unphased authoring verdict. Default: `None`.
-    pub(crate) schema_phase: Option<crate::markdown::schemas::SchemaPhase>,
+    pub(crate) schema_phase: Option<simplified_schema::SchemaPhase>,
 
     // ── Deferred frontmatter keys (DM1) ────────────────────────────
     /// Top-level frontmatter keys deferred from every compose-time value
@@ -1869,7 +1869,7 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_baseline_schema(
         mut self,
-        schema: crate::markdown::schemas::SchemaRoot,
+        schema: simplified_schema::SchemaRoot,
     ) -> Self {
         self.baseline_schema = Some(schema);
         self.baseline_definitions = std::sync::Arc::default();
@@ -1884,8 +1884,8 @@ impl ComposeOptions {
     #[must_use]
     pub(crate) fn with_baseline_schema_and_definitions(
         self,
-        schema: crate::markdown::schemas::SchemaRoot,
-        definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
+        schema: simplified_schema::SchemaRoot,
+        definitions: std::sync::Arc<simplified_schema::DefinitionTable>,
     ) -> Self {
         let mut opts = self.with_baseline_schema(schema);
         opts.baseline_definitions = definitions;
@@ -2253,21 +2253,21 @@ impl ComposeOptions {
     ///
     /// ```
     /// use darkmatter::markdown::compose::ComposeOptions;
-    /// use darkmatter::markdown::schemas::SchemaPhase;
+    /// use simplified_schema::SchemaPhase;
     ///
     /// let options = ComposeOptions::new().with_schema_phase(Some(SchemaPhase::Launch));
     /// ```
     #[must_use]
     pub fn with_schema_phase(
         mut self,
-        phase: Option<crate::markdown::schemas::SchemaPhase>,
+        phase: Option<simplified_schema::SchemaPhase>,
     ) -> Self {
         self.schema_phase = phase;
         self
     }
 
     /// The runtime schema phase the compose-time verdict is judged at, if any.
-    pub fn schema_phase(&self) -> Option<crate::markdown::schemas::SchemaPhase> {
+    pub fn schema_phase(&self) -> Option<simplified_schema::SchemaPhase> {
         self.schema_phase
     }
 
@@ -2772,8 +2772,8 @@ static DEFAULT_BASELINE_CANONICAL_JSON: std::sync::OnceLock<String> = std::sync:
 /// semantic distinction. The definition-free `schemas::darkmatter_base_schema()`
 /// lowers to different bytes, so it fingerprints as a different baseline.
 fn baseline_canonical_json(
-    schema: &crate::markdown::schemas::SchemaRoot,
-    definitions: &crate::markdown::schemas::DefinitionTable,
+    schema: &simplified_schema::SchemaRoot,
+    definitions: &simplified_schema::DefinitionTable,
     is_darkmatter_default: bool,
 ) -> std::borrow::Cow<'static, str> {
     use biscuit_hash::canonical_json;
@@ -2784,7 +2784,7 @@ fn baseline_canonical_json(
         }));
     }
 
-    let json = crate::markdown::schemas::to_json_schema_with_definitions(schema, definitions)
+    let json = simplified_schema::to_json_schema_with_definitions(schema, definitions)
         .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
     std::borrow::Cow::Owned(canonical_json(&json))
 }
@@ -3730,11 +3730,11 @@ fn remote_fetch_opt_same_instance(
 
 /// Stable identity tag for the compose-time schema phase: `0` unphased,
 /// `1` launch, `2` completion.
-fn schema_phase_tag(phase: Option<crate::markdown::schemas::SchemaPhase>) -> u8 {
+fn schema_phase_tag(phase: Option<simplified_schema::SchemaPhase>) -> u8 {
     match phase {
         None => 0,
-        Some(crate::markdown::schemas::SchemaPhase::Launch) => 1,
-        Some(crate::markdown::schemas::SchemaPhase::Completion) => 2,
+        Some(simplified_schema::SchemaPhase::Launch) => 1,
+        Some(simplified_schema::SchemaPhase::Completion) => 2,
     }
 }
 
@@ -4734,7 +4734,7 @@ mod tests {
     fn non_default_baseline_does_not_read_the_default_cache() {
         let default = fixed_opts().with_darkmatter_baseline_schema();
         let custom = fixed_opts().with_baseline_schema(
-            crate::markdown::schemas::parse_yaml_schema(
+            simplified_schema::parse_yaml_schema(
                 &serde_yaml_ng::from_str::<serde_yaml_ng::Value>("zzz_probe: string").unwrap(),
             )
             .unwrap(),

@@ -16,10 +16,10 @@ use super::content_policy_fixtures::{
 use crate::markdown::Markdown;
 use crate::markdown::schemas::embedded::{self, EmbeddedDocument};
 use crate::markdown::schemas::catalog::{DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog};
-use crate::markdown::schemas::resolve::{ResolvedSchema, prepare_embedded_inline_schema, prepare_embedded_schema};
-use crate::markdown::schemas::{
-    DarkmatterSchemas, PropertyDef, SchemaError, SchemaSourceId, SchemaRoot, TypeExpr,
-};
+use crate::markdown::schemas::resolve::{prepare_embedded_inline_schema, prepare_embedded_schema};
+use simplified_schema::resolve::ResolvedSchema;
+use crate::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{PropertyDef, SchemaError, SchemaSourceId, SchemaRoot, TypeExpr};
 
 const IMPORTER: &str = "schemas/main.yaml";
 
@@ -253,7 +253,7 @@ fn run_column(column: &str, shipped: Shipped<'_>) {
             .map_err(|error| error.to_string())
             .and_then(|catalog| {
                 let (baseline, definitions) = catalog.baseline().expect("the catalog declares `fm`");
-                let json = crate::markdown::schemas::to_json_schema_with_definitions(&baseline, &definitions)
+                let json = simplified_schema::to_json_schema_with_definitions(&baseline, &definitions)
                     .map_err(|error| error.to_string())?;
                 DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
                     .with_baseline_json_schema(json)

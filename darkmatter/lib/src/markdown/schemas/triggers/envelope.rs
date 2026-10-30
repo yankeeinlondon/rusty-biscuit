@@ -23,7 +23,7 @@
 
 use serde_yaml_ng::Value as YamlValue;
 
-use crate::markdown::schemas::errors::SchemaError;
+use simplified_schema::errors::SchemaError;
 
 use super::grammar::{MatchConditions, parse_match_conditions};
 use super::lint;

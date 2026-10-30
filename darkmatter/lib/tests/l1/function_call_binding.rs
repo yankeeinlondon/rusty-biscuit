@@ -6,13 +6,13 @@
 
 use std::cell::Cell;
 
-use darkmatter::markdown::coercion::{FailureReason, ValueKind, bind};
+use simplified_schema::coercion::{FailureReason, ValueKind, bind};
 use darkmatter::markdown::compose::expression::call_binding::{
     ArgumentProblem, BoundCall, CallBindingError, CallErrorKind, EvaluationMode, FunctionRegistration, NoNamedTypes,
     RegistrationError, SignatureProblem, TranslateError, property_shape_from_def, shape_from_property_def,
 };
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
-use darkmatter::markdown::schemas::simplified::{FunctionType, PropertyDef, TypeExpr};
+use simplified_schema::simplified::grammar::parse_type_definition;
+use simplified_schema::simplified::{FunctionType, PropertyDef, TypeExpr};
 use serde_json::{Value, json};
 
 /// A registered function whose handler only counts its invocations.
@@ -722,7 +722,7 @@ fn def(text: &str) -> PropertyDef {
     parse_type_definition("p", text).expect("parses")
 }
 
-fn bare(text: &str) -> darkmatter::markdown::coercion::Shape {
+fn bare(text: &str) -> simplified_schema::coercion::Shape {
     shape_from_property_def(&def(text), &NoNamedTypes).expect("translates")
 }
 

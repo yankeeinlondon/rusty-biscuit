@@ -111,7 +111,7 @@ impl CompileCache {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::schemas::{ValidationStage, ValidationTimings};
+/// use simplified_schema::{ValidationStage, ValidationTimings};
 ///
 /// let ((), timings) = ValidationTimings::record(|| ());
 /// assert_eq!(timings.compile_cache().name(), "not requested");

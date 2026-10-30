@@ -15,10 +15,8 @@
 //! verbatim as a string instead.
 
 use darkmatter::markdown::FrontmatterMap;
-use darkmatter::markdown::schemas::{
-    DefKey, EffectiveSchema, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot,
-    SimplifiedType, TypeExpr,
-};
+use darkmatter::markdown::schemas::EffectiveSchema;
+use simplified_schema::{DefKey, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr};
 use serde_json::{Map, Value};
 
 /// A parsed `<prop>=<value>` assignment.

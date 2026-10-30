@@ -41,7 +41,7 @@ use biscuit_file::FileReference;
 use jsonschema::Validator;
 use serde_json::{Map, Value};
 
-use super::format::DARKMATTER_FILE_FORMAT;
+use simplified_schema::format::DARKMATTER_FILE_FORMAT;
 use super::scope::SchemaScope;
 use super::validate::{self, CallerOrigins, ValidatorCache, error_top_level_key};
 use crate::markdown::compose::expression::path_projection::make_portable_relative_in_context;
@@ -51,7 +51,7 @@ use crate::markdown::compose::expression::resolve_ctx::{
 
 /// Outcome of normalizing a frontmatter instance against a schema.
 ///
-/// Mirrors [`super::coerce::CoercionOutcome`]'s shape: the (possibly
+/// Mirrors [`simplified_schema::coerce::CoercionOutcome`]'s shape: the (possibly
 /// rewritten) instance plus a flag telling the caller whether anything
 /// actually changed. Pure — the caller's input is never mutated.
 #[derive(Debug, Clone)]
@@ -252,7 +252,7 @@ impl<'a> ArmValidators<'a> {
         validator
     }
 
-    fn note(looked_up: Result<(Arc<Validator>, bool), super::errors::SchemaError>) -> Option<Arc<Validator>> {
+    fn note(looked_up: Result<(Arc<Validator>, bool), simplified_schema::errors::SchemaError>) -> Option<Arc<Validator>> {
         let (validator, compiled) = looked_up.ok()?;
         if compiled {
             crate::note_work!(RewriteArmCompile);
@@ -320,7 +320,7 @@ fn rewrite_root_union(
 /// residual validation problem points at a pending `$(...)` top-level key.
 /// Those keys are re-validated and converted after shell expansion, so
 /// deferring them here is sound; a problem on any non-pending key rejects the
-/// arm. The same allowance [`super::coerce::coerce_frontmatter_with_pending`]
+/// arm. The same allowance [`simplified_schema::coerce::coerce_frontmatter_with_pending`]
 /// applies.
 fn arm_accepts(
     validator: &Validator,
