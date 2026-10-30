@@ -1,21 +1,46 @@
 ---
 total_phases: 9
 created: 2026-10-25
-phase: 1
+phase: 2
 agent: claude/sonnet
 yolo: true
 human_review: false
 human_review_items: []
 packages:
-    - simplified-schema
-    - biscuit-file
-    - darkmatter
-    - darkmatter-cli
-    - dmls
-    - claudine
-    - claudine-cli
-    - claudine-gen
-    - messenger
+- biscuit-file
+- darkmatter
+source_files_during_phase_1:
+- biscuit-file/lib/Cargo.toml
+- biscuit-file/justfile
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/frontmatter.rs
+- biscuit-file/lib/src/path_text.rs
+- biscuit-file/lib/src/yaml/types.rs
+- biscuit-file/lib/src/file_reference/mod.rs
+- biscuit-file/lib/src/file_reference/error.rs
+- biscuit-file/lib/src/file_reference/context.rs
+- biscuit-file/lib/src/file_reference/resolve.rs
+- biscuit-file/lib/src/file_reference/lexical.rs
+- biscuit-file/lib/src/file_reference/glob/mod.rs
+- biscuit-file/lib/src/file_reference/glob/parse.rs
+- biscuit-file/lib/src/file_reference/glob/error.rs
+- biscuit-file/lib/src/file_reference/portable/mod.rs
+- biscuit-file/lib/src/file_reference/portable/path_identity.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/reference_syntax_only.rs
+- darkmatter/lib/src/markdown/frontmatter.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+docs_updated_during_phase_1:
+- biscuit-file/README.md
+- biscuit-file/docs/dependencies.md
+- biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_1:
+- darkmatter/features/2026-10-28-extract-simplified-schema/inventory.md
+skills_files_updated_during_phase_1:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/biscuit-file/references/architecture.md
 ---
 
 # Plan: Extract SimplifiedSchema
@@ -229,7 +254,7 @@ compare against, and build the two pieces that live below the new crate
 
 ### Wave 1 (parallel: disjoint files)
 
-- [ ] **1.1 Boundary inventory.**
+- [x] **1.1 Boundary inventory.**
     - Produce `darkmatter/features/2026-10-25-extract-simplified-schema/inventory.md`
       (a snapshot, not a doc): one row per file under `schemas/`,
       `coercion/`, `numeric*`, `literal_token.rs`, and `compose/expression/`
@@ -252,7 +277,7 @@ compare against, and build the two pieces that live below the new crate
       path, missing match, union result) from `simplified/query.rs` and
       `cursor.rs`; the facade preserves what they return.
 
-- [ ] **1.2 Baseline benchmarks.**
+- [x] **1.2 Baseline benchmarks.**
     - On this host (macOS), run the existing `schema_validation` and
       `effective_schema_ownership` Criterion benches (and the recursive/cold/warm
       cases they contain) three times each with `cargo bench --bench …` and keep
@@ -260,7 +285,7 @@ compare against, and build the two pieces that live below the new crate
       toolchain (`rustc -V`), and profile. Phase 8 re-runs the same commands.
     - One host, one quick sample (no widening); no CI gate.
 
-- [ ] **1.3 Pre-extraction characterization tests (matrix and R6).**
+- [x] **1.3 Pre-extraction characterization tests (matrix and R6).**
     - In `darkmatter/lib/tests/l1/` add `schema_extraction_characterization.rs`:
         - R6 table rows (all four) through the current exact-validation and
           coercing operations: acceptance, effective value, and (for borrowed vs.
@@ -276,7 +301,7 @@ compare against, and build the two pieces that live below the new crate
 
 ### Wave 2 (parallel: separate packages)
 
-- [ ] **1.4 `biscuit-file` feature split.**
+- [x] **1.4 `biscuit-file` feature split.**
     - Read `biscuit-file/lib/src/file_reference/parse.rs` and `mod.rs`; add
       `file-reference-syntax` (passive grammar, `FileReference`, errors, portable
       path types) with no `gix`/`walkdir`/`globset`; make `file-reference` imply it.
@@ -291,7 +316,7 @@ compare against, and build the two pieces that live below the new crate
     - Update `biscuit-file/docs/dependencies.md` / feature table in
       `biscuit-file/docs/` and `.claude/skills/biscuit-file/`.
 
-- [ ] **1.5 Passive frontmatter helper.**
+- [x] **1.5 Passive frontmatter helper.**
     - Create `biscuit_file::frontmatter` (unfeatured) containing
       `extract_frontmatter_block`, `FrontmatterExtraction`, line-span helpers,
       BOM handling, near-miss fence detection, preserving `yaml_base_line` and
@@ -304,10 +329,10 @@ compare against, and build the two pieces that live below the new crate
 
 ### Phase 1 checkpoint
 
-- [ ] `inventory.md` complete and every "needs a fact" row has a decided home.
-- [ ] Characterization tests green on unmodified Darkmatter code.
-- [ ] `just test` and `just lint` green in `biscuit-file/` and `darkmatter/`.
-- [ ] Baseline numbers recorded.
+- [x] `inventory.md` complete and every "needs a fact" row has a decided home.
+- [x] Characterization tests green on unmodified Darkmatter code.
+- [x] `just test` and `just lint` green in `biscuit-file/` and `darkmatter/`.
+- [x] Baseline numbers recorded.
 
 ### Input Robustness Matrix
 
