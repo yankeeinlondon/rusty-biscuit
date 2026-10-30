@@ -21,7 +21,10 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-30
+review_iterations: 0
 implemented: false
 created: 2026-10-30
 owner: Ken Snyder <ken@ken.net>
@@ -81,17 +84,25 @@ The target's own summary frontmatter is not used. `darkmatter/docs/lsp/features.
 additionally advertises "inferred MIME, image preview" for link hovers; neither
 exists.
 
+## Goals and boundaries
+
+A reference must select the same file in validation, document links, and
+go-to-definition. Value hovers must explain that selection without running
+composition, while key hovers continue to explain the property's schema.
+The root-precedence change and format restriction below are deliberate
+behavior changes; the latter has unresolved author choices.
+
 ## Decisions
 
-### D1. Schema root order: `SCHEMAS_DIR` moves first
+### Schema root order: `SCHEMAS_DIR` moves first
 
 A bare-name `$schema` (and every other bare schema reference: `Name@file.yaml`,
-`example(file.yaml)`, trigger payloads) searches, nearest first:
+`example(file.yaml)`, trigger payloads) searches in precedence order:
 
 1. the folder `SCHEMAS_DIR` names
 2. `{package-root}/schemas`
 3. `{package-area-root}/schemas`
-4. `{repo-root}/schemas` (the file tree root)
+4. `{base_dir()}/schemas` (the file tree root; the repository root inside a repository)
 5. `{home}/schemas`
 
 Previously `SCHEMAS_DIR` was fourth. Because the same order decides trigger
@@ -108,118 +119,313 @@ Unchanged:
 - when no schema root exists at all, a bare name resolves like any other
   implicit path, starting at the document's folder
 
-### D2. One resolver for validation and the editor (Option A)
+### One resolver for validation and the editor
 
-The bare-name lookup becomes one public function in `simplified-schema` that
-both the validator and DMLS call. It returns the resolved path when one exists
-and, either way, the ordered roots it consulted. DMLS calls it from
-`schema_target` with the roots it already computes
-(`SchemaRoots::for_document`, as `overlay/registry.rs` does) before anything
-else; non-bare references keep their current `resolve_reference` path.
+Expose the file-selection portion of the
+[simplified-schema resolver](../../../simplified-schema/lib/src/resolve.rs)
+so validation and DMLS choose paths through one implementation. It returns
+the selected path or typed failure, the ordered attempted locations, and any
+safe prospective creation target. Selection must remain usable when the
+selected file's contents are malformed.
 
-Rejected alternative: have the overlay remember the path the validator
-resolved and link to that. It has no answer when resolution fails (which D3
-needs), can be stale between an edit and revalidation, and has no answer when
-the schema file itself is malformed.
+DMLS's [`schema_target`](../../dmls/src/providers/frontmatter.rs), which
+supplies frontmatter navigation destinations, uses that selection with the
+roots from Darkmatter's
+[`SchemaRoots::for_document`](../../lib/src/markdown/schemas/roots.rs).
+The shared function delegates non-bare references to their existing
+biscuit-file rules. Darkmatter continues to own root discovery; the extracted
+`simplified-schema` package must not acquire a dependency on Darkmatter.
 
-### D3. Link target when a `$schema` reference does not resolve
+Rejected alternative: deriving navigation exclusively from the last successful
+validation result. It cannot describe missing or malformed schema files and
+may reflect an earlier edit. Prepared editor data may cache selection and
+source together, provided failed resolutions and all dependencies participate
+in invalidation; a successful validation is not a prerequisite for navigation.
+
+### Link target when a `$schema` reference does not resolve
 
 A missing `$schema` target is an error (the validator's diagnostic is
 unchanged). Clicking the link anyway opens the path where the file would be
-created, chosen by the same precedence as D1 but testing for the *folder*:
+created, chosen by the schema-root precedence above, using roots already
+classified as searchable:
 
-- **Bare name:** `{first schema root whose folder exists}/{name}`; when no root
+- **Bare name:** `{first searchable schema root}/{name}`; when no root
   folder exists, `{document folder}/{name}`.
 - **Explicit relative:** the path beside the document, as today.
 
-The editor opens that path as a new, empty buffer (standard LSP behavior for a
-link to a nonexistent file).
+DMLS returns a file URI without creating a file or directory. Zed may open
+that URI as an empty buffer; other clients decide how to handle a nonexistent
+target. Opening an empty buffer is not a server-side acceptance requirement.
 
-### D4. What a `$schema` reference may point at
+### What a `$schema` reference may point at
 
 | Target | Valid? |
 |---|---|
-| YAML file with a top-level `$schema` (mapping or root-union sequence); `kind: schema` is recommended but not required | yes |
-| JSON file that is a JSON Schema document | yes |
-| YAML file with no top-level `$schema` — including a `kind: schema` file that exports only `types` | **no**: `types` serves other schema files, but a Markdown document referencing it gets no schema |
+| Recognized standalone YAML schema with an explicit `$schema` payload (mapping, root-union sequence, or existing whole-file delegation reference) | yes, if the payload and its dependencies are valid |
+| JSON file that is a JSON Schema document | yes, subject to the recognition policy in Open Questions |
+| YAML file with no top-level `$schema` — including a `kind: schema` file that exports only `types` | **no** under the new restriction: use a named-type import instead |
 | JSON file that is not a JSON Schema document | **no** |
 
-This narrows the library: today a YAML file without an envelope, and any JSON
-file, are accepted as raw JSON Schema. The validator, the link, and the hover
-all use one classification so they agree.
+This is an **intentional compatibility change**, not a navigation requirement.
+Today unrecognized YAML objects fall back to raw JSON Schema, and JSON objects
+are loaded as raw schemas without requiring a dialect declaration. Applying
+a `types`-only document as a document schema is newly rejected; importing a
+named type from that same document remains supported.
 
-**Open for the implementer to propose before coding:** the test for "is a JSON
-Schema document". Candidates: the root is an object whose `$schema` names a
-JSON Schema meta-schema URI; or the root compiles under the Draft 2020-12
-meta-schema. The first is cheap and explicit, the second accepts schemas that
-omit `$schema`. Also audit the repository for `$schema` references that the
-narrowing would newly reject, and list them in the implementation log.
+**Reader's note:** `kind: schema` alone is not a safe recommendation. The
+[simplified-schema standalone parser](../../../simplified-schema/lib/src/simplified/standalone.rs)
+requires a `types` mapping for tagged schema documents. In particular,
+`kind: schema` plus a `$schema` mapping without `types` denotes a global
+catalog, which must never become an ordinary document schema. Keep that
+boundary. Metadata envelopes and JSON recognition need the author decisions
+under Open Questions before this format restriction is implemented.
 
-### D5. `$schema` value hover
+Do not fork classification into DMLS. Extend the existing standalone parser
+and referenced-schema loader in `simplified-schema`, preserving typed errors,
+source spans, imports, whole-file delegation, root-union handling, cycle/depth
+guards, and embedded-source resolution. A file found at the winning path that
+has invalid contents stays the winning path: report its error rather than
+silently trying a lower-precedence root. Navigation still opens that file so
+the author can repair it.
+
+Before landing the restriction, audit shipped schemas, trigger payloads,
+embedded sources, direct references, and root-union file arms. Record newly
+rejected authored files and their migration in the implementation log; update
+those files and contract fixtures in the same implementation change. Raw YAML
+JSON Schema users must migrate to `.json` under this design. The JSON policy
+must specify how existing JSON objects without a dialect declaration migrate.
+If the audit exposes a further public-format decision, bring it back to Open
+Questions rather than silently widening or narrowing the parser.
+
+### `$schema` value hover
 
 Hovering the **value** of `$schema` (a file reference) shows a value hover. The
 key hover is unchanged.
 
 **Resolved, valid target:**
 
-1. If the target file has a top-level `description` property, its full text,
-   then a blank line. (Only the property counts; a leading YAML comment block
+1. If the target file has a nonempty top-level string `description`, its full
+   text, then a blank line. (Only the property counts; a leading YAML comment block
    is not used.)
 2. `Schema Definition:`, then a blank line.
-3. The target's `$schema` value only (no other top-level properties), as a
-   fenced, highlighted block: `yaml` for a YAML target, `json` for a JSON
+3. The directly referenced target's `$schema` value only (no other top-level
+   properties), as a fenced, highlighted block: `yaml` for a YAML target, `json` for a JSON
    Schema target (for JSON, the whole document is the definition).
 4. At most **10** lines inside the block. When truncated, after the block: a
    blank line, then `*Showing **10** of **{total}** lines*`, where `{total}`
    counts the lines of the full definition.
 
-The resolved path is shown as a link, repo-relative, so it is clickable and
-renders in the link color.
+After the preview (and its truncation line, when present), a blank line and
+`Resolves to [{display path}]({uri})`; the description stays first, as the
+author specified. The label
+is repository-relative when inside the document's repository, otherwise an
+absolute portable path; an outside-repository document uses an absolute label.
+The URI comes from the existing file-path-to-URI conversion, not string
+concatenation. Escape labels and authored error text for Markdown. The client
+controls link color and highlighting.
 
-**Resolved file that is not a valid target (D4):**
+Use the authored payload's source span for YAML, preserving comments and line
+order, and the authored whole document for JSON. Remove only the YAML key and
+common indentation; normalize line endings for display. Count logical lines
+without counting a final newline as an extra line. Show all lines when there
+are ten or fewer; otherwise show the first ten and the exact total. Choose a
+fence longer than any matching fence run in the excerpt. A delegated YAML
+schema previews its authored reference value and links to the directly named
+file; it does not expand an import tree or display generated JSON Schema.
 
-> The file [`{repo-relative path}`]({uri}) exists but it is **not** a valid schema definition!
+**Resolved file that is not an accepted schema format:**
 
-**Unresolved:** the bare-name message lists the roots searched in order, so the
-author can see where to put the file.
+> The file [`{display path}`]({uri}) exists but it is **not** a valid schema definition!
+
+**Other failures:** malformed YAML/JSON, invalid schema grammar, unreadable
+files, invalid dependencies, and cycles retain their own reason and resolved
+path when available. Do not describe an unreadable or malformed file as a file
+that does not exist. Format rejection and schema-validation failure are
+distinct outcomes from the shared loader.
+
+**Unresolved:** list searched roots in order and show the prospective creation
+target separately, explicitly labeled as missing. For a sibling-only match,
+show the existing `./name` correction without linking to that sibling as if
+the bare name had resolved. With no searchable roots, explain that ordinary
+file-reference lookup was used and list its attempted candidates.
 
 Hover is Markdown only; no inline HTML (Zed does not render it reliably).
 
-### D6. `file`-typed value hover
+### `file`-typed value hover
 
-Hovering the **value** of a property whose type (any union arm) is `file`.
-Values that are not static — a `{{ … }}` template or `$(…)` command — keep the
-existing expression hover and get no file hover.
+Hovering the **value** of a property whose effective type includes `file`. Use DMLS's existing selected-arm
+analysis: a rejected union arm must not make a value a file. When several
+arms remain possible, keep the existing any-surviving-file-arm behavior.
+This applies to nested mappings and scalar array items as well as root
+properties.
+Values that are not static — a Darkmatter `{{ … }}` expression or `$(…)`
+command — retain the applicable expression/property hover and get no file
+hover. Preserve biscuit-file's environment-reference syntax; do not reject it
+with a blanket brace check. Inline schema mappings, nulls, non-string values,
+collection markers, and comments do not become file references.
 
 | Case | Hover | Error? |
 |---|---|---|
-| Value is not a valid file reference (invalid path characters, malformed reference) | `` `{value}` is not a valid file reference: {reason} `` | **yes** |
-| File exists | resolves to [`{repo-relative path}`]({uri}) | no |
+| Value is not a valid file reference (as classified by `FileReference::new`, not OS-specific character rules) | `` `{value}` is not a valid file reference: {reason} `` | **yes** |
+| File exists | Resolves to [`{display path}`]({uri}), using the path-label rules above | no |
 | File does not exist, property is `eager` | "This file reference is a valid file reference but the file does not exist yet in the filesystem. The `{property}` is defined as being an **eager** file reference so that means the file reference must refer to a real file at runtime." | no |
 | File does not exist, property is not `eager` | "This file reference is a valid file reference but the file does not exist yet in the filesystem. Because `{property}` is not defined as being **eager** then the file reference is not required to exist even at run time." | no |
 
-`eager` is read with the existing `is_eager` (item or array level, any arm).
+The two missing-file messages are the author's wording; keep them verbatim.
+
+`eager` is read with DMLS's existing
+[`is_eager`](../../dmls/src/providers/frontmatter.rs) helper (item or array
+level across surviving arms). For an ambiguous union, say that the file arm
+is eager rather than claiming every allowed value must name an existing file.
 Resolution follows the existing `file` rules (implicit paths from the document
 folder then the repository root; explicit `./`/`../` from the document folder).
 
 At design time DMLS reports **no diagnostic** for a well-formed `file` value
 whose target does not exist, `eager` or not; `eager` existence is a run-time
 check. If DMLS's validation pass currently reports a missing eager file, that
-diagnostic is removed from the editor (the `md` run-time check is unchanged).
+diagnostic is removed from the editor (the `md` runtime check is unchanged).
+Suppress only typed missing-target (`NoMatch`) findings attributable to
+`file` value existence. Do not match diagnostic prose or suppress missing
+`$schema`, import, example, required-value, syntax, context, or I/O errors.
+Keep diagnostic codes, source ranges, and `resolution_failure` data for all
+retained findings. Do not change shared runtime validation to achieve this.
 
-### D7. Body-link hover to a Markdown document
+Missing context, permission/I/O failure, and unsupported remote resolution
+get their own explanation, not a missing-file message or a creation link.
+A well-formed URL remains syntactically valid, but this local preview feature
+never fetches it or claims to have checked its existence. Keep the single
+existing context-build diagnostic rather than adding a duplicate per value.
+
+### Body-link hover to a Markdown document
 
 When a body link resolves to a Markdown document, the hover adds the target's
 summary text: the first of its frontmatter properties `excerpt`, `summary`,
-`description`, `about` that is present (in that order), rendered as Markdown
-below the existing title and path. When none is present, the hover is
+`description`, `about` that is a nonempty string after trimming (in that order), rendered as Markdown
+below the existing title and path, preserving any heading/fragment preview.
+Skip nulls, blank strings, collections, and non-string scalars; do not stringify
+them. Read only top-level authored frontmatter, never compose the target,
+execute expressions, or follow summary links. Omit a pending expression or
+shell-command value and try the next summary field. When none is present, the hover is
 unchanged. Links to every other file type are unchanged.
 
 `hover.rs` reads nothing from disk; the summary is captured into the workspace
-graph's document record when the target is parsed, the same way headings are.
+graph's document record when the target is parsed, the same way headings are. This is content-derived state and must not enter
+the graph's reusable path-only document table. Use existing on-demand target
+preparation, including Markdown dependencies outside the workspace listing;
+do not parse every listed file just to obtain summaries. An unreadable target
+keeps the existing hover without a summary. Open buffers take precedence over
+disk; watched changes, save-based refresh, closing a buffer, and deletion
+refresh or remove the summary through existing document invalidation. This
+feature does not require adding summary text to the persistent reference
+index; if extraction stored there changes, its existing versioning and golden
+fixture rules still apply.
 
 The "inferred MIME, image preview" link-hover claim is removed from
 `darkmatter/docs/lsp/features.md`.
+
+## Shared resolution and editor lifecycle
+
+The shared lookup belongs in `simplified-schema`; root discovery remains in
+Darkmatter. DMLS supplies its document's captured context and ordered
+`SchemaRoots`, never a new process snapshot. Use biscuit-file's
+[`FileReference`](../../../biscuit-file/lib/src/file_reference/mod.rs) for
+syntax, candidate planning, and resolution; do not implement a second sigil
+or path parser. The biscuit-file skill governs this boundary.
+
+The result must distinguish an existing target, a clean miss with an optional
+creation candidate, a sibling-only schema error, and a typed resolution
+failure. Keep the ordered attempted locations even on failure. Existing
+`ResolvedSchema.searched` is sorted and deduplicated for dependency tracking;
+it cannot provide display order. Preserve that dependency representation and
+return the ordered search trace separately. Reuse this lookup for validation,
+named imports, examples, trigger payloads, document links, and definition;
+content parsing remains a separate operation.
+
+For a clean miss with searchable schema roots, the prospective target uses
+the first searchable root. With zero searchable roots, preserve ordinary
+implicit-reference resolution (document folder, then the context's fallback),
+then use the first planned candidate only if no file matched. An existing
+repository-root match must not be replaced by a document-folder creation
+link. An explicit reference uses its existing candidate plan, including
+boundary checks. Other file-reference forms keep their existing semantics.
+Malformed references, missing anchors/context, and I/O failures never get a
+guessed creation path.
+
+Moving `SCHEMAS_DIR` first must preserve existing absolute-value validation,
+request-snapshot environment capture, duplicate-root identity rules, symlink
+policy, and trigger-pattern base directories. Only precedence changes.
+Invalid/unset roots do not become creation targets; unreadable roots remain
+errors rather than permitting a lower-priority file to win.
+
+Schema hover reads prepared source and resolution facts from DMLS's existing
+schema preparation/dependency machinery. The hover formatting function does
+no disk or network I/O and never runs composition. Prepare only what the
+requested preview needs; reuse dependency watching for valid, malformed, and
+missing targets, including roots outside the workspace and JSON targets.
+Invalidate when a selected file changes or disappears, or a higher-priority
+candidate/root appears. A repair must refresh a prior failure too. Open schema
+buffers, where supported by the existing source layer, take precedence over
+disk; do not introduce a second independent cache for hover.
+
+Value hovers use the value's authored source range and negotiated position
+encoding. Keys keep their existing schema documentation; expression and named
+type-definition hovers keep their existing priority. `$schema` root-union
+string items receive the same reference behavior as a scalar declaration;
+inline arms and inline `$schema` mappings retain schema-authoring hovers.
+
+## Open Questions
+
+### How should JSON schema files declare their intent?
+
+JSON Schema permits objects without `$schema`, and unknown keywords do not
+by themselves make an object invalid. Therefore merely compiling or
+meta-validating an object cannot reliably distinguish an accidental data file
+from an intended schema. This decision changes library behavior and requires
+the author's choice before implementing the format restriction.
+
+1. **Require the supported Draft 2020-12 `$schema` URI on referenced JSON
+   objects, then validate the schema with the existing offline validator
+   (recommended).** Pros: explicit intent, deterministic rejection of
+   accidental data, no remote meta-schema lookup. Cons: existing schemas
+   without the declaration must add it; other dialects and bare boolean
+   schemas remain unsupported. Recommend this because it satisfies the
+   draft's stated goal of rejecting non-schema JSON with a simple rule that
+   can be explained and tested. Use the exact supported URI from the existing
+   schema compiler; a declaration alone does not prove that the schema is
+   well formed.
+2. **Accept any object valid under the supported meta-schema.** Pros: keeps
+   schemas without a dialect declaration and most current compatibility.
+   Cons: ordinary data objects can also pass, so the goal must be restated as
+   rejecting structurally invalid schemas rather than detecting intent.
+3. **Keep current JSON object loading and add an advisory for ambiguous
+   files.** Pros: smallest compatibility change and useful editor guidance.
+   Cons: accidental data can still silently behave as a permissive schema;
+   does not deliver the proposed hard rejection.
+
+### Which YAML schema envelopes may carry hover descriptions?
+
+The current standalone parser rejects `description` beside a schema payload.
+It also distinguishes tagged named-type documents from global catalogs. The
+hover requirement cannot add metadata support only in DMLS.
+
+1. **Extend recognized standalone envelopes with an optional string
+   `description`, preserving all existing `kind`/`types` and catalog rules
+   (recommended).** Pros: one classifier for library and editor, supports
+   descriptions on pure `$schema` documents, keeps catalogs separate. Cons:
+   expands the public grammar and requires parser, authoring, corpus, and
+   documentation updates. Recommend this minimal extension because it adds
+   the requested annotation without changing what `kind: schema` means.
+2. **Introduce a distinct tagged envelope for document schemas.** Pros:
+   clearly separates document schemas, type libraries, and catalogs. Cons:
+   adds a new public convention and migration work beyond this navigation
+   fix.
+3. **Keep YAML envelopes unchanged and omit YAML description previews.**
+   Pros: no grammar change; JSON `description` still works. Cons: the
+   requested descriptive hover is unavailable to YAML authors.
+
+Until these choices are resolved, implementers can complete shared navigation,
+file-value hover, and body summaries, but must not invent a recognition rule
+or land acceptance claims for the format restriction or new YAML metadata.
 
 ## Out of scope
 
@@ -230,37 +436,81 @@ The "inferred MIME, image preview" link-hover claim is removed from
 
 ## Acceptance
 
+Format-recognition and YAML-metadata assertions below require the author
+choices in Open Questions to be recorded first.
+
 - In `review-3.md`, Cmd-click and go-to-definition on `feature-review.yaml` open
   `schemas/feature-review.yaml`.
 - A bare-name `$schema` that resolves nowhere links to the first existing
   schema-root folder; with no root folder, to the document's folder.
 - `SCHEMAS_DIR` wins over every other root for both `$schema` and trigger
-  discovery.
+  discovery, without changing trigger-pattern bases or root eligibility.
 - The `$schema` value hover in `review-3.md` shows `Schema Definition:`, a
   10-line `yaml` block of `feature-review.yaml`'s `$schema`, and
   `*Showing **10** of **{n}** lines*`; the key hover text is unchanged.
-- A `$schema` naming a `types`-only YAML file, or a non-schema JSON file, is an
-  error in validation and shows the "not a valid schema definition" hover.
-- `file`-typed values show each D6 message; only a malformed reference is an
-  error, and no missing-file diagnostic appears in the editor.
+- A `$schema` naming a `types`-only YAML file, or a JSON file rejected by the
+  chosen recognition rule, is an error in validation and shows the "not a valid schema definition" hover.
+- `file`-typed values show each file-value outcome. A clean miss produces no
+  editor existence diagnostic; malformed references, context failures, and
+  I/O failures retain their existing typed diagnostics.
 - A body link to a Markdown document with `summary:` shows that summary.
 
 ### Tests
 
-- L1 resolver tests: root order with `SCHEMAS_DIR` first; the D3 fallback
-  target with zero, one, and several existing root folders.
+All automated cases below are L1: protocol requests and temporary files need
+no real editor or focused window. Use existing test-toolkit fixtures and
+nextest through the package-area `just test` recipes for affected areas.
+
+- Resolver tests: root order with `SCHEMAS_DIR` first; creation targets with
+  zero, one, and several searchable roots; zero roots with an existing fallback
+  match; sibling-only correction; invalid/duplicate roots; typed failures with
+  no invented target. Preserve existing symlink and boundary fixtures.
+- Consumer parity: validation, document link, and definition select the same
+  existing file or failure; named imports, examples, and trigger shadowing
+  obey the new precedence. Include a malformed winning file and a valid file
+  in a later root to prove there is no fallback after a content error.
 - Response-contract fixtures (`dmls/tests/fixtures/response_contracts/`): a
   bare-name `$schema` resolving to a repo-root `schemas/` file, for both
   document link and definition (regression for problem 1).
-- Hover snapshots for every D5 and D6 branch, and D7 with each summary property
-  and with none.
-- Validator tests for the D4 rejections.
+- Hover snapshots: schema success, short/exactly-ten/over-ten line previews,
+  description policy, malformed and unreadable targets, clean misses, and
+  sibling-only matches; every file-value outcome, nested/list values,
+  ambiguous and selected unions, expressions, and unchanged key hovers.
+- Body summaries: each field, precedence, blank/non-string/pending values,
+  no summary, heading targets, external dependency targets, and buffer edits.
+- Session tests: change/delete a schema, create a nearer candidate, repair an
+  invalid target, and edit/close a summary target buffer. Assert that hover,
+  links, definition, and diagnostics refresh together. Cover JSON dependency
+  watching and watched roots outside the workspace using existing seams.
+- Diagnostic tests: only missing `file` values lose existence errors; missing
+  schemas/imports/examples, required values, malformed references, and context
+  or I/O failures still report their typed errors. Confirm runtime eager-file
+  checks remain unchanged through the ordinary CLI invocation fixture.
+- Classifier tests after the author decisions: accepted envelopes, rejected
+  document-schema use of type libraries, preserved named-type imports,
+  catalog rejection, delegation/root-union handling, and the chosen JSON
+  policy. Include the passive shipped-schema corpus and a normal validation
+  invocation so metadata support cannot work only in hover.
+- Assert URI and range behavior with spaces, Markdown punctuation, non-ASCII
+  text, and existing portable/native path fixtures. Do not add a new OS
+  character blacklist.
+
+No performance spike is required: the design reuses prepared schema data and
+on-demand document parsing. Verify those properties with existing work
+counters or preparation seams; do not add host matrices or timing thresholds
+for this fix.
 
 ## Documentation
 
 - `darkmatter/docs/topics/schemas/definition.md`: "Schema roots" table and
-  prose (new order); what a `$schema` reference may point at (D4).
-- `roots.rs` module docs (root order).
+  prose (new order); what a `$schema` reference may point at (including the chosen format-recognition and metadata policy).
+- `roots.rs` module/constant docs and the Darkmatter skill's schema-root
+  reference (root order); CLI schema-root reporting and its snapshots.
+- Standalone-parser and referenced-loader docs in `simplified-schema` for the
+  chosen envelope/recognition policy, keeping import and catalog uses distinct.
+- `darkmatter/dmls/docs/file-references.md` and `darkmatter/dmls/docs/hover.md`:
+  schema-specific lookup, creation candidates, value/key hover distinction,
+  typed failures, and the editor-only missing-file diagnostic policy.
 - `darkmatter/docs/lsp/features.md` and `darkmatter/docs/topics/dmls.md`: `$schema` and
   `file` value hovers, link fallback, Markdown link summary; remove the
   MIME/image-preview claim.
