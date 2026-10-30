@@ -12,7 +12,7 @@ types:
     count: number(integer;min(0))
 
     counts:
-        $description: Test-result totals for one cell, including every test case and how many passed, failed, were skipped, or errored.
+        # Test-result totals for one cell, including every test case and how many passed, failed, were skipped, or errored.
         total: |-
             count(required) ->
             Total test cases recorded in the cell's reports. This equals the sum of passed, failed, skipped, and errored tests.
@@ -30,7 +30,7 @@ types:
             Test cases marked as errored, meaning an error interrupted their execution rather than an ordinary test failure being reported.
 
     build:
-        $description: Identifies the planned build and the realized archive manifest whose binaries a cell executed.
+        # Identifies the planned build and the realized archive manifest whose binaries a cell executed.
         key: |-
             identity(required) ->
             Planned key identifying the build archive whose binaries the cell executed.
@@ -39,7 +39,7 @@ types:
             Realized digest of the verified build manifest. It identifies the archive and build inputs the cell actually used.
 
     receipt_cell:
-        $description: The measured result of one package and gate in a validation run, including its outcome, test counts, execution inputs, and report location.
+        # The measured result of one package and gate in a validation run, including its outcome, test counts, execution inputs, and report location.
         package: |-
             string(required;not-empty) ->
             Cargo package name, exactly as declared by the package. This is never a package area name.
@@ -84,7 +84,7 @@ types:
             Non-empty nextest filter selecting a narrowed set of L1 tests. The result proves only those tests on the exact tree, never the whole tier.
 
     receipt_host:
-        $description: The host that produced a validation receipt and the directory where that run's reports were retained.
+        # The host that produced a validation receipt and the directory where that run's reports were retained.
         os: |-
             enum(Darwin,Linux,Windows;required) ->
             Operating system reported by the producing host: `Darwin` for macOS, `Linux` for Linux and WSL2, or `Windows` for native Windows.
@@ -96,7 +96,7 @@ types:
             Directory on the producing host where the run's reports are retained. Readers do not assume this path exists on their own host.
 
     validation_receipt:
-        $description: A version-2 record of one host's validation run on an exact commit, containing the measured result for each package and gate.
+        # A version-2 record of one host's validation run on an exact commit, containing the measured result for each package and gate.
         schema_version: |-
             literal(2;required) ->
             Receipt format version. Version 2 records outcomes and measurements per cell.
@@ -126,7 +126,7 @@ types:
             Measured result for each package and gate covered by the run. A receipt contains at least one cell.
 
     observation_host:
-        $description: The host that produced an observation, including its operating system details, an optional label, and any directory used to retain reports and proof documents.
+        # The host that produced an observation, including its operating system details, an optional label, and any directory used to retain reports and proof documents.
         os: |-
             string(required;not-empty) ->
             Operating system name reported by the producing host.
@@ -141,7 +141,7 @@ types:
             Directory on the producing host that retains `host-dir` reports and proof documents. Required and non-empty whenever the observation uses `host-dir` storage.
 
     producer:
-        $description: The system that produced an observation and the host or run identifiers needed to trace its origin.
+        # The system that produced an observation and the host or run identifiers needed to trace its origin.
         kind: |-
             enum(hook,rig,hosted,seed;required) ->
             System that created the observation: `hook` for a local pre-push run, `rig` for a cross-check test rig, `hosted` for a workflow run, or `seed` for a pre-nightly seed run.
@@ -162,7 +162,7 @@ types:
             Identifier of the seed pass, derived from the pinned commit and resolved plan. Required for seed producers.
 
     proof:
-        $description: Evidence that a non-hook producer ran the work scheduled for a cell, linking the test runner, expected-test listing, and completion record.
+        # Evidence that a non-hook producer ran the work scheduled for a cell, linking the test runner, expected-test listing, and completion record.
         nextest_version: |-
             string(required;not-empty) ->
             Version of the nextest binary that listed and ran the cell's tests.
@@ -177,7 +177,7 @@ types:
             SHA-256 digest of the record proving that every scheduled test and requirement was accounted for. Required for passing non-hook observations.
 
     report_reference:
-        $description: An immutable reference to a report's location and exact content, including its SHA-256 digest and byte size.
+        # An immutable reference to a report's location and exact content, including its SHA-256 digest and byte size.
         path: |-
             string(required;not-empty) ->
             Path of the report within its store, such as a relative path in the host report directory or a member path in a workflow artifact.
@@ -192,7 +192,7 @@ types:
             Where the report bytes are retained: `host-dir` for the producer's report directory or `artifact` for a workflow artifact.
 
     observation:
-        $description: One immutable attempt to validate one package and gate, recording its producer, result, reports, and any explicit retry relationship.
+        # One immutable attempt to validate one package and gate, recording its producer, result, reports, and any explicit retry relationship.
         observation_id: |-
             identity(required) ->
             Content identity of every other field. It makes the observation immutable and detects conflicting content published under the same ID.
@@ -225,7 +225,7 @@ types:
             Exact isolated Cargo feature arguments used for this attempt. Omitted means no feature arguments; reuse requires an exact match with the plan.
 
     observation_collection:
-        $description: The top-level evidence record stored in Git notes for one commit and CI environment, containing immutable observations of individual validation cells.
+        # The top-level evidence record stored in Git notes for one commit and CI environment, containing immutable observations of individual validation cells.
         schema_version: |-
             literal(3;required) ->
             Collection format version. Version 3 stores immutable per-cell observations.

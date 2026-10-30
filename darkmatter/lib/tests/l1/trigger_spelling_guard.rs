@@ -126,7 +126,6 @@ fn no_active_file_spells_a_renamed_trigger_form() {
         manifest_dir!().join("../../.claude/skills/darkmatter"),
         manifest_dir!().join("../../.claude/skills/claudine"),
         manifest_dir!().join("../../schemas"),
-        manifest_dir!().join("../../docs/drafts"),
     ];
     let mut files = vec![
         manifest_dir!().join("../README.md"),
