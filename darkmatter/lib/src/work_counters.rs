@@ -20,7 +20,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[repr(usize)]
 pub enum Work {
     /// An expression lexed and parsed by the expression parser. Counted by
-    /// simplified-schema, which owns the parser.
+    /// simplified-schema, which owns the parser, as are the other kinds
+    /// whose code moved there (see `library_kind`).
     ExpressionParse,
     /// A trigger-registry scan of a document's schema roots.
     TriggerDiscovery,
@@ -149,7 +150,7 @@ impl WorkSnapshot {
 }
 
 /// The counters' current values, with simplified-schema's counts folded into
-/// the kinds they share ([`Work::ExpressionParse`]).
+/// the kinds they share (the work of code that moved into the library).
 pub fn snapshot() -> WorkSnapshot {
     let library = simplified_schema::work_counters::snapshot();
     WorkSnapshot {
@@ -163,8 +164,16 @@ pub fn snapshot() -> WorkSnapshot {
 /// The simplified-schema counter that records `work`, when that code moved
 /// into the library.
 fn library_kind(work: Work) -> Option<simplified_schema::work_counters::Work> {
+    use simplified_schema::work_counters::Work as Library;
     match work {
-        Work::ExpressionParse => Some(simplified_schema::work_counters::Work::ExpressionParse),
+        Work::ExpressionParse => Some(Library::ExpressionParse),
+        Work::ValidatorCompile => Some(Library::ValidatorCompile),
+        Work::AlphanumericCheckCompile => Some(Library::AlphanumericCheckCompile),
+        Work::NamedTypeTableParse => Some(Library::NamedTypeTableParse),
+        Work::CoercionFailureBuild => Some(Library::CoercionFailureBuild),
+        Work::AlternativeMatcherPrepare => Some(Library::AlternativeMatcherPrepare),
+        Work::RecursiveTargetTranslate => Some(Library::RecursiveTargetTranslate),
+        Work::PositionKeyComparison => Some(Library::PositionKeyComparison),
         _ => None,
     }
 }

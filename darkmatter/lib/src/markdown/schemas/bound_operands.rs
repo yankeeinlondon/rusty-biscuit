@@ -68,15 +68,6 @@ use crate::markdown::literal_token::decode_leaf;
 /// descent, so this is only a backstop.
 const MAX_HOPS: usize = 64;
 
-/// Whether some node of `schema` carries `x-darkmatter-operands`.
-pub(super) fn marks_operands(schema: &Value) -> bool {
-    match schema {
-        Value::Object(map) => map.contains_key(DARKMATTER_OPERANDS_KEYWORD) || map.values().any(marks_operands),
-        Value::Array(items) => items.iter().any(marks_operands),
-        _ => false,
-    }
-}
-
 /// The verdicts on every generated verb value of one instance.
 #[derive(Debug, Default)]
 pub(super) struct BoundOperands {

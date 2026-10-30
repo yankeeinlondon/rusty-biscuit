@@ -1,0 +1,465 @@
+//! Content-based standalone SimplifiedSchema document recognition.
+//!
+//! The public entry point [`parse_standalone_schema_document`] classifies a
+//! YAML source string as a standalone SimplifiedSchema authoring document by
+//! its **content** — not by filename, glob, or consumer discovery.
+//!
+//! ## Recognition
+//!
+//! Two envelopes are recognized:
+//!
+//! - **Pure**: a YAML mapping with `$schema` and an optional `types` mapping.
+//! - **Tagged**: a YAML mapping containing `kind: schema`, a `types`
+//!   mapping, an optional exported `$schema`, and optionally a `categories` list (see
+//!   [`StandaloneSchemaDocument::categories`]).
+//!
+//! A separate `types` mapping supplies local names and named imports without
+//! adding document properties. Otherwise mapping payload entries serve both
+//! roles. A sequence export is a root-level schema union for whole-file use,
+//! and a scalar export is a whole-file schema
+//! reference. Every pure payload is parsed by the shared
+//! [`parse_schema_declaration`](super::parse_schema_declaration) authority —
+//! the same parser that classifies an inline `$schema` value — so reference
+//! arms are syntax-checked and remote references rejected without I/O. A
+//! tagged `types` payload must remain a mapping.
+//!
+//! Once an envelope is recognized, a malformed payload is a
+//! [`SchemaError::SchemaDocument`] — the library never silently reinterprets
+//! the document as ordinary YAML or raw JSON Schema. Text that is not YAML at
+//! all is a [`SchemaError::SchemaDocument`] too, never a silent decline.
+//!
+//! ## Side-effect freedom
+//!
+//! Classification, parsing, and suggestion linting perform no file reads,
+//! shell execution, composition directive evaluation, or network access. The
+//! caller supplies the source string; all work is in-memory.
+
+use std::path::{Path, PathBuf};
+
+use indexmap::IndexMap;
+use serde_yaml_ng::Value as YamlValue;
+
+use crate::errors::SchemaError;
+
+use super::{
+    Constraint, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaShape, SchemaSourceMap, SchemaSourcePath,
+    SchemaRoot, SuggestionLintProblem, TypeExpr, lint_suggestions,
+    signature::duplicate_overload, source::parse_standalone_schema_payload_with_source,
+};
+
+/// The content envelope used by a standalone SimplifiedSchema document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandaloneSchemaEnvelope {
+    /// A document with `$schema` and an optional reusable `types` mapping.
+    Pure,
+    /// A document containing `kind: schema`, `types`, and an optional export.
+    Tagged,
+}
+
+/// One entry of a tagged schema document's `categories:` list, written
+/// `Name` or `Name -> description`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaCategory {
+    /// The trimmed text before `->`; case-sensitive.
+    pub name: String,
+    /// The trimmed text after `->`, which may span lines.
+    pub description: Option<String>,
+}
+
+/// A parsed standalone SimplifiedSchema authoring document.
+///
+/// Produced by [`parse_standalone_schema_document`]. Carries the shared
+/// [`SchemaDeclaration`] product for the envelope payload, structural source
+/// map, the content envelope that claimed the document, and suggestion lint
+/// problems with byte spans relative to `source`.
+///
+/// Candidate spans are byte ranges in the authoring source, and lint problems
+/// retain those same authoring-document ranges. Parsing and linting perform no
+/// file reads, shell, network, or composition operations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StandaloneSchemaDocument {
+    /// Path of the authoring document supplied by the caller.
+    pub path: PathBuf,
+    /// Content envelope that claimed the document.
+    pub envelope: StandaloneSchemaEnvelope,
+    /// The shared declaration product for the envelope payload: an inline
+    /// schema (mapping or root-union sequence) or a syntax-checked whole-file
+    /// reference. Without an explicit export, a tagged `types` table is the payload.
+    pub declaration: SchemaDeclaration,
+    /// Structural authored spans for the parsed schema payload.
+    pub source_map: SchemaSourceMap,
+    /// Reusable definitions declared beside an exported `$schema`. These
+    /// supply its local namespace without becoming document properties.
+    pub local_types: Option<SchemaShape>,
+    /// Authored spans of `local_types`, relative to that mapping's root.
+    pub local_type_source_map: Option<SchemaSourceMap>,
+    /// Invalid advisory suggestion metadata in declaration order.
+    ///
+    /// These are lint problems, not errors — the schema is still usable for
+    /// validation and completion. See [`SuggestionLintProblem`].
+    pub suggestion_lints: Vec<SuggestionLintProblem>,
+    /// The tagged envelope's `categories:` list in authored order, or `None`
+    /// when the document declares none. A declared list (even `[]`) limits
+    /// every `category(...)` in `types` to its names; without one any name is
+    /// accepted.
+    pub categories: Option<Vec<SchemaCategory>>,
+}
+
+impl StandaloneSchemaDocument {
+    /// The namespace available to local references and named imports. An
+    /// explicit `types` table is independent of the exported properties.
+    pub fn named_types(&self) -> Option<&SchemaShape> {
+        self.local_types.as_ref().or_else(|| match self.schema()? {
+            SchemaRoot::Single(shape) => Some(shape),
+            SchemaRoot::Union(_) => None,
+        })
+    }
+
+    /// Authored spans of the table returned by [`Self::named_types`].
+    pub fn named_type_source_map(&self) -> &SchemaSourceMap {
+        self.local_type_source_map.as_ref().unwrap_or(&self.source_map)
+    }
+
+    /// Source locations for resolution, keeping exported properties and
+    /// local types distinct when they share a name.
+    pub fn resolution_source_map(&self) -> SchemaSourceMap {
+        let Some(types) = &self.local_type_source_map else {
+            return self.source_map.clone();
+        };
+        let mut map = SchemaSourceMap::default();
+        map.extend_prefixed(&self.source_map, &SchemaSourcePath::root().property("$schema"));
+        map.extend_prefixed(types, &SchemaSourcePath::root().property("types"));
+        map
+    }
+
+    /// Borrows the parsed inline schema when the payload is a mapping or a
+    /// root-union sequence; `None` when the payload is a whole-file reference.
+    pub fn schema(&self) -> Option<&SchemaRoot> {
+        match &self.declaration {
+            SchemaDeclaration::Schema(schema) => Some(schema),
+            SchemaDeclaration::Reference(_) => None,
+        }
+    }
+}
+
+/// Classifies and parses a standalone YAML SimplifiedSchema document.
+///
+/// Returns `Ok(None)` for ordinary YAML and raw JSON Schema documents, and an
+/// error for text that is not valid YAML. Once
+/// `kind: schema` claims a tagged document, or `$schema` with optional `types`
+/// claims an untagged document, malformed envelope content is returned as a
+/// [`SchemaError::SchemaDocument`] instead of falling back to raw JSON Schema.
+///
+/// Every pure payload — mapping, root-union sequence, or whole-file reference
+/// scalar — is parsed by the shared
+/// [`parse_schema_declaration`](super::parse_schema_declaration) authority, so
+/// reference arms are syntax-checked and HTTP(S) references rejected without
+/// I/O. A tagged `types` payload must be a mapping.
+///
+/// ## Errors versus lint
+///
+/// Text that is not valid YAML, and a malformed recognized envelope
+/// (missing/malformed `types`, unsupported tagged-envelope keys, a malformed
+/// `categories` list or an undeclared category, two overloads with one
+/// binding contract, unparseable SimplifiedSchema payload, invalid or
+/// remote reference) returns
+/// `Err(SchemaError::SchemaDocument)`, as does a global catalog
+/// ([`crate::catalog`]), which is never a document schema.
+/// Invalid `suggest(...)` candidates
+/// within a valid envelope are returned as
+/// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
+/// errors.
+///
+/// ## Side-effect freedom
+///
+/// Performs no file reads, shell execution, composition directive evaluation,
+/// or network access. The caller supplies `source`; all work is in-memory.
+pub fn parse_standalone_schema_document(
+    source: &str,
+    path: impl AsRef<Path>,
+) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
+    let path = path.as_ref();
+    let Some(recognized) =
+        recognize_standalone(source).map_err(|message| schema_document_error(path, message))?
+    else {
+        return Ok(None);
+    };
+    let (envelope, payload_key) = (recognized.envelope, recognized.payload_key());
+    let map = recognized.mapping();
+    let payload = recognized.payload();
+    let categories_key = YamlValue::String("categories".into());
+    let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
+        .map_err(|error| {
+            schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
+        })?;
+    let local = if payload_key == "$schema" {
+        map.get("types")
+            .map(|value| parse_standalone_schema_payload_with_source(value, source, "types"))
+            .transpose()
+            .map_err(|error| schema_document_error(path, format!("invalid named types: {error}")))?
+    } else {
+        None
+    };
+    let (local_types, local_type_source_map) = match local {
+        Some(parsed) => match parsed.value {
+            SchemaDeclaration::Schema(SchemaRoot::Single(shape)) => (Some(shape), Some(parsed.source_map)),
+            _ => return Err(schema_document_error(path, "`types` must be a mapping")),
+        },
+        None => (None, None),
+    };
+    let categories = map
+        .get(&categories_key)
+        .map(|value| parse_categories(path, value))
+        .transpose()?;
+    if let SchemaDeclaration::Schema(SchemaRoot::Single(shape)) = &parsed.value
+        && envelope == StandaloneSchemaEnvelope::Tagged
+        && local_types.is_none()
+    {
+        check_named_types(path, shape, categories.as_deref())?;
+    }
+    if let Some(shape) = &local_types {
+        check_named_types(path, shape, categories.as_deref())?;
+    }
+    let mut suggestion_lints = match &mut parsed.value {
+        SchemaDeclaration::Schema(schema) => {
+            lint_suggestions(schema).map_err(|error| {
+                schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
+            })?
+        }
+        // A whole-file reference carries no suggestion metadata to lint.
+        SchemaDeclaration::Reference(_) => Vec::new(),
+    };
+    if let Some(shape) = &local_types {
+        suggestion_lints.extend(lint_suggestions(&SchemaRoot::Single(shape.clone()))?);
+    }
+    Ok(Some(StandaloneSchemaDocument {
+        path: path.to_path_buf(),
+        envelope,
+        declaration: parsed.value,
+        source_map: parsed.source_map,
+        local_types,
+        local_type_source_map,
+        suggestion_lints,
+        categories,
+    }))
+}
+
+/// A YAML document whose content claims a standalone schema envelope.
+pub(super) struct RecognizedStandalone {
+    /// The whole document, a mapping.
+    document: YamlValue,
+    envelope: StandaloneSchemaEnvelope,
+}
+
+impl RecognizedStandalone {
+    /// The envelope key holding the payload.
+    pub(super) fn payload_key(&self) -> &'static str {
+        if self.mapping().contains_key("$schema") { "$schema" } else { "types" }
+    }
+
+    fn mapping(&self) -> &serde_yaml_ng::Mapping {
+        self.document.as_mapping().expect("recognition requires a mapping document")
+    }
+
+    /// The payload value; recognition checked that the key is present.
+    pub(super) fn payload(&self) -> &YamlValue {
+        self.mapping()
+            .get(self.payload_key())
+            .expect("recognition checked the payload key")
+    }
+
+    pub(super) fn local_types(&self) -> Option<&YamlValue> {
+        (self.payload_key() == "$schema").then(|| self.mapping().get("types")).flatten()
+    }
+}
+
+/// Loads `source` with admitted numbers and decides which envelope, if any,
+/// claims it.
+///
+/// `Ok(None)` is an ordinary document (not a mapping, or no envelope claims
+/// it). `Err` carries the message of an outer failure: text that is not YAML,
+/// a global catalog, or a malformed tagged envelope. The payload itself is
+/// not parsed here.
+pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStandalone>, String> {
+    // Numbers are admitted here too, so a schema file's numbers follow the
+    // same rules whichever loader reads the file first.
+    let document: YamlValue = crate::numeric::load_admitted_yaml(source).map_err(|error| {
+        if crate::numeric::is_yaml_admission_error(&error) {
+            error.to_string()
+        } else {
+            format!("not valid YAML: {error}")
+        }
+    })?;
+    let Some(map) = document.as_mapping() else {
+        return Ok(None);
+    };
+
+    let kind_key = YamlValue::String("kind".into());
+    let types_key = YamlValue::String("types".into());
+    let categories_key = YamlValue::String("categories".into());
+    let schema_key = YamlValue::String("$schema".into());
+    let tagged = map.get(&kind_key).and_then(YamlValue::as_str) == Some("schema");
+
+    let envelope = if tagged {
+        if matches!(map.get(&schema_key), Some(YamlValue::Mapping(_))) && !map.contains_key(&types_key) {
+            return Err("is a global catalog (`kind: schema` with `$schema` declarations); a catalog declares \
+                 globals for a host to register and never applies as a document schema"
+                .into());
+        }
+        let unsupported: Vec<String> = map
+            .keys()
+            .filter_map(YamlValue::as_str)
+            .filter(|key| !matches!(*key, "kind" | "types" | "categories" | "$schema"))
+            .map(str::to_string)
+            .collect();
+        let expected_len = 2 + usize::from(map.contains_key(&categories_key))
+            + usize::from(map.contains_key(&schema_key));
+        if !unsupported.is_empty() || map.len() != expected_len {
+            return Err(format!(
+                "tagged schema documents support only `kind`, `types`, `$schema`, and `categories`; \
+                 found unsupported keys: {}",
+                unsupported.join(", ")
+            ));
+        }
+        let Some(payload) = map.get(&types_key) else {
+            return Err("tagged schema document is missing the `types` mapping".into());
+        };
+        if !matches!(payload, YamlValue::Mapping(_)) {
+            return Err("tagged schema document `types` must be a mapping".into());
+        }
+        StandaloneSchemaEnvelope::Tagged
+    } else if map.contains_key(&schema_key)
+        && (map.len() == 1 || (map.len() == 2 && map.contains_key(&types_key)))
+    {
+        if map.contains_key(&types_key) && !matches!(map.get(&types_key), Some(YamlValue::Mapping(_))) {
+            return Err("`types` must be a mapping".into());
+        }
+        StandaloneSchemaEnvelope::Pure
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(RecognizedStandalone { document, envelope }))
+}
+
+/// Reads a `categories:` list: each entry `Name` or `Name -> description`,
+/// names unique and non-blank, order kept.
+fn parse_categories(path: &Path, value: &YamlValue) -> Result<Vec<SchemaCategory>, SchemaError> {
+    let YamlValue::Sequence(entries) = value else {
+        return Err(schema_document_error(
+            path,
+            "`categories` must be a list of `Name` or `Name -> description` entries \
+             (`categories: []` declares none)",
+        ));
+    };
+    let mut categories: Vec<SchemaCategory> = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let at = |message: String| schema_document_error(path, format!("`categories[{index}]`: {message}"));
+        let YamlValue::String(text) = entry else {
+            return Err(at("a category entry must be a string, `Name` or `Name -> description`".into()));
+        };
+        let (name, description) = match text.split_once("->") {
+            Some((name, description)) => {
+                let description = description.trim();
+                if description.is_empty() {
+                    return Err(at("`->` must be followed by a description".into()));
+                }
+                (name.trim(), Some(description.to_string()))
+            }
+            None => (text.trim(), None),
+        };
+        if name.is_empty() {
+            return Err(at("a category name cannot be blank".into()));
+        }
+        if let Some(first) = categories.iter().position(|category| category.name == name) {
+            return Err(at(format!(
+                "duplicate category `{name}` (first declared at `categories[{first}]`)"
+            )));
+        }
+        categories.push(SchemaCategory {
+            name: name.to_string(),
+            description,
+        });
+    }
+    Ok(categories)
+}
+
+/// The checks that need a whole `types` mapping: every `category(...)` names
+/// a declared category (when a list is declared), and no overload set has two
+/// options with one binding contract once local references are resolved.
+fn check_named_types(
+    path: &Path,
+    types: &SchemaShape,
+    categories: Option<&[SchemaCategory]>,
+) -> Result<(), SchemaError> {
+    let named: &IndexMap<String, PropertyDef> = &types.properties;
+    for (name, def) in named {
+        if let PropertyDef::Union(arms) = def
+            && let Some(message) = duplicate_overload(arms, Some(named))
+        {
+            return Err(schema_document_error(path, format!("`types.{name}`: {message}")));
+        }
+        if let Some(categories) = categories {
+            let mut undeclared = None;
+            visit_def(def, &mut |atom| {
+                for constraint in atom.constraints.iter().chain(&atom.array_constraints) {
+                    if let Constraint::Category(category) = constraint
+                        && undeclared.is_none()
+                        && !categories.iter().any(|declared| &declared.name == category)
+                    {
+                        undeclared = Some(category.clone());
+                    }
+                }
+            });
+            if let Some(category) = undeclared {
+                return Err(schema_document_error(
+                    path,
+                    format!("`types.{name}`: category `{category}` is not declared in `categories:`"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Calls `visit` with every atom of `def`, including those nested in inline
+/// objects, unions, tuples, and function signatures.
+fn visit_def(def: &PropertyDef, visit: &mut impl FnMut(&PropertyAtom)) {
+    match def {
+        PropertyDef::Single(atom) => visit_atom(atom, visit),
+        PropertyDef::Union(arms) => arms.iter().for_each(|atom| visit_atom(atom, visit)),
+    }
+}
+
+fn visit_atom(atom: &PropertyAtom, visit: &mut impl FnMut(&PropertyAtom)) {
+    visit(atom);
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => shape
+            .properties
+            .values()
+            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+            .for_each(|def| visit_def(def, visit)),
+        TypeExpr::Union(arms) => arms.iter().for_each(|atom| visit_atom(atom, visit)),
+        TypeExpr::Tuple(tuple) => {
+            tuple.elements.iter().for_each(|element| visit_def(&element.def, visit));
+            if let Some(spread) = &tuple.spread {
+                visit_atom(spread, visit);
+            }
+        }
+        TypeExpr::Function(function) => {
+            function
+                .parameters
+                .as_slice()
+                .iter()
+                .for_each(|parameter| visit_def(&parameter.def, visit));
+            visit_def(&function.returns, visit);
+        }
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
+    }
+}
+
+fn schema_document_error(path: &Path, message: impl Into<String>) -> SchemaError {
+    SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message: message.into(),
+    }
+}

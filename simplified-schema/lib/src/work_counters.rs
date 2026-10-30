@@ -23,11 +23,38 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub enum Work {
     /// An expression lexed and parsed by the expression parser.
     ExpressionParse,
+    /// A `jsonschema` validator compiled with the library's formats and
+    /// keywords, whoever asked for it.
+    ValidatorCompile,
+    /// An `alphanumeric` default/suggest check compiled during lowering: a
+    /// miss in the shared structural cache (also counted as a
+    /// [`Work::ValidatorCompile`]).
+    AlphanumericCheckCompile,
+    /// A named-type table parsed from an imported file's text (a memo miss).
+    NamedTypeTableParse,
+    /// An owned conversion `ValueFailure` built by the coercion engine.
+    CoercionFailureBuild,
+    /// A one-alternative schema prepared (definitions collected, lowered,
+    /// hashed) to test one value in editor assistance.
+    AlternativeMatcherPrepare,
+    /// A recursive `$ref` target body translated into a conversion shape.
+    RecursiveTargetTranslate,
+    /// A mapping entry key compared while locating a problem's position.
+    PositionKeyComparison,
 }
 
 impl Work {
     /// Every kind, in declaration order.
-    pub const ALL: &[Work] = &[Work::ExpressionParse];
+    pub const ALL: &[Work] = &[
+        Work::ExpressionParse,
+        Work::ValidatorCompile,
+        Work::AlphanumericCheckCompile,
+        Work::NamedTypeTableParse,
+        Work::CoercionFailureBuild,
+        Work::AlternativeMatcherPrepare,
+        Work::RecursiveTargetTranslate,
+        Work::PositionKeyComparison,
+    ];
 }
 
 static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work::ALL.len()];

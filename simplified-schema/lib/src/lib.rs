@@ -1,20 +1,55 @@
 //! The SimplifiedSchema language, independent of any Markdown host.
 //!
-//! The crate is being assembled from Darkmatter's schema modules; it currently
-//! holds the shared foundations every schema module builds on:
+//! The crate holds the language and everything that judges values with it:
 //!
 //! - [`numeric`]: admission of written numbers into finite `f64`s;
 //! - [`span`]: byte spans over the exact supplied text;
 //! - [`expression`]: passive `{{ … }}` syntax (scan, lexer, parser, AST),
 //!   never evaluated;
-//! - [`pending`]: the `{{!data:v1:…}}` literal-token codec.
+//! - [`pending`]: the `{{!data:v1:…}}` literal-token codec;
+//! - [`simplified`]: the AST ([`SchemaRoot`], [`SchemaShape`],
+//!   [`PropertyDef`], …), the type grammar, source maps, cursors, queries,
+//!   serializers, subtyping, and JSON Schema lowering;
+//! - [`resolve`]: named-type expansion, cycle checks, use-site merges, and
+//!   layering over explicitly supplied sources ([`embedded::ShippedSources`]);
+//! - [`coercion`] and [`coerce`]: the conversion engine and frontmatter
+//!   conversion against a JSON Schema;
+//! - [`validate`], [`format`], [`file_match`]: compiled validators, the
+//!   `darkmatter-*` formats, and `x-darkmatter-*` keywords;
+//! - [`errors`]: [`SchemaError`].
 //!
-//! See the package's `docs/` for the crate boundary.
+//! A host (Darkmatter) keeps its own policy — baseline selection, schema
+//! roots, trigger discovery, pending classification — and calls in here. See
+//! the package's `docs/` for the crate boundary.
 
+pub mod advisory;
+pub mod coerce;
+pub mod coercion;
+pub mod completion;
+pub mod discriminant;
+pub mod embedded;
+pub mod errors;
+pub mod example;
 pub mod expression;
+pub mod file_context;
+pub mod file_match;
+pub mod format;
+pub mod frontmatter_shape;
+pub mod json_shape;
+pub mod mapping_orders;
 pub mod numeric;
+pub mod origin;
 pub mod pending;
+pub mod phase;
+pub mod positions;
+pub mod reference;
+pub mod resolve;
+pub mod scope;
+pub mod simplified;
 pub mod span;
+pub mod timings;
+pub mod validate;
+pub mod validation;
 #[cfg(feature = "work-counters")]
 pub mod work_counters;
 
@@ -29,4 +64,64 @@ macro_rules! note_work {
 }
 pub(crate) use note_work;
 
+pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
+pub use discriminant::select_literal_discriminant_arm;
+pub use errors::{CycleReference, GrammarRelated, SchemaError};
+pub use frontmatter_shape::{
+    FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
+    frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
+    nested_property_shape_with_definitions, property_def_at_path, property_def_at_path_with_definitions,
+};
+pub use json_shape::shape_from_json_schema;
+pub use mapping_orders::MappingOrders;
+pub use origin::{SchemaOrigin, SchemaOriginKind, SchemaOriginMap};
+pub use phase::SchemaPhase;
+pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
+#[cfg(feature = "work-counters")]
+pub use simplified::alias_search_work;
+pub use simplified::{
+    Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
+    DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
+    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
+    SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
+    SchemaReferenceSite, SchemaRoot, SchemaShape, SchemaSourceId, SchemaSourceMap, SchemaSourcePath,
+    SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind,
+    SchemaValueNode, SimplifiedType, SourceAware, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
+    SuggestionItem, SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr,
+    decode_alias_definition, decode_partial_scalar_at, decode_plain_scalar_node, decode_scalar, decode_scalar_at,
+    decode_scalar_node, flattened_alternatives, flow_collection_end, is_definition_subtype,
+    is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
+    is_union_arm_path, lint_suggestions, locate_schema_declaration_cursor,
+    locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_standalone_definition_failure,
+    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
+    parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
+    parse_schema_declaration_with_source, parse_standalone_schema_document, parse_yaml_schema,
+    suggestions_for_def, suggestions_for_path, to_json_schema, to_json_schema_with_definitions,
+};
 pub use span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};
+pub use timings::{CompileCache, ValidationStage, ValidationTimings};
+pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
+pub use validation::{
+    CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SCHEMA_CONSTRAINT_CODE,
+    SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
+    SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE, ValidationProblem, ValidationProblemCode,
+    ValidationProblemKind, authored_node_at,
+};
+
+/// Benchmarking seam: empties this crate's process-wide schema caches so the
+/// next validation does its schema work cold.
+///
+/// Cleared: the shared, conversion, completion-alternative, and
+/// example-target validator caches; the conversion-plan, format-validator,
+/// example-artifact, emitted-pattern, and named-type parse caches. A host
+/// clears its own memos beside this call.
+#[doc(hidden)]
+pub fn reset_process_caches() {
+    validate::SHARED_VALIDATOR_CACHE.clear();
+    coerce::reset_process_caches();
+    completion::reset_process_caches();
+    example::reset_process_caches();
+    json_shape::reset_process_caches();
+    simplified::convert::reset_process_caches();
+    resolve::reset_process_caches();
+}

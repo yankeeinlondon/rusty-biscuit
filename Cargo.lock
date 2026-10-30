@@ -13154,14 +13154,25 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "biscuit-file",
+ "biscuit-hash",
+ "biscuit-terminal",
  "biscuit-test-harness",
+ "chrono",
+ "fancy-regex 0.19.1",
+ "indexmap 2.14.2",
+ "jsonschema",
  "proptest",
+ "regex",
+ "renderable",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "sniff",
+ "tempfile",
  "test-toolkit",
  "thiserror 2.0.21",
  "tracing",
+ "url",
 ]
 
 [[package]]
