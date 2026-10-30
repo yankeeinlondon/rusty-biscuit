@@ -118,6 +118,69 @@ decisions_for_review:
     - |-
         Darkmatter's `CompiledValidators` (with a new `accepts` and `collect_problems`), `wrapped_root_arms` and its memo, and the problem-description pass moved into the library's `prepared` module. Darkmatter's `EffectiveSchema` now calls them, so strict/soft and Darkmatter's own validation run the same collection code. The memo is cleared by the library's `reset_process_caches`. `phase_json_schema` and `merged_trigger_schema` stay in Darkmatter: they implement phase and trigger policy, which the library does not need.
         Darkmatter's entry points (`validate`, `validate_raw`, the phase and stored variants) are unchanged and do not route through `validate_strict`/`validate_soft`, as the spec requires; they add templates, lifecycle-verb operands, and positions that only a host has.
+    - |-
+        The schema object lives in a new module, `simplified_schema::schema`, and is re-exported at the crate root with its helpers: `SimplifiedSchema`, `SimplifiedSchemaError` (one error type for building, layering, and export), `SchemaProvenance`, `TypeDefinition`, `FunctionView`, `PathSyntaxError`, and, with the `file` feature, `SchemaSource` and `repository_scope_catalog`. The plan named the views `TypeDefinition` and `FunctionType`; `FunctionType` is already the language's name for a parsed function signature, so the borrowed view is `FunctionView`.
+        Alternative: separate error types per operation (loading, layering, export). More precise signatures, but three enums that share most variants.
+        If reversed: split `SimplifiedSchemaError`; only `schema/error.rs` and the `Result` types of the facade's methods change.
+    - |-
+        The file factories take one argument, `impl Into<SchemaSource>`. `SchemaSource` converts from `&Path`, `PathBuf`, `&str`/`String` (parsed as a file reference at entry) and `FileReference`. A plain source is raw (the factory captures a new request context once, first thing); `.bound(context)` makes it context-bound (no capture); `.with_text(buffer)` supplies the file's text so it is not read (for an editor's unsaved buffer). A raw relative path is joined to the captured directory; a reference resolves through the context's normal candidate order. The plan left the input type's name and shape open.
+        Alternative: two input types (a raw one and a bound one) or a trait the caller implements. Same behavior with more types to learn.
+        If reversed: only `schema/source.rs` changes.
+    - |-
+        A schema built from text (`TryFrom<&str>`) that names another file (a `Name@./file` import, a whole-file `$schema` reference, a file arm of a root union, or `example(./file)`) is built successfully and keeps the reference as parsed, as the spec asks. It can be inspected and exported, but validation fails with a new `ValidationFailure::Unprepared { error }` variant carrying `SchemaError::Unresolved` with the cause `ResolutionUnavailable`. There is no method to attach a file context to such a schema afterwards; loading it through a file factory is the way to follow its references.
+        Alternative: add a `bind(context)` method that resolves the kept references later. That is a second way to get a file-backed schema, with its own capture rules to audit.
+        If reversed: add the method on `SimplifiedSchema`; it would rebuild the layer through the same `resolve_authored` path the factories use.
+    - |-
+        `ValidationFailure` gained a third variant, `Unprepared { error: Arc<SchemaError> }`, for a schema that cannot be prepared: a function-typed property (no JSON Schema form), a lowered schema `jsonschema` rejects, or text that names a file. The Phase 5 agent suggested exactly this. The error is shared, so every validation of such a schema returns the same one without retrying. `problems()` is empty for it.
+        Alternative: make construction fail for any schema that does not lower. Function catalogs (`kind: schema` with only function types) could then never be loaded for inspection, which the spec requires.
+    - |-
+        A schema built from text has no file context, so its `file(eager)` and `match(...)` checks cannot run. Such a check now fails as `ValidationFailure::UnavailableCheck` (not `InvalidData`) in every build, the same way the minimal build reports them. Malformed file-reference syntax is still invalid data. `ValidationProblem::is_unavailable_check()` still answers only for the build (no `file` feature); the content case is decided when the failure is classified, from a crate-private flag on `Prepared` (`without_file_checks`).
+        Alternative: report them as invalid data, which is what resolving against an empty context would produce. That would reject every valid path.
+        If reversed: drop `Prepared::without_file_checks` and the flag on `ValidationFailure::from_problems`.
+    - |-
+        `TryFrom<&str>` and `try_from_yaml` also accept a raw JSON Schema written in YAML or JSON when its root `$schema` is a `json-schema.org` dialect URI; a mapping with no recognizable schema structure is `MissingSchema`. The spec asked for classification by `$schema` structure and for the raw JSON Schema surface to be preserved; it did not say whether content can be raw JSON Schema. `try_from_json_schema` uses the resolver's existing strict JSON loader unchanged, which accepts any JSON object.
+        Alternative: accept raw JSON Schema only through `try_from_json_schema`. Simpler classification, but `TryFrom<&str>` would reject a valid JSON Schema document.
+        If reversed: delete the dialect branch in `Layer::from_yaml_document`.
+    - |-
+        `SimplifiedSchema::select(name)` returns an object named type as a schema of its own (`kind: schema` with `types: { Person: … }` → a `Person` schema), because the spec's example says "a consumer can select `Person` and validate a mapping against it". Its export writes the selected type as `$schema` with the whole authored `types` table beside it, so references between named types still resolve. The plan did not list this method.
+        Alternative: have callers query the type and build a schema from it themselves. Every caller would then have to repeat the lowering.
+    - |-
+        Layering keeps the typed layers as a list (highest precedence first) plus the merged lowered JSON Schema, rather than merging the typed declarations into one. A query answers from the highest layer that declares the top-level key, which is exactly the property-level replacement the JSON merge performs; a raw JSON Schema layer that declares the key hides typed layers below it. The file context that judges `file(...)` values and the reported provenance stay the receiver's, also under `layer_over`. A call whose merge leaves the receiver's JSON unchanged (every incoming property shadowed) changes nothing, so the revision and prepared validators are kept, as the spec asks for unchanged definitions. Darkmatter's `EffectiveSchema` keeps its typed layers the same way (document shape plus trigger shapes).
+        Alternative: merge the typed declarations into one `SchemaShape`. That needs a typed merge of named-type tables, which the resolver does not have; inventing one is the new merge semantics the spec rules out.
+        If reversed: `Definition` in `schema/mod.rs` and the query in `schema/view.rs` change.
+    - |-
+        The YAML export writes nested objects as block mappings and property-level unions as YAML lists, because the existing inline serializer drops pattern keys and `$constraints` of inline objects, and keeps only the last arm's description of a `a | b` union. Where the serializer would still have to drop something (an inline object with pattern keys inside a type string, such as `'{<string>: number}[]'`), the export returns `ExportUnsupported` instead. A layered schema exports when every layer is a SimplifiedSchema object schema and the properties copied from lower layers do not refer to named types (which resolve in the layer that declared them); otherwise `ExportUnsupported`. The spec forbids silently dropping metadata.
+        Alternative: extend the inline serializer to write pattern keys and object constraints. That changes an existing serializer the extraction must preserve.
+    - |-
+        `coords[1]` on a tuple returns the type at that position (past the last element, the spread's type). The existing path walk the facade uses (`completion::def_at_path`, as the inventory recommended) treats any index as "an element of the list" and returns the list's own declaration, so the facade resolves the tuple position itself when the last step is an index. A key below a tuple position (`coords[1].x`) still returns `None`, as the walk does. A property that root-union arms declare is answered with the union of the arms' declarations, owned, even when only one arm declares it, as the existing walk does.
+        Alternative: return the tuple's declaration with an "element" marker and leave the position to the caller. The spec names tuple indices as a query feature.
+        If reversed: drop `tuple_position` in `schema/view.rs`.
+    - |-
+        The facade resolves with `ShippedSources::NONE`, so `Name@darkmatter:<stem>` is an ordinary file reference through it. The spec keeps that namespace host policy, and Darkmatter's own entry points still pass its shipped sources. If Phase 7 migrates a Darkmatter or DMLS path onto the facade, it needs a way to pass the host's `ShippedSources` (for example a `SchemaSource::with_shipped_sources`).
+    - |-
+        `repository_scope_catalog` (the projection from a `sniff` repository observation to biscuit-file's scope catalog) moved from Darkmatter into the library's `capture` module, and Darkmatter re-exports it, as the inventory's row F7 decided, so the library's raw-path capture and Darkmatter's request capture use one projection. The capture itself mirrors Darkmatter's binaries: the process directory, home and environment through biscuit-file, the repository root through `sniff::filesystem::git::repo_root`, the packages through `detect_repo_structure`. A discovery error is an error (`SimplifiedSchemaError::Discovery`), no repository is not, as in Darkmatter.
+    - |-
+        `SimplifiedSchema::resolve(uri)` is an `async fn` that does all its work before its first (and only) poll, so it needs no runtime dependency; it selects the loader by extension the way the resolver does for referenced files (`.md`/`.markdown` Markdown, `.json` raw JSON Schema, anything else YAML). The plan only said it supports local references and supplied sources and keeps HTTP(S) as `RemoteUnsupported`.
+    - |-
+        The capture and read counters are thread-local `cfg(test)` statics, so the context-boundary tests (criterion 15) are unit tests inside the crate (`src/schema/tests.rs`) rather than L1 integration tests, which cannot see `cfg(test)` code. The tests that move the process directory or home are `#[serial]` and restore what they changed.
+        Alternative: a test-only Cargo feature exposing the counters to L1 tests. That is a public surface the plan said not to add.
+    - |-
+        Darkmatter's effective schema does not hold a `SimplifiedSchema` object. The plan said `DarkmatterSchemas`/`EffectiveSchema` would hold the library object and build the effective schema with `effective.layer_under([&baseline, ...triggers])`.
+        What was done instead: Darkmatter keeps merging the already lowered baseline, trigger, and document layers itself, with the library's `merge_baseline`, the same merge `layer_under` runs, in the same low-to-high order with the document winning. A new test file (`darkmatter/lib/tests/l1/effective_schema_layering.rs`) builds the same layers as library objects and asserts the merged schema and the verdicts are equal, for a custom baseline, the shipped baseline, a matched trigger, and no document schema.
+        Why: the Darkmatter merge is memoized by pointer identity of the shared baseline and trigger payloads, and the shipped baseline and a lone trigger are shared rather than copied. That keeps the validator cache warm and is what the spec's "no per-page reparsing or cloning" asks for. Building library objects per page would add a schema object per layer per page, and the library's validation uses the schema file's folder for file checks while Darkmatter's uses the document's folder, so validation would still have to go through Darkmatter's own path.
+        Alternative: give the library a constructor from already resolved parts (typed schema, definitions, lowered JSON) and hold the object inside `EffectiveSchema`, keeping Darkmatter's memo and validators beside it. That exposes the typed queries on an effective schema but adds a second representation of the same data.
+        If the reviewer prefers the alternative: add that constructor to `simplified-schema/lib/src/schema/layer.rs`, store the object in `EffectiveSchema` (`darkmatter/lib/src/markdown/schemas/mod.rs`, `effective_for_with_override`), and keep the parity tests as they are.
+    - |-
+        Phase 7 removed every Darkmatter re-export of the schema language, including the untagged ones. The plan's task 7.6 named only the re-exports marked `migration: removed in Phase 7`.
+        The untagged lists at `darkmatter::markdown::schemas` (`SchemaRoot`, `SchemaError`, `PropertyDef`, `ValidatorCache`, `parse_yaml_schema`, `to_json_schema`, and about a hundred more) were the same kind of re-export, and the marked module re-exports could not be removed while they stayed, since they re-exported through those modules. Removing them gives every type one import path. As a result `darkmatter-cli`, `dmls`, `claudine`, `claudine-cli`, `claudine-gen`, and `messenger` (under its `research` feature) now depend on `simplified-schema` directly.
+        Kept, as earlier phases decided: `markdown::span`, `markdown::literal_token`, and the expression items `compose::expression` names in its own API (`Expr`, `Lexer`, `Token`, `parse`, …). Darkmatter's `schemas::coerce` module is now crate-private because nothing public is left in it.
+        Alternative: keep the untagged root lists, pointed at `simplified_schema` directly. Consumers would then need no new dependency, but each type would have two import paths again.
+        If the reviewer prefers the alternative: re-add `pub use simplified_schema::{…}` lists to `darkmatter/lib/src/markdown/schemas/mod.rs`; the consumer import changes can stay as they are.
+    - |-
+        The library's content constructor (`SimplifiedSchema::try_from(&str)`) was left unchanged, though it cannot read JSON text with an object key longer than 1024 characters. It reads JSON through the YAML parser, which limits a key to that length. Darkmatter's shipped baseline has a longer `patternProperties` key, so its JSON text is rejected as invalid YAML, while the same schema written as YAML text loads.
+        Why it was left: Darkmatter loads YAML schema files and frontmatter with the same loader, so changing only the library's constructor would make the two disagree on the same text. The spec asks for parity.
+        Alternative: when the content starts with `{`, parse it with the JSON parser first. That accepts this text but changes how the constructor classifies content, including how duplicate keys are reported.
+        If the reviewer prefers the alternative: change `Layer::from_content` in `simplified-schema/lib/src/schema/layer.rs` and add its JSON cases to the content tests; the Darkmatter parity test can then pass JSON text.
 source_files_during_phase_1:
     - biscuit-file/lib/Cargo.toml
     - biscuit-file/justfile
@@ -159,6 +222,7 @@ packages:
     - darkmatter-cli
     - dmls
     - simplified-schema
+    - messenger
 source_files_during_phase_2:
     - simplified-schema/lib/Cargo.toml
     - simplified-schema/justfile
@@ -440,13 +504,326 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5:
     - simplified-schema/docs/topics/validation.md
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/outcome.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/simplified/standalone.rs
+    - simplified-schema/lib/src/schema/mod.rs
+    - simplified-schema/lib/src/schema/error.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/schema/layering.rs
+    - simplified-schema/lib/src/schema/view.rs
+    - simplified-schema/lib/src/schema/export.rs
+    - simplified-schema/lib/src/schema/capture.rs
+    - simplified-schema/lib/src/schema/source.rs
+    - simplified-schema/lib/src/schema/tests.rs
+    - simplified-schema/lib/examples/validate_person.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/schema_object.rs
+    - simplified-schema/lib/tests/l1/schema_files.rs
+    - darkmatter/lib/src/markdown/compose/context/repository_scope.rs
+docs_updated_during_phase_6:
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/validation.md
+    - simplified-schema/docs/topics/features.md
+    - simplified-schema/docs/topics/language-core.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_6:
+    - simplified-schema/docs/topics/schema-object.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
 message_to_agent: |-
-    Phase 5 is done: `simplified_schema::Prepared` (module `prepared`) compiles a lowered JSON Schema once, `Prepared::new(Arc<Value>, base_dir: Option<PathBuf>, FileResolutionContext)`, and judges values with `validate_strict` / `validate_soft`, returning `Result<ValidationSuccess<'input>, ValidationFailure>` (module `outcome`, both re-exported at the crate root). The contract tests are `simplified-schema/lib/tests/l1/validation_contract.rs`; Darkmatter parity is `darkmatter/lib/tests/l1/validation_contract_parity.rs`.
-    Points for Phase 6:
-    (1) The facade should own a `Prepared` and rebuild it when its definition changes (revision bump) or its file context changes; `Prepared` is not `Clone` and holds no interior cache of its own. Build it from `to_json_schema_with_definitions(&root, &definitions)` wrapped in an `Arc`.
-    (2) `Prepared::new` returns `SchemaError` on a compile failure. If the facade compiles lazily inside `validate_strict`/`validate_soft`, add a `ValidationFailure` variant for it (the enum is `#[non_exhaustive]`) instead of panicking or returning `SchemaError` from validation.
-    (3) Darkmatter's `CompiledValidators`, `wrapped_root_arms`, and the problem-description pass now live in `simplified_schema::prepared`; Darkmatter's `EffectiveSchema` calls them. `phase_json_schema` and `merged_trigger_schema` stay in Darkmatter (host policy).
-    (4) Soft validation borrows the input when nothing converted, via the crate-private `coerce::validation_working_copy` (a `Cow`); keep using it so validation never clones the input.
+    Phase 7 is done. Darkmatter no longer re-exports the schema language: every `migration: removed in Phase 7` re-export and the untagged `darkmatter::markdown::schemas::{SchemaRoot, SchemaError, ...}` lists are gone, `markdown::numeric` is deleted, and `darkmatter-cli`, `dmls`, `claudine`, `claudine-cli`, `claudine-gen`, and `messenger` (feature `research`) depend on `simplified-schema` directly. Still re-exported on purpose: `markdown::span`, `markdown::literal_token`, `compose::repository_scope_catalog`, and the expression items `compose::expression` names (`Expr`, `Lexer`, `Token`, `parse`, ...). Darkmatter's `schemas::resolve` keeps only its shipped-source wrappers (`resolve_schema`, `expand_named_types_with_locals`, `prepare_embedded_*`, ...); import anything else from `simplified_schema::resolve`.
+    Points for Phase 8:
+    (1) `EffectiveSchema` does not hold a `SimplifiedSchema` (decision recorded); the effective merge is `merge_baseline` over lowered layers, and `darkmatter/lib/tests/l1/effective_schema_layering.rs` pins it equal to the object's `layer_under` (criterion 4 evidence, with `dmls/tests/l1/core_schema_types.rs::an_unsaved_document_schema_judges_the_buffer`).
+    (2) The library's content constructor cannot read JSON text with a key over 1024 characters (YAML parser limit); Darkmatter's shipped baseline has one. A corpus check that feeds the shipped baseline as JSON content will fail for that reason; feed YAML text or a file through `try_from_json_schema` (decision recorded, not changed).
+    (3) The library's doctests now all pass (`cargo test -p simplified-schema --doc`, 29); nextest does not run them, so a Phase 8 guard could.
+    (4) Carried over from Phase 6, still open: the default build's graph holds `reqwest`/`tokio` through `sniff -> schematic-schema -> schematic-runtime` (criterion 14 needs a ruling or a narrower `sniff` dependency); the minimal graph holds `globset` (Phase 1 decision); the facade resolves with `ShippedSources::NONE` and no schema roots.
+    (5) Pre-existing, not from this extraction: four `claudine-gen` `cli_switches` tests fail because `claudine/docs/research/model-config/_schema.yaml` declares `notes: string[]` (commit f0c34b7b0) while seven model-config research documents (codex, claude, gemini, goose, kilo, opencode, pi) still write `notes` as a string. Fix the data or the sidecar before treating the claudine area as green; Phase 7 left it alone as a contract decision.
+source_files_during_phase_7:
+    - Cargo.lock
+    - claudine/cli/Cargo.toml
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/keys.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/features/_completed/2026-10-28-schema-enhancements/spikes/single-engine/src/from_grammar.rs
+    - claudine/features/_completed/2026-10-28-schema-enhancements/spikes/single-engine/src/from_json_schema.rs
+    - claudine/features/_completed/2026-10-28-schema-enhancements/spikes/single-engine/src/mod.rs
+    - claudine/features/_completed/2026-10-28-schema-enhancements/spikes/single-engine/src/numberlike_format.rs
+    - claudine/features/_completed/2026-10-28-schema-enhancements/spikes/single-engine/src/tests.rs
+    - claudine/features/_completed/2026-10-30-claudine-recursive-schemas/spike/deferred_operand_spike.rs
+    - claudine/gen/Cargo.toml
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/composition/completion.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/inline_prompt.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/system_prompt/prepare.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/container_schema_recursion.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/detect.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/cli/tests/l1/schema_validate_phase.rs
+    - darkmatter/dmls/Cargo.toml
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/position_parity_tests.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/named_references.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/validation_timing.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/tests/l1/collection_editor.rs
+    - darkmatter/dmls/tests/l1/content_policy_baseline.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/lib/benches/effective_schema_ownership.rs
+    - darkmatter/lib/benches/pipeline_work_support/mod.rs
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/src/lifecycle/operands.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/markdown/cleanup/frontmatter.rs
+    - darkmatter/lib/src/markdown/cleanup/rules.rs
+    - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/parser.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/deferred.rs
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/fm_namespace.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/strings.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/expression/lint.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/lexical.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/raw.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/policy.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/canonical.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/matching.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/errors/mod.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/numeric.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/roots.rs
+    - darkmatter/lib/src/markdown/schemas/tests/clean_quoting.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/style/parse.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/collection_analysis.rs
+    - darkmatter/lib/tests/l1/compose_call_precheck.rs
+    - darkmatter/lib/tests/l1/content_policy_disk_baseline.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/diagnostic_positions.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/effective_schema_layering.rs
+    - darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/file_predicates.rs
+    - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+    - darkmatter/lib/tests/l1/frontmatter_coercion_engine.rs
+    - darkmatter/lib/tests/l1/function_binding_conversions.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/lib/tests/l1/git_context_integration.rs
+    - darkmatter/lib/tests/l1/glob_consumers.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/lifecycle_generated_operands.rs
+    - darkmatter/lib/tests/l1/lifecycle_operand_validation.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/match_keyword_input_matrix.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/meta_schema_reference_graph.rs
+    - darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs
+    - darkmatter/lib/tests/l1/numeric_admission.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/recent_commits_shared_type.rs
+    - darkmatter/lib/tests/l1/recursive_schema_completion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_conversion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - darkmatter/lib/tests/l1/recursive_schema_reporting.rs
+    - darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/required_context.rs
+    - darkmatter/lib/tests/l1/schema_cache_validity.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/mod.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schema_expression_syntax_checks.rs
+    - darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+    - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+    - darkmatter/lib/tests/l1/schema_json_key_order.rs
+    - darkmatter/lib/tests/l1/schema_nested_template_deferral.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schema_validation_timings.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_alphanumeric_check_cache.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/tests/l1/schemas_constraints_block_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_effective_presence.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_memo.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_required_count_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_runtime_parity.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_union_coerce.rs
+    - darkmatter/lib/tests/l1/schemas_union_completion.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/schemas_union_schema_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/lib/tests/l1/schemas_validation_summary.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_definitions.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_selection.rs
+    - darkmatter/lib/tests/l1/shell_template_execution.rs
+    - darkmatter/lib/tests/l1/shell_template_guards.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/simplified_schema_reexports.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+    - darkmatter/lib/tests/l1/trigger_input_matrix.rs
+    - darkmatter/lib/tests/l1/trigger_match_grammar.rs
+    - darkmatter/lib/tests/l1/trigger_payload_load_errors.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+    - messenger/lib/Cargo.toml
+    - messenger/lib/src/research/load.rs
+    - simplified-schema/lib/src/coercion/mod.rs
+    - simplified-schema/lib/src/format.rs
+    - simplified-schema/lib/src/json_shape.rs
+    - simplified-schema/lib/src/mapping_orders.rs
+    - simplified-schema/lib/src/simplified/alphanumeric.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/simplified/cursor.rs
+    - simplified-schema/lib/src/simplified/serialize.rs
+    - simplified-schema/lib/src/simplified/source.rs
+    - simplified-schema/lib/src/simplified/subtype.rs
+    - simplified-schema/lib/src/timings.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/dependencies.md
+    - claudine/docs/dependencies.md
+    - docs/dependencies.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/frontmatter.md
 ---
 
 # Implementation Log for 2026-10-28-extract-simplified-schema (9 phases)
@@ -1336,3 +1713,413 @@ syntax case uses `~alice/notes.md`.
   new tests resolve files only through tempdirs and `./` references, which
   the Phase 4 Windows run already exercises in the same shape.
 - The gates were not skipped (source files changed).
+
+## Phase 6
+
+Done inline by the orchestrator (no subagents): the facade's modules share
+one internal representation, so splitting them across agents would have
+meant agreeing that representation up front anyway.
+
+### Shape of the facade (`simplified-schema/lib/src/schema/`)
+
+| File | What it holds |
+| --- | --- |
+| `mod.rs` | `SimplifiedSchema` (definition `Arc`, `revision`, `Mutex<Option<Arc<PreparedState>>>`), `TryFrom<&str>`, `validate_strict`/`validate_soft`, `select`, `revision`, `provenance` |
+| `layer.rs` | `Layer` (authored form, expanded typed form, lowered JSON Schema or its error, file binding, `SchemaProvenance`), content/Markdown/YAML/JSON construction, resolution of a parsed declaration |
+| `layering.rs` | `layer_under`, `layer_over`, `as_base`, `override_with` |
+| `view.rs` | `query`, `query_steps`, `property`, `properties`, `named_type`, `TypeDefinition`, `FunctionView`, `PathSyntaxError` |
+| `export.rs` | `to_json_schema`, `to_simplified_yaml` |
+| `source.rs` | `SchemaSource`, `try_from_yaml`/`try_from_markdown`/`try_from_json_schema`, async `resolve` (feature `file`) |
+| `capture.rs` | private `request_context()` (the one raw-path capture), public `repository_scope_catalog` (feature `file`) |
+| `error.rs` | `SimplifiedSchemaError` |
+| `tests.rs` | private-seam unit tests (prepared identity, capture and read counters) |
+
+- **One read, one parse.** A file factory captures or reuses the context,
+  resolves the target, reads the text once (`fs::read_to_string`, or the
+  supplied text), and builds the layer from that buffer. The parsed
+  declaration goes straight to the resolver's crate-private entry points
+  (`resolve_reference_in_context`, `resolve_root_union`,
+  `resolve_standalone_root_union`, `resolve_document_examples`, newly
+  `pub(crate)`), and named types expand through a new
+  `expand_named_types_searched` (the public `expand_named_types_with_locals`
+  now delegates to it with a fresh probe set, so its behavior is unchanged).
+  Inline Markdown `$schema` resolves with the document namespace
+  (`InlineRoot`/`RootUnionArm`); a standalone file with its file namespace,
+  exactly as `resolve_inline_mapping` / `resolve_standalone_schema` do.
+- **Lowering is kept, not fatal.** A layer stores `Result<Arc<Value>,
+  Arc<SchemaError>>`; a function-typed property (no JSON Schema form) builds
+  an inspectable, exportable schema whose validation is
+  `ValidationFailure::Unprepared`. Expansion errors (unknown named type,
+  cycles) are malformed definitions and fail construction.
+- **Prepared state.** Built on first validation through `Prepared::new`
+  (shared validator cache), stored as an `Arc` in the object, and dropped by
+  a committing layering call. A schema that cannot prepare stores the error,
+  so every later validation returns the same `Arc<SchemaError>` without
+  retrying.
+- **Content has no file context.** Validation uses a placeholder
+  `FileResolutionContext::from_snapshot("", None, {})` (no process reads,
+  fails validation before any probe) and `Prepared::without_file_checks`, so
+  failures made only of file checks are `UnavailableCheck` in every build.
+  `ValidationFailure::from_problems` gained that flag; the public
+  `is_unavailable_check` is unchanged (it delegates to a new crate-private
+  `is_file_check`).
+
+### Layering staging measurement (6.5)
+
+Release build, this host (macOS, `rustc 1.98.1`), three runs, 300 iterations
+each; receiver 20 properties, incoming baseline 400 and trigger 50 (each
+property an inline object of three fields):
+
+| Operation | Run 1 | Run 2 | Run 3 |
+| --- | --- | --- | --- |
+| Direct host merge (`merge_baseline` twice, cloning each higher layer once) | 1.349 ms | 1.314 ms | 1.318 ms |
+| `SimplifiedSchema::layer_under(&[&base, &trigger])` (same merges + stage + unchanged check + commit) | 1.297 ms | 1.307 ms | 1.326 ms |
+| Deep copy of the merged JSON (the copy-for-rollback the spec rules out) | 0.502 ms | 0.537 ms | 0.513 ms |
+| `SimplifiedSchema::clone` (shares the definition) | 6 ns | 10 ns | 8 ns |
+
+Staging is not material: the facade's only owned working data is the clone a
+merge already consumes (the receiver's JSON as the higher side), and its
+`merged == receiver` no-op check is within noise. No action taken. The probe
+was a throwaway example, not committed.
+
+### Dependency graph (criterion 1, recorded for Phase 8)
+
+`cargo tree -p simplified-schema -e normal`: no Darkmatter, Claudine, DMLS,
+or `biscuit-terminal` in either configuration. The minimal build
+(`--no-default-features`, 116 crates) holds `globset` (decision recorded in
+Phase 1) and no `gix`, `walkdir`, or `sniff`. The default build (363 crates)
+holds `reqwest` and `tokio` through `sniff -> schematic-schema ->
+schematic-runtime`: present since Phase 2 declared `sniff`, now exercised by
+`capture.rs`. Phase 8 must decide whether that counts as an effect stack
+under criterion 14 (see `message_to_agent`).
+
+### Tests added (requirement → test)
+
+L1 (`simplified-schema/lib/tests/l1/`), unit tests (`src/schema/tests.rs`),
+and the example; all F1, in-process, at the crate's public API except the
+private-seam unit tests, which observe the capture/read counters and prepared
+identity no public API exposes (the plan made the counter a `cfg(test)` seam).
+
+| Requirement | Test |
+| --- | --- |
+| C1: schema-only example, AST inspected before validation, many values through one object | `examples/validate_person.rs` (ran: strict/soft output per value); `schema_object::the_example_schema_text_is_the_spec_person`; `validation::one_object_validates_many_values_in_both_modes` |
+| C10: spec precedence table | `schema_object::layering::the_spec_precedence_table` |
+| C10: whole-property replacement, no intersection | `layering::a_declaration_is_replaced_whole_never_intersected` |
+| C10: returned reference aliases the receiver (`std::ptr::eq`); sources unchanged | `layering::the_returned_reference_is_the_receiver_and_sources_are_unchanged` |
+| C10: valid first layer, unsupported later layer: receiver unchanged, validation uses prior state | `layering::a_failure_mid_list_leaves_the_receiver_as_it_was`; unit `prepared_state::a_failed_layering_keeps_the_receivers_definition_and_prepared_state` (definition `Arc` and prepared identity) |
+| C10: chain keeps earlier successes | `layering::a_chain_keeps_its_earlier_successes_when_a_later_call_fails` |
+| C10: next validation observes a change; unchanged definitions keep prepared state | `layering::a_successful_change_is_observed_by_the_next_validation`, `layering::layering_with_nothing_new_keeps_the_revision`; unit `prepared_state::a_successful_change_drops_the_prepared_state_and_an_unchanged_one_keeps_it`, `prepared_state::validation_prepares_once_and_reuses_it` |
+| C11: typed errors for missing file, absent structure, malformed definitions | `schema_files::factory_errors_are_typed`, `content::content_without_schema_structure_is_a_typed_missing_schema_error`, `content::malformed_input_is_a_typed_error` |
+| C11: classification by structure; raw JSON Schema surface preserved | `content::standalone_envelopes_are_recognized`, `content::raw_json_schema_content_is_recognized_by_its_dialect`, `schema_files::json_schema_files_go_through_the_resolvers_json_loader` |
+| C11: unsaved buffer, no reread, no loader setup | `schema_files::a_bound_source_with_supplied_text_reads_no_file`; unit `context_boundary::supplied_text_is_never_read_from_disk` |
+| C12: file-looking string is content, never opened | `content::a_file_looking_string_is_content_and_never_opened` (a real file at that path exists) |
+| C12: YAML ≡ Markdown, body ignored | `content::yaml_and_markdown_with_the_same_payload_give_the_same_schema`; files: `schema_files::yaml_and_markdown_files_with_the_same_payload_are_the_same_schema` |
+| C12: external references retained, no I/O | `content::external_references_are_kept_as_parsed_with_no_io` (import, whole-file reference, file arm, `example(...)`) |
+| C13: dotted keys, list and tuple indices, quoted dotted keys, segments | `queries::dotted_keys_indices_and_quoted_keys` |
+| C13: empty path, missing match, unsupported step | `queries::empty_missing_and_unsupported_paths_are_none`, `queries::malformed_paths_are_typed_errors` |
+| C13: union-query behavior preserved | `queries::a_root_union_answers_with_the_union_of_its_arms` |
+| C13: recursion traversed lazily, no expansion; borrowed views | `queries::a_recursive_type_is_queried_lazily_without_expansion` |
+| C13: function view keeps names, order, types, optional/rest, return, `fallible` default, description | `queries::a_function_view_keeps_the_whole_signature` |
+| C15: raw path captures once; imports, validation, queries, export, layering capture nothing; input read once | unit `context_boundary::a_raw_path_captures_once_and_nothing_downstream_captures_again` |
+| C15: bound input and content capture zero times | unit `context_boundary::a_bound_source_and_content_capture_nothing` |
+| C15: CWD and home changes after capture do not retarget | unit `context_boundary::process_changes_after_capture_do_not_retarget` (`~/` and `./` file values after moving both) |
+| C15: source-relative imports and file values | `schema_files::imports_and_file_values_resolve_from_the_schema_files_directory` |
+| C15/C8: CRLF, Windows paths | `content::crlf_content_parses_like_lf`, `schema_files::crlf_files_parse_like_lf`; unit `context_boundary::a_windows_path_with_a_drive_resolves` (`cfg(windows)`); every file test uses temp-dir paths, which are `C:\…` on Windows |
+| C15: raw relative path and raw reference resolve from the captured directory | `schema_files::a_raw_relative_path_resolves_from_the_process_directory` |
+| C16: parse → export → parse, metadata, union arms, functions, finite recursive graphs | `export::object_and_metadata` (descriptions, `$constraints`, pattern keys, per-arm union descriptions), `export::root_union_arms`, `export::function_definitions` (with categories), `export::finite_recursive_named_definitions` |
+| C16: raw JSON Schema export unsupported; function lowering keeps its located error; no silent drop | `content::raw_json_schema_content_is_recognized_by_its_dialect`, `validation::a_function_typed_property_cannot_be_prepared_and_keeps_its_located_error`, `export::an_inline_object_the_serializer_cannot_write_is_refused`, `layering::a_layered_schema_exports_its_merged_properties` |
+| R4: HTTP(S) stays `RemoteUnsupported` | `content::remote_references_are_rejected_at_parse`, `schema_files::remote_references_are_unsupported` (factory and async `resolve`) |
+| Content file checks are unavailable, not violated | `validation::file_checks_of_content_are_unavailable_not_violated` |
+| Named-type selection (spec `Person`) | `validation::a_selected_named_type_validates_its_own_values` |
+| `resolve` by extension | `schema_files::resolve_selects_the_loader_by_extension` |
+
+Input Robustness Matrix, for the new content loader (`TryFrom<&str>`) and
+the factories, which reuse the existing loaders: the default outcome is a
+typed error and no schema. Exceptions pinned: `$schema` absent is
+`MissingSchema`; explicit null (`$schema:` and `$schema: null`) is *not*
+absence and reaches the declaration parser (`Grammar`); a number is
+`Grammar`; `{}` is an empty object schema (accepted); `[]` is an error.
+Document shapes: the YAML loader's duplicate key and malformed text
+(`schema_files::factory_errors_are_typed`, `content::malformed_input_is_a_typed_error`),
+the JSON loader's trailing content, duplicate key, and non-object
+(`json_schema_files_go_through_the_resolvers_json_loader`), the frontmatter
+extractor's near-miss fence and empty block, and CRLF. Smell grep over the
+new code (`src/schema/`): no `#[serde(default)]`, no `unwrap_or_default()` or
+`.ok()` on a load-bearing parse; the two `.ok()` in `capture.rs` drop an
+invalid scope catalog exactly as Darkmatter's capture does (the context then
+carries no catalog), and `view.rs`'s `unwrap_or_default` lists no
+properties for a schema that does not lower.
+
+Test-file notes: the original Phase 5 contract tests are unchanged. One test
+expectation was corrected while writing (an earlier draft of the test, not
+the code): the existing root-union property lookup returns an owned union
+even for a key only one arm declares (`root_property_def`), so the view is
+not borrowed there; pinned as is.
+
+### Darkmatter edit
+
+`darkmatter/lib/src/markdown/compose/context/repository_scope.rs`:
+`repository_scope_catalog` is now `pub use
+simplified_schema::repository_scope_catalog` (the inventory's F7: one
+projection for Darkmatter and the library's capture). Its body and the
+`package_area_root` helper moved; its unit tests stay and pass
+unchanged against the re-export.
+
+### Docs
+
+- New `simplified-schema/docs/topics/schema-object.md` (building, the
+  raw/bound/supplied-text flow as a Mermaid diagram, validation, layering
+  with the precedence table, queries, export).
+- `README.md` (facade example first, link), `validation.md`
+  (`Unprepared`, content file checks), `features.md` (file factories),
+  `language-core.md` (module table and diagram).
+- `.claude/skills/darkmatter/SKILL.md`: the facade and the shared
+  projection.
+
+### Checkpoint
+
+- Criteria 1, 10, 11, 12, 13, 15, 16: see the requirement → test table; the
+  example ran and printed per-value strict/soft verdicts.
+- Criterion 14, part 1: both builds compile, lint, and pass; the minimal
+  build runs every test that does not need a file (39 of the 53 new tests;
+  the file-factory and capture tests are `cfg(feature = "file")`).
+
+### Phase gates
+
+- `simplified-schema`: `just test` 1206/1206 (`work-counters,terminal`,
+  +53) and 1070/1070 (`--no-default-features`, +39); `just lint` clean in
+  both configurations; `just check-tier-coverage simplified-schema`: nothing
+  stranded; the new `select` doctest passes (`cargo test --doc`).
+- `darkmatter` (directly changed: the re-export; lib, cli, dmls): `just lint`
+  clean; `just test` 12756 passed, 10 skipped, 0 failed.
+- Dependents: `cargo check --all-targets` clean for claudine, claudine-cli,
+  claudine-gen, messenger, dmls, darkmatter-cli. Claudine uses
+  `compose::repository_scope_catalog` (`invocation_context.rs`); targeted run
+  `test(/invocation_context|repository_scope|scope_catalog|schema|validat/)`
+  1235/1235. DMLS's use of `expand_named_types_with_locals` is covered by the
+  Darkmatter area run.
+- Cross-OS: `just cross-check simplified-schema --os windows` (native
+  Windows): 1207/1207 passed, including the `cfg(windows)` drive-path test.
+  Run because the facade joins, anchors, and captures paths. The rig tested
+  the working tree (no observation published for this head, as the recipe
+  reports).
+- Scope calculator over the working tree (`git status --porcelain
+  --untracked-files=all | awk '{print $NF}' | xargs python3
+  scripts/ci/affected_scope.py`): `packages` = darkmatter,
+  simplified-schema, test-toolkit, darkmatter-cli; `change_class` =
+  package. `test-toolkit` is selected by every Rust source file (its
+  repository-wide source checks); `cargo nextest run -p test-toolkit`
+  479 passed, 2 skipped.
+- The gates were not skipped (source files changed).
+- No load-sensitive or pre-existing failures were seen.
+
+## Phase 7
+
+Done inline by the orchestrator (no subagents): the work was one
+compiler-driven import migration across six packages plus a handful of
+targeted tests, and splitting it would have meant several agents editing
+the same `use` lines.
+
+### 7.6 first: the re-exports are gone
+
+Every `// migration: removed in Phase 7` re-export was deleted, and with it
+the untagged lists in `darkmatter::markdown::schemas` that re-exported the
+library's types (`SchemaRoot`, `SchemaError`, `PropertyDef`,
+`ValidatorCache`, `parse_yaml_schema`, `to_json_schema`, …, and
+`alias_search_work`). See `decisions_for_review` for why the untagged lists
+went too.
+
+| Removed | Now imported from |
+| --- | --- |
+| `markdown::numeric` (file deleted), `markdown::coercion` | `simplified_schema::{numeric, coercion}` |
+| `schemas::{discriminant, errors, example, file_match, format, simplified, validate}`, crate-private `phase`, `scope`, `timings` | `simplified_schema::…` (the schemas module keeps private `use`s for its own code) |
+| `schemas::{SchemaRoot, SchemaError, …}` (both root lists) | `simplified_schema::…` |
+| `schemas::coerce::*` glob | `simplified_schema::coerce`; Darkmatter's `schemas::coerce` keeps only `nested_templates` and is now `pub(crate)` |
+| `schemas::resolve::*` glob | `simplified_schema::resolve`; Darkmatter's `schemas::resolve` keeps its wrappers that pass the shipped sources (`resolve_schema`, `resolve_schema_with_roots`, `expand_named_types_with_locals`, `prepare_embedded_*`, …) |
+| `compose::expression::{ast, parser}` modules, the `lexer` token re-exports | `simplified_schema::expression::{ast, parser, lexer}`; `compose::expression` still re-exports the items its composition API names (`Expr`, `SpannedExpr`, `Lexer`, `Token`, `ParseMode`, `parse`, `parse_spanned`, …), as Phase 3 decided |
+
+Kept, as earlier phases decided: `markdown::span`, `markdown::literal_token`,
+`compose::repository_scope_catalog`.
+
+How: two throwaway scripts (kept outside the repo) split every
+`use darkmatter::…::{…}` group, nested groups included, by each leaf's
+full path. A leaf that names a library item moved to a
+`use simplified_schema::…;` line; a leaf that names a Darkmatter wrapper
+(the `resolve` wrappers, `coerce::nested_templates`) stayed. Inline paths
+were rewritten the same way. The compiler did the rest (relative
+`super::ast` paths in `compose/expression`, `resolve::merge_baseline` in
+`schemas/`, and the in-crate test modules, which now import
+`Constraint`, `SchemaOriginKind`, `to_json_schema`, and `parse_yaml_schema`
+from the library). Long generated `use` lines were wrapped; nothing else was
+reformatted.
+
+New direct `simplified-schema` path dependencies: `darkmatter-cli`, `dmls`,
+`claudine`, `claudine-cli`, `claudine-gen`, and `messenger` (optional, under
+its `research` feature). Each already had it in its graph through
+Darkmatter, so `Cargo.lock` gains edges and no package.
+
+`rg 'darkmatter::markdown::schemas::simplified' --type rust` and
+`rg 'migration: removed in Phase 7' --type rust` both return nothing. The
+stale doc-comment examples in `simplified-schema` that still named
+`darkmatter::markdown::{coercion, schemas::simplified, schemas::format}`
+now name the library's paths.
+
+Test edits forced by the removal (minimal, listed per the conventions):
+`darkmatter/lib/tests/l1/simplified_schema_reexports.rs` dropped its numeric
+assertion (`markdown::numeric` no longer exists, so it would compare the
+library with itself) and spells the expression items through
+`compose::expression`'s remaining re-exports instead of the removed `ast`,
+`parser`, and `lexer` module paths. Every other test change is an import
+line.
+
+### 7.1 Darkmatter adapters
+
+`DarkmatterSchemas`/`EffectiveSchema` do not hold a `SimplifiedSchema`
+object (decision recorded). The effective schema is still merged by
+`merged_trigger_schema` over the already lowered baseline, trigger, and
+document layers with `simplified_schema::resolve::merge_baseline`, the
+same merge the object's `layer_under` runs, in the same low-to-high order
+with the document as the receiver. Its doc comment now says so and why
+(memo by `Arc` identity; no per-page schema objects). Origin tracking,
+pending classification, literal tokens, lifecycle operands, default and
+eager-file handling are untouched.
+
+New `darkmatter/lib/tests/l1/effective_schema_layering.rs` (F1, in-process,
+public API of both crates) pins the parity and the reuse:
+
+| Requirement (criterion 4) | Test |
+| --- | --- |
+| Document over custom baseline and a matched trigger equals `doc.layer_under([&baseline, &trigger])`; document wins `title`, each layer's own key survives; verdicts | `the_document_schema_is_layered_over_the_baseline_and_a_matched_trigger` |
+| No document schema: trigger over baseline, as the library layers them | `a_trigger_wins_over_the_baseline_when_the_document_has_no_schema` |
+| Absent document schema with an enabled baseline: shared `Arc` across pages; disabled baseline and no layers: `None` and a vacuous report (`has_schema == false`), while the library constructor's absence is the typed `MissingSchema` | `an_absent_document_schema_keeps_the_shared_baseline_and_no_layers_is_no_schema` |
+| A lone matched trigger is shared as resolved; an unmatched page has no schema | `a_lone_matched_trigger_is_shared_as_resolved` |
+| Shipped baseline: the process baseline itself (`ptr::eq`), and layered like the library | `the_shipped_baseline_layers_like_the_library_and_is_never_cloned_per_page` |
+| Compiled-validator reuse: two pages, same effective schema, one memoized merge and one validator (`ptr::eq`) | `compiled_validators_are_reused_across_pages_with_the_same_effective_schema` |
+
+Existing reuse tests that still hold: `darkmatter_base_json_schema_is_cached`,
+`darkmatter_base_schema_is_prepared_once_with_its_json`,
+`darkmatter_baseline_builder_shares_cached_json_schema` (unit), and
+`content_policy_embedded_baseline` (L1, `ptr::eq` with the process baseline).
+
+Finding while writing the shipped-baseline case: the library's content
+constructor (`SimplifiedSchema::try_from(&str)`) reads JSON text through
+the YAML parser, which caps an implicit key at 1024 characters, and the
+shipped baseline has a longer `patternProperties` key; the test passes the
+baseline as YAML text. Not changed (decision recorded): it is the same
+loader Darkmatter uses for YAML schema files and frontmatter.
+
+### 7.2 Darkmatter CLI
+
+Only imports changed (6 files). `md schema` behavior evidence is the
+existing CLI suite in the area run below.
+
+### 7.3 DMLS
+
+Imports only (24 files); DMLS already builds every effective schema from
+the open buffer's `Markdown` through `DarkmatterSchemas`, with no path-only
+factory and no reread. New test
+`dmls/tests/l1/core_schema_types.rs::an_unsaved_document_schema_judges_the_buffer`:
+the saved page declares `count: string` (valid), the open buffer declares
+`count: number` with `count: many`; DMLS reports one
+`dm.schema.type_mismatch` on `many`, the saved file is unchanged, and the
+library accepts the saved page. Searched-but-absent candidate invalidation
+is the existing `searched_candidates.rs` and `overlay/registry.rs` tests
+(`a_nearer_candidate_created_in_an_absent_folder_invalidates_a_ready_registry`
+and siblings), unchanged and in the area run.
+
+### 7.4 Claudine
+
+`claudine-gen`'s `schema_compat.rs` and `inputs.rs` (`coerce`) and every
+schema-only use in `claudine` and `claudine-cli` now import
+`simplified_schema`; Markdown, triggers, and composition stay on Darkmatter.
+No `source-inputs` entry named a moved or deleted file.
+
+### 7.5 Messenger
+
+`research/load.rs` imports `ValidationProblemCode` from the library. It
+still validates through `EffectiveSchema::validate` and deserializes the
+authored frontmatter (`loaded.frontmatter`), never the converted value;
+`research_validation::a_quoted_schema_version_is_unsupported_even_though_the_schema_coerces_it`
+and `strict_scalars_reject_authored_type_mismatches_at_their_pointer` are
+the evidence.
+
+### Docs and skills
+
+- `darkmatter/lib/src/markdown/schemas/mod.rs` module docs rewritten (the
+  module layout listed moved modules as Darkmatter's), and the old
+  `[SchemaRoot]`-style link block removed; `compose/expression/{mod,lexer}.rs`
+  module docs no longer promise the old paths.
+- `darkmatter/docs/dependencies.md` (the SimplifiedSchema entry),
+  `claudine/docs/dependencies.md` (`claudine-gen`), `docs/dependencies.md`
+  (the new direct edges), `darkmatter/docs/topics/schemas/definition.md`
+  (two code examples).
+- Skills: `.claude/skills/darkmatter/{SKILL,schema,compose,expressions,frontmatter}.md`
+  name `simplified_schema::{numeric, coercion, SchemaRoot, …}` and describe
+  what Darkmatter still re-exports and how the effective merge relates to
+  `layer_under`.
+
+### Library doctests (found and fixed)
+
+`cargo test -p simplified-schema --doc` failed 11 of 29 before this phase:
+the doc examples moved in Phase 4 still said `use darkmatter::…`, which the
+library cannot see, and nextest (the `just test` runner) never runs
+doctests, so no gate caught it. Their imports now name the library's paths
+(`mapping_orders.rs`, `timings.rs`, `json_shape.rs`,
+`simplified/{alphanumeric,cursor,source,subtype}.rs`; `subtype.rs`'s
+`resolve_yaml_schema` example also passes `ShippedSources::NONE`, the
+argument the library's resolver takes). Result: 29 passed, 2 ignored.
+Comment-only edits in `coercion/mod.rs`, `format.rs`,
+`simplified/{convert,serialize}.rs` likewise name the library's paths.
+Darkmatter's doctests (whose examples the import migration rewrote): 209
+passed, 8 ignored.
+
+### Phase gates
+
+- `darkmatter` area (lib, cli, dmls): `just lint` clean; `just test` 12763
+  passed, 10 skipped, 0 failed (12756 before, plus the 6 parity tests and
+  the DMLS unsaved-buffer test). `just check-tier-coverage darkmatter`:
+  nothing stranded. Doctests: 209 passed.
+- `simplified-schema`: `just lint` clean (both configurations); `just test`
+  passed in both configurations (1070 in the minimal one); doctests 29
+  passed (11 failed before; see above).
+- `claudine` area: `just lint` clean; `just test` 11680 passed, 4 failed,
+  15 skipped. **The 4 failures are pre-existing and not caused by this
+  phase**: `claudine-gen::l1 cli_switches::{control_row_types_dash_c_as_a_string,
+  a_spelling_may_repeat_at_disjoint_command_paths,
+  a_revision_one_document_generates_an_explicit_gap,
+  every_compiled_provider_has_switches_or_a_gap}` fail deterministically
+  (rerun alone: same) with `ResearchInvalid` for the copied
+  `claudine/docs/research/model-config/codex.md`: its `notes` values are
+  strings, and the sidecar `_schema.yaml` declares `notes: string[]` since
+  commit `f0c34b7b0` (2026-10-29, "support local schema types and ordered
+  output", before Phase 1 of this plan; it changed `notes: string` to
+  `string[]` without updating the documents). `md schema validate
+  claudine/docs/research/model-config/codex.md` reports the same problems.
+  `claude.md`, `gemini.md`, `goose.md`, `kilo.md`, `opencode.md`, and
+  `pi.md` hold scalar `notes` too. Not fixed here: choosing between
+  reverting the sidecar to `string` and rewriting seven research documents
+  is a contract decision outside this extraction (recorded in
+  `message_to_agent`). The import change in `claudine-gen/src/inputs.rs` is
+  the same function under its owning path.
+- `messenger`: `just lint` clean; `just test` 782 passed, 2 skipped
+  (includes the 30 `research_validation` cases).
+- Other packages the scope calculator selected: `test-toolkit` 479 passed;
+  `zed-dmls-cli` 27 passed; `sniff`, filtered to its workspace, lockfile,
+  package, and git readers (`test(/lockfile|integration|git_parity|package|workspace|repo/)`),
+  911 passed.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk
+  '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` =
+  claudine, claudine-cli, claudine-gen, darkmatter, darkmatter-cli, dmls,
+  messenger, simplified-schema, test-toolkit, sniff, zed-dmls-cli;
+  `change_class` = package. Gates were not skipped.
+- Cross-OS (native Windows, `just cross-check <package> --os windows
+  <name filter>`): run because the import rewrite was checked by the
+  compiler only for code built on macOS, and a `cfg(windows)` block naming
+  a removed path would compile nowhere else. A name filter still builds
+  every test target. `darkmatter`: all targets built, 6 passed.
+  `darkmatter-cli` (`schema_validate`) 155 passed; `dmls`
+  (`core_schema_types`) 11 passed; `claudine` (`invocation_context`) 49
+  passed; `claudine-cli` (`schema_completion`) 52 passed; `claudine-gen` and
+  `messenger` built every target (their filters matched no test). No
+  Windows failures, so `os_failing` is not set.
+- No load-sensitive failures were seen.
