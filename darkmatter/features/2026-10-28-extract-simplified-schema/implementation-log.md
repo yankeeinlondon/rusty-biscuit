@@ -85,7 +85,7 @@ decisions_for_review:
         Alternative: a transparent wrapper type in Darkmatter plus an unsafe pointer cast (or a `ref-cast` dependency) to borrow it. That keeps the library free of terminal code at the price of unsafe code or a new crate.
         If reversed: move the `impl` block (errors.rs, under `#[cfg(feature = "terminal")]`) into a Darkmatter wrapper and drop the feature.
     - |-
-        Moving the resolver and the file formats into the library meant its `--no-default-features` build (no file resolution) had to decide what a file check does. It now fails with a new typed error, `biscuit_file::FileReferenceError::ResolutionUnavailable { reference }` (classified as missing context), and file globs accept nothing. That follows the plan's rule that a check with no implementation must fail, never pass silently. The new error variant is a small change to biscuit-file's public enum; no code in the workspace matches that enum exhaustively.
+        Moving the resolver and the file formats into the library meant its `--no-default-features` build (no file resolution) had to decide what a file check does. It now fails with a new typed error, `biscuit_file::FileReferenceError::ResolutionUnavailable { reference }` (classified as missing context), and file globs accept nothing. Claudine's deliberately exhaustive error-to-slug mapping (`harness/error.rs` and its mirror test) now maps the variant to `missing_context`, matching biscuit-file's own class. That follows the plan's rule that a check with no implementation must fail, never pass silently. The new error variant is a small change to biscuit-file's public enum; the one exhaustive match in the workspace (Claudine's failure-slug vocabulary and its mirror test) maps it to `missing_context`.
         Alternative: a library-only error type. That would need a new `SchemaError` variant and different error plumbing in every resolution path.
         If reversed: add the library error and map it at the four places that now build `ResolutionUnavailable`.
     - |-
@@ -99,6 +99,25 @@ decisions_for_review:
     - |-
         `DARKMATTER_SCHEMA_CACHE_SIZE` (the validator cache size) is now read by the library's `validate.rs`. Darkmatter's context-construction guard only scans Darkmatter's own source, so its allowlist entry for that read was removed and the library has no equivalent guard yet. The trigger-spelling guard was extended to scan `simplified-schema`.
         Follow-up: Phase 8 (guards) should run the ambient-state guard over the library's source too.
+    - |-
+        Phase 5 put the strict/soft methods on a new library type, `Prepared` (in `simplified_schema::prepared`), built from an already lowered JSON Schema plus the directory and file-resolution context file values resolve in: `Prepared::new(json_schema, base_dir, context)`. The plan said Task 5.2 exposes the prepared state the Phase 6 `SimplifiedSchema` object owns, with reuse keyed on definition revision and context identity.
+        Why: the facade does not exist yet, so the revision-keyed reuse is left to Phase 6, which will hold a `Prepared` and rebuild it when its definition changes. `Prepared` itself is built once and judges any number of values.
+        Alternative: build the facade's lazy cache now. That would pull Phase 6's layering and revision design into this phase.
+        If reversed: nothing here changes; the facade wraps `Prepared` either way.
+    - |-
+        `ValidationFailure` is a `#[non_exhaustive]` enum with two variants, `InvalidData { problems }` and `UnavailableCheck { problems }`, and each `ValidationProblem` gained `is_unavailable_check()`. When a failure has both a real violation and a check that could not run, it is `InvalidData` (the value is certainly invalid), and the unavailable problems are still marked one by one. The spec only said the two kinds must be told apart.
+        Alternative: let "could not complete" win whenever any check was unavailable. A caller would then not learn that the value is certainly wrong.
+        Schema compile errors are not a `ValidationFailure` variant: `Prepared::new` returns `SchemaError`, so validating can never hit one. If Phase 6 compiles lazily inside `validate_*`, it adds a variant (the enum is non-exhaustive, so that is not a breaking change).
+    - |-
+        A problem counts as an unavailable check when the crate is built without the `file` feature and the problem is a file value's resolution failure or a `match(...)` glob rejection. Without that feature both checks always fail that way, so the rule is exact, and with the feature it never applies. Malformed file-reference syntax is still a real violation in every build.
+        Alternative: add a new `FileReferenceDiagnostic::Unavailable` variant carrying the exact cause. That is more explicit, but it changes a public enum that Claudine matches exhaustively and Darkmatter constructs in tests, for a case only the minimal build can reach.
+        If reversed: map `FileReferenceError::ResolutionUnavailable` to the new variant in `validate.rs`'s `file_reference_diagnostic`, have `is_unavailable_check` test for it, and update Claudine's match.
+    - |-
+        `ValidationSuccess` reports the schema's advisories (non-fatal resolution findings, set with `Prepared::with_advisories`) as its "diagnostics". Successful validation produces no other non-fatal finding today, so nothing else had to go there.
+        If a reviewer wants room for more: add a field; the struct's fields are public, so a new one is additive only for code that does not build the struct by hand.
+    - |-
+        Darkmatter's `CompiledValidators` (with a new `accepts` and `collect_problems`), `wrapped_root_arms` and its memo, and the problem-description pass moved into the library's `prepared` module. Darkmatter's `EffectiveSchema` now calls them, so strict/soft and Darkmatter's own validation run the same collection code. The memo is cleared by the library's `reset_process_caches`. `phase_json_schema` and `merged_trigger_schema` stay in Darkmatter: they implement phase and trigger policy, which the library does not need.
+        Darkmatter's entry points (`validate`, `validate_raw`, the phase and stored variants) are unchanged and do not route through `validate_strict`/`validate_soft`, as the spec requires; they add templates, lifecycle-verb operands, and positions that only a host has.
 source_files_during_phase_1:
     - biscuit-file/lib/Cargo.toml
     - biscuit-file/justfile
@@ -215,6 +234,9 @@ docs_created_during_phase_3:
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/SKILL.md
 source_files_during_phase_4:
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - claudine/lib/tests/l1/boundary_lint.rs
     - darkmatter/lib/tests/l1/context_construction_guard.rs
     - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
     - Cargo.lock
@@ -398,14 +420,33 @@ skills_files_updated_during_phase_4:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_5:
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/coerce.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/outcome.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/validation_contract.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/validation_contract_parity.rs
+docs_updated_during_phase_5:
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/language-core.md
+    - simplified-schema/docs/topics/features.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_5:
+    - simplified-schema/docs/topics/validation.md
+skills_files_updated_during_phase_5: []
 message_to_agent: |-
-    Phase 4 is done: the language core (AST, grammar, resolve, conversion, validators, formats, SchemaError) lives flat at the `simplified-schema` root (`simplified_schema::{simplified, resolve, validate, format, file_match, coerce, coercion, completion, ...}`), and Darkmatter re-exports it at the old `markdown::schemas::*` paths (tagged `// migration: removed in Phase 7`).
-    Points for Phase 5:
-    (1) The two existing operations to map: strict = `validate::build_structural_validator` / `build_validator_in_context` + `validate::collect_problems*` on the value as given (what `EffectiveSchema::validate_raw` does); soft = `coerce::coerce_frontmatter` (or `coerce_with_plan` + `ConversionPlan::for_schema`) then the same validator (what `EffectiveSchema::validate_with_positions` does). Those Darkmatter orchestrations live in `darkmatter/lib/src/markdown/schemas/mod.rs` (`validate_converted`, `judge_stored`); `NestedTemplates::default()` is what a host-free caller passes.
-    (2) Without the `file` feature, file checks fail with `FileReferenceError::ResolutionUnavailable` (see `tests/l1/resolution_unavailable.rs`): that is the "unavailable required check" outcome the `ValidationFailure` type should classify.
-    (3) Resolve functions now take a trailing `ShippedSources` argument; library callers pass `ShippedSources::NONE`. Darkmatter's `schemas::resolve` wrappers pass its own.
-    (4) Library tests: `just test` runs `--features work-counters,terminal` then the minimal build; tests that need files on disk carry `#[cfg(feature = "file")]`.
-    (5) Darkmatter still holds the memo helpers in `schemas/mod.rs` (`phase_json_schema`, `merged_trigger_schema`, `CompiledValidators`, `wrapped_root_arms`); move what the facade's prepared state needs.
+    Phase 5 is done: `simplified_schema::Prepared` (module `prepared`) compiles a lowered JSON Schema once, `Prepared::new(Arc<Value>, base_dir: Option<PathBuf>, FileResolutionContext)`, and judges values with `validate_strict` / `validate_soft`, returning `Result<ValidationSuccess<'input>, ValidationFailure>` (module `outcome`, both re-exported at the crate root). The contract tests are `simplified-schema/lib/tests/l1/validation_contract.rs`; Darkmatter parity is `darkmatter/lib/tests/l1/validation_contract_parity.rs`.
+    Points for Phase 6:
+    (1) The facade should own a `Prepared` and rebuild it when its definition changes (revision bump) or its file context changes; `Prepared` is not `Clone` and holds no interior cache of its own. Build it from `to_json_schema_with_definitions(&root, &definitions)` wrapped in an `Arc`.
+    (2) `Prepared::new` returns `SchemaError` on a compile failure. If the facade compiles lazily inside `validate_strict`/`validate_soft`, add a `ValidationFailure` variant for it (the enum is `#[non_exhaustive]`) instead of panicking or returning `SchemaError` from validation.
+    (3) Darkmatter's `CompiledValidators`, `wrapped_root_arms`, and the problem-description pass now live in `simplified_schema::prepared`; Darkmatter's `EffectiveSchema` calls them. `phase_json_schema` and `merged_trigger_schema` stay in Darkmatter (host policy).
+    (4) Soft validation borrows the input when nothing converted, via the crate-private `coerce::validation_working_copy` (a `Cow`); keep using it so validation never clones the input.
 ---
 
 # Implementation Log for 2026-10-28-extract-simplified-schema (9 phases)
@@ -1129,3 +1170,169 @@ build only) is pinned above.
 - `rg "crate::markdown|crate::lifecycle" simplified-schema/lib/src`: none.
 - One implementation each: `fn parse_spanned`, `fn to_json_schema`,
   `fn bind_with` are only in `simplified-schema`.
+
+### Darkmatter and Claudine follow-on edits
+
+- `compose/context/repository_scope.rs` guard
+  (`resolver_inventory_has_one_projection_adapter_and_no_discovery_fallbacks`)
+  now also reads the library's `format.rs`, `file_context.rs`,
+  `file_match.rs`, `resolve.rs` for `find_git_root_from`.
+- `tests/l1/context_construction_guard.rs`: the allowlist entry for the
+  `DARKMATTER_SCHEMA_CACHE_SIZE` read in `markdown/schemas/validate.rs` is
+  gone (the read moved to the library; see decisions_for_review).
+- `tests/l1/trigger_spelling_guard.rs`: the allowlist names
+  `simplified-schema/lib/src/errors.rs`, and the scan covers the library's
+  `src`, `tests`, and `docs`.
+- `claudine/lib/tests/l1/boundary_lint.rs`: the `FileReference`-routing check
+  reads the library's `resolve.rs`.
+- `claudine/lib/src/harness/error.rs` (+ its test): `ResolutionUnavailable`
+  → `missing_context`.
+
+### Phase gates
+
+- `simplified-schema`: `just test` 1136/1136 (`work-counters,terminal`) and
+  1014/1014 (`--no-default-features`); `just lint` clean (default,
+  `work-counters,terminal`, no-default-features); `just
+  check-tier-coverage simplified-schema` nothing stranded. The `test` and
+  `lint` recipes now enable `terminal` (19 rendering tests).
+- `darkmatter` (lib, cli, dmls): `just lint` clean (incl. zed-dmls wasm32);
+  `just test` 12748 passed, 10 skipped, 0 failed. The first two runs failed
+  on three guard tests whose allowlists or read lists named moved files
+  (fixed above); no behavior test failed.
+- `biscuit-file`: `just test` 1187/1187 (+6 syntax-only); `just lint` clean.
+- Dependents: `cargo check --all-targets` clean for dmls, darkmatter-cli,
+  claudine, claudine-cli, claudine-gen, messenger, messenger-cli, research.
+  `messenger` `just test` 782/782. `claudine` `just lint` clean; targeted run
+  (schema, completion, bundle, prepare, trigger, preflight, file-reference
+  filters) 2678/2679, the failure was the boundary lint fixed above (re-run
+  7/7).
+- `claudine` full `just test`: 11680 passed, **4 failed** (fail-fast stopped
+  the last 120 claudine-gen tests): `claudine-gen::l1 cli_switches::{control_row_types_dash_c_as_a_string,
+  a_spelling_may_repeat_at_disjoint_command_paths,
+  a_revision_one_document_generates_an_explicit_gap,
+  every_compiled_provider_has_switches_or_a_gap}`. **Pre-existing, not caused
+  by this phase:** the same test fails identically on the Phase 3 tree
+  (`f5b53f574`, exported with `git archive` and run in `/tmp`). The
+  model-config research documents (`claudine/docs/research/model-config/*.md`)
+  write `notes` as a single string while their contract
+  (`_schema.yaml`, changed in `f0c34b7b0` on 2026-10-29) types it
+  `string[]`, and conversion never wraps a scalar in a list. Fixing it means
+  either rewriting about 120 `notes` values as lists or loosening the
+  contract, which is the author's choice; it was left as is.
+- Cross-OS: `just cross-check simplified-schema --os windows` 1136/1136 on
+  build-win-native.
+- The gates were not skipped (source files changed).
+
+## Phase 5
+
+Done inline by the orchestrator (no subagents): the result types, the
+prepared state, and the Darkmatter switch-over touch one call path, and
+the tests run in well under a second.
+
+### Mapping decision (5.1)
+
+- `validate_strict` = the existing **exact** operation, what
+  `EffectiveSchema::validate_raw` does: compiled validators judge the value as
+  given; problems are collected (root unions per arm, discriminated unions
+  narrowed), annotated with the conversion core's reasons, and given their
+  declared descriptions.
+- `validate_soft` = the existing **coercing** operation, what
+  `EffectiveSchema::validate` / `validate_with_positions` does: a value the
+  validators accept as written is kept; otherwise the working copy
+  (`coerce::validation_copy_with_plan`) is judged by the same collection.
+  The accepted value equals `coerce_frontmatter_with_pending`'s.
+- Existing callers keep their operation. No Darkmatter, DMLS, or Claudine
+  entry point routes through the new methods; Darkmatter's
+  `validate_instance` now calls the same moved collection code (see below).
+
+### 5.1 Result types (`simplified-schema/lib/src/outcome.rs`)
+
+- `ValidationSuccess<'input> { value: Cow<'input, Value>, advisories }` with
+  `is_converted()`.
+- `ValidationFailure` (`#[non_exhaustive]`): `InvalidData { problems }` or
+  `UnavailableCheck { problems }`, with `problems()` / `into_problems()`. No
+  variant carries a value. A failure with any decided violation is
+  `InvalidData`; one whose every problem is an unavailable check is
+  `UnavailableCheck`.
+- `ValidationProblem::is_unavailable_check()` (`validation.rs`): without the
+  `file` feature, a file value's resolution failure
+  (`FileReferenceDiagnostic::ResolutionFailed`, which in that build is always
+  `ResolutionUnavailable`) or a `match(...)` rejection; always `false` with
+  `file`.
+
+### 5.2 `Prepared`, `validate_strict`, `validate_soft` (`prepared.rs`)
+
+- `Prepared::new(Arc<Value>, Option<PathBuf>, FileResolutionContext)`
+  compiles through `SHARED_VALIDATOR_CACHE` and finds the conversion plan
+  once; `with_advisories`; `json_schema()`.
+- Both methods take `&Value`. Strict and unconverted soft success return
+  `Cow::Borrowed(input)`; soft after conversion returns `Cow::Owned`. The
+  input is never cloned to validate: the new crate-private
+  `coerce::validation_working_copy` returns a `Cow` that borrows the
+  instance whenever nothing converted (`validation_copy_with_plan` is now
+  `validation_working_copy(..).into_owned()`, behavior unchanged).
+- Moved from Darkmatter's `schemas/mod.rs` into `prepared.rs` (one
+  implementation): `CompiledValidators` (+ new `accepts`,
+  `collect_problems`), `wrapped_root_arms` and its `WRAPPED` memo (now cleared
+  by the library's `reset_process_caches`), and the description pass
+  (`describe_problems`). Darkmatter's `accepts_as_is` and `validate_instance`
+  call them; `rewrite.rs` uses `wrapped_root_arms` through the import.
+  `phase_json_schema` and `merged_trigger_schema` stay (host policy).
+- The revision/context-keyed reuse is the Phase 6 facade's: it owns a
+  `Prepared` (see decisions_for_review).
+
+### Tests added (requirement → test)
+
+| Requirement | Test |
+| --- | --- |
+| R6 row 1: `number`/`4` borrowed by both (`std::ptr::eq`) | lib L1 `validation_contract::r6_table::number_with_number_4_is_borrowed_by_both` |
+| R6 row 2: `number`/`"4"` strict rejects (TypeMismatch at `/v`), soft owns `4`, input unchanged, equals `coerce_frontmatter` | `…::number_with_string_4_is_rejected_strictly_and_owned_as_4_softly` |
+| R6 row 3: `number(integer)`/`"2.5"` rejected by both, never repaired | `…::integer_with_string_2_5_is_rejected_by_both_and_never_repaired` |
+| R6 row 4: `string \| number`/`"4"` borrowed as the string by both | `…::string_or_number_with_string_4_is_borrowed_as_the_string_by_both` |
+| Nested conversion in mappings and lists | `conversion_rules::nested_values_convert_inside_mappings_and_lists` |
+| Union: as-written arm kept, otherwise converted as the engine does | `conversion_rules::a_union_keeps_the_arm_that_accepts_as_written_before_converting` |
+| Numeric precision failure with its reason | `conversion_rules::a_number_the_model_cannot_hold_exactly_fails_with_the_reason` |
+| No partial value on failure | `conversion_rules::one_failing_value_fails_the_whole_soft_validation_without_a_value` |
+| Structured diagnostics kept (codes, instance/schema paths, missing and unknown keys) | `diagnostics::every_problem_is_kept_with_its_paths_and_code` |
+| Declared description rides on its problem | `diagnostics::a_declared_description_rides_on_its_problem` |
+| Success exposes diagnostics (advisories) | `diagnostics::success_reports_the_schema_advisories` |
+| Input and schema immutability in both methods; one schema, many values | `immutability::both_methods_leave_input_and_schema_unchanged` |
+| Root union through both methods | `root_union::a_root_union_borrows_an_arm_match_and_converts_into_an_arm` |
+| Unavailable check vs control (both builds) | `unavailable_checks::an_eager_file_value_is_accepted_only_where_it_can_be_resolved`, `…::a_missing_file_is_invalid_data_with_resolution_and_unavailable_without` |
+| Mixed failure is invalid data; unavailable problem still marked | `unavailable_checks::a_decided_violation_beside_an_unavailable_check_is_invalid_data` |
+| Malformed syntax is decided in every build | `unavailable_checks::malformed_file_syntax_is_invalid_data_in_every_build` |
+| Parity with Darkmatter's exact/coercing operations (verdict, problem paths, accepted value, converted flag) on the characterization cells | DM L1 `validation_contract_parity::*` (8 cells) |
+
+Boundary and fidelity: the crate boundary; F1 in-process tests at each
+crate's public API, L1. The lib file runs in both builds (`just test` runs
+the default-plus-features and `--no-default-features` suites), so the
+`UnavailableCheck` branch is exercised in the minimal build. Input
+Robustness Matrix: not applicable, no loader or configuration reader changed.
+
+Note found while writing tests: `""` is accepted by SimplifiedSchema's
+`file(eager)` (an existing lowering outcome, not changed here); the malformed
+syntax case uses `~alice/notes.md`.
+
+### Docs
+
+- New `simplified-schema/docs/topics/validation.md` (strict/soft, result
+  types, failure kinds, host mapping), linked from the README,
+  `language-core.md` (module table and diagram), and `features.md`.
+
+### Phase gates
+
+- `simplified-schema`: `just test` 1153/1153 (`work-counters,terminal`, +17)
+  and 1031/1031 (`--no-default-features`, +17); `just lint` clean (after one
+  `clippy::cloned_ref_to_slice_refs` fix in the new test); `just
+  check-tier-coverage simplified-schema`: nothing stranded.
+- `darkmatter` (lib, cli, dmls): `just lint` clean; `just test` 12756
+  passed, 10 skipped, 0 failed (+8 parity tests).
+- Dependents: `cargo check --all-targets` clean for claudine, claudine-cli,
+  claudine-gen, messenger. Claudine targeted run (`test(/schema|validat/)`)
+  1178/1178. Darkmatter's change is internal (private validation helpers now
+  called from the library), with no public API change, so no wider
+  dependent run was needed.
+- Cross-OS: not run. No path, process, or `cfg(windows)` code changed; the
+  new tests resolve files only through tempdirs and `./` references, which
+  the Phase 4 Windows run already exercises in the same shape.
+- The gates were not skipped (source files changed).

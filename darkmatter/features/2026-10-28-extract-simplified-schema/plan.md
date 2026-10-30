@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-10-25
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 human_review: false
@@ -122,6 +122,9 @@ docs_created_during_phase_3:
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/SKILL.md
 source_files_during_phase_4:
+- claudine/lib/src/harness/error.rs
+- claudine/lib/src/harness/error/tests.rs
+- claudine/lib/tests/l1/boundary_lint.rs
 - darkmatter/lib/tests/l1/context_construction_guard.rs
 - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
 - Cargo.lock
@@ -305,6 +308,26 @@ skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/SKILL.md
 - .claude/skills/darkmatter/compose.md
 - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_5:
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/outcome.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/validation_contract.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/validation_contract_parity.rs
+docs_updated_during_phase_5:
+- simplified-schema/README.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/features.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_5:
+- simplified-schema/docs/topics/validation.md
+skills_files_updated_during_phase_5: []
 ---
 
 # Plan: Extract SimplifiedSchema
@@ -805,11 +828,11 @@ mostly sequential because the pieces import each other.
 
 ### Phase 4 checkpoint
 
-- [ ] `rg` finds no `crate::markdown::compose` or `crate::lifecycle` import in
+- [x] `rg` finds no `crate::markdown::compose` or `crate::lifecycle` import in
       `simplified-schema`.
-- [ ] Moved unit tests (the large majority of the 1,128) pass in the new crate;
+- [x] Moved unit tests (the large majority of the 1,128) pass in the new crate;
       the count moved is recorded in the log.
-- [ ] `just test` in `simplified-schema/`, `darkmatter/`, `darkmatter/dmls`,
+- [x] `just test` in `simplified-schema/`, `darkmatter/`, `darkmatter/dmls`,
       `claudine/`, `messenger/` green; `just lint` green.
 
 ## Phase 5: Validation Contract
@@ -818,7 +841,7 @@ Give the library the strict/soft API of R6 on top of the moved engine.
 
 ### Wave 7 (sequential, then parallel tests)
 
-- [ ] **5.1 Result types.**
+- [x] **5.1 Result types.**
     - Define `ValidationSuccess<'input>` (accepted value as `Cow<'input, Value>`,
       diagnostics) and `ValidationFailure` (invalid data vs. could-not-complete /
       unavailable required check; keeps accumulated structured diagnostics with
@@ -828,7 +851,7 @@ Give the library the strict/soft API of R6 on top of the moved engine.
       validation; `validate_soft` = existing coercing operation. Existing callers
       keep their current operation and do not auto-route through the new methods.
 
-- [ ] **5.2 `validate_strict` and `validate_soft`.**
+- [x] **5.2 `validate_strict` and `validate_soft`.**
     - Both take `&Value`; strict borrows the input on success; soft borrows when no
       coercion occurred and owns the converted value otherwise. Never mutate the
       input; never clone the whole value merely to validate.
@@ -836,7 +859,7 @@ Give the library the strict/soft API of R6 on top of the moved engine.
       reuse keyed on definition revision and context identity; Task 5.2 exposes the
       internal `Prepared` type the facade owns.
 
-- [ ] **5.3 Contract tests (parallel with 5.2 follow-ups).**
+- [x] **5.3 Contract tests (parallel with 5.2 follow-ups).**
     - The four R6 table rows for both methods, with pointer-identity assertions for
       "borrows the original" (`Cow::Borrowed` and `std::ptr::eq`).
     - Coercion never repairs a violated constraint (`number(integer)` and `"2.5"`).
@@ -847,8 +870,8 @@ Give the library the strict/soft API of R6 on top of the moved engine.
 
 ### Phase 5 checkpoint
 
-- [ ] `just test`/`just lint` green in `simplified-schema/`.
-- [ ] Criterion 2 satisfied in the library test tree.
+- [x] `just test`/`just lint` green in `simplified-schema/`.
+- [x] Criterion 2 satisfied in the library test tree.
 
 ## Phase 6: The `SimplifiedSchema` Facade
 
