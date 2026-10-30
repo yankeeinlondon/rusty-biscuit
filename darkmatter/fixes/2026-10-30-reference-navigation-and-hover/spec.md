@@ -34,6 +34,7 @@ packages:
     - simplified-schema
 related:
     - 2026-10-16-unified-logical-or
+next_spec: 2026-10-30-yaml-document-schemas
 ---
 
 # Reference Navigation and Hover in DMLS
@@ -90,7 +91,7 @@ A reference must select the same file in validation, document links, and
 go-to-definition. Value hovers must explain that selection without running
 composition, while key hovers continue to explain the property's schema.
 The root-precedence change and format restriction below are deliberate
-behavior changes; the latter has unresolved author choices.
+behavior changes, decided by the author on 2026-10-30.
 
 ## Decisions
 
@@ -162,7 +163,7 @@ target. Opening an empty buffer is not a server-side acceptance requirement.
 | Target | Valid? |
 |---|---|
 | Recognized standalone YAML schema with an explicit `$schema` payload (mapping, root-union sequence, or existing whole-file delegation reference) | yes, if the payload and its dependencies are valid |
-| JSON file that is a JSON Schema document | yes, subject to the recognition policy in Open Questions |
+| JSON object declaring `"$schema": "https://json-schema.org/draft/2020-12/schema"` | yes, if the schema is valid (see JSON recognition below) |
 | YAML file with no top-level `$schema` — including a `kind: schema` file that exports only `types` | **no** under the new restriction: use a named-type import instead |
 | JSON file that is not a JSON Schema document | **no** |
 
@@ -172,13 +173,59 @@ are loaded as raw schemas without requiring a dialect declaration. Applying
 a `types`-only document as a document schema is newly rejected; importing a
 named type from that same document remains supported.
 
-**Reader's note:** `kind: schema` alone is not a safe recommendation. The
-[simplified-schema standalone parser](../../../simplified-schema/lib/src/simplified/standalone.rs)
-requires a `types` mapping for tagged schema documents. In particular,
-`kind: schema` plus a `$schema` mapping without `types` denotes a global
-catalog, which must never become an ordinary document schema. Keep that
-boundary. Metadata envelopes and JSON recognition need the author decisions
-under Open Questions before this format restriction is implemented.
+#### YAML schema documents
+
+Decided by the author on 2026-10-30. There are two formal document types and
+one informal one:
+
+| Type | Identifier | Properties |
+|---|---|---|
+| `schema` | `kind: schema` | `$schema`, `types`, `description` (string), `categories`; each optional, but at least one of `$schema` or `types` |
+| `schema-trigger` | `kind: schema-trigger` | match rules plus `$schema` (unchanged by this fix) |
+| informal `schema` | no `kind` | as `schema`, with `$schema` required |
+
+Any other top-level key is a malformed-envelope error. A Markdown `$schema:`
+may target only a document that has a `$schema` property; a `types`-only
+`schema` serves named-type imports from other schema files.
+
+Today the
+[standalone parser](../../../simplified-schema/lib/src/simplified/standalone.rs)
+departs from this in two ways, both corrected here:
+
+- the informal form rejects `description` (it falls back to raw JSON Schema);
+- `kind: schema` with a `$schema` mapping and no `types` is refused as a
+  "global catalog". That shape check exists for
+  `darkmatter/schemas/darkmatter.yaml` (whose `fm` entry is the frontmatter
+  base schema) and Claudine's `claudine/schemas/globals.yaml`, but it also
+  refuses every formal `schema` without `types`. Remove it with no
+  replacement. Both files are loaded only by explicit registration in code
+  (`GlobalCatalog`), whose own strict loader is unchanged. A Markdown document
+  that points `$schema:` at one of them now gets its entries as optional
+  properties; this is accepted.
+
+These rules remain hand-written in the parser for this fix. Expressing
+`schema` and `schema-trigger` as YAML definitions in `darkmatter/schemas/` and
+applying them to YAML documents by `kind` is `2026-10-30-yaml-document-schemas`.
+
+#### JSON recognition
+
+Decided by the author on 2026-10-30. A referenced `.json` file is a schema
+only when its root is an object whose `$schema` is exactly the Draft 2020-12
+URI the existing compiler supports
+(`https://json-schema.org/draft/2020-12/schema`); it is then validated with the
+existing offline validator. A declaration alone does not make it valid.
+
+| JSON target | Outcome |
+|---|---|
+| Object declaring the 2020-12 URI | accepted, then validated as a schema |
+| Object with no `$schema`, or a non-object root (array, boolean, scalar) | not a schema: the "not a valid schema definition" hover; the diagnostic adds the hint to declare `"$schema": "https://json-schema.org/draft/2020-12/schema"` |
+| Object declaring another dialect (for example Draft 7) | a distinct "unsupported JSON Schema dialect" error naming the declared URI, not "not a schema" |
+
+JSON objects without the declaration have no migration path other than adding
+it. A repository audit on 2026-10-30 found no `$schema:` reference to a
+`.json` file outside test fixtures, and the raw-schema fixture
+(`darkmatter/dmls/tests/fixtures/suggest_constraint/raw-schema.json`) already
+declares the URI; the implementation audit still re-checks this.
 
 Do not fork classification into DMLS. Extend the existing standalone parser
 and referenced-schema loader in `simplified-schema`, preserving typed errors,
@@ -192,8 +239,7 @@ Before landing the restriction, audit shipped schemas, trigger payloads,
 embedded sources, direct references, and root-union file arms. Record newly
 rejected authored files and their migration in the implementation log; update
 those files and contract fixtures in the same implementation change. Raw YAML
-JSON Schema users must migrate to `.json` under this design. The JSON policy
-must specify how existing JSON objects without a dialect declaration migrate.
+JSON Schema users must migrate to a `.json` file declaring the 2020-12 URI.
 If the audit exposes a further public-format decision, bring it back to Open
 Questions rather than silently widening or narrowing the parser.
 
@@ -373,71 +419,16 @@ type-definition hovers keep their existing priority. `$schema` root-union
 string items receive the same reference behavior as a scalar declaration;
 inline arms and inline `$schema` mappings retain schema-authoring hovers.
 
-## Open Questions
-
-### How should JSON schema files declare their intent?
-
-JSON Schema permits objects without `$schema`, and unknown keywords do not
-by themselves make an object invalid. Therefore merely compiling or
-meta-validating an object cannot reliably distinguish an accidental data file
-from an intended schema. This decision changes library behavior and requires
-the author's choice before implementing the format restriction.
-
-1. **Require the supported Draft 2020-12 `$schema` URI on referenced JSON
-   objects, then validate the schema with the existing offline validator
-   (recommended).** Pros: explicit intent, deterministic rejection of
-   accidental data, no remote meta-schema lookup. Cons: existing schemas
-   without the declaration must add it; other dialects and bare boolean
-   schemas remain unsupported. Recommend this because it satisfies the
-   draft's stated goal of rejecting non-schema JSON with a simple rule that
-   can be explained and tested. Use the exact supported URI from the existing
-   schema compiler; a declaration alone does not prove that the schema is
-   well formed.
-2. **Accept any object valid under the supported meta-schema.** Pros: keeps
-   schemas without a dialect declaration and most current compatibility.
-   Cons: ordinary data objects can also pass, so the goal must be restated as
-   rejecting structurally invalid schemas rather than detecting intent.
-3. **Keep current JSON object loading and add an advisory for ambiguous
-   files.** Pros: smallest compatibility change and useful editor guidance.
-   Cons: accidental data can still silently behave as a permissive schema;
-   does not deliver the proposed hard rejection.
-
-### Which YAML schema envelopes may carry hover descriptions?
-
-The current standalone parser rejects `description` beside a schema payload.
-It also distinguishes tagged named-type documents from global catalogs. The
-hover requirement cannot add metadata support only in DMLS.
-
-1. **Extend recognized standalone envelopes with an optional string
-   `description`, preserving all existing `kind`/`types` and catalog rules
-   (recommended).** Pros: one classifier for library and editor, supports
-   descriptions on pure `$schema` documents, keeps catalogs separate. Cons:
-   expands the public grammar and requires parser, authoring, corpus, and
-   documentation updates. Recommend this minimal extension because it adds
-   the requested annotation without changing what `kind: schema` means.
-2. **Introduce a distinct tagged envelope for document schemas.** Pros:
-   clearly separates document schemas, type libraries, and catalogs. Cons:
-   adds a new public convention and migration work beyond this navigation
-   fix.
-3. **Keep YAML envelopes unchanged and omit YAML description previews.**
-   Pros: no grammar change; JSON `description` still works. Cons: the
-   requested descriptive hover is unavailable to YAML authors.
-
-Until these choices are resolved, implementers can complete shared navigation,
-file-value hover, and body summaries, but must not invent a recognition rule
-or land acceptance claims for the format restriction or new YAML metadata.
-
 ## Out of scope
 
 - Editor-specific link underline behavior (Zed underlines document links only
   while the modifier is held).
 - `DocumentLink.tooltip`.
 - Previews for body links to non-Markdown files.
+- YAML definitions of `schema` and `schema-trigger`, and validating YAML
+  documents by `kind` (`2026-10-30-yaml-document-schemas`).
 
 ## Acceptance
-
-Format-recognition and YAML-metadata assertions below require the author
-choices in Open Questions to be recorded first.
 
 - In `review-3.md`, Cmd-click and go-to-definition on `feature-review.yaml` open
   `schemas/feature-review.yaml`.
@@ -448,8 +439,13 @@ choices in Open Questions to be recorded first.
 - The `$schema` value hover in `review-3.md` shows `Schema Definition:`, a
   10-line `yaml` block of `feature-review.yaml`'s `$schema`, and
   `*Showing **10** of **{n}** lines*`; the key hover text is unchanged.
-- A `$schema` naming a `types`-only YAML file, or a JSON file rejected by the
-  chosen recognition rule, is an error in validation and shows the "not a valid schema definition" hover.
+- A `$schema` naming a `types`-only YAML file, or a JSON file without the
+  2020-12 declaration, is an error in validation and shows the "not a valid
+  schema definition" hover; another declared dialect reports "unsupported JSON
+  Schema dialect".
+- `kind: schema` + `description` + `$schema` (no `types`), and an informal
+  file with `description` + `$schema`, are accepted document schemas, and
+  their `description` leads the value hover.
 - `file`-typed values show each file-value outcome. A clean miss produces no
   editor existence diagnostic; malformed references, context failures, and
   I/O failures retain their existing typed diagnostics.
@@ -486,11 +482,14 @@ nextest through the package-area `just test` recipes for affected areas.
   schemas/imports/examples, required values, malformed references, and context
   or I/O failures still report their typed errors. Confirm runtime eager-file
   checks remain unchanged through the ordinary CLI invocation fixture.
-- Classifier tests after the author decisions: accepted envelopes, rejected
-  document-schema use of type libraries, preserved named-type imports,
-  catalog rejection, delegation/root-union handling, and the chosen JSON
-  policy. Include the passive shipped-schema corpus and a normal validation
-  invocation so metadata support cannot work only in hover.
+- Classifier tests: every row of the YAML and JSON tables (including
+  `description` in both YAML forms, `kind: schema` without `types`, a
+  `kind: schema` file with neither `$schema` nor `types`, and an unknown
+  top-level key), rejected document-schema use of type libraries, preserved
+  named-type imports, delegation/root-union handling, and the `GlobalCatalog`
+  loaders still loading both shipped catalogs. Include the passive
+  shipped-schema corpus and a normal validation invocation so `description`
+  support cannot work only in hover.
 - Assert URI and range behavior with spaces, Markdown punctuation, non-ASCII
   text, and existing portable/native path fixtures. Do not add a new OS
   character blacklist.
@@ -503,11 +502,13 @@ for this fix.
 ## Documentation
 
 - `darkmatter/docs/topics/schemas/definition.md`: "Schema roots" table and
-  prose (new order); what a `$schema` reference may point at (including the chosen format-recognition and metadata policy).
+  prose (new order); what a `$schema` reference may point at (the YAML and
+  JSON tables above).
 - `roots.rs` module/constant docs and the Darkmatter skill's schema-root
   reference (root order); CLI schema-root reporting and its snapshots.
 - Standalone-parser and referenced-loader docs in `simplified-schema` for the
-  chosen envelope/recognition policy, keeping import and catalog uses distinct.
+  envelope and JSON recognition rules, and the `catalog.rs` module docs, which
+  currently state that the standalone loader refuses a catalog's envelope.
 - `darkmatter/dmls/docs/file-references.md` and `darkmatter/dmls/docs/hover.md`:
   schema-specific lookup, creation candidates, value/key hover distinction,
   typed failures, and the editor-only missing-file diagnostic policy.
