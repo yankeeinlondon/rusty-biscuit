@@ -30,12 +30,13 @@ clarified: true
 clarified_by: codex/gpt-6.1-sol
 needs_rulings: false
 review_note: the clarification process served as a review
-implemented: false
+implemented: true
 review_iterations: 0
 related:
     - 2026-05-11-schemas
     - 2026-07-08-schema-plus
     - 2026-10-28-schema-enhancements
+implemented_by: "claude/opus"
 ---
 
 # Extract SimplifiedSchema
