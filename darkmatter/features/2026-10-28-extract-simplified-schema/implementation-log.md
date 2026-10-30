@@ -62,6 +62,43 @@ decisions_for_review:
         Alternative: move that comparison test into the library. The test reads Darkmatter's catalog, so it cannot move.
     - |-
         The plan's decision 5 expected `error.rs` to be split into a syntax part and a host part. As the inventory found, it has no syntax part: the syntax errors are `LexerError` and `ParseError`, which moved with the lexer and parser. `error.rs` stays whole in Darkmatter, and `ExpressionError` converts the library's `ParseError` as before.
+    - |-
+        Phase 4 placed the moved modules flat at the library root, mirroring Darkmatter's `schemas/` folder (`simplified_schema::{simplified, resolve, validate, format, coerce, coercion, ...}`), with root re-exports equal to what `darkmatter::markdown::schemas` re-exported. The plan named no module layout; the inventory proposed curated paths such as `simplified_schema::{types, parse, json_schema, query, validation}`.
+        Why: a one-to-one layout made every internal path rewrite mechanical and kept the move reviewable as a move. Curating the public paths is the facade's job (Phase 6) and the consumer migration's (Phase 7).
+        Alternative: reorganize into the proposed paths now. That mixes a rename of every module with the move and makes the diff much harder to check.
+        If reversed: Phase 6 or 7 renames modules in the library and updates Darkmatter's `pub use` lines; no behavior depends on the layout.
+    - |-
+        Darkmatter already had a public `schemas::SchemaRoot` (one of its five schema *search* roots), which collided with the plan's new name for the `SimplifiedSchema` enum. The search-root struct is now `SchemaSearchRoot` (3 files); `SchemaRoots`, `SchemaRootKind`, and `SchemaRootState` kept their names. The plan did not foresee the collision.
+        Alternative: keep the search root's name and expose the AST enum in Darkmatter only as `schemas::simplified::SchemaRoot`. That avoids touching Darkmatter's roots API but leaves two public types with the same name in one module family, and every import of the enum would need a longer path.
+        If reversed: rename `SchemaSearchRoot` back and change the `pub use simplified::{… SchemaRoot …}` line in `schemas/mod.rs` to a module path.
+    - |-
+        The resolver now takes Darkmatter's shipped documents and its `darkmatter:` namespace as an explicit `ShippedSources` argument on every public resolve function, as plan task 4.4 asked. Darkmatter keeps its old signatures through same-named wrapper functions in `schemas/resolve.rs` that pass `SHIPPED_SOURCES`, so no Darkmatter, DMLS, CLI, or Claudine caller changed.
+        Alternative: a process-wide table the host installs once. Fewer signature changes, but it is hidden global state: the library's behavior would depend on whether Darkmatter happened to be loaded in the process, and tests could not exercise both cases.
+        If reversed: replace the parameter with a registration function and delete the wrappers.
+    - |-
+        `SchemaOrigin::{trigger, for_trigger, trigger_source}` read Darkmatter's `TriggerSource`, and Rust does not let Darkmatter add methods to a library type. They are now a Darkmatter extension trait, `schemas::TriggerOrigin`; call sites keep their spelling but must import the trait (five files did). The inventory suggested plain functions.
+        Alternative: free functions (`trigger_source(&origin)`). No import needed for the trait, but every call site would change shape.
+        If reversed: replace the trait with functions and rewrite the five callers.
+    - |-
+        `SchemaError`'s terminal rendering (its `biscuit-terminal` `BlockError` implementation) is in the library behind a new opt-in `terminal` feature, which Darkmatter enables. The inventory flagged this as needing a ruling because the spec puts presentation in rendering packages.
+        Why: Rust forbids Darkmatter from implementing a third-party trait for a library type, and Darkmatter's error registry must hand out a borrowed `&dyn BlockError`.
+        Alternative: a transparent wrapper type in Darkmatter plus an unsafe pointer cast (or a `ref-cast` dependency) to borrow it. That keeps the library free of terminal code at the price of unsafe code or a new crate.
+        If reversed: move the `impl` block (errors.rs, under `#[cfg(feature = "terminal")]`) into a Darkmatter wrapper and drop the feature.
+    - |-
+        Moving the resolver and the file formats into the library meant its `--no-default-features` build (no file resolution) had to decide what a file check does. It now fails with a new typed error, `biscuit_file::FileReferenceError::ResolutionUnavailable { reference }` (classified as missing context), and file globs accept nothing. That follows the plan's rule that a check with no implementation must fail, never pass silently. The new error variant is a small change to biscuit-file's public enum; no code in the workspace matches that enum exhaustively.
+        Alternative: a library-only error type. That would need a new `SchemaError` variant and different error plumbing in every resolution path.
+        If reversed: add the library error and map it at the four places that now build `ResolutionUnavailable`.
+    - |-
+        83 moved inline tests that judge real files on disk are marked `#[cfg(feature = "file")]` (two whole test modules are gated the same way), so they run in the default suite but not in the minimal build, where those checks are unavailable by design. A new L1 test pins the minimal build's typed failure.
+        Alternative: run them in both builds and expect failures in the minimal one. That doubles the assertions for no new information.
+    - |-
+        The plan asked for a new golden test of the shipped catalogs' lowered output. The existing `recursive_schema_golden` corpus already pins every shipped catalog (the embedded baseline, every partial, Content Policy, and the catalog body) byte for byte and was generated before this phase, so it is the golden; no duplicate was added.
+    - |-
+        Only the parts of `schemas/mod.rs` that moved code needs were moved (validation problem types and codes, schema origins, the shared validator cache). The memo helpers `phase_json_schema`, `merged_trigger_schema`, `CompiledValidators`, and `wrapped_root_arms` stay in Darkmatter for now: only `EffectiveSchema` uses them and `merged_trigger_schema` takes Darkmatter's trigger layers. The inventory listed them as moving.
+        If Phase 5/6 needs them for prepared state, they move then.
+    - |-
+        `DARKMATTER_SCHEMA_CACHE_SIZE` (the validator cache size) is now read by the library's `validate.rs`. Darkmatter's context-construction guard only scans Darkmatter's own source, so its allowlist entry for that read was removed and the library has no equivalent guard yet. The trigger-spelling guard was extended to scan `simplified-schema`.
+        Follow-up: Phase 8 (guards) should run the ambient-state guard over the library's source too.
 source_files_during_phase_1:
     - biscuit-file/lib/Cargo.toml
     - biscuit-file/justfile
@@ -96,7 +133,12 @@ skills_files_updated_during_phase_1:
     - .claude/skills/biscuit-file/references/architecture.md
 packages:
     - biscuit-file
+    - claudine
+    - claudine-cli
+    - claudine-gen
     - darkmatter
+    - darkmatter-cli
+    - dmls
     - simplified-schema
 source_files_during_phase_2:
     - simplified-schema/lib/Cargo.toml
@@ -172,13 +214,198 @@ docs_created_during_phase_3:
     - simplified-schema/docs/topics/expression-syntax.md
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+    - Cargo.lock
+    - biscuit-file/lib/src/file_reference/error.rs
+    - claudine/cli/src/completion/schema_completion/keys.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/lib/src/composition/completion/tests.rs
+    - claudine/lib/src/composition/inline_prompt.rs
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/system_prompt/prepare.rs
+    - claudine/lib/src/system_prompt/prepare/tests.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/detect.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/collection_editor.rs
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+    - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/repository_scope.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/errors/mod.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/numeric.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/positions.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/roots.rs
+    - darkmatter/lib/src/markdown/schemas/tests/baseline_grammar.rs
+    - darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+    - darkmatter/lib/src/markdown/schemas/tests/host_file_formats.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/coercion_core.rs
+    - darkmatter/lib/tests/l1/coercion_engine_parity.rs
+    - darkmatter/lib/tests/l1/collection_analysis.rs
+    - darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+    - darkmatter/lib/tests/l1/design_time_call_check.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/expression_type_scope.rs
+    - darkmatter/lib/tests/l1/file_predicates.rs
+    - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase6.rs
+    - darkmatter/lib/tests/l1/recent_commits_shared_type.rs
+    - darkmatter/lib/tests/l1/recursive_schema_completion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+    - darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+    - darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_values.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_union_completion.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+    - darkmatter/lib/tests/l1/shell_template_execution.rs
+    - darkmatter/lib/tests/l1/shell_template_guards.rs
+    - darkmatter/lib/tests/l1/shell_template_policy.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - simplified-schema/justfile
+    - simplified-schema/lib/Cargo.toml
+    - simplified-schema/lib/src/advisory.rs
+    - simplified-schema/lib/src/coerce.rs
+    - simplified-schema/lib/src/coercion/engine.rs
+    - simplified-schema/lib/src/coercion/error.rs
+    - simplified-schema/lib/src/coercion/mod.rs
+    - simplified-schema/lib/src/coercion/shape.rs
+    - simplified-schema/lib/src/coercion/union.rs
+    - simplified-schema/lib/src/completion.rs
+    - simplified-schema/lib/src/discriminant.rs
+    - simplified-schema/lib/src/embedded.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/example.rs
+    - simplified-schema/lib/src/file_context.rs
+    - simplified-schema/lib/src/file_match.rs
+    - simplified-schema/lib/src/format.rs
+    - simplified-schema/lib/src/frontmatter_shape.rs
+    - simplified-schema/lib/src/json_shape.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/mapping_orders.rs
+    - simplified-schema/lib/src/origin.rs
+    - simplified-schema/lib/src/phase.rs
+    - simplified-schema/lib/src/positions.rs
+    - simplified-schema/lib/src/reference.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/resolve/graph.rs
+    - simplified-schema/lib/src/resolve/recursive.rs
+    - simplified-schema/lib/src/resolve/searched_tests.rs
+    - simplified-schema/lib/src/scope.rs
+    - simplified-schema/lib/src/simplified/alphanumeric.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/simplified/cursor.rs
+    - simplified-schema/lib/src/simplified/definitions.rs
+    - simplified-schema/lib/src/simplified/grammar.rs
+    - simplified-schema/lib/src/simplified/lint.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/src/simplified/narrowing.rs
+    - simplified-schema/lib/src/simplified/query.rs
+    - simplified-schema/lib/src/simplified/serialize.rs
+    - simplified-schema/lib/src/simplified/signature.rs
+    - simplified-schema/lib/src/simplified/source.rs
+    - simplified-schema/lib/src/simplified/standalone.rs
+    - simplified-schema/lib/src/simplified/subtype.rs
+    - simplified-schema/lib/src/simplified/types.rs
+    - simplified-schema/lib/src/simplified/yaml_scalar.rs
+    - simplified-schema/lib/src/timings.rs
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/src/work_counters.rs
+    - simplified-schema/lib/tests/l1/coercion_core.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/resolution_unavailable.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - docs/dependencies.md
+    - docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/dependencies.md
+    - simplified-schema/docs/topics/features.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+    - darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_4:
+    - simplified-schema/docs/topics/language-core.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/biscuit-file/references/file-references.md
 message_to_agent: |-
-    Phase 3 is done. `simplified_schema::expression` now holds `scan`, `lexer` (Token, ParseMode, ComparisonOp, LexerError, Lexer, lex_spanned, identifier_prefix_start), `parser` (parse, parse_spanned, parse_condition(_spanned), parse_callback(_spanned), ParseError, Parser, INVALID_CALLBACK_CODE, PRECEDENCE_TABLE), and `ast`, all re-exported at `simplified_schema::expression::*`. Darkmatter's `compose::expression` re-exports `ast` and `parser` as modules and the token items from `lexer.rs` (tagged `// migration: removed in Phase 7`); `ExpressionFinder`, `deferred.rs`, `error.rs`, and the evaluator stay.
-    Points for Phase 4:
-    (1) The schema checks in `schemas/format.rs`, `schemas/simplified/convert.rs`, and `schemas/simplified/grammar.rs` already import `simplified_schema::expression::…` directly; when they move, change those to `crate::expression::…`. Their check-level tests are in Darkmatter's `tests/l1/schema_expression_syntax_checks.rs` (they use Darkmatter's validation/lowering entry points, so they stay as cross-crate parity tests).
-    (2) Work counters: the library has a test-only `work-counters` feature and `simplified_schema::work_counters` (`Work`, `add`, `snapshot`, `WorkSnapshot::{get, since}`) plus a crate-private `crate::note_work!(Kind)` macro (one unit; add a count arm if moved code needs `note_work!(Kind, n)`). When moved code calls `note_work!` (inventory section 2 lists the kinds: ValidatorCompile, AlphanumericCheckCompile, PositionMapBuild, ...), add the kind to the library's `Work` enum and `ALL`, and map it in `library_kind` in `darkmatter/lib/src/work_counters.rs` so Darkmatter's snapshot still reports it under its own `Work` variant. Darkmatter's `work-counters` already enables the library feature.
-    (3) The library's `just test` runs with `--features work-counters`, then `--no-default-features`; `just lint` runs default, `work-counters`, and no-default-features clippy passes.
-    (4) Phase 2 and Phase 3 are not committed yet: the tree holds both phases' changes, and the `git mv` renames are unstaged (they show as deletions plus untracked files).
+    Phase 4 is done: the language core (AST, grammar, resolve, conversion, validators, formats, SchemaError) lives flat at the `simplified-schema` root (`simplified_schema::{simplified, resolve, validate, format, file_match, coerce, coercion, completion, ...}`), and Darkmatter re-exports it at the old `markdown::schemas::*` paths (tagged `// migration: removed in Phase 7`).
+    Points for Phase 5:
+    (1) The two existing operations to map: strict = `validate::build_structural_validator` / `build_validator_in_context` + `validate::collect_problems*` on the value as given (what `EffectiveSchema::validate_raw` does); soft = `coerce::coerce_frontmatter` (or `coerce_with_plan` + `ConversionPlan::for_schema`) then the same validator (what `EffectiveSchema::validate_with_positions` does). Those Darkmatter orchestrations live in `darkmatter/lib/src/markdown/schemas/mod.rs` (`validate_converted`, `judge_stored`); `NestedTemplates::default()` is what a host-free caller passes.
+    (2) Without the `file` feature, file checks fail with `FileReferenceError::ResolutionUnavailable` (see `tests/l1/resolution_unavailable.rs`): that is the "unavailable required check" outcome the `ValidationFailure` type should classify.
+    (3) Resolve functions now take a trailing `ShippedSources` argument; library callers pass `ShippedSources::NONE`. Darkmatter's `schemas::resolve` wrappers pass its own.
+    (4) Library tests: `just test` runs `--features work-counters,terminal` then the minimal build; tests that need files on disk carry `#[cfg(feature = "file")]`.
+    (5) Darkmatter still holds the memo helpers in `schemas/mod.rs` (`phase_json_schema`, `merged_trigger_schema`, `CompiledValidators`, `wrapped_root_arms`); move what the facade's prepared state needs.
 ---
 
 # Implementation Log for 2026-10-28-extract-simplified-schema (9 phases)
@@ -690,3 +917,215 @@ not apply: the expression grammar is a text grammar, and no loader changed.
   build-win-native.
 - No test failed or flaked. The gates were not skipped (source files
   changed). The `git mv` renames were unstaged; nothing is staged.
+
+## Phase 4
+
+Done inline by the orchestrator (no subagents): every task moved files that
+import each other, so the library had to compile as one unit before any
+Darkmatter edit could be checked. Note: the author committed part of this
+phase's working tree mid-run (`2f7c2ad14`, "extract schema language
+library"); the rest of the phase is uncommitted on top of it.
+
+### Layout
+
+The moved modules sit **flat at the library root**, mirroring Darkmatter's
+`schemas/` tree (`simplified_schema::{simplified, resolve, validate, format,
+file_match, json_shape, coerce, coercion, completion, frontmatter_shape,
+positions, phase, scope, example, discriminant, reference, advisory, timings,
+errors, mapping_orders}`) plus three new files carved out of Darkmatter:
+`validation.rs` (`ValidationProblem` and its kind/code, the six
+`SCHEMA_*_CODE` constants except `SCHEMA_INVALID_TRIGGER_CODE`, `JsonPointer`,
+`FileReferenceDiagnostic`, `CallerFileReferenceProvenance`,
+`authored_node_at`), `origin.rs` (`SchemaOrigin`, `SchemaOriginKind`,
+`SchemaOriginMap`), `embedded.rs` (`EmbeddedDocument`, `find`,
+`resolve_path`, `resolve_bundle_path`, `is_plain_segment`, new
+`ShippedSources`), and `file_context.rs` (`document_file_context`,
+`resolve_document_file_ref` from `compose/expression/resolve_ctx.rs`).
+`lib.rs` re-exports what `schemas/mod.rs` re-exported, so moved code's
+`super::X` and `crate::markdown::schemas::X` paths became `crate::X`
+mechanically. Darkmatter re-exports the modules at their old paths
+(`pub use simplified_schema::{discriminant, errors, example, file_match,
+format, simplified, validate}`, `markdown::coercion`, `MappingOrders`),
+tagged `// migration: removed in Phase 7`.
+
+### 4.1 AST, grammar, and the `SchemaRoot` rename
+
+- `git mv` of `schemas/simplified/` (all 16 files), `markdown/mapping_orders.rs`.
+- The `SimplifiedSchema` enum is `SchemaRoot` everywhere (126 Rust files in
+  darkmatter, dmls, cli, claudine, claudine-gen, messenger). Only code tokens
+  and type references in docs were renamed; prose naming the *language*
+  ("a SimplifiedSchema property", error strings) is unchanged, so no message
+  changed.
+- Darkmatter already exported `schemas::SchemaRoot` (one of the five schema
+  search roots, `roots.rs`). It is now `SchemaSearchRoot` (3 files);
+  `SchemaRoots`, `SchemaRootKind`, `SchemaRootState` keep their names. See
+  decisions_for_review.
+- `simplified/` submodules that were private are `pub` in the library
+  (`cursor`, `definitions`, `lint`, `narrowing`, `serialize`, `signature`,
+  `source`, `standalone`, `subtype`, `alphanumeric`), and
+  `locate_frontmatter_value` is `pub` (Darkmatter's validation needs it).
+- Grammar and convert already called `simplified_schema::expression`; now
+  `crate::expression`.
+- Three tests in `simplified/mod.rs` read the shipped `fm.yaml` and
+  `darkmatter_base_json_schema()`; they moved to Darkmatter as
+  `schemas/tests/baseline_grammar.rs` (bodies unchanged).
+
+### 4.2 Conversion engine
+
+- `git mv` of `markdown/coercion/` (5 files) and `schemas/coerce.rs`.
+- Signatures unchanged. Darkmatter's argument binding still calls the engine
+  directly, with no schema document or JSON Schema round trip per argument:
+  `compose/expression/call_binding/bind.rs` calls `bind_with` /
+  `bind_with_marked` on `Shape`s it translates in `call_binding/translate.rs`,
+  through the `markdown::coercion` re-export (the same functions).
+- Pending classification stays in Darkmatter (inventory F1):
+  `NestedTemplates::find` became `schemas::coerce::nested_templates` (a
+  Darkmatter free function; an inherent method cannot be added to a foreign
+  type) which walks the instance with `ConversionPlan::shape` and
+  `bind_with_marked`, classifying with `is_deferred_template` and
+  `holds_pending_syntax`, and hands the paths to the new
+  `NestedTemplates::from_template_paths`. `holds_template_syntax` moved with
+  it. `bound_operands::marks_operands` (a pure keyword scan) moved into the
+  library's `coerce.rs`.
+- Tests: `tests/l1/coercion_core.rs` (the engine's public API) moved to
+  `simplified-schema/lib/tests/l1/` with its imports repointed;
+  `coercion_engine_parity.rs` stays in Darkmatter as the thin integration case
+  (it compares frontmatter conversion with expression-call binding, both
+  Darkmatter surfaces); its source-reading guard now `include_str!`s the
+  library's `coerce.rs`.
+
+### 4.3 Subtype, serialize, query, cursor, source, lint, standalone
+
+- Moved with `simplified/`. `source.rs` needed **no split**: it holds no
+  Markdown-position code (it compiled in the library unchanged); the
+  document-relative projection was already in Darkmatter's callers.
+- `completion.rs` split: the pure union-aware part (`PathStep`,
+  `AlternativeSite/Key/Value/Completion`, `for_path_in`, `def_at_path`,
+  `alternative_accepts(_in)`, `AlternativeMatcher`,
+  `alternative_fingerprint`, `alternatives_for_def(_in)`,
+  `root_property_def` now `pub`) moved; `impl DefinitionLookup for
+  EffectiveSchema`, `CompletionSuggestion`, `CompletionKind`,
+  `for_property`, `completable_properties`, `for_list_item`,
+  `for_property_value`, `for_path`, and the tests (they build
+  `EffectiveSchema`s) stay in Darkmatter, which `pub use`s the library part.
+- Literal-key precedence and union-query helpers are untouched (moved
+  byte-for-byte apart from paths).
+
+### 4.4 Resolution and recursion
+
+- `git mv` of `resolve.rs` and `resolve/{graph,recursive,searched_tests}.rs`.
+- **Supplied shipped sources.** The resolver no longer reads Darkmatter's
+  compiled-in table. `embedded::ShippedSources` (reserved namespace prefix,
+  partials directory, documents; `ShippedSources::NONE` for none) is a new
+  last parameter of every public resolve entry point (`resolve_schema`,
+  `resolve_schema_with_roots`, `resolve_yaml_schema`,
+  `resolve_yaml_schema_with_roots`, `resolve_yaml_schema_owned_by`,
+  `resolve_catalog_declaration`, `named_type_reference_path`,
+  `expand_named_types(_with_locals)`, `check_standalone_named_types`,
+  `prepare_embedded_*`) and is held by the `ImportEngine`. The shipped
+  named-type memo is keyed by path and text address so two hosts' tables
+  cannot share an entry.
+- Darkmatter's `schemas/resolve.rs` is now a wrapper module: `pub use
+  simplified_schema::resolve::*` plus same-named functions with the old
+  signatures that pass `embedded::SHIPPED_SOURCES` (`darkmatter:` over
+  `SHIPPED`). Every Darkmatter, DMLS, CLI, and Claudine caller is unchanged.
+- The `reserved_namespace` test module (which names `darkmatter:` partials)
+  moved into Darkmatter's `resolve.rs` and runs through the wrappers. The
+  library gained `resolve::reserved_namespace` tests over a fake `host:`
+  namespace: a supplied partial resolves (including an import inside it)
+  and records no file; with `NONE` the same spelling is an ordinary file
+  reference; an unknown stem is `NoMatch`.
+- `SchemaOrigin::{trigger, for_trigger, trigger_source}` read Darkmatter's
+  `TriggerSource`; they are the Darkmatter extension trait
+  `schemas::TriggerOrigin` (callers import it: 2 Darkmatter L1 tests, 2
+  Claudine L1 tests, `claudine/lib/src/composition/schema/bundle.rs`). The
+  library gained `SchemaOrigin::trigger_layer(SchemaSourceId)`.
+- `HTTP(S)` references still return `SchemaError::RemoteUnsupported` (moved
+  tests `remote_https_is_rejected`, `remote_http_is_rejected`).
+- `schema_plus_phase1` tests read fixtures under
+  `darkmatter/features/_completed/2026-07-08-schema-plus/`; the
+  `feature_dir()` path gained `../darkmatter` (minimal edit).
+
+### 4.5 Lowering and validation core
+
+- `git mv` of `validate.rs`, `format.rs`, `json_shape.rs`, `phase.rs`,
+  `example.rs`, `advisory.rs`, `discriminant.rs`, `scope.rs`, `reference.rs`,
+  `errors.rs`, `timings.rs`, `positions.rs`, `frontmatter_shape.rs`.
+- `positions.rs` split: `ProblemPositions` (its `Deferred` variant borrows a
+  `Markdown`) stays in Darkmatter's new `schemas/positions.rs`; the library
+  gained `PositionMap::locate_all`, which `validate.rs` and
+  `ProblemPositions` call.
+- `frontmatter_shape.rs` split: `effective_property_shape` /
+  `layered_property_shape` (they read the baseline) stay in Darkmatter; the
+  library's `layered_property_shape(base, …)` takes the base shape as an
+  argument. The module's doctest and three tests use an empty base.
+- `SHARED_VALIDATOR_CACHE` moved to `validate.rs` (conversion consults it);
+  the library has `reset_process_caches()`, which Darkmatter's
+  `reset_process_caches_for_bench` calls before clearing its own memos.
+- `format.rs`'s `file_format_package_reference_prefers_package_area_over_repository`
+  needs Darkmatter's request capture (`build_resolution_context`); it moved to
+  Darkmatter's `schemas/tests/host_file_formats.rs`.
+- `markdown::errors::{with_glob_hint, with_hint_line}` moved into the
+  library's `errors.rs`; Darkmatter re-exports them.
+- `SchemaError`'s `BlockError` impl (and the 19 tests that render it) is
+  behind the new opt-in `terminal` feature (inventory F6); Darkmatter enables
+  it. See decisions_for_review.
+- The mod.rs memo helpers (`phase_json_schema`, `merged_trigger_schema`,
+  `CompiledValidators`, `wrapped_root_arms`) stay in Darkmatter for now:
+  only `EffectiveSchema` uses them, and `merged_trigger_schema` takes
+  Darkmatter's trigger layers. Phase 5/6 moves what the facade needs.
+- **Golden.** The existing `tests/l1/recursive_schema_golden.rs` corpus
+  already pins every shipped catalog's lowered JSON Schema byte for byte
+  (`embedded-darkmatter-base`, every `darkmatter/schemas/partials/*`,
+  `content-policy`, the catalog body), generated before this phase and never
+  re-blessed. It passes unchanged, so no second golden was added.
+- Work counters (inventory F5): the library's `Work` gained
+  `ValidatorCompile`, `AlphanumericCheckCompile`, `NamedTypeTableParse`,
+  `CoercionFailureBuild`, `AlternativeMatcherPrepare`,
+  `RecursiveTargetTranslate`, `PositionKeyComparison`; Darkmatter's
+  `library_kind` folds each into its own variant of the same name.
+  `PositionMapBuild` and `EffectivePreparation` are recorded in Darkmatter
+  code that stayed.
+
+### Minimal (`--no-default-features`) build
+
+Moving the resolver and formats made the library call `biscuit-file`
+resolution (`resolve_in_context`, `resolve_detailed`, glob `matches`,
+`prepare`), which the syntax-only build lacks. Without the `file` feature:
+`file_context::resolve_document_file_ref`, the bare-name and `$schema`
+reference probes in `resolve.rs` return the new
+`biscuit_file::FileReferenceError::ResolutionUnavailable { reference }`
+(classified `MissingContext`); `FileMatchGlobs::matches` and the context-free
+match accept nothing; `prepare`/`PreparedFileMatch` exist only with `file`.
+Nothing that needs a file passes silently. 83 inline tests that judge files
+on disk carry `#[cfg(feature = "file")]` (they run in the default suite); the
+`file_match` and `searched_tests` modules are gated whole. New L1
+`tests/l1/resolution_unavailable.rs` pins both outcomes through the public
+API (control with `file`, typed failure without).
+
+### Tests added or moved (requirement → test)
+
+| Requirement | Test |
+| --- | --- |
+| Moved code keeps its behavior | 819 more library tests than Phase 3 (317 → 1136 with `work-counters,terminal`): every moved inline test plus `coercion_core` (L1); none edited beyond paths, the `SchemaRoot` rename, and the `ShippedSources::NONE` argument |
+| A host's reserved namespace resolves among supplied documents, records no file; `NONE` treats it as a file reference | lib `resolve::reserved_namespace::*` (2) |
+| Darkmatter still resolves `Name@darkmatter:<stem>` | DM `schemas::resolve::reserved_namespace::*` (6, moved) |
+| Shipped catalogs lower byte-for-byte as before | DM `recursive_schema_golden` (existing corpus) |
+| Minimal build fails resolution checks with a typed cause | lib L1 `resolution_unavailable::*` (2, both builds) |
+| Baseline grammar and ctx semantics | DM `schemas::tests::baseline_grammar::*` (3, moved) |
+| Package-area `^` reference in the eager file format | DM `schemas::tests::host_file_formats` (1, moved) |
+| Resolver files never discover git themselves | DM `repository_scope::tests::resolver_inventory_…` now also reads the library's `format.rs`, `file_context.rs`, `file_match.rs`, `resolve.rs` |
+| Frontmatter conversion and call binding agree | DM `coercion_engine_parity` (stays) |
+
+Boundary and fidelity: the crate line is the boundary; F1 in-process tests
+at each crate's public API, L1. The Input Robustness Matrix: no loader's
+behavior changed (the YAML schema, raw JSON Schema, and frontmatter loaders
+moved unchanged and their Phase 1 characterization tests pass unchanged), so
+no matrix cell changed; the one new outcome (`ResolutionUnavailable`, minimal
+build only) is pinned above.
+
+### Checkpoint
+
+- `rg "crate::markdown|crate::lifecycle" simplified-schema/lib/src`: none.
+- One implementation each: `fn parse_spanned`, `fn to_json_schema`,
+  `fn bind_with` are only in `simplified-schema`.

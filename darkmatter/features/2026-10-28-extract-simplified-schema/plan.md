@@ -8,7 +8,12 @@ human_review: false
 human_review_items: []
 packages:
 - biscuit-file
+- claudine
+- claudine-cli
+- claudine-gen
 - darkmatter
+- darkmatter-cli
+- dmls
 - simplified-schema
 source_files_during_phase_1:
 - biscuit-file/lib/Cargo.toml
@@ -116,6 +121,190 @@ docs_created_during_phase_3:
 - simplified-schema/docs/topics/expression-syntax.md
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- Cargo.lock
+- biscuit-file/lib/src/file_reference/error.rs
+- claudine/cli/src/completion/schema_completion/keys.rs
+- claudine/gen/src/inputs.rs
+- claudine/gen/src/schema_compat.rs
+- claudine/lib/src/composition/completion/tests.rs
+- claudine/lib/src/composition/inline_prompt.rs
+- claudine/lib/src/composition/schema/bundle.rs
+- claudine/lib/src/composition/schema/classify.rs
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/src/composition/schema/supplied.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/composition/schema/translate.rs
+- claudine/lib/src/system_prompt/prepare.rs
+- claudine/lib/src/system_prompt/prepare/tests.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- darkmatter/cli/src/commands/schema/assignment.rs
+- darkmatter/cli/src/commands/schema/detect.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/tests/l1/entry_point_parity.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/suggestions.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/dmls/tests/l1/expression_scopes.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/markdown/cleanup/diagnostic.rs
+- darkmatter/lib/src/markdown/compose/cache/hashing.rs
+- darkmatter/lib/src/markdown/compose/context/catalog.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/repository_scope.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+- darkmatter/lib/src/markdown/compose/tests/schema.rs
+- darkmatter/lib/src/markdown/errors/mod.rs
+- darkmatter/lib/src/markdown/frontmatter.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/numeric.rs
+- darkmatter/lib/src/markdown/schemas/about.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/src/markdown/schemas/coerce.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/src/markdown/schemas/detect.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/positions.rs
+- darkmatter/lib/src/markdown/schemas/resolve.rs
+- darkmatter/lib/src/markdown/schemas/roots.rs
+- darkmatter/lib/src/markdown/schemas/tests/baseline_grammar.rs
+- darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+- darkmatter/lib/src/markdown/schemas/tests/host_file_formats.rs
+- darkmatter/lib/src/markdown/schemas/tests/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/coercion_core.rs
+- darkmatter/lib/tests/l1/coercion_engine_parity.rs
+- darkmatter/lib/tests/l1/collection_analysis.rs
+- darkmatter/lib/tests/l1/content_policy_embedded_baseline.rs
+- darkmatter/lib/tests/l1/design_time_call_check.rs
+- darkmatter/lib/tests/l1/directive_target_analysis.rs
+- darkmatter/lib/tests/l1/expression_type_scope.rs
+- darkmatter/lib/tests/l1/file_predicates.rs
+- darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/lib/tests/l1/meta_schema_phase3.rs
+- darkmatter/lib/tests/l1/meta_schema_phase6.rs
+- darkmatter/lib/tests/l1/recent_commits_shared_type.rs
+- darkmatter/lib/tests/l1/recursive_schema_completion.rs
+- darkmatter/lib/tests/l1/recursive_schema_merge.rs
+- darkmatter/lib/tests/l1/recursive_schema_typed_consumers.rs
+- darkmatter/lib/tests/l1/recursive_schema_types.rs
+- darkmatter/lib/tests/l1/schema_embedded_trigger_bundles.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+- darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+- darkmatter/lib/tests/l1/schemas_conjunctive_lowering.rs
+- darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
+- darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+- darkmatter/lib/tests/l1/schemas_core_type_values.rs
+- darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+- darkmatter/lib/tests/l1/schemas_source_projection.rs
+- darkmatter/lib/tests/l1/schemas_union_completion.rs
+- darkmatter/lib/tests/l1/schemas_union_postfix.rs
+- darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+- darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+- darkmatter/lib/tests/l1/shell_template_execution.rs
+- darkmatter/lib/tests/l1/shell_template_guards.rs
+- darkmatter/lib/tests/l1/shell_template_policy.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+- darkmatter/lib/tests/l1/variable_type_projection.rs
+- simplified-schema/justfile
+- simplified-schema/lib/Cargo.toml
+- simplified-schema/lib/src/advisory.rs
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/coercion/engine.rs
+- simplified-schema/lib/src/coercion/error.rs
+- simplified-schema/lib/src/coercion/mod.rs
+- simplified-schema/lib/src/coercion/shape.rs
+- simplified-schema/lib/src/coercion/union.rs
+- simplified-schema/lib/src/completion.rs
+- simplified-schema/lib/src/discriminant.rs
+- simplified-schema/lib/src/embedded.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/example.rs
+- simplified-schema/lib/src/file_context.rs
+- simplified-schema/lib/src/file_match.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/frontmatter_shape.rs
+- simplified-schema/lib/src/json_shape.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/mapping_orders.rs
+- simplified-schema/lib/src/origin.rs
+- simplified-schema/lib/src/phase.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/src/reference.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/graph.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/resolve/searched_tests.rs
+- simplified-schema/lib/src/scope.rs
+- simplified-schema/lib/src/simplified/alphanumeric.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/cursor.rs
+- simplified-schema/lib/src/simplified/definitions.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/lint.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/query.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/signature.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/simplified/subtype.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/simplified/yaml_scalar.rs
+- simplified-schema/lib/src/timings.rs
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/src/work_counters.rs
+- simplified-schema/lib/tests/l1/coercion_core.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/resolution_unavailable.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/schemas/definition.md
+- docs/dependencies.md
+- docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md
+- simplified-schema/README.md
+- simplified-schema/docs/dependencies.md
+- simplified-schema/docs/topics/features.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_4:
+- simplified-schema/docs/topics/language-core.md
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/biscuit-file/references/file-references.md
 ---
 
 # Plan: Extract SimplifiedSchema
@@ -562,14 +751,14 @@ mostly sequential because the pieces import each other.
 
 ### Wave 6 (sequential: dependency order)
 
-- [ ] **4.1 AST, grammar, types, yaml scalars, alphanumeric, definitions.**
+- [x] **4.1 AST, grammar, types, yaml scalars, alphanumeric, definitions.**
     - Move `simplified/{types,grammar,yaml_scalar,alphanumeric,definitions,signature}.rs`.
     - Rename the existing `SimplifiedSchema` enum to `SchemaRoot` (decision 1);
       apply the rename across Darkmatter, DMLS, CLI via the re-export plus a
       workspace-wide search/replace; the facade name is reserved for Phase 6.
     - Grammar's use of `crate::markdown::compose::expression` now uses the library.
 
-- [ ] **4.2 Conversion engine.**
+- [x] **4.2 Conversion engine.**
     - Move `coercion/{engine,shape,union,error,mod}.rs` and
       `simplified/convert.rs` (4,255 lines) with the numeric model.
     - Preserve the "shape-based engine boundary" and callable special paths (the
@@ -581,14 +770,14 @@ mostly sequential because the pieces import each other.
       truth into the library test tree; the Darkmatter copy becomes a thin
       integration case.
 
-- [ ] **4.3 Subtype, serialize, query, cursor, source, lint.**
+- [x] **4.3 Subtype, serialize, query, cursor, source, lint.**
     - Move `simplified/{subtype,serialize,query,cursor,source,lint,standalone}.rs`.
     - `source.rs` (3,014 lines) mixes source maps with Markdown positions: split,
       moving source maps and scalar decoding; document-relative projection stays in
       Darkmatter's adapter.
     - Preserve literal-key precedence and union-query helpers exactly (criterion 13).
 
-- [ ] **4.4 Resolution and recursion.**
+- [x] **4.4 Resolution and recursion.**
     - Move `resolve/graph.rs`, `resolve/recursive.rs`, and from `resolve.rs`
       (6,310 lines) the named-type expansion, cycle checks, use-site constraint
       merge, and layering merge (`merge_baseline` generalizes to the layering
@@ -601,7 +790,7 @@ mostly sequential because the pieces import each other.
     - HTTP(S) schema, named import, and example references return
       `SchemaError::RemoteUnsupported` unchanged.
 
-- [ ] **4.5 JSON Schema lowering and validation core.**
+- [x] **4.5 JSON Schema lowering and validation core.**
     - Move `validate.rs` (3,107), `format.rs` (1,189), `json_shape.rs`,
       `phase.rs`, `example.rs`, `advisory.rs`, `discriminant.rs`, the type-scope
       part of `scope.rs`, and the pure parts of `completion.rs`/`positions.rs`.
