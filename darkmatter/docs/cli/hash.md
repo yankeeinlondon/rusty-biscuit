@@ -329,6 +329,44 @@ and `detailed` kinds are rejected with a usage error. Directory output forms:
   differences in heading *source* surface through the verbatim `body` component
   instead.
 
+### Key Order and Stored Baselines
+
+Reordering frontmatter keys is not a content change in non-strict mode, at any
+depth. Both documents below have the same non-strict hash:
+
+```yaml
+# a.md                        # b.md
+title: Notes                  owner:
+owner:                          email: kim@example.com
+  name: Kim                     name: Kim
+  email: kim@example.com      title: Notes
+tags: [b, a]                  tags: [b, a]
+```
+
+Changing `tags` to `[a, b]` changes the hash, because a list's element order
+is part of its value.
+
+So a non-strict baseline survives a reorder: `md hash --diff` exits `0`, and
+`md hash --save` leaves the file untouched and does not bump `last_updated`.
+
+Strict mode hashes the keys in the order the author wrote them, nested
+mappings included. Older releases serialized nested mappings with their keys
+sorted, so a strict hash stored by one of them can differ from today's strict
+hash of the same, unedited document whenever a nested mapping was not already
+written in sorted order. Stored hashes are not migrated. To refresh such a
+baseline, check it and save it again:
+
+```bash
+md hash doc.md --strict --diff   # exits 2: reports a frontmatter change
+md hash doc.md --strict --save   # writes the new hash, bumps last_updated
+md hash doc.md --strict --diff   # exits 0
+```
+
+A stored hash does not record whether it was computed in strict mode, so use
+the same mode for `--save` and `--diff`. Saving with `--strict` over a
+baseline saved without it (or the reverse) counts as a change and bumps
+`last_updated`.
+
 ## Lessons Learned
 
 - Non-strict mode is best for change detection where formatting-only edits

@@ -2,7 +2,7 @@
 
 Darkmatter retains YAML frontmatter as structured values plus raw source needed
 for source-aware diagnostics. Use this topic for typed library access, merge
-policy, and the `md frontmatter` CLI. Use [schema.md](schema.md) for validation
+policy, and the `md get`/`set`/`rm` CLI. Use [schema.md](schema.md) for validation
 and coercion, and [rendering.md](rendering.md) when a `style:` value is being
 lowered into render policy.
 
@@ -102,6 +102,11 @@ receiving document as `base` and picks the value-winning side with
 reorders the result). This applies to external state (document first),
 transclusion inheritance (child first, parent keys appended), and `set`
 overrides (child first).
+User-facing authority: `darkmatter/docs/topics/frontmatter.md` (parsing, key
+order, shallow merges), `docs/topics/frontmatter-recursion.md` (what a child
+inherits and in which order), and `docs/cli/hash.md` "Key Order and Stored
+Baselines" (non-strict ignores order; strict baselines are refreshed with
+`--strict --save`, never migrated). Change those pages with the behavior.
 
 ## Shared Frontmatter Views
 
@@ -152,7 +157,7 @@ let meta: PostMeta = md.fm_parse()?;
 
 ## CLI Operations
 
-Use `md frontmatter get`, `set`, and `rm` for structured changes. `set` and
+Use `md get`, `md set`, and `md rm` (top-level commands) for structured changes. `set` and
 `rm` compute the edited document from the parsed frontmatter, then splice only
 the changed top-level properties into the loaded source with
 `restore_properties_text` (`Markdown::source_text()` is the loaded text), so
