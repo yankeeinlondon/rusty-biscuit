@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-10-25
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 human_review: false
@@ -9,6 +9,7 @@ human_review_items: []
 packages:
 - biscuit-file
 - darkmatter
+- simplified-schema
 source_files_during_phase_1:
 - biscuit-file/lib/Cargo.toml
 - biscuit-file/justfile
@@ -41,6 +42,80 @@ skills_files_updated_during_phase_1:
 - .claude/skills/biscuit-file/SKILL.md
 - .claude/skills/biscuit-file/references/api.md
 - .claude/skills/biscuit-file/references/architecture.md
+source_files_during_phase_2:
+- simplified-schema/lib/Cargo.toml
+- simplified-schema/justfile
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/numeric.rs
+- simplified-schema/lib/src/numeric/ingress.rs
+- simplified-schema/lib/src/span.rs
+- simplified-schema/lib/src/pending.rs
+- simplified-schema/lib/src/expression/mod.rs
+- simplified-schema/lib/src/expression/scan.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/test_layout.rs
+- simplified-schema/lib/tests/l1/foundations.rs
+- Cargo.toml
+- Cargo.lock
+- justfile
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/markdown/numeric.rs
+- darkmatter/lib/src/markdown/numeric/ingress.rs
+- darkmatter/lib/src/markdown/span.rs
+- darkmatter/lib/src/markdown/literal_token.rs
+- darkmatter/lib/src/markdown/compose/expression/lexer.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/simplified_schema_reexports.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/inline/interpolation.md
+- docs/dependencies.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_2:
+- simplified-schema/README.md
+- simplified-schema/docs/dependencies.md
+- simplified-schema/docs/topics/features.md
+- simplified-schema/docs/topics/foundations.md
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_3:
+- simplified-schema/lib/Cargo.toml
+- simplified-schema/justfile
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/work_counters.rs
+- simplified-schema/lib/src/expression/mod.rs
+- simplified-schema/lib/src/expression/lexer.rs
+- simplified-schema/lib/src/expression/parser.rs
+- simplified-schema/lib/src/expression/ast.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/expression_syntax.rs
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/lexer.rs
+- darkmatter/lib/src/markdown/compose/expression/parser.rs
+- darkmatter/lib/src/markdown/compose/expression/ast.rs
+- darkmatter/lib/src/markdown/schemas/format.rs
+- darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+- darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/simplified_schema_reexports.rs
+- darkmatter/lib/tests/l1/schema_expression_syntax_checks.rs
+docs_updated_during_phase_3:
+- simplified-schema/README.md
+- simplified-schema/docs/topics/foundations.md
+- simplified-schema/docs/topics/features.md
+- darkmatter/docs/topics/schemas/parsing/index.md
+- darkmatter/docs/topics/schemas/parsing/scanning.md
+- darkmatter/docs/topics/schemas/parsing/lexing.md
+- darkmatter/docs/topics/schemas/parsing/grammar.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/plan.md
+- darkmatter/features/2026-10-28-extract-simplified-schema/implementation-log.md
+docs_created_during_phase_3:
+- simplified-schema/docs/topics/expression-syntax.md
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/SKILL.md
 ---
 
 # Plan: Extract SimplifiedSchema
@@ -393,7 +468,7 @@ numeric model, span vocabulary, and the pending codec if required.
 
 ### Wave 3 (sequential: scaffold first)
 
-- [ ] **2.1 Package area.**
+- [x] **2.1 Package area.**
     - Create `simplified-schema/lib/` (package `simplified-schema`, lib name
       `simplified_schema`, edition 2024, license consistent with Darkmatter's
       `AGPL-3.0-only`), `README.md` (overview with links into `docs/`), `docs/`,
@@ -415,27 +490,27 @@ numeric model, span vocabulary, and the pending codec if required.
 
 ### Wave 4 (parallel after 2.1: disjoint modules)
 
-- [ ] **2.2 Numeric model.**
+- [x] **2.2 Numeric model.**
     - Move `markdown/numeric.rs` and `numeric/ingress.rs` to `simplified_schema::numeric`
       (Move Protocol). Darkmatter re-exports from `crate::markdown::numeric`.
     - Parity: the existing numeric admission/precision tests move; the
       `numberlike` and `i128`/f64 boundary cases are explicitly named in the log.
 
-- [ ] **2.3 Span vocabulary.**
+- [x] **2.3 Span vocabulary.**
     - Move `Spanned<T>` and span helpers from `markdown/span.rs` that the moved code
       uses; `SourceSpan` stays `biscuit_file::SourceSpan` (identity preserved).
       Darkmatter's `span.rs` re-exports.
     - Standalone offsets refer to the exact supplied text including CRLF
       (criterion 8): add a CRLF + Windows-path test.
 
-- [ ] **2.4 Pending codec (conditional, decision 4).**
+- [x] **2.4 Pending codec (conditional, decision 4).**
     - Using Task 1.1's verdict, move only the pure token codec the engine calls;
       otherwise record "not required" in the log and skip.
 
 ### Phase 2 checkpoint
 
-- [ ] `just test` / `just lint` green in `simplified-schema/` and `darkmatter/`.
-- [ ] `cargo tree -p simplified-schema --no-default-features -e normal` shows no
+- [x] `just test` / `just lint` green in `simplified-schema/` and `darkmatter/`.
+- [x] `cargo tree -p simplified-schema --no-default-features -e normal` shows no
       `darkmatter`, `claudine`, `content-policy`, `gix`, `walkdir`, `globset`.
 
 ## Phase 3: Passive Expression Syntax
@@ -445,7 +520,7 @@ defaults, and function examples without a Darkmatter host.
 
 ### Wave 5 (sequential: split before move)
 
-- [ ] **3.1 Split `lexer.rs`.**
+- [x] **3.1 Split `lexer.rs`.**
     - `compose/expression/lexer.rs` (2,445 lines) holds both the expression token
       lexer and a Markdown-aware template finder using
       `compose::parse_utils::scan_code_regions`. Separate them: the token lexer
@@ -454,7 +529,7 @@ defaults, and function examples without a Darkmatter host.
     - Replace the lexer's use of `crate::markdown::numeric::admit_number_spelling`
       with the library's `numeric` (Phase 2).
 
-- [ ] **3.2 Move tokens, AST, parser, syntax errors.**
+- [x] **3.2 Move tokens, AST, parser, syntax errors.**
     - Move `ast.rs` (592), the token lexer, `parser.rs` (2,453: `parse`,
       `parse_spanned`, `parse_condition`, `parse_condition_spanned`, and the parse
       modes) and the syntax part of `error.rs` (decision 5) into
@@ -467,7 +542,7 @@ defaults, and function examples without a Darkmatter host.
       type. Parity: the 28 `compose::expression` crossings inventoried in 1.1 compile
       against the library for the syntax-only ones; the rest stay.
 
-- [ ] **3.3 Syntax-only schema checks.**
+- [x] **3.3 Syntax-only schema checks.**
     - Make the library's schema checks (expression-typed values, expression defaults,
       function-example calls and expected literals) call its own parser. Verify they
       do not evaluate, run examples, or look up named functions or variables.
@@ -476,8 +551,8 @@ defaults, and function examples without a Darkmatter host.
 
 ### Phase 3 checkpoint
 
-- [ ] No second expression grammar anywhere: `rg "fn parse_spanned"` finds one.
-- [ ] `just test` green in both areas; Darkmatter expression tests unchanged.
+- [x] No second expression grammar anywhere: `rg "fn parse_spanned"` finds one.
+- [x] `just test` green in both areas; Darkmatter expression tests unchanged.
 
 ## Phase 4: Move the Language Core
 
