@@ -24,7 +24,7 @@ fn import_from(dir: &Path, body: &str) -> (PathBuf, Result<ResolvedSchema, Schem
 /// names the imported file.
 fn schema_document_message(label: &str, types: &Path, result: Result<ResolvedSchema, SchemaError>) -> String {
     match result {
-        Err(SchemaError::SchemaDocument { path, message }) => {
+        Err(SchemaError::SchemaDocument { path, message, .. }) => {
             assert_eq!(
                 biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
                 biscuit_file::canonicalize_simplified(types).expect("imported file canonicalizes"),

@@ -1214,13 +1214,19 @@ fn root_schema_arm_applies(
     composition_pending: &HashSet<String>,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
 ) -> RootArmApplicability {
-    // The arm is judged alone, so it takes its root's definitions.
+    // The arm converts alone, with its root's definitions, and then under
+    // the keywords a raw root declares beside its `anyOf`: the wrapped arm the
+    // validator judges below holds the arm in an `allOf`, which drives no
+    // conversion.
     let mut candidate = coerce_frontmatter_with_pending(
         &simplified_schema::scope::with_root_definitions(arm, root),
         instance,
         composition_pending,
     )
     .value;
+    if let Some(siblings) = simplified_schema::validate::root_union_sibling_schema(root) {
+        candidate = coerce_frontmatter_with_pending(&siblings, &candidate, composition_pending).value;
+    }
     if !project_root_arm_caller_values(&mut candidate, root, records, fragments_by_property) {
         return RootArmApplicability::None;
     }

@@ -109,7 +109,7 @@ fn a_malformed_revision_after_a_good_one_is_a_located_error_and_never_the_old_ta
 
     std::fs::write(&types, "kind: schema\ntypes: [\n").expect("break types");
     match import(dir.path(), "types.yaml") {
-        Err(SchemaError::SchemaDocument { path, message }) => {
+        Err(SchemaError::SchemaDocument { path, message, .. }) => {
             assert_eq!(
                 biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
                 biscuit_file::canonicalize_simplified(&types).expect("types canonicalizes")

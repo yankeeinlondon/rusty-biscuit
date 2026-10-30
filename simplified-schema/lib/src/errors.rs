@@ -148,9 +148,26 @@ pub enum SchemaError {
     )]
     AmbiguousReferenced { path: PathBuf },
 
-    /// A recognized standalone SimplifiedSchema envelope is malformed.
+    /// A recognized standalone SimplifiedSchema envelope is malformed, or a
+    /// schema document's text cannot be read as a schema.
+    ///
+    /// `path` names the document: the file read, or `content` for text the
+    /// `SimplifiedSchema` factories were handed directly. When a typed failure
+    /// caused the rejection (a malformed type string in the payload, the
+    /// `types` table, or a Markdown frontmatter `$schema`), `source` keeps it
+    /// unchanged and `message` repeats its text. `span` is the rejected text's
+    /// byte range in the exact document supplied (for Markdown, the whole file
+    /// including its frontmatter fence; line endings, CRLF included, counted
+    /// as written): the rejected token when it can be projected, otherwise the
+    /// whole rejected value. Either is `None` when unavailable.
     #[error("invalid standalone schema document `{path}`: {message}")]
-    SchemaDocument { path: PathBuf, message: String },
+    SchemaDocument {
+        path: PathBuf,
+        message: String,
+        #[source]
+        source: Option<Box<SchemaError>>,
+        span: Option<Range<usize>>,
+    },
 
     /// A `$schema` value is a remote URL; v1 only supports local references.
     #[error("remote $schema references are not supported in this version: `{reference}`")]
@@ -714,7 +731,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      supply a Draft 2020-12 JSON Schema.",
                 ),
 
-            SchemaError::SchemaDocument { path, message } => StatusBlock::new(StatusState::Error)
+            SchemaError::SchemaDocument { path, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
                     "standalone schema document invalid",

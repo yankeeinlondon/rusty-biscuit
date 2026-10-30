@@ -26,7 +26,9 @@
 //! Once an envelope is recognized, a malformed payload is a
 //! [`SchemaError::SchemaDocument`] — the library never silently reinterprets
 //! the document as ordinary YAML or raw JSON Schema. Text that is not YAML at
-//! all is a [`SchemaError::SchemaDocument`] too, never a silent decline.
+//! all is a [`SchemaError::SchemaDocument`] too, never a silent decline. A
+//! payload or `types` definition the grammar rejects keeps the parser's typed
+//! error as the `source` and its byte range in `source` text as the `span`.
 //!
 //! ## Side-effect freedom
 //!
@@ -170,6 +172,12 @@ impl StandaloneSchemaDocument {
 /// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
 /// errors.
 ///
+/// A payload or `types` definition the parser rejects keeps that typed error
+/// (usually [`SchemaError::Grammar`], whose own span is relative to the type
+/// string) as the `SchemaDocument` `source`, and its byte range in `source`
+/// as the `span`. A failure to lint a valid payload keeps its typed cause
+/// without a span.
+///
 /// ## Side-effect freedom
 ///
 /// Performs no file reads, shell execution, composition directive evaluation,
@@ -189,14 +197,12 @@ pub fn parse_standalone_schema_document(
     let payload = recognized.payload();
     let categories_key = YamlValue::String("categories".into());
     let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
-        .map_err(|error| {
-            schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
-        })?;
+        .map_err(|failure| failure.into_document_error(path, "invalid SimplifiedSchema payload"))?;
     let local = if payload_key == "$schema" {
         map.get("types")
             .map(|value| parse_standalone_schema_payload_with_source(value, source, "types"))
             .transpose()
-            .map_err(|error| schema_document_error(path, format!("invalid named types: {error}")))?
+            .map_err(|failure| failure.into_document_error(path, "invalid named types"))?
     } else {
         None
     };
@@ -222,8 +228,11 @@ pub fn parse_standalone_schema_document(
     }
     let mut suggestion_lints = match &mut parsed.value {
         SchemaDeclaration::Schema(schema) => {
-            lint_suggestions(schema).map_err(|error| {
-                schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
+            lint_suggestions(schema).map_err(|error| SchemaError::SchemaDocument {
+                path: path.to_path_buf(),
+                message: format!("could not lint SimplifiedSchema payload: {error}"),
+                source: Some(Box::new(error)),
+                span: None,
             })?
         }
         // A whole-file reference carries no suggestion metadata to lint.
@@ -461,5 +470,7 @@ fn schema_document_error(path: &Path, message: impl Into<String>) -> SchemaError
     SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message: message.into(),
+        source: None,
+        span: None,
     }
 }

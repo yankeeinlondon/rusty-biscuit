@@ -1161,7 +1161,9 @@ fn unescape_pointer_segment(segment: &str) -> String {
 /// ## Notes
 ///
 /// The base node is the winning root-union arm (`root["anyOf"][arm_index]`)
-/// when `problem.arm_index` is `Some`, otherwise `root` itself. References
+/// when `problem.arm_index` is `Some`, walked together with the `properties`
+/// and `items` a raw root declares beside its `anyOf`; otherwise it is `root`
+/// itself. References
 /// resolve against `root`, whose `$defs` hold every recursive body. The final
 /// node is read with its reference targets, use site first, so a sibling
 /// description wins and a referenced union yields its articulation (Decision
@@ -1178,9 +1180,9 @@ pub fn resolve_problem_description(
         return None;
     }
 
-    let base = match problem.arm_index {
-        Some(idx) => root.get("anyOf")?.as_array()?.get(idx)?,
-        None => root,
+    let (base, beside) = match problem.arm_index {
+        Some(idx) => (root.get("anyOf")?.as_array()?.get(idx)?, Some(root)),
+        None => (root, None),
     };
 
     let mut segments: Vec<String> = problem
@@ -1199,7 +1201,7 @@ pub fn resolve_problem_description(
     }
 
     let scope = SchemaScope::new(root);
-    let mut descriptions = schema_nodes_at(&scope, base, &segments, instance)?
+    let mut descriptions = schema_nodes_at(&scope, base, beside, &segments, instance)?
         .into_iter()
         .map(|node| description_at_node(&scope, node));
     let first = descriptions.next()??;
@@ -1222,6 +1224,10 @@ pub fn resolve_problem_description(
 ///   at that location, else by every non-null arm. Arms that cannot take the
 ///   next segment drop out.
 ///
+/// `beside` is a root union whose arm `base` is: its own `properties` and
+/// `items` apply beside the arm at the first step, while its other arms do
+/// not.
+///
 /// The returned nodes are read as-is, so a final union or reference node is
 /// not expanded. Several nodes mean several arms reach the location; an empty
 /// result means the path does not resolve. `None` means a reference on the way
@@ -1231,11 +1237,13 @@ pub fn resolve_problem_description(
 fn schema_nodes_at<'a>(
     scope: &SchemaScope<'a>,
     base: &'a Value,
+    beside: Option<&'a Value>,
     segments: &[String],
     instance: &Value,
 ) -> Option<Vec<&'a Value>> {
     let mut nodes = vec![base];
     let mut value = Some(instance);
+    let mut beside = beside;
     for segment in segments {
         let mut arms = Vec::new();
         // Each step consumes a segment, so only a union reached again at the
@@ -1245,6 +1253,7 @@ fn schema_nodes_at<'a>(
         for node in nodes {
             push_union_arms(scope, node, value, &mut expanded, &mut arms)?;
         }
+        arms.extend(beside.take());
         let numeric = is_numeric_segment(segment);
         nodes = Vec::new();
         for arm in arms {
@@ -1268,7 +1277,8 @@ fn schema_nodes_at<'a>(
 }
 
 /// Pushes the concrete (non-union) schemas `node` stands for at an instance
-/// location holding `value`; see [`schema_nodes_at`] for the arm rules.
+/// location holding `value`, plus any union node that declares `properties`
+/// or `items` beside its `anyOf`; see [`schema_nodes_at`] for the arm rules.
 /// `expanded` holds the unions already expanded at this location. `None` when
 /// a reference names nothing.
 fn push_union_arms<'a>(
@@ -1285,6 +1295,10 @@ fn push_union_arms<'a>(
         };
         if !expanded.insert(std::ptr::from_ref(hop)) {
             continue;
+        }
+        // Children declared beside the union apply under every arm.
+        if hop.get("properties").is_some() || hop.get("items").is_some() {
+            out.push(hop);
         }
         let non_null: Vec<&Value> = arms.iter().filter(|arm| !is_null_schema(arm)).collect();
         if non_null.is_empty() {
@@ -1412,10 +1426,90 @@ fn is_numeric_segment(segment: &str) -> bool {
     !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Adds the canonical `$schema` URI to an `anyOf` arm of `root` so the cache
-/// can compile it as a standalone validator, along with `root`'s `$defs`, where
-/// the arm's `#/$defs/…` references resolve.
+/// Root keywords that never change which values a root union accepts; any
+/// other keyword beside a root `anyOf` is an assertion every arm must keep.
+const ROOT_UNION_NON_ASSERTIONS: &[&str] = &[
+    "anyOf",
+    "$schema",
+    "$defs",
+    "$comment",
+    "title",
+    "description",
+    "examples",
+    "default",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+];
+
+/// Whether `root` declares a keyword beside its `anyOf` that every arm must
+/// keep.
+fn has_root_union_sibling_assertions(root: &Value) -> bool {
+    root.as_object()
+        .is_some_and(|map| map.keys().any(|key| !ROOT_UNION_NON_ASSERTIONS.contains(&key.as_str())))
+}
+
+/// Root keywords whose verdict reads what every successful `anyOf`
+/// alternative evaluated, so an arm cannot be judged by them alone.
+const ROOT_UNION_EVALUATION_READERS: &[&str] = &["unevaluatedProperties", "unevaluatedItems"];
+
+/// The keywords `root` declares beside its `anyOf`, as a schema of their own
+/// (`root` without `anyOf`), or `None` when none of them is an assertion, as
+/// in a generated SimplifiedSchema union.
+///
+/// Conversion uses it where an arm is judged through
+/// [`wrap_arm_as_root_schema`]: that schema's `allOf` drives no conversion,
+/// so a caller converts against the arm and then against these keywords,
+/// and the root's own `properties` convert as they do without the union.
+pub fn root_union_sibling_schema(root: &Value) -> Option<Value> {
+    if !has_root_union_sibling_assertions(root) {
+        return None;
+    }
+    let mut map = root.as_object()?.clone();
+    map.shift_remove("anyOf");
+    Some(Value::Object(map))
+}
+
+/// An `anyOf` arm of `root` as a standalone schema the cache can compile,
+/// accepting exactly the values `root` accepts through that arm, so some
+/// arm's schema accepts a value exactly when `root` does.
+///
+/// The result carries the canonical `$schema` URI and `root`'s `$defs`, where
+/// the arm's `#/$defs/…` references resolve. A generated SimplifiedSchema
+/// union (an object arm, no assertion beside the root `anyOf`) is the arm
+/// itself, so its problem paths are the arm's. Otherwise the result is `root`
+/// with the arm added under `allOf`: the root's sibling assertions (a raw
+/// JSON Schema's `required` or `type`) still apply, and a boolean arm keeps
+/// its meaning (`false` rejects every value).
+///
+/// The root's `anyOf` is removed, except where the root declares
+/// `unevaluatedProperties` or `unevaluatedItems`: those read the fields and
+/// items every successful alternative evaluated, not only the selected
+/// arm's. There the alternatives stay, followed by a `true` alternative so
+/// the union itself never fails and the problems reported are still the
+/// selected arm's and the siblings'.
 pub fn wrap_arm_as_root_schema(arm: &Value, root: &Value) -> Value {
+    if has_root_union_sibling_assertions(root) || !arm.is_object() {
+        let mut map = root.as_object().cloned().unwrap_or_default();
+        let reads_evaluations = ROOT_UNION_EVALUATION_READERS.iter().any(|reader| map.contains_key(*reader));
+        match map.get_mut("anyOf") {
+            Some(Value::Array(alternatives)) if reads_evaluations => alternatives.push(Value::Bool(true)),
+            _ => {
+                map.shift_remove("anyOf");
+            }
+        }
+        match map.get_mut("allOf") {
+            Some(Value::Array(all_of)) => all_of.push(arm.clone()),
+            // A non-array `allOf` fails to compile, as `root` itself does.
+            Some(_) => {}
+            None => {
+                map.insert("allOf".into(), Value::Array(vec![arm.clone()]));
+            }
+        }
+        map.entry("$schema")
+            .or_insert_with(|| Value::String(super::simplified::DRAFT_2020_12.to_string()));
+        return Value::Object(map);
+    }
     let arm = super::scope::with_root_definitions(arm, root);
     let mut map = arm.as_object().cloned().unwrap_or_default();
     if !map.contains_key("$schema") {
@@ -2610,6 +2704,25 @@ mod tests {
             "expected improved message, got: {}",
             problems[0].message,
         );
+    }
+
+    /// A root `unevaluatedProperties` or `unevaluatedItems` keeps the
+    /// alternatives beside each wrapped arm, closed by a `true` alternative.
+    #[test]
+    fn root_union_arm_keeps_the_alternatives_an_unevaluated_restriction_reads() {
+        let arm = json!({"properties": {"name": {"type": "string"}}});
+        let other = json!({"properties": {"age": {"type": "number"}}});
+        for reader in ["unevaluatedProperties", "unevaluatedItems"] {
+            let root = json!({"anyOf": [arm, other], reader: false});
+
+            let wrapped = wrap_arm_as_root_schema(&arm, &root);
+
+            assert_eq!(wrapped["anyOf"], json!([arm, other, true]), "{reader}");
+            assert_eq!(wrapped["allOf"], json!([arm]), "{reader}");
+            assert_eq!(wrapped[reader], json!(false), "{reader}");
+        }
+        let without_reader = wrap_arm_as_root_schema(&arm, &json!({"anyOf": [arm, other], "required": ["name"]}));
+        assert!(without_reader.get("anyOf").is_none(), "{without_reader}");
     }
 
     #[cfg(feature = "file")]

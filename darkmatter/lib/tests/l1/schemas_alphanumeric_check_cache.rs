@@ -77,6 +77,8 @@ fn rejected_in_types_file(dir: &Path, keyword: &str, value: &str) -> String {
     let lint = SchemaError::SchemaDocument {
         path: dir.join("types.yaml"),
         message: format!("could not lint SimplifiedSchema payload: {}", rejected("slug", keyword, value)),
+        source: Some(Box::new(rejected("slug", keyword, value))),
+        span: None,
     };
     format!("{lint:?}")
 }

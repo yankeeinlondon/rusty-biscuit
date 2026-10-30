@@ -25,7 +25,7 @@ use super::yaml_scalar::{self, DecodedScalar};
 use super::{
     Constraint, DefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
     SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, parse_property_definition_located,
-    parse_schema_declaration, parse_schema_declaration_located, parse_yaml_schema,
+    parse_schema_declaration_located, parse_yaml_schema,
 };
 
 /// One segment in a structural path through a schema declaration.
@@ -215,6 +215,20 @@ impl std::fmt::Display for LocatedDefinitionFailure {
 impl std::error::Error for LocatedDefinitionFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&*self.error)
+    }
+}
+
+impl LocatedDefinitionFailure {
+    /// This failure as the [`SchemaError::SchemaDocument`] of the document
+    /// `path`, keeping the typed error as its source. The span is the token
+    /// when projected, otherwise the whole rejected value.
+    pub(crate) fn into_document_error(self, path: &std::path::Path, context: &str) -> SchemaError {
+        SchemaError::SchemaDocument {
+            path: path.to_path_buf(),
+            message: format!("{context}: {}", self.error),
+            span: self.authored_span.or(self.value_span),
+            source: Some(self.error),
+        }
     }
 }
 
@@ -539,20 +553,42 @@ pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefin
     {
         return None;
     }
-    let located = locate_yaml_value(source).ok();
-    let located_payload = located.as_ref().and_then(|located| match &located.kind {
-        LocatedKind::Mapping(pairs) => pairs
-            .iter()
-            .find(|pair| pair.key == payload_key)
-            .map(|pair| &pair.value),
+    Some(locate_keyed_failure(failure, payload, source, payload_key, 0))
+}
+
+/// Parses `value`, the entry `key` of the YAML mapping authored as
+/// `mapping_source`, as a schema declaration. A failure is located in
+/// `mapping_source` with `source_offset` applied, its path starting at `key`.
+pub(crate) fn parse_keyed_declaration(
+    value: &YamlValue,
+    mapping_source: &str,
+    key: &str,
+    source_offset: usize,
+) -> Result<SchemaDeclaration, LocatedDefinitionFailure> {
+    parse_schema_declaration_located(value)
+        .map_err(|failure| locate_keyed_failure(failure, value, mapping_source, key, source_offset))
+}
+
+/// Projects `failure`, whose path is relative to `value`, through the entry
+/// `key` of the mapping authored as `mapping_source`.
+fn locate_keyed_failure(
+    failure: DefinitionFailure,
+    value: &YamlValue,
+    mapping_source: &str,
+    key: &str,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let located = locate_yaml_value(mapping_source).ok();
+    let located_value = located.as_ref().and_then(|located| match &located.kind {
+        LocatedKind::Mapping(pairs) => pairs.iter().find(|pair| pair.key == key).map(|pair| &pair.value),
         _ => None,
     });
-    Some(project_definition_failure(
+    project_definition_failure(
         failure,
-        located_payload.map(|located| (located, payload)),
-        &SchemaSourcePath::root().property(payload_key),
-        0,
-    ))
+        located_value.map(|located| (located, value)),
+        &SchemaSourcePath::root().property(key),
+        source_offset,
+    )
 }
 
 /// A projection error after a successful semantic parse: nothing was
@@ -702,12 +738,24 @@ fn follow_path<'a>(
     Some((located, value))
 }
 
+/// Parses the standalone payload `value`, the entry `payload_key` of
+/// `yaml_source`, with its source map. A definition failure is located in
+/// `yaml_source`; a projection failure after a successful parse has no range.
 pub(super) fn parse_standalone_schema_payload_with_source(
     value: &YamlValue,
     yaml_source: &str,
     payload_key: &str,
+) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
+    let parsed = parse_keyed_declaration(value, yaml_source, payload_key, 0)?;
+    project_standalone_payload(parsed, value, yaml_source, payload_key).map_err(unlocated_failure)
+}
+
+fn project_standalone_payload(
+    parsed: SchemaDeclaration,
+    value: &YamlValue,
+    yaml_source: &str,
+    payload_key: &str,
 ) -> Result<SourceAware<SchemaDeclaration>, SchemaError> {
-    let parsed = parse_schema_declaration(value)?;
     let located = locate_yaml_value(yaml_source)?;
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());

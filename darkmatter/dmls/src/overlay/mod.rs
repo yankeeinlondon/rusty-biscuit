@@ -589,6 +589,8 @@ impl OverlayState {
                         Arc::new(SchemaError::SchemaDocument {
                             path: path.to_path_buf(),
                             message: malformed.to_string(),
+                            source: None,
+                            span: None,
                         })
                     }
                     Ok(Some(_)) => unreachable!("handled above"),

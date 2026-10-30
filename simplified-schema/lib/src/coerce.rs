@@ -943,6 +943,30 @@ mod tests {
         assert_eq!(outcome.value, instance);
     }
 
+    /// A raw root union whose `unevaluatedProperties` reads every accepting
+    /// arm: the pending-key fallback judges each arm with the others'
+    /// evaluated fields, so only the pending key's problem remains.
+    #[test]
+    fn root_union_arm_fallback_sees_every_accepting_arm_beside_a_pending_key() {
+        let schema = json!({
+            "$schema": crate::simplified::DRAFT_2020_12,
+            "properties": { "later": {"type": "number"} },
+            "anyOf": [
+                { "properties": { "name": {"type": "string"} }, "required": ["name"] },
+                { "properties": { "age": {"type": "number"} }, "required": ["age"] }
+            ],
+            "unevaluatedProperties": false
+        });
+        let validator = structural_validator(&schema).expect("schema compiles");
+        let pending: HashSet<String> = ["later".to_string()].into_iter().collect();
+        let templates = NestedTemplates::default();
+
+        let both = json!({ "name": "Ada", "age": 36, "later": "$(echo 1)" });
+        assert!(accepts(&schema, &validator, &both, &pending, &templates));
+        let extra = json!({ "name": "Ada", "age": 36, "later": "$(echo 1)", "extra": true });
+        assert!(!accepts(&schema, &validator, &extra, &pending, &templates));
+    }
+
     #[test]
     fn a_failing_property_keeps_its_siblings_conversions() {
         let schema = json!({

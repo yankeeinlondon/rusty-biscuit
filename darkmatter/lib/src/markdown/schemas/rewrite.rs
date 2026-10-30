@@ -268,6 +268,11 @@ impl<'a> ArmValidators<'a> {
 ///
 /// Rewriting against an arm the validator never accepted would normalize a
 /// value under the wrong declaration, so only accepting arms take part.
+///
+/// A raw schema's root may declare `properties` beside its `anyOf`; those
+/// apply whichever arm accepts, so they are rewritten first and each
+/// accepting arm then rewrites that result. A generated SimplifiedSchema
+/// union declares no root `properties`, so that first pass changes nothing.
 fn rewrite_root_union(
     root_arms: &[Value],
     root: &Value,
@@ -278,6 +283,7 @@ fn rewrite_root_union(
     request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
     let mut agreed: Option<NormalizationOutcome> = None;
+    let mut beside_arms: Option<NormalizationOutcome> = None;
     for (index, arm) in root_arms.iter().enumerate() {
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
@@ -287,15 +293,19 @@ fn rewrite_root_union(
         if !arm_accepts(&validator, instance, composition_pending) {
             continue;
         }
-        let outcome = rewrite_object(
+        let beside_arms = beside_arms.get_or_insert_with(|| {
+            rewrite_object(root, instance, base_dir, arms, composition_pending, request_context, root)
+        });
+        let mut outcome = rewrite_object(
             arm,
-            instance,
+            &beside_arms.value,
             base_dir,
             arms,
             composition_pending,
             request_context,
             root,
         );
+        outcome.changed |= beside_arms.changed;
         match &agreed {
             None => agreed = Some(outcome),
             Some(previous) if previous.value == outcome.value => {}

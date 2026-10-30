@@ -1138,6 +1138,8 @@ fn parse_yaml_referenced_file(
     let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message: format!("not UTF-8 text: {error}"),
+        source: None,
+        span: None,
     })?;
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
@@ -1170,6 +1172,8 @@ fn parse_yaml_referenced_file(
         SchemaError::SchemaDocument {
             path: path.to_path_buf(),
             message,
+            source: None,
+            span: None,
         }
     })?;
     let advisories = missing_simplified_envelope_advisory(&yaml, path)
@@ -1388,6 +1392,8 @@ pub fn prepare_embedded_schema_in(
     let unsupported = |message: &str| SchemaError::SchemaDocument {
         path: PathBuf::from(path),
         message: message.to_string(),
+        source: None,
+        span: None,
     };
     let document = embedded::find(documents, path)
         .ok_or_else(|| unsupported("not a registered embedded schema document"))?;
@@ -1428,6 +1434,8 @@ pub fn prepare_embedded_inline_schema(
         return Err(SchemaError::SchemaDocument {
             path: PathBuf::from(importer),
             message: "an embedded inline schema cannot be a root union".into(),
+            source: None,
+            span: None,
         });
     }
     lower_embedded_schema(schema, None, importer, documents, bundle, Sharing::Automatic, shipped)
@@ -1448,6 +1456,8 @@ pub fn prepare_embedded_catalog_declaration(
         return Err(SchemaError::SchemaDocument {
             path: PathBuf::from(importer),
             message: "an embedded inline schema cannot be a root union".into(),
+            source: None,
+            span: None,
         });
     }
     lower_embedded_schema(schema, None, importer, documents, "", sharing, shipped)
@@ -1483,6 +1493,8 @@ fn lower_embedded_schema(
         return Err(SchemaError::SchemaDocument {
             path: PathBuf::from(path),
             message: "an embedded schema cannot reference `example(...)` artifacts".into(),
+            source: None,
+            span: None,
         });
     }
     reads.push(PathBuf::from(path));
@@ -1653,6 +1665,8 @@ pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<Resolve
     let document_error = |message: String| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message,
+        source: None,
+        span: None,
     };
     let text = std::str::from_utf8(bytes).map_err(|error| document_error(format!("not UTF-8 text: {error}")))?;
     if let Some(message) =
@@ -2548,10 +2562,14 @@ impl ImportEngine<'_> {
             let target = embedded::resolve_path(importer, reference).map_err(|reason| SchemaError::SchemaDocument {
                 path: PathBuf::from(importer),
                 message: format!("embedded import `{trimmed}`: {reason}"),
+                source: None,
+                span: None,
             })?;
             let document = embedded::find(self.shipped.documents(), &target).ok_or_else(|| SchemaError::SchemaDocument {
                 path: PathBuf::from(importer),
                 message: format!("embedded import `{trimmed}`: `{target}` is not a shipped schema document"),
+                source: None,
+                span: None,
             })?;
             return self.shipped_namespace(document.path);
         }
@@ -2631,6 +2649,8 @@ impl ImportEngine<'_> {
         let invalid = |reason: String| SchemaError::SchemaDocument {
             path: PathBuf::from(importer),
             message: format!("embedded import `{}`: {reason}", reference.trim()),
+            source: None,
+            span: None,
         };
         let target = if bundle.is_empty() {
             embedded::resolve_path(importer, reference)
@@ -2960,12 +2980,16 @@ fn named_types_from_text(text: &str, path: &Path) -> Result<NamedTypes, SchemaEr
         SchemaDeclaration::Schema(SchemaRoot::Union(_)) => Err(SchemaError::SchemaDocument {
             path: path.to_path_buf(),
             message: "root-union schema documents cannot supply named imports".into(),
+            source: None,
+            span: None,
         }),
         // A whole-file reference declares no named types of its own; imports
         // are defined only among a file's own top-level entries.
         SchemaDeclaration::Reference(_) => Err(SchemaError::SchemaDocument {
             path: path.to_path_buf(),
             message: "whole-file reference schema documents cannot supply named imports".into(),
+            source: None,
+            span: None,
         }),
     }
 }
@@ -6497,7 +6521,7 @@ mod shared_type_tables {
         let root = root_namespace(dir.path(), IndexMap::new());
 
         let error = engine.resolve_namespace("./types.yaml", &root).err().expect("a reference is no namespace");
-        let SchemaError::SchemaDocument { path, message } = error else {
+        let SchemaError::SchemaDocument { path, message, .. } = error else {
             panic!("expected a schema-document error, got {error:?}");
         };
         assert_eq!(path, dir.path().join("types.yaml"));

@@ -42,7 +42,7 @@ fn prepare(schema: &str, others: &[(&str, &str)]) -> Result<ResolvedSchema, Sche
 /// The message of a [`SchemaError::SchemaDocument`] naming `IMPORTER`.
 fn importer_message(error: SchemaError) -> String {
     match error {
-        SchemaError::SchemaDocument { path, message } => {
+        SchemaError::SchemaDocument { path, message, .. } => {
             assert_eq!(path, std::path::Path::new(IMPORTER), "{message}");
             message
         }

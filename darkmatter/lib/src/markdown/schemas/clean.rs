@@ -530,7 +530,9 @@ fn solely_string(nodes: &[&Value]) -> bool {
 /// `None` covers a path the schema does not declare, a genuine union (two or
 /// more non-null `anyOf` arms) at or above the location, and a reference the
 /// root cannot resolve. A missing target is a schema error, never an
-/// unconstrained schema, so it authorizes no cleanup.
+/// unconstrained schema, so it authorizes no cleanup. A root union is walked
+/// through the arm the problem names (`arm_index`) together with the root's
+/// own keywords, which a raw schema may declare beside its `anyOf`.
 ///
 /// The walk follows one instance path, so each instance location is visited
 /// once; a recursive definition is re-entered at each deeper location rather
@@ -542,15 +544,16 @@ fn schemas_at<'a>(root: &'a Value, problem: &ValidationProblem) -> Option<Vec<&'
 
 fn schemas_along<'a>(root: &'a Value, arm_index: Option<usize>, segments: &[String]) -> Option<Vec<&'a Value>> {
     let scope = SchemaScope::new(root);
-    let start = match arm_index {
-        Some(index) => root
-            .get("anyOf")
-            .and_then(Value::as_array)
-            .and_then(|arms| arms.get(index))
-            .unwrap_or(root),
-        None => root,
+    let arm = arm_index.and_then(|index| root.get("anyOf")?.as_array()?.get(index));
+    let mut nodes = match arm {
+        // A raw root's own keywords (its `properties`) apply beside the arm.
+        Some(arm) => {
+            let mut nodes = expand_applicable(&scope, arm)?;
+            nodes.push(root);
+            nodes
+        }
+        None => expand_applicable(&scope, root)?,
     };
-    let mut nodes = expand_applicable(&scope, start)?;
     for segment in segments {
         let numeric = segment.bytes().all(|byte| byte.is_ascii_digit());
         let mut next: Vec<&Value> = Vec::new();

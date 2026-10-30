@@ -50,7 +50,10 @@ structure:
 Anything else is `SimplifiedSchemaError::MissingSchema`: ordinary YAML, a
 YAML scalar (including a string that looks like a file path), Markdown
 without `$schema`. A malformed definition is `SimplifiedSchemaError::Schema`
-with the language's own `SchemaError`; a malformed fence (`----`) is
+holding a `SchemaError::SchemaDocument` that keeps the grammar's own error and
+its byte range in the text you passed
+([details](./diagnostics.md#a-rejected-definition-in-a-schema-document));
+a malformed fence (`----`) is
 `SimplifiedSchemaError::Frontmatter`.
 
 ```rust

@@ -93,6 +93,13 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 cannot run, such as a file check without a file context), and
 `Unprepared { error }` (the schema itself cannot be prepared).
 
+A definition rejected inside a schema document (standalone payload, `types`
+table, Markdown frontmatter `$schema`, or an imported named-type file) is
+`SchemaError::SchemaDocument { path, message, source, span }`: `source` is the
+grammar's typed error unchanged, `span` a byte range in the exact supplied
+text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
+`message` alone; see [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md#a-rejected-definition-in-a-schema-document).
+
 ## Features
 
 | Feature | Default | Adds |

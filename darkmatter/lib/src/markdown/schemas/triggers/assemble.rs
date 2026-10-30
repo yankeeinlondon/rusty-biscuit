@@ -755,6 +755,8 @@ fn resolve_embedded_payload(
             .map_err(|reason| SchemaError::SchemaDocument {
                 path: importer_path.clone(),
                 message: format!("embedded `$schema` `{}`: {reason}", reference.trim()),
+                source: None,
+                span: None,
             })?;
             let claims_trigger = crate::markdown::schemas::embedded::find(documents, &target)
                 .is_some_and(|document| matches!(parse_trigger_envelope_from_str(document.text), Ok(Some(_))));

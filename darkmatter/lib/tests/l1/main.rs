@@ -159,6 +159,7 @@ mod persistent_cache_disabled;
 mod predict_conflicts;
 mod prelude_exports;
 mod prose_wrap_parity;
+mod raw_root_union_assertions;
 mod raw_schema_conversion;
 mod recent_commits_shared_type;
 mod reference_integration;

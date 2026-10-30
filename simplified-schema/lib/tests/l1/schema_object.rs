@@ -123,10 +123,12 @@ mod content {
             SimplifiedSchema::try_from("----\n$schema:\n  a: string\n----\n"),
             Err(SimplifiedSchemaError::Frontmatter(_))
         ));
-        // Markdown frontmatter with a malformed `$schema` definition.
+        // Markdown frontmatter with a malformed `$schema` definition: the
+        // grammar's own error, located in the document.
         assert!(matches!(
             SimplifiedSchema::try_from("---\n$schema:\n  a: 'number(min('\n---\n"),
-            Err(SimplifiedSchemaError::Schema(SchemaError::Grammar { .. }))
+            Err(SimplifiedSchemaError::Schema(SchemaError::SchemaDocument { source: Some(cause), .. }))
+                if matches!(*cause, SchemaError::Grammar { .. })
         ));
         // A misspelled type is an unknown named type, found while expanding.
         assert!(matches!(
@@ -141,11 +143,18 @@ mod content {
     #[test]
     fn schema_field_shapes_through_frontmatter() {
         let frontmatter = |value: &str| SimplifiedSchema::try_from(format!("---\n$schema:{value}\n---\n").as_str());
+        let grammar = |result: Result<SimplifiedSchema, SimplifiedSchemaError>| {
+            matches!(
+                result,
+                Err(SimplifiedSchemaError::Schema(SchemaError::SchemaDocument { source: Some(cause), .. }))
+                    if matches!(*cause, SchemaError::Grammar { .. })
+            )
+        };
         // Explicit null is not absence: it reaches the declaration parser.
-        assert!(matches!(frontmatter(""), Err(SimplifiedSchemaError::Schema(SchemaError::Grammar { .. }))));
-        assert!(matches!(frontmatter(" null"), Err(SimplifiedSchemaError::Schema(SchemaError::Grammar { .. }))));
+        assert!(grammar(frontmatter("")));
+        assert!(grammar(frontmatter(" null")));
         // Wrong type, whole field.
-        assert!(matches!(frontmatter(" 42"), Err(SimplifiedSchemaError::Schema(SchemaError::Grammar { .. }))));
+        assert!(grammar(frontmatter(" 42")));
         // Empty mapping: an object schema that declares nothing.
         let empty = frontmatter(" {}").expect("an empty mapping is an empty object schema");
         assert!(empty.properties().is_empty());

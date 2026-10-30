@@ -31,8 +31,10 @@ use crate::{SchemaAdvisory, SchemaError, ValidationProblem, discriminant};
 pub enum CompiledValidators {
     /// An ordinary object schema's validator.
     Object(Arc<Validator>),
-    /// One validator per arm of a root `anyOf` union. Validation reports per
-    /// arm, so the union as a whole is never compiled.
+    /// One validator per arm of a root `anyOf` union, each carrying the
+    /// root's sibling assertions (see [`validate::wrap_arm_as_root_schema`]),
+    /// so some arm accepts exactly the values the whole root accepts.
+    /// Validation reports per arm.
     RootUnion(Vec<Arc<Validator>>),
 }
 
@@ -117,8 +119,14 @@ const RECENT_SCHEMAS: usize = 8;
 /// [`wrapped_root_arms`]'s memo; module-level so [`reset_process_caches`] can clear it.
 static WRAPPED: Mutex<Vec<Wrapped>> = Mutex::new(Vec::new());
 
-/// Each arm of `schema`'s root union, wrapped as a root schema, or `None` for
-/// a schema that is not a root union.
+/// Each arm of `schema`'s root union, wrapped as a root schema (see
+/// [`validate::wrap_arm_as_root_schema`]), or `None` for a schema that is not
+/// a root union.
+///
+/// A malformed root `anyOf` (empty, or with an arm that is neither a schema
+/// object nor a boolean) is also `None`: the schema is then compiled whole,
+/// and `jsonschema` rejects it instead of an arm being projected into an
+/// unconstrained schema.
 ///
 /// Memoized for the process over a few recent schemas (an entry holds its
 /// schema alive, so `Arc` identity is a sound key): a root union merged with
@@ -126,6 +134,9 @@ static WRAPPED: Mutex<Vec<Wrapped>> = Mutex::new(Vec::new());
 /// otherwise copy and rehash them for the validator cache.
 pub fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
     let arms = schema.get("anyOf").and_then(Value::as_array)?;
+    if arms.is_empty() || !arms.iter().all(|arm| arm.is_object() || arm.is_boolean()) {
+        return None;
+    }
     let mut wrapped = WRAPPED.lock().expect("root arm memo poisoned");
     if let Some((_, hit)) = wrapped.iter().find(|(held, _)| Arc::ptr_eq(held, schema)) {
         return Some(Arc::clone(hit));

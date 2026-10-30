@@ -33,23 +33,56 @@ is `SimplifiedSchemaError::Schema`, which holds the language's own
 use simplified_schema::{SchemaError, SimplifiedSchema, SimplifiedSchemaError};
 
 // Markdown content: the frontmatter `$schema` is the schema.
-let error = SimplifiedSchema::try_from("---\n$schema:\n  age: 'number(min(nope))'\n---\n").unwrap_err();
+let text = "---\r\ntitle: test\r\n$schema:\r\n  age: 'number(min('\r\n---\r\n";
+let error = SimplifiedSchema::try_from(text).unwrap_err();
 match error {
-    SimplifiedSchemaError::Schema(SchemaError::Grammar { property, span, .. }) => {
-        assert_eq!(property, "age");
-        let _ = span; // byte range inside `number(min(nope))`
+    SimplifiedSchemaError::Schema(SchemaError::SchemaDocument { path, span: Some(span), source: Some(cause), .. }) => {
+        assert_eq!(path, std::path::Path::new("content")); // the file, when one was read
+        assert_eq!(&text[span], "'number(min('"); // a range in the whole document
+        assert!(matches!(*cause, SchemaError::Grammar { ref property, .. } if property == "age"));
     }
     other => panic!("unexpected: {other}"),
 }
 ```
 
 `SimplifiedSchemaError` is `#[non_exhaustive]`; match the variants you act on
-and keep a fallback arm. A definition failure inside a *standalone* schema
-document is reported as `SchemaError::SchemaDocument` with the underlying
-message; `locate_standalone_definition_failure` recovers its structured
-location (see [below](#source-aware-parsing-and-located-failures)). The lower-level functions (`parse_yaml_schema`,
+and keep a fallback arm. The lower-level functions (`parse_yaml_schema`,
 `to_json_schema`, the `resolve` module) return `SchemaError` directly; its
 variants are listed in the [Error Model](#error-model).
+
+### A rejected definition in a schema document
+
+When a definition inside a schema *document* fails to parse, the error is
+`SchemaError::SchemaDocument`, located in the text that was supplied:
+
+| Field | Holds |
+| --- | --- |
+| `path` | the file that was read, or `content` for text handed to `SimplifiedSchema::try_from` |
+| `source` | the parser's own typed error, unchanged (usually `Grammar`, whose `span` stays relative to the type string) |
+| `span` | the rejected text's byte range in the exact document supplied: the rejected token when it can be projected, otherwise the whole rejected value |
+| `message` | the cause's text, prefixed with where it was found (`invalid SimplifiedSchema payload`, `invalid named types`, ``invalid frontmatter `$schema` ``) |
+
+This holds for every way a document is read:
+
+- a standalone YAML document's `$schema` payload and its `types` table, from
+  `parse_standalone_schema_document`, the content factory, `try_from_yaml`,
+  or `resolve`;
+- a Markdown document's frontmatter `$schema`, from the content factory,
+  `try_from_markdown`, or `resolve`, where `span` counts from the first byte
+  of the Markdown file, fence lines included;
+- a named-type file a schema imports (`Person@./types.yaml`), where `path`
+  is the imported file and `span` is a range in that file.
+
+Byte offsets count line endings as written, so a CRLF document's offsets
+are larger than its LF twin's. A frontmatter that is not YAML at all is a
+`SchemaDocument` whose `span` is the empty range at the YAML parser's
+position in the whole document (its message's line and column still count
+from the frontmatter's first line). Other document failures, such as an
+envelope of the wrong shape or a suggestion list that cannot be linted, have
+no `span`; a lint failure keeps its typed cause in `source`.
+`locate_standalone_definition_failure` returns the same failure with its
+structural path and secondary locations (see
+[below](#source-aware-parsing-and-located-failures)).
 
 ### Where a definition failure points
 
@@ -242,7 +275,7 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `NoMatch`               | `$schema` reference matched no file (a path, or a bare name no schema root holds); a text with `*`, `?`, or `[` adds the literal-glob hint. |
 | `AmbiguousReferenced`   | Referenced file is neither a valid SimplifiedSchema nor a valid JSON Schema.                              |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
-| `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload.     |
+| `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload, or a schema document's text is not a schema; carries the document `path`, and, for a rejected definition, the typed cause as `source` and its byte `span` in the supplied text ([details](#a-rejected-definition-in-a-schema-document)). |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
 | `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |

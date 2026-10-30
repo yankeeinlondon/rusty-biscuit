@@ -636,6 +636,32 @@ the file mode (`spec: string` in one, `spec: file` in the other) or one omits
 the property, the caller value stays raw, and the eager-`file` rewrite leaves
 it raw too rather than re-anchor it as though the document had authored it.
 
+A raw JSON Schema root may declare `properties` beside its `anyOf`. They
+apply whichever arm is chosen, exactly as they do without the union:
+
+```json
+{
+  "type": "object",
+  "properties": { "count": { "type": "integer" }, "notes": { "type": "string", "format": "darkmatter-file" } },
+  "anyOf": [
+    { "properties": { "kind": { "const": "a" } }, "required": ["kind"] },
+    { "properties": { "kind": { "const": "b" } }, "required": ["kind"] }
+  ]
+}
+```
+
+A caller's `--set count=3` converts to the integer before an arm is judged,
+so the arm that applies is still found and a caller file it declares
+resolves from the caller's origin; an
+eager `notes` is normalized like one an arm declares; and `md clean` quotes
+and suggests keys against `count` and `notes` too.
+
+A root `unevaluatedProperties: false` beside the `anyOf` reads every
+accepting arm. With arms requiring `name` and `age` respectively,
+frontmatter declaring both is valid, its eager files are normalized, and a
+caller's values compose; a key no arm and no root `properties` declares is
+still rejected.
+
 ### Root unions and file `match`
 
 Each simplified arm's declared glob is compiled into that arm as

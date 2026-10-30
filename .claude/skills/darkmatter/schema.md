@@ -869,9 +869,10 @@ grammar fills from `Parser::arm_spans` and the YAML-list parser from the
 option's scalar). Registration's text path keeps them on
 `RegistrationError::Grammar`; the programmatic path has no text and gives
 `InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
-located in the catalog source. A standalone file's payload failure is folded
-into `SchemaError::SchemaDocument`'s message, so DMLS locates it when the
-overlay is assembled (`overlay::file_failures`, keyed by the path the error
+located in the catalog source. A standalone file's payload failure is a
+`SchemaError::SchemaDocument` whose message repeats the cause and which keeps
+the typed cause (`source`) and its byte `span` in that file; DMLS locates it
+with secondary locations when the overlay is assembled (`overlay::file_failures`, keyed by the path the error
 names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
 request must never read or parse a file.
 
@@ -1069,7 +1070,10 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   context (structural slot), and conversion reuses that validator
   (`ConversionPlan::validator`); a root union compiles only its arms
   (`CompiledValidators::RootUnion`, so `EffectiveSchema::validator()` is
-  `None` for it). Coercion skips validating union arms when no arm changes
+  `None` for it). A raw root with `unevaluatedProperties`/`unevaluatedItems`
+  keeps its `anyOf` (plus a trailing `true`) in every wrapped arm
+  (`validate::wrap_arm_as_root_schema`), so those keywords see every
+  accepting arm's evaluations; never drop the alternatives there. Coercion skips validating union arms when no arm changes
   the value. Lowering builds nested fragments by moving them
   (`convert.rs::any_of_value`), never `json!` with an interpolated `Value`,
   which re-serializes the subtree. Every trigger payload is still resolved

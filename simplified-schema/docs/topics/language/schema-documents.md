@@ -143,7 +143,7 @@ $schema:
 
 ### Malformed Envelopes
 
-Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when `types` is missing, malformed, or accompanied by top-level keys other than `categories`. A file that is not valid YAML at all (for example one with a duplicate key) is also a schema-document error, `not valid YAML: ...`, rather than an unrecognized file.
+Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when `types` is missing, malformed, or accompanied by top-level keys other than `categories`. A file that is not valid YAML at all (for example one with a duplicate key) is also a schema-document error, `not valid YAML: ...`, rather than an unrecognized file. A definition the grammar rejects keeps the grammar's typed error and its byte range in the document; see [A rejected definition in a schema document](../diagnostics.md#a-rejected-definition-in-a-schema-document).
 
 ### Raw JSON Schema
 
@@ -153,6 +153,51 @@ Existing raw JSON Schema reference support remains a distinct validation format.
 - cannot supply a `Name@fileref` named-import namespace;
 - does not receive SimplifiedSchema completion or type enforcement; and
 - does not enable suggestion discovery from a hand-authored `x-darkmatter-suggest` field.
+
+A raw root `anyOf` is judged with everything beside it. Here `name` is
+required whichever arm matches, so `{"kind": "a"}` fails with a
+missing-required problem:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["name"],
+  "anyOf": [
+    { "properties": { "kind": { "const": "a" } } },
+    { "properties": { "kind": { "const": "b" } } }
+  ]
+}
+```
+
+The root's own `properties` apply beside the arm too: a problem on one
+carries its `description`, as it does without the union.
+
+A root `unevaluatedProperties` or `unevaluatedItems` sees what **every**
+accepting arm evaluated, exactly as a JSON Schema validator does. This schema
+accepts `{"name": "Ada"}`, `{"age": 36}`, and `{"name": "Ada", "age": 36}`,
+and rejects `{"name": "Ada", "extra": true}`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "anyOf": [
+    { "properties": { "name": { "type": "string" } }, "required": ["name"] },
+    { "properties": { "age": { "type": "number" } }, "required": ["age"] }
+  ],
+  "unevaluatedProperties": false
+}
+```
+
+A failing value is still reported against its closest arm: the problems
+are those of that arm and the root keywords, never a separate failure of the
+union.
+
+Boolean arms keep their meaning (`anyOf: [false, false]` rejects every
+value). A root `anyOf` that is empty, or has an arm that is neither a schema
+object nor a boolean (`anyOf: [7]`), cannot be prepared: validation fails with
+`ValidationFailure::Unprepared` holding `SchemaError::BuildValidator`.
 
 A referenced YAML map without either standalone envelope remains raw JSON
 Schema even when every property value is a valid SimplifiedSchema type string.

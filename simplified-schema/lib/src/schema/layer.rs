@@ -16,7 +16,7 @@ use crate::resolve::{self, InlineOwner, ReferenceStack, ResolvedSchema};
 use crate::simplified::standalone::visit_def;
 use crate::simplified::{
     Constraint, DefinitionTable, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaDeclaration,
-    SchemaRoot, SchemaShape, StandaloneSchemaEnvelope, TypeExpr, parse_schema_declaration,
+    SchemaRoot, SchemaShape, StandaloneSchemaEnvelope, TypeExpr, parse_keyed_declaration,
     parse_standalone_schema_document, to_json_schema_with_definitions,
 };
 use crate::{SchemaAdvisory, SchemaError};
@@ -141,7 +141,7 @@ impl Layer {
     /// YAML (or JSON) document.
     pub(super) fn from_content(text: &str) -> Result<Self, SimplifiedSchemaError> {
         match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
-            Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, None, None),
+            Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, frontmatter.yaml_span.start, None, None),
             None => Self::from_yaml_document(text, None, None),
         }
     }
@@ -154,26 +154,38 @@ impl Layer {
         binding: Option<Binding>,
     ) -> Result<Self, SimplifiedSchemaError> {
         match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
-            Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, path, binding),
+            Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, frontmatter.yaml_span.start, path, binding),
             None => Err(missing_schema(path.as_deref(), "the document has no frontmatter block")),
         }
     }
 
-    /// A frontmatter block's YAML, which must hold `$schema`.
+    /// A frontmatter block's YAML, which must hold `$schema`. `yaml_offset`
+    /// is where `yaml_text` starts in the Markdown document, so a rejected
+    /// definition is located in the document as supplied.
     fn from_frontmatter(
         yaml_text: &str,
+        yaml_offset: usize,
         path: Option<PathBuf>,
         binding: Option<Binding>,
     ) -> Result<Self, SimplifiedSchemaError> {
         let frontmatter = crate::numeric::load_admitted_yaml(yaml_text).map_err(|error| SchemaError::SchemaDocument {
             path: path.clone().unwrap_or_else(|| PathBuf::from(CONTENT)),
+            // The parser's line and column count from the frontmatter's
+            // first line; `span` is the same position in the document.
+            span: error.location().map(|at| yaml_offset + at.index()..yaml_offset + at.index()),
             message: format!("frontmatter is not valid YAML: {error}"),
+            source: None,
         })?;
         let Some(value) = frontmatter.as_mapping().and_then(|mapping| mapping.get("$schema")) else {
             return Err(missing_schema(path.as_deref(), "the frontmatter has no `$schema`"));
         };
         let authored = AuthoredSchema {
-            declaration: parse_schema_declaration(value)?,
+            declaration: parse_keyed_declaration(value, yaml_text, "$schema", yaml_offset).map_err(|failure| {
+                failure.into_document_error(
+                    path.as_deref().unwrap_or(Path::new(CONTENT)),
+                    "invalid frontmatter `$schema`",
+                )
+            })?,
             local_types: None,
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
@@ -203,6 +215,8 @@ impl Layer {
         let yaml = crate::numeric::load_admitted_yaml(text).map_err(|error| SchemaError::SchemaDocument {
             path: named.clone(),
             message: format!("not valid YAML: {error}"),
+            source: None,
+            span: None,
         })?;
         let dialect = yaml
             .as_mapping()
