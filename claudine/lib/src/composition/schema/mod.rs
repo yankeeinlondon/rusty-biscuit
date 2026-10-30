@@ -40,7 +40,7 @@
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaError,
-    SchemaOriginKind, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
+    SchemaOriginKind, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, ValidationProblem,
     ValidationProblemCode, ValidationProblemKind,
 };
 
@@ -1046,7 +1046,7 @@ fn normalize_file_array_values(
     };
     let shape = match effective {
         Some(e) => match e.simplified.as_ref() {
-            Some(SimplifiedSchema::Single(s)) => Some(s),
+            Some(SchemaRoot::Single(s)) => Some(s),
             _ => None,
         },
         _ => None,
@@ -1161,7 +1161,7 @@ fn drop_invalid_optionals_with_schemas(
     }
 
     let shape: Option<&SchemaShape> = match effective.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(s)) => Some(s),
+        Some(SchemaRoot::Single(s)) => Some(s),
         _ => None,
     };
 

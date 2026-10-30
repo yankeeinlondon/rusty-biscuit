@@ -504,7 +504,9 @@ fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
         | E::CwdOutsideBaseDir { .. }
         | E::RelativeContextDirectory { .. }
         | E::BaseDirNotRepositoryRoot { .. }
-        | E::BareRepository => "missing_context",
+        | E::BareRepository
+        // A caller built without resolution: no context to resolve in.
+        | E::ResolutionUnavailable { .. } => "missing_context",
         E::RemoteNotLocal(_) => "unsupported_remote",
         E::CurrentDirectory(_)
         | E::Git(_)

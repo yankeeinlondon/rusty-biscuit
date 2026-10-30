@@ -7,6 +7,7 @@
 //! its controls without a checkout. A disk file of the same name in any root
 //! always wins; see `claudine/docs/topics/schemas.md`.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use darkmatter::markdown::schemas::triggers::TriggerSource;
 use darkmatter::markdown::schemas::{EffectiveSchema, EmbeddedSchemaBundle, SchemaOriginKind};
 

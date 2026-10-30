@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use darkmatter::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType,
+    Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType,
     TypeExpr, parse_standalone_schema_document, parse_yaml_schema,
 };
 
@@ -20,7 +20,7 @@ use crate::errors::GenError;
 use crate::memo::FileMemo;
 use crate::registry::{DeclaredSource, RegistryEntry, SchemaExpectation};
 
-/// Loads a topic sidecar (`_schema.yaml`) as a [`SimplifiedSchema`].
+/// Loads a topic sidecar (`_schema.yaml`) as a [`SchemaRoot`].
 ///
 /// The sidecar must wrap its properties under a root `$schema:` key —
 /// darkmatter's resolver otherwise classifies the file as raw JSON Schema.
@@ -30,8 +30,8 @@ use crate::registry::{DeclaredSource, RegistryEntry, SchemaExpectation};
 ///
 /// The result is reused while the sidecar and the types files it inlines are
 /// unchanged: every provider pass gates on the same topic sidecars.
-pub fn load_sidecar_schema(path: &Path) -> Result<SimplifiedSchema, GenError> {
-    static SIDECARS: LazyLock<FileMemo<SimplifiedSchema>> = LazyLock::new(FileMemo::new);
+pub fn load_sidecar_schema(path: &Path) -> Result<SchemaRoot, GenError> {
+    static SIDECARS: LazyLock<FileMemo<SchemaRoot>> = LazyLock::new(FileMemo::new);
     SIDECARS.get_or_try_insert(format!("{path:?}"), || {
         let mut schema = parse_sidecar_schema(path)?;
         let mut inputs = inline_local_object_types(&mut schema, path)?;
@@ -42,7 +42,7 @@ pub fn load_sidecar_schema(path: &Path) -> Result<SimplifiedSchema, GenError> {
 
 /// Parses a topic sidecar without inlining its local object types, for a
 /// caller that reads only top-level property declarations.
-pub(crate) fn parse_sidecar_schema(path: &Path) -> Result<SimplifiedSchema, GenError> {
+pub(crate) fn parse_sidecar_schema(path: &Path) -> Result<SchemaRoot, GenError> {
     let text = std::fs::read_to_string(path).map_err(|source| GenError::Io {
         path: path.to_path_buf(),
         source,
@@ -67,8 +67,8 @@ pub(crate) fn parse_sidecar_schema(path: &Path) -> Result<SimplifiedSchema, GenE
 /// type's shape. Imports of shared types (`../`) and of non-object types
 /// stay as they are; no registry entry reads through them. Returns the types
 /// files read.
-fn inline_local_object_types(schema: &mut SimplifiedSchema, sidecar: &Path) -> Result<Vec<PathBuf>, GenError> {
-    let SimplifiedSchema::Single(shape) = schema else {
+fn inline_local_object_types(schema: &mut SchemaRoot, sidecar: &Path) -> Result<Vec<PathBuf>, GenError> {
+    let SchemaRoot::Single(shape) = schema else {
         return Ok(Vec::new());
     };
     // WHY: a sidecar imports many record types from the same types file, and
@@ -108,7 +108,7 @@ fn local_types(path: &Path) -> Result<SchemaShape, GenError> {
     let document = parse_standalone_schema_document(&text, path)
         .map_err(|err| invalid(err.to_string()))?
         .ok_or_else(|| invalid("not a `kind: schema` types file".into()))?;
-    let Some(SimplifiedSchema::Single(types)) = document.schema() else {
+    let Some(SchemaRoot::Single(types)) = document.schema() else {
         return Err(invalid("the `types` mapping did not parse as one schema".into()));
     };
     Ok(types.clone())
@@ -136,7 +136,7 @@ fn local_object_type(types: &SchemaShape, path: &Path, name: &str) -> Result<Opt
 /// topic is absent fail with [`GenError::SchemaPathMissing`].
 pub fn check_entries<'a>(
     entries: &[RegistryEntry],
-    mut sidecar_for: impl FnMut(&str) -> Option<&'a SimplifiedSchema>,
+    mut sidecar_for: impl FnMut(&str) -> Option<&'a SchemaRoot>,
 ) -> Result<(), GenError> {
     for entry in entries {
         let DeclaredSource::Research { topic, path } = entry.source else {
@@ -157,8 +157,8 @@ pub fn check_entries<'a>(
 
 /// Resolves a dot-separated property path to its [`PropertyAtom`], descending
 /// through inline-object literals (including array-of-record elements).
-fn resolve_path<'s>(schema: &'s SimplifiedSchema, path: &str) -> Option<&'s PropertyAtom> {
-    let SimplifiedSchema::Single(shape) = schema else {
+fn resolve_path<'s>(schema: &'s SchemaRoot, path: &str) -> Option<&'s PropertyAtom> {
+    let SchemaRoot::Single(shape) = schema else {
         // Root unions never appear in topic sidecars; unsupported here.
         return None;
     };

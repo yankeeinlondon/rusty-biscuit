@@ -468,7 +468,7 @@ fn explicit_replace_preserves_mode() {
 //
 // The following tests pin the spec at `claudine/features/2026-06-14-system-prompt-mode/spec.md`.
 // Discovered `system-prompt.md` files may declare `mode: append|replace`
-// in frontmatter; the value is validated by the baseline `SimplifiedSchema`
+// in frontmatter; the value is validated by the baseline `SchemaRoot`
 // attached in `compose_prompt_markdown` and read back from the composed
 // frontmatter by `mode_from_composed`.
 

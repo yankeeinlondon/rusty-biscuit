@@ -383,7 +383,7 @@ fn raw_json_schema_required_is_enforced_at_completion() {
     assert!(!missing.is_satisfied());
     assert_eq!(missing.problems[0].property, "researched_by");
     assert_eq!(missing.problems[0].kind, CompletionProblemKind::Missing);
-    // The per-property status table is projected from SimplifiedSchema, so a
+    // The per-property status table is projected from SchemaRoot, so a
     // raw JSON Schema contributes no rows and the failure travels through the
     // problem list alone.
     let status = missing.status.as_ref().expect("a status report is still built");

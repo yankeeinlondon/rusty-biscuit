@@ -2587,7 +2587,7 @@ fn presence_and_timing_read_through_a_resolved_union_reference() {
         &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap();
-    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    let Some(darkmatter::markdown::schemas::SchemaRoot::Single(shape)) = &resolved.simplified
     else {
         panic!("a single shape");
     };
@@ -2618,7 +2618,7 @@ fn null_admitting_whole_values_are_not_required() {
         &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap();
-    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    let Some(darkmatter::markdown::schemas::SchemaRoot::Single(shape)) = &resolved.simplified
     else {
         panic!("a single shape");
     };

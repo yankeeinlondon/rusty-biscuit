@@ -18,8 +18,8 @@ pub(super) fn categorize_problems(
     let mut pointer_paths = Vec::new();
 
     let shape: Option<&SchemaShape> = effective.and_then(|e| match e.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(s)) => Some(s),
-        Some(SimplifiedSchema::Union(_)) | None => None,
+        Some(SchemaRoot::Single(s)) => Some(s),
+        Some(SchemaRoot::Union(_)) | None => None,
     });
 
     for problem in problems {
@@ -138,8 +138,8 @@ pub(super) fn promote_null_required_to_missing(
     instance: Option<&serde_json::Value>,
 ) {
     let shape: Option<&SchemaShape> = effective.and_then(|e| match e.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(s)) => Some(s),
-        Some(SimplifiedSchema::Union(_)) | None => None,
+        Some(SchemaRoot::Single(s)) => Some(s),
+        Some(SchemaRoot::Union(_)) | None => None,
     });
     let Some(shape) = shape else {
         return;
@@ -678,7 +678,7 @@ pub(in crate::composition) fn status_report_from_validation(
     }
 
     let shape = match effective.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(s)) => s,
+        Some(SchemaRoot::Single(s)) => s,
         // Root-level unions don't expose a single property table; report
         // as raw so the CLI falls back to a minimal listing.
         _ => {

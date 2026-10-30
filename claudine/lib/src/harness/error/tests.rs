@@ -345,7 +345,8 @@ mod classification_tests {
                 | E::RepositoryRootNotContainingSource { .. }
                 | E::CwdOutsideBaseDir { .. }
                 | E::RelativeContextDirectory { .. }
-                | E::BaseDirNotRepositoryRoot { .. } => "missing_context",
+                | E::BaseDirNotRepositoryRoot { .. }
+                | E::ResolutionUnavailable { .. } => "missing_context",
                 E::CurrentDirectory(_)
                 | E::Git(_)
                 | E::RepositoryEscape { .. }
@@ -378,6 +379,9 @@ mod classification_tests {
             },
             FileReferenceError::VaultNotConfigured,
             FileReferenceError::BareRepository,
+            FileReferenceError::ResolutionUnavailable {
+                reference: "./spec.md".to_string(),
+            },
             FileReferenceError::RepositoryRootNotContainingSource {
                 repository_root: PathBuf::from("/repo"),
                 source_path: PathBuf::from("/elsewhere/source.md"),

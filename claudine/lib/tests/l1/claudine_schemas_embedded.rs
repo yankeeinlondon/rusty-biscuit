@@ -23,6 +23,7 @@
 //! explicit environment inside a temporary directory; neither the checkout,
 //! the process environment, nor the process CWD is consulted.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 

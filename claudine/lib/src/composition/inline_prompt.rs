@@ -10,7 +10,7 @@ use std::path::Path;
 
 use darkmatter::markdown::schemas::simplified::serialize_property_atom;
 use darkmatter::markdown::schemas::{
-    PropertyDef, SchemaShape, SimplifiedSchema,
+    PropertyDef, SchemaShape, SchemaRoot,
 };
 
 use super::guardrails::document_path_span;
@@ -30,8 +30,8 @@ pub fn build_inline_prompt_header(
 ) -> String {
     let mut header = format!("**Document:** {}", document_path_span(document_path));
     let shape = schema.and_then(|schema| match schema.effective.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(shape)) => Some(shape),
-        Some(SimplifiedSchema::Union(_)) | None => None,
+        Some(SchemaRoot::Single(shape)) => Some(shape),
+        Some(SchemaRoot::Union(_)) | None => None,
     });
     if let Some(shape) = shape
         && !shape.properties.is_empty()

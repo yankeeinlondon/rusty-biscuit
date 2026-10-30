@@ -7,7 +7,7 @@ use darkmatter::markdown::schemas::file_match::{
 };
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef,
-    SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
+    SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, ValidationProblem,
     to_json_schema_with_definitions,
     select_literal_discriminant_arm,
 };
@@ -243,8 +243,8 @@ pub(super) fn file_reference_target(
             .and_then(|definition| file_match_target(definition, definitions))
     };
     match effective.simplified.as_ref()? {
-        SimplifiedSchema::Single(shape) => file_atom(shape),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => file_atom(shape),
+        SchemaRoot::Union(arms) => {
             let json_arms = effective
                 .json_schema
                 .get("anyOf")
@@ -388,8 +388,8 @@ fn supplied_file_arms<'a>(
     effective: &'a EffectiveSchema,
 ) -> Option<SuppliedArms<'a>> {
     let arms = match effective.simplified.as_ref()? {
-        SimplifiedSchema::Single(shape) => return Some(SuppliedArms::Unique(shape)),
-        SimplifiedSchema::Union(arms) => arms,
+        SchemaRoot::Single(shape) => return Some(SuppliedArms::Unique(shape)),
+        SchemaRoot::Union(arms) => arms,
     };
     let overrides = serde_json::Value::Object(
         records
@@ -438,7 +438,7 @@ fn supplied_file_arms<'a>(
         // it lowers against that table; without it an arm reaching a
         // recursive type would not convert and no arm would be selected.
         let relaxed = to_json_schema_with_definitions(
-            &SimplifiedSchema::Single(relaxed),
+            &SchemaRoot::Single(relaxed),
             effective.definitions(),
         )
         .ok()?;

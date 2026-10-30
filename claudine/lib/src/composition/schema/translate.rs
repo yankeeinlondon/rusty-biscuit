@@ -423,8 +423,8 @@ pub(super) fn filter_droppable_invalid_optionals(
     effective: Option<&EffectiveSchema>,
 ) -> Vec<ValidationProblem> {
     let shape: Option<&SchemaShape> = effective.and_then(|e| match e.simplified.as_ref() {
-        Some(SimplifiedSchema::Single(s)) => Some(s),
-        Some(SimplifiedSchema::Union(_)) | None => None,
+        Some(SchemaRoot::Single(s)) => Some(s),
+        Some(SchemaRoot::Union(_)) | None => None,
     });
     invalid_optional
         .iter()

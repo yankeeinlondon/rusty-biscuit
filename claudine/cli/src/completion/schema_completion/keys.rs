@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use biscuit_file::{FileReference, YamlValue};
 
 use darkmatter::markdown::schemas::{
-    EffectiveSchema, PropertyDef, SchemaArm, SimplifiedSchema,
+    EffectiveSchema, PropertyDef, SchemaArm, SchemaRoot,
 };
 
 use crate::completion::fuzzy;
@@ -242,8 +242,8 @@ fn name_matches(name: &str, partial: &str) -> bool {
 /// Collect every property `(name, def)` a schema exposes for setter-name
 /// completion.
 ///
-/// A [`SimplifiedSchema::Single`] yields its shape's properties in declaration
-/// order. A [`SimplifiedSchema::Union`] (root-level union) yields the union of
+/// A [`SchemaRoot::Single`] yields its shape's properties in declaration
+/// order. A [`SchemaRoot::Union`] (root-level union) yields the union of
 /// every inline arm's properties, deduplicated by name in first-seen (arm)
 /// order, so a `spec`-or-`design` root union offers both names. Unresolved
 /// [`SchemaArm::FileRef`] arms are skipped.
@@ -252,8 +252,8 @@ fn collect_property_defs(effective: &EffectiveSchema) -> Vec<(&String, &Property
         return Vec::new();
     };
     match simplified {
-        SimplifiedSchema::Single(shape) => shape.properties.iter().collect(),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => shape.properties.iter().collect(),
+        SchemaRoot::Union(arms) => {
             let mut out: Vec<(&String, &PropertyDef)> = Vec::new();
             let mut seen: HashSet<&str> = HashSet::new();
             for arm in arms {

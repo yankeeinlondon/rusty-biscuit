@@ -7,6 +7,7 @@
 //! matrix at the end edits one field of the shipped file per test, from an
 //! unedited positive control, through Darkmatter's public catalog reader.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 
 use claudine::composition::lifecycle::LifecycleSignal;
