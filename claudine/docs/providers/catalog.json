@@ -4010,27 +4010,37 @@
           "local_runners": [
             {
               "integration": "unsupported",
-              "notes": "Ollama serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard.",
+              "notes": [
+                "Ollama serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard."
+              ],
               "runner": "ollama"
             },
             {
               "integration": "unsupported",
-              "notes": "oMLX serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard.",
+              "notes": [
+                "oMLX serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard."
+              ],
               "runner": "omlx"
             },
             {
               "integration": "unsupported",
-              "notes": "LM Studio serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard.",
+              "notes": [
+                "LM Studio serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard."
+              ],
               "runner": "lmstudio"
             },
             {
               "integration": "unsupported",
-              "notes": "llama.cpp's `llama-server` serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard.",
+              "notes": [
+                "llama.cpp's `llama-server` serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard."
+              ],
               "runner": "llamacpp"
             },
             {
               "integration": "unsupported",
-              "notes": "vLLM serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard.",
+              "notes": [
+                "vLLM serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for either standard."
+              ],
               "runner": "vllm"
             }
           ],
@@ -4040,7 +4050,9 @@
           "model_config_paths": [
             {
               "format": "json",
-              "notes": "Persistent CLI settings. The observed host file contains `model: \"Gemini 3.1 Pro (High)\"`, `enableTelemetry`, and `trustedWorkspaces`. Official docs describe this as the plain-JSON settings file and the CLI changelog says `--model` and the `models` subcommand were added in 1.0.5. No observed or documented key adds custom providers, base URLs, API keys, or per-model metadata.",
+              "notes": [
+                "Persistent CLI settings. The observed host file contains `model: \"Gemini 3.1 Pro (High)\"`, `enableTelemetry`, and `trustedWorkspaces`. Official docs describe this as the plain-JSON settings file and the CLI changelog says `--model` and the `models` subcommand were added in 1.0.5. No observed or documented key adds custom providers, base URLs, API keys, or per-model metadata."
+              ],
               "path": "~/.gemini/antigravity-cli/settings.json",
               "scope": "user"
             }
@@ -14589,7 +14601,9 @@
               "adapter": null,
               "auth_site": "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or apiKeyHelper",
               "base_url_site": "ANTHROPIC_BASE_URL",
-              "notes": "Primary path for user-added arbitrary models. Claude Code emits the Anthropic Messages API to this base URL. Cloud-provider deployments (Bedrock, Vertex/Agent Platform, Foundry, Claude Platform on AWS) use their own base-url variables and CLAUDE_CODE_USE_* toggles but are intended for Claude-family models, not generic user models.",
+              "notes": [
+                "Primary path for user-added arbitrary models. Claude Code emits the Anthropic Messages API to this base URL. Cloud-provider deployments (Bedrock, Vertex/Agent Platform, Foundry, Claude Platform on AWS) use their own base-url variables and CLAUDE_CODE_USE_* toggles but are intended for Claude-family models, not generic user models."
+              ],
               "standard": "anthropic_compatible"
             }
           ],
@@ -14747,42 +14761,54 @@
             {
               "example": "ollama launch claude  # or manually: ANTHROPIC_BASE_URL=http://localhost:11434 ANTHROPIC_AUTH_TOKEN=ollama claude --model qwen3:1.7b",
               "integration": "first_class",
-              "notes": "Ollama serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `ollama launch claude` hook. Size/quantization tags such as `:1.7b` are part of the model identifier.",
+              "notes": [
+                "Ollama serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `ollama launch claude` hook. Size/quantization tags such as `:1.7b` are part of the model identifier."
+              ],
               "runner": "ollama",
               "standard": "anthropic_compatible"
             },
             {
               "example": "omlx launch claude  # or manually: ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=<key> claude --model Qwen3.6-35B-A3B-oQ6",
               "integration": "first_class",
-              "notes": "oMLX serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `omlx launch claude` hook. Default port is 8000.",
+              "notes": [
+                "oMLX serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `omlx launch claude` hook. Default port is 8000."
+              ],
               "runner": "omlx",
               "standard": "anthropic_compatible"
             },
             {
               "example": "ANTHROPIC_BASE_URL=http://localhost:1234 ANTHROPIC_AUTH_TOKEN=lmstudio claude --model openai/gpt-oss-20b",
               "integration": "base_url_override",
-              "notes": "LM Studio serves an Anthropic-compatible `/v1/messages` endpoint. Set auth token to `lmstudio` when authentication is disabled, or to the configured API token when required.",
+              "notes": [
+                "LM Studio serves an Anthropic-compatible `/v1/messages` endpoint. Set auth token to `lmstudio` when authentication is disabled, or to the configured API token when required."
+              ],
               "runner": "lmstudio",
               "standard": "anthropic_compatible"
             },
             {
               "example": "ANTHROPIC_BASE_URL=http://localhost:8080 ANTHROPIC_AUTH_TOKEN=<LLAMA_API_KEY-if-set> claude --model gemma-3-1b-it.Q4_K_M.gguf",
               "integration": "base_url_override",
-              "notes": "llama-server serves an Anthropic-compatible `/v1/messages` endpoint (added in build b7187). The model ID is the `--alias` value or the GGUF filename.",
+              "notes": [
+                "llama-server serves an Anthropic-compatible `/v1/messages` endpoint (added in build b7187). The model ID is the `--alias` value or the GGUF filename."
+              ],
               "runner": "llamacpp",
               "standard": "anthropic_compatible"
             },
             {
               "example": "ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=EMPTY claude --model Qwen/Qwen2.5-1.5B-Instruct",
               "integration": "base_url_override",
-              "notes": "vLLM serves an Anthropic-compatible `/v1/messages` endpoint (v0.11.1+). Each vLLM process hosts one model; use `--served-model-name` aliases if needed.",
+              "notes": [
+                "vLLM serves an Anthropic-compatible `/v1/messages` endpoint (v0.11.1+). Each vLLM process hosts one model; use `--served-model-name` aliases if needed."
+              ],
               "runner": "vllm",
               "standard": "anthropic_compatible"
             },
             {
               "example": "ANTHROPIC_BASE_URL=http://localhost:<port> ANTHROPIC_AUTH_TOKEN=<token> claude --model <runner-model-id>",
               "integration": "base_url_override",
-              "notes": "Any local runner that exposes an Anthropic Messages API-compatible `/v1/messages` endpoint can be pointed at directly. Runners that speak only the OpenAI Chat Completions API require a translating gateway.",
+              "notes": [
+                "Any local runner that exposes an Anthropic Messages API-compatible `/v1/messages` endpoint can be pointed at directly. Runners that speak only the OpenAI Chat Completions API require a translating gateway."
+              ],
               "runner": "other",
               "standard": "anthropic_compatible"
             }
@@ -14799,25 +14825,33 @@
           "model_config_paths": [
             {
               "format": "json",
-              "notes": "Global user settings. Top-level `model` key pins the default model; `env` block persists model-related environment variables. Observed on this host with `\"model\": \"claude-fable-5[1m]\"`.",
+              "notes": [
+                "Global user settings. Top-level `model` key pins the default model; `env` block persists model-related environment variables. Observed on this host with `\"model\": \"claude-fable-5[1m]\"`."
+              ],
               "path": "~/.claude/settings.json",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "Project-shared settings committed to source control. Lower precedence than local settings.",
+              "notes": [
+                "Project-shared settings committed to source control. Lower precedence than local settings."
+              ],
               "path": ".claude/settings.json",
               "scope": "repo"
             },
             {
               "format": "json",
-              "notes": "Personal project-only overrides. Gitignored by default when created by Claude Code.",
+              "notes": [
+                "Personal project-only overrides. Gitignored by default when created by Claude Code."
+              ],
               "path": ".claude/settings.local.json",
               "scope": "repo"
             },
             {
               "format": "json",
-              "notes": "Organization-managed policy that cannot be overridden by user, project, or local settings. Delivery paths vary by OS and admin mechanism.",
+              "notes": [
+                "Organization-managed policy that cannot be overridden by user, project, or local settings. Delivery paths vary by OS and admin mechanism."
+              ],
               "path": "managed-settings.json / MDM plist / Windows registry / server-managed",
               "scope": "env"
             }
@@ -22629,7 +22663,9 @@
               "adapter": "none",
               "auth_site": "OPENAI_API_KEY (built-in) or [model_providers.<id>.env_key]",
               "base_url_site": "openai_base_url (built-in) or [model_providers.<id>.base_url]",
-              "notes": "Codex speaks the OpenAI Responses API only. wire_api = \"chat\" was removed; wire_api = \"responses\" is the only supported value. Custom providers and all local runners must expose an OpenAI-compatible /v1/responses endpoint.",
+              "notes": [
+                "Codex speaks the OpenAI Responses API only. wire_api = \"chat\" was removed; wire_api = \"responses\" is the only supported value. Custom providers and all local runners must expose an OpenAI-compatible /v1/responses endpoint."
+              ],
               "standard": "openai_compatible"
             }
           ],
@@ -22689,41 +22725,53 @@
             {
               "example": "# ~/.codex/config.toml\nmodel = \"qwen3:1.7b\"\nmodel_provider = \"ollama\"\noss_provider = \"ollama\"\n\n# Or interactively\ncodex --oss -m qwen3:1.7b\n\n# Or via Ollama's native hook (v0.15+)\nollama launch codex\n",
               "integration": "first_class",
-              "notes": "Built-in ollama provider uses http://localhost:11434/v1 by default. Port is overridable via the experimental CODEX_OSS_PORT or CODEX_OSS_BASE_URL env vars. Model tags (e.g., :1.7b) are passed through unchanged.",
+              "notes": [
+                "Built-in ollama provider uses http://localhost:11434/v1 by default. Port is overridable via the experimental CODEX_OSS_PORT or CODEX_OSS_BASE_URL env vars. Model tags (e.g., :1.7b) are passed through unchanged."
+              ],
               "runner": "ollama",
               "standard": "openai_compatible"
             },
             {
               "example": "# ~/.codex/config.toml\nmodel = \"openai/gpt-oss-20b\"\nmodel_provider = \"lmstudio\"\noss_provider = \"lmstudio\"\n\n# Or interactively\ncodex --oss --local-provider lmstudio -m openai/gpt-oss-20b\n",
               "integration": "first_class",
-              "notes": "Built-in lmstudio provider uses http://localhost:1234/v1 by default. The lms CLI must be installed and LM Studio must have been run at least once.",
+              "notes": [
+                "Built-in lmstudio provider uses http://localhost:1234/v1 by default. The lms CLI must be installed and LM Studio must have been run at least once."
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "example": "# ~/.codex/config.toml\nmodel = \"Qwen3.6-35B-A3B-oQ6\"\nmodel_provider = \"local_omlx\"\n\n[model_providers.local_omlx]\nname = \"oMLX\"\nbase_url = \"http://localhost:8000/v1\"\n# oMLX auth is optional; set env_key if you configured an API key.\n",
               "integration": "base_url_override",
-              "notes": "No native Codex provider. oMLX exposes an OpenAI-compatible endpoint at /v1/* on port 8000. oMLX also ships omlx launch codex, which sets OPENAI_BASE_URL/OPENAI_API_KEY and execs Codex.",
+              "notes": [
+                "No native Codex provider. oMLX exposes an OpenAI-compatible endpoint at /v1/* on port 8000. oMLX also ships omlx launch codex, which sets OPENAI_BASE_URL/OPENAI_API_KEY and execs Codex."
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "example": "# ~/.codex/config.toml\nmodel = \"gemma-3-1b-it.Q4_K_M.gguf\"\nmodel_provider = \"local_llamacpp\"\n\n[model_providers.local_llamacpp]\nname = \"llama.cpp\"\nbase_url = \"http://localhost:8080/v1\"\n",
               "integration": "base_url_override",
-              "notes": "llama-server exposes an OpenAI-compatible endpoint at /v1/* on port 8080 (build b7187+). The request model field is ignored in single-model mode; the server uses whatever model it was started with.",
+              "notes": [
+                "llama-server exposes an OpenAI-compatible endpoint at /v1/* on port 8080 (build b7187+). The request model field is ignored in single-model mode; the server uses whatever model it was started with."
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "example": "# ~/.codex/config.toml\nmodel = \"Qwen/Qwen2.5-1.5B-Instruct\"\nmodel_provider = \"local_vllm\"\n\n[model_providers.local_vllm]\nname = \"vLLM\"\nbase_url = \"http://localhost:8000/v1\"\n",
               "integration": "base_url_override",
-              "notes": "vLLM exposes an OpenAI-compatible endpoint at /v1/* on port 8000. Each vLLM process hosts exactly one model; use --served-model-name aliases if needed.",
+              "notes": [
+                "vLLM exposes an OpenAI-compatible endpoint at /v1/* on port 8000. Each vLLM process hosts exactly one model; use --served-model-name aliases if needed."
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "Any local runner that exposes an OpenAI Responses API-compatible /v1/responses endpoint can be wired in as a custom provider. Runners that speak only the Anthropic Messages API require a translating gateway.",
+              "notes": [
+                "Any local runner that exposes an OpenAI Responses API-compatible /v1/responses endpoint can be wired in as a custom provider. Runners that speak only the Anthropic Messages API require a translating gateway."
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -22773,25 +22821,33 @@
           "model_config_paths": [
             {
               "format": "toml",
-              "notes": "Global user defaults. Shared by the CLI and IDE extension. Observed on this host with model = \"gpt-5.5\", model_reasoning_effort = \"medium\", personality = \"pragmatic\", and per-project trust tables.",
+              "notes": [
+                "Global user defaults. Shared by the CLI and IDE extension. Observed on this host with model = \"gpt-5.5\", model_reasoning_effort = \"medium\", personality = \"pragmatic\", and per-project trust tables."
+              ],
               "path": "~/.codex/config.toml",
               "scope": "user"
             },
             {
               "format": "toml",
-              "notes": "Project-scoped overrides. Loaded only when the project is trusted. Cannot override provider, auth, telemetry, profile, notification, or host-owned app request metadata keys.",
+              "notes": [
+                "Project-scoped overrides. Loaded only when the project is trusted. Cannot override provider, auth, telemetry, profile, notification, or host-owned app request metadata keys."
+              ],
               "path": ".codex/config.toml",
               "scope": "repo"
             },
             {
               "format": "toml",
-              "notes": "Profile files selected with --profile profile-name. Overlay between user config and project/CLI overrides. Can also set model_catalog_json per profile.",
+              "notes": [
+                "Profile files selected with --profile profile-name. Overlay between user config and project/CLI overrides. Can also set model_catalog_json per profile."
+              ],
               "path": "$CODEX_HOME/profile-name.config.toml",
               "scope": "env"
             },
             {
               "format": "toml",
-              "notes": "System-wide defaults on Unix. Lowest precedence after built-in defaults.",
+              "notes": [
+                "System-wide defaults on Unix. Lowest precedence after built-in defaults."
+              ],
               "path": "/etc/codex/config.toml",
               "scope": "env"
             }
@@ -34215,7 +34271,9 @@
             {
               "auth_site": "GEMINI_API_KEY, GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, or OAuth",
               "base_url_site": "GOOGLE_GEMINI_BASE_URL / GOOGLE_VERTEX_BASE_URL env vars (no settings.json key)",
-              "notes": "The CLI uses the Google GenAI SDK and speaks the Gemini API (or Vertex AI). A \"gateway\" auth mode lets users redirect to a custom Gemini API-compatible base URL via `GOOGLE_GEMINI_BASE_URL`. There is no OpenAI-compatible or Anthropic-compatible adapter in the shipping CLI.",
+              "notes": [
+                "The CLI uses the Google GenAI SDK and speaks the Gemini API (or Vertex AI). A \"gateway\" auth mode lets users redirect to a custom Gemini API-compatible base URL via `GOOGLE_GEMINI_BASE_URL`. There is no OpenAI-compatible or Anthropic-compatible adapter in the shipping CLI."
+              ],
               "standard": "bespoke"
             }
           ],
@@ -34297,42 +34355,54 @@
             {
               "example": "A Gemini API-compatible translating proxy must sit between Gemini CLI and Ollama. `export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=ollama`, then `gemini --model qwen3:1.7b`. The proxy translates Gemini API requests to Ollama's OpenAI-compatible `/v1/chat/completions` endpoint.",
               "integration": "proxy_required",
-              "notes": "Ollama serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to Ollama will not work.",
+              "notes": [
+                "Ollama serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to Ollama will not work."
+              ],
               "runner": "ollama",
               "standard": "bespoke"
             },
             {
               "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=<omlx-key-or-ignored>`, then `gemini --model Qwen3.6-35B-A3B-oQ6`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
               "integration": "proxy_required",
-              "notes": "oMLX serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI only emits the Gemini API. A direct base URL to oMLX will not work.",
+              "notes": [
+                "oMLX serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI only emits the Gemini API. A direct base URL to oMLX will not work."
+              ],
               "runner": "omlx",
               "standard": "bespoke"
             },
             {
               "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=lmstudio`, then `gemini --model openai/gpt-oss-20b`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
               "integration": "proxy_required",
-              "notes": "LM Studio serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to LM Studio will not work.",
+              "notes": [
+                "LM Studio serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to LM Studio will not work."
+              ],
               "runner": "lmstudio",
               "standard": "bespoke"
             },
             {
               "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=<key-if-set>`, then `gemini --model gemma-3-1b-it.Q4_K_M.gguf`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
               "integration": "proxy_required",
-              "notes": "llama-server serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI only emits the Gemini API. A direct base URL to llama-server will not work.",
+              "notes": [
+                "llama-server serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI only emits the Gemini API. A direct base URL to llama-server will not work."
+              ],
               "runner": "llamacpp",
               "standard": "bespoke"
             },
             {
               "example": "`export GOOGLE_GEMINI_BASE_URL=http://localhost:8080` and `export GEMINI_API_KEY=EMPTY`, then `gemini --model Qwen/Qwen2.5-1.5B-Instruct`. A Gemini-to-OpenAI/Anthropic translating proxy is required.",
               "integration": "proxy_required",
-              "notes": "vLLM serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to vLLM will not work.",
+              "notes": [
+                "vLLM serves OpenAI- and Anthropic-compatible endpoints, but Gemini CLI does not speak those standards. A direct base URL to vLLM will not work."
+              ],
               "runner": "vllm",
               "standard": "bespoke"
             },
             {
               "example": "{ \"experimental\": { \"gemmaModelRouter\": { \"enabled\": true, \"classifier\": { \"host\": \"http://localhost:9379\", \"model\": \"gemma3-1b-gpu-custom\" } } } }",
               "integration": "first_class",
-              "notes": "Local Gemma via LiteRT-LM is supported only as an experimental routing classifier, not as a general chat model. Setup is normally done with `gemini gemma setup`.",
+              "notes": [
+                "Local Gemma via LiteRT-LM is supported only as an experimental routing classifier, not as a general chat model. Setup is normally done with `gemini gemma setup`."
+              ],
               "runner": "other",
               "standard": "bespoke"
             }
@@ -34358,25 +34428,33 @@
           "model_config_paths": [
             {
               "format": "json",
-              "notes": "Global user settings. `model.name` pins the default model and `modelConfigs` declares custom aliases, overrides, and model definitions. Observed on this host with no `model.name` or `modelConfigs` block, so the CLI is using the default `auto` model selection.",
+              "notes": [
+                "Global user settings. `model.name` pins the default model and `modelConfigs` declares custom aliases, overrides, and model definitions. Observed on this host with no `model.name` or `modelConfigs` block, so the CLI is using the default `auto` model selection."
+              ],
               "path": "~/.gemini/settings.json",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "Project-specific settings that override the user settings file.",
+              "notes": [
+                "Project-specific settings that override the user settings file."
+              ],
               "path": ".gemini/settings.json",
               "scope": "repo"
             },
             {
               "format": "other",
-              "notes": "Auto-loaded env file (project first, then ~/.gemini/.env). Used for `GEMINI_MODEL`, `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_VERTEX_BASE_URL`, etc. The first file found wins; values are not merged.",
+              "notes": [
+                "Auto-loaded env file (project first, then ~/.gemini/.env). Used for `GEMINI_MODEL`, `GEMINI_API_KEY`, `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_VERTEX_BASE_URL`, etc. The first file found wins; values are not merged."
+              ],
               "path": ".gemini/.env or ~/.gemini/.env",
               "scope": "env"
             },
             {
               "format": "other",
-              "notes": "Session-scoped overrides such as `GEMINI_MODEL`, API credentials, and gateway base URLs.",
+              "notes": [
+                "Session-scoped overrides such as `GEMINI_MODEL`, API credentials, and gateway base URLs."
+              ],
               "path": "Shell environment variables",
               "scope": "env"
             }
@@ -42876,21 +42954,27 @@
               "adapter": "none",
               "auth_site": "api_key_env in custom provider JSON (or OPENAI_API_KEY for the built-in openai provider)",
               "base_url_site": "base_url in custom provider JSON (or OPENAI_HOST for the built-in openai provider)",
-              "notes": "Custom providers with engine openai/openai_compatible speak the OpenAI Chat Completions API. The built-in OpenAI provider can also be pointed at any OpenAI-compatible endpoint.",
+              "notes": [
+                "Custom providers with engine openai/openai_compatible speak the OpenAI Chat Completions API. The built-in OpenAI provider can also be pointed at any OpenAI-compatible endpoint."
+              ],
               "standard": "openai_compatible"
             },
             {
               "adapter": "none",
               "auth_site": "api_key_env in custom provider JSON (or ANTHROPIC_API_KEY for the built-in anthropic provider)",
               "base_url_site": "base_url in custom provider JSON (or ANTHROPIC_HOST for the built-in anthropic provider)",
-              "notes": "Custom providers with engine anthropic/anthropic_compatible speak the Anthropic Messages API.",
+              "notes": [
+                "Custom providers with engine anthropic/anthropic_compatible speak the Anthropic Messages API."
+              ],
               "standard": "anthropic_compatible"
             },
             {
               "adapter": "none",
               "auth_site": "none (Ollama local servers typically require no key)",
               "base_url_site": "base_url in custom provider JSON (or OLLAMA_HOST for the built-in ollama provider)",
-              "notes": "Custom providers with engine ollama/ollama_compatible use the Ollama native API, which is neither OpenAI nor Anthropic compatible.",
+              "notes": [
+                "Custom providers with engine ollama/ollama_compatible use the Ollama native API, which is neither OpenAI nor Anthropic compatible."
+              ],
               "standard": "bespoke"
             }
           ],
@@ -42997,41 +43081,53 @@
             {
               "example": "GOOSE_PROVIDER: ollama\nGOOSE_MODEL: qwen2.5\nOLLAMA_HOST: http://localhost:11434\n",
               "integration": "first_class",
-              "notes": "First-class built-in provider using the native Ollama API. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose. Can also be added as a custom OpenAI- or Anthropic-compatible provider.",
+              "notes": [
+                "First-class built-in provider using the native Ollama API. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose. Can also be added as a custom OpenAI- or Anthropic-compatible provider."
+              ],
               "runner": "ollama",
               "standard": "bespoke"
             },
             {
               "example": "GOOSE_PROVIDER: lmstudio\nGOOSE_MODEL: qwen2.5-coder-14b-instruct\n",
               "integration": "first_class",
-              "notes": "First-class built-in provider. Connects to localhost:1234 by default over LM Studios OpenAI-compatible endpoint. Use the model id reported by LM Studio.",
+              "notes": [
+                "First-class built-in provider. Connects to localhost:1234 by default over LM Studios OpenAI-compatible endpoint. Use the model id reported by LM Studio."
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "example": "{\n  \"name\": \"local_omlx\",\n  \"engine\": \"openai\",\n  \"display_name\": \"oMLX\",\n  \"base_url\": \"http://localhost:8000/v1\",\n  \"requires_auth\": false,\n  \"models\": [{\"name\": \"qwen2.5-7b\", \"context_limit\": 32768}]\n}\n",
               "integration": "base_url_override",
-              "notes": "No native provider; add via custom OpenAI-compatible provider. oMLX also exposes an Anthropic-compatible endpoint, so engine anthropic with base_url http://localhost:8000 works as well.",
+              "notes": [
+                "No native provider; add via custom OpenAI-compatible provider. oMLX also exposes an Anthropic-compatible endpoint, so engine anthropic with base_url http://localhost:8000 works as well."
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "example": "{\n  \"name\": \"local_llamacpp\",\n  \"engine\": \"openai\",\n  \"display_name\": \"llama.cpp\",\n  \"base_url\": \"http://localhost:8080/v1\",\n  \"requires_auth\": false,\n  \"models\": [{\"name\": \"qwen2.5-coder-14b\", \"context_limit\": 32768}]\n}\n",
               "integration": "base_url_override",
-              "notes": "llama.cpp server exposes an OpenAI-compatible Chat Completions API and, since build b7187, an Anthropic-compatible /v1/messages endpoint. Add it as a custom provider on either standard.",
+              "notes": [
+                "llama.cpp server exposes an OpenAI-compatible Chat Completions API and, since build b7187, an Anthropic-compatible /v1/messages endpoint. Add it as a custom provider on either standard."
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "example": "{\n  \"name\": \"local_vllm\",\n  \"engine\": \"openai\",\n  \"display_name\": \"vLLM\",\n  \"base_url\": \"http://localhost:8000/v1\",\n  \"requires_auth\": false,\n  \"models\": [{\"name\": \"qwen2.5-coder-32b-instruct\", \"context_limit\": 32768}]\n}\n",
               "integration": "base_url_override",
-              "notes": "vLLM serves both OpenAI-compatible and Anthropic-compatible APIs (anthropic since v0.11.1). Add it as a custom provider on either standard, or point the built-in openai provider at it with OPENAI_HOST.",
+              "notes": [
+                "vLLM serves both OpenAI-compatible and Anthropic-compatible APIs (anthropic since v0.11.1). Add it as a custom provider on either standard, or point the built-in openai provider at it with OPENAI_HOST."
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "Any local runner that exposes an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint can be added as a custom provider.",
+              "notes": [
+                "Any local runner that exposes an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint can be added as a custom provider."
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -43051,25 +43147,33 @@
           "model_config_paths": [
             {
               "format": "yaml",
-              "notes": "Global user settings. Top-level GOOSE_PROVIDER and GOOSE_MODEL keys pin the default provider and model. This host does not have Goose CLI installed, so no local file was observed.",
+              "notes": [
+                "Global user settings. Top-level GOOSE_PROVIDER and GOOSE_MODEL keys pin the default provider and model. This host does not have Goose CLI installed, so no local file was observed."
+              ],
               "path": "~/.config/goose/config.yaml",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "One JSON file per custom provider. Each file adds a user-defined provider with its own model list and endpoint configuration.",
+              "notes": [
+                "One JSON file per custom provider. Each file adds a user-defined provider with its own model list and endpoint configuration."
+              ],
               "path": "~/.config/goose/custom_providers/*.json",
               "scope": "user"
             },
             {
               "format": "yaml",
-              "notes": "Fallback file-based secret store used when the system keyring is unavailable or disabled; holds API keys referenced by custom providers.",
+              "notes": [
+                "Fallback file-based secret store used when the system keyring is unavailable or disabled; holds API keys referenced by custom providers."
+              ],
               "path": "~/.config/goose/secrets.yaml",
               "scope": "user"
             },
             {
               "format": "other",
-              "notes": "Session-scoped overrides such as GOOSE_PROVIDER, GOOSE_MODEL, GOOSE_PROVIDER__HOST, and provider-specific HOST variables.",
+              "notes": [
+                "Session-scoped overrides such as GOOSE_PROVIDER, GOOSE_MODEL, GOOSE_PROVIDER__HOST, and provider-specific HOST variables."
+              ],
               "path": "Shell environment variables",
               "scope": "env"
             }
@@ -57731,21 +57835,27 @@
               "adapter": "@ai-sdk/openai-compatible",
               "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
               "base_url_site": "provider.<id>.options.baseURL",
-              "notes": "Primary path for custom/local models and OpenAI Chat Completions-compatible gateways. Kilo custom providers default to this unless another API is selected.",
+              "notes": [
+                "Primary path for custom/local models and OpenAI Chat Completions-compatible gateways. Kilo custom providers default to this unless another API is selected."
+              ],
               "standard": "openai_compatible"
             },
             {
               "adapter": "@ai-sdk/anthropic",
               "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
               "base_url_site": "provider.<id>.options.baseURL",
-              "notes": "Used for Anthropic Messages API providers (e.g. Anthropic, MiniMax). Set via the provider api/npm fields.",
+              "notes": [
+                "Used for Anthropic Messages API providers (e.g. Anthropic, MiniMax). Set via the provider api/npm fields."
+              ],
               "standard": "anthropic_compatible"
             },
             {
               "adapter": "npm AI SDK provider package (e.g. @ai-sdk/openai for OpenAI Responses, @ai-sdk/google, @ai-sdk/azure)",
               "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
               "base_url_site": "provider.<id>.options.baseURL",
-              "notes": "Provider-native protocols selected via the provider \"api\" or \"npm\" fields, such as OpenAI Responses for OpenAI/xAI models.",
+              "notes": [
+                "Provider-native protocols selected via the provider \"api\" or \"npm\" fields, such as OpenAI Responses for OpenAI/xAI models."
+              ],
               "standard": "bespoke"
             }
           ],
@@ -57814,42 +57924,54 @@
             {
               "example": "{\"provider\":{\"ollama\":{\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"baseURL\":\"http://localhost:11434/v1\"},\"models\":{\"gemma3:27b\":{\"name\":\"Gemma 3 27B\",\"limit\":{\"context\":128000,\"output\":8192}}}}},\"model\":\"ollama/gemma3:27b\"}",
               "integration": "base_url_override",
-              "notes": "Ollama also exposes an Anthropic-compatible /v1/messages endpoint, but the documented Kilo path uses the OpenAI-compatible server. Size/quantization tags are part of the model ID.",
+              "notes": [
+                "Ollama also exposes an Anthropic-compatible /v1/messages endpoint, but the documented Kilo path uses the OpenAI-compatible server. Size/quantization tags are part of the model ID."
+              ],
               "runner": "ollama",
               "standard": "openai_compatible"
             },
             {
               "example": "{\"provider\":{\"lmstudio\":{\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"baseURL\":\"http://localhost:1234/v1\"},\"models\":{\"deepseek-r1-0528\":{\"name\":\"DeepSeek R1 0528\"}}}},\"model\":\"lmstudio/deepseek-r1-0528\"}",
               "integration": "base_url_override",
-              "notes": "LM Studio also supports Anthropic Messages, but the documented Kilo path uses the OpenAI-compatible server loaded by LM Studio.",
+              "notes": [
+                "LM Studio also supports Anthropic Messages, but the documented Kilo path uses the OpenAI-compatible server loaded by LM Studio."
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "example": "{\"provider\":{\"llamacpp\":{\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"baseURL\":\"http://127.0.0.1:8080/v1\"},\"models\":{\"qwen3-coder:a3b\":{\"name\":\"Qwen3-Coder a3b (local)\",\"limit\":{\"context\":128000,\"output\":65536}}}}},\"model\":\"llamacpp/qwen3-coder:a3b\"}",
               "integration": "base_url_override",
-              "notes": "llama-server also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.",
+              "notes": [
+                "llama-server also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example."
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "example": "{\"provider\":{\"vllm\":{\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"baseURL\":\"http://localhost:8000/v1\",\"apiKey\":\"EMPTY\"},\"models\":{\"Qwen/Qwen2.5-1.5B-Instruct\":{\"name\":\"Qwen2.5 1.5B Instruct (local vLLM)\"}}}},\"model\":\"vllm/Qwen/Qwen2.5-1.5B-Instruct\"}",
               "integration": "base_url_override",
-              "notes": "vLLM also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.",
+              "notes": [
+                "vLLM also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example."
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "example": "{\"provider\":{\"omlx\":{\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"baseURL\":\"http://localhost:8000/v1\"},\"models\":{\"Qwen3.6-35B-A3B-oQ6\":{\"name\":\"Qwen3.6-35B-A3B-oQ6 (local)\",\"limit\":{\"context\":262144,\"output\":98304}}}}},\"model\":\"omlx/Qwen3.6-35B-A3B-oQ6\"}",
               "integration": "base_url_override",
-              "notes": "oMLX also exposes an Anthropic-compatible /v1/messages endpoint; the OpenAI-compatible endpoint is the standard Kilo example.",
+              "notes": [
+                "oMLX also exposes an Anthropic-compatible /v1/messages endpoint; the OpenAI-compatible endpoint is the standard Kilo example."
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "example": "{\"provider\":{\"my-local\":{\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"baseURL\":\"http://localhost:<port>/v1\"},\"models\":{\"<model-id>\":{\"name\":\"My local model\"}}}},\"model\":\"my-local/<model-id>\"}",
               "integration": "base_url_override",
-              "notes": "Any local server exposing an OpenAI-compatible /v1 chat endpoint can be wired via @ai-sdk/openai-compatible. If the runner only speaks Anthropic Messages, use @ai-sdk/anthropic instead.",
+              "notes": [
+                "Any local server exposing an OpenAI-compatible /v1 chat endpoint can be wired via @ai-sdk/openai-compatible. If the runner only speaks Anthropic Messages, use @ai-sdk/anthropic instead."
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -57879,61 +58001,81 @@
           "model_config_paths": [
             {
               "format": "jsonc",
-              "notes": "Global user config. Observed on this host at this path and currently contains only a \"$schema\" reference to https://app.kilo.ai/config.json. Also accepts kilo.json.",
+              "notes": [
+                "Global user config. Observed on this host at this path and currently contains only a \"$schema\" reference to https://app.kilo.ai/config.json. Also accepts kilo.json."
+              ],
               "path": "~/.config/kilo/kilo.jsonc",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "JSON variant of the global config.",
+              "notes": [
+                "JSON variant of the global config."
+              ],
               "path": "~/.config/kilo/kilo.json",
               "scope": "user"
             },
             {
               "format": "jsonc",
-              "notes": "TUI-specific settings (notifications, sounds, themes, keybindings) rather than model configuration.",
+              "notes": [
+                "TUI-specific settings (notifications, sounds, themes, keybindings) rather than model configuration."
+              ],
               "path": "~/.config/kilo/tui.jsonc",
               "scope": "user"
             },
             {
               "format": "jsonc",
-              "notes": "Project config in repository root. Overrides global config. Also accepts kilo.json.",
+              "notes": [
+                "Project config in repository root. Overrides global config. Also accepts kilo.json."
+              ],
               "path": "./kilo.jsonc",
               "scope": "repo"
             },
             {
               "format": "jsonc",
-              "notes": "Project config inside .kilo directory. Legacy .kilocode/ is also read.",
+              "notes": [
+                "Project config inside .kilo directory. Legacy .kilocode/ is also read."
+              ],
               "path": "./.kilo/kilo.jsonc",
               "scope": "repo"
             },
             {
               "format": "jsonc",
-              "notes": "Project TUI settings.",
+              "notes": [
+                "Project TUI settings."
+              ],
               "path": "./.kilo/tui.jsonc",
               "scope": "repo"
             },
             {
               "format": "jsonc",
-              "notes": "Custom config file path loaded between global and project configs (inherited OpenCode convention).",
+              "notes": [
+                "Custom config file path loaded between global and project configs (inherited OpenCode convention)."
+              ],
               "path": "KILO_CONFIG",
               "scope": "env"
             },
             {
               "format": "json",
-              "notes": "Inline JSON config merged as a final local-scope override (inherited OpenCode convention).",
+              "notes": [
+                "Inline JSON config merged as a final local-scope override (inherited OpenCode convention)."
+              ],
               "path": "KILO_CONFIG_CONTENT",
               "scope": "env"
             },
             {
               "format": "jsonc",
-              "notes": "Custom directory searched for agents, commands, modes, and plugins (inherited OpenCode convention).",
+              "notes": [
+                "Custom directory searched for agents, commands, modes, and plugins (inherited OpenCode convention)."
+              ],
               "path": "KILO_CONFIG_DIR",
               "scope": "env"
             },
             {
               "format": "jsonc",
-              "notes": "Managed/organizational settings loaded at highest priority and not user-overridable (inherited OpenCode convention).",
+              "notes": [
+                "Managed/organizational settings loaded at highest priority and not user-overridable (inherited OpenCode convention)."
+              ],
               "path": "/Library/Application Support/kilo/ (macOS), /etc/kilo/ (Linux), %ProgramData%\\kilo (Windows)",
               "scope": "env"
             }
@@ -63747,21 +63889,27 @@
               "adapter": "none",
               "auth_site": "providers.<name>.api_key (or OPENAI_API_KEY env var)",
               "base_url_site": "providers.<name>.base_url (or OPENAI_BASE_URL env var for openai_legacy/openai_responses providers)",
-              "notes": "Use provider type `openai_legacy` for Chat Completions-compatible services or `openai_responses` for the newer Responses API. Custom headers can be added with `custom_headers`.\n",
+              "notes": [
+                "Use provider type `openai_legacy` for Chat Completions-compatible services or `openai_responses` for the newer Responses API. Custom headers can be added with `custom_headers`.\n"
+              ],
               "standard": "openai_compatible"
             },
             {
               "adapter": "none",
               "auth_site": "providers.<name>.api_key",
               "base_url_site": "providers.<name>.base_url",
-              "notes": "Use provider type `anthropic` for Anthropic Claude API-compatible endpoints. The base URL should omit `/v1`; the client appends `/v1/messages`.\n",
+              "notes": [
+                "Use provider type `anthropic` for Anthropic Claude API-compatible endpoints. The base URL should omit `/v1`; the client appends `/v1/messages`.\n"
+              ],
               "standard": "anthropic_compatible"
             },
             {
               "adapter": "none",
               "auth_site": "providers.<name>.api_key (or KIMI_API_KEY env var for kimi providers)",
               "base_url_site": "providers.<name>.base_url (or KIMI_BASE_URL env var for kimi providers)",
-              "notes": "Use provider type `kimi` for the native Kimi/Moonshot API, `gemini` for Google Gemini, or `vertexai` for Google Vertex AI. OAuth-backed managed providers (e.g. `managed:kimi-code`) store tokens separately under `~/.kimi/credentials`.\n",
+              "notes": [
+                "Use provider type `kimi` for the native Kimi/Moonshot API, `gemini` for Google Gemini, or `vertexai` for Google Vertex AI. OAuth-backed managed providers (e.g. `managed:kimi-code`) store tokens separately under `~/.kimi/credentials`.\n"
+              ],
               "standard": "bespoke"
             }
           ],
@@ -63835,38 +63983,50 @@
             {
               "example": "[providers.ollama-local]\ntype = \"openai_legacy\"\nbase_url = \"http://localhost:11434/v1\"\napi_key = \"ollama\"\n\n[models.\"ollama/qwen3:1.7b\"]\nprovider = \"ollama-local\"\nmodel = \"qwen3:1.7b\"\nmax_context_size = 131072\ncapabilities = [\"thinking\", \"image_in\", \"tool_use\"]\ndisplay_name = \"Qwen3 1.7B (Ollama)\"\n",
               "integration": "base_url_override",
-              "notes": "Ollama exposes an OpenAI-compatible Chat Completions endpoint at `/v1/chat/completions`. Pass the Ollama model tag (including size/quantization suffix) as the API `model` value. The same runner also serves an Anthropic-compatible endpoint, so `type = \"anthropic\"` with `base_url = \"http://localhost:11434\"` works as well.\n",
+              "notes": [
+                "Ollama exposes an OpenAI-compatible Chat Completions endpoint at `/v1/chat/completions`. Pass the Ollama model tag (including size/quantization suffix) as the API `model` value. The same runner also serves an Anthropic-compatible endpoint, so `type = \"anthropic\"` with `base_url = \"http://localhost:11434\"` works as well.\n"
+              ],
               "runner": "ollama",
               "standard": "openai_compatible"
             },
             {
               "example": "[providers.lmstudio-local]\ntype = \"openai_legacy\"\nbase_url = \"http://localhost:1234/v1\"\napi_key = \"lmstudio\"\n\n[models.\"lmstudio/openai/gpt-oss-20b\"]\nprovider = \"lmstudio-local\"\nmodel = \"openai/gpt-oss-20b\"\nmax_context_size = 128000\ncapabilities = [\"thinking\", \"image_in\", \"tool_use\"]\ndisplay_name = \"GPT-OSS 20B (LM Studio)\"\n",
               "integration": "base_url_override",
-              "notes": "LM Studio's local server is OpenAI-compatible. Use the model id reported by LM Studio's `/v1/models` endpoint. LM Studio also supports the Anthropic Messages API, so `type = \"anthropic\"` with `base_url = \"http://localhost:1234\"` is an alternative.\n",
+              "notes": [
+                "LM Studio's local server is OpenAI-compatible. Use the model id reported by LM Studio's `/v1/models` endpoint. LM Studio also supports the Anthropic Messages API, so `type = \"anthropic\"` with `base_url = \"http://localhost:1234\"` is an alternative.\n"
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "vLLM serves an OpenAI-compatible API by default. The `model` value is the served model name or a `--served-model-name` alias.\n",
+              "notes": [
+                "vLLM serves an OpenAI-compatible API by default. The `model` value is the served model name or a `--served-model-name` alias.\n"
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. The client-visible model id is the `--alias` value or the GGUF filename.\n",
+              "notes": [
+                "llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. The client-visible model id is the `--alias` value or the GGUF filename.\n"
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "oMLX serves an OpenAI-compatible API at `/v1/chat/completions`. Use the model directory name or alias as the API `model` value.\n",
+              "notes": [
+                "oMLX serves an OpenAI-compatible API at `/v1/chat/completions`. Use the model directory name or alias as the API `model` value.\n"
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "Any runner that implements the OpenAI Chat Completions API can be added via `openai_legacy`. Runners exposing the Anthropic Messages API can use `anthropic`.\n",
+              "notes": [
+                "Any runner that implements the OpenAI Chat Completions API can be added via `openai_legacy`. Runners exposing the Anthropic Messages API can use `anthropic`.\n"
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -63883,19 +64043,25 @@
           "model_config_paths": [
             {
               "format": "toml",
-              "notes": "Primary user configuration. Also accepts JSON (`~/.kimi/config.json`), which is auto-migrated to TOML on first run if `config.toml` is absent. Observed on this host with `default_model = \"kimi-code/kimi-for-coding\"` and managed provider/model entries.\n",
+              "notes": [
+                "Primary user configuration. Also accepts JSON (`~/.kimi/config.json`), which is auto-migrated to TOML on first run if `config.toml` is absent. Observed on this host with `default_model = \"kimi-code/kimi-for-coding\"` and managed provider/model entries.\n"
+              ],
               "path": "~/.kimi/config.toml",
               "scope": "user"
             },
             {
               "format": "toml",
-              "notes": "`KIMI_SHARE_DIR` relocates the entire share directory (default `~/.kimi`), which moves the config file with it.\n",
+              "notes": [
+                "`KIMI_SHARE_DIR` relocates the entire share directory (default `~/.kimi`), which moves the config file with it.\n"
+              ],
               "path": "$KIMI_SHARE_DIR/config.toml",
               "scope": "env"
             },
             {
               "format": "toml",
-              "notes": "CLI flag that replaces the default config file for the launched session. `--config '<json/toml>'` can also supply raw config content inline for one session.\n",
+              "notes": [
+                "CLI flag that replaces the default config file for the launched session. `--config '<json/toml>'` can also supply raw config content inline for one session.\n"
+              ],
               "path": "--config-file /path/to/config.toml",
               "scope": "env"
             }
@@ -76629,14 +76795,18 @@
               "adapter": "@ai-sdk/openai-compatible",
               "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
               "base_url_site": "provider.<id>.options.baseURL",
-              "notes": "Officially documented path for user-added cloud/local models. Use @ai-sdk/openai-compatible for /v1/chat/completions endpoints and @ai-sdk/openai for /v1/responses endpoints.",
+              "notes": [
+                "Officially documented path for user-added cloud/local models. Use @ai-sdk/openai-compatible for /v1/chat/completions endpoints and @ai-sdk/openai for /v1/responses endpoints."
+              ],
               "standard": "openai_compatible"
             },
             {
               "adapter": "npm key naming any AI SDK provider package (e.g. @ai-sdk/google, @ai-sdk/anthropic if installed)",
               "auth_site": "provider.<id>.options.apiKey or {env:VARIABLE_NAME}",
               "base_url_site": "provider.<id>.options.baseURL",
-              "notes": "OpenCode can load arbitrary AI SDK packages via npm, but custom providers are officially documented only as OpenAI-compatible.",
+              "notes": [
+                "OpenCode can load arbitrary AI SDK packages via npm, but custom providers are officially documented only as OpenAI-compatible."
+              ],
               "standard": "bespoke"
             }
           ],
@@ -76686,42 +76856,54 @@
             {
               "example": "{ \"provider\": { \"ollama\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"Ollama (local)\", \"options\": { \"baseURL\": \"http://localhost:11434/v1\" }, \"models\": { \"gemma3:27b\": { \"name\": \"Gemma 3 27B\", \"limit\": { \"context\": 128000, \"output\": 8192 } } } } }, \"model\": \"ollama/gemma3:27b\" }",
               "integration": "first_class",
-              "notes": "First-class `ollama launch opencode` integration. Manual setup uses the OpenAI-compatible server endpoint. Size/quantization tags are part of the model ID.",
+              "notes": [
+                "First-class `ollama launch opencode` integration. Manual setup uses the OpenAI-compatible server endpoint. Size/quantization tags are part of the model ID."
+              ],
               "runner": "ollama",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"provider\": { \"omlx\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"oMLX (local)\", \"options\": { \"baseURL\": \"http://localhost:8000/v1\" }, \"models\": { \"Qwen3.6-35B-A3B-oQ6\": { \"name\": \"Qwen3.6 35B A3B oQ6 (local)\" } } } }, \"model\": \"omlx/Qwen3.6-35B-A3B-oQ6\" }",
               "integration": "first_class",
-              "notes": "First-class `omlx launch opencode` integration configures and launches OpenCode against the running oMLX server. Manual setup uses the OpenAI-compatible endpoint served by `omlx serve`; auth is optional — pass the key in options.apiKey or {env:VAR} if enabled.",
+              "notes": [
+                "First-class `omlx launch opencode` integration configures and launches OpenCode against the running oMLX server. Manual setup uses the OpenAI-compatible endpoint served by `omlx serve`; auth is optional — pass the key in options.apiKey or {env:VAR} if enabled."
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"provider\": { \"lmstudio\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"LM Studio (local)\", \"options\": { \"baseURL\": \"http://127.0.0.1:1234/v1\" }, \"models\": { \"google/gemma-3n-e4b\": { \"name\": \"Gemma 3n-e4b (local)\" } } } }, \"model\": \"lmstudio/google/gemma-3n-e4b\" }",
               "integration": "base_url_override",
-              "notes": "Uses the OpenAI-compatible server endpoint loaded by LM Studio. Set options.apiKey to the configured token when authentication is enabled.",
+              "notes": [
+                "Uses the OpenAI-compatible server endpoint loaded by LM Studio. Set options.apiKey to the configured token when authentication is enabled."
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"provider\": { \"llamacpp\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"llama-server (local)\", \"options\": { \"baseURL\": \"http://127.0.0.1:8080/v1\" }, \"models\": { \"qwen3-coder:a3b\": { \"name\": \"Qwen3-Coder a3b (local)\", \"limit\": { \"context\": 128000, \"output\": 65536 } } } } }, \"model\": \"llamacpp/qwen3-coder:a3b\" }",
               "integration": "base_url_override",
-              "notes": "Uses llama.cpp llama-server OpenAI-compatible endpoint. Pass options.apiKey or {env:LLAMA_API_KEY} when --api-key is set.",
+              "notes": [
+                "Uses llama.cpp llama-server OpenAI-compatible endpoint. Pass options.apiKey or {env:LLAMA_API_KEY} when --api-key is set."
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"provider\": { \"vllm\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"vLLM (local)\", \"options\": { \"baseURL\": \"http://localhost:8000/v1\" }, \"models\": { \"qwen2.5-coder-32b-instruct\": { \"name\": \"Qwen2.5 Coder 32B Instruct (local)\" } } } }, \"model\": \"vllm/qwen2.5-coder-32b-instruct\" }",
               "integration": "base_url_override",
-              "notes": "vLLM exposes an OpenAI-compatible API by default. Each vLLM process hosts one model; use --served-model-name aliases if needed.",
+              "notes": [
+                "vLLM exposes an OpenAI-compatible API by default. Each vLLM process hosts one model; use --served-model-name aliases if needed."
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"provider\": { \"my-local\": { \"npm\": \"@ai-sdk/openai-compatible\", \"name\": \"My local runner\", \"options\": { \"baseURL\": \"http://localhost:<port>/v1\" }, \"models\": { \"<runner-model-id>\": { \"name\": \"My local model\" } } } }, \"model\": \"my-local/<runner-model-id>\" }",
               "integration": "base_url_override",
-              "notes": "Any local server that exposes an OpenAI-compatible /v1 chat endpoint works with @ai-sdk/openai-compatible.",
+              "notes": [
+                "Any local server that exposes an OpenAI-compatible /v1 chat endpoint works with @ai-sdk/openai-compatible."
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -76751,49 +76933,65 @@
           "model_config_paths": [
             {
               "format": "jsonc",
-              "notes": "Global user config. Also accepts opencode.jsonc. Observed on this host with a built-in Z.AI provider block and model metadata.",
+              "notes": [
+                "Global user config. Also accepts opencode.jsonc. Observed on this host with a built-in Z.AI provider block and model metadata."
+              ],
               "path": "~/.config/opencode/opencode.json",
               "scope": "user"
             },
             {
               "format": "jsonc",
-              "notes": "JSON-with-comments variant of the global config.",
+              "notes": [
+                "JSON-with-comments variant of the global config."
+              ],
               "path": "~/.config/opencode/opencode.jsonc",
               "scope": "user"
             },
             {
               "format": "jsonc",
-              "notes": "Project config in repository root. Also accepts opencode.jsonc. OpenCode walks up from cwd to the nearest Git root.",
+              "notes": [
+                "Project config in repository root. Also accepts opencode.jsonc. OpenCode walks up from cwd to the nearest Git root."
+              ],
               "path": "opencode.json",
               "scope": "repo"
             },
             {
               "format": "jsonc",
-              "notes": "JSON-with-comments variant of the project config.",
+              "notes": [
+                "JSON-with-comments variant of the project config."
+              ],
               "path": "opencode.jsonc",
               "scope": "repo"
             },
             {
               "format": "jsonc",
-              "notes": "Custom config file path loaded between global and project configs.",
+              "notes": [
+                "Custom config file path loaded between global and project configs."
+              ],
               "path": "OPENCODE_CONFIG",
               "scope": "env"
             },
             {
               "format": "json",
-              "notes": "Inline JSON config merged as a final local-scope override.",
+              "notes": [
+                "Inline JSON config merged as a final local-scope override."
+              ],
               "path": "OPENCODE_CONFIG_CONTENT",
               "scope": "env"
             },
             {
               "format": "jsonc",
-              "notes": "Managed/organizational settings loaded at highest priority and not user-overridable.",
+              "notes": [
+                "Managed/organizational settings loaded at highest priority and not user-overridable."
+              ],
               "path": "/Library/Application Support/opencode/opencode.json (macOS), /etc/opencode/opencode.json (Linux), %ProgramData%\\opencode\\opencode.json (Windows)",
               "scope": "env"
             },
             {
               "format": "jsonc",
-              "notes": "macOS managed preferences deployed via MDM; highest priority, not user-overridable.",
+              "notes": [
+                "macOS managed preferences deployed via MDM; highest priority, not user-overridable."
+              ],
               "path": "ai.opencode.managed plist / .mobileconfig (macOS MDM)",
               "scope": "env"
             }
@@ -85004,19 +85202,25 @@
             {
               "auth_site": "apiKey in models.json, or /login/auth.json, or provider-specific env var such as OPENAI_API_KEY",
               "base_url_site": "baseUrl in ~/.pi/agent/models.json (provider or model level)",
-              "notes": "Covers api values openai-completions, openai-responses, azure-openai-responses, and openai-codex-responses. Most common path for local runners and proxies.",
+              "notes": [
+                "Covers api values openai-completions, openai-responses, azure-openai-responses, and openai-codex-responses. Most common path for local runners and proxies."
+              ],
               "standard": "openai_compatible"
             },
             {
               "auth_site": "apiKey in models.json, or /login/auth.json, or ANTHROPIC_API_KEY",
               "base_url_site": "baseUrl in ~/.pi/agent/models.json",
-              "notes": "Use api: anthropic-messages for Anthropic-compatible proxies or custom endpoints. Compat flags control eager tool streaming, cache retention, adaptive thinking, and empty signatures.",
+              "notes": [
+                "Use api: anthropic-messages for Anthropic-compatible proxies or custom endpoints. Compat flags control eager tool streaming, cache retention, adaptive thinking, and empty signatures."
+              ],
               "standard": "anthropic_compatible"
             },
             {
               "auth_site": "apiKey in models.json, or /login/auth.json, or GEMINI_API_KEY",
               "base_url_site": "baseUrl in ~/.pi/agent/models.json",
-              "notes": "Covers google-generative-ai, google-vertex, mistral-conversations, bedrock-converse-stream, and fully custom APIs implemented via an extension streamSimple function.",
+              "notes": [
+                "Covers google-generative-ai, google-vertex, mistral-conversations, bedrock-converse-stream, and fully custom APIs implemented via an extension streamSimple function."
+              ],
               "standard": "bespoke"
             }
           ],
@@ -85087,41 +85291,53 @@
             {
               "example": "{ \"providers\": { \"ollama\": { \"baseUrl\": \"http://localhost:11434/v1\", \"api\": \"openai-completions\", \"apiKey\": \"ollama\", \"compat\": { \"supportsDeveloperRole\": false, \"supportsReasoningEffort\": false }, \"models\": [{ \"id\": \"llama3.1:8b\" }] } } }",
               "integration": "base_url_override",
-              "notes": "Ollama exposes both OpenAI- and Anthropic-compatible endpoints; Pi documentation examples use openai-completions. Use a dummy apiKey because Ollama ignores it.",
+              "notes": [
+                "Ollama exposes both OpenAI- and Anthropic-compatible endpoints; Pi documentation examples use openai-completions. Use a dummy apiKey because Ollama ignores it."
+              ],
               "runner": "ollama",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"providers\": { \"omlx\": { \"baseUrl\": \"http://127.0.0.1:8000/v1\", \"api\": \"openai-completions\", \"apiKey\": \"VPZ-77XNJozqp4o\", \"authHeader\": true, \"models\": [{ \"id\": \"Qwen3.6-35B-A3B-oQ6\", \"name\": \"Qwen3.6-35B-A3B-oQ6\", \"reasoning\": false, \"input\": [\"text\", \"image\"], \"cost\": {\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0}, \"contextWindow\": 98304, \"maxTokens\": 98304 }] } } }",
               "integration": "first_class",
-              "notes": "First-class `omlx launch pi` hook launches Pi configured against the running oMLX server; the example shows the manual equivalent observed in the host ~/.pi/agent/models.json. oMLX also exposes an Anthropic-compatible endpoint.",
+              "notes": [
+                "First-class `omlx launch pi` hook launches Pi configured against the running oMLX server; the example shows the manual equivalent observed in the host ~/.pi/agent/models.json. oMLX also exposes an Anthropic-compatible endpoint."
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"providers\": { \"lmstudio\": { \"baseUrl\": \"http://localhost:1234/v1\", \"api\": \"openai-completions\", \"apiKey\": \"lmstudio\", \"models\": [{ \"id\": \"qwen2.5-coder-32b-instruct\" }] } } }",
               "integration": "base_url_override",
-              "notes": "Routes through LM Studio OpenAI-compatible local server. LM Studio also exposes an Anthropic-compatible endpoint, so api: anthropic-messages with baseUrl http://localhost:1234 is also valid.",
+              "notes": [
+                "Routes through LM Studio OpenAI-compatible local server. LM Studio also exposes an Anthropic-compatible endpoint, so api: anthropic-messages with baseUrl http://localhost:1234 is also valid."
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"providers\": { \"llamacpp\": { \"baseUrl\": \"http://localhost:8080/v1\", \"api\": \"openai-completions\", \"apiKey\": \"llamacpp\", \"models\": [{ \"id\": \"llama-3-70b\" }] } } }",
               "integration": "base_url_override",
-              "notes": "Works via llama.cpp OpenAI-compatible HTTP server. Size/quantization tags are part of the model id string. Anthropic-compatible endpoint is also available since build b7187.",
+              "notes": [
+                "Works via llama.cpp OpenAI-compatible HTTP server. Size/quantization tags are part of the model id string. Anthropic-compatible endpoint is also available since build b7187."
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "example": "{ \"providers\": { \"vllm\": { \"baseUrl\": \"http://localhost:8000/v1\", \"api\": \"openai-completions\", \"apiKey\": \"vllm\", \"compat\": { \"supportsDeveloperRole\": false, \"supportsReasoningEffort\": false }, \"models\": [{ \"id\": \"qwen2.5-72b\" }] } } }",
               "integration": "base_url_override",
-              "notes": "Use the /v1 OpenAI-compatible endpoint. vLLM also exposes an Anthropic-compatible endpoint. Compat flags are commonly required because vLLM does not support the developer role or reasoning_effort natively.",
+              "notes": [
+                "Use the /v1 OpenAI-compatible endpoint. vLLM also exposes an Anthropic-compatible endpoint. Compat flags are commonly required because vLLM does not support the developer role or reasoning_effort natively."
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "integration": "base_url_override",
-              "notes": "Any runner exposing an OpenAI-compatible, Anthropic-compatible, or other supported endpoint can be registered in models.json. For unsupported APIs, use a custom extension with streamSimple.",
+              "notes": [
+                "Any runner exposing an OpenAI-compatible, Anthropic-compatible, or other supported endpoint can be registered in models.json. For unsupported APIs, use a custom extension with streamSimple."
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -85146,25 +85362,33 @@
           "model_config_paths": [
             {
               "format": "json",
-              "notes": "Primary file for adding custom cloud and local providers/models. Reloaded each time /model is opened; no restart needed. Observed on this host with an omlx provider entry using api: openai-completions.",
+              "notes": [
+                "Primary file for adding custom cloud and local providers/models. Reloaded each time /model is opened; no restart needed. Observed on this host with an omlx provider entry using api: openai-completions."
+              ],
               "path": "~/.pi/agent/models.json",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "Global user settings. Pins defaultProvider and defaultModel. Observed on this host with defaultProvider: omlx and defaultModel: Qwen3.6-35B-A3B-oQ6.",
+              "notes": [
+                "Global user settings. Pins defaultProvider and defaultModel. Observed on this host with defaultProvider: omlx and defaultModel: Qwen3.6-35B-A3B-oQ6."
+              ],
               "path": "~/.pi/agent/settings.json",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "Project-local settings that override global settings. Nested objects are merged. Subject to project trust flow on interactive startup.",
+              "notes": [
+                "Project-local settings that override global settings. Nested objects are merged. Subject to project trust flow on interactive startup."
+              ],
               "path": ".pi/settings.json",
               "scope": "repo"
             },
             {
               "format": "json",
-              "notes": "Credential store for API keys and OAuth tokens. Created with 0600 permissions. Not a model-config file per se, but credentials stored here unlock models declared in models.json.",
+              "notes": [
+                "Credential store for API keys and OAuth tokens. Created with 0600 permissions. Not a model-config file per se, but credentials stored here unlock models declared in models.json."
+              ],
               "path": "~/.pi/agent/auth.json",
               "scope": "user"
             }
@@ -98453,25 +98677,33 @@
             {
               "auth_site": "per-model `envKey` (defaults to `OPENAI_API_KEY`)",
               "base_url_site": "per-model `baseUrl` in `modelProviders.openai`; env var `OPENAI_BASE_URL`",
-              "notes": "Uses the official `openai` Node.js SDK. Supports OpenAI, Azure OpenAI, OpenRouter, Requesty, ModelScope, DeepSeek, Alibaba Cloud/DashScope, Coding Plan, and any local OpenAI-compatible server. `extra_body` is supported only for OpenAI-compatible providers.",
+              "notes": [
+                "Uses the official `openai` Node.js SDK. Supports OpenAI, Azure OpenAI, OpenRouter, Requesty, ModelScope, DeepSeek, Alibaba Cloud/DashScope, Coding Plan, and any local OpenAI-compatible server. `extra_body` is supported only for OpenAI-compatible providers."
+              ],
               "standard": "openai_compatible"
             },
             {
               "auth_site": "per-model `envKey` (defaults to `ANTHROPIC_API_KEY`)",
               "base_url_site": "per-model `baseUrl` in `modelProviders.anthropic`; env var `ANTHROPIC_BASE_URL`",
-              "notes": "Uses the official `@anthropic-ai/sdk`. Supports Anthropic Claude and any Anthropic-compatible endpoint.",
+              "notes": [
+                "Uses the official `@anthropic-ai/sdk`. Supports Anthropic Claude and any Anthropic-compatible endpoint."
+              ],
               "standard": "anthropic_compatible"
             },
             {
               "auth_site": "per-model `envKey` (defaults to `GEMINI_API_KEY`)",
               "base_url_site": "per-model `baseUrl` in `modelProviders.gemini`; default Gemini endpoint if omitted",
-              "notes": "Google Gemini protocol via the `@google/genai` SDK. Model selection env var is `GEMINI_MODEL`.",
+              "notes": [
+                "Google Gemini protocol via the `@google/genai` SDK. Model selection env var is `GEMINI_MODEL`."
+              ],
               "standard": "bespoke"
             },
             {
               "auth_site": "per-model `envKey` (defaults to `GOOGLE_API_KEY`)",
               "base_url_site": "per-model `baseUrl` in `modelProviders.vertex-ai`; default Vertex endpoint if omitted",
-              "notes": "Google Vertex AI. Selecting this auth type sets `GOOGLE_GENAI_USE_VERTEXAI=true` internally and routes through the Gemini protocol in Vertex mode. Model selection env var is `GOOGLE_MODEL`.",
+              "notes": [
+                "Google Vertex AI. Selecting this auth type sets `GOOGLE_GENAI_USE_VERTEXAI=true` internally and routes through the Gemini protocol in Vertex mode. Model selection env var is `GOOGLE_MODEL`."
+              ],
               "standard": "bespoke"
             }
           ],
@@ -98554,42 +98786,54 @@
             {
               "example": "`{ \"id\": \"gemma3:27b\", \"name\": \"Gemma 3 27B (Ollama)\", \"envKey\": \"OLLAMA_API_KEY\", \"baseUrl\": \"http://localhost:11434/v1\" }` under `modelProviders.openai.models`.",
               "integration": "base_url_override",
-              "notes": "Ollama serves an OpenAI-compatible API at `/v1`. Use any placeholder for the API key if Ollama requires none.",
+              "notes": [
+                "Ollama serves an OpenAI-compatible API at `/v1`. Use any placeholder for the API key if Ollama requires none."
+              ],
               "runner": "ollama",
               "standard": "openai_compatible"
             },
             {
               "example": "`{ \"id\": \"Qwen3.6-35B-A3B-oQ6\", \"name\": \"Qwen3.6 35B (oMLX)\", \"envKey\": \"OMLX_API_KEY\", \"baseUrl\": \"http://localhost:8000/v1\" }` under `modelProviders.openai.models`.",
               "integration": "base_url_override",
-              "notes": "oMLX serves an OpenAI-compatible API at `/v1`. Auth is optional unless configured; use a placeholder if none is required.",
+              "notes": [
+                "oMLX serves an OpenAI-compatible API at `/v1`. Auth is optional unless configured; use a placeholder if none is required."
+              ],
               "runner": "omlx",
               "standard": "openai_compatible"
             },
             {
               "example": "`{ \"id\": \"local-model\", \"name\": \"Local Model (LM Studio)\", \"envKey\": \"LMSTUDIO_API_KEY\", \"baseUrl\": \"http://localhost:1234/v1\" }` under `modelProviders.openai.models`.",
               "integration": "base_url_override",
-              "notes": "LM Studio's local server is OpenAI-compatible. Auth is optional; set `LMSTUDIO_API_KEY` to the configured token when required.",
+              "notes": [
+                "LM Studio's local server is OpenAI-compatible. Auth is optional; set `LMSTUDIO_API_KEY` to the configured token when required."
+              ],
               "runner": "lmstudio",
               "standard": "openai_compatible"
             },
             {
               "example": "`{ \"id\": \"my-alias\", \"name\": \"Local Model (llama.cpp)\", \"envKey\": \"LLAMA_API_KEY\", \"baseUrl\": \"http://localhost:8080/v1\" }` under `modelProviders.openai.models`.",
               "integration": "base_url_override",
-              "notes": "llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. Model ID is the `--alias` value or the GGUF filename.",
+              "notes": [
+                "llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. Model ID is the `--alias` value or the GGUF filename."
+              ],
               "runner": "llamacpp",
               "standard": "openai_compatible"
             },
             {
               "example": "`{ \"id\": \"llama-3.1-8b\", \"name\": \"Llama 3.1 8B (vLLM)\", \"envKey\": \"VLLM_API_KEY\", \"baseUrl\": \"http://localhost:8000/v1\" }` under `modelProviders.openai.models`.",
               "integration": "base_url_override",
-              "notes": "vLLM exposes an OpenAI-compatible server by default. Each vLLM process hosts one model.",
+              "notes": [
+                "vLLM exposes an OpenAI-compatible server by default. Each vLLM process hosts one model."
+              ],
               "runner": "vllm",
               "standard": "openai_compatible"
             },
             {
               "example": "`{ \"id\": \"<runner-model-id>\", \"name\": \"Local Model\", \"envKey\": \"LOCAL_API_KEY\", \"baseUrl\": \"http://localhost:<port>/v1\" }` under `modelProviders.openai.models`.",
               "integration": "base_url_override",
-              "notes": "Any self-hosted server with an OpenAI-compatible API can be added under `modelProviders.openai`.",
+              "notes": [
+                "Any self-hosted server with an OpenAI-compatible API can be added under `modelProviders.openai`."
+              ],
               "runner": "other",
               "standard": "openai_compatible"
             }
@@ -98620,31 +98864,41 @@
           "model_config_paths": [
             {
               "format": "json",
-              "notes": "User-global settings. Holds `model.name`, `model.baseUrl`, `modelProviders`, `security.auth.selectedType`, and an `env` block for API keys. On this host observed as `$version: 3` with `modelProviders.openai` stored as a legacy array of model objects; current docs describe a newer object shape `{ \"protocol\": \"openai\", \"models\": [...] }`.",
+              "notes": [
+                "User-global settings. Holds `model.name`, `model.baseUrl`, `modelProviders`, `security.auth.selectedType`, and an `env` block for API keys. On this host observed as `$version: 3` with `modelProviders.openai` stored as a legacy array of model objects; current docs describe a newer object shape `{ \"protocol\": \"openai\", \"models\": [...] }`."
+              ],
               "path": "~/.qwen/settings.json",
               "scope": "user"
             },
             {
               "format": "json",
-              "notes": "Project-specific settings. The entire `modelProviders` object from project settings replaces the corresponding section in user settings, rather than merging.",
+              "notes": [
+                "Project-specific settings. The entire `modelProviders` object from project settings replaces the corresponding section in user settings, rather than merging."
+              ],
               "path": ".qwen/settings.json",
               "scope": "repo"
             },
             {
               "format": "other",
-              "notes": "Dotenv files loaded into the Qwen Code process. Search order is `.qwen/.env` (walked upward from the current directory), `.env`, `~/.qwen/.env`, then `~/.env`. Only the first file found is loaded, and only variables not already present in the environment are set.",
+              "notes": [
+                "Dotenv files loaded into the Qwen Code process. Search order is `.qwen/.env` (walked upward from the current directory), `.env`, `~/.qwen/.env`, then `~/.env`. Only the first file found is loaded, and only variables not already present in the environment are set."
+              ],
               "path": ".qwen/.env / .env / ~/.qwen/.env / ~/.env",
               "scope": "env"
             },
             {
               "format": "json",
-              "notes": "System-wide defaults. Lowest-precedence settings file; path overridable via `QWEN_CODE_SYSTEM_DEFAULTS_PATH`.",
+              "notes": [
+                "System-wide defaults. Lowest-precedence settings file; path overridable via `QWEN_CODE_SYSTEM_DEFAULTS_PATH`."
+              ],
               "path": "/etc/qwen-code/system-defaults.json (Linux), C:\\ProgramData\\qwen-code\\system-defaults.json (Windows), /Library/Application Support/QwenCode/system-defaults.json (macOS)",
               "scope": "env"
             },
             {
               "format": "json",
-              "notes": "System-wide override settings. Highest-precedence settings file; path overridable via `QWEN_CODE_SYSTEM_SETTINGS_PATH`.",
+              "notes": [
+                "System-wide override settings. Highest-precedence settings file; path overridable via `QWEN_CODE_SYSTEM_SETTINGS_PATH`."
+              ],
               "path": "/etc/qwen-code/settings.json (Linux), C:\\ProgramData\\qwen-code\\settings.json (Windows), /Library/Application Support/QwenCode/settings.json (macOS)",
               "scope": "env"
             }

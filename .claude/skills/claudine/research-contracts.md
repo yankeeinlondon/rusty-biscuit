@@ -80,6 +80,17 @@ Found with `md` 0.1.0. Several differ from the Darkmatter documentation.
 Reference a type with `name(required)@this`, `name[](required)@this`, or
 `name@../_types.yaml`.
 
+`claudine-gen`'s schema/catalog gate inlines a top-level record type
+declared in the sidecar's `types` (`local_runners: runner[]`) or in a
+`./` types file before checking its fields; a shared `../` import is not
+inlined, so a registry-read record must not live there.
+
+A sidecar edit that changes a property's type (for example `notes: string` to
+`notes: string[]`) migrates every shipped document in the same change, then
+runs `claudine-gen generate` (the catalog embeds research frontmatter) and
+updates the catalog's hash in `gen/tests/fixtures/generated-artifact-baseline.json`.
+Otherwise the generator rejects the topic with `ResearchInvalid`.
+
 ## The two gates
 
 | Gate | Command | Checks |

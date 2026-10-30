@@ -153,18 +153,18 @@ Follow these steps exactly:
     - `schema_url` - the URL of the (formal preferred) config schema; omit when none
     - `model_config_paths` - one record per config file that accepts model configuration:
       `scope` (`user`/`repo`/`env`), `path` (template form, e.g.
-      `~/.config/opencode/opencode.jsonc`), `format`, `notes`
+      `~/.config/opencode/opencode.jsonc`), `format`, `notes` (a list of strings)
     - `api_standards` - one record per supported standard for user-added models:
       `standard` (`openai_compatible`/`anthropic_compatible`/`bespoke`),
       `base_url_site` (the config key or env var carrying the base URL), `auth_site`,
-      `adapter` (e.g. OpenCode's `npm` key; omit when none), `notes`
+      `adapter` (e.g. OpenCode's `npm` key; omit when none), `notes` (a list of strings)
     - `metadata_overrides` - the per-model keys a user may declare when adding a model
     - `merge_semantics` - `merge`, `shadow`, `replace`, or `unknown`
     - `local_runners` - one record per runner (`ollama`, `omlx`, `lmstudio`,
       `llamacpp`, `vllm`, `other`): `integration` (`first_class`/`base_url_override`/
       `proxy_required`/`unsupported`), `standard` (the API standard the path rides
       on: `openai_compatible`/`anthropic_compatible`/`bespoke`; omit for
-      `unsupported`), a concrete `example` for any supported path, `notes`. Records
+      `unsupported`), a concrete `example` for any supported path, `notes` (a list of strings). Records
       must be consistent with the local_runners ground-truth frontmatter and with
       `api_standards` above — `unsupported` is only valid when {{seq.name}} has no
       base-URL override on any standard that runner speaks

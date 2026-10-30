@@ -12,6 +12,7 @@ mod context_construction_guard;
 mod drift;
 mod fixtures_provenance;
 mod generate_ux;
+mod model_config_research;
 mod pipeline;
 mod registry_coverage;
 mod signals_sidecar_mirror;

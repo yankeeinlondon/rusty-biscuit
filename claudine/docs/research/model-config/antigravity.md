@@ -9,47 +9,53 @@ model_config_paths:
   - scope: user
     path: ~/.gemini/antigravity-cli/settings.json
     format: json
-    notes: >-
-      Persistent CLI settings. The observed host file contains `model:
-      "Gemini 3.1 Pro (High)"`, `enableTelemetry`, and `trustedWorkspaces`.
-      Official docs describe this as the plain-JSON settings file and the CLI
-      changelog says `--model` and the `models` subcommand were added in 1.0.5.
-      No observed or documented key adds custom providers, base URLs, API keys,
-      or per-model metadata.
+    notes:
+      - >-
+        Persistent CLI settings. The observed host file contains `model:
+        "Gemini 3.1 Pro (High)"`, `enableTelemetry`, and `trustedWorkspaces`.
+        Official docs describe this as the plain-JSON settings file and the CLI
+        changelog says `--model` and the `models` subcommand were added in 1.0.5.
+        No observed or documented key adds custom providers, base URLs, API keys,
+        or per-model metadata.
 api_standards: []
 metadata_overrides: []
 merge_semantics: unknown
 local_runners:
   - runner: ollama
     integration: unsupported
-    notes: >-
-      Ollama serves OpenAI- and Anthropic-compatible endpoints, but Antigravity
-      CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for
-      either standard.
+    notes:
+      - >-
+        Ollama serves OpenAI- and Anthropic-compatible endpoints, but Antigravity
+        CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for
+        either standard.
   - runner: omlx
     integration: unsupported
-    notes: >-
-      oMLX serves OpenAI- and Anthropic-compatible endpoints, but Antigravity
-      CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for
-      either standard.
+    notes:
+      - >-
+        oMLX serves OpenAI- and Anthropic-compatible endpoints, but Antigravity
+        CLI 1.1.0 exposes no user base-URL override or custom-provider adapter for
+        either standard.
   - runner: lmstudio
     integration: unsupported
-    notes: >-
-      LM Studio serves OpenAI- and Anthropic-compatible endpoints, but
-      Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider
-      adapter for either standard.
+    notes:
+      - >-
+        LM Studio serves OpenAI- and Anthropic-compatible endpoints, but
+        Antigravity CLI 1.1.0 exposes no user base-URL override or custom-provider
+        adapter for either standard.
   - runner: llamacpp
     integration: unsupported
-    notes: >-
-      llama.cpp's `llama-server` serves OpenAI- and Anthropic-compatible
-      endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or
-      custom-provider adapter for either standard.
+    notes:
+      - >-
+        llama.cpp's `llama-server` serves OpenAI- and Anthropic-compatible
+        endpoints, but Antigravity CLI 1.1.0 exposes no user base-URL override or
+        custom-provider adapter for either standard.
   - runner: vllm
     integration: unsupported
-    notes: >-
-      vLLM serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI
-      1.1.0 exposes no user base-URL override or custom-provider adapter for
-      either standard.
+    notes:
+      - >-
+        vLLM serves OpenAI- and Anthropic-compatible endpoints, but Antigravity CLI
+        1.1.0 exposes no user base-URL override or custom-provider adapter for
+        either standard.
 cloud_bridge:
   supported: false
   mechanism: No documented or observed custom-provider, base-URL, or adapter mechanism in Antigravity CLI 1.1.0.

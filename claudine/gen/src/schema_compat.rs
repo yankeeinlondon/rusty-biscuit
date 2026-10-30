@@ -25,8 +25,9 @@ use crate::registry::{DeclaredSource, RegistryEntry, SchemaExpectation};
 /// The sidecar must wrap its properties under a root `$schema:` key —
 /// darkmatter's resolver otherwise classifies the file as raw JSON Schema.
 /// A top-level property typed as an object from the topic's own types file
-/// (`name@./_types.yaml`) is inlined, so the gate checks a named record type
-/// exactly like an inline-object one.
+/// (`name@./_types.yaml`) or from the sidecar's own `types:` mapping (a bare
+/// `name`, which parses as `name@this`) is inlined, so the gate checks a
+/// named record type exactly like an inline-object one.
 ///
 /// The result is reused while the sidecar and the types files it inlines are
 /// unchanged: every provider pass gates on the same topic sidecars.
@@ -63,10 +64,10 @@ pub(crate) fn parse_sidecar_schema(path: &Path) -> Result<SchemaRoot, GenError> 
     })
 }
 
-/// Replaces each top-level `name@./file` import of an object type with that
-/// type's shape. Imports of shared types (`../`) and of non-object types
-/// stay as they are; no registry entry reads through them. Returns the types
-/// files read.
+/// Replaces each top-level `name@./file` or `name@this` reference to an
+/// object type with that type's shape. Imports of shared types (`../`) and of
+/// non-object types stay as they are; no registry entry reads through them.
+/// Returns the types files read.
 fn inline_local_object_types(schema: &mut SchemaRoot, sidecar: &Path) -> Result<Vec<PathBuf>, GenError> {
     let SchemaRoot::Single(shape) = schema else {
         return Ok(Vec::new());
@@ -74,6 +75,7 @@ fn inline_local_object_types(schema: &mut SchemaRoot, sidecar: &Path) -> Result<
     // WHY: a sidecar imports many record types from the same types file, and
     // parsing that file once per import dominated generation time.
     let mut types_files: HashMap<PathBuf, SchemaShape> = HashMap::new();
+    let mut own_types: Option<SchemaShape> = None;
     for def in shape.properties.values_mut() {
         let PropertyDef::Single(atom) = def else {
             continue;
@@ -81,18 +83,53 @@ fn inline_local_object_types(schema: &mut SchemaRoot, sidecar: &Path) -> Result<
         let TypeExpr::Imported { name, reference } = &atom.ty else {
             continue;
         };
-        let Some(relative) = reference.strip_prefix("./") else {
+        let object = if reference.trim() == "this" {
+            let types = match &mut own_types {
+                Some(types) => types,
+                empty => empty.insert(sidecar_types(sidecar)?),
+            };
+            local_object_type(types, sidecar, name)?
+        } else if let Some(relative) = reference.strip_prefix("./") {
+            let types_path = sidecar.with_file_name(relative);
+            if !types_files.contains_key(&types_path) {
+                types_files.insert(types_path.clone(), local_types(&types_path)?);
+            }
+            local_object_type(&types_files[&types_path], &types_path, name)?
+        } else {
             continue;
         };
-        let types_path = sidecar.with_file_name(relative);
-        if !types_files.contains_key(&types_path) {
-            types_files.insert(types_path.clone(), local_types(&types_path)?);
-        }
-        if let Some(object) = local_object_type(&types_files[&types_path], &types_path, name)? {
+        if let Some(object) = object {
             atom.ty = TypeExpr::InlineObject(object);
         }
     }
     Ok(types_files.into_keys().collect())
+}
+
+/// The sidecar's own `types:` mapping, which a bare type name in its
+/// `$schema:` mapping refers to; empty when the sidecar declares none.
+fn sidecar_types(path: &Path) -> Result<SchemaShape, GenError> {
+    let text = std::fs::read_to_string(path).map_err(|source| GenError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).map_err(|err| GenError::Yaml {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
+    let Some(types) = value.get("types") else {
+        return Ok(SchemaShape::default());
+    };
+    match parse_yaml_schema(types) {
+        Ok(SchemaRoot::Single(types)) => Ok(types),
+        Ok(_) => Err(GenError::SidecarInvalid {
+            path: path.to_path_buf(),
+            message: "the `types` mapping did not parse as one schema".into(),
+        }),
+        Err(err) => Err(GenError::SidecarInvalid {
+            path: path.to_path_buf(),
+            message: err.to_string(),
+        }),
+    }
 }
 
 /// The `types` mapping of the `kind: schema` types file at `path`.

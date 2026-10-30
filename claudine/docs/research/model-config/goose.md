@@ -9,35 +9,42 @@ model_config_paths:
   - scope: user
     path: ~/.config/goose/config.yaml
     format: yaml
-    notes: 'Global user settings. Top-level GOOSE_PROVIDER and GOOSE_MODEL keys pin the default provider and model. This host does not have Goose CLI installed, so no local file was observed.'
+    notes:
+      - 'Global user settings. Top-level GOOSE_PROVIDER and GOOSE_MODEL keys pin the default provider and model. This host does not have Goose CLI installed, so no local file was observed.'
   - scope: user
     path: ~/.config/goose/custom_providers/*.json
     format: json
-    notes: 'One JSON file per custom provider. Each file adds a user-defined provider with its own model list and endpoint configuration.'
+    notes:
+      - 'One JSON file per custom provider. Each file adds a user-defined provider with its own model list and endpoint configuration.'
   - scope: user
     path: ~/.config/goose/secrets.yaml
     format: yaml
-    notes: 'Fallback file-based secret store used when the system keyring is unavailable or disabled; holds API keys referenced by custom providers.'
+    notes:
+      - 'Fallback file-based secret store used when the system keyring is unavailable or disabled; holds API keys referenced by custom providers.'
   - scope: env
     path: Shell environment variables
     format: other
-    notes: 'Session-scoped overrides such as GOOSE_PROVIDER, GOOSE_MODEL, GOOSE_PROVIDER__HOST, and provider-specific HOST variables.'
+    notes:
+      - 'Session-scoped overrides such as GOOSE_PROVIDER, GOOSE_MODEL, GOOSE_PROVIDER__HOST, and provider-specific HOST variables.'
 api_standards:
   - standard: openai_compatible
     base_url_site: base_url in custom provider JSON (or OPENAI_HOST for the built-in openai provider)
     auth_site: api_key_env in custom provider JSON (or OPENAI_API_KEY for the built-in openai provider)
     adapter: none
-    notes: 'Custom providers with engine openai/openai_compatible speak the OpenAI Chat Completions API. The built-in OpenAI provider can also be pointed at any OpenAI-compatible endpoint.'
+    notes:
+      - 'Custom providers with engine openai/openai_compatible speak the OpenAI Chat Completions API. The built-in OpenAI provider can also be pointed at any OpenAI-compatible endpoint.'
   - standard: anthropic_compatible
     base_url_site: base_url in custom provider JSON (or ANTHROPIC_HOST for the built-in anthropic provider)
     auth_site: api_key_env in custom provider JSON (or ANTHROPIC_API_KEY for the built-in anthropic provider)
     adapter: none
-    notes: 'Custom providers with engine anthropic/anthropic_compatible speak the Anthropic Messages API.'
+    notes:
+      - 'Custom providers with engine anthropic/anthropic_compatible speak the Anthropic Messages API.'
   - standard: bespoke
     base_url_site: base_url in custom provider JSON (or OLLAMA_HOST for the built-in ollama provider)
     auth_site: none (Ollama local servers typically require no key)
     adapter: none
-    notes: 'Custom providers with engine ollama/ollama_compatible use the Ollama native API, which is neither OpenAI nor Anthropic compatible.'
+    notes:
+      - 'Custom providers with engine ollama/ollama_compatible use the Ollama native API, which is neither OpenAI nor Anthropic compatible.'
 metadata_overrides:
   - name
   - resolved_model
@@ -56,14 +63,16 @@ local_runners:
       GOOSE_PROVIDER: ollama
       GOOSE_MODEL: qwen2.5
       OLLAMA_HOST: http://localhost:11434
-    notes: 'First-class built-in provider using the native Ollama API. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose. Can also be added as a custom OpenAI- or Anthropic-compatible provider.'
+    notes:
+      - 'First-class built-in provider using the native Ollama API. Model IDs include the Ollama tag, e.g. qwen2.5 or michaelneale/deepseek-r1-goose. Can also be added as a custom OpenAI- or Anthropic-compatible provider.'
   - runner: lmstudio
     integration: first_class
     standard: openai_compatible
     example: |
       GOOSE_PROVIDER: lmstudio
       GOOSE_MODEL: qwen2.5-coder-14b-instruct
-    notes: 'First-class built-in provider. Connects to localhost:1234 by default over LM Studios OpenAI-compatible endpoint. Use the model id reported by LM Studio.'
+    notes:
+      - 'First-class built-in provider. Connects to localhost:1234 by default over LM Studios OpenAI-compatible endpoint. Use the model id reported by LM Studio.'
   - runner: omlx
     integration: base_url_override
     standard: openai_compatible
@@ -76,7 +85,8 @@ local_runners:
         "requires_auth": false,
         "models": [{"name": "qwen2.5-7b", "context_limit": 32768}]
       }
-    notes: 'No native provider; add via custom OpenAI-compatible provider. oMLX also exposes an Anthropic-compatible endpoint, so engine anthropic with base_url http://localhost:8000 works as well.'
+    notes:
+      - 'No native provider; add via custom OpenAI-compatible provider. oMLX also exposes an Anthropic-compatible endpoint, so engine anthropic with base_url http://localhost:8000 works as well.'
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
@@ -89,7 +99,8 @@ local_runners:
         "requires_auth": false,
         "models": [{"name": "qwen2.5-coder-14b", "context_limit": 32768}]
       }
-    notes: 'llama.cpp server exposes an OpenAI-compatible Chat Completions API and, since build b7187, an Anthropic-compatible /v1/messages endpoint. Add it as a custom provider on either standard.'
+    notes:
+      - 'llama.cpp server exposes an OpenAI-compatible Chat Completions API and, since build b7187, an Anthropic-compatible /v1/messages endpoint. Add it as a custom provider on either standard.'
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
@@ -102,11 +113,13 @@ local_runners:
         "requires_auth": false,
         "models": [{"name": "qwen2.5-coder-32b-instruct", "context_limit": 32768}]
       }
-    notes: 'vLLM serves both OpenAI-compatible and Anthropic-compatible APIs (anthropic since v0.11.1). Add it as a custom provider on either standard, or point the built-in openai provider at it with OPENAI_HOST.'
+    notes:
+      - 'vLLM serves both OpenAI-compatible and Anthropic-compatible APIs (anthropic since v0.11.1). Add it as a custom provider on either standard, or point the built-in openai provider at it with OPENAI_HOST.'
   - runner: other
     integration: base_url_override
     standard: openai_compatible
-    notes: 'Any local runner that exposes an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint can be added as a custom provider.'
+    notes:
+      - 'Any local runner that exposes an OpenAI-compatible, Anthropic-compatible, or Ollama-compatible endpoint can be added as a custom provider.'
 cloud_bridge:
   supported: true
   mechanism: custom provider JSON with engine openai/anthropic and base_url pointing at a gateway, or OPENAI_HOST/ANTHROPIC_HOST on built-in providers
