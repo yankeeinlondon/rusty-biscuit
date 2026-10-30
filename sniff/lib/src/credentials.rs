@@ -51,6 +51,7 @@ pub(crate) fn authenticate_provider_request<R: ProviderRequestBuilder>(
 
 /// Environment variables that hold a provider-scoped token, in the order
 /// [`provider_token`] consults them.
+#[cfg(feature = "remote")]
 pub(crate) fn provider_token_variables(flavor: ApiFlavor) -> &'static [&'static str] {
     match flavor {
         ApiFlavor::GitHub => &["GH_TOKEN", "GITHUB_TOKEN"],
@@ -69,6 +70,7 @@ pub(crate) fn provider_token_variables(flavor: ApiFlavor) -> &'static [&'static 
 ///
 /// A variable set to the empty string is unset: an empty token is never sent,
 /// and it does not hide a later variable.
+#[cfg(feature = "remote")]
 pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<(&'static str, String)>, &'static str) {
     let names = provider_token_variables(flavor);
     (

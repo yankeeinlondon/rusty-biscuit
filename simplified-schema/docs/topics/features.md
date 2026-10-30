@@ -11,7 +11,9 @@ With `default-features = false` the crate works on supplied text only:
 references are parsed but never resolved. Its
 dependency graph then holds no `gix`, `walkdir`, or `sniff`; it still holds
 `globset`, because glob patterns written in a schema are checked while the
-schema is parsed, in every build.
+schema is parsed, in every build. `globset` is a passive syntax dependency,
+not a resolver dependency: it validates `match(...)` pattern text and
+performs no I/O.
 
 Without `file`, nothing that needs a file on disk is judged to pass. A
 `$schema` file reference, a named-type import from a file, or an

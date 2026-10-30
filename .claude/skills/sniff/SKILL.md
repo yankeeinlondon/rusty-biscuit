@@ -241,6 +241,12 @@ separate APIs.
 
 ## Remote authority
 
+Everything that sends HTTP stays behind `network`/`remote`. A build with
+neither feature compiles no `reqwest`, `hyper`, or `tokio`, and local-only
+consumers such as `simplified-schema` rely on that. `schematic-schema` is
+therefore optional and enabled only by `remote`. Never make an HTTP-carrying
+dependency unconditional.
+
 `resolve_remote_at` is the selection authority for configured remotes.
 Classification stays local when possible; ambiguous self-hosted HTTP(S) hosts
 require exact-host consent before probing.

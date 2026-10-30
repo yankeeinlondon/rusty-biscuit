@@ -20,7 +20,10 @@ and `walkdir`.
   `file_reference/glob/` module names it, and only `glob/parse.rs` builds a
   matcher (`roots.rs` holds the compiled `GlobMatcher`). It belongs to the
   syntax feature because `GlobReference::new` compiles each pattern to
-  report invalid glob syntax before any context exists. Darkmatter already depends on the
+  report invalid glob syntax before any context exists. It is a passive
+  syntax dependency, not a resolver dependency: it performs no I/O, so a
+  consumer that keeps only `file-reference-syntax` (for example
+  `simplified-schema` without its `file` feature) still compiles it. Darkmatter already depends on the
   same `0.4` line, so the workspace gains no new crate. Patterns are built
   with explicit options, never the crate defaults: `literal_separator(true)`,
   case-sensitive, and `backslash_escape(false)` on every OS (the default is on
