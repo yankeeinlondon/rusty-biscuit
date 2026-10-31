@@ -129,7 +129,7 @@ starts with its field (`` `match[1].group[0]`: ``). The input matrix is
 `darkmatter/schemas/schema-trigger.yaml`, both in `embedded::SHIPPED`). Entry
 point: `DarkmatterSchemas::validate_kind_document(text, path)` →
 `Ok(None)` unclaimed (no/null/non-string/unknown `kind`, or not a mapping),
-`Ok(Some(KindValidation { kind, report }))`, or `Err(SchemaDocument)` for a
+`Ok(Some(KindValidation { kind, report, document }))` (`document` is the JSON data judged), or `Err(SchemaDocument)` for a
 loader failure (`load_admitted_yaml`, same wording as `recognize_standalone`)
 or a non-string key. Validation is raw (`validate_raw_with_positions`, no
 coercion) over the whole mapping with `$schema` kept as data; no baseline, no
@@ -156,7 +156,30 @@ triggers (`EffectiveSchema` built by `effective_for_resolved`).
   triggers, or assignments. A `SchemaDocument` error naming the argument is
   `FileOutcome::YamlLoadError` (exit 3, JSON `error: "yaml_parse"`); any other
   error is exit 2. `key=value` with any YAML argument exits 64 before any file
-  is validated. CLI tests: `cli/tests/l1/schema_validate_kind_documents.rs`.
+  is validated (a spelling that hides the extension, such as `@name`, is
+  rechecked on the opened path just before that file). CLI tests: `cli/tests/l1/schema_validate_kind_documents.rs`.
+- DMLS: `overlay/kind_document.rs` computes `DocumentOverlay::kind_document`
+  (cached per URI by text, revision, and context; none without a context or
+  when the YAML does not load) before the trigger/standalone branches and
+  attaches it to every non-Markdown overlay (`with_kind`, `kind_only`). It
+  sets `overlay.ast` from `FrontmatterAst::parse_yaml_document` (whose
+  `schema_entry()` is `None`, so `$schema` is never a reference: no link,
+  definition, or reference hover), `overlay.schema` to a bundle of
+  `effective_for_kind`, and an analysis whose root is the definition alone
+  (`AnalysisIdentity::kind_document`; no Markdown baseline keys), so the
+  frontmatter completion and hover serve the definition's keys and `->`
+  descriptions. `diagnostics_under` skips the Markdown schema/expression/
+  nested-span passes for it and runs `diagnostics/kind_document.rs`, which
+  feeds the report through the shared `generic_problem_diagnostics`
+  (`classify`: a missing key is strict-mode only) and drops meta-type payload
+  problems once the standalone/trigger envelope has reported its own located
+  error. Tests: `dmls/tests/l1/kind_document_editor.rs`,
+  `standalone_stdio::kind_document_diagnostics_reach_a_stdio_client`.
+- User docs: `docs/topics/schemas/definition.md#how-a-yaml-document-is-validated-by-its-kind`
+  (flow and residual-rule list), `authoring-schemas.md#external-grammar-files`
+  (transcludes both definitions), `inline/schema-validation.md#yaml-documents`,
+  `dmls-schema-support.md#yaml-kind-documents`. Edit a definition there and
+  the docs follow automatically; edit a residual rule and update the list.
 - The trigger kind's control fixture is a real trigger
   (`claudine/schemas/sequence.yaml`): `schema-trigger.yaml` is itself a
   `kind: schema` document.

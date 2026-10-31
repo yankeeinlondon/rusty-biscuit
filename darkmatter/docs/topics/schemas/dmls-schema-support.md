@@ -324,6 +324,55 @@ Hover also understands schema *authoring*:
 
 A property typed by a postfixed union reference (`U[]`, `U(required)`) has no single type, so its hover lists every alternative with its own description. Hovering one item of a `U[]` list names an alternative only when exactly one alternative accepts the item; a missing, invalid, or multiply-matching item shows every alternative instead. Acceptance is decided by the Darkmatter library, never by a closest-match guess (see [Union-typed properties and list items](../../../dmls/docs/hover.md#union-typed-properties-and-list-items)).
 
+### YAML kind documents
+
+A YAML file whose top-level `kind` is `schema` or `schema-trigger` is checked
+against the definition that ships with Darkmatter for that kind (see
+[How a YAML document is validated by its `kind`](./definition.md#how-a-yaml-document-is-validated-by-its-kind)).
+DMLS decides this from the buffer's content, not its name or folder: a
+trigger outside any schema root is checked too. Markdown frontmatter is never
+a kind document, even when it sets `kind: schema-trigger`.
+
+**Diagnostics.** The definition's problems are published with the same
+`dm.schema.*` codes, severities, and ranges as frontmatter problems:
+
+| Problem | Example | Ranged on |
+|---|---|---|
+| wrong type or failed constraint | `description: 5` | the value (`5`) |
+| missing required key | a trigger without `match` | the root mapping (or the parent mapping of a nested key) |
+
+```yaml
+kind: schema
+description: 5    # dm.schema.type_mismatch on `5` (line 2, column 14)
+types:
+    title: string
+```
+
+The definitions' problems are graded like frontmatter: a missing required key
+(`dm.schema.missing_required`) is reported only with `schema.strict` on. The
+envelope diagnostics described above (`dm.schema.document_malformed`,
+`dm.schema.invalid_type_definition`, and the rest) still run beside them,
+and a definition the envelope already reports precisely (a bad type in
+`types:`) is reported once, by the envelope, on the offending token.
+
+There are no kind diagnostics while the buffer is not valid YAML (the parse
+diagnostic stands alone), for a `kind` that is missing, null, or any other
+string, or when DMLS has no workspace context for the file.
+
+**Completion.** At an empty top-level line, completion offers the definition's
+keys that are not yet present, each with its `->` description; the Markdown
+frontmatter keys (`title`, `tags`, …) are never offered. After `kind:`, it
+offers the claiming kind's own value (`schema` in a `kind: schema` file). An
+empty `kind:` claims no definition, so nothing is offered there.
+
+**Hover.** Hovering a top-level key shows the definition's description of it,
+for example `match` in a trigger.
+
+**`$schema` is data.** In a kind document `$schema` is the content being
+described, not a reference. Its value is not a link, has no go-to-definition,
+and does not show a schema-reference hover; hovering the `$schema` key shows
+the definition's description.
+
 ### Recursive types
 
 A named type may refer to itself, directly or through other named types in
@@ -512,7 +561,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 | Standalone schema documents (`kind: schema`)  | ✅ ¹⁴       | ✅         | ✅    | —            | —               | ❌          | ❌     | —            |
 | `expression`-typed values                     | ✅          | ✅         | ✅    | —            | —               | ❌ ¹⁵       | ❌     | —            |
 | `style.*` keys                                | ✅          | ✅         | ✅    | —            | —               | ❌          | ❌     | ✅           |
-| Trigger envelopes (`kind: schema-trigger`)    | ✅ ¹⁶       | —          | —     | —            | —               | ❌          | ❌     | —            |
+| Trigger envelopes (`kind: schema-trigger`)    | ✅ ¹⁶       | ✅ ¹⁸      | ✅ ¹⁸ | —            | —               | ❌          | ❌     | —            |
 | `ctx.*` generated keys                        | —           | ✅         | ✅    | —            | —               | ❌ ¹⁵       | ❌     | —            |
 
 1. Required keys marked; nested keys offered per the enclosing inline-object shape.
@@ -528,10 +577,11 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 11. Authored pattern-key definitions hover in schema documents; consumers hover the value definition only where the shape resolves it.
 12. Type keywords, array forms, scaffolds, and subject-filtered constraint keywords; constraint *arguments* are deliberately not completed.
 13. Path completions and scaffolds for the reference itself.
-14. The schema file owns its problems (`invalid_suggestion`, `document_malformed`); they never duplicate onto consumers.
+14. The schema file owns its problems (`invalid_suggestion`, `document_malformed`); they never duplicate onto consumers. The file is also checked against the shipped `kind: schema` definition, which drives its top-level key completion and hover (see [YAML kind documents](#yaml-kind-documents)).
 15. Reserved in the semantic-token legend for a future expression phase; not emitted in V1.
-16. The matched payload merges into the effective schema and drives diagnostics, completion, and hover on consuming documents (see [How DMLS Assembles the Effective Schema](#how-dmls-assembles-the-effective-schema)). A malformed envelope is diagnosed on the envelope file.
+16. The matched payload merges into the effective schema and drives diagnostics, completion, and hover on consuming documents (see [How DMLS Assembles the Effective Schema](#how-dmls-assembles-the-effective-schema)). A malformed envelope is diagnosed on the envelope file. The trigger file itself is also checked against its shipped definition (see [YAML kind documents](#yaml-kind-documents)).
 17. A union property lists its alternatives; a list item names its alternative only when exactly one accepts it.
+18. Top-level keys and the `kind` value from the shipped `schema-trigger` definition; see [YAML kind documents](#yaml-kind-documents).
 
 The short version: **the read/analyze half of the LSP surface (diagnostics, completion, hover, navigation, structure) is broadly shipped for schemas, while the styling-and-refactor half (semantic tokens, rename, references-on-keys, lenses, hints) is still ahead of us.**
 

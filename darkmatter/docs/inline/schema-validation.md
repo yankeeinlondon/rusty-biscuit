@@ -275,10 +275,66 @@ for the full rules and fallbacks.
 | 0 | All files valid. |
 | 1 | One or more files failed validation. |
 | 2 | Schema or baseline could not be loaded. |
-| 3 | A file's frontmatter could not be parsed at all. |
+| 3 | A file's frontmatter, or a YAML document, could not be parsed at all. |
 | 64 | Usage error. |
 
 A document with no `$schema` is validated against the baseline and reported as having a schema definition; in JSON output its `schema` field is still `null`, because the field names the document's own `$schema`. Only with the baseline turned off does such a document succeed vacuously (with a warning line in pretty mode).
+
+### YAML documents
+
+A `.yaml` or `.yml` argument (the extension is matched without regard to case)
+is not Markdown: it is validated as a whole YAML document by its top-level
+`kind`. A file whose `kind` is `schema` or `schema-trigger` is checked against
+the definition that ships with Darkmatter; any other file is valid by default.
+See [How a YAML document is validated by its `kind`](../topics/schemas/definition.md#how-a-yaml-document-is-validated-by-its-kind)
+for what is checked.
+
+```bash
+md schema validate schemas/post.yaml schemas/require-title.yaml notes.yaml
+```
+
+```
+- ✗ the document post.yaml failed schema validation:
+    - arm[1]: description 5 is not of type "string" (at line 2, column 14)
+        what the schema is for
+- ✗ the document require-title.yaml failed schema validation:
+    - match is a required property (at line 1, column 1)
+        the conditions that select a document (one expression, or a list that must all hold)
+- ✔ the document notes.yaml doesn't have a schema definition so is valid by default.
+```
+
+The `kind: schema` definition is a union of two shapes (one requires
+`$schema`, the other `types`), so a problem names the shape it was checked
+against as `arm[n]`. Line and column count from the first line of the file.
+
+What differs from a Markdown argument:
+
+- **No baseline and no triggers.** `--schema`, `--disable baseline-schema`,
+  and `--disable schema-triggers` change nothing for a YAML file.
+- **Values are not coerced.** `description: 5` is a problem, not the string
+  `"5"`.
+- **A file that does not load exits 3.** A duplicate key, a second YAML
+  document, or a syntax error is reported as
+  `the YAML document … could not be loaded`, and its JSON record carries
+  `"error": "yaml_parse"`:
+
+  ```json
+  {"error":"yaml_parse","file":"dup.yaml","message":"not valid YAML: duplicate entry with key \"kind\"","problems":[],"schema":null,"valid":false}
+  ```
+
+- **`schema` is always `null` in JSON output**, whether or not a kind claimed the
+  file; only pretty output distinguishes "valid" from "valid by default".
+- **Assignments are rejected.** `<prop>=<value>` assignments apply to Markdown
+  frontmatter only. When any argument is a YAML file and an assignment is
+  present, the command prints
+  `Error: assignments apply to Markdown frontmatter, not to YAML document <path>`
+  and exits 64. The check runs before any file is validated, except for a
+  reference whose spelling hides the extension (such as `@name`), which is
+  checked when that file is opened.
+
+The exit codes are the same as for Markdown: `1` for problems, `2` if a kind's
+definition cannot be prepared, `3` for a file that does not load, and the most
+specific failure wins across files.
 
 ### Stage timings (`-vv`)
 
