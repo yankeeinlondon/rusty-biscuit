@@ -7126,9 +7126,10 @@ fn undeclared_property_fires_in_every_operand_position_at_warning_severity() {
         (span_on(OPERAND_DOC, "f1:", "fm_bin"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f2:", "fm_then"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f3:", "fm_arg"), "darkmatter.frontmatter"),
-        // `f4`'s `known || fm_rhs` is the condition grammar's `or`, whose
-        // operands bind `unknown | null`, so `fm_rhs` is handled; `B4`'s body
-        // `||` is a fallback, whose right-hand side is not.
+        // `||` has one absence rule everywhere: its left operand is an absence
+        // check, its right operand an ordinary read, so `f4`'s `fm_rhs` is
+        // reported exactly like `B4`'s body `rhs_var`.
+        (span_on(OPERAND_DOC, "f4:", "fm_rhs"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f6:", "foo--bar"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f7:", "a- b"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "B1:", "bin_op"), "darkmatter.compose"),

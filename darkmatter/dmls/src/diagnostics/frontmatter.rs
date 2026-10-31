@@ -780,7 +780,7 @@ fn expression_diagnostics(
             Some(error) => Err(error),
             None => {
                 note_expression_diagnostic_parse();
-                crate::overlay::expressions::parse_condition(expression)
+                crate::overlay::expressions::parse(expression)
             }
         };
         match parsed {
@@ -869,7 +869,7 @@ fn expression_diagnostics(
                     &view,
                     &parsed,
                     expression,
-                    crate::overlay::expressions::parse_condition,
+                    crate::overlay::expressions::parse,
                     yaml_quote(ctx, value),
                 );
                 let first = out.len();
@@ -987,7 +987,7 @@ fn stack_expression_diagnostics(
             .get(expression.entry.value_span.start..)
             .and_then(|value| value.chars().next())
             .filter(|first| matches!(first, '\'' | '"'));
-        let findings = known_roots.findings(view, &parsed, &expression.text, expression.dialect.parser(), quote);
+        let findings = known_roots.findings(view, &parsed, &expression.text, crate::overlay::expressions::parse, quote);
         for finding in findings {
             let span = crate::providers::dsl::finding_span(&finding).clone();
             // A fix edits authored bytes, so it rides only on an exact range
@@ -1905,8 +1905,8 @@ mod tests {
     }
 
     #[test]
-    fn condition_dialect_and_expression_is_not_malformed() {
-        // The `expression` schema format validates with `parse_condition`, which
+    fn logical_and_expression_is_not_malformed() {
+        // The `expression` schema format validates with the shared parser, which
         // accepts `&&`; the spec's own example must not be diagnosed malformed.
         let text = expression_doc(r#"when: 'is_agent() && os == "macos"'"#);
         diagnostics_for(&text, |diagnostics| {
@@ -1916,13 +1916,13 @@ mod tests {
                     code != Some(code::EXPRESSION_MALFORMED)
                         && code != Some(code::SCHEMA_CONSTRAINT)
                 }),
-                "a condition-dialect `&&` expression must not be malformed: {diagnostics:#?}"
+                "a `&&` expression must not be malformed: {diagnostics:#?}"
             );
         });
     }
 
     #[test]
-    fn condition_dialect_or_expression_is_not_malformed() {
+    fn logical_or_expression_is_not_malformed() {
         let text = expression_doc(r#"when: 'os == "macos" || os == "linux"'"#);
         diagnostics_for(&text, |diagnostics| {
             assert!(
@@ -1931,7 +1931,7 @@ mod tests {
                     code != Some(code::EXPRESSION_MALFORMED)
                         && code != Some(code::SCHEMA_CONSTRAINT)
                 }),
-                "a condition-dialect `||` expression must not be malformed: {diagnostics:#?}"
+                "a `||` expression must not be malformed: {diagnostics:#?}"
             );
         });
     }

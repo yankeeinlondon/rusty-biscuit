@@ -483,7 +483,7 @@ fn task_when(map: &serde_json::Map<String, Value>, origin: &std::path::Path, pro
             return Err(invalid("`when` must not be an empty expression; remove the key to run the task unconditionally".into(), None));
         }
         Value::String(text) => {
-            darkmatter::markdown::compose::expression::parse_condition(text).map_err(|source| {
+            darkmatter::markdown::compose::expression::parse(text).map_err(|source| {
                 invalid(format!("`when` is not a valid expression: {source}"), Some(source))
             })?;
         }

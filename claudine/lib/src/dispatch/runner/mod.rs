@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse_condition};
+use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse};
 use tracing::{debug, info_span, warn};
 
 use crate::actions::{CompiledMapper, HookAction, HookDecision, HookResponse};
@@ -108,7 +108,7 @@ fn evaluate_when_with_lookup(
         return WhenOutcome::Run;
     };
 
-    let parsed = match parse_condition(expr) {
+    let parsed = match parse(expr) {
         Ok(parsed) => parsed,
         Err(error) => {
             warn!(

@@ -1253,8 +1253,7 @@ pub(crate) fn expression_values<'c>(ctx: &DocumentContext<'c>) -> Vec<Expression
 }
 
 /// Hover on an Expression-typed frontmatter value, via the shared
-/// [`expressions::hover_markdown_condition`] authority (condition dialect, so
-/// `&&`/`||` values hover like any other expression). Fires only when the cursor
+/// [`expressions::hover_markdown`] authority. Fires only when the cursor
 /// is inside the value (a cursor on the key falls through to the schema hover,
 /// which describes the `expression` type itself). The value's own ternary and
 /// `&&`/`||` facts narrow it; no enclosing lifecycle or task `when` does.
@@ -1270,7 +1269,6 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, value: &Express
             |name: &str| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name));
         match event {
             Some(event) => expressions::hover_markdown_in_event(
-                expressions::parse_condition,
                 value.expression(),
                 expr_offset,
                 site,
@@ -1278,7 +1276,7 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, value: &Express
                 property,
                 &event,
             ),
-            None => expressions::hover_markdown_condition(value.expression(), expr_offset, site, scalar, property),
+            None => expressions::hover_markdown(value.expression(), expr_offset, site, scalar, property),
         }
     });
     markup_hover(ctx, value.expression_span(), markdown)
@@ -1298,7 +1296,6 @@ fn stack_expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, index: us
     let host = crate::providers::dsl::host_catalogs(ctx);
     let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
         expressions::hover_markdown_in_event(
-            expression.dialect.parser(),
             &expression.text,
             expr_offset,
             site,
@@ -3351,11 +3348,11 @@ mod tests {
     }
 
     #[test]
-    fn condition_dialect_expression_value_hover_uses_condition_grammar() {
-        // The `expression` schema format validates with `parse_condition`; the
-        // value hover must parse the same dialect, so `||` lowers to a logical
-        // `or(...)` (not the value-dialect fallback) and the `is_empty` function
-        // call under the cursor is still enriched.
+    fn expression_value_hover_parses_logical_or() {
+        // The `expression` schema format and the value hover share one parser,
+        // so `||` stays a logical OR shown as authored (never lowered to an
+        // `or(...)` call) and the `is_empty` function call under the cursor is
+        // still enriched.
         let text = expression_doc(r#"when: 'is_empty(title) || is_string(title)'"#);
         with_ctx(&text, |ctx| {
             let offset = text.find("is_empty").unwrap() + 2;
@@ -3363,15 +3360,16 @@ mod tests {
             let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
                 panic!("markdown hover");
             };
-            assert!(value.contains("or("), "condition dialect lowers || to or(): {value}");
+            assert!(value.contains("is_empty(title) || is_string(title)"), "hover shows `||` as authored: {value}");
+            assert!(!value.contains("or("), "`||` is never lowered to or(): {value}");
             let is_empty = expressions::function_descriptor("is_empty").unwrap();
             assert!(value.contains(&expressions::format_function_block(is_empty)), "{value}");
         });
     }
 
     #[test]
-    fn condition_dialect_expression_value_completion_offers_catalog() {
-        // Completion is token-based and dialect-agnostic: a `&&`-containing value
+    fn logical_and_expression_value_completion_offers_catalog() {
+        // Completion is token-based: a `&&`-containing value
         // still offers `ctx.*` for the trailing token.
         let text = expression_doc(r#"when: 'is_agent() && ctx.'"#);
         with_ctx(&text, |ctx| {

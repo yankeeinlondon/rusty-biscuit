@@ -1,7 +1,7 @@
 //! Contract tests for the prompt documents shipped with Claudine.
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::{ExpressionFinder, parse_condition};
+use darkmatter::markdown::compose::expression::{ExpressionFinder, parse};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use simplified_schema::SchemaPhase;
 use ignore::WalkBuilder;
@@ -68,7 +68,7 @@ fn record_expression_errors(
         ExpressionFinder::find_all_plain(text)
     };
     for expression in expressions {
-        if let Err(error) = parse_condition(&expression.expression) {
+        if let Err(error) = parse(&expression.expression) {
             errors.push(format!(
                 "{} [{surface}] `{{{{ {} }}}}`: {error}",
                 prompt.display(),
@@ -110,7 +110,7 @@ fn inspect_frontmatter_value(
             let leaf = property.rsplit('.').next().unwrap_or(property);
             if matches!(leaf, "when" | "until" | "while")
                 && !text.contains("{{")
-                && let Err(error) = parse_condition(text)
+                && let Err(error) = parse(text)
             {
                 errors.push(format!(
                     "{} [{property}] `{text}`: {error}",
@@ -142,7 +142,7 @@ fn inspect_block_conditions(prompt: &Path, body: &str, errors: &mut Vec<String>)
         if condition.contains("{{") {
             continue;
         }
-        if let Err(error) = parse_condition(condition) {
+        if let Err(error) = parse(condition) {
             errors.push(format!(
                 "{} [body line {}] `{condition}`: {error}",
                 prompt.display(),

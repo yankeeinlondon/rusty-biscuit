@@ -147,7 +147,7 @@ fn hook_env_stays_absent_and_a_missing_member_reads_no_other_root() {
     assert_eq!(lookup.get("hook.command"), None);
     assert_eq!(lookup.get("hook.tool_response.command"), None);
     assert_eq!(
-        parse_and_evaluate("hook.status", ParseMode::Interpolation, &lookup),
+        parse_and_evaluate("hook.status", &lookup),
         Value::Null
     );
 
@@ -162,7 +162,6 @@ fn hook_leaf_reads_see_each_event_current_values() {
     meta.tool_response = Some(json!({"status": "first"}));
     let first = parse_and_evaluate(
         "hook.tool_response.status",
-        ParseMode::Interpolation,
         &EventMetaExpressionLookup::new(&meta),
     );
 
@@ -174,7 +173,6 @@ fn hook_leaf_reads_see_each_event_current_values() {
     assert_eq!(
         parse_and_evaluate(
             "hook.tool_response.status",
-            ParseMode::Interpolation,
             &lookup
         ),
         json!("second")

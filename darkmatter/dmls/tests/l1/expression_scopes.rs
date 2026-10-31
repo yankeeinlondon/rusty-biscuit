@@ -18,7 +18,7 @@ use common::{LspFixture, LspWorkspace};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::directive_targets::{TargetNullability, analyze_directive_targets};
 use darkmatter::markdown::compose::expression::{
-    DeclaredTypes, Polarity, ScopedType, Subject, TypeScope, parse, parse_condition, parse_spanned,
+    DeclaredTypes, Polarity, ScopedType, Subject, TypeScope, parse, parse_spanned,
     static_variable_reads,
 };
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
@@ -274,7 +274,7 @@ fn hover_inside_ternary_and_conjunction_shows_the_library_type() {
     let declared = DeclaredTypes::new(Some(&schema));
     let site = TypeScope::unguarded(&declared);
     let side = |guard: &str, polarity| {
-        site.assume(&parse_condition(guard).unwrap(), polarity)
+        site.assume(&parse(guard).unwrap(), polarity)
             .type_of(&subject("target"))
     };
 
@@ -674,7 +674,7 @@ fn expression_branch_rows(rows: &[&cases::BlockCase]) {
     for (index, row) in rows.iter().enumerate() {
         let guard = row.guards[0];
         let library = site
-            .assume(&parse_condition(guard).unwrap(), Polarity::True)
+            .assume(&parse(guard).unwrap(), Polarity::True)
             .type_of_expr(&parse(row.read).unwrap())
             .expect("a stable subject");
         for (prefix, operator) in [

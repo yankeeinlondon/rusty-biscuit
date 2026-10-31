@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
     AuthoredMode, BindingView, CtxLookup, EvaluationLookup, EvaluationSession, ExpressionError,
-    ParseMode, ResolutionContext, ResolvedBinding, ScopeId, evaluate_prepared,
+    ResolutionContext, ResolvedBinding, ScopeId, evaluate_prepared,
     FmPath, fm_namespace_path, is_reserved_namespace, prepare_value,
 };
 use darkmatter::markdown::MarkdownError;
@@ -187,7 +187,7 @@ pub fn evaluate_whole<L: EvaluationLookup>(
 ) -> Result<Value, CompositionError> {
     evaluate_authored(
         expression,
-        AuthoredMode::Expression(ParseMode::Interpolation),
+        AuthoredMode::Expression,
         lookup,
     )
 }

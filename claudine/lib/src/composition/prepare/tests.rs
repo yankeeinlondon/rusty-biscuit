@@ -556,8 +556,8 @@ fn lifecycle_message_referencing_frontmatter_is_deferred_raw() {
 }
 
 #[test]
-fn lifecycle_fallback_span_is_deferred_unresolved() {
-    // Fallback (`{{ x || 'y' }}`) is deferred like any other lifecycle
+fn lifecycle_logical_or_span_is_deferred_unresolved() {
+    // A logical OR (`{{ x || 'y' }}`) is deferred like any other lifecycle
     // span: a whole-value span is parsed, never resolved, at prepare and
     // resolves at event-time.
     let dir = TempDir::new().unwrap();
@@ -576,9 +576,9 @@ fn lifecycle_fallback_span_is_deferred_unresolved() {
         .expect("message action");
     assert_eq!(
         message,
-        Expr::Fallback {
-            primary: Box::new(Expr::Variable("missing_lifecycle_var".to_string())),
-            fallback: Box::new(Expr::StringLiteral("default".to_string())),
+        Expr::LogicalOr {
+            left: Box::new(Expr::Variable("missing_lifecycle_var".to_string())),
+            right: Box::new(Expr::StringLiteral("default".to_string())),
         }
     );
 }

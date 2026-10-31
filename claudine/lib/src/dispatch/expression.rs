@@ -24,7 +24,7 @@
 //!    object, read straight off the event so only that value is copied, and
 //!    is absent when missing, never falling through to the steps below.
 //! 1. `env.NAME` — resolves to the current process environment variable.
-//!    Fallback syntax (`env.NAME || "default"`) is handled by Darkmatter's
+//!    A default via `||` (`env.NAME || "default"`) is handled by Darkmatter's
 //!    parser, so this layer never inspects the `||` token itself.
 //! 2. `ctx.*` — left unresolved by [`EventMetaExpressionLookup`].
 //!    [`EventMetaConditionLookup`] short-circuits `ctx.*` to Darkmatter's

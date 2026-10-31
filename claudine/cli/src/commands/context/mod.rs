@@ -268,7 +268,6 @@ fn render_expressions_report() {
     expressions::render_expressions_comparison(&term);
     expressions::render_expressions_arithmetic(&term);
     expressions::render_expressions_variable_access(&term);
-    expressions::render_expressions_modes(&term);
     expressions::render_expressions_null_propagation(&term);
     expressions::render_expressions_functions(&term);
 

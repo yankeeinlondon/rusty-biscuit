@@ -15,7 +15,6 @@
 //! scope variables are the intended replacement; until then this is the only
 //! place DMLS knows Claudine's lifecycle keys.
 
-use darkmatter::markdown::compose::expression::ParseMode;
 use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 use serde::{Deserialize, Serialize};
 
@@ -164,7 +163,7 @@ pub(crate) fn whole_value_diagnostics(
         {
             continue;
         }
-        let lints = interpolation.nested_span_lints(ctx.text, ParseMode::Interpolation);
+        let lints = interpolation.nested_span_lints(ctx.text);
         push_first(ctx, lints, out);
     }
 }
@@ -177,7 +176,7 @@ pub(crate) fn predicate_diagnostic(
     out: &mut Vec<Diagnostic>,
 ) {
     let lints =
-        value.projection().nested_span_lints(ctx.text, value.expression(), 0, ParseMode::Condition);
+        value.projection().nested_span_lints(ctx.text, value.expression(), 0);
     push_first(ctx, lints, out);
 }
 

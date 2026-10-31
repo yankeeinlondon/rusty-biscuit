@@ -609,7 +609,7 @@ fn incident_rewrite_is_the_darkmatter_lint_suggestion_verbatim() {
         for diagnostic in &found {
             let payload = NestedSpanRewrite::from_data(diagnostic.data.as_ref().unwrap()).unwrap();
             let inner = &ctx.text[ctx.source_map.lsp_range_to_byte(payload.range).unwrap()];
-            let lints = lint_expression(inner, ParseMode::Interpolation);
+            let lints = lint_expression(inner);
             assert!(!lints.is_empty(), "{inner}");
             assert_eq!(Some(payload.new_text.as_str()), lints[0].suggestion.as_deref());
         }

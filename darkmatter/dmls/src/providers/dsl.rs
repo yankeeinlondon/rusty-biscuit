@@ -1085,7 +1085,7 @@ fn expression_diagnostics(
                 continue;
             };
             // A malformed condition is composition's error to report.
-            let Ok(expr) = expressions::parse_condition(&value.value) else {
+            let Ok(expr) = expressions::parse(&value.value) else {
                 continue;
             };
             // The value span includes its quotes. Escapes make the authored

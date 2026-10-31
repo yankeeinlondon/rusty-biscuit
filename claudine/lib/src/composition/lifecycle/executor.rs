@@ -286,7 +286,7 @@ impl StackExecutionContext<'_> {
     /// The parse or evaluation failure. A guard that raises is never read as
     /// false.
     pub fn evaluate_task_guard(&self, condition: &str) -> Result<bool, TaskGuardFailure> {
-        let expr = darkmatter::markdown::compose::expression::parse_condition(condition)?;
+        let expr = darkmatter::markdown::compose::expression::parse(condition)?;
         self.run(|executor| executor.evaluate_guard(&expr)).map_err(Into::into)
     }
 

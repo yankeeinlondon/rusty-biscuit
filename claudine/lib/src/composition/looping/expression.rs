@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
-    FmPath, fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
+    FmPath, fm_namespace_path, is_reserved_namespace, is_truthy, parse,
 };
 use serde_json::{Map, Value};
 
@@ -303,7 +303,7 @@ pub fn evaluate_condition(
         LoopCondition::Until(source) => ("until", source),
     };
 
-    let parsed = parse_condition(source).map_err(|error| {
+    let parsed = parse(source).map_err(|error| {
         CompositionError::LoopExpressionInvalid {
             kind: kind.to_string(),
             condition: source.clone(),

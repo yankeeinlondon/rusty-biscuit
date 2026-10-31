@@ -705,3 +705,35 @@ fn absence_handling_names_no_function() {
     }
     assert!(production.contains("handles_absence_at"), "the classifier asks the registration");
 }
+
+// ── Logical OR in a condition (one absence rule on every surface) ───────────
+
+/// A condition's `||` handles its left operand's absence exactly as an
+/// interpolation's does: the left root is silent, while the right operand is
+/// an ordinary read that warns once it is evaluated.
+#[test]
+fn a_page_block_gate_logical_or_handles_only_its_left_operand() {
+    let block = |gate: &str| format!("---\ntitle: T\n---\n::block when=\"{gate}\"\nshown\n::end-block\n");
+
+    let (content, report) = compose_doc(&block("spce || plan"));
+    assert!(!content.contains("shown"), "{content}");
+    assert_eq!(warned_roots(&report), ["plan"], "{:?}", report.warnings);
+    assert_eq!(unknown_identifiers(&report)[0].line_number, Some(4));
+
+    let (content, report) = compose_doc(&block("plan || spce"));
+    assert!(!content.contains("shown"), "{content}");
+    assert_eq!(warned_roots(&report), ["spce"], "{:?}", report.warnings);
+}
+
+/// Schema-declared roots are known in either operand position, so neither
+/// gate raises an advisory.
+#[test]
+fn a_page_block_gate_logical_or_over_declared_roots_is_silent() {
+    for gate in ["spce || plan", "plan || spce"] {
+        let (content, report) = compose_doc(&format!(
+            "---\n$schema:\n  spce: string\n  plan: string\n---\n::block when=\"{gate}\"\nshown\n::end-block\n"
+        ));
+        assert!(!content.contains("shown"), "{gate}: {content}");
+        assert!(unknown_identifiers(&report).is_empty(), "{gate}: {:?}", report.warnings);
+    }
+}

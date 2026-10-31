@@ -14,10 +14,10 @@ use darkmatter::markdown::compose::context::{
 use darkmatter::markdown::compose::expression::{
     Availability, BinaryOp, BindingError, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
     ParseError,
-    ParseMode, SpannedExpr, SpannedExprKind, expression_function_descriptors,
+    SpannedExpr, SpannedExprKind, expression_function_descriptors,
     function_descriptors as catalog_function_overloads,
     BindingView, ReservedRootDescriptor, RootMembers, ScopedType, Shape, TypeScope, branch_scope,
-    identifier_prefix_start, is_whole_value_span, lint_expression, parse_condition_spanned,
+    identifier_prefix_start, is_whole_value_span, lint_expression,
     parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
@@ -260,11 +260,10 @@ impl ScalarProjection {
         document: &str,
         text: &str,
         offset: usize,
-        mode: ParseMode,
     ) -> Vec<ProjectedNestedSpan> {
         let project =
             |range: std::ops::Range<usize>| self.project(offset + range.start..offset + range.end);
-        lint_expression(text, mode)
+        lint_expression(text)
             .into_iter()
             .map(|lint| {
                 let ExpressionLintKind::NestedSpanInStringLiteral { literal, nested } = lint.kind;
@@ -352,8 +351,8 @@ impl FrontmatterInterpolation<'_> {
 
     /// Nested `{{ … }}` spans inside this expression's quoted string literals,
     /// through Darkmatter's shared lint, projected to authored bytes.
-    pub fn nested_span_lints(&self, document: &str, mode: ParseMode) -> Vec<ProjectedNestedSpan> {
-        self.projection.nested_span_lints(document, &self.text, self.inner.start, mode)
+    pub fn nested_span_lints(&self, document: &str) -> Vec<ProjectedNestedSpan> {
+        self.projection.nested_span_lints(document, &self.text, self.inner.start)
     }
 }
 
@@ -428,11 +427,11 @@ pub fn scalar_interpolations<'a>(
         .collect()
 }
 
-/// Parses a **value-dialect** expression, span-carrying. This is the body
-/// `{{ }}` interpolation parser: it accepts `&&` (logical AND, identical to the
-/// condition dialect) and `||` (as fallback / first-truthy, whereas the
-/// condition dialect reads `||` as logical OR) — matching `md compose`'s
-/// interpolation grammar.
+/// Parses an expression, span-carrying, with the one grammar every surface
+/// shares: `{{ }}` interpolation, `::block when=`, lifecycle conditions, and
+/// Expression-typed frontmatter values (the `expression` schema format
+/// validates with the same parser, so a value the schema accepts is never
+/// diagnosed as malformed here).
 ///
 /// ## Errors
 ///
@@ -440,20 +439,6 @@ pub fn scalar_interpolations<'a>(
 /// expression text) exactly as the compose parser would.
 pub fn parse(expression: &str) -> Result<SpannedExpr, ParseError> {
     parse_spanned(expression)
-}
-
-/// Parses a **condition-dialect** expression, span-carrying. This is the parse
-/// authority for an Expression-typed frontmatter value: it accepts `&&`/`||`
-/// (lowered to synthetic `and`/`or` calls), matching the `expression` schema
-/// format's `parse_condition` validation, so a value the schema accepts is never
-/// diagnosed as malformed here. Body `{{ }}` interpolation stays on [`parse`].
-///
-/// ## Errors
-///
-/// Returns the [`ParseError`] (with a byte-offset `position` into the
-/// expression text) exactly as the compose condition parser would.
-pub fn parse_condition(expression: &str) -> Result<SpannedExpr, ParseError> {
-    parse_condition_spanned(expression)
 }
 
 /// The leading identifier of an expression — a bare `Variable` name, or the
@@ -499,7 +484,7 @@ pub fn function_call_at<'a>(
         | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
         SpannedExprKind::Index { base, index } => vec![base, index],
         SpannedExprKind::MemberAccess { base, .. } => vec![base],
-        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::LogicalOr { left, right } => vec![left, right],
         SpannedExprKind::Ternary {
             condition,
             then_branch,
@@ -556,7 +541,7 @@ pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> 
         | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
         SpannedExprKind::Index { base, index } => vec![base, index],
         SpannedExprKind::MemberAccess { base, .. } => vec![base],
-        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::LogicalOr { left, right } => vec![left, right],
         SpannedExprKind::Ternary {
             condition,
             then_branch,
@@ -1153,16 +1138,14 @@ pub fn event_global_candidates(partial: &str, event: &StackEvent) -> Vec<ExprCom
     items
 }
 
-/// The Markdown body of a **value-dialect** expression hover — the body `{{ }}`
-/// interpolation hover. `expr_offset` is the cursor's byte offset into
+/// The Markdown body of an expression hover, for body `{{ }}` interpolation and
+/// Expression-typed frontmatter values alike. `expr_offset` is the cursor's byte offset into
 /// `expression`; `site` is the type scope enclosing the whole expression (its
 /// body `::block` guards, or unguarded). Pure so the D2/D5 classification is
 /// unit-testable.
 ///
-/// The single authority for value-dialect expression hover markdown. See
-/// [`hover_markdown_from`] for the shared classification rule, and
-/// [`hover_markdown_condition`] for the condition-dialect companion used by
-/// Expression-typed frontmatter values.
+/// The single authority for expression hover markdown. See
+/// [`hover_markdown_from`] for the shared classification rule.
 pub fn hover_markdown(
     expression: &str,
     expr_offset: usize,
@@ -1172,29 +1155,6 @@ pub fn hover_markdown(
 ) -> String {
     hover_markdown_from(
         parse(expression),
-        expression,
-        expr_offset,
-        site,
-        frontmatter_scalar,
-        schema_property,
-        None,
-    )
-}
-
-/// The Markdown body of a **condition-dialect** expression hover — the
-/// Expression-typed frontmatter value hover. Identical formatting to
-/// [`hover_markdown`], but parses with [`parse_condition`] so `&&`/`||`
-/// expressions (which the `expression` schema format accepts) receive the same
-/// intelligence as any other expression instead of an unparsed fallback.
-pub fn hover_markdown_condition(
-    expression: &str,
-    expr_offset: usize,
-    site: &TypeScope<'_>,
-    frontmatter_scalar: impl Fn(&str) -> Option<String>,
-    schema_property: impl Fn(&str) -> Option<String>,
-) -> String {
-    hover_markdown_from(
-        parse_condition(expression),
         expression,
         expr_offset,
         site,
@@ -1218,13 +1178,11 @@ pub fn hover_markdown_parsed(
     hover_markdown_from(Ok(parsed), expression, expr_offset, site, frontmatter_scalar, schema_property, None)
 }
 
-/// The expression hover for an expression inside `event`'s lifecycle stack,
-/// parsed with `parser`: identical to [`hover_markdown`] and
-/// [`hover_markdown_condition`], except that a root the event's view declares
+/// The expression hover for an expression inside `event`'s lifecycle stack:
+/// identical to [`hover_markdown`], except that a root the event's view declares
 /// ([`event_global_hover`]) shadows a same-named frontmatter key, as it does
 /// when the stack runs.
 pub fn hover_markdown_in_event(
-    parser: fn(&str) -> Result<SpannedExpr, ParseError>,
     expression: &str,
     expr_offset: usize,
     site: &TypeScope<'_>,
@@ -1233,7 +1191,7 @@ pub fn hover_markdown_in_event(
     event: &StackEvent,
 ) -> String {
     hover_markdown_from(
-        parser(expression),
+        parse(expression),
         expression,
         expr_offset,
         site,
@@ -1243,8 +1201,8 @@ pub fn hover_markdown_in_event(
     )
 }
 
-/// The shared hover-markdown formatter over an already-parsed expression, so the
-/// value- and condition-dialect entry points render identically once parsed.
+/// The shared hover-markdown formatter over an already-parsed expression, so
+/// every entry point renders identically once parsed.
 /// `expr_offset` is the cursor's byte offset into `expression`.
 ///
 /// The D2 classification rule: only an explicitly `ctx.`-qualified root receives
@@ -1561,7 +1519,7 @@ pub enum UndeclaredPropertyFinding {
 
 /// Every undeclared-property finding for one parsed expression.
 ///
-/// `reparse` is the dialect `expr` was parsed with; a quick-fix is offered
+/// `reparse` is the parser `expr` came from; a quick-fix is offered
 /// only when the edited expression reparses with the replacement as a single
 /// reference to the key. `is_undeclared` classifies a root; `is_key` answers
 /// whether a top-level frontmatter key is present or declared.
@@ -1718,7 +1676,7 @@ fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
         | SpannedExprKind::Comparison { left, right, .. } => vec![left, right],
         SpannedExprKind::Index { base, index } => vec![base, index],
         SpannedExprKind::MemberAccess { base, .. } => vec![base],
-        SpannedExprKind::Fallback { primary, fallback } => vec![primary, fallback],
+        SpannedExprKind::LogicalOr { left, right } => vec![left, right],
         SpannedExprKind::Ternary {
             condition,
             then_branch,
@@ -1783,7 +1741,7 @@ mod tests {
         TypeScope::unguarded(&UNTYPED)
     }
 
-    /// Findings for a value-dialect `source` where `keys` are the document's
+    /// Findings for `source` where `keys` are the document's
     /// frontmatter keys.
     fn findings_for(source: &str, keys: &[&str], forbidden_quote: Option<char>) -> Vec<UndeclaredPropertyFinding> {
         let expr = parse(source).unwrap();
@@ -2626,37 +2584,25 @@ mod tests {
     }
 
     #[test]
-    fn condition_dialect_lowers_logical_or_where_value_dialect_treats_it_as_fallback() {
-        // Both dialects accept the `expression`-format corpus (`&&`/`||`), so
-        // neither the spec example nor a `||` value is malformed. The dialects
-        // differ in meaning: the value dialect (body `{{ }}`) reads `||` as
-        // fallback, while the condition dialect (Expression-typed frontmatter
-        // values, matching the schema format's `parse_condition`) lowers it to a
-        // logical `or(...)`.
+    fn one_grammar_keeps_logical_or_and_lowers_logical_and() {
+        // Every surface parses `||` to one `LogicalOr` node, rendered as
+        // authored; `&&` still lowers to a synthetic `and(...)` call.
         assert_eq!(parse("a && b").unwrap().erase().to_string(), "and(a, b)");
-        assert_eq!(parse_condition("a && b").unwrap().erase().to_string(), "and(a, b)");
         assert_eq!(parse("a || b").unwrap().erase().to_string(), "a || b");
-        assert_eq!(parse_condition("a || b").unwrap().erase().to_string(), "or(a, b)");
-        // The spec's own example parses cleanly in both dialects.
         assert!(parse(r#"is_agent() && os == "macos""#).is_ok());
-        assert!(parse_condition(r#"is_agent() && os == "macos""#).is_ok());
     }
 
     #[test]
-    fn condition_hover_uses_condition_grammar_body_hover_stays_value_grammar() {
+    fn hover_shows_logical_or_as_authored() {
         let no_fm = |_: &str| None;
         let no_schema = |_: &str| None;
-        // Body (value dialect) hover renders `||` as fallback — the behavior this
-        // change must preserve.
-        let body = hover_markdown("a || b", 0, &untyped(), no_fm, no_schema);
-        assert!(body.contains("`a || b`"), "{body}");
-        // Frontmatter (condition dialect) hover lowers `||` to a logical `or(...)`.
-        let cond = hover_markdown_condition("a || b", 0, &untyped(), no_fm, no_schema);
-        assert!(cond.contains("`or(a, b)`"), "{cond}");
-        // A function-call name inside a condition expression still enriches.
+        let hover = hover_markdown("a || b", 0, &untyped(), no_fm, no_schema);
+        assert!(hover.contains("`a || b`"), "{hover}");
+        assert!(!hover.contains("or(a, b)"), "{hover}");
+        // A function-call name inside a `||` expression still enriches.
         let source = "is_empty(title) || is_string(title)";
         let fn_offset = source.find("is_empty").unwrap() + 2;
-        let enriched = hover_markdown_condition(source, fn_offset, &untyped(), no_fm, no_schema);
+        let enriched = hover_markdown(source, fn_offset, &untyped(), no_fm, no_schema);
         let is_empty = function_descriptor("is_empty").expect("`is_empty` is a known function");
         assert!(enriched.contains(&format_function_block(is_empty)), "{enriched}");
     }
@@ -2719,18 +2665,14 @@ mod tests {
         }
 
         #[test]
-        fn hover_resolves_a_kebab_name_at_every_offset_in_both_dialects() {
+        fn hover_resolves_a_kebab_name_at_every_offset_beside_logical_or() {
             let expression = "spec-name || foo";
             for offset in 0..="spec-name".len() {
-                for markdown in [
-                    hover_markdown(expression, offset, &untyped(), kebab_scalar, |_| None),
-                    hover_markdown_condition(expression, offset, &untyped(), kebab_scalar, |_| None),
-                ] {
-                    assert!(
-                        markdown.contains("from frontmatter `spec-name`"),
-                        "offset {offset}: {markdown}"
-                    );
-                }
+                let markdown = hover_markdown(expression, offset, &untyped(), kebab_scalar, |_| None);
+                assert!(
+                    markdown.contains("from frontmatter `spec-name`"),
+                    "offset {offset}: {markdown}"
+                );
             }
         }
 

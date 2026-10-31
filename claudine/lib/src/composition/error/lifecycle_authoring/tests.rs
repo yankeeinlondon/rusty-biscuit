@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use darkmatter::lifecycle::error::ActionExprError;
-use darkmatter::markdown::compose::expression::parse_condition;
+use darkmatter::markdown::compose::expression::parse;
 
 use super::*;
 
@@ -11,7 +11,7 @@ use super::*;
 fn every_variant() -> Vec<(LifecycleError, fn(&CompositionError) -> bool)> {
     let source_path = PathBuf::from("docs/prompt.md");
     let path = || source_path.clone();
-    let parse_error = || parse_condition("(").expect_err("an unbalanced condition does not parse");
+    let parse_error = || parse("(").expect_err("an unbalanced condition does not parse");
     let s = |text: &str| text.to_string();
     vec![
         (
@@ -312,7 +312,7 @@ fn a_typed_cause_survives_the_conversion() {
         source_path: PathBuf::from("doc.md"),
         property: "start[0].when".to_string(),
         message: "`when` is not a valid expression".to_string(),
-        source: parse_condition("(").expect_err("does not parse"),
+        source: parse("(").expect_err("does not parse"),
     };
     let converted = CompositionError::from(error);
     let source = std::error::Error::source(&converted).expect("a source");
