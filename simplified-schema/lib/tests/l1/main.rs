@@ -12,6 +12,7 @@ mod located_schema_errors;
 mod path_lookup_guard;
 mod resolution_unavailable;
 mod root_union_assertions;
+mod schema_file_selection;
 mod schema_files;
 mod schema_object;
 mod shipped_corpus;

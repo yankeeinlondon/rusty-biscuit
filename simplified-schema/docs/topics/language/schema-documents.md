@@ -40,6 +40,25 @@ trigger discovery is off with `--disable schema-triggers`, or `md` is checking a
 document outside a repository), a bare name resolves like any other bare path.
 No ambient current working directory is read.
 
+Every consumer selects the file through one function,
+`simplified_schema::resolve::select_schema_file`, so validation and an
+editor's links agree on the file. Its `SchemaFileSelection` reports the
+outcome, every location probed in order, and, for a clean miss, the path the
+file would be created at: the first schema root for a bare name, else the
+reference's first candidate (beside the document for `./x.yaml`). A
+malformed, remote, or unresolvable reference offers no path.
+
+```rust
+use simplified_schema::resolve::{select_schema_file, SelectionOutcome};
+
+let selection = select_schema_file("claudine.yaml", &document_dir, &roots, &context);
+match selection.outcome {
+    SelectionOutcome::Found(path) => println!("uses {}", path.display()),
+    SelectionOutcome::Missing { creation: Some(path), .. } => println!("create {}", path.display()),
+    _ => {}
+}
+```
+
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
 
 ## Standalone Schema Documents

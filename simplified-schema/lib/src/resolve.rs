@@ -35,11 +35,11 @@
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
-use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
+use biscuit_file::FileResolutionContext;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
@@ -749,71 +749,10 @@ fn join_file_arm_definitions(
     Ok(false)
 }
 
-// ── Bare-name schema-root resolution (Phase 3) ──────────────────────────────
+// ── Schema-file selection ───────────────────────────────────────────────────
 //
-// A schema reference with no path component (`$schema: claudine.yaml`,
-// `Name@claudine.yaml`, `example(claudine.yaml)`) resolves against the
-// schema-root list, nearest first. References with a path separator, `./`
-// prefix, or magic-path prefix are untouched and resolve exactly as before.
-// `FileReference` remains the authority for turning the selected reference
-// into a filesystem path; bare-name selection only chooses *which* root to
-// resolve from.
-
-/// Returns `true` when a parsed reference is a non-recursive implicit-relative
-/// name with exactly one portable path component.
-fn is_bare_name(file_ref: &FileReference) -> bool {
-    let class = file_ref.class();
-    let portable = file_ref.raw().replace('\\', "/");
-    let mut components = Path::new(&portable).components();
-    let is_single_component =
-        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
-    class.kind == FileReferenceKind::ImplicitRelative
-        && !class.recursive
-        && is_single_component
-}
-
-/// Tries a bare name against each schema root, nearest first. Returns the
-/// resolved path of the first root that contains a file matching `name`, or
-/// `None` when no root has it. Each root's location is added to `searched` as
-/// it is tried.
-///
-/// Each root is tried with the name spelled as an explicit `./name`, resolved
-/// in the request context derived onto that root. An explicit relative
-/// reference has exactly one candidate, the root's own entry, so the loop's
-/// advertised nearest-first ordering decides the winner. The derivation keeps
-/// the request's home and environment and reads no ambient state; it crosses
-/// the trust boundary because a schema root (configuration, `~`) may lie
-/// outside the request's repository.
-fn try_bare_name_in_roots(
-    file_ref: &FileReference,
-    schema_roots: &[PathBuf],
-    request_context: &FileResolutionContext,
-    searched: &mut BTreeSet<PathBuf>,
-) -> Result<Option<PathBuf>, SchemaError> {
-    let unresolved = |source| SchemaError::Unresolved {
-        reference: file_ref.raw().to_string(),
-        source,
-    };
-    let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
-    #[cfg(not(feature = "file"))]
-    {
-        let _ = (explicit, schema_roots, request_context, searched);
-        Err(unresolved(biscuit_file::FileReferenceError::ResolutionUnavailable {
-            reference: file_ref.raw().to_string(),
-        }))
-    }
-    #[cfg(feature = "file")]
-    {
-        for root in schema_roots {
-            let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
-            observed::probed(searched, detailed.probed_paths());
-            if let Some(path) = detailed.into_convenience().map_err(unresolved)? {
-                return Ok(Some(path));
-            }
-        }
-        Ok(None)
-    }
-}
+// `$schema` values, named-type imports, and `example(...)` constraints all
+// select their file through [`select_schema_file`] (`resolve/select.rs`).
 
 // ── `$schema` file-reference delegation guard ───────────────────────────────
 
@@ -894,70 +833,9 @@ pub(crate) fn resolve_reference_in_context(
     stack: &mut ReferenceStack,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let trimmed = reference.trim();
-    let file_ref = FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-        reference: reference.to_string(),
-        source,
-    })?;
-    if file_ref.class().kind == FileReferenceKind::Url {
-        return Err(SchemaError::RemoteUnsupported {
-            reference: reference.into(),
-        });
-    }
-
-    let mut searched = BTreeSet::new();
-    // Bare-name resolution against schema roots (Phase 3). When schema roots
-    // are provided and the reference has no path component, resolve against
-    // the roots nearest-first instead of the document directory.
-    if !schema_roots.is_empty() && is_bare_name(&file_ref) {
-        if let Some(path) =
-            try_bare_name_in_roots(&file_ref, schema_roots, request_context, &mut searched)?
-        {
-            let mut resolved = load_guarded_in_context(
-                &path,
-                schema_roots,
-                request_context,
-                stack,
-                shipped,
-            )?;
-            attribute_origin(&mut resolved, &path);
-            resolved.referenced_files = accumulate_referenced_file(
-                resolved.referenced_files,
-                canonical_path(&path),
-            );
-            accumulate_searched(&mut resolved, searched);
-            return Ok(resolved);
-        }
-        // Bare name not found in any schema root. Check if a document-sibling
-        // file of that name exists — if so, suggest `./name` (the author
-        // likely intended a relative reference, not a schema-root lookup).
-        let sibling = base_dir.join(trimmed);
-        if sibling.is_file() {
-            return Err(SchemaError::BareNameSiblingExists {
-                reference: trimmed.to_string(),
-                suggestion: format!("./{trimmed}"),
-            });
-        }
-        // No sibling either — the bare name simply does not resolve.
-        return Err(SchemaError::NoMatch {
-            reference: trimmed.to_string(),
-            bare_name: true,
-        });
-    }
-
-    // `$schema` references resolve through the shared document-backed context:
-    // explicit `./`/`../` from the document directory only, implicit path
-    // references from the document directory first, then the repository root — the same
-    // order the `file`-typed value references use. No ambient CWD is read.
-    let path = resolve_file_reference_in_context(&file_ref, base_dir, request_context, &mut searched)
-        .map_err(|source| SchemaError::Unresolved {
-            reference: trimmed.to_string(),
-            source,
-        })?
-        .ok_or_else(|| SchemaError::NoMatch {
-            reference: trimmed.to_string(),
-            bare_name: false,
-        })?;
+    let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
+    let searched: BTreeSet<PathBuf> = selection.attempted.iter().cloned().collect();
+    let path = selection.into_result()?;
 
     let mut resolved = load_guarded_in_context(
         &path,
@@ -1055,16 +933,13 @@ pub mod observed {
         (result, observed)
     }
 
-    /// Adds `probed` to `searched`, and records it.
-    #[cfg(feature = "file")]
-    pub(super) fn probed(searched: &mut BTreeSet<PathBuf>, probed: impl Iterator<Item = PathBuf>) {
-        let probed: Vec<PathBuf> = probed.collect();
+    /// Records locations a schema-file selection probed.
+    pub(super) fn record_probes(probed: &[PathBuf]) {
         FRAMES.with_borrow_mut(|frames| {
             for frame in frames.iter_mut() {
                 frame.searched.extend(probed.iter().cloned());
             }
         });
-        searched.extend(probed);
     }
 
     /// Records a file read successfully.
@@ -1078,29 +953,6 @@ pub mod observed {
                 frame.read.insert(normalized.clone());
             }
         });
-    }
-}
-
-/// Resolves `file_ref` from `base_dir`, adding every location it probed to
-/// `searched`. This and [`try_bare_name_in_roots`] are the only places schema
-/// resolution probes a file reference, so `searched` sees every candidate.
-fn resolve_file_reference_in_context(
-    file_ref: &FileReference,
-    base_dir: &Path,
-    request_context: &biscuit_file::FileResolutionContext,
-    searched: &mut BTreeSet<PathBuf>,
-) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
-    #[cfg(feature = "file")]
-    {
-        let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
-        observed::probed(searched, detailed.probed_paths());
-        detailed.into_convenience()
-    }
-    // Without the `file` feature nothing is probed (see `file_context`).
-    #[cfg(not(feature = "file"))]
-    {
-        let _ = (base_dir, request_context, searched);
-        Err(biscuit_file::FileReferenceError::ResolutionUnavailable { reference: file_ref.raw().to_string() })
     }
 }
 
@@ -2755,9 +2607,8 @@ fn shipped_named_types(shipped: ShippedSources, path: &str) -> Result<Arc<NamedT
 }
 
 /// The file an explicit named-type reference (`Name@reference`) selects,
-/// resolved exactly as the resolver selects it: schema roots nearest-first for
-/// a bare file name when roots are configured, else through `request_context`
-/// from `base_dir` (the directory of the schema that wrote the reference).
+/// through [`select_schema_file`] from `base_dir` (the directory of the schema
+/// that wrote the reference), adding every probed location to `searched`.
 fn named_type_file_path(
     reference: &str,
     base_dir: &Path,
@@ -2765,58 +2616,9 @@ fn named_type_file_path(
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, SchemaError> {
-    let trimmed = reference.trim();
-    let file_ref =
-        FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-            reference: reference.to_string(),
-            source,
-        })?;
-    if file_ref.class().kind == FileReferenceKind::Url {
-        return Err(SchemaError::RemoteUnsupported {
-            reference: reference.to_string(),
-        });
-    }
-
-    // Bare-name resolution against schema roots (Phase 3).
-    let path = if !schema_roots.is_empty() && is_bare_name(&file_ref) {
-        if let Some(p) = try_bare_name_in_roots(
-            &file_ref,
-            schema_roots,
-            request_context,
-            searched,
-        )? {
-            p
-        } else {
-            // Check sibling for pointed error.
-            let sibling = base_dir.join(trimmed);
-            if sibling.is_file() {
-                return Err(SchemaError::BareNameSiblingExists {
-                    reference: trimmed.to_string(),
-                    suggestion: format!("./{trimmed}"),
-                });
-            }
-            return Err(SchemaError::NoMatch {
-                reference: reference.to_string(),
-                bare_name: true,
-            });
-        }
-    } else {
-        resolve_file_reference_in_context(
-            &file_ref,
-            base_dir,
-            request_context,
-            searched,
-        )
-            .map_err(|source| SchemaError::Unresolved {
-                reference: trimmed.to_string(),
-                source,
-            })?
-            .ok_or_else(|| SchemaError::NoMatch {
-                reference: trimmed.to_string(),
-                bare_name: false,
-            })?
-    };
-    Ok(path)
+    let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
+    searched.extend(selection.attempted.iter().cloned());
+    selection.into_result()
 }
 
 /// Rewrites every `example(...)` reference in `atom`, including those of
@@ -4029,57 +3831,15 @@ fn resolve_example_path(
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, SchemaError> {
-    let trimmed = reference.trim();
-    Ok(if trimmed == "this" {
-        this_file
-            .map(Path::to_path_buf)
-            .ok_or_else(|| SchemaError::InvalidExample {
-                reference: reference.to_string(),
-                message: "`this` example reference has no target (the schema is inline, not a file)"
-                    .into(),
-            })?
-    } else {
-        let file_ref =
-            FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
-                reference: reference.to_string(),
-                source,
-            })?;
-        if file_ref.class().kind == FileReferenceKind::Url {
-            return Err(SchemaError::RemoteUnsupported {
-                reference: reference.to_string(),
-            });
-        }
-        // Bare-name resolution against schema roots (Phase 3).
-        if !schema_roots.is_empty() && is_bare_name(&file_ref) {
-            if let Some(p) =
-                try_bare_name_in_roots(&file_ref, schema_roots, request_context, searched)?
-            {
-                p
-            } else {
-                let sibling = base_dir.join(trimmed);
-                if sibling.is_file() {
-                    return Err(SchemaError::BareNameSiblingExists {
-                        reference: trimmed.to_string(),
-                        suggestion: format!("./{trimmed}"),
-                    });
-                }
-                return Err(SchemaError::NoMatch {
-                    reference: reference.to_string(),
-                    bare_name: true,
-                });
-            }
-        } else {
-            resolve_file_reference_in_context(&file_ref, base_dir, request_context, searched)
-                .map_err(|source| SchemaError::Unresolved {
-                    reference: trimmed.to_string(),
-                    source,
-                })?
-                .ok_or_else(|| SchemaError::NoMatch {
-                    reference: trimmed.to_string(),
-                    bare_name: false,
-                })?
-        }
-    })
+    if reference.trim() == "this" {
+        return this_file.map(Path::to_path_buf).ok_or_else(|| SchemaError::InvalidExample {
+            reference: reference.to_string(),
+            message: "`this` example reference has no target (the schema is inline, not a file)".into(),
+        });
+    }
+    let selection = select_schema_file(reference, base_dir, schema_roots, request_context);
+    searched.extend(selection.attempted.iter().cloned());
+    selection.into_result()
 }
 
 /// Resolves one `example(...)` reference to a validated example object.
@@ -5685,6 +5445,8 @@ mod schema_plus_phase1 {
 #[cfg(test)]
 mod bare_name_phase3 {
     use super::*;
+    use super::select::is_bare_name;
+    use biscuit_file::FileReference;
     use std::path::PathBuf;
 
     #[cfg(feature = "file")]
@@ -6761,7 +6523,10 @@ mod reserved_namespace {
 mod searched_tests;
 
 mod graph;
+mod select;
 mod recursive;
+
+pub use select::{SchemaFileSelection, SelectionFailure, SelectionOutcome, select_schema_file};
 
 #[cfg(test)]
 mod embedded_recursion {
