@@ -127,7 +127,7 @@ its `data`, so a client never has to parse the message:
 |---|---|
 | `dm.links.broken_path` | `NoMatch`, or why the reference could not be planned (for example `MissingContext` for `&` outside a repository) |
 | `dm.transclusion.broken_path` | The class from resolving the target |
-| `dm.schema.invalid_file_reference` | The class from validating the value (`InvalidReference` for bad syntax, `NoMatch` for a missing file) |
+| `dm.schema.invalid_file_reference` | The class from validating the value (`InvalidReference` for bad syntax, `MissingContext` or `Io` when it could not be checked). A well-formed reference to a missing file is not reported in the editor, eager or not; `md` still fails on a missing `file(eager)` target |
 | `dm.context.build_failure` | The build failure's class |
 
 The classes are biscuit-file's `ResolutionFailure` variants: `InvalidReference`,

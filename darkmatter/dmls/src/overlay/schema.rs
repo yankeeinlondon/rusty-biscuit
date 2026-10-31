@@ -280,8 +280,9 @@ pub fn frontmatter_authoring(
 /// that is *already known* to be unparseable, on every keystroke. The
 /// recognizer is therefore lexical — one linear scan, no backtracking — and
 /// tolerant of truncated or otherwise broken input. It still refuses ordinary
-/// YAML and raw JSON Schema, which carry top-level keys beyond `$schema`
-/// and an optional `types` table and never carry `kind: schema`.
+/// YAML and raw JSON Schema, which carry top-level keys beyond `$schema`,
+/// an optional `types` table, and an optional `description`, and never carry
+/// `kind: schema`.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
     let top_level = match flow_mapping_start(text) {
         Some(start) => flow_top_level_entries(&text[start + 1..]),
@@ -293,9 +294,10 @@ pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope>
         return Some(StandaloneSchemaEnvelope::Tagged);
     }
     (top_level.iter().any(|(key, _)| key == "$schema")
-        && (top_level.len() == 1
-            || (top_level.len() == 2 && top_level.iter().any(|(key, _)| key == "types"))))
-        .then_some(StandaloneSchemaEnvelope::Pure)
+        && top_level
+            .iter()
+            .all(|(key, _)| matches!(key.as_str(), "$schema" | "types" | "description")))
+    .then_some(StandaloneSchemaEnvelope::Pure)
 }
 
 /// Top-level implicit or explicit pairs of a block mapping.
@@ -1310,6 +1312,10 @@ mod tests {
             "---\n{ \"$schema\": { \"title\": \"str\" } }\n",
             // Truncated mid-edit: the closing braces are not typed yet.
             "{\"$schema\": {\"title\": \"str",
+            // An informal envelope may carry a `description` beside `types`.
+            "description: Feature reviews\n$schema:\n  title: string\n",
+            "description: Reviews\ntypes:\n  Id: string\n$schema:\n  id: Id@this\n",
+            "{description: Reviews, $schema: {title: string}}",
         ] {
             assert_eq!(
                 standalone_envelope_claim(pure),
@@ -1322,6 +1328,7 @@ mod tests {
             "kind: schema\ntypes:\n  title: string\n",
             "? kind\n: schema\n? types\n:\n  title: string\n",
             "{kind: schema, types: {title: string}}",
+            "kind: schema\ndescription: Reviews\n$schema:\n  title: string\n",
             "{\"types\": {\"title\": \"str\"}, \"kind\": \"schema\"}",
         ] {
             assert_eq!(
@@ -1339,6 +1346,9 @@ mod tests {
             "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\"}",
             "{kind: config, types: {title: string}}",
             "[1, 2, 3]\n",
+            // A key outside `$schema`, `types`, and `description` declines.
+            "description: Reviews\ntitle: x\n$schema:\n  title: string\n",
+            "kind: config\ndescription: Reviews\n$schema:\n  title: string\n",
         ] {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
         }
@@ -1442,10 +1452,10 @@ mod tests {
 
         // Part 2 — a `-"` mid-plain-scalar on a *top-level* line must not open a
         // cross-line quote that swallows the deciding `kind` key. The extra
-        // top-level `description` key makes the parser reject the recognized
+        // top-level `notes` key makes the parser reject the recognized
         // envelope, so `Some(Tagged)` still agrees with it.
         let top_level_poison =
-            concat!("description: foo-\"bar\n", "kind: schema\n", "types:\n", "  x: string\n");
+            concat!("notes: foo-\"bar\n", "kind: schema\n", "types:\n", "  x: string\n");
         assert!(
             simplified_schema::parse_standalone_schema_document(
                 top_level_poison,
@@ -1546,8 +1556,10 @@ mod tests {
     fn envelope_claim_distinguishes_block_plain_scalars_from_flow_collections() {
         for indicator in ['[', '{', ','] {
             let value = format!("foo{indicator} \"bar");
+            // `notes` is outside the tagged envelope's keys, so the parser
+            // recognizes the envelope and rejects it.
             let tagged = format!(
-                "description: {value}\nkind: schema\ntypes:\n  title: nope\n"
+                "notes: {value}\nkind: schema\ntypes:\n  title: nope\n"
             );
             serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&tagged).unwrap_or_else(|error| {
                 panic!("block carrier must be valid YAML: {tagged:?}: {error}")

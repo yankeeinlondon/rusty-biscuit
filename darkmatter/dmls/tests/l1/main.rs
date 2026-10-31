@@ -55,6 +55,8 @@ mod referenced_targets;
 mod registry_observability;
 mod registry_preparation;
 mod repository_contexts;
+mod schema_reference_parity;
+mod schema_reference_sessions;
 mod schema_roots_parity;
 mod schema_yaml_spellings;
 mod searched_candidates;

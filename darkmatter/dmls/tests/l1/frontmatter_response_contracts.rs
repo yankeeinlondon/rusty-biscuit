@@ -120,25 +120,31 @@ impl Session {
     /// `value` with the session's temporary root replaced by `<root>` in
     /// every string, path separators normalized, so a golden is portable.
     fn portable(&self, value: Value) -> Value {
-        let url = url::Url::from_directory_path(&self.root).expect("root URL").to_string();
-        let url = url.trim_end_matches('/').to_string();
-        let path = self.root.display().to_string();
-        let forward = path.replace('\\', "/");
-        fn walk(value: Value, replace: &dyn Fn(&str) -> String) -> Value {
-            match value {
-                Value::String(text) => Value::String(replace(&text)),
-                Value::Array(items) => Value::Array(items.into_iter().map(|item| walk(item, replace)).collect()),
-                Value::Object(map) => Value::Object(map.into_iter().map(|(key, item)| (key, walk(item, replace))).collect()),
-                other => other,
-            }
-        }
-        walk(value, &|text: &str| {
-            if !(text.contains(&url) || text.contains(&path) || text.contains(&forward)) {
-                return text.to_string();
-            }
-            text.replace(&url, "<root-uri>").replace(&path, "<root>").replace('\\', "/").replace(&forward, "<root>")
-        })
+        portable_under(&self.root, value)
     }
+}
+
+/// `value` with `root` replaced by `<root>` (and its URL by `<root-uri>`) in
+/// every string, path separators normalized, so a golden is portable.
+fn portable_under(root: &Path, value: Value) -> Value {
+    let url = url::Url::from_directory_path(root).expect("root URL").to_string();
+    let url = url.trim_end_matches('/').to_string();
+    let path = root.display().to_string();
+    let forward = path.replace('\\', "/");
+    fn walk(value: Value, replace: &dyn Fn(&str) -> String) -> Value {
+        match value {
+            Value::String(text) => Value::String(replace(&text)),
+            Value::Array(items) => Value::Array(items.into_iter().map(|item| walk(item, replace)).collect()),
+            Value::Object(map) => Value::Object(map.into_iter().map(|(key, item)| (key, walk(item, replace))).collect()),
+            other => other,
+        }
+    }
+    walk(value, &|text: &str| {
+        if !(text.contains(&url) || text.contains(&path) || text.contains(&forward)) {
+            return text.to_string();
+        }
+        text.replace(&url, "<root-uri>").replace(&path, "<root>").replace('\\', "/").replace(&forward, "<root>")
+    })
 }
 
 /// The byte offset `nudge` bytes into the first `needle`.
@@ -482,5 +488,42 @@ fn a3_navigation_is_unchanged() {
         include_str!("../fixtures/response_contracts/a3_navigation.json"),
         "a3_navigation.json",
         &session.portable(actual),
+    );
+}
+
+/// The document links and definition of every `$schema` selection shape in
+/// `schema_reference_parity.rs`'s fixture: a found bare name (the
+/// `review-3.md` regression, which must open the repository's
+/// `schemas/feature-review.yaml`), clean and sibling-only misses linking to
+/// the first schema root, a document without schema roots linking beside
+/// itself, `SCHEMAS_DIR` shadowing a package copy, an explicit miss, a
+/// root-union item, a malformed winning file, and percent-encoded folder
+/// names. No request creates a missing target.
+#[test]
+fn schema_reference_navigation_is_unchanged() {
+    use crate::schema_reference_parity::{Expect, NavigationFixture, uri_of};
+
+    let fixture = NavigationFixture::new();
+    let actual: Vec<Value> = fixture
+        .cases()
+        .iter()
+        .map(|case| {
+            let responses = fixture.request(case);
+            if case.expect == Expect::Creation {
+                assert!(!case.target.exists(), "{}: requesting links created the target", case.label);
+            }
+            json!({
+                "case": case.label,
+                "document": uri_of(&case.document),
+                "schemas_dir": case.schemas_dir,
+                "document_links": responses.links,
+                "definition": responses.definition,
+            })
+        })
+        .collect();
+    assert_golden(
+        include_str!("../fixtures/response_contracts/schema_reference_navigation.json"),
+        "schema_reference_navigation.json",
+        &portable_under(&fixture.root, Value::Array(actual)),
     );
 }

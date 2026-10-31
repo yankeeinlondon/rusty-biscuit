@@ -173,8 +173,31 @@ fn open(fixture: &LspFixture<'_>, uri: &str, text: &str) {
     );
 }
 
+/// The `dm.schema.prepare` diagnostics on a consumer whose `$schema` names a
+/// YAML file with no `$schema` property, after checking that the retired
+/// missing-envelope advisory is never emitted.
+fn no_schema_property_errors<'a>(diagnostics: &'a [Value], file: &str) -> Vec<&'a Value> {
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")),
+        "the loader no longer emits the missing-envelope advisory: {diagnostics:?}"
+    );
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.prepare")
+                && diagnostic["message"].as_str().is_some_and(|message| {
+                    message.contains(&format!(
+                        "{file}` is not a valid schema definition: it has no `$schema` property"
+                    ))
+                })
+        })
+        .collect()
+}
+
 #[test]
-fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
+fn bare_sidecar_without_schema_property_errors_on_consumer_and_tracks_dependency_changes() {
     let workspace = LspWorkspace::new();
     let sidecar_path = workspace.path().join("schema.yaml");
     let document_path = workspace.path().join("doc.md");
@@ -191,37 +214,32 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     open(&fixture, document_uri.as_str(), document);
 
     let initial = fixture.wait_for_diagnostics(document_uri.as_str());
-    let advisories: Vec<_> = initial
-        .iter()
-        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_simplified_envelope"))
-        .collect();
-    assert_eq!(advisories.len(), 1, "consumer diagnostics: {initial:?}");
-    let advisory = advisories[0];
-    assert_eq!(advisory["source"], json!("darkmatter.schema"));
-    assert_eq!(advisory["severity"], json!(2));
+    let errors = no_schema_property_errors(&initial, "schema.yaml");
+    assert_eq!(errors.len(), 1, "consumer diagnostics: {initial:?}");
+    let error = errors[0];
+    assert_eq!(error["source"], json!("darkmatter.schema"));
+    assert_eq!(error["severity"], json!(1));
     assert_eq!(
-        advisory["range"],
+        error["range"],
         json!({
             "start": { "line": 1, "character": 9 },
             "end": { "line": 1, "character": 22 }
         })
     );
     assert!(
-        advisory["message"]
+        error["message"]
             .as_str()
             .unwrap()
             .contains(&sidecar_path.display().to_string()),
-        "advisory message: {}",
-        advisory["message"]
+        "error message: {}",
+        error["message"]
     );
 
     open(&fixture, sidecar_uri.as_str(), bare_sidecar);
     let sidecar_diagnostics = fixture.wait_for_diagnostics(sidecar_uri.as_str());
     assert!(
-        sidecar_diagnostics.iter().all(|diagnostic| {
-            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
-        }),
-        "the advisory belongs only to the consuming Markdown document: {sidecar_diagnostics:?}"
+        no_schema_property_errors(&sidecar_diagnostics, "schema.yaml").is_empty(),
+        "the error belongs only to the consuming Markdown document: {sidecar_diagnostics:?}"
     );
     fixture.notify(
         "textDocument/didClose",
@@ -240,10 +258,10 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     );
     let corrected = fixture.wait_for_diagnostics(document_uri.as_str());
     assert!(
-        corrected.iter().all(|diagnostic| {
-            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
-        }),
-        "correcting the sidecar must clear the advisory: {corrected:?}"
+        corrected
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.prepare")),
+        "correcting the sidecar must clear the error: {corrected:?}"
     );
 
     std::fs::write(&sidecar_path, bare_sidecar).unwrap();
@@ -253,21 +271,16 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     );
     let restored = fixture.wait_for_diagnostics(document_uri.as_str());
     assert_eq!(
-        restored
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
-            })
-            .count(),
+        no_schema_property_errors(&restored, "schema.yaml").len(),
         1,
-        "the advisory must return once after a repeated read/write/read: {restored:?}"
+        "the error must return once after a repeated read/write/read: {restored:?}"
     );
 
     fixture.shutdown();
 }
 
 #[test]
-fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() {
+fn bare_sidecar_rejection_reports_once_for_root_union_and_rejects_raw_yaml_json_schema() {
     let workspace = LspWorkspace::new();
     let bare_path = workspace.path().join("bare.yaml");
     let raw_path = workspace.path().join("raw.yaml");
@@ -289,24 +302,20 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
     open(&fixture, union_uri.as_str(), union_document);
     let union_diagnostics = fixture.wait_for_diagnostics(union_uri.as_str());
     assert_eq!(
-        union_diagnostics
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
-            })
-            .count(),
+        no_schema_property_errors(&union_diagnostics, "bare.yaml").len(),
         1,
-        "duplicate reference arms must produce one advisory: {union_diagnostics:?}"
+        "duplicate reference arms must produce one error: {union_diagnostics:?}"
     );
 
+    // Raw JSON Schema keywords in YAML no longer make a file loadable: with no
+    // `$schema` property it is rejected like any other bare mapping.
     let raw_uri = url::Url::from_file_path(&raw_document_path).unwrap();
     open(&fixture, raw_uri.as_str(), raw_document);
     let raw_diagnostics = fixture.wait_for_diagnostics(raw_uri.as_str());
-    assert!(
-        raw_diagnostics.iter().all(|diagnostic| {
-            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
-        }),
-        "raw JSON Schema keywords must suppress the advisory: {raw_diagnostics:?}"
+    assert_eq!(
+        no_schema_property_errors(&raw_diagnostics, "raw.yaml").len(),
+        1,
+        "raw YAML JSON Schema must be rejected: {raw_diagnostics:?}"
     );
 
     fixture.shutdown();
@@ -5212,6 +5221,61 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
     fixture.shutdown();
 }
 
+/// An informal envelope may carry a `description`; the lexical claim must
+/// still recognize it mid-edit, or the description would drop the last-good
+/// model the moment the payload stops parsing.
+#[test]
+fn meta_schema_standalone_with_description_keeps_last_good_while_mid_edit() {
+    let workspace = LspWorkspace::new();
+    let valid = "description: Feature reviews\n$schema:\n  title: string\n";
+    let malformed = "description: Feature reviews\n$schema:\n  title: str(\n";
+    let path = workspace.path().join("schema.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 2, "character": 12 }
+            }),
+        )
+        .result
+        .expect("last-good completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "last-good schema state keeps completion alive: {completion:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 2, 3);
+    assert!(hover.contains("Declares: **string**"), "{hover}");
+
+    fixture.shutdown();
+}
+
 #[test]
 fn meta_schema_explicit_mapping_pairs_retain_last_good_assistance() {
     let workspace = LspWorkspace::new();
@@ -5397,7 +5461,7 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 #[test]
 fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
     let workspace = LspWorkspace::new();
-    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope(\n";
+    let malformed = "notes: foo{ \"bar\nkind: schema\ntypes:\n  title: nope(\n";
     let poison_line_len = malformed.lines().next().unwrap().len();
     let valid = format!(
         "#{}\nkind: schema\ntypes:\n  title: string\n",
@@ -5426,14 +5490,14 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
         }),
     );
 
-    // The unsupported `description` key makes the envelope itself invalid, so
+    // The unsupported `notes` key makes the envelope itself invalid, so
     // the current buffer's diagnostic is the classifier's envelope error, not
     // the definition inside it.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics.iter().any(|diagnostic| {
             diagnostic["code"] == json!("dm.schema.document_malformed")
-                && diagnostic["message"].as_str().is_some_and(|message| message.contains("description"))
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("notes"))
         }),
         "the current malformed envelope owns diagnostics: {diagnostics:?}"
     );

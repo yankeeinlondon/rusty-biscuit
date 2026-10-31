@@ -147,9 +147,9 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 | `dm.schema.missing_required`                                   | a required key is absent — **strict mode only**                                                       |
 | `dm.schema.unknown_key`                                        | a key the schema does not declare is present                                                          |
 | `dm.schema.deprecated_key`                                     | a deprecated key is present                                                                           |
-| `dm.schema.invalid_file_reference`                             | a `file(...)`-typed value failed to parse, resolve, or match a file                                   |
+| `dm.schema.invalid_file_reference`                             | a `file(...)`-typed value failed to parse or resolve (a well-formed reference to a file that does not exist is not reported in the editor; `md` still rejects a missing `file(eager)` target) |
 | `dm.schema.invalid_suggestion`                                 | a `suggest(...)` candidate is invalid metadata for its target schema                                  |
-| `dm.schema.missing_simplified_envelope`                        | a referenced bare property map looks like SimplifiedSchema but lacks a supported envelope             |
+| `dm.schema.missing_simplified_envelope`                        | reserved: a referenced bare property map lacking an envelope; the loader now rejects such a file instead |
 | `dm.schema.document_malformed`                                 | a recognized standalone schema envelope is malformed                                                  |
 | `dm.style.unknown_key` / `dm.style.deprecated_key`             | `style:` surface problems                                                                             |
 | `dm.expression.malformed` / `dm.expression.unknown_function`   | expression-typed frontmatter values that do not parse or call an unknown function (errors)            |
@@ -407,7 +407,7 @@ work at each of its uses, opening only the definitions on the cursor's path.
 
 ### Navigation
 
-- **go-to-definition** on a `$schema` file reference or a `file(...)` value jumps to the target file; both also render as clickable **document links**
+- **go-to-definition** on a `$schema` file reference or a `file(...)` value jumps to the target file; both also render as clickable **document links**. A `$schema` string (the value, or each string item of a root union) targets the file validation selects; when none exists it targets the path the file would be created at (the first schema root for a bare name, else beside the document); requesting the link creates no file or folder
 - **go-to-definition** on a named-type reference (bare, `@this`, or cross-file) lands on the defining key in the file that defines it, including a reference that closes a cycle back into another file
 - an interpolation variable in the body jumps to the frontmatter key that defines it, and a key the effective schema declares counts as a known identifier even when the document has not set it
 - **references** answers "who transcludes this file" across the workspace graph

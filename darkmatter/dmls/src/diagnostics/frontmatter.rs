@@ -15,7 +15,7 @@ use darkmatter::markdown::Markdown;
 use simplified_schema::format::is_pending_expression_value;
 use darkmatter::markdown::schemas::{ValidationOptions, ValidationReport};
 use simplified_schema::{
-    PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason, ValidationProblem,
+    FileReferenceDiagnostic, PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason, ValidationProblem,
     ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
     SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
     locate_standalone_definition_failure, parse_property_definition, parse_property_definition_with_source,
@@ -422,6 +422,14 @@ fn schema_problem_diagnostics(
         // Without a context no file value was resolved for this document; its
         // one context-failure diagnostic stands in for them.
         if problem.file_reference.is_some() && ctx.file_context().is_err() {
+            continue;
+        }
+        // A well-formed reference to a file that does not exist yet is the
+        // value hover's to explain, not an editor error; `md` still enforces
+        // an eager file at runtime. A projection's caller-owned failure stays.
+        if matches!(problem.file_reference, Some(FileReferenceDiagnostic::NoMatch { .. }))
+            && problem.caller_file.is_none()
+        {
             continue;
         }
         if matches!(
@@ -2512,5 +2520,244 @@ mod tests {
                 assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
             }
         }
+    }
+
+    /// Builds a context for `text` written to `{root}/doc.md`, resolving
+    /// through a context anchored at `root` (never the process cwd), runs
+    /// `diagnostics`, and hands both to `f`.
+    fn diagnostics_on_disk<R>(
+        root: &Path,
+        text: &str,
+        strict: bool,
+        f: impl FnOnce(&DocumentContext, &[Diagnostic]) -> R,
+    ) -> R {
+        let path = root.join("doc.md");
+        std::fs::write(&path, text).expect("write document");
+        let uri = crate::workspace::file_path_to_uri(&path).expect("document uri");
+        let mut config = DmlsConfig::default();
+        config.schema.strict = strict;
+        let roots = [root.to_path_buf()];
+        let resolution = crate::context::test_support::resolution_in(root, &path);
+        let state = OverlayState::default();
+        let overlay = state.for_document(&uri, text, &path, &config, &roots, &resolution);
+        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
+        let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let ctx = DocumentContext {
+            uri: &uri,
+            path: &path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: overlay.as_ref(),
+            resolution: &resolution,
+        };
+        let diagnostics = diagnostics(&ctx);
+        f(&ctx, &diagnostics)
+    }
+
+    /// A canonical temp directory, so a macOS `/var` spelling never differs
+    /// from the resolver's `/private/var`.
+    fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical temp dir");
+        (dir, root)
+    }
+
+    /// `(code, [start line, start char, end line, end char], message, data)`
+    /// of each diagnostic with `code`.
+    fn pinned<'d>(
+        diagnostics: &'d [Diagnostic],
+        code: &str,
+    ) -> Vec<(&'d str, [u32; 4], &'d str, Option<serde_json::Value>)> {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| code_of(diagnostic) == Some(code))
+            .inspect(|diagnostic| assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR)))
+            .map(|diagnostic| {
+                let range = diagnostic.range;
+                (
+                    code_of(diagnostic).unwrap(),
+                    [range.start.line, range.start.character, range.end.line, range.end.character],
+                    diagnostic.message.as_str(),
+                    diagnostic.data.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// The paths the effective schema's own validation reports a
+    /// `NoMatch` file reference at, so a test of the suppression proves the
+    /// validator still found the missing file.
+    fn no_match_paths(ctx: &DocumentContext) -> Vec<String> {
+        let bundle = ctx.overlay.and_then(|overlay| overlay.bundle()).expect("schema bundle");
+        bundle
+            .effective
+            .validate_with_options(&bundle.frontmatter_json, &PositionMap::new(), &ValidationOptions::default())
+            .problems
+            .into_iter()
+            .filter(|problem| matches!(problem.file_reference, Some(FileReferenceDiagnostic::NoMatch { .. })))
+            .map(|problem| problem.path)
+            .collect()
+    }
+
+    #[test]
+    fn a_missing_file_value_is_left_to_the_hover_not_diagnosed() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("exists.md"), "x").unwrap();
+        let text = "---\n$schema:\n  missing: file(eager)\n  plain: file\n  present: file(eager)\nmissing: ./nope.md\nplain: ./nope-too.md\npresent: ./exists.md\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, false, |ctx, diagnostics| {
+            assert_eq!(no_match_paths(ctx), ["/missing"], "the validator still finds the missing eager file");
+            assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        });
+    }
+
+    #[test]
+    fn a_missing_eager_file_in_a_sequence_item_is_not_diagnosed() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("exists.md"), "x").unwrap();
+        let text = "---\n$schema:\n  items: file(eager)[]\nitems:\n  - ./exists.md\n  - ./gone.md\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, false, |ctx, diagnostics| {
+            assert_eq!(no_match_paths(ctx), ["/items/1"]);
+            assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        });
+    }
+
+    #[test]
+    fn a_malformed_file_reference_keeps_its_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  bad: file(eager)\n  lazybad: file\nbad: \"@\"\nlazybad: \"@\"\n---\n\nbody\n";
+        let message = "`@` is not a valid file reference: file reference syntax is invalid: the `@` sigil requires a relative payload: `@`";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_INVALID_FILE_REFERENCE),
+                [
+                    (
+                        "dm.schema.invalid_file_reference",
+                        [4, 5, 4, 8],
+                        message,
+                        Some(serde_json::json!({ "instance_path": "/bad", "resolution_failure": "InvalidReference" })),
+                    ),
+                    (
+                        "dm.schema.invalid_file_reference",
+                        [5, 9, 5, 12],
+                        message,
+                        Some(serde_json::json!({ "instance_path": "/lazybad", "resolution_failure": "InvalidReference" })),
+                    ),
+                ],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_repository_reference_without_a_repository_keeps_its_context_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  anchored: file(eager)\nanchored: \"&root-only.md\"\n---\n\nbody\n";
+        let message = format!(
+            "could not resolve file reference `&root-only.md`: `&` repository reference requires a repository containing reference CWD `{}`",
+            root.display()
+        );
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_INVALID_FILE_REFERENCE),
+                [(
+                    "dm.schema.invalid_file_reference",
+                    [3, 10, 3, 25],
+                    message.as_str(),
+                    Some(serde_json::json!({ "instance_path": "/anchored", "resolution_failure": "MissingContext" })),
+                )],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    /// A path through a regular file fails its probe with `ENOTDIR`, which
+    /// is an I/O failure rather than absence. Windows reports the same probe
+    /// as not found, so it has no equivalent here.
+    #[cfg(unix)]
+    #[test]
+    fn an_io_failure_keeps_its_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("afile.md"), "x").unwrap();
+        let text = "---\n$schema:\n  through: file(eager)\nthrough: ./afile.md/inner.md\n---\n\nbody\n";
+        let message = format!(
+            "could not resolve file reference `./afile.md/inner.md`: filesystem error while resolving `{}/./afile.md/inner.md`: Not a directory (os error 20)",
+            root.display()
+        );
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_INVALID_FILE_REFERENCE),
+                [(
+                    "dm.schema.invalid_file_reference",
+                    [3, 9, 3, 28],
+                    message.as_str(),
+                    Some(serde_json::json!({ "instance_path": "/through", "resolution_failure": "Io" })),
+                )],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn missing_schema_import_and_example_files_keep_their_prepare_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        for (text, range, missing) in [
+            ("---\n$schema: ./missing-schema.yaml\ntitle: A\n---\n\nbody\n", [1, 9, 1, 30], "./missing-schema.yaml"),
+            ("---\n$schema:\n  thing: Thing@./missing-types.yaml\nthing: x\n---\n\nbody\n", [2, 2, 3, 0], "./missing-types.yaml"),
+            (
+                "---\n$schema:\n  title: string(example(./missing-example.yaml))\ntitle: x\n---\n\nbody\n",
+                [2, 2, 3, 0],
+                "./missing-example.yaml",
+            ),
+        ] {
+            let message = format!("could not resolve $schema reference `{missing}`");
+            diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+                assert_eq!(
+                    pinned(diagnostics, code::SCHEMA_PREPARE),
+                    [("dm.schema.prepare", range, message.as_str(), None)],
+                    "{text:?}: {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn a_missing_required_value_keeps_its_strict_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  title: string(required)\nother: 1\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, true, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_MISSING_REQUIRED),
+                [(
+                    "dm.schema.missing_required",
+                    [1, 0, 4, 0],
+                    "\"title\" is a required property",
+                    Some(serde_json::json!({ "instance_path": "" })),
+                )],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_yaml_syntax_error_keeps_its_parse_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  title: string\ntitle: [unclosed\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::FM_YAML_PARSE),
+                [(
+                    "dm.frontmatter.yaml_parse",
+                    [4, 0, 4, 0],
+                    "unterminated flow collection: unexpected end of input",
+                    None,
+                )],
+                "{diagnostics:#?}"
+            );
+        });
     }
 }

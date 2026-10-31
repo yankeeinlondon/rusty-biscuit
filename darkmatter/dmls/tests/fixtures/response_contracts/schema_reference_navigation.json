@@ -1,0 +1,387 @@
+[
+  {
+    "case": "bare name found in the tree root (review-3 regression)",
+    "document": "<root-uri>/repo/messenger/features/x/review-3.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 28
+          }
+        },
+        "target": "<root-uri>/repo/schemas/feature-review.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/schemas/feature-review.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "clean-miss bare name links into the first searchable root",
+    "document": "<root-uri>/repo/messenger/features/x/clean-miss.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 20
+          }
+        },
+        "target": "<root-uri>/repo/messenger/schemas/absent.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/messenger/schemas/absent.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "bare name with no schema root folder links beside the document",
+    "document": "<root-uri>/bare/docs/no-root.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 21
+          }
+        },
+        "target": "<root-uri>/bare/docs/nowhere.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/bare/docs/nowhere.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "package copy without SCHEMAS_DIR",
+    "document": "<root-uri>/repo/area/pkg/docs/defs.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 20
+          }
+        },
+        "target": "<root-uri>/repo/area/pkg/schemas/shared.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/area/pkg/schemas/shared.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "SCHEMAS_DIR wins over the package copy",
+    "document": "<root-uri>/repo/area/pkg/docs/defs.md",
+    "schemas_dir": true,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 20
+          }
+        },
+        "target": "<root-uri>/dm%20defs%20(y)%20caf%C3%A9/shared.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/dm%20defs%20(y)%20caf%C3%A9/shared.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "sibling-only bare name links to the first-root creation path",
+    "document": "<root-uri>/repo/messenger/features/x/sibling.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 20
+          }
+        },
+        "target": "<root-uri>/repo/messenger/schemas/beside.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/messenger/schemas/beside.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "explicit relative miss links beside the document",
+    "document": "<root-uri>/repo/messenger/features/x/explicit.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 23
+          }
+        },
+        "target": "<root-uri>/repo/messenger/features/x/missing.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/messenger/features/x/missing.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "root-union string item",
+    "document": "<root-uri>/repo/messenger/features/x/union.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 10
+          },
+          "end": {
+            "line": 1,
+            "character": 29
+          }
+        },
+        "target": "<root-uri>/repo/schemas/feature-review.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/schemas/feature-review.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "malformed winning file still opens",
+    "document": "<root-uri>/repo/messenger/features/x/malformed.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 20
+          }
+        },
+        "target": "<root-uri>/repo/schemas/broken.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/schemas/broken.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "bare name from a punctuated non-ASCII folder",
+    "document": "<root-uri>/repo/messenger/features/%5Bx%5D%20(y)%20caf%C3%A9/review.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 28
+          }
+        },
+        "target": "<root-uri>/repo/schemas/feature-review.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/schemas/feature-review.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  },
+  {
+    "case": "explicit non-ASCII miss in a spaced non-ASCII folder",
+    "document": "<root-uri>/repo/messenger/features/notes%20(y)%20caf%C3%A9/notes.md",
+    "schemas_dir": false,
+    "document_links": [
+      {
+        "range": {
+          "start": {
+            "line": 1,
+            "character": 9
+          },
+          "end": {
+            "line": 1,
+            "character": 20
+          }
+        },
+        "target": "<root-uri>/repo/messenger/features/notes%20(y)%20caf%C3%A9/caf%C3%A9.yaml"
+      }
+    ],
+    "definition": [
+      {
+        "uri": "<root-uri>/repo/messenger/features/notes%20(y)%20caf%C3%A9/caf%C3%A9.yaml",
+        "range": {
+          "start": {
+            "line": 0,
+            "character": 0
+          },
+          "end": {
+            "line": 0,
+            "character": 0
+          }
+        }
+      }
+    ]
+  }
+]

@@ -702,7 +702,7 @@ fn editing_an_imported_definition_refreshes_every_assistance_without_reopening()
 fn a_wrapped_conflict_watches_every_participant_file() {
     let workspace = LspWorkspace::new();
     let types = write(&workspace, "types.yaml", "kind: schema\ntypes:\n  label: number(min(10))\n");
-    write(&workspace, "outer.yaml", "kind: schema\ntypes:\n  title: 'label(max(5))@./types.yaml'\n");
+    write(&workspace, "outer.yaml", "$schema:\n  title: 'label(max(5))@./types.yaml'\n");
     let document = write(&workspace, "doc.md", "---\n$schema: ./outer.yaml\ntitle: 3\n---\n\nBody\n");
     let conflicts = |diagnostics: &[Value]| {
         diagnostics

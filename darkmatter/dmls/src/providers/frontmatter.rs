@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::schemas::completion::{
     AlternativeKey, AlternativeSite, DefinitionLookup, alternatives_for_def_in,
 };
+use simplified_schema::resolve::SelectionOutcome;
 use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors};
 use simplified_schema::{
@@ -2148,7 +2149,8 @@ fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
 // ── Navigation (definition + document links) ────────────────────────────────
 
 /// Definition on a named-type reference, a `$schema` file reference, or a
-/// `file(...)` value. Only the scalar under the cursor is typed and resolved.
+/// `file(...)` value. Only the `file` scalar under the cursor is typed and
+/// resolved; a `$schema` target is the overlay's selection.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if let Some(location) = named_references::definition(ctx, offset) {
         return vec![location];
@@ -2159,7 +2161,7 @@ pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if ctx.file_context().is_err() {
         return Vec::new();
     }
-    let schema = schema_target(ctx, ast).filter(|(span, _)| span.contains(&offset));
+    let schema = schema_targets(ctx, ast).into_iter().filter(|(span, _)| span.contains(&offset));
     let file = cursor_scalar(ast, offset)
         .and_then(|index| file_target(ctx, ast, index, scalar_typing(ctx, index)?));
     schema
@@ -2185,12 +2187,13 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 }
 
 /// The `(value_span, resolved_path)` navigation targets in the frontmatter:
-/// the `$schema` file reference plus every `file(...)`-typed scalar value,
+/// each `$schema` file reference plus every `file(...)`-typed scalar value,
 /// typed through the snapshot's scalar inventory.
 ///
-/// Each value resolves through the document's context to the existing file,
-/// else to where it would be created. A document without a context has no
-/// targets. Resolution is never cached: it reads the filesystem.
+/// Each value names the existing file, else where it would be created. A
+/// document without a context has no targets. A `$schema` target is the
+/// file the overlay selected for validation, cached with the schema; a
+/// `file` value resolves on every request, reading the filesystem.
 fn nav_targets(ctx: &DocumentContext) -> Vec<(SourceSpan, PathBuf)> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
@@ -2198,7 +2201,7 @@ fn nav_targets(ctx: &DocumentContext) -> Vec<(SourceSpan, PathBuf)> {
     if ctx.file_context().is_err() {
         return Vec::new();
     }
-    schema_target(ctx, ast)
+    schema_targets(ctx, ast)
         .into_iter()
         .chain(scalar_inventory(ctx).filter_map(|(index, typing)| file_target(ctx, ast, index, typing)))
         .collect()
@@ -2209,12 +2212,35 @@ fn navigation_path(ctx: &DocumentContext, value: &str) -> Option<PathBuf> {
     ctx.resolve_reference(value).and_then(|target| target.navigation_target().map(Path::to_path_buf))
 }
 
-/// The `$schema: ./file.yaml` target (an inline `{ ... }` mapping is not a
-/// file reference).
-fn schema_target(ctx: &DocumentContext, ast: &FrontmatterAst) -> Option<(SourceSpan, PathBuf)> {
-    let entry = ast.schema_entry().filter(|entry| entry.kind == FmValueKind::Scalar)?;
-    let value = entry.scalar.as_deref().filter(|value| looks_like_path(value))?;
-    Some((entry.value_span.clone(), navigation_path(ctx, value)?))
+/// The target of each `$schema` string reference (the scalar, or each item
+/// of a root union): the file the validator selects, else the path a missing
+/// reference would be created at. A sibling-only bare name links to its
+/// creation path, never to the sibling it does not name; a remote or
+/// unresolvable reference has no target.
+fn schema_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, PathBuf)> {
+    let Some(overlay) = ctx.overlay else {
+        return Vec::new();
+    };
+    overlay
+        .schema_references
+        .entries
+        .iter()
+        .filter_map(|fact| {
+            let entry = ast.entry_by_pointer(&fact.pointer)?;
+            if entry.scalar.as_deref() != Some(fact.reference.as_str()) {
+                return None;
+            }
+            let path = match &fact.selection.as_ref().ok()?.outcome {
+                SelectionOutcome::Found(path)
+                | SelectionOutcome::Missing { creation: Some(path), .. }
+                | SelectionOutcome::SiblingOnly { creation: path, .. } => path.clone(),
+                SelectionOutcome::Missing { creation: None, .. } | SelectionOutcome::Failed(_) => {
+                    return None;
+                }
+            };
+            Some((entry.value_span.clone(), path))
+        })
+        .collect()
 }
 
 /// The target of the `file(...)`-typed scalar entry `index`, at any depth:
@@ -3049,29 +3075,13 @@ fn is_sequence_item_line(text: &str, line_start: usize) -> bool {
     line == "-" || line.starts_with("- ")
 }
 
-/// Whether a scalar value is plausibly a local file path (not a URL or an
-/// obvious non-path token).
-///
-/// A dot/slash heuristic for callers with no schema type to trust — the
-/// `$schema` source reference, whose value is a `.yaml`/`.md`/`.json` file or an
-/// inline `{ ... }` mapping. A schema-confirmed `file(...)` value uses
-/// [`is_schema_file_value`] instead, which does not require a dot or slash.
-fn looks_like_path(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty()
-        && !value.contains("://")
-        && !value.starts_with('{')
-        && (value.contains('/') || value.contains('.'))
-}
-
 /// Whether a value the schema already types as `file(...)` is a navigable local
 /// reference.
 ///
 /// Once the effective schema confirms the `file` type, a bare extensionless
 /// filename (e.g. `LICENSE`, `Makefile`) is a valid relative reference — the
 /// same implicit-relative form `FileReference` accepts — so only a URL or an
-/// inline-object literal disqualifies it. The dot/slash heuristic in
-/// [`looks_like_path`] must not gate this path.
+/// inline-object literal disqualifies it; no dot/slash heuristic gates it.
 fn is_schema_file_value(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty() && !value.contains("://") && !value.starts_with('{')
@@ -4901,15 +4911,6 @@ mod tests {
         // Unknown tails and the `ctx` container keep their generic annotations.
         assert!(ctx_hover_markdown("ctx.nope", "nope").contains("Darkmatter-generated"));
         assert!(ctx_hover_markdown("ctx", "ctx").starts_with("**`ctx`**"));
-    }
-
-    #[test]
-    fn test_looks_like_path() {
-        assert!(looks_like_path("./schema.yaml"));
-        assert!(looks_like_path("dir/file.md"));
-        assert!(!looks_like_path("https://example.com/s.yaml"));
-        assert!(!looks_like_path("plain"));
-        assert!(!looks_like_path("{ inline: true }"));
     }
 
     #[test]

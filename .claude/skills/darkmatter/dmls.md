@@ -336,6 +336,19 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   trigger registry enters the key as its install `version`, and the
   registry's envelopes and payload files are left out of the cache's
   re-hashed dependencies (the registry cache tracks them).
+- `$schema` navigation never resolves on its own: `overlay/references.rs`
+  (`DocumentOverlay::schema_references`) selects each `$schema` string (the
+  scalar, or each string item of a root union; `null`/numbers/aliases/inline
+  mappings are not references) through `select_schema_file` in
+  `schema_for`, beside assembly and from its exact inputs (last-good text,
+  `roots.search_paths()`, `path.parent()`, the context). A registry error
+  gives every fact `Err` (no root guessed). `CachedSchema.probes` (each
+  attempted location and whether it existed) must be unchanged for a hit,
+  and each selected file joins `collect_dep_hashes`.
+  `providers/frontmatter.rs::schema_targets` links `Found`, else the
+  `creation` path (never a sibling). A `NoMatch` file-reference problem
+  without `caller_file` is not published (`diagnostics/frontmatter.rs`); `md`
+  keeps the runtime eager check.
 - `dmls/tests/l1/schema_roots_parity.rs` is the `md` vs DMLS parity gate for
   schema roots, applied triggers, bare-name `$schema`, and `$path`
   definition errors; DMLS shows missing required properties only with

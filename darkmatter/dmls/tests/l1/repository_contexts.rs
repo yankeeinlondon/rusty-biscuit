@@ -303,9 +303,9 @@ fn repository_sigils_resolve_in_every_feature() {
     let pkg_only = canonical(&package.join("pkg-only.md"));
     let magic_only = canonical(&magic.join("magic-only.md"));
 
-    // Schema validation: every eager file value resolves (an unresolved one
-    // is `dm.schema.invalid_file_reference`); only `&missing.md`, a link, is
-    // broken.
+    // Schema validation: no eager file value is diagnosed (a missing one is
+    // left to the value hover, never `dm.schema.invalid_file_reference`);
+    // only `&missing.md`, a link, is broken.
     let diagnostics = current_diagnostics(&mut fixture, &doc_uri);
     assert_eq!(codes(&diagnostics), vec!["dm.links.broken_path".to_string()], "{diagnostics:#?}");
     assert_eq!(diagnostics[0]["data"], json!({ "resolution_failure": "NoMatch" }));
@@ -554,7 +554,9 @@ fn a_failed_context_is_one_diagnostic_and_no_resolution_until_repaired() {
     let codes = codes(&diagnostics);
     assert!(!codes.contains(&"dm.context.build_failure".to_string()), "{diagnostics:#?}");
     assert!(codes.contains(&"dm.transclusion.broken_path".to_string()), "{diagnostics:#?}");
-    assert!(codes.contains(&"dm.schema.invalid_file_reference".to_string()), "{diagnostics:#?}");
+    // A missing `file(eager)` target is the value hover's to explain, never
+    // an editor diagnostic.
+    assert!(!codes.contains(&"dm.schema.invalid_file_reference".to_string()), "{diagnostics:#?}");
     // Frontmatter values (`missing` navigates to where it would be created),
     // the existing transclusion, and the Markdown link.
     let beside = canonical(&repo.join("docs/beside.md"));

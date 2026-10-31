@@ -22,6 +22,7 @@ pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
 pub mod named_types;
+pub mod references;
 pub mod registry;
 pub mod schema;
 pub mod shell;
@@ -56,6 +57,7 @@ pub use frontmatter::{
 };
 pub use analysis::FrontmatterAnalysis;
 pub use named_types::NamedTypeCatalog;
+pub use references::{SchemaReferenceFact, SchemaReferenceFacts};
 pub use registry::{RegistrySummary, RootFileClass};
 pub use schema::{
     FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
@@ -178,6 +180,10 @@ pub struct DocumentOverlay {
     /// The schema files the document's own explicit named-type references
     /// import, read when the overlay was assembled.
     pub named_types: Arc<NamedTypeCatalog>,
+    /// The file each `$schema` string reference selects, from the text
+    /// [`schema`](Self::schema) was assembled from. Empty for a document
+    /// with no context and for a non-Markdown document.
+    pub schema_references: Arc<SchemaReferenceFacts>,
     /// Why a standalone schema document's own named-type references do not
     /// resolve (an unknown name, contradictory reuse, or an import cycle).
     pub standalone_resolution: Option<Arc<SchemaError>>,
@@ -277,8 +283,13 @@ struct CachedSchema {
     /// dependencies, which keeps their lookup a pure text+config check with no
     /// extra I/O.
     deps: Vec<(PathBuf, u64)>,
+    /// Every location the `$schema` selections probed, with whether a file
+    /// existed there at assembly. A hit also requires each to be unchanged, so
+    /// creating a nearer candidate or deleting the selected one reselects.
+    probes: Vec<(PathBuf, bool)>,
     outcome: SchemaOutcome,
     named_types: Arc<NamedTypeCatalog>,
+    schema_references: Arc<SchemaReferenceFacts>,
     /// Invalid `suggest(...)` candidates written on the inline `$schema`'s
     /// references, judged against the resolved targets.
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
@@ -289,6 +300,7 @@ struct CachedSchema {
 struct FrontmatterSchema {
     outcome: SchemaOutcome,
     named_types: Arc<NamedTypeCatalog>,
+    schema_references: Arc<SchemaReferenceFacts>,
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
     file_failures: FileFailures,
     /// The cache key the outcome was assembled under, or `None` when
@@ -301,6 +313,7 @@ impl FrontmatterSchema {
         Self {
             outcome,
             named_types: Arc::default(),
+            schema_references: Arc::default(),
             reference_suggestions: Arc::default(),
             file_failures: FileFailures::default(),
             key: None,
@@ -407,7 +420,14 @@ impl OverlayState {
                 text
             };
             let schema_text = schema_text.to_string();
-            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions, file_failures, key: schema_key } =
+            let FrontmatterSchema {
+                outcome: schema,
+                named_types,
+                schema_references,
+                reference_suggestions,
+                file_failures,
+                key: schema_key,
+            } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
                         &uri_key,
@@ -464,6 +484,7 @@ impl OverlayState {
                 suggestions,
                 schema_authoring,
                 named_types,
+                schema_references,
                 standalone_resolution: None,
                 file_failures,
                 analysis,
@@ -489,6 +510,7 @@ impl OverlayState {
                         suggestions: SuggestionState::TriggerError(Arc::new(error)),
                         schema_authoring: SchemaAuthoringState::Inactive,
                         named_types: Arc::default(),
+                        schema_references: Arc::default(),
                         standalone_resolution: None,
                         file_failures: FileFailures::default(),
                         analysis: Arc::new(FrontmatterAnalysis::detached()),
@@ -513,6 +535,7 @@ impl OverlayState {
                             suggestions: SuggestionState::TriggerWarning(Arc::new(finding.clone())),
                             schema_authoring: SchemaAuthoringState::Inactive,
                             named_types: Arc::default(),
+                            schema_references: Arc::default(),
                             standalone_resolution: None,
                             file_failures: FileFailures::default(),
                             analysis: Arc::new(FrontmatterAnalysis::detached()),
@@ -563,6 +586,7 @@ impl OverlayState {
                         error: None,
                     },
                     named_types: resolved.named_types,
+                    schema_references: Arc::default(),
                     standalone_resolution: resolved.error,
                     file_failures: resolved.file_failures,
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
@@ -615,6 +639,7 @@ impl OverlayState {
                         error: Some(error),
                     },
                     named_types: Arc::default(),
+                    schema_references: Arc::default(),
                     standalone_resolution: None,
                     file_failures: FileFailures::default(),
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
@@ -899,7 +924,12 @@ impl OverlayCache {
             Ok(registry) => registry,
             Err(error) => {
                 self.schema.remove(uri_key);
-                return FrontmatterSchema::new(SchemaOutcome::Failed(error));
+                let schema_references =
+                    Arc::new(SchemaReferenceFacts::select(text, path, Err(&error), context));
+                return FrontmatterSchema {
+                    schema_references,
+                    ..FrontmatterSchema::new(SchemaOutcome::Failed(error))
+                };
             }
         };
         let registry_key = registry.as_ref().map_or(0, |installed| installed.version);
@@ -915,6 +945,7 @@ impl OverlayCache {
         if let Some(cached) = self.schema.get(uri_key)
             && cached.key == key
             && deps_unchanged(&cached.deps)
+            && probes_unchanged(&cached.probes)
         {
             if matches!(cached.outcome, SchemaOutcome::Ready(Some(_))) {
                 validation_timing::note_assembly(true);
@@ -922,6 +953,7 @@ impl OverlayCache {
             return FrontmatterSchema {
                 outcome: cached.outcome.clone(),
                 named_types: Arc::clone(&cached.named_types),
+                schema_references: Arc::clone(&cached.schema_references),
                 reference_suggestions: Arc::clone(&cached.reference_suggestions),
                 file_failures: Arc::clone(&cached.file_failures),
                 key: Some(key),
@@ -943,6 +975,9 @@ impl OverlayCache {
             Err(error) => SchemaOutcome::Failed(Arc::new(error)),
         };
         let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
+        let schema_references =
+            Arc::new(SchemaReferenceFacts::select(text, path, Ok(&schema_roots), context));
+        let probes = schema_references.probes();
         let reference_suggestions = Arc::new(
             FrontmatterAst::parse(text)
                 .and_then(|parse| parse.ast)
@@ -957,7 +992,7 @@ impl OverlayCache {
         // them.
         let registry_files: std::collections::HashSet<&Path> =
             registry_files.iter().map(PathBuf::as_path).collect();
-        let deps = collect_dep_hashes(&outcome, &named_types, &registry_files);
+        let deps = collect_dep_hashes(&outcome, &named_types, &schema_references, &registry_files);
         let file_failures = match &outcome {
             SchemaOutcome::Failed(error) => file_failures(error),
             SchemaOutcome::Ready(_) => FileFailures::default(),
@@ -965,6 +1000,7 @@ impl OverlayCache {
         let schema = FrontmatterSchema {
             outcome,
             named_types,
+            schema_references,
             reference_suggestions,
             file_failures,
             key: Some(key),
@@ -974,8 +1010,10 @@ impl OverlayCache {
             CachedSchema {
                 key,
                 deps,
+                probes,
                 outcome: schema.outcome.clone(),
                 named_types: Arc::clone(&schema.named_types),
+                schema_references: Arc::clone(&schema.schema_references),
                 reference_suggestions: Arc::clone(&schema.reference_suggestions),
                 file_failures: Arc::clone(&schema.file_failures),
             },
@@ -1206,8 +1244,10 @@ fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
 /// Reads and hashes each dependency of an assembled bundle, so a later lookup
 /// can detect a content change. Covers the effective schema's dependencies
 /// (imports, examples, referenced `$schema` file), the extension-baseline
-/// files, and the files the named-type catalog read, which may name the same
-/// file — dedup by path so each file is hashed once. The trigger envelopes and
+/// files, the files the named-type catalog read, and each file a `$schema`
+/// reference selects (so editing, deleting, or repairing it refreshes a cached
+/// failure too), which may name the same file — dedup by path so each file is
+/// hashed once. The trigger envelopes and
 /// payload files in `registry_files` are left out: the registry cache tracks
 /// them. A failed assembly has no
 /// bundle, so its edges come from the files its error names: without them a
@@ -1218,6 +1258,7 @@ fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
 fn collect_dep_hashes(
     outcome: &SchemaOutcome,
     named_types: &NamedTypeCatalog,
+    schema_references: &SchemaReferenceFacts,
     registry_files: &std::collections::HashSet<&Path>,
 ) -> Vec<(PathBuf, u64)> {
     let mut paths: Vec<PathBuf> = match outcome {
@@ -1232,6 +1273,7 @@ fn collect_dep_hashes(
         SchemaOutcome::Failed(error) => error_dependencies(error),
     };
     paths.extend(named_types.dependencies().cloned());
+    paths.extend(schema_references.selected().cloned());
     paths.retain(|path| !registry_files.contains(path.as_path()));
     hash_files(paths.iter())
 }
@@ -1268,7 +1310,11 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
                 out.push(path.clone());
                 walk(source, out);
             }
-            SchemaError::SchemaDocument { path, .. } | SchemaError::Io { path, .. } => out.push(path.clone()),
+            SchemaError::SchemaDocument { path, .. }
+            | SchemaError::Io { path, .. }
+            | SchemaError::NotASchemaDocument { path, .. }
+            | SchemaError::UnsupportedJsonDialect { path, .. }
+            | SchemaError::InvalidJsonSchema { path, .. } => out.push(path.clone()),
             SchemaError::UnknownNamedType { namespace, site, .. } => {
                 file(namespace, out);
                 file(&site.source, out);
@@ -1327,6 +1373,11 @@ fn deps_unchanged(deps: &[(PathBuf, u64)]) -> bool {
             .map(|bytes| work_counters::hash_bytes(&bytes) == *hash)
             .unwrap_or(false)
     })
+}
+
+/// Whether a file exists at every probed location exactly where it did.
+fn probes_unchanged(probes: &[(PathBuf, bool)]) -> bool {
+    probes.iter().all(|(path, existed)| path.is_file() == *existed)
 }
 
 #[cfg(test)]
@@ -2586,5 +2637,179 @@ mod tests {
         state.forget(&doc);
         assert_eq!(Arc::strong_count(&repaired), 1, "closing drops the cache's snapshot");
         assert!(!shared(&repaired, &build(5, &text.replace("one", "two"), &strict, &other_context)));
+    }
+
+    /// A repository with a `schemas/` root holding `shape.yaml`, and the
+    /// path of a document at its top.
+    fn schema_reference_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::write(root.join("schemas/shape.yaml"), "$schema:\n  title: string\n").unwrap();
+        let path = root.join("doc.md");
+        (dir, root, path)
+    }
+
+    fn schema_references_of(
+        state: &OverlayState,
+        root: &Path,
+        path: &Path,
+        text: &str,
+        resolution: &DocumentResolution,
+    ) -> Arc<SchemaReferenceFacts> {
+        let overlay = state
+            .for_document(&uri("file:///w/doc.md"), text, path, &DmlsConfig::default(), &[root.to_path_buf()], resolution)
+            .expect("frontmatter overlay");
+        overlay.schema_references
+    }
+
+    /// `(pointer, reference, found path or creation path)` of each fact.
+    fn fact_rows(facts: &SchemaReferenceFacts) -> Vec<(String, String, Option<PathBuf>)> {
+        use simplified_schema::resolve::SelectionOutcome;
+        facts
+            .entries
+            .iter()
+            .map(|fact| {
+                let target = match &fact.selection.as_ref().expect("roots read").outcome {
+                    SelectionOutcome::Found(path) => Some(path.clone()),
+                    SelectionOutcome::Missing { creation, .. } => creation.clone(),
+                    SelectionOutcome::SiblingOnly { creation, .. } => Some(creation.clone()),
+                    SelectionOutcome::Failed(_) => None,
+                };
+                (fact.pointer.clone(), fact.reference.clone(), target)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn schema_reference_facts_cover_the_scalar_and_root_union_string_items() {
+        let (_dir, root, path) = schema_reference_fixture();
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+
+        let scalar = schema_references_of(&state, &root, &path, "---\n$schema: shape.yaml\n---\n", &resolution);
+        assert_eq!(
+            fact_rows(&scalar),
+            [("/$schema".to_string(), "shape.yaml".to_string(), Some(root.join("schemas/shape.yaml")))]
+        );
+
+        let quoted = schema_references_of(&state, &root, &path, "---\n$schema: \"shape.yaml\"\n---\n", &resolution);
+        assert_eq!(fact_rows(&quoted), fact_rows(&scalar), "a quoted string is the same reference");
+
+        let union = "---\n$schema:\n  - shape.yaml\n  - title: string\n  - './local.yaml'\n  - 12\n---\n";
+        let union = schema_references_of(&state, &root, &path, union, &resolution);
+        assert_eq!(
+            fact_rows(&union),
+            [
+                ("/$schema/0".to_string(), "shape.yaml".to_string(), Some(root.join("schemas/shape.yaml"))),
+                ("/$schema/2".to_string(), "./local.yaml".to_string(), Some(root.join("local.yaml"))),
+            ],
+            "an inline mapping arm and a number are not references"
+        );
+    }
+
+    #[test]
+    fn schema_reference_facts_skip_values_that_are_not_strings() {
+        let (_dir, root, path) = schema_reference_fixture();
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        for text in [
+            "---\n$schema:\n  title: string\n---\n",
+            "---\n$schema: { title: string }\n---\n",
+            "---\n$schema: null\n---\n",
+            "---\n$schema:\n---\n",
+            "---\n$schema: 12\n---\n",
+            "---\n$schema: true\n---\n",
+            "---\nbase: &s shape.yaml\n$schema: *s\n---\n",
+            "---\n$schema: [null, 3]\n---\n",
+            "---\ntitle: shape.yaml\n---\n",
+        ] {
+            let facts = schema_references_of(&state, &root, &path, text, &resolution);
+            assert!(facts.entries.is_empty(), "{text:?}: {:?}", fact_rows(&facts));
+        }
+    }
+
+    #[test]
+    fn schema_reference_facts_keep_the_last_good_text_while_mid_edit() {
+        let (_dir, root, path) = schema_reference_fixture();
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let good = schema_references_of(&state, &root, &path, "---\n$schema: shape.yaml\n---\n", &resolution);
+        let stale = schema_references_of(
+            &state,
+            &root,
+            &path,
+            "---\n$schema: other.yaml\ntitle: [\n---\n",
+            &resolution,
+        );
+        assert_eq!(fact_rows(&stale), fact_rows(&good), "a malformed buffer keeps the last-good facts");
+    }
+
+    #[test]
+    fn schema_reference_facts_need_a_context() {
+        let (_dir, root, path) = schema_reference_fixture();
+        let resolution = DocumentResolution::from_failure(crate::context::ContextFailure::NotProvided);
+        let state = OverlayState::default();
+        let facts = schema_references_of(&state, &root, &path, "---\n$schema: shape.yaml\n---\n", &resolution);
+        assert!(facts.entries.is_empty());
+    }
+
+    #[test]
+    fn unreadable_schema_roots_fail_every_reference_without_guessing_a_root() {
+        let (_dir, root, path) = schema_reference_fixture();
+        // A root file that is not UTF-8 fails the trigger registry's scan.
+        std::fs::write(root.join("schemas/binary.yaml"), [0xff, 0xfe, 0x00]).unwrap();
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let text = "---\n$schema:\n  - shape.yaml\n  - ./local.yaml\n---\n";
+        let facts = schema_references_of(&state, &root, &path, text, &resolution);
+        let pointers: Vec<&str> = facts.entries.iter().map(|fact| fact.pointer.as_str()).collect();
+        assert_eq!(pointers, ["/$schema/0", "/$schema/1"]);
+        for fact in &facts.entries {
+            assert!(
+                matches!(fact.selection.as_ref().map_err(|error| &**error), Err(SchemaError::Io { path, .. }) if path.ends_with("binary.yaml")),
+                "{fact:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cached_schema_reselects_when_a_probed_location_changes() {
+        let (_dir, root, path) = schema_reference_fixture();
+        let resolution = crate::context::test_support::resolution_in_repository(&root, &path);
+        let state = OverlayState::default();
+        let text = "---\n$schema: ./local.yaml\ntitle: x\n---\n";
+        let build = || {
+            state
+                .for_document(&uri("file:///w/doc.md"), text, &path, &DmlsConfig::default(), std::slice::from_ref(&root), &resolution)
+                .unwrap()
+        };
+
+        let missing = build();
+        assert_eq!(fact_rows(&missing.schema_references)[0].2, Some(root.join("local.yaml")));
+        assert!(matches!(missing.schema, SchemaOutcome::Failed(_)));
+        assert!(Arc::ptr_eq(&missing.schema_references, &build().schema_references), "an unchanged miss stays cached");
+
+        std::fs::write(root.join("local.yaml"), "$schema:\n  title: string\n").unwrap();
+        let created = build();
+        assert!(
+            matches!(
+                created.schema_references.entries[0].selection.as_ref().unwrap().outcome,
+                simplified_schema::resolve::SelectionOutcome::Found(ref found) if *found == root.join("local.yaml")
+            ),
+            "creating the missing file reselects"
+        );
+        assert!(created.bundle().is_some(), "and the schema reassembles");
+
+        std::fs::write(root.join("local.yaml"), "$schema: [\n").unwrap();
+        let broken = build();
+        assert!(matches!(broken.schema, SchemaOutcome::Failed(_)), "editing the selected file refreshes it");
+
+        std::fs::remove_file(root.join("local.yaml")).unwrap();
+        let deleted = build();
+        assert!(matches!(
+            deleted.schema_references.entries[0].selection.as_ref().unwrap().outcome,
+            simplified_schema::resolve::SelectionOutcome::Missing { .. }
+        ));
     }
 }
