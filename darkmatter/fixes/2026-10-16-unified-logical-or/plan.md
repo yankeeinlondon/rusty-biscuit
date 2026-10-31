@@ -1,9 +1,14 @@
 ---
 total_phases: 7
 created: 2026-10-30
-phase: 1
+phase: 2
 agent: opencode/zai-coding-plan/glm-5.3
-yolo: "true"
+yolo: 'true'
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # One Meaning for `||` — Implementation Plan
@@ -222,7 +227,7 @@ execute without choices.
 
 Tasks:
 
-- [ ] Safety search re-run
+- [x] Safety search re-run
     - Re-run the R14 search over the repository (Markdown, YAML, Rust;
       exclude `_completed/`, `frozen`, and this fix's own directory) for
       `when`/`while`/`until` conditions containing `||`, and inspect each hit
@@ -231,7 +236,7 @@ Tasks:
     - Apply the R14 outcome actions and record the result (found-count and
       any rewrite) in `darkmatter/fixes/2026-10-16-unified-logical-or/` as an
       implementation-log entry.
-- [ ] Green baseline capture
+- [x] Green baseline capture
     - Run, before any code change: `cargo nextest run -p darkmatter --features
       prompt-tests --test prompts` and `just test-prompts` in `claudine/`
       (the passive shipped-artifact corpus named in AC3), confirming both are
