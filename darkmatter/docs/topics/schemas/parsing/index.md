@@ -51,15 +51,14 @@ whole string skip straight to Stage 2.
 | `$()` ternary condition and branches | no | the token in executed position |
 | Public condition API, Claudine loop/hook conditions | no | the caller's string |
 
-## Parse modes
+## One grammar
 
-The grammar has two modes, selected by the surface, and they differ in exactly
-one place: what `||` means. See [grammar.md](./grammar.md#parse-modes).
-
-| Mode | Entry point | `\|\|` | `&&` |
-| --- | --- | --- | --- |
-| Interpolation | `parse`, `parse_spanned` | fallback (first truthy wins) | logical AND |
-| Condition | `parse_condition`, `parse_condition_spanned` | logical OR | logical AND |
+Every surface in the table above parses with the same grammar through `parse`
+(or `parse_spanned`, which keeps source spans), so an expression means the same
+thing wherever it is written. In particular, `a || b` returns the operand that
+decided the result — `a` when it is truthy, otherwise `b` — in `{{ … }}` and in
+a condition alike, while `&&` returns a boolean. See
+[grammar.md](./grammar.md#lowering).
 
 ## Failure handling
 
@@ -79,7 +78,7 @@ The error names the source file, the authored line and column, and the
 expression, and no partially composed document is written. `ComposeOptions::with_fail_fast(false)`
 does not relax this; it governs recoverable non-expression stages only. Subtree
 compose (`compose_subtree`, `SubtreeCompose`) follows the same rule. The public
-condition API (`evaluate_condition`, `parse_condition`) returns its failures as
+condition API (`evaluate_condition`) returns its failures as
 `Result` errors and leaves their disposition to the caller.
 
 A well-formed identifier that resolves to nothing is **not** a failure: it is an

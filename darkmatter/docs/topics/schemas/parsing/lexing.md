@@ -13,7 +13,7 @@ re-exported under `darkmatter::markdown::compose::expression`.
 | Function | Returns | Used by |
 | --- | --- | --- |
 | `Lexer::tokenize_all()` | `Vec<Token>` | direct callers, tests |
-| `lex_spanned(input, mode)` | `Vec<Spanned<Token>>` | the parser, and therefore everything else |
+| `lex_spanned(input)` | `Vec<Spanned<Token>>` | the parser, and therefore everything else |
 
 Both always end with `Token::Eof`. Spans are byte ranges into the expression
 text and are captured **after** whitespace is skipped, so a token's span covers
@@ -140,7 +140,7 @@ a backslash.
 | `==` `!=` `>` `>=` `<` `<=` | `CompOp(…)` |
 | `!` | `Bang` (unless followed by `=`) |
 | `&&` | `AndAnd` |
-| `\|\|` | `Pipe` in interpolation mode, `OrOr` in condition mode |
+| `\|\|` | `Pipe` |
 
 ### Characters that must be doubled
 
@@ -148,8 +148,7 @@ Three characters are only ever valid as a pair, and each has its own error
 message rather than a generic one:
 
 - a lone `&` — "Unexpected character: '&'"
-- a lone `|` — "Use '||' for fallback" (interpolation) or "Use '||' for logical
-  OR" (condition)
+- a lone `|` — "Unexpected '|'. Use '||'."
 - a lone `=` — "Expected '=' after '=' for equality operator"
 
 There is no bitwise operator set and no single-`=` assignment anywhere in the
@@ -157,14 +156,6 @@ language, so these are always typos.
 
 Any other unrecognized character produces "Unexpected character: 'x'" at its
 byte offset.
-
-## Mode affects exactly one token
-
-`ParseMode::Interpolation` (the default) lexes `||` as `Token::Pipe`;
-`ParseMode::Condition` lexes it as `Token::OrOr`. Everything else — including
-`&&`, which is logical AND in both modes — is mode-independent. See
-[grammar.md § Parse modes](./grammar.md#parse-modes) for what the parser then
-does with each.
 
 ## Errors
 

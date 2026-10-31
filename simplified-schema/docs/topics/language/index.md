@@ -145,7 +145,8 @@ These are limits of the language itself; a host built on it may add its own.
   conversion, use [strict validation](../validation.md).
 - **No cross-document constraints.** A schema judges one value; uniqueness
   across many documents is out of scope.
-- **No parameterized `expression(condition)`.** The dialect-restricting form
-  is reserved and rejected today; bare `expression` accepts either dialect.
+- **No parameterized `expression(…)`.** There is one expression grammar, so a
+  positional value has nothing to select and is rejected; use bare
+  `expression`.
 - **No expression evaluation or return-type checking.** `expression` checks
   syntax only; whether a condition evaluates to a boolean is never checked.

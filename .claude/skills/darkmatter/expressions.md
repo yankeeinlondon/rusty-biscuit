@@ -193,8 +193,10 @@ Claudine's `type_scope_ownership_guard.rs` fails on an unreviewed
 static presence and type at a site: `DeclaredTypes` (built once per owner
 from `EffectiveSchema.simplified`, static frontmatter, and host roots or a
 `BindingView`) refined by guards. `TypeScope::assume(&Expr, Polarity)` is the
-only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
-`FunctionCall`/`Fallback`, matched through the registry), ternaries,
+only fact producer. It handles `!`, parentheses, `and`/`or`/`&&`/`||`
+(`&&` lowers to an `and(...)` `FunctionCall`; `||` is the `LogicalOr` node,
+treated as `or(...)` when used as a truth test; both matched through the
+registry), ternaries,
 `==`/`!=` by strict typed equality (`Shape::equal_to`/`differs_from`, and
 `finite_values` for subject-to-subject), and each predicate's
 `NarrowingFact` (`call_binding/registration.rs`: `FactKind::{TrueIff,

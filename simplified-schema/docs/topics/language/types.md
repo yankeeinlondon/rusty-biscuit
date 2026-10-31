@@ -672,11 +672,11 @@ $schema:
 ```
 
 - A plain keyword type with no positional value — parses exactly like `string`.
-- There is **no** parameterized form in v1. `expression(condition)` is reserved for a future backward-compatible opt-in and is rejected today.
+- There is **no** parameterized form: `expression(…)` with a positional value is rejected, because there is only one expression grammar to select.
 
 #### Semantics
 
-The expression language has two dialects that disagree on `&&` / `||`: the **value** dialect (body `{{ }}` interpolation) and the **condition** dialect (`when="..."`, where `&&`/`||` are logical AND/OR). A bare `expression` validates when the string parses under **either** dialect, so `when: expression` accepts `is_agent() && os == "macos"` on day one. In practice this is a single condition-mode parse, because the condition parser accepts a parse-superset of the value dialect.
+A bare `expression` validates when the string parses under the Darkmatter expression grammar, the one grammar every surface uses (`{{ }}` interpolation, `when="..."` conditions, lifecycle `when:`). So `when: expression` accepts `is_agent() && os == "macos"` and `length(items || []) > 0` alike.
 
 Validation checks **parseability only**:
 

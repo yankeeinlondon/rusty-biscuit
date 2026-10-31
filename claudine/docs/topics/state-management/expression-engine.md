@@ -111,18 +111,23 @@ false, or **falsy**:
 All other values are **truthy**. For example, a nonempty string is truthy even
 if its text is `"false"`.
 
-### Interpolation vs. condition mode
+### Logical OR
 
-The meaning of `||` depends on where the expression appears:
+`||` means the same thing wherever the expression appears: it returns the
+operand that decided the result — the first truthy operand, otherwise the last
+one — and stops evaluating at the first truthy operand. As a truth value that
+is ordinary logical OR, so a condition and an interpolation always agree:
 
-| Where | Meaning of `||` | Example |
+| Where | Example | Result |
 |---|---|---|
-| Interpolation: `{{ … }}` | Returns the first truthy value, or the fallback value. | `{{ "ready" || "waiting" }}` returns `ready`. |
-| Condition: `when="…"` | Logical OR: returns a boolean. | `when="draft || review_needed"` is true if either value is truthy. |
+| Interpolation: `{{ … }}` | `{{ "ready" \|\| "waiting" }}` | `ready` |
+| Condition: `when:` | `when: "draft \|\| review_needed"` | runs when either value is truthy |
+| Condition: `when:` | `when: "length(open_questions \|\| []) > 0"` | runs when `open_questions` lists at least one item; an absent list counts as `[]` |
 
-`&&` means logical AND in both modes: both sides must be truthy. The function
-forms `and(...)` and `or(...)` also work in both modes and stop evaluating once
-the result is determined.
+`&&` is logical AND everywhere and returns `true` or `false`: both sides must
+be truthy. The function forms `and(...)` and `or(...)` also return booleans and
+stop evaluating once the result is determined; use `or(...)` when you want a
+boolean rather than the deciding operand.
 
 ## Calculate and compare values
 
@@ -149,7 +154,7 @@ parentheses to make a different order explicit: `(2 + 3) * 4` produces `20`.
 4. Addition and subtraction: `+`, `-`
 5. Comparisons: `==`, `!=`, `>`, `>=`, `<`, `<=`
 6. Logical AND: `&&`
-7. Logical OR or fallback: `||`, depending on mode
+7. Logical OR: `||`
 8. Conditional choice: `? :`
 
 ## Find and use functions
@@ -219,8 +224,9 @@ The engine lives in the
 An expression passes through three stages:
 
 1. The **lexer** splits its text into tokens, such as names and operators.
-2. The **parser** builds an expression tree (`ast::Expr`). `parse()` selects
-   interpolation mode; `parse_condition()` selects condition mode.
+2. The **parser** builds an expression tree (`ast::Expr`). One parser,
+   `parse()`, serves every surface: interpolation, `when:` conditions, and
+   loop `while`/`until`.
 3. The **evaluator** computes the result. `EvaluationLookup` supplies variable
    values and the resolution context needed by file-reading functions.
 

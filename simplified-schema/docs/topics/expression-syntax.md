@@ -6,16 +6,16 @@ evaluating it**. Use it when you need to know whether text is a well-formed
 expression, or what shape it has, and you have no host to run it in.
 
 ```rust
-use simplified_schema::expression::{Expr, parse_condition};
+use simplified_schema::expression::{Expr, parse};
 
 // Nothing defines `unknown_fn`; parsing only checks the syntax.
-let expr = parse_condition("unknown_fn(1)").unwrap();
+let expr = parse("unknown_fn(1)").unwrap();
 assert_eq!(
     expr,
     Expr::FunctionCall { name: "unknown_fn".into(), args: vec![Expr::NumberLiteral(1.0)] }
 );
 
-let error = parse_condition("unknown_fn(").unwrap_err();
+let error = parse("unknown_fn(").unwrap_err();
 assert_eq!(error.position, 11); // a byte offset into the supplied text
 ```
 
@@ -36,31 +36,35 @@ flowchart LR
 
 ## Entry points
 
-| Function | Dialect | Returns |
+| Function | Reads | Returns |
 | --- | --- | --- |
-| `parse` | interpolation | `Expr` |
-| `parse_spanned` | interpolation | `SpannedExpr` (every node carries a byte span) |
-| `parse_condition` | condition | `Expr` |
-| `parse_condition_spanned` | condition | `SpannedExpr` |
+| `parse` | an expression | `Expr` |
+| `parse_spanned` | an expression | `SpannedExpr` (every node carries a byte span) |
 | `parse_callback`, `parse_callback_spanned` | callback argument (`x => x.name`) | `Callback` |
-| `lex_spanned` | either (`ParseMode`) | `Vec<Spanned<Token>>` |
+| `lex_spanned` | an expression | `Vec<Spanned<Token>>` |
 
 `SpannedExpr::erase` turns a spanned tree into the plain `Expr`; both come
 from one grammar, so they always agree.
 
-## The two dialects
+## Logical OR
 
-The dialects differ only in `||`:
+There is one grammar for every surface: `{{ … }}` text and a condition such as
+`when:` parse the same way. Infix `||` builds an `Expr::LogicalOr` node, while
+`&&` lowers to a call named `and`:
 
-| Text | Interpolation (`parse`) | Condition (`parse_condition`) |
+| Text | Tree | Value when a host evaluates it |
 | --- | --- | --- |
-| `a \|\| b` | fallback: `b` when `a` is falsy | logical OR, lowered to a call named `or` |
-| `a && b` | logical AND (call named `and`) | logical AND (call named `and`) |
+| `a \|\| b` | `LogicalOr { left: a, right: b }` | the deciding operand: `a` when truthy, otherwise `b` |
+| `a && b` | `FunctionCall { name: "and", args: [a, b] }` | a boolean |
 
-Every other construct (literals, member and index access, arithmetic,
-comparison, ternary, calls, inline callbacks) is the same in both. A text
-valid in either dialect parses in condition mode, which is why schema checks
-of expression-typed values use `parse_condition`.
+```rust
+use simplified_schema::expression::{Expr, parse};
+
+let expr = parse("items || []").unwrap();
+assert!(matches!(expr, Expr::LogicalOr { .. }));
+```
+
+Schema checks of `expression`-typed values use `parse` too.
 
 ## Spans and errors
 
