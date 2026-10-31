@@ -1115,7 +1115,12 @@ Hosts declare their own globals in a catalog of the same format
 and the host's requirements). DMLS hovers and completes host globals from the
 catalogs in a document's schema roots (`catalog::host_catalogs`), treating
 each as `ExecutionDependent` (DMLS cannot know loop/group membership); a
-catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
+catalog that fails to load is a `dm.schema.host_catalog` warning. The
+envelope test (`catalog::is_global_catalog`) is only `kind: schema` + a
+`$schema` mapping + no `types`, so an ordinary document schema written that
+way in any schema root (including the repo-root `schemas/`) becomes a broken
+host catalog and warns on every document there; write such schemas as pure
+`$schema` envelopes (no `kind`), as `schemas/*.yaml` are. Inside an
 md event's stack DMLS uses that event's registry `BindingView`
 (`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
 `dm.expression.unavailable_global`.

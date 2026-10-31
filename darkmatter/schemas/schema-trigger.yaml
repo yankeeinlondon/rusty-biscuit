@@ -1,0 +1,19 @@
+kind: schema
+description: |-
+    The definition of a `kind: schema-trigger` document: a YAML file whose
+    `match` conditions select the Markdown documents its `$schema` applies to.
+types:
+    match-expression:
+        all: match-expression[] -> every entry must match
+        group: match-expression[] -> at least one entry must match
+        none: match-expression[] -> no entry may match
+        min-match:
+            count: number(required) -> how many of `of` must match
+            of: match-expression[](required) -> the candidate conditions
+        $path: string | string[] -> glob references for the document path; `!` excludes
+        <string>: type-definition -> a frontmatter property condition, written as a type expression
+    match-payload: match-expression | match-expression[]
+$schema:
+    kind: literal(schema-trigger; required) -> the document kind that claims this definition
+    match: match-payload(required) -> the conditions that select a document (one expression, or a list that must all hold)
+    $schema: schema -> the schema applied to matching documents; omit it for a matcher-only trigger

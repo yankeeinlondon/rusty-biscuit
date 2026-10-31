@@ -141,8 +141,9 @@ pub(crate) const CONTENT_POLICY_PATH: &str = "content-policy/schemas/content-pol
 /// The shipped documents: Darkmatter's global catalog, its partials
 /// (including the neutral lifecycle action definitions, the `md` profile's
 /// stacks, and the expression-function catalog, whose `recent-commits` helper
-/// type the context partial imports), and the Content Policy editor schema the
-/// `fm` partial imports.
+/// type the context partial imports), the definitions of the `kind: schema`
+/// and `kind: schema-trigger` YAML documents, and the Content Policy editor
+/// schema the `fm` partial imports.
 /// The runtime baseline is the catalog's resolved `fm` definition.
 pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
@@ -180,6 +181,14 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     EmbeddedDocument {
         path: "darkmatter/schemas/partials/functions.yaml",
         text: include_str!("../../../../schemas/partials/functions.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/schema.yaml",
+        text: include_str!("../../../../schemas/schema.yaml"),
+    },
+    EmbeddedDocument {
+        path: "darkmatter/schemas/schema-trigger.yaml",
+        text: include_str!("../../../../schemas/schema-trigger.yaml"),
     },
     EmbeddedDocument {
         path: CONTENT_POLICY_PATH,
@@ -271,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_table_registers_exactly_the_catalog_its_partials_and_policy_schema() {
+    fn the_shipped_table_registers_exactly_the_catalog_its_partials_kind_definitions_and_policy_schema() {
         let paths: Vec<_> = SHIPPED.iter().map(|document| document.path).collect();
         assert_eq!(
             paths,
@@ -285,10 +294,63 @@ mod tests {
                 "darkmatter/schemas/partials/lifecycle.yaml",
                 "darkmatter/schemas/partials/md-lifecycle.yaml",
                 "darkmatter/schemas/partials/functions.yaml",
+                "darkmatter/schemas/schema.yaml",
+                "darkmatter/schemas/schema-trigger.yaml",
                 CONTENT_POLICY_PATH,
             ]
         );
         assert_eq!(find(SHIPPED, CONTENT_POLICY_PATH).map(|d| d.text), Some(content_policy::EDITOR_SCHEMA));
         assert!(find(SHIPPED, "darkmatter/docs/schemas/darkmatter.yaml").is_none());
+    }
+
+    /// YAML files under `darkmatter/schemas` that are compiled in through
+    /// another table, so [`SHIPPED`] deliberately lacks them.
+    const UNSHIPPED: &[&str] = &[
+        // `effects/types.rs` `MUTATIONS_SOURCE`.
+        "darkmatter/schemas/partials/mutations.yaml",
+        // `compose/expression/catalog/mod.rs`, the function catalog's examples.
+        "darkmatter/schemas/partials/function-examples/as_line_separated.yaml",
+        "darkmatter/schemas/partials/function-examples/as_ordered_list.yaml",
+        "darkmatter/schemas/partials/function-examples/as_tsv.yaml",
+        "darkmatter/schemas/partials/function-examples/as_unordered_list.yaml",
+    ];
+
+    fn yaml_files_below(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display())) {
+            let path = entry.expect("directory entry").path();
+            if path.is_dir() {
+                yaml_files_below(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "yaml" || ext == "yml") {
+                found.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn every_yaml_file_under_darkmatter_schemas_is_shipped_or_listed_as_embedded_elsewhere() {
+        let schemas_dir = biscuit_test_harness::manifest_dir!().join("../schemas");
+        let mut files = Vec::new();
+        yaml_files_below(&schemas_dir, &mut files);
+        let found: Vec<String> = files
+            .iter()
+            .map(|path| {
+                let relative = path.strip_prefix(&schemas_dir).expect("below the schemas folder");
+                let segments: Vec<_> = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect();
+                format!("darkmatter/schemas/{}", segments.join("/"))
+            })
+            .collect();
+        for path in &found {
+            assert!(
+                find(SHIPPED, path).is_some() || UNSHIPPED.contains(&path.as_str()),
+                "`{path}` is neither in SHIPPED nor in UNSHIPPED"
+            );
+        }
+        for path in UNSHIPPED {
+            assert!(found.iter().any(|candidate| candidate == path), "UNSHIPPED entry `{path}` no longer exists");
+            assert!(find(SHIPPED, path).is_none(), "UNSHIPPED entry `{path}` is also in SHIPPED");
+        }
+        for document in SHIPPED.iter().filter(|document| document.path.starts_with("darkmatter/schemas/")) {
+            assert!(found.iter().any(|path| path == document.path), "SHIPPED entry `{}` has no file", document.path);
+        }
     }
 }

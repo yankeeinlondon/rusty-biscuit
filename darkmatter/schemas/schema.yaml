@@ -1,0 +1,15 @@
+kind: schema
+description: |-
+    The definition of a `kind: schema` document: a YAML file that exports a
+    document schema (`$schema`), reusable named types (`types`), or both.
+$schema:
+    - kind: literal(schema; required) -> the document kind that claims this definition
+      description: string -> what the schema is for
+      categories: string[] -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+      $schema: schema(required) -> the exported document schema (an inline mapping or union, or a reference to a schema file)
+      types: schema -> reusable named types; these names are not document properties
+    - kind: literal(schema; required) -> the document kind that claims this definition
+      description: string -> what the schema is for
+      categories: string[] -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+      $schema: schema -> the exported document schema (an inline mapping or union, or a reference to a schema file)
+      types: schema(required) -> reusable named types; these names are not document properties
