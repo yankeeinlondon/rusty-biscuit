@@ -14,11 +14,13 @@ use std::path::{Path, PathBuf};
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use serde_json::json;
 use simplified_schema::embedded::ShippedSources;
-use simplified_schema::resolve::{ResolvedSchema, resolve_schema_with_roots};
-use simplified_schema::{NotSchemaReason, SchemaError, parse_standalone_schema_document};
+use simplified_schema::resolve::{ResolvedSchema, inspect_schema_target, resolve_schema_with_roots};
+use simplified_schema::{
+    NotSchemaReason, SchemaCategory, SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+};
 
 /// An informal envelope with every key it may carry.
-const INFORMAL: &str = "description: Feature reviews\n$schema:\n  title: string(required)\n  id: Id\ntypes:\n  Id: string\n";
+const INFORMAL: &str = "description: Feature reviews\ncategories: [Core]\n$schema:\n  title: string(required)\n  id: Id\ntypes:\n  Id: string\n";
 /// A tagged envelope with every key it may carry.
 const TAGGED: &str = "kind: schema\ndescription: Reviews\ncategories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string(category(Core))\n";
 /// A Draft 2020-12 JSON Schema.
@@ -310,6 +312,129 @@ fn categories_field_shapes() {
         let (path, result) = fixture.target(&format!("categories-{label}.yaml"), &text);
         assert_document_error(result, &path, &["`categories` must be a list"]);
     }
+}
+
+// ── YAML: an informal document's `categories` ─────────────────────────────
+//
+// The informal envelope is the tagged one with `$schema` required, so it
+// carries `categories` too. Each case writes the same file, `subject.yaml`,
+// once informal and once with `kind: schema` added as the control.
+
+/// An informal document declaring a category list.
+const INFORMAL_CATEGORIES: &str = "categories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string\n";
+
+/// The lowering of an optional `string` property.
+fn optional_string() -> serde_json::Value {
+    json!({"anyOf": [{"type": "null"}, {"type": "string"}]})
+}
+
+fn informal_and_tagged() -> [(&'static str, String); 2] {
+    [
+        ("informal", INFORMAL_CATEGORIES.to_string()),
+        ("tagged", format!("kind: schema\n{INFORMAL_CATEGORIES}")),
+    ]
+}
+
+#[test]
+fn an_informal_document_with_categories_is_recognized_and_exposes_them() {
+    for (label, text, envelope) in [
+        ("informal", INFORMAL_CATEGORIES.to_string(), StandaloneSchemaEnvelope::Pure),
+        ("tagged", format!("kind: schema\n{INFORMAL_CATEGORIES}"), StandaloneSchemaEnvelope::Tagged),
+    ] {
+        let document = parse_standalone_schema_document(&text, "subject.yaml")
+            .unwrap_or_else(|error| panic!("{label}: {error}"))
+            .unwrap_or_else(|| panic!("{label}: not recognized"));
+        assert_eq!(document.envelope, envelope, "{label}");
+        assert!(document.exports_schema, "{label}");
+        assert_eq!(
+            document.categories,
+            Some(vec![SchemaCategory { name: "Core".into(), description: None }]),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn an_informal_document_with_categories_is_a_schema_target() {
+    for (label, text) in informal_and_tagged() {
+        let fixture = Fixture::new();
+        let (path, result) = fixture.target("subject.yaml", &text);
+        let resolved = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(resolved.json_schema["properties"]["title"], optional_string(), "{label}");
+
+        let inspection = inspect_schema_target(&path, text.as_bytes());
+        assert!(inspection.classification.is_ok(), "{label}: {:?}", inspection.classification);
+        assert_eq!(inspection.lines, Some(vec!["title: string".to_string()]), "{label}");
+    }
+}
+
+#[test]
+fn an_informal_document_with_categories_serves_named_imports() {
+    for (label, text) in informal_and_tagged() {
+        let fixture = Fixture::new();
+        let subject = fixture.write("subject.yaml", &text);
+        fixture.write("consumer.yaml", "$schema:\n  id: Id@./subject.yaml\n");
+        let resolved = fixture.resolve("./consumer.yaml").unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(resolved.imports, vec![subject], "{label}");
+        assert_eq!(resolved.json_schema["properties"]["id"], optional_string(), "{label}");
+    }
+}
+
+#[test]
+fn an_informal_document_with_categories_is_a_delegation_and_root_union_arm() {
+    for (label, text) in informal_and_tagged() {
+        let fixture = Fixture::new();
+        fixture.write("subject.yaml", &text);
+        fixture.write("delegate.yaml", "$schema: ./subject.yaml\n");
+        let delegated = fixture.resolve("./delegate.yaml").unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(delegated.json_schema["properties"]["title"], optional_string(), "{label}");
+
+        fixture.write("union.yaml", "$schema:\n  - ./subject.yaml\n  - count: number\n");
+        let union = fixture.resolve("./union.yaml").unwrap_or_else(|error| panic!("{label}: {error}"));
+        let lowered = union.json_schema.to_string();
+        assert!(lowered.contains("\"title\"") && lowered.contains("\"count\""), "{label}: {lowered}");
+    }
+}
+
+/// Every `categories` shape through the resolver: absent and `[]` declare no
+/// restriction; any other non-list or non-string entry is a located error
+/// from the shared category validator, never an envelope refusal.
+#[test]
+fn informal_categories_field_shapes() {
+    let fixture = Fixture::new();
+    for (label, value) in [("absent", None), ("empty", Some("[]")), ("control", Some("[Core]"))] {
+        let text = match value {
+            Some(value) => INFORMAL_CATEGORIES.replace("[Core]", value),
+            None => INFORMAL_CATEGORIES.replace("categories: [Core]\n", ""),
+        };
+        let (_, result) = fixture.target(&format!("informal-categories-{label}.yaml"), &text);
+        assert!(result.is_ok(), "{label}: {result:?}");
+    }
+    for (label, value, fragment) in [
+        ("null", "null", "`categories` must be a list"),
+        ("scalar", "Core", "`categories` must be a list"),
+        ("mapping", "{}", "`categories` must be a list"),
+        ("mixed", "[Core, 3]", "`categories[1]`: a category entry must be a string"),
+        ("all-wrong", "[3]", "`categories[0]`: a category entry must be a string"),
+    ] {
+        let text = INFORMAL_CATEGORIES.replace("[Core]", value);
+        let (path, result) = fixture.target(&format!("informal-categories-{label}.yaml"), &text);
+        let message = assert_document_error(result, &path, &[fragment]);
+        assert!(!message.contains("unsupported top-level"), "{label}: {message}");
+    }
+    // An unknown key is still refused beside `categories`.
+    let (path, result) = fixture.target("informal-categories-unknown.yaml", &format!("foo: 1\n{INFORMAL_CATEGORIES}"));
+    assert_document_error(result, &path, &["unsupported top-level key(s): foo"]);
+}
+
+/// `categories` does not make a `$schema`-less document informal.
+#[test]
+fn categories_without_schema_is_not_an_informal_document() {
+    let text = "categories: [Core]\ntypes:\n  Id: string\n";
+    assert!(parse_standalone_schema_document(text, "subject.yaml").unwrap().is_none());
+    let fixture = Fixture::new();
+    let (path, result) = fixture.target("subject.yaml", text);
+    assert_not_schema(result, &path, NotSchemaReason::NoSchemaProperty);
 }
 
 // ── JSON: control, document shapes, and the dialect ───────────────────────

@@ -280,8 +280,9 @@ pub fn frontmatter_authoring(
 /// that is *already known* to be unparseable, on every keystroke. The
 /// recognizer is therefore lexical — one linear scan, no backtracking — and
 /// tolerant of truncated or otherwise broken input. It still refuses ordinary
-/// YAML and raw JSON Schema, which carry top-level keys beyond `$schema`,
-/// an optional `types` table, and an optional `description`, and never carry
+/// YAML and raw JSON Schema, which carry a top-level key the informal
+/// envelope does not admit
+/// ([`StandaloneSchemaEnvelope::admits_top_level_key`]) and never carry
 /// `kind: schema`.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
     let top_level = match flow_mapping_start(text) {
@@ -296,7 +297,7 @@ pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope>
     (top_level.iter().any(|(key, _)| key == "$schema")
         && top_level
             .iter()
-            .all(|(key, _)| matches!(key.as_str(), "$schema" | "types" | "description")))
+            .all(|(key, _)| StandaloneSchemaEnvelope::Pure.admits_top_level_key(key)))
     .then_some(StandaloneSchemaEnvelope::Pure)
 }
 
@@ -1316,6 +1317,8 @@ mod tests {
             "description: Feature reviews\n$schema:\n  title: string\n",
             "description: Reviews\ntypes:\n  Id: string\n$schema:\n  id: Id@this\n",
             "{description: Reviews, $schema: {title: string}}",
+            // ... and a `categories` list, as the tagged envelope may.
+            "categories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string\n",
         ] {
             assert_eq!(
                 standalone_envelope_claim(pure),
@@ -1346,7 +1349,7 @@ mod tests {
             "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\"}",
             "{kind: config, types: {title: string}}",
             "[1, 2, 3]\n",
-            // A key outside `$schema`, `types`, and `description` declines.
+            // A key the informal envelope does not admit declines.
             "description: Reviews\ntitle: x\n$schema:\n  title: string\n",
             "kind: config\ndescription: Reviews\n$schema:\n  title: string\n",
         ] {

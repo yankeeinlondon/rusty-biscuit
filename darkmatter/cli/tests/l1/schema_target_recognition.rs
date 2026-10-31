@@ -1,6 +1,6 @@
 //! `md schema validate` through the normal invocation path, on the files a
 //! document's `$schema` may and may not target: a schema file carrying a
-//! `description` beside its `$schema` applies like any other, and a
+//! `description` or `categories` beside its `$schema` applies like any other, and a
 //! `types`-only file is refused with the named-import hint.
 
 use crate::common;
@@ -39,6 +39,22 @@ fn a_described_schema_file_applies_its_schema() {
     let (code, report) = validate(&process, &invalid);
     assert_eq!(code, Some(1), "the schema's `required` applies: {report}");
     assert!(report.to_string().contains("title"), "{report}");
+}
+
+/// An informal schema may declare `categories`, as a tagged one may.
+#[test]
+fn an_informal_schema_file_with_categories_applies_its_schema() {
+    let process = CliProcessFixture::new();
+    assert!(process.initialize_repository(), "git init");
+    process.write_file(
+        "schemas/subject.yaml",
+        "categories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string\n",
+    );
+    let doc = process.write_file("docs/doc.md", "---\n$schema: ../schemas/subject.yaml\ntitle: Ship it\n---\nBody\n");
+
+    let (code, report) = validate(&process, &doc);
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], true, "{report}");
 }
 
 #[test]

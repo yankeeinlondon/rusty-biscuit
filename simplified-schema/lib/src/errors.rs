@@ -606,7 +606,7 @@ pub enum SchemaError {
         chain: String,
     },
 
-    /// A document `$schema` directly referenced a `*.trigger.yaml` file.
+    /// A document `$schema` directly referenced a `kind: schema-trigger` file.
     /// Trigger schemas activate by placement and match, never by reference;
     /// the error names the payload (`suggestion`) as the file to reference
     /// instead.

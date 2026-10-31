@@ -549,6 +549,15 @@ mod export {
         );
     }
 
+    /// An informal document keeps its `categories` list, so the restriction
+    /// it places on `category(...)` survives the round trip.
+    #[test]
+    fn informal_categories() {
+        let exported = round_trips("categories: [Core]\n$schema:\n  id: Id\ntypes:\n  Id: string(category(Core))\n");
+        assert!(!exported.contains("kind:"), "{exported}");
+        assert!(exported.starts_with("categories:\n- Core\n"), "{exported}");
+    }
+
     #[test]
     fn finite_recursive_named_definitions() {
         let exported = round_trips(

@@ -148,6 +148,30 @@ fn assert_valid_trigger_applies_beside_invalid(good: &str, bad: &str) {
     assert_eq!(report.trigger_findings.len(), 1);
 }
 
+/// An informal schema may declare `categories`, as a tagged one may; a
+/// trigger naming either applies its payload.
+#[test]
+fn a_payload_file_with_categories_applies_informal_or_tagged() {
+    let informal = "categories: [Core]\n$schema:\n  level: number\ntypes:\n  Id: string\n";
+    for (label, payload) in [("informal", informal.to_string()), ("tagged", format!("kind: schema\n{informal}"))] {
+        let repo = Repo::new(&[
+            ("schemas/host.trigger.yaml", &trigger_with_payload("./subject.yaml")),
+            ("schemas/subject.yaml", &payload),
+        ]);
+
+        let schemas = repo.schemas();
+
+        assert!(schemas.discovery_findings().is_empty(), "{label}: {:?}", schemas.discovery_findings());
+        assert_eq!(file_sources(schemas.trigger_registry().expect("registry")), [repo.path("schemas/host.trigger.yaml")], "{label}");
+        let rejected = repo.document("bad.md", "title: t\nlevel: high\n");
+        let report = schemas.validate(&rejected).expect("validates");
+        assert!(
+            report.problems.iter().any(|problem| problem.instance_path.first() == Some("level")),
+            "{label}: the payload applies: {report:?}"
+        );
+    }
+}
+
 #[test]
 fn a_valid_trigger_after_an_invalid_one_still_applies() {
     assert_valid_trigger_applies_beside_invalid("schemas/b-good.yaml", "schemas/a-bad.yaml");

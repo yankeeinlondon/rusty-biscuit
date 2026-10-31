@@ -20,10 +20,12 @@
 //! loads it with [`GlobalCatalog::from_documents`] and its own
 //! [`GlobalRequirement`]s.
 //!
-//! A catalog is registered explicitly, never discovered: the standalone
-//! schema loader refuses its envelope, so a document `$schema` that reaches a
-//! catalog by any path fails rather than applying its globals as frontmatter
-//! properties, and trigger discovery never claims it. Shape is separate from
+//! A catalog becomes the baseline or a host's globals only by explicit
+//! registration through [`GlobalCatalog`], never by discovery: trigger
+//! discovery never claims it. To the standalone schema loader it is an
+//! ordinary tagged schema document, so a document `$schema` that names a
+//! catalog is accepted and gets the catalog's entries as document properties,
+//! optional unless an entry says `required`. Shape is separate from
 //! availability: which events may read a global is the host's
 //! [`BindingView`](crate::markdown::compose::expression::BindingView).
 //!

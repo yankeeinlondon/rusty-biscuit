@@ -48,6 +48,7 @@ use serde_yaml_ng::Value as YamlValue;
 use super::{
     SchemaAdvisory, SchemaArm,
     embedded::{self, EmbeddedDocument, ShippedSources}, SchemaOrigin, SchemaOriginKind, SchemaShape, SchemaRoot, StandaloneSchemaDocument,
+    StandaloneSchemaEnvelope,
     errors::{DRAFT_2020_12_DIALECT, NotSchemaReason, SchemaError},
     simplified::{
         AlphanumericOptions, DefKey, DefNamespace, DefinitionTable, SchemaConstraintConflictKind,
@@ -1032,7 +1033,8 @@ pub(crate) fn is_json_schema_path(path: &Path) -> bool {
 /// - [`SchemaError::SchemaDocument`] for text that is not valid YAML (a
 ///   duplicate key, trailing content, and a second document included), a
 ///   malformed envelope, or an untagged mapping with `$schema` and a key
-///   outside `$schema`, `types`, and `description` (with a migration note when
+///   the informal envelope does not admit
+///   ([`StandaloneSchemaEnvelope::admits_top_level_key`]) (with a migration note when
 ///   `$schema` is a `json-schema.org` URI, the raw JSON Schema form).
 /// - [`SchemaError::NotASchemaDocument`] with
 ///   [`NotSchemaReason::TypesOnly`] for a `types`-only tagged document,
@@ -1063,7 +1065,10 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
     }
     let unsupported: Vec<String> = map
         .keys()
-        .filter(|key| !matches!(key.as_str(), Some("$schema" | "types" | "description")))
+        .filter(|key| {
+            !key.as_str()
+                .is_some_and(|key| StandaloneSchemaEnvelope::Pure.admits_top_level_key(key))
+        })
         .map(|key| key.as_str().map_or_else(|| format!("{key:?}"), str::to_string))
         .collect();
     let mut message = format!("unsupported top-level key(s): {}", unsupported.join(", "));

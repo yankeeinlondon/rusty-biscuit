@@ -522,15 +522,16 @@ pub fn parse_schema_declaration_with_source(
 /// ([`parse_standalone_schema_document`](super::parse_standalone_schema_document)),
 /// and the payload is parsed by the same shared parser, so the failure is the
 /// semantic error that parser reports first. Its path starts at the envelope:
-/// `types` for a tagged document, `$schema` for a pure one (including root-union
-/// mapping arms, by index). Ranges are byte offsets into `source`.
+/// `$schema` when the document has one (including root-union mapping arms, by
+/// index), then its `types` table; `types` for a `types`-only tagged document.
+/// Ranges are byte offsets into `source`.
 ///
 /// ## Returns
 ///
 /// `None` for a valid payload, an unrecognized document, invalid YAML, and
-/// every outer envelope or declaration-shape failure (a global catalog, a
-/// malformed envelope, a payload or root-union arm of the wrong type, an
-/// invalid whole-file reference), all of which the classifier reports. A
+/// every outer envelope or declaration-shape failure (a malformed envelope,
+/// a payload or root-union arm of the wrong type, an invalid whole-file
+/// reference), all of which the classifier reports. A
 /// recognized definition failure is returned even when neither range can be
 /// projected.
 ///

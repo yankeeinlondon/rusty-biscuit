@@ -267,6 +267,23 @@ fn a_nonblank_description_leads_and_comments_never_do() {
     }
 }
 
+/// An informal schema may declare `categories`, as a tagged one may.
+#[test]
+fn informal_and_tagged_targets_with_categories_preview_their_definition() {
+    let hovers = Hovers::new();
+    let informal = "categories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string\n";
+    for (name, schema) in [("informal", informal.to_string()), ("tagged", format!("kind: schema\n{informal}"))] {
+        let target = hovers.schemas().join(format!("{name}.yaml"));
+        write(&target, &schema);
+        let markdown = hovers.schema_value(&hovers.doc(&format!("{name}.md")), &format!("{name}.yaml"));
+        assert_eq!(
+            markdown,
+            format!("Schema Definition:\n\n```yaml\ntitle: string\n```\n\nResolves to [schemas/{name}.yaml]({})", link_uri(&target)),
+            "{name}"
+        );
+    }
+}
+
 #[test]
 fn a_json_target_previews_its_whole_document_in_a_json_fence() {
     let hovers = Hovers::new();

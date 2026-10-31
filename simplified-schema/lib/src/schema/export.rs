@@ -115,6 +115,9 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
     let mut document = Mapping::new();
     match authored.envelope {
         StandaloneSchemaEnvelope::Pure => {
+            if let Some(categories) = &authored.categories {
+                document.insert("categories".into(), write_categories(categories));
+            }
             document.insert("$schema".into(), write_declaration(&authored.declaration)?);
             if let Some(types) = &authored.local_types {
                 document.insert("types".into(), YamlValue::Mapping(write_shape(types)?));

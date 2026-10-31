@@ -1670,6 +1670,19 @@ mod tests {
         );
     }
 
+    /// An informal schema may declare `categories`, as a tagged one may; both
+    /// are named schemas a root folder serves.
+    #[test]
+    fn informal_and_tagged_schemas_with_categories_classify_as_named_schemas() {
+        let informal = "categories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string\n";
+        let tagged = format!("kind: schema\n{informal}");
+        let path = Path::new("/schemas/subject.yaml");
+
+        assert_eq!(classify(informal, path), RootFileClass::NamedSchema);
+        assert_eq!(classify(&tagged, path), RootFileClass::NamedSchema);
+        assert_eq!(classify("categories: [Core]\ntitle: string\n", path), RootFileClass::Unclassified);
+    }
+
     #[test]
     fn a_payload_failure_counts_its_trigger_as_failed_once_across_contexts() {
         let fixture = Fixture::new();

@@ -9,12 +9,15 @@
 //! Two envelopes are recognized:
 //!
 //! - **Pure** (informal): a YAML mapping without `kind: schema` that has
-//!   `$schema` and whose only other keys are an optional `types` mapping and
-//!   an optional string `description`.
-//! - **Tagged**: a YAML mapping containing `kind: schema` and at least one of
-//!   an exported `$schema` and a `types` mapping, plus optionally a
-//!   `description` string and a `categories` list (see
+//!   `$schema` and whose only other keys are an optional `types` mapping, an
+//!   optional string `description`, and an optional `categories` list (see
 //!   [`StandaloneSchemaDocument::categories`]).
+//! - **Tagged**: a YAML mapping containing `kind: schema` and at least one of
+//!   an exported `$schema` and a `types` mapping, plus the same optional
+//!   `description` and `categories`.
+//!
+//! [`StandaloneSchemaEnvelope::admits_top_level_key`] is the one definition
+//! of each envelope's key set.
 //!
 //! Only a document with a `$schema` property exports document properties
 //! ([`StandaloneSchemaDocument::exports_schema`]); a tagged `types`-only
@@ -59,13 +62,27 @@ use super::{
 /// The content envelope used by a standalone SimplifiedSchema document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandaloneSchemaEnvelope {
-    /// A document with `$schema` and an optional reusable `types` mapping.
+    /// A document with `$schema`, an optional reusable `types` mapping, and
+    /// optional `description` and `categories` metadata.
     Pure,
     /// A document containing `kind: schema`, `types`, and an optional export.
     Tagged,
 }
 
-/// One entry of a tagged schema document's `categories:` list, written
+impl StandaloneSchemaEnvelope {
+    /// Whether this envelope admits `key` at the top level of its mapping.
+    ///
+    /// Both envelopes admit `$schema`, `types`, `description`, and
+    /// `categories`; only [`Tagged`](Self::Tagged) admits `kind`. This is the
+    /// one definition of each envelope's key set: recognition, `$schema`
+    /// target classification, and editor-side lexical claims all read it.
+    pub fn admits_top_level_key(self, key: &str) -> bool {
+        matches!(key, "$schema" | "types" | "description" | "categories")
+            || (self == Self::Tagged && key == "kind")
+    }
+}
+
+/// One entry of a schema document's `categories:` list, written
 /// `Name` or `Name -> description`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaCategory {
@@ -114,7 +131,7 @@ pub struct StandaloneSchemaDocument {
     /// These are lint problems, not errors — the schema is still usable for
     /// validation and completion. See [`SuggestionLintProblem`].
     pub suggestion_lints: Vec<SuggestionLintProblem>,
-    /// The tagged envelope's `categories:` list in authored order, or `None`
+    /// The envelope's `categories:` list in authored order, or `None`
     /// when the document declares none. A declared list (even `[]`) limits
     /// every `category(...)` in `types` to its names; without one any name is
     /// accepted.
@@ -162,9 +179,10 @@ impl StandaloneSchemaDocument {
 ///
 /// Returns `Ok(None)` for ordinary YAML and raw JSON Schema documents
 /// (including an untagged mapping with `$schema` and any key outside
-/// `$schema`, `types`, and `description`), and an error for text that is not
-/// valid YAML. Once `kind: schema` claims a tagged document, or `$schema` with
-/// optional `types` and `description` claims an untagged document, malformed
+/// `$schema`, `types`, `description`, and `categories`), and an error for text
+/// that is not valid YAML. Once `kind: schema` claims a tagged document, or
+/// `$schema` with optional `types`, `description`, and `categories` claims an
+/// untagged document, malformed
 /// envelope content is returned as a [`SchemaError::SchemaDocument`] instead
 /// of falling back to raw JSON Schema.
 ///
@@ -330,7 +348,10 @@ pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
     let envelope = if tagged {
         let unsupported: Vec<String> = map
             .keys()
-            .filter(|key| !matches!(key.as_str(), Some("kind" | "types" | "categories" | "$schema" | "description")))
+            .filter(|key| {
+                !key.as_str()
+                    .is_some_and(|key| StandaloneSchemaEnvelope::Tagged.admits_top_level_key(key))
+            })
             .map(|key| key.as_str().map_or_else(|| format!("{key:?}"), str::to_string))
             .collect();
         if !unsupported.is_empty() {
@@ -350,7 +371,7 @@ pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
     } else if map.contains_key(&schema_key)
         && map
             .keys()
-            .all(|key| matches!(key.as_str(), Some("$schema" | "types" | "description")))
+            .all(|key| key.as_str().is_some_and(|key| StandaloneSchemaEnvelope::Pure.admits_top_level_key(key)))
     {
         if map.get(&types_key).is_some_and(|types| !matches!(types, YamlValue::Mapping(_))) {
             return Err("`types` must be a mapping".into());
