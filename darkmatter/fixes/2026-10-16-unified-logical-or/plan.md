@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-30
-phase: 6
+phase: 8
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1: []
@@ -111,6 +111,121 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/state-management/expression-engine.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/schemas/parsing/grammar.md
+- darkmatter/docs/topics/schemas/parsing/index.md
+- darkmatter/docs/topics/schemas/parsing/lexing.md
+- simplified-schema/docs/topics/expression-syntax.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/types.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/claudine/architecture.md
+- .claude/skills/darkmatter/expressions.md
+source_files_during_phase_7: []
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_code:
+- simplified-schema/lib/src/expression/ast.rs
+- simplified-schema/lib/src/expression/lexer.rs
+- simplified-schema/lib/src/expression/parser.rs
+- simplified-schema/lib/src/expression/mod.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/tests/l1/expression_syntax.rs
+- darkmatter/lib/src/catalog/mod.rs
+- darkmatter/lib/src/lifecycle/action_shape.rs
+- darkmatter/lib/src/lifecycle/mod.rs
+- darkmatter/lib/src/lifecycle/parse.rs
+- darkmatter/lib/src/lifecycle/validate.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/parser.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/lint.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+- darkmatter/lib/src/markdown/compose/expression/semantics.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/tests/shell.rs
+- darkmatter/lib/tests/l1/binding_contract.rs
+- darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+- darkmatter/lib/tests/l1/schema_language_ownership_guard.rs
+- darkmatter/lib/tests/l1/schemas_literal_expression.rs
+- darkmatter/lib/tests/l1/simplified_schema_reexports.rs
+- darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+- claudine/cli/src/commands/context/expressions.rs
+- claudine/cli/src/commands/context/mod.rs
+- claudine/cli/tests/l1/context_command.rs
+- claudine/cli/tests/level2/level2_context_capture.rs
+- claudine/cli/tests/prompts/shipped_prompt_contract.rs
+- claudine/lib/benches/pipeline_work.rs
+- claudine/lib/benches/pipeline_work_alloc.rs
+- claudine/lib/src/composition/error/lifecycle_authoring/tests.rs
+- claudine/lib/src/composition/lifecycle/binding_checks.rs
+- claudine/lib/src/composition/lifecycle/bindings.rs
+- claudine/lib/src/composition/lifecycle/bindings/rename.rs
+- claudine/lib/src/composition/lifecycle/bindings/tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+- claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+- claudine/lib/src/composition/looping/config.rs
+- claudine/lib/src/composition/looping/expression.rs
+- claudine/lib/src/composition/prepare/tests.rs
+- claudine/lib/src/composition/sequence/expr.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/dispatch/expression.rs
+- claudine/lib/src/dispatch/expression/tests.rs
+- claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+- claudine/lib/src/dispatch/matcher.rs
+- claudine/lib/src/dispatch/runner/mod.rs
+- claudine/lib/src/dispatch/template.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/nested_span.rs
+- darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_value_hovers.json
+- darkmatter/dmls/tests/l1/expression_scopes.rs
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+- darkmatter/lib/tests/l1/expression_regression.rs
+- darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+documentation:
+- claudine/docs/topics/flow-control/lifecycle.md
+- claudine/docs/topics/state-management/expression-engine.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/schemas/parsing/grammar.md
+- darkmatter/docs/topics/schemas/parsing/index.md
+- darkmatter/docs/topics/schemas/parsing/lexing.md
+- simplified-schema/docs/topics/expression-syntax.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/types.md
+- .claude/skills/claudine/architecture.md
+- .claude/skills/darkmatter/expressions.md
+completed_phase: 7
+implemented: true
 ---
 
 # One Meaning for `||` — Implementation Plan
@@ -625,7 +740,7 @@ was read at planning time and its mode-dependent lines are identified.
 
 Tasks:
 
-- [ ] Darkmatter docs
+- [x] Darkmatter docs
     - `darkmatter/docs/topics/darkmatter-expressions.md`: replace the
       "Interpolation vs. Condition Mode" section (824–841) with a short
       "Logical OR" statement carrying the spec's Goal table and one `x || []`
@@ -655,13 +770,13 @@ Tasks:
       Darkmatter expression grammar; drop the "reserved" phrasing from the
       limitations (713 and 4472), keeping that parameterized forms are
       rejected.
-- [ ] simplified-schema docs
+- [x] simplified-schema docs
     - `simplified-schema/docs/topics/expression-syntax.md`: remove the
       `parse_condition`/`parse_condition_spanned` rows and the `ParseMode`
       note (43–46, 55–63); replace the two-mode comparison table with the
       Logical OR statement; `lex_spanned` row loses "(either (`ParseMode`))";
       drop the "condition mode accepts a superset" explanation (62–63).
-- [ ] Claudine docs
+- [x] Claudine docs
     - `claudine/docs/topics/state-management/expression-engine.md`: replace
       "Interpolation vs. condition mode" (114–125) with the unified Logical OR
       statement (both `{{ }}` and `when` examples return the deciding
@@ -670,7 +785,7 @@ Tasks:
       one parser serves every surface.
     - `claudine/docs/topics/flow-control/lifecycle.md`: drop "(in the
       condition dialect)" from the nested-span validation sentence (1710).
-- [ ] Skills
+- [x] Skills
     - `.opencode/skill/darkmatter/expressions.md`: line 196–197's "`and`/
       `or`/`||` (lowered to `FunctionCall`/`Fallback`, matched through the
       registry)" becomes "`&&` lowers to an `and(...)` `FunctionCall`; `||`
@@ -688,12 +803,12 @@ Tasks:
 
 Tasks (sequential):
 
-- [ ] Every-feature workspace build (AC4)
+- [x] Every-feature workspace build (AC4)
     - `cargo check --workspace --all-features --all-targets` — proves
       `ParseMode`, `Token::OrOr`, `parse_condition`, and
       `parse_condition_spanned` no longer exist anywhere (a stray reference is
       a compile error).
-- [ ] Leftover sweep
+- [x] Leftover sweep
     - `rg -n "ParseMode|parse_condition_spanned|parse_condition\b|Token::OrOr|Expr::Fallback|SpannedExprKind::Fallback|Lexer::with_mode|Parser::with_mode|MODE_DESCRIPTORS|hover_markdown_condition" simplified-schema/ darkmatter/ claudine/ --type rust`
       — expect zero hits, with exactly one permitted exclusion: the
       definition and calls of claudine's local loop-map helper
@@ -701,13 +816,13 @@ Tasks (sequential):
       every other hit is a defect to fix before Phase 7 ends.
     - `rg -n "condition mode|condition dialect|Interpolation vs\. Condition|Logical OR / Fallback" darkmatter/docs claudine/docs simplified-schema/docs .opencode/skill`
       — expect zero hits.
-- [ ] Area suites
+- [x] Area suites
     - `just test` and `just lint` in `simplified-schema/`, `darkmatter/`
       (covers lib, cli, dmls, zed-dmls-cli), and `claudine/`; then
       `just test-prompts` in `claudine/` and
       `cargo nextest run -p darkmatter --features prompt-tests --test prompts`
       one final time.
-- [ ] Acceptance-criteria roll-up and review package
+- [x] Acceptance-criteria roll-up and review package
     - Verify each spec acceptance criterion 1–6 against its named test from
       Phases 2–5 and record the mapping in the implementation log.
     - Re-run the R14 safety search a final time (the spec requires it

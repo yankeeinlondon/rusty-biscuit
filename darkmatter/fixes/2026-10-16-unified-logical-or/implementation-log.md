@@ -128,6 +128,19 @@ decisions_for_review:
         instead of `or(!total_phases, total_phases <= 0)`. Both are the
         intended result; nothing needs redoing unless the absence decision
         itself is reversed.
+    - |-
+        The plan and spec place the `expression` schema format's "two
+        dialects" paragraph and its reserved `expression(condition)` form in
+        `darkmatter/docs/topics/schemas/definition.md`. That page no longer
+        holds them: the format's reference moved to the SimplifiedSchema
+        language docs (`simplified-schema/docs/topics/language/types.md` and
+        `language/index.md`). I rewrote the text where it lives now (one
+        grammar; a parameterized `expression(...)` is rejected because there
+        is nothing to select) and left definition.md unchanged. Likewise
+        `schema-targeting.md` had no parse-mode wording, so it is unchanged.
+        The alternative, adding the text back to definition.md, would
+        duplicate the language reference. Nothing needs redoing unless the
+        reviewer wants the format documented in Darkmatter as well.
 source_files_during_phase_3:
     - darkmatter/lib/src/catalog/mod.rs
     - darkmatter/lib/src/lifecycle/action_shape.rs
@@ -214,18 +227,121 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
-message_to_agent: |-
-    Phase 5 added tests only (AC1, AC2, AC5); no production code changed.
-    darkmatter `just test` 12884/12884, darkmatter and claudine `just lint`
-    clean. The Phase 6 doc and skill list is unchanged from Phase 4's note:
-    darkmatter-expressions.md, schemas/definition.md,
-    schemas/parsing/{index,grammar,lexing}.md, schema-targeting.md,
-    simplified-schema expression-syntax.md, claudine expression-engine.md and
-    lifecycle.md, the darkmatter skill's expressions.md (names `Fallback`),
-    and the claudine skill's architecture.md line 362, plus the semantics.rs
-    operator descriptor and parser.rs precedence entry the spec lists. The
-    new tests can serve as doc examples: `length(items || []) > 0` in
-    darkmatter/lib/tests/l1/expression_regression.rs.
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/parsing/index.md
+    - darkmatter/docs/topics/schemas/parsing/lexing.md
+    - simplified-schema/docs/topics/expression-syntax.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/types.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_7: []
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7: []
+source_code:
+    - simplified-schema/lib/src/expression/ast.rs
+    - simplified-schema/lib/src/expression/lexer.rs
+    - simplified-schema/lib/src/expression/parser.rs
+    - simplified-schema/lib/src/expression/mod.rs
+    - simplified-schema/lib/src/format.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/tests/l1/expression_syntax.rs
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/lifecycle/action_shape.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/parse.rs
+    - darkmatter/lib/src/lifecycle/validate.rs
+    - darkmatter/lib/src/markdown/compose/call_precheck.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/parser.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+    - darkmatter/lib/src/markdown/compose/expression/lint.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/remote.rs
+    - darkmatter/lib/src/markdown/compose/tests/shell.rs
+    - darkmatter/lib/tests/l1/binding_contract.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/schema_language_ownership_guard.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/simplified_schema_reexports.rs
+    - darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/level2/level2_context_capture.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/lib/benches/pipeline_work.rs
+    - claudine/lib/benches/pipeline_work_alloc.rs
+    - claudine/lib/src/composition/error/lifecycle_authoring/tests.rs
+    - claudine/lib/src/composition/lifecycle/binding_checks.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - claudine/lib/src/dispatch/expression/tests.rs
+    - claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+    - claudine/lib/src/dispatch/matcher.rs
+    - claudine/lib/src/dispatch/runner/mod.rs
+    - claudine/lib/src/dispatch/template.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/semantic_tokens.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_value_hovers.json
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+documentation:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/state-management/expression-engine.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/parsing/index.md
+    - darkmatter/docs/topics/schemas/parsing/lexing.md
+    - simplified-schema/docs/topics/expression-syntax.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/types.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/darkmatter/expressions.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-16-unified-logical-or (7 phases)
@@ -559,3 +675,227 @@ message_to_agent: |-
 - Scope calculator (whole uncommitted tree, which still includes Phase 4's
   uncommitted edits): packages `[claudine, claudine-cli, darkmatter, dmls,
   test-toolkit]`, change_class `package`; gates not skippable (run above).
+
+## Phase 6
+
+- Did the work directly, without subagents: eleven small Markdown edits in
+  separate files, with nothing gained from running them in parallel.
+- Code-side wording the spec's Documentation list names (the `semantics.rs`
+  operator descriptor, the `parser.rs` precedence entry, and both `mod.rs`
+  module docs) was already updated in Phases 2–3. A grep for
+  `Fallback|mode-dependent|ParseMode|parse_condition|dialect` over those
+  files returns nothing, so no source file changed in this phase.
+- Darkmatter docs:
+    - `darkmatter-expressions.md`: the API bullet now names `parse` instead
+      of `parse_condition`. The parsing summary ("Mode changes exactly one
+      thing", which also wrongly said `||` lowers to `or(…)`) is replaced by
+      "One grammar, one meaning". Precedence row 7 is now "Logical OR". The
+      truthiness paragraph names the `x || default` idiom and links to the
+      new section. "Interpolation vs. Condition Mode" is replaced by
+      "Logical OR", which carries the spec's three-row table, a
+      `::block when="length(items || []) > 0"` example (taken from the
+      Phase 5 regression tests), the absence rule for the left operand, and
+      the D4 explanation of why `&&`, `and(…)`, and `or(…)` return booleans.
+    - `schemas/parsing/index.md`: the two-mode table is replaced by an
+      "One grammar" section, and the condition API sentence drops
+      `parse_condition`.
+    - `schemas/parsing/grammar.md`: the ladder now has a single
+      `logical_or` rule, so the `fallback` rule and the mode branches are
+      gone. "Parse modes" is folded into one-grammar text plus the `&&`
+      precedence note. "Lowering" now has a `||` vs `&&` table and explains
+      why `||` keeps its own node. The stray `Fallback` note is deleted, and
+      the DMLS paragraph names `parse_spanned` only.
+    - `schemas/parsing/lexing.md`: `||` now maps to `Pipe` only, and the
+      lone-`|` error carries its single wording. The "Mode affects exactly
+      one token" section is deleted, and `lex_spanned(input)` no longer
+      shows a mode argument.
+    - `schemas/schema-targeting.md` and `schemas/definition.md`: neither page
+      contains mode or dialect wording any more, so both are unchanged (see
+      decisions_for_review).
+- simplified-schema docs:
+    - `expression-syntax.md`: the intro example uses `parse`. The entry-point
+      table loses the `parse_condition*` rows and `ParseMode`. "The two
+      dialects" is replaced by "Logical OR", with an AST/value table and a
+      `LogicalOr` example.
+    - `language/types.md` and `language/index.md`: these are the actual home
+      of the `expression` format's "two dialects" paragraph and its
+      `expression(condition)` reservation. They now say there is one grammar
+      and that a parameterized `expression(…)` is rejected.
+- Claudine docs:
+    - `expression-engine.md`: the "Interpolation vs. condition mode" section
+      is replaced by "Logical OR", with an interpolation example and two
+      `when:` examples, one of them the `length(x || []) > 0` idiom.
+      Precedence row 7 is now "Logical OR: `||`". The evaluation steps say
+      that one `parse()` serves every surface.
+    - `lifecycle.md`: "(in the condition dialect)" is removed.
+- Skills:
+    - `.claude/skills/darkmatter/expressions.md`: the `TypeScope::assume`
+      bullet now says `&&` lowers to an `and(...)` call and `||` is the
+      `LogicalOr` node, treated as `or` in a truth test. No other mode-split
+      phrasing remains in the darkmatter skill, and `compose.md` "Fallback
+      Expressions" is left as the plan says.
+    - `.claude/skills/claudine/architecture.md`: the hook diagram line now
+      reads `parse(expr)`.
+- Sweep:
+    - `rg "condition mode|condition dialect|Interpolation vs\. Condition|Logical OR / Fallback|parse_condition|ParseMode|#parse-modes"`
+      over darkmatter/docs, claudine/docs, simplified-schema/docs, and
+      .claude/skills returns zero hits.
+    - The only remaining hits are in `darkmatter/dmls/design/research/`,
+      historical research left as written. No inbound links pointed at the
+      removed `#interpolation-vs-condition-mode` or `#parse-modes` anchors,
+      apart from the two in-tree links that were rewritten.
+- Test mapping: this phase changes no behavior, so it adds no tests. The doc
+  examples restate behavior already pinned by the Phase 5 tests
+  (`logical_or_value_parity`, `regression_logical_or_*`,
+  `a_page_block_gate_logical_or_*`).
+- Scope calculator:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → packages `[claudine-cli, darkmatter, dmls, test-toolkit]`, change_class
+  `package`. The changed docs are test inputs, so the gates are not
+  skippable.
+- Gates:
+    - darkmatter `just test`: 12884/12884 passed, 10 skipped.
+    - darkmatter `just lint`: clean.
+    - Narrowed dependent cells:
+        - `cargo nextest run -p claudine-cli --features test-fixtures -E 'binary(l1) & test(/loop_gate_ambient/)'`
+          → 6/6. This test reads `lifecycle.md` through `include_str!`.
+        - `cargo nextest run -p test-toolkit -E 'test(active_ci_authority_matches_the_retirement_contract)'`
+          → 1/1. This test reads `.claude/skills/claudine/architecture.md`.
+- No cross-OS check: Markdown only.
+- No darkmatter skill change beyond `expressions.md`.
+
+## Phase 7
+
+- Phase 7 is validation only. No source, doc, or skill file changed; the only
+  edits are this log, the plan, and the spec frontmatter. I did the work
+  directly, without subagents, and ran each gate serially.
+
+### Every-feature workspace build (AC4)
+
+- `cargo check --workspace --all-features --all-targets` → exit 0, no
+  errors or warnings (2m 58s). A leftover `ParseMode`, `Token::OrOr`,
+  `parse_condition`, or `parse_condition_spanned` anywhere in the workspace
+  would have been a compile error.
+
+### Leftover sweep
+
+- `rg -n "ParseMode|parse_condition_spanned|parse_condition\b|Token::OrOr|Expr::Fallback|SpannedExprKind::Fallback|Lexer::with_mode|Parser::with_mode|MODE_DESCRIPTORS|hover_markdown_condition" simplified-schema/ darkmatter/ claudine/ --type rust`
+  → 2 hits, both the permitted R15 exclusion: claudine's loop-map helper
+  `fn parse_condition(` (`composition/looping/config.rs:520`) and its one
+  call (line 295). No defects.
+- `rg -n "condition mode|condition dialect|Interpolation vs\. Condition|Logical OR / Fallback" darkmatter/docs claudine/docs simplified-schema/docs .claude/skills`
+  → 0 hits. The plan names `.opencode/skill`, which is a symlink to
+  `.claude/skills` (rg does not follow it), so I searched the target.
+
+### R14 safety search (final run before landing)
+
+- Same command as Phase 1 (`git grep -nE '(when|while|until)[=:"' ]+.*\|\|'`
+  over `*.md`/`*.yaml`/`*.yml`/`*.rs`, excluding `_completed`, frozen
+  fixtures, and this fix's directory) → 152 lines, of which 102 are
+  `when=`/`when:`/`while:`/`until:` lines (Phase 1: 141 / 99; the new
+  lines are this fix's Phase 5 tests and Phase 6 doc examples).
+- Value-consumed `||` checks: a `||` inside a function argument list, or a
+  parenthesized `||` group used as a comparison operand. Hits:
+    - `length(items || []) > 0` / `length(frontmatter(plan, 'open_questions') || []) > 0`
+      in `conditions_control.rs`, `expression_regression.rs`, and
+      `darkmatter-expressions.md`. This fix added these on purpose to pin the
+      new value semantics.
+    - `(a || b) && c` (`compose/tests/shell.rs`) and
+      `(draft || preview) && user.is_admin` (docs). These are tested only for
+      truth, so they are unaffected.
+    - `prompts/_reviews/feature-review.md:79`. The match comes from the prose
+      word "_while_", and the `||` is inside a `{{ }}` interpolation, which
+      already had value semantics. Unaffected.
+- R14 outcome: **0 existing conditions consume `||` as a value; no rewrite
+  needed.**
+
+### Area suites
+
+- simplified-schema `just test` → 1112/1112 passed; `just lint` → clean.
+- darkmatter `just test` → 12884/12884 passed, 10 skipped (lib, cli, dmls,
+  zed-dmls-cli; same count as Phases 5–6); `just lint` → clean, including
+  the zed-dmls wasm32-wasip2 build.
+- `cargo nextest run -p darkmatter --features prompt-tests --test prompts`
+  → 10/10.
+- claudine `just test` → 11810/11810 passed, 15 skipped; `just lint` → clean.
+- claudine `just test-prompts` → the fail-fast run stopped after 3 failures.
+  So I re-ran the same binary to completion
+  (`cargo nextest run -p claudine-cli --features prompt-tests,test-fixtures --test prompts --no-fail-fast`):
+  87 run, 81 passed, 6 failed. These are exactly the six Phase 1 baseline
+  failures (three `review_fix_rehearsal::*`, three
+  `shipped_prompt_route_drift::*`; see decisions_for_review). There are no
+  new failures, and `shipped_prompt_contract::shipped_prompts_have_parseable_schemas_and_expressions`
+  (AC3 corpus) passes.
+- `just check-tier-coverage darkmatter` / `claudine` → 0 stranded.
+- Narrowed dependent cells for the changed docs (still uncommitted in this
+  tree from Phase 6):
+  `cargo nextest run -p claudine-cli --features test-fixtures -E 'binary(l1) & test(/loop_gate_ambient/)'`
+  → 6/6; `cargo nextest run -p test-toolkit -E 'test(active_ci_authority_matches_the_retirement_contract)'`
+  → 1/1. Other dependents are covered at compile level by the all-features
+  workspace check; this phase changed no symbol.
+- No load-sensitive or flaky tests were seen.
+
+### Acceptance-criteria roll-up
+
+Every test below passed in this phase's runs:
+
+- **AC1 — `||` returns the same value on `{{ }}`, `::block when=`, and
+  lifecycle `when:`.**
+    - Evaluator rows, `darkmatter/lib/tests/l1/expression_regression.rs`
+      `logical_or_value_parity::*`:
+      `a_present_left_operand_is_the_value`,
+      `an_absent_left_operand_yields_the_right_operand`,
+      `a_defaulted_collection_feeds_length_in_a_condition`,
+      `a_truthy_left_operand_is_returned_not_coerced_to_a_boolean`,
+      `two_falsy_operands_yield_the_last_operand`,
+      `a_truthy_left_operand_short_circuits_the_right_operand`.
+    - Body and page-block surfaces:
+      `regression_logical_or_interpolates_the_deciding_operand`,
+      `regression_logical_or_defaults_a_collection_in_a_page_block_gate`,
+      `regression_logical_or_gate_takes_the_truth_of_the_deciding_operand`.
+    - Lifecycle surface: claudine
+      `conditions_control::when_logical_or_takes_the_truth_of_the_deciding_operand`.
+- **AC2 — the `open_questions` guard fires.** claudine
+  `conditions_control::when_logical_or_defaulted_open_questions_fires_when_listed`
+  and `..._skips_when_absent`.
+- **AC3 — AST-shape tests rewritten to `LogicalOr`, not deleted.**
+    - simplified-schema `expression::parser::tests::logical_operators::*` (10/10,
+      including `parses_infix_or_as_logical_or_node`,
+      `chained_or_left_associative`, `and_binds_tighter_than_or_{left,right}`,
+      `parenthesized_or_then_and`, `or_inside_or`).
+    - The corpora: darkmatter prompts 10/10 and claudine
+      `shipped_prompts_have_parseable_schemas_and_expressions`.
+- **AC4 — the mode symbols are gone.** The every-feature workspace check
+  above plus the zero-defect leftover sweep.
+- **AC5 — absence handling for the left operand in conditions.**
+    - darkmatter `unknown_identifier_warning::a_page_block_gate_logical_or_handles_only_its_left_operand`
+      and `..._over_declared_roots_is_silent`.
+    - DMLS `lsp_session::undeclared_property_fires_in_every_operand_position_at_warning_severity`.
+- **AC6 — the nested-span suggestion is offered for `a == "x {{ y || 'd' }}"`.**
+  darkmatter `lint::tests::lint_model::logical_or_span_is_offered_a_suggestion`
+  (exact text `a == "x " + (y || 'd')`), `suggestion_beside_logical_or_reparses`,
+  `fires_once_beside_logical_or`.
+
+### Spec departures and drift
+
+- No new departures in this phase. The departures from earlier phases are in
+  decisions_for_review: the `expression` format docs live in
+  simplified-schema, the `context --expressions` tests were rewritten, the
+  DMLS right-operand warning, and the renamed mode-split tests.
+- No comment or doc drift found. The sweeps above are clean.
+- No darkmatter skill change: Phase 7 changed no behavior, and Phase 6 already
+  brought `.claude/skills/darkmatter/expressions.md` up to date.
+- No cross-OS check: no code changed in this phase. Earlier phases changed
+  grammar and AST code with no path, process, or OS-specific surface.
+
+### Scope calculator
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → packages `[claudine-cli, darkmatter, dmls, test-toolkit]`, change_class
+  `package`. This includes Phase 6's uncommitted doc edits, so the gates
+  were not skippable and were run (above).
+
+### State
+
+- Implementation complete, ready for review. Nothing committed, no
+  `just complete`, no lifecycle move.

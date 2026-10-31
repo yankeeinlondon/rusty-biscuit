@@ -22,7 +22,7 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
-implemented: false
+implemented: true
 created: 2026-10-16
 owner: Ken Snyder <ken@ken.net>
 packages:
@@ -30,6 +30,7 @@ packages:
     - darkmatter
     - dmls
     - claudine
+implemented_by: "claude/opus"
 ---
 
 # One Meaning for `||`
