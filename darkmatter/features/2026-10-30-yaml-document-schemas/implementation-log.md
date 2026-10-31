@@ -7,6 +7,7 @@ packages:
 - darkmatter
 - darkmatter-cli
 - simplified-schema
+- dmls
 source_files_during_phase_1:
 - darkmatter/lib/src/markdown/schemas/embedded.rs
 - darkmatter/schemas/schema.yaml
@@ -103,25 +104,98 @@ decisions_for_review:
     output can. Putting the claiming kind into `schema` (for example `"kind:schema"`)
     would fix that but adds a value format the plan did not decide. Changing it is
     one field in `validate_yaml_document` plus a test assertion.
-message_to_agent: |-
-    Phase 3 notes for later phases:
-    1. `md schema validate` now routes `.yaml`/`.yml` arguments (opened path,
-       ASCII case-insensitive) to `validate_kind_document` in
-       `darkmatter/cli/src/commands/schema/validate.rs` (`validate_yaml_document`,
-       `is_yaml_document`). Load failures use a new outcome `YamlLoadError`:
-       pretty output says "the YAML document <link> could not be loaded:", JSON
-       `error` is `"yaml_parse"` (not `"frontmatter_parse"`), exit 3. A
-       definition error is exit 2. An assignment with any YAML argument prints
-       `Error: assignments apply to Markdown frontmatter, not to YAML document
-       <path>` and exits 64 before anything is validated (also re-checked on the
-       opened path for a spelling like `@name`). Phase 5's CLI docs
-       (`darkmatter/docs/inline/schema-validation.md`) must describe these.
-    2. JSON records for YAML documents keep `"schema": null` whether claimed or
-       not (Rule 14's `schema_label: None`); only pretty output distinguishes
-       claimed ("has a schema definition and is valid") from unclaimed.
-    3. Phase 2 notes still apply for DMLS: `effective_for_kind(kind)` gives the
-       schema; `schema.yaml` lowers to a two-arm root `anyOf`; tests that read
-       repository files use `include_str!` or `manifest_dir!()`.
+- |-
+    The plan's diagnostics test list included "wrong `kind` literal (range: the
+    value)". That case cannot produce a kind diagnostic: the `kind` value is what
+    selects a definition, so `kind: schema-triggers` is claimed by no definition and
+    gets no kind diagnostics at all (the same rule `md schema validate` follows). The
+    test asserts that instead. The alternative, treating a near-miss kind as a wrong
+    value of the nearest kind, would need a fuzzy claim rule nobody specified.
+    Nothing needs redoing unless a reviewer wants that rule.
+- |-
+    The plan said `kind: ` value completion offers "the two kinds" (`schema`,
+    `schema-trigger`). Completion reads the definition of the kind that claims the
+    buffer, and each definition fixes its own `kind` literal, so a `kind: schema`
+    buffer is offered `schema` and a `kind: schema-trigger` buffer `schema-trigger`;
+    a buffer with an empty `kind:` is unclaimed and gets neither. Offering both would
+    need a separate "known kinds" completion source outside the definitions (a small
+    addition in the frontmatter completion provider, keyed on `SHIPPED_KINDS`).
+- |-
+    The plan said the editor's completion and hover reuse the frontmatter machinery
+    unchanged. Unchanged, the root shape would layer the Markdown baseline under the
+    definition, so a `kind: schema` file would be offered `title`, `tags`, `style`
+    and the rest. I added a flag to the shared analysis so a kind document's root
+    shape is the definition alone. The alternative was to accept the Markdown keys,
+    which would be wrong suggestions. Reverting is removing the `kind_document` flag
+    in `overlay/analysis.rs`.
+- |-
+    The plan did not cover a kind document's `schema`/`type-definition` payload
+    problem that the Rust envelope also reports. Without handling, a bad type in
+    `types:` produced two diagnostics: the envelope's precise one on the offending
+    token and the kind report's coarse one on the whole `types` value (an existing
+    DMLS test caught this). The kind diagnostics now drop such meta-type problems
+    when the standalone or trigger envelope has already reported its own error, and
+    keep them otherwise (for example a trigger outside a `schemas/` folder, where no
+    envelope diagnostic runs). Alternatives: always drop them (loses that trigger
+    case), or always keep both (duplicate squiggles). Changing it is one filter in
+    `dmls/src/diagnostics/kind_document.rs`.
+- |-
+    Following the plan, kind diagnostics are graded by the same rule as frontmatter
+    problems, so a missing required key (for example a trigger without `match`) is
+    reported only when the editor's schema `strict` setting is on; the default is
+    off. The envelope's own error still reports a missing `match` in a `schemas/`
+    folder. The alternative, always reporting missing keys for kind documents (as
+    `md schema validate` does), is a one-line change in
+    `dmls/src/diagnostics/kind_document.rs` but makes kind documents graded
+    differently from frontmatter.
+- |-
+    The library's `KindValidation` result gained a `document` field (the JSON data
+    the report judged) so the editor can build its schema bundle without loading
+    the YAML a second time with its own copy of the loader rules. The alternative
+    was to duplicate the load-and-convert step in DMLS. Reverting means removing the
+    field and re-deriving the data in `dmls/src/overlay/kind_document.rs`.
+- |-
+    A kind document is validated in the editor only when DMLS has a file-resolution
+    context for it, because the validator is built in one (`DarkmatterSchemas::new`
+    takes a context). Without one, the document gets the existing context-failure
+    diagnostic and no kind diagnostics or definition-driven completion. The
+    alternative, a context-free validator constructor in the library, is a larger
+    API change for a case the editor already reports.
+- |-
+    The plan's drift sweep says nothing in current code should reference the deleted
+    placeholder `schema-definition.yaml`. One test fixture still does: the recursive-schema
+    golden corpus keeps a byte-for-byte copy of `err.yaml` taken on 2026-10-23 (with its old
+    `$schema: ./schema-definition.yaml` line) and two "skipped" notes that name the
+    placeholder. I left that fixture alone, because it is a dated snapshot whose test
+    checks the frozen copy, not the live file, and its notes are still true of that copy.
+    The alternative is to refresh the frozen `err.yaml` copy and drop the two notes, which
+    would also mean regenerating that entry's golden output. Nothing else depends on it.
+- |-
+    Deleting the placeholder broke three tests that list the `darkmatter/docs/schemas`
+    folder; the plan named only the corpus exceptions. Two now expect two files with
+    `err.yaml` accepted as a schema. The third checked every `$schema` declaration in that
+    folder against the `schema` type, and the only declaration was the removed
+    `$schema: ./schema-definition.yaml`. It now checks the `$schema` of the two shipped kind
+    definitions (`schema.yaml`, `schema-trigger.yaml`) instead. The alternative was to point
+    it at the whole `darkmatter/schemas` folder, which would pull in the global catalog and
+    function partials whose `$schema` values are not plain schemas. Reverting means
+    choosing another source of real declarations for that test.
+- |-
+    Rewriting the authoring guide turned up a trigger example that the new validator
+    rejects (a `description:` key and an `expression: foo || bar || baz` condition, neither
+    of which the trigger grammar has). I replaced it with a `group:` of property conditions
+    that validates. The guide's list of trigger conditions (time of day, host OS, file
+    contains text, and so on) sits under an existing "some of this is not implemented"
+    note and I left it unchanged; it describes conditions the trigger grammar does not have
+    today. Trimming that list to the real grammar is a larger edit to a user-facing page and
+    was not asked for.
+- |-
+    The plan asked for the authoring guide's two definition transclusions to replace the
+    "recursive truth" sentence in the External Schemas section. I put them under the empty
+    "Schema Definition Files" and "Trigger Files" headings in the "External Grammar Files"
+    section instead, and the old sentence now points there. Those headings existed for this
+    content, and this keeps the long trigger definition out of the beginner walkthrough.
+    Moving them back is a cut-and-paste of two `::code` lines and their short intros.
 source_files_during_phase_2:
 - darkmatter/lib/src/markdown/schemas/mod.rs
 - darkmatter/lib/src/markdown/schemas/kind_documents.rs
@@ -145,6 +219,85 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/schemas/kind_documents.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/kind_document.rs
+- darkmatter/dmls/src/overlay/frontmatter.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/kind_document.rs
+- darkmatter/dmls/tests/l1/kind_document_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/docs/schemas/err.yaml
+- darkmatter/docs/schemas/schema-definition.yaml
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/dmls/src/overlay/mod.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/inline/schema-validation.md
+- docs/kind-documents.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/cli.md
+source_code:
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/schemas/schema.yaml
+- darkmatter/schemas/schema-trigger.yaml
+- schemas/kind.yaml
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/kind_documents.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+- darkmatter/lib/tests/l1/kind_documents.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/schema_validate_kind_documents.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/kind_document.rs
+- darkmatter/dmls/src/overlay/frontmatter.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/kind_document.rs
+- darkmatter/dmls/tests/l1/kind_document_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+- darkmatter/docs/schemas/err.yaml
+- darkmatter/docs/schemas/schema-definition.yaml
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+documentation:
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/inline/schema-validation.md
+- docs/kind-documents.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/cli.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-10-30-yaml-document-schemas (5 phases)
@@ -370,3 +523,213 @@ The field-shape matrix for the kind definitions is in-process (Phase 2's
   Messenger matches are comments), so no downstream run was needed.
 - Cross-OS: not run. The change is an extension comparison and an equality test on
   the same `PathBuf` passed through; no path canonicalization or OS-specific code.
+
+## Phase 4
+
+### Wave 8: overlay foundation (`darkmatter/dmls/src/overlay`)
+
+- `FrontmatterAst::parse_yaml_document` (`overlay/frontmatter.rs`): the
+  `parse_yaml` tree with a private `schema_key_is_data` flag; `schema_entry()`
+  returns `None` for it. `overlay/references.rs::references` now finds the
+  `$schema` entry through `schema_entry()` (it matched the pointer directly),
+  so the no-context hover branch also treats a kind document's `$schema` as data.
+- New `overlay/kind_document.rs`: `KindDocumentOverlay { kind, report, ast,
+  bundle }` and `OverlayCache::kind_document`, cached per URI on text,
+  revision, context identity, and context generation. It calls
+  `DarkmatterSchemas::validate_kind_document`, then `effective_for_kind`, and
+  builds a `SchemaBundle` (no advisories from extensions, document JSON with
+  `$schema` kept) and a `FrontmatterAnalysis` marked `kind_document`.
+- `DocumentOverlay::kind_document` is computed in `for_document_timed` after the
+  Markdown return (which sets `None`) and before the trigger and standalone
+  branches. Every non-Markdown return attaches it (`with_kind`); a claimed buffer
+  that no envelope branch serves (a valid trigger, a lexical claim the parser
+  declined, an unclaimed envelope with a parse error) returns `kind_only`.
+- `overlay/analysis.rs`: `AnalysisIdentity::kind_document`; `root()` for a kind
+  document is `simplified_schema::layered_property_shape` over an empty base
+  (the definition alone, no Markdown baseline keys).
+- Library: `KindValidation` gained `document: Value` (the data the report
+  judged), so DMLS does not repeat the load. See `decisions_for_review`.
+
+### Wave 9: providers
+
+- Diagnostics: new `diagnostics/kind_document.rs`; `diagnostics_under` runs it
+  when `overlay.kind_document` is set and then skips the Markdown schema,
+  expression, and nested-span passes. The generic problem loop of
+  `schema_problem_diagnostics` is now `generic_problem_diagnostics(ctx, ast,
+  bundle, problems, out)`; the Markdown caller pre-filters the specialized and
+  expression-owned problems it used to `continue` past (pure filters, no
+  behavior change; the mapping-only corpus baseline still passes).
+- First full run failed `core_schema_types::option_and_null_default_errors_are_ranged_on_the_offending_token`:
+  a bad option in `types:` was reported twice (the envelope's
+  `invalid_type_definition` on the token, and the kind report's
+  `dm.schema.constraint` on `/types`). Kind diagnostics now drop meta-type
+  problems (`is_meta_type_problem`, the existing `x-darkmatter-*` schema-path
+  test) when the standalone or trigger envelope already reported its error.
+- Completion and hover: verified, no provider change needed beyond the root
+  shape. Links and go-to-definition read `overlay.schema_references`, empty for a
+  kind document; `$schema` value hover reads the same facts (or `references()`
+  without a context). Other `overlay.ast` readers (semantic tokens, DSL
+  frontmatter lookups, code actions) see the tree as frontmatter and contribute
+  nothing new for the kind fixtures.
+
+### Wave 10: tests
+
+New `dmls/tests/l1/kind_document_editor.rs` (in-process, temp workspace,
+`RepositoryContexts` on the fixture snapshot; each test ~0.04 s), plus one stdio
+case:
+
+| Requirement | Test |
+| --- | --- |
+| control `kind: schema` and trigger, and the shipped `schema.yaml`/`schema-trigger.yaml` (`include_str!`): no kind diagnostics | `valid_kind_documents_have_no_kind_diagnostics` |
+| `description: 5`: one `dm.schema.type_mismatch` on the value, exact range | `a_wrong_description_type_ranges_the_value` |
+| wrong `kind` literal is unclaimed; `match: 5` ranges the value; envelope diagnostic still published beside it | `a_trigger_with_the_wrong_kind_literal_is_unclaimed_and_a_wrong_match_type_ranges_the_value` |
+| missing `match`: `dm.schema.missing_required` on the root mapping (0:0–3:0) under strict; none by default | `a_missing_match_ranges_the_root_mapping_under_strict_mode_only` |
+| invalid YAML: unclaimed, no kind diagnostic, parse diagnostic stands; unclaimed shapes (other kind, no kind, `kind:` null, sequence root): no diagnostics | `invalid_yaml_keeps_only_its_parse_diagnostic_and_unclaimed_yaml_has_none` |
+| Markdown frontmatter with `kind: schema-trigger`: not claimed, no `match` problem, baseline still judges `metadata: 5` | `markdown_frontmatter_is_never_a_kind_document` |
+| completion at an empty top-level line: missing definition keys offered, present ones and Markdown baseline keys (`title`) not | `completion_offers_the_definitions_missing_top_level_keys` |
+| `kind:` value completion: the claiming kind's literal; empty `kind:` offers neither | `completion_offers_the_claiming_kind_for_the_kind_value` |
+| hover on `description`/`match` shows the definition's `->` description | `hovering_a_key_shows_its_definition_description` |
+| `$schema` key hover is the definition's; value hover, document links, and definition do not resolve a reference (Markdown control does) | `hovering_the_schema_key_or_value_resolves_no_reference` |
+| a rejected type definition reported once (envelope) in a standalone file; kept from the kind report for a trigger outside `schemas/` | `a_rejected_definition_is_reported_once_by_the_envelope_when_it_reports` |
+| stdio: the built `dmls` publishes `dm.schema.type_mismatch` at 1:13 with `instance_path: /description` for a `kind: schema` file | `standalone_stdio::kind_document_diagnostics_reach_a_stdio_client` |
+
+Input robustness: the loader and field-shape matrix are Phase 2's in-process
+tests (`lib/tests/l1/kind_documents.rs`); DMLS proves wiring with the control,
+two invalid field shapes, the invalid-YAML document shape, and the unclaimed
+shapes. Smell grep over the new files (`#[serde(default)]`, `unwrap_or_default()`,
+`filter_map(.. as_str())`, `.ok()`): `kind_document.rs` uses
+`validate_kind_document(..).ok()??` deliberately: a load error is the YAML
+parse diagnostic's to report, so it maps to "no kind state", not to valid.
+
+### Gates
+
+- `just test` (darkmatter): first run 1 failure (above, fixed); rerun 12921
+  passed, 10 skipped.
+- `just lint` (darkmatter): clean (rerun after the fix).
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`:
+  packages `[darkmatter, dmls, test-toolkit, darkmatter-cli]`, change_class
+  `package`, so the gates were required and ran.
+- Dependents: no crate outside `darkmatter/` uses `KindValidation`,
+  `validate_kind_document`, or `effective_for_kind`, and nothing depends on
+  `dmls`; the darkmatter-cli consumer is in the area's `just test`.
+- Cross-OS: not run. No path, process, or OS-specific code changed; the new
+  stdio test follows the existing one (canonicalized temp root, URL from path).
+
+## Phase 5
+
+### Wave 11: documentation
+
+- `darkmatter/docs/topics/schemas/authoring-schemas.md`: the "recursive truth"
+  sentence and its `::code` of the deleted placeholder are replaced by a
+  pointer to "External Grammar Files". That section's empty
+  "Schema Definition Files" / "Trigger Files" headings now transclude
+  `^darkmatter/schemas/schema.yaml` and `^darkmatter/schemas/schema-trigger.yaml`
+  with a short description of each, and the obsolete trigger sketch
+  (`kind: "const(schema-trigger,required)"`, `match: TODO`, `description`) is
+  gone. The "tagged" schema file wording now says `$schema`, `types`, or both
+  (the code always allowed a `$schema`-only tagged file).
+- Same file, drift found and fixed: the trigger example used `description:`
+  (not a trigger key) and `match: - expression: foo || bar || baz` (not the
+  trigger grammar). The new kind validator itself rejects it
+  (`match/0/expression invalid SimplifiedSchema ... unexpected character |`).
+  Replaced with a `group:` of property conditions, verified valid with
+  `target/debug/md schema validate` in a `schemas/` folder.
+- `definition.md`: new H2 "How a YAML document is validated by its `kind`"
+  (table of the two kinds, the Mermaid flow, the claim rule with claimed and
+  unclaimed examples, raw validation, `$schema` as data, the residual Rust
+  rules, and where the check runs); a "What You Get" bullet; the CLI flag
+  table and exit-code row mention YAML files; Library API gains
+  "Kind documents". Every example's outcome was produced with the worktree's
+  `md` (wrong `description` type at 2:14, missing `match` at 1:1, `$schema: 5`
+  rejected, `$schema` string/list accepted, `kind: 5` unclaimed, `name:` and
+  null `description` accepted by the definition).
+- `darkmatter/docs/inline/schema-validation.md`: "YAML documents" subsection
+  (pretty output copied from a real run, `arm[n]` explained, no baseline or
+  triggers, no coercion, exit 3 with `yaml_parse`, `schema: null` in JSON,
+  assignments rejected with exit 64 including the `@name` caveat) and the
+  exit-code row.
+- `dmls-schema-support.md`: "YAML kind documents" subsection (content-based
+  claim, diagnostics table with ranging per Rule 10, strict-only missing keys,
+  envelope de-duplication, when no kind diagnostics run, completion, hover,
+  `$schema` as data); coverage matrix trigger row gains completion and hover
+  (footnote 18), footnotes 14 and 16 point at the new section.
+- `docs/kind-documents.md`: `::code ^schemas/kind.yaml`; prose now says the
+  schema documents the values and applies only when a document names it (the
+  Phase 1 decision made it a plain `$schema` file), and points at the two
+  formal kinds. Pre-existing and left alone: its `::file ^darkmatter/docs/topics/schemas/`
+  line names a directory, which `md compose` reports as an invalid
+  transclusion (`no-match`); it predates this feature and its intent (list the
+  schema folders) needs an author's choice.
+- Skills: `SKILL.md` Schema authority gains the kind-document sentence;
+  `schema.md` gains the user-doc pointers and the `@name` assignment caveat;
+  `cli.md` gains the YAML route paragraph.
+
+### Wave 12: placeholder removal and drift sweep
+
+- Deleted `darkmatter/docs/schemas/schema-definition.yaml`; removed
+  `$schema: ./schema-definition.yaml` and `name: err` from
+  `darkmatter/docs/schemas/err.yaml`; removed both `shipped_schema_corpus.rs`
+  exceptions. `err.yaml` now classifies as a `types`-only tagged schema and
+  passes the corpus and its kind definition; no defect to fix in its `types`.
+- Not listed in the plan but broken by the deletion, updated in the same
+  change: `lib/tests/l1/meta_schema_phase1.rs::shipped_schema_corpus_is_passively_classified_without_resolution`
+  (two artifacts; `env.yaml` and `err.yaml` are schemas, nothing rejected or
+  inactive) and `dmls/src/overlay/mod.rs::shipped_schema_corpus_uses_content_classification`
+  (`err.yaml` is now `ready`, the placeholder row is gone).
+- Drift sweep (`git grep -n "schema-definition.yaml\|kind-document.yaml"`
+  outside closed specs and this feature): only the frozen golden fixture
+  remains (`lib/tests/fixtures/recursive_schema_golden/inputs/.../err.yaml`
+  and two `skipped` notes in its `manifest.yaml`). That corpus is a dated,
+  byte-for-byte copy (2026-10-23) and is left as is; see `decisions_for_review`.
+  No "recursive truth" or "empty placeholder" statement remains in the touched
+  docs or code.
+- Targeted run after the removal (28 tests: corpus, golden, both
+  classification tests, `rust_accepted_kind_documents_pass_their_kind_definition`):
+  all passed.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+| --- | --- |
+| placeholder gone, `err.yaml` accepted by the Rust parser and its kind definition | `shipped_schema_corpus::shipped_schema_artifacts_parse_passively`, `::rust_accepted_kind_documents_pass_their_kind_definition`, `meta_schema_phase1::shipped_schema_corpus_is_passively_classified_without_resolution` |
+| DMLS classifies the docs schema folder by content after the deletion | `dmls overlay::tests::shipped_schema_corpus_uses_content_classification` |
+| docs examples and transclusions | not compiled; verified by `md schema validate` / `md compose` runs recorded above |
+
+No parser, schema, or loader behavior changed in this phase, so the input
+robustness matrix is Phase 2's and is unchanged.
+
+### Gates
+
+- `just test` (darkmatter), first run: 1 failure,
+  `meta_schema_phase4::shipped_schema_artifacts_validate_through_semantic_keywords`
+  ("shipped schema declarations"). It collected `$schema` declarations from
+  `darkmatter/docs/schemas`, and the only one was the removed reference to the
+  placeholder. It now also checks the `$schema` of both shipped kind definitions
+  (`include_str!`); see `decisions_for_review`. The test alone and its module
+  passed (23 tests).
+- `just test` (darkmatter), rerun: 12921 passed, 10 skipped.
+- `just lint` (darkmatter): clean.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`:
+  packages `[darkmatter, dmls, test-toolkit, darkmatter-cli]`, change_class
+  `package`, so the gates were required. The tree also still holds Phase 4's
+  uncommitted changes, so this scope covers both phases.
+- Dependents: no package outside `darkmatter/` reads `err.yaml`, the deleted
+  placeholder, or the changed tests; `claudine/` is unchanged. Nothing more to run.
+- Cross-OS: not run. This phase changed docs, one YAML artifact, and tests that
+  list a directory by file name (sorted, `extension() == "yaml"`). None of it
+  is OS-specific.
+- `just test-l2`: not required (no terminal behavior changed).
+
+### Definition of Done
+
+Every bullet holds. Definitions shipped and tied (Phases 1 and 2);
+`validate_kind_document` and the modified-copy test (Phase 2); self-validation
+and corpus (`rust_accepted_kind_documents_pass_their_kind_definition`, now
+including `err.yaml`); the `md schema validate` YAML route (Phase 3); DMLS
+(Phase 4); `SHIPPED` completeness (Phase 1); placeholder deleted,
+`authoring-schemas.md` transcludes both definitions, `docs/kind-documents.md`
+embeds `schemas/kind.yaml` (this phase); docs and skills updated (this phase);
+gates green; `claudine/` unchanged. Status: implementation complete, ready for
+review.

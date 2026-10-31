@@ -22,7 +22,7 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 reviewed: false
-implemented: false
+implemented: true
 created: 2026-10-30
 owner: Ken Snyder <ken@ken.net>
 packages:
@@ -33,6 +33,7 @@ related:
     - 2026-10-30-reference-navigation-and-hover
     - 2026-10-28-schema-enhancements
     - 2026-10-28-extract-simplified-schema
+implemented_by: "claude/opus"
 ---
 
 # Schema Definitions for YAML Documents

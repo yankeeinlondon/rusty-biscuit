@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-31
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 human_review: true
@@ -14,6 +14,7 @@ packages:
 - darkmatter
 - darkmatter-cli
 - simplified-schema
+- dmls
 source_files_during_phase_1:
 - darkmatter/lib/src/markdown/schemas/embedded.rs
 - darkmatter/schemas/schema.yaml
@@ -46,6 +47,85 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/schemas/kind_documents.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/kind_document.rs
+- darkmatter/dmls/src/overlay/frontmatter.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/kind_document.rs
+- darkmatter/dmls/tests/l1/kind_document_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/docs/schemas/err.yaml
+- darkmatter/docs/schemas/schema-definition.yaml
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/dmls/src/overlay/mod.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/inline/schema-validation.md
+- docs/kind-documents.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/cli.md
+source_code:
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/schemas/schema.yaml
+- darkmatter/schemas/schema-trigger.yaml
+- schemas/kind.yaml
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/kind_documents.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+- darkmatter/lib/tests/l1/kind_documents.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/schema_validate_kind_documents.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/kind_document.rs
+- darkmatter/dmls/src/overlay/frontmatter.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/kind_document.rs
+- darkmatter/dmls/tests/l1/kind_document_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+- darkmatter/docs/schemas/err.yaml
+- darkmatter/docs/schemas/schema-definition.yaml
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+documentation:
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/inline/schema-validation.md
+- docs/kind-documents.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/cli.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: Schema Definitions for YAML Documents
@@ -655,10 +735,10 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Wave 8 (sequential: foundation in `darkmatter/dmls/src`)
 
-- [ ] **YAML-document AST.** Add `FrontmatterAst::parse_yaml_document` per Rule 15
+- [x] **YAML-document AST.** Add `FrontmatterAst::parse_yaml_document` per Rule 15
   in `overlay/frontmatter.rs` with a field that makes `schema_entry()` return
   `None`; update that type's doc comments.
-- [ ] **Overlay state.** Add `KindDocumentOverlay` and the
+- [x] **Overlay state.** Add `KindDocumentOverlay` and the
   `DocumentOverlay::kind_document` field; compute it in `for_document_timed`
   before the trigger and standalone branches (Rule 15), building
   `overlay.ast`, a `SchemaBundle` from `effective_for_kind`, and
@@ -666,11 +746,11 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Wave 9 (parallel: disjoint providers)
 
-- [ ] **Diagnostics.** New `darkmatter/dmls/src/diagnostics/kind_document.rs`
+- [x] **Diagnostics.** New `darkmatter/dmls/src/diagnostics/kind_document.rs`
   and the branch in `diagnostics_under` per Rule 15; extract the generic problem
   loop of `schema_problem_diagnostics` into a shared function used by both
   callers (no behavior change for Markdown).
-- [ ] **Completion and hover.** Verify the existing frontmatter completion and
+- [x] **Completion and hover.** Verify the existing frontmatter completion and
   hover providers serve a claimed buffer through `overlay.ast` and the bundle:
   top-level keys not yet present (with the definition's `->` descriptions), and
   `kind` value completion (`schema`, `schema-trigger`). Where a provider reads
@@ -680,7 +760,7 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Wave 10 (parallel: new tests in `darkmatter/dmls/tests/l1/`)
 
-- [ ] **Diagnostics tests.** One new test module (declared in `l1/main.rs`)
+- [x] **Diagnostics tests.** One new test module (declared in `l1/main.rs`)
   driving `OverlayState::for_document` and the diagnostics provider in-process
   over a schema buffer and a trigger buffer: control (no kind diagnostic),
   missing `match` (range: root mapping), wrong `kind` literal (range: the value),
@@ -688,61 +768,61 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
   diagnostic; the existing parse diagnostic stands), an unclaimed `kind` (no kind
   diagnostics), and the Markdown frontmatter diagnostics unchanged for a `.md`
   buffer.
-- [ ] **Completion and hover tests.** Same module: completion at an empty top-level
+- [x] **Completion and hover tests.** Same module: completion at an empty top-level
   line of a `kind: schema` buffer offers `description`, `categories`, `types`,
   `$schema` (and not `kind` when present); `kind: ` value completion offers the two
   kinds; hovering the `description` key returns the definition's description
   text; hovering the `$schema` key does not resolve a reference.
-- [ ] **Stdio wiring.** One case in the existing
+- [x] **Stdio wiring.** One case in the existing
   `standalone_stdio.rs` pattern showing the diagnostics reach a client for a
   `kind: schema` file with a structurally invalid key.
 
 ### Phase 4 checkpoint
 
-- [ ] `just test` and `just lint` from `darkmatter/` pass, including DMLS L1.
+- [x] `just test` and `just lint` from `darkmatter/` pass, including DMLS L1.
 
 ## Phase 5: Documentation, Cleanup, and Closure
 
 ### Wave 11 (parallel: disjoint files)
 
-- [ ] **Authoring guide.** `authoring-schemas.md`: replace
+- [x] **Authoring guide.** `authoring-schemas.md`: replace
   `::code ^darkmatter/docs/schemas/schema-definition.yaml` (line 146) and its
   "recursive truth" sentence with transclusions of
   `::code ^darkmatter/schemas/schema.yaml` and
   `::code ^darkmatter/schemas/schema-trigger.yaml`; describe the two kinds from
   them.
-- [ ] **Definition topic.** `definition.md`: a section "How a YAML document is
+- [x] **Definition topic.** `definition.md`: a section "How a YAML document is
   validated by its `kind`" with the Mermaid diagram of the Summary, a compact
   example per rule (claim, raw mode, `$schema` kept), the unclaimed outcome, and
   the residual-rules list of Rule 11 for a developer with no repository context.
-- [ ] **DMLS docs.** `dmls-schema-support.md`: diagnostics, completion, and hover
+- [x] **DMLS docs.** `dmls-schema-support.md`: diagnostics, completion, and hover
   in schema YAML files, with the ranging of Rule 10.
-- [ ] **CLI docs.** `darkmatter/docs/inline/schema-validation.md`: the YAML route
+- [x] **CLI docs.** `darkmatter/docs/inline/schema-validation.md`: the YAML route
   of Rule 14 (exit codes, no baseline or triggers, assignments rejected).
-- [ ] **Kind catalog doc.** `docs/kind-documents.md`: change the `::code` line to
+- [x] **Kind catalog doc.** `docs/kind-documents.md`: change the `::code` line to
   `::code ^schemas/kind.yaml` and keep its prose accurate to Rule 5.
-- [ ] **Skills.** Update `.claude/skills/darkmatter/SKILL.md` ("Schema authority"
+- [x] **Skills.** Update `.claude/skills/darkmatter/SKILL.md` ("Schema authority"
   paragraph), `schema.md`, and `cli.md` for the mechanism, the API names of
   Rule 9, and the YAML route.
 
 ### Wave 12 (sequential: after Wave 11)
 
-- [ ] **Placeholder removal.** Apply Rule 19: delete
+- [x] **Placeholder removal.** Apply Rule 19: delete
   `darkmatter/docs/schemas/schema-definition.yaml`, remove the two
   `shipped_schema_corpus.rs` exceptions, edit `err.yaml`'s header, rerun the
   corpus. Fix any defect the corpus reports in `err.yaml`.
-- [ ] **Drift sweep.** `git grep -n "schema-definition.yaml\|kind-document.yaml"`
+- [x] **Drift sweep.** `git grep -n "schema-definition.yaml\|kind-document.yaml"`
   outside closed specs and `lowered-corpus.blake3`; nothing in current docs or
   code references the placeholder or the drafts. Search the docs and code
   comments this change touched for stale statements (for example "an empty
   placeholder", "recursive truth").
-- [ ] **Implementation log.** Fill
+- [x] **Implementation log.** Fill
   `darkmatter/features/2026-10-30-yaml-document-schemas/implementation-log.md`
   with what landed, any departure from this plan, and the verification run.
 
 ### Phase 5 checkpoint (final)
 
-- [ ] From `darkmatter/`: `just test`, `just test-l2` is not required (no
+- [x] From `darkmatter/`: `just test`, `just test-l2` is not required (no
   terminal behavior changed), `just lint` passes.
-- [ ] Every Definition of Done bullet is demonstrably true; the feature is
+- [x] Every Definition of Done bullet is demonstrably true; the feature is
   left in `darkmatter/features/` as "implementation complete, ready for review".
