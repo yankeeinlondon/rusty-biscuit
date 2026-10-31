@@ -232,6 +232,7 @@ mod shared_acyclic_consumers;
 mod shared_acyclic_definitions;
 mod shared_acyclic_selection;
 mod shipped_schema_corpus;
+mod kind_documents;
 mod set_overlay_integration;
 mod frontmatter_merge_order;
 mod shell_block_integration;

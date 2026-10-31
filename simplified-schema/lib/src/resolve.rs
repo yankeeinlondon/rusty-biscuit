@@ -1238,9 +1238,10 @@ fn resolve_standalone_schema(
 /// The resolver's typed errors. Failures specific to an embedded source are
 /// [`SchemaError::SchemaDocument`], naming the importing virtual document: an
 /// unregistered `path` or import target, an import that is not a relative
-/// virtual path inside the repository root, a whole-file reference or
-/// root-union document, or an `example(...)` constraint (which would name a
-/// file on disk).
+/// virtual path inside the repository root, a whole-file reference, a root
+/// union with an arm that names a schema file, or an `example(...)`
+/// constraint (which would name a file on disk). A root union of inline arms
+/// is prepared like any other schema.
 pub fn prepare_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
@@ -1273,10 +1274,14 @@ pub fn prepare_embedded_schema_in(
         });
     };
     let schema = match standalone.declaration {
-        SchemaDeclaration::Schema(schema @ SchemaRoot::Single(_)) => schema,
-        SchemaDeclaration::Schema(SchemaRoot::Union(_)) => {
-            return Err(unsupported("an embedded schema cannot be a root union"));
+        // A root union is lowered arm by arm; an arm naming a schema file
+        // would need a file lookup, which an embedded source never does.
+        SchemaDeclaration::Schema(SchemaRoot::Union(arms))
+            if arms.iter().any(|arm| matches!(arm, SchemaArm::FileRef(_))) =>
+        {
+            return Err(unsupported("an embedded schema's root union cannot name a schema file"));
         }
+        SchemaDeclaration::Schema(schema) => schema,
         SchemaDeclaration::Reference(_) => {
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
@@ -6561,6 +6566,26 @@ mod embedded_recursion {
         let defs = resolved.json_schema["$defs"].as_object().expect("$defs");
         assert_eq!(defs.keys().collect::<Vec<_>>(), ["item", "a", "b"]);
         assert_eq!(resolved.json_schema["properties"]["tree"]["anyOf"][1], serde_json::json!({"$ref": "#/$defs/item"}));
+    }
+
+    #[test]
+    fn an_inline_root_union_prepares_and_a_file_arm_is_refused() {
+        let documents = [
+            EmbeddedDocument {
+                path: "bundle/union.yaml",
+                text: "kind: schema\n$schema:\n  - a: string(required)\n  - b: number(required)\n",
+            },
+            EmbeddedDocument { path: "bundle/file-arm.yaml", text: "kind: schema\n$schema:\n  - a: string\n  - ./union.yaml\n" },
+        ];
+        let (resolved, _) = prepare_embedded_schema_in("bundle/union.yaml", &documents, "bundle", ShippedSources::NONE)
+            .expect("an inline root union prepares");
+        assert!(matches!(resolved.simplified, Some(SchemaRoot::Union(ref arms)) if arms.len() == 2));
+        let arms = resolved.json_schema["anyOf"].as_array().or_else(|| resolved.json_schema["oneOf"].as_array());
+        assert_eq!(arms.map(Vec::len), Some(2), "{}", resolved.json_schema);
+
+        let error = prepare_embedded_schema_in("bundle/file-arm.yaml", &documents, "bundle", ShippedSources::NONE)
+            .expect_err("a file arm needs a file lookup");
+        assert!(error.to_string().contains("root union cannot name a schema file"), "{error}");
     }
 }
 #[cfg(test)]

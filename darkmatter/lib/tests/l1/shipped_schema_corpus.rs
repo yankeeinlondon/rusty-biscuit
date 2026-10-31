@@ -1618,3 +1618,64 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
         "loading a trigger mutated a fixture"
     );
 }
+
+/// Every repository schema and trigger document the Rust envelope parsers
+/// accept also passes its YAML kind definition
+/// (`DarkmatterSchemas::validate_kind_document`). Files the parsers reject
+/// (placeholders, drafts, rejected envelopes) are outside that contract. A
+/// document that fails here is fixed by correcting the definition, never by
+/// skipping the file.
+#[test]
+fn rust_accepted_kind_documents_pass_their_kind_definition() {
+    let root = repo_root();
+    let dirs = [
+        ("schemas", root.join("schemas")),
+        ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("darkmatter/docs/schemas", root.join("darkmatter/docs/schemas")),
+        ("claudine/schemas", root.join("claudine/schemas")),
+        ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
+        ("claudine/docs/research", root.join("claudine/docs/research")),
+        ("content-policy/schemas", root.join("content-policy/schemas")),
+    ];
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let api = darkmatter::markdown::schemas::DarkmatterSchemas::new(crate::request_support::context_at(scratch.path()));
+    let mut checked = BTreeSet::new();
+    for (label, dir) in &dirs {
+        let files = files_below(dir, "yaml").into_iter().chain(files_below(dir, "yml"));
+        for file in files {
+            let name = format!("{label}/{}", relative(&file, dir));
+            let source = fs::read_to_string(&file).unwrap_or_else(|error| panic!("{name}: {error}"));
+            let Ok(document) = serde_yaml_ng::from_str::<YamlValue>(&source) else {
+                continue;
+            };
+            let accepted = match document.get("kind").and_then(YamlValue::as_str) {
+                Some("schema") => matches!(parse_standalone_schema_document(&source, &file), Ok(Some(_))),
+                Some("schema-trigger") => matches!(parse_trigger_envelope_from_str(&source), Ok(Some(_))),
+                _ => false,
+            };
+            if !accepted {
+                continue;
+            }
+            let validation = api
+                .validate_kind_document(&source, &file)
+                .unwrap_or_else(|error| panic!("{name}: {error}"))
+                .unwrap_or_else(|| panic!("{name}: a Rust-accepted kind document must be claimed"));
+            assert!(
+                validation.report.valid,
+                "{name} passes the Rust `{}` envelope but not its YAML definition: {:#?}",
+                validation.kind,
+                validation.report.problems,
+            );
+            checked.insert(name);
+        }
+    }
+    for required in [
+        "darkmatter/schemas/schema.yaml",
+        "darkmatter/schemas/schema-trigger.yaml",
+        "claudine/schemas/claudine.yaml",
+        "claudine/schemas/inline-compose.yaml",
+        "claudine/schemas/sequence.yaml",
+    ] {
+        assert!(checked.contains(required), "{required} was not checked; checked: {checked:#?}");
+    }
+}

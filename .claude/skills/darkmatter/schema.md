@@ -121,6 +121,46 @@ starts with its field (`` `match[1].group[0]`: ``). The input matrix is
 `lib/tests/l1/trigger_selection_parity.rs` and Claudine's
 `claudine_trigger_selection_parity.rs`.
 
+### Kind-document validation (whole YAML files)
+
+`schemas/kind_documents.rs` validates a whole YAML document by its top-level
+`kind` against a compiled-in definition (`SHIPPED_KINDS`: `schema` →
+`darkmatter/schemas/schema.yaml`, `schema-trigger` →
+`darkmatter/schemas/schema-trigger.yaml`, both in `embedded::SHIPPED`). Entry
+point: `DarkmatterSchemas::validate_kind_document(text, path)` →
+`Ok(None)` unclaimed (no/null/non-string/unknown `kind`, or not a mapping),
+`Ok(Some(KindValidation { kind, report }))`, or `Err(SchemaDocument)` for a
+loader failure (`load_admitted_yaml`, same wording as `recognize_standalone`)
+or a non-string key. Validation is raw (`validate_raw_with_positions`, no
+coercion) over the whole mapping with `$schema` kept as data; no baseline, no
+triggers (`EffectiveSchema` built by `effective_for_resolved`).
+`effective_for_kind` gives the schema to editors; `with_kind_documents` +
+`KindDocuments::from_documents` swap the registry in tests.
+
+- The YAML definitions own structure; Rust keeps only what they cannot
+  express (open root → unknown keys, null on optional properties, `types`
+  sequence, category grammar, trigger lints and `$path`/`min-match`/`any`
+  rules). Both residual lists are in the `//!` docs of `standalone.rs` and
+  `triggers/envelope.rs`. Drift tests: the key-set/literal/required tie tests
+  in `kind_documents.rs`, the agreement matrix in
+  `lib/tests/l1/kind_documents.rs` (YAML-invalid ⇒ Rust-invalid; every
+  YAML-valid/Rust-invalid cell carries a reason), and
+  `shipped_schema_corpus::rust_accepted_kind_documents_pass_their_kind_definition`.
+  A failing corpus document is fixed in the definition, never skipped.
+- `prepare_embedded_schema_in` (library) accepts a root union of inline arms
+  (`schema.yaml` is one: `$schema` or `types` required); a union arm naming a
+  schema file is still refused.
+- `md schema validate` routes a `.yaml`/`.yml` argument (opened path, ASCII
+  case-insensitive) to `validate_kind_document`
+  (`cli/src/commands/schema/validate.rs::validate_yaml_document`): no baseline,
+  triggers, or assignments. A `SchemaDocument` error naming the argument is
+  `FileOutcome::YamlLoadError` (exit 3, JSON `error: "yaml_parse"`); any other
+  error is exit 2. `key=value` with any YAML argument exits 64 before any file
+  is validated. CLI tests: `cli/tests/l1/schema_validate_kind_documents.rs`.
+- The trigger kind's control fixture is a real trigger
+  (`claudine/schemas/sequence.yaml`): `schema-trigger.yaml` is itself a
+  `kind: schema` document.
+
 ## Composition and validation
 
 SimplifiedSchema compiles to Draft 2020-12 JSON Schema. Composition validates

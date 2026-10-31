@@ -184,8 +184,12 @@ fn malformed_imports_cycles_and_examples_fail_preparation() {
     );
     assert!(message.contains("example"), "{message}");
 
+    // A root union of inline arms prepares; one naming a schema file would
+    // need a file lookup.
     let union = prepare_embedded_schema(IMPORTER, &table(&[(IMPORTER, "$schema:\n  - a: string\n  - b: string\n")]));
-    assert!(importer_message(union.expect_err("root union")).contains("root union"));
+    assert!(union.is_ok(), "an inline root union prepares: {union:?}");
+    let file_arm = prepare_embedded_schema(IMPORTER, &table(&[(IMPORTER, "$schema:\n  - a: string\n  - ./other.yaml\n")]));
+    assert!(importer_message(file_arm.expect_err("file arm")).contains("root union cannot name a schema file"));
     let reference = prepare_embedded_schema(IMPORTER, &table(&[(IMPORTER, "$schema: ./other.yaml\n")]));
     assert!(importer_message(reference.expect_err("whole-file reference")).contains("whole-file reference"));
 }
