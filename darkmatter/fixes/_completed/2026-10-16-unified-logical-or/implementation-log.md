@@ -864,7 +864,16 @@ Every test below passed in this phase's runs:
       `chained_or_left_associative`, `and_binds_tighter_than_or_{left,right}`,
       `parenthesized_or_then_and`, `or_inside_or`).
     - The corpora: darkmatter prompts 10/10 and claudine
-      `shipped_prompts_have_parseable_schemas_and_expressions`.
+      `shipped_prompts_have_parseable_schemas_and_expressions`. These check
+      syntax only.
+    - Shipped passive call-check verdicts (added in review-fix iteration 1,
+      see `log.md`): darkmatter prompts
+      `shipped_conditions_keep_their_call_check_verdict` call-checks every
+      shipped condition (224, 22 with `||`) as parsed and with each
+      `LogicalOr` projected back to the former `or(…)` call; no verdict
+      differs. Controls: `call_check_distinguishes_a_rejected_condition_call`,
+      `call_verdict_comparison_reports_a_changed_verdict`,
+      `projection_marks_only_synthesized_or_calls`.
 - **AC4 — the mode symbols are gone.** The every-feature workspace check
   above plus the zero-defect leftover sweep.
 - **AC5 — absence handling for the left operand in conditions.**

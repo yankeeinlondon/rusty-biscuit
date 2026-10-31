@@ -31,6 +31,8 @@ packages:
     - dmls
     - claudine
 implemented_by: "claude/opus"
+review_iterations: 2
+completed: true
 ---
 
 # One Meaning for `||`
