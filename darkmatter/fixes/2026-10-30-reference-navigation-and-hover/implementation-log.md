@@ -165,6 +165,24 @@ decisions_for_review:
       server's text read rejects on every OS. A permission-denied file was not used because Windows has
       no portable way for a test to make a file unreadable. Both paths go through the same failed-read
       branch, so a reviewer preferring a permission-based case would only add a Unix-only test.
+    - |-
+      The Darkmatter skill's entry file (`.claude/skills/darkmatter/SKILL.md`) is over the plan's
+      200-line limit: 323 lines, and it was already 282 on `main` before this branch. Choice: this
+      phase only corrected the sentences that had become false (the catalog paragraph) and did not
+      restructure the file. Alternative: move sections (for example the long CLI orientation
+      paragraphs) into topic files to get under 200, which is a skill reorganization unrelated to
+      this fix. Redo if rejected: split `SKILL.md` into its topic files in a separate change.
+    - |-
+      The plan's final verification asks for `just test` in Claudine. This phase changed no code
+      Claudine runs: the three Rust edits are doc comments only. Choice: compile Claudine and its
+      tests (`cargo check -p claudine -p claudine-cli --tests`, which passed) instead of running its
+      whole suite, as the repository's dependent-testing guidance asks. Earlier phases ran the
+      Claudine tests that use the changed schema behavior. Redo if rejected: run `just test` in
+      `claudine/`.
+    - |-
+      The plan says to set the spec's `implemented_by` to `claude/sonnet`. The run instructions say
+      `claude/opus`, so the spec records `claude/opus`. The spec's `status` is set to
+      `implemented`, as the plan asks.
 source_files_during_phase_1:
     - simplified-schema/lib/src/resolve/select.rs
     - simplified-schema/lib/src/resolve.rs
@@ -202,11 +220,6 @@ packages:
     - simplified-schema
     - claudine
     - claudine-cli
-message_to_agent: |-
-  Phase 5 is done: body-link hovers append the target's frontmatter summary. `just lint` and `just test` pass in darkmatter (see the Phase 5 log). Facts for Phase 6:
-  - The summary is `DocumentIndex::summary`, read by `graph/substrate.rs::summary_text` (first nonempty, non-pending YAML string among `excerpt`, `summary`, `description`, `about`; trimmed; nothing stringified). It is stored on the per-snapshot `DocumentState` and exposed as `DocumentRecord::summary`; it is not in `FileFacts`, so `FACTS_VERSION` and `index_store_golden.txt` are unchanged.
-  - `providers/hover.rs::resolved_hover` appends `\n\n{summary}` after the title, path, and `Heading:` line. Wiki-link hover (`providers/wiki.rs::resolved_hover`) was NOT changed: the spec and Rule 16 name only body links; see decisions_for_review.
-  - Task 16.x owns the docs: `darkmatter/docs/lsp/features.md` still carries the MIME/image-preview claim and does not yet describe the summary.
 source_files_during_phase_2:
     - simplified-schema/lib/src/errors.rs
     - simplified-schema/lib/src/lib.rs
@@ -337,6 +350,154 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/simplified/source.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/dmls.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+    - simplified-schema/README.md
+docs_created_during_phase_6:
+    - simplified-schema/docs/topics/selecting-schema-files.md
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/simplified-schema/SKILL.md
+source_code:
+    - simplified-schema/lib/src/resolve/select.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/tests/l1/schema_file_selection.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/schemas/roots.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schema_reference_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/simplified/standalone.rs
+    - simplified-schema/lib/tests/l1/schema_target_classification.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/numeric_admission.rs
+    - darkmatter/lib/tests/l1/raw_root_union_assertions.rs
+    - darkmatter/lib/tests/l1/raw_schema_conversion.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/tests/l1/recursive_schema_merge.rs
+    - darkmatter/lib/tests/l1/schema_cache_validity.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+    - darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+    - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/variable_type_projection.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/manifest.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-keywords-schema-json.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-detected-schema.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-keywords-schema.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_target_recognition.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - claudine/lib/src/composition/completion/tests.rs
+    - claudine/lib/src/composition/ownership/tests/setters.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/system_prompt/prepare/tests.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/ctx_launch_anchor.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - prompts/_implement/implement.yaml
+    - darkmatter/dmls/src/overlay/references.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/workspace/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/schema_reference_parity.rs
+    - darkmatter/dmls/tests/l1/schema_reference_sessions.rs
+    - darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/schema_reference_navigation.json
+    - simplified-schema/lib/src/resolve/inspect.rs
+    - simplified-schema/lib/tests/l1/schema_target_inspection.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter/schema_value_hover.rs
+    - darkmatter/dmls/src/providers/frontmatter/file_value_hover.rs
+    - darkmatter/dmls/src/providers/reference_hover.rs
+    - darkmatter/dmls/src/providers/reference_hover/tests.rs
+    - darkmatter/dmls/tests/l1/value_hovers.rs
+    - darkmatter/dmls/src/graph/substrate.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/index_store/facts.rs
+    - darkmatter/dmls/src/providers/hover.rs
+    - darkmatter/dmls/tests/l1/index_store_facts.rs
+    - darkmatter/dmls/tests/l1/referenced_targets.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - simplified-schema/lib/src/simplified/source.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - claudine/docs/topics/schemas.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/dmls/design/research/r5-schema-error-range-mapping.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/dmls.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/selecting-schema-files.md
+completed_phase: 6
+implemented: true
 ---
 ---
 
@@ -994,3 +1155,91 @@ the filesystem, and the router's preparation, so they are F2 in-process-server L
 - Cross-OS: no path, `#[cfg]`, or OS-specific code changed; the unreadable-target fixture uses invalid
   UTF-8 bytes, which fail the text read identically on every OS. No `just cross-check` was run.
 - No test was skipped, ignored, or left failing.
+
+## Phase 6
+
+### 16.1 Schema docs
+
+- `darkmatter/docs/topics/schemas/definition.md`: new "What a `$schema` Reference May Point At"
+  section (summary, YAML envelope and JSON tables, Mermaid classification flowchart, `description`,
+  migration for raw-YAML JSON Schema → `.json` declaring 2020-12 and for `types`-only files →
+  `Name@file.yaml`, a document `$schema` naming the global catalog). The roots table already had
+  `SCHEMAS_DIR` first (Phase 1). Drift fixed: the `$schema` value list said a file could hold "a
+  SimplifiedSchema or a JSON Schema".
+- `simplified-schema/docs/topics/diagnostics.md`: "When a file is not a schema target" (each
+  rejection, its error, its hint). Drift fixed: `locate_standalone_definition_failure` was said to
+  return `None` for a global catalog and to start tagged paths at `types`.
+- New `simplified-schema/docs/topics/selecting-schema-files.md` (`select_schema_file`, outcomes,
+  ordered `attempted`, creation paths, `into_result()`, `is_bare_name`, `inspect_schema_target`),
+  linked from `simplified-schema/README.md`'s documentation list (the area's docs index).
+- `schema-documents.md`: one sentence corrected (a `types`-only file is not validated against "either
+  mapping envelope") and a link to the new page.
+- Comment-only Rust edits: `catalog.rs` module docs (a catalog acts as globals only through explicit
+  `GlobalCatalog` registration; a document `$schema` naming one gets its entries as optional
+  properties); `simplified/source.rs::locate_standalone_definition_failure` docs (same drift as
+  above); `errors.rs::TriggerSchemaReferenced` docs (a trigger file is recognized by content, not a
+  `*.trigger.yaml` name). Drift resolved in favor of the code in each case.
+
+### 16.2 DMLS docs
+
+- `darkmatter/dmls/docs/file-references.md`: `$schema` lookup (five roots in order, explicit
+  relative from the document folder), the creation-path link fallback, the cases with no link, when
+  a selection is redone, and why a missing `file` value is not an editor diagnostic.
+- `darkmatter/dmls/docs/hover.md`: value versus key hover (Mermaid dispatch chart), every `$schema`
+  and `file` value outcome with wording quoted from `providers/reference_hover.rs`, and the body-link
+  summary rule (Markdown body links only; wiki links have no summary).
+- `darkmatter/docs/lsp/features.md`: "inferred MIME, image preview" removed; hovers, link fallback,
+  missing-`file` policy, and summary added. `darkmatter/docs/topics/dmls.md`: the same in brief.
+- `darkmatter/dmls/README.md` not edited (overview only), as planned.
+- No `docs/` page names this fix or links to its spec (grep of the edited pages is clean).
+
+### 17.1 Skills
+
+- `.claude/skills/darkmatter/schema.md`: the envelope paragraph still said referenced YAML without an
+  envelope "remains raw JSON Schema" and that the advisory fires; now `NotASchemaDocument` with no
+  raw-YAML fallback. The catalog paragraph still said the standalone loader refuses a catalog; now
+  only registration makes it globals. The roots section was already current (Phase 1).
+- `.claude/skills/darkmatter/SKILL.md`: the catalog sentence corrected the same way; the roots and
+  classifier bullets were already current (Phases 1-2).
+- `.claude/skills/darkmatter/dmls.md`: pointer to the new user docs (the content was current from
+  Phases 3-5).
+- `.claude/skills/simplified-schema/SKILL.md`: link to the new selection page (196 lines).
+
+### 17.2 Log and spec status
+
+- Spec frontmatter: `status: implemented`, `implemented: true`, `implemented_by: "claude/opus"`.
+- Departures from the spec, all already recorded with their corrected docs in `decisions_for_review`:
+  wiki-link hovers have no summary; an unreadable file inside a schema root reports the roots as
+  unreadable; a `file` value in a document with no context gets no file hover. The audit and
+  migration list is in Phase 2 ("5.x Audit and migration"; the one shipped migration is
+  `prompts/_implement/implement.yaml`). The Rule 2 aliasing note is in Phase 1 (1.1 tests,
+  `schemas_dir_aliasing_a_package_schemas_folder_searches_it_as_schemas_dir`). The test inventory is
+  each phase's "Requirement-to-test mapping".
+
+### 18.1 Verification (run once, after both doc agents had finished, nothing else running)
+
+- `simplified-schema/`: `just lint` pass; `just test` pass (minimal-features run 1118/1118).
+- `darkmatter/`: `just lint` pass (including the zed-dmls wasm check); `just test` 12870 passed,
+  10 skipped, 0 failed (69.9 s). No load-sensitive failures.
+- Claudine: `cargo check -p claudine -p claudine-cli --tests` passes (no code Claudine runs changed
+  in this phase; see `decisions_for_review`).
+- `just check-tier-coverage darkmatter` and `simplified-schema`: nothing stranded.
+- Every `tests/l1/*.rs` file named in the plan exists; every long backticked function name in the
+  plan exists except `parse_yaml_referenced_file` and `missing_simplified_envelope_advisory`,
+  which the plan deleted on purpose (Phase 2).
+- Greps: `AmbiguousReferenced` appears only in historical `_completed` specs and logs;
+  `inferred MIME` appears nowhere outside spec folders.
+- `git status` shows only the intended docs, skills, three comment-only Rust files, and this
+  fix's plan/log/spec; no `.gitnexus` or snapshot noise.
+- `affected_scope.py` over the working tree: packages `darkmatter, simplified-schema, test-toolkit`,
+  change class `package`, so the gates were required and run.
+- Cross-OS: no path, `#[cfg]`, or runtime code changed (doc comments only), so no `just cross-check`.
+- Input Robustness Matrix: not applicable (no reader of a file format or configuration changed).
+
+### Requirement-to-test mapping (Phase 6)
+
+Phase 6 changed no behavior. The Definition of Done items it re-read map to the tests already listed
+in Phases 1-5. The pages that tests read were rechecked by the scoped runs during 16.1
+(`no_doc_or_skill_names_the_singular_schema_variable`, `no_active_file_spells_a_renamed_trigger_form`,
+`shipped_markdown_inline_schemas_parse_passively`, `shipped_markdown_named_type_references_resolve`),
+then by the full `just test`. No test was skipped, ignored, or left failing.

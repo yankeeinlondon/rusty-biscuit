@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-30
-phase: 6
+phase: 7
 agent: claude/sonnet
 yolo: true
 human_review: true
@@ -177,6 +177,154 @@ docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_6:
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/simplified/source.rs
+docs_updated_during_phase_6:
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/dmls/docs/file-references.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/dmls.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/README.md
+docs_created_during_phase_6:
+- simplified-schema/docs/topics/selecting-schema-files.md
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/simplified-schema/SKILL.md
+source_code:
+- simplified-schema/lib/src/resolve/select.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/tests/l1/schema_file_selection.rs
+- simplified-schema/lib/tests/l1/main.rs
+- darkmatter/lib/src/markdown/schemas/roots.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+- darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+- darkmatter/lib/tests/l1/schema_roots.rs
+- darkmatter/lib/tests/l1/schema_reference_parity.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_triggers.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/tests/l1/schema_roots_parity.rs
+- claudine/lib/tests/l1/claudine_schemas_embedded.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/tests/l1/schema_target_classification.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/tests/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/lib/tests/l1/meta_schema_phase5.rs
+- darkmatter/lib/tests/l1/numeric_admission.rs
+- darkmatter/lib/tests/l1/raw_root_union_assertions.rs
+- darkmatter/lib/tests/l1/raw_schema_conversion.rs
+- darkmatter/lib/tests/l1/recursive_schema_golden.rs
+- darkmatter/lib/tests/l1/recursive_schema_merge.rs
+- darkmatter/lib/tests/l1/schema_cache_validity.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+- darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+- darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+- darkmatter/lib/tests/l1/schemas_source_projection.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/variable_type_projection.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/manifest.yaml
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-keywords-schema-json.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-detected-schema.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-keywords-schema.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_target_recognition.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- darkmatter/dmls/tests/l1/named_type_references.rs
+- claudine/lib/src/composition/completion/tests.rs
+- claudine/lib/src/composition/ownership/tests/setters.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/system_prompt/prepare/tests.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+- claudine/cli/src/commands/wrap/overlay.rs
+- claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- claudine/cli/tests/l1/provider_tail_ownership.rs
+- prompts/_implement/implement.yaml
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/workspace/mod.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/schema_reference_parity.rs
+- darkmatter/dmls/tests/l1/schema_reference_sessions.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/repository_contexts.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/schema_reference_navigation.json
+- simplified-schema/lib/src/resolve/inspect.rs
+- simplified-schema/lib/tests/l1/schema_target_inspection.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/work_counters.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/frontmatter/schema_value_hover.rs
+- darkmatter/dmls/src/providers/frontmatter/file_value_hover.rs
+- darkmatter/dmls/src/providers/reference_hover.rs
+- darkmatter/dmls/src/providers/reference_hover/tests.rs
+- darkmatter/dmls/tests/l1/value_hovers.rs
+- darkmatter/dmls/src/graph/substrate.rs
+- darkmatter/dmls/src/graph/arena.rs
+- darkmatter/dmls/src/index_store/facts.rs
+- darkmatter/dmls/src/providers/hover.rs
+- darkmatter/dmls/tests/l1/index_store_facts.rs
+- darkmatter/dmls/tests/l1/referenced_targets.rs
+- darkmatter/lib/src/markdown/schemas/catalog.rs
+- simplified-schema/lib/src/simplified/source.rs
+documentation:
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/lsp/indexing.md
+- darkmatter/docs/lsp/configuration.md
+- darkmatter/docs/topics/lifecycle/host-artifact.md
+- claudine/docs/topics/schemas.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/diagnostics.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/dmls/design/research/r5-schema-error-range-mapping.md
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+- darkmatter/dmls/docs/file-references.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/lsp/features.md
+- darkmatter/docs/topics/dmls.md
+- simplified-schema/README.md
+- simplified-schema/docs/topics/selecting-schema-files.md
+completed_phase: 6
+implemented: true
 ---
 
 ## Summary and Definition of Done
@@ -1055,7 +1203,7 @@ its precedence) and one invalid shape (null) proving it uses `summary_text`.
 
 ### Wave 16 (parallel: disjoint documents)
 
-- [ ] **16.1 Schema docs**
+- [x] **16.1 Schema docs**
     - `darkmatter/docs/topics/schemas/definition.md`: the "what a `$schema` reference may point
       at" YAML and JSON tables, the `description` property, the migration path for raw YAML JSON
       Schema (move to `.json` declaring 2020-12) and for `types`-only files (named-type
@@ -1068,7 +1216,7 @@ its precedence) and one invalid shape (null) proving it uses `summary_text`.
       schema loader refuses its envelope" with the real mechanism (a catalog is registered
       explicitly; a document `$schema` that names one now gets its entries as optional
       properties, which is accepted).
-- [ ] **16.2 DMLS docs**
+- [x] **16.2 DMLS docs**
     - `darkmatter/dmls/docs/file-references.md`: schema-specific lookup, creation candidates,
       typed failures, the editor-only missing-file policy. `darkmatter/dmls/docs/hover.md`:
       value versus key hover, every `$schema` and `file` outcome with an example, the body
@@ -1081,13 +1229,13 @@ its precedence) and one invalid shape (null) proving it uses `summary_text`.
 
 ### Wave 17 (parallel: after Wave 16)
 
-- [ ] **17.1 Skills**
+- [x] **17.1 Skills**
     - `.claude/skills/darkmatter/SKILL.md` ("Triggers and bare-name `$schema` lookup use the
       five schema roots" bullet and the standalone-classifier sentence), `schema.md` (roots
       section ~931-1037, ~1087), `dmls.md` (value hovers, link fallback, facts cache and probes,
       summary), and `.claude/skills/simplified-schema/` (selector, inspection, envelope rules,
       `NotASchemaDocument`). Keep each `SKILL.md` under 200 lines.
-- [ ] **17.2 Implementation log and spec status**
+- [x] **17.2 Implementation log and spec status**
     - Finish `implementation-log.md`: the audit and migration list, each departure from the
       spec (there is none planned; record any real one with the corrected doc), the Rule 2
       aliasing note, and the test inventory. Set the spec frontmatter `implemented: true`,
@@ -1096,7 +1244,7 @@ its precedence) and one invalid shape (null) proving it uses `summary_text`.
 
 ### Wave 18 (sequential: final verification)
 
-- [ ] **18.1 Verification**
+- [x] **18.1 Verification**
     - `just test` and `just lint` in `simplified-schema/`, `darkmatter/`, `claudine/`;
       confirm every test named in this plan exists (`just test` list output, filtered by the
       new module names).
