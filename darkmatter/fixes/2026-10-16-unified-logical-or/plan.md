@@ -1,14 +1,63 @@
 ---
 total_phases: 7
 created: 2026-10-30
-phase: 2
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+- simplified-schema
+- darkmatter
+source_files_during_phase_2:
+- simplified-schema/lib/src/expression/ast.rs
+- simplified-schema/lib/src/expression/lexer.rs
+- simplified-schema/lib/src/expression/parser.rs
+- simplified-schema/lib/src/expression/mod.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/tests/l1/expression_syntax.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- darkmatter/lib/src/catalog/mod.rs
+- darkmatter/lib/src/lifecycle/action_shape.rs
+- darkmatter/lib/src/lifecycle/mod.rs
+- darkmatter/lib/src/lifecycle/parse.rs
+- darkmatter/lib/src/lifecycle/validate.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/parser.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/lint.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+- darkmatter/lib/src/markdown/compose/expression/semantics.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/tests/shell.rs
+- darkmatter/lib/tests/l1/binding_contract.rs
+- darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+- darkmatter/lib/tests/l1/schema_language_ownership_guard.rs
+- darkmatter/lib/tests/l1/schemas_literal_expression.rs
+- darkmatter/lib/tests/l1/simplified_schema_reexports.rs
+- darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # One Meaning for `||` — Implementation Plan
@@ -252,7 +301,7 @@ compile until Phases 3–4 — expected, per R16.
 
 Tasks:
 
-- [ ] Core grammar unification
+- [x] Core grammar unification
     - Files: `simplified-schema/lib/src/expression/{ast.rs, lexer.rs,
       parser.rs, mod.rs}` (one owner; their tests are in-file).
     - ast.rs: rename per R1; update module docs and the in-file `Display`
@@ -276,7 +325,7 @@ Tasks:
       node (AC3: rewritten, never deleted).
     - mod.rs: module docs drop the `ParseMode` phrase; re-export lists drop
       `ParseMode`, `parse_condition`, `parse_condition_spanned` (R4).
-- [ ] Schema format and crate tests
+- [x] Schema format and crate tests
     - Files: `simplified-schema/lib/src/format.rs`,
       `simplified-schema/lib/src/simplified/convert.rs`,
       `simplified-schema/lib/tests/l1/expression_syntax.rs`.
@@ -289,7 +338,7 @@ Tasks:
       assertion (tokens are `Variable, Pipe, Variable`); replace the
       two-mode table test with one asserting `parse("a || b")` yields
       `Expr::LogicalOr` and `parse("a && b")` lowers to `and(a, b)` (D4).
-- [ ] Phase 2 validation
+- [x] Phase 2 validation
     - `cargo nextest run -p simplified-schema --features work-counters,terminal`
       and `just lint` in `simplified-schema/` (R16). Do not run workspace-wide
       checks yet.
@@ -304,7 +353,7 @@ All tasks are mechanical applications of Phase 2's API to
 
 Tasks:
 
-- [ ] Evaluator and analysis arms
+- [x] Evaluator and analysis arms
     - Files (under `darkmatter/lib/src/markdown/compose/`):
       `expression/mod.rs`, `expression/absence.rs`, `expression/call_check.rs`,
       `expression/scope/facts.rs`, `expression/lexer.rs`,
@@ -322,13 +371,13 @@ Tasks:
       `parse_condition`, `parse_condition_spanned`; `expression/lexer.rs`
       re-export (line 36) drops `ParseMode`; `interpolation/mod.rs` imports
       (78–79) drop `ParseMode` and `parse_condition`.
-- [ ] Semantics catalog
+- [x] Semantics catalog
     - Files: `markdown/compose/expression/semantics.rs`,
       `darkmatter/lib/src/catalog/mod.rs`.
     - Apply R6 (descriptor names) and R7 (delete `ModeDescriptor`,
       `MODE_DESCRIPTORS`, `mode_descriptors()`, the mode-examples test, and
       the `catalog/mod.rs:465` check line).
-- [ ] Lint rework
+- [x] Lint rework
     - File: `markdown/compose/expression/lint.rs`.
     - Apply R9: modeless `lint_expression`, single-reparse `lint_spanned`,
       modeless proof in `rewrite`; update the doctest; rewrite the tests named
@@ -336,12 +385,12 @@ Tasks:
       assertion) and the `authority` proptest (drop the
       `condition: any::<bool>()` mode parameterization and the
       `ParseMode::Condition` branches at 942–946, 974).
-- [ ] Prepared values
+- [x] Prepared values
     - File: `markdown/compose/expression/prepared.rs`.
     - Apply R8: `AuthoredMode::Expression` unit variant; delete
       `parse_in_mode`; the `Expression` arm and `parse_occurrences` (line 252)
       call `parse_spanned`; update doc examples and the in-file test at 981.
-- [ ] Condition-surface call swaps
+- [x] Condition-surface call swaps
     - Files: `markdown/compose/{conditions.rs, call_precheck.rs,
       page_blocks/guards.rs, collection_blocks/parser.rs,
       collection_blocks/scopes.rs, frontmatter_shell_expansion.rs,
@@ -362,7 +411,7 @@ Tasks:
       from the test imports (616–617).
     - Fix the comment at execution_tests.rs:814 and the `parse_condition`
       mention in action_shape.rs:375 to say `parse`.
-- [ ] Library test files
+- [x] Library test files
     - Files: `darkmatter/lib/tests/l1/{binding_contract.rs,
       compose_expression_failure_contract.rs, expression_regression.rs,
       simplified_schema_reexports.rs, schemas_literal_expression.rs}`,
@@ -383,7 +432,7 @@ Tasks:
       is deleted; `dashed_variables` calls `lex_spanned(text)` (313–314); the
       parse dispatch (326–327) collapses to `parse(&expression.text)`;
       mode-parameterized test rows (415) drop the mode.
-- [ ] Phase 3 validation
+- [x] Phase 3 validation
     - `cargo nextest run -p darkmatter --features
       effects-instrumentation,work-counters`, then
       `cargo nextest run -p darkmatter --features prompt-tests --test prompts`
