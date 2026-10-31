@@ -85,12 +85,19 @@ fn effective_schema_raw_validation_keeps_root_required_beside_any_of() {
     assert!(effective.validate_raw(&json!({"kind": "b", "name": "Ada"})).valid);
 }
 
-/// A canonical temp root holding `schema` as `schema.json` and `doc.md`
-/// declaring it with `frontmatter`.
+/// A canonical temp root holding `schema` as `schema.json` (declaring the
+/// Draft 2020-12 dialect when `schema` does not) and `doc.md` declaring it
+/// with `frontmatter`.
 fn raw_schema_document(schema: &serde_json::Value, frontmatter: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-    std::fs::write(root.join("schema.json"), serde_json::to_string_pretty(schema).expect("schema JSON"))
+    let mut declared = schema.clone();
+    declared
+        .as_object_mut()
+        .expect("schema object")
+        .entry("$schema")
+        .or_insert_with(|| json!(simplified_schema::DRAFT_2020_12_DIALECT));
+    std::fs::write(root.join("schema.json"), serde_json::to_string_pretty(&declared).expect("schema JSON"))
         .expect("write schema");
     std::fs::write(root.join("doc.md"), format!("---\n$schema: ./schema.json\n{frontmatter}---\nBody\n"))
         .expect("write document");

@@ -233,7 +233,10 @@ impl Layer {
             };
             return Err(missing_schema(path.as_deref(), &reason));
         }
-        let json = serde_json::to_value(yaml).map_err(|_| SchemaError::AmbiguousReferenced { path: named })?;
+        let json = serde_json::to_value(yaml).map_err(|_| SchemaError::NotASchemaDocument {
+            path: named,
+            reason: crate::errors::NotSchemaReason::NotAMapping,
+        })?;
         Ok(Self::json_schema(json, path, binding))
     }
 

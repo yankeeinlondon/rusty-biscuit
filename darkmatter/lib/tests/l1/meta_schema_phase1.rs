@@ -430,7 +430,7 @@ fn shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance() {
         .expect("write simplified schema");
     fs::write(
         dir.path().join("raw.json"),
-        r#"{"type":"object","properties":{"title":{"type":"string"}}}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"string"}}}"#,
     )
     .expect("write raw JSON Schema");
 

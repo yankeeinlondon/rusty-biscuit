@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-30
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 human_review: true
@@ -16,6 +16,7 @@ packages:
 - dmls
 - simplified-schema
 - claudine
+- claudine-cli
 source_files_during_phase_1:
 - simplified-schema/lib/src/resolve/select.rs
 - simplified-schema/lib/src/resolve.rs
@@ -46,6 +47,102 @@ skills_files_updated_during_phase_1:
 - .claude/skills/darkmatter/SKILL.md
 - .claude/skills/darkmatter/schema.md
 - .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_2:
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_target_classification.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/tests/mod.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+- darkmatter/lib/tests/l1/global_catalog.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/lib/tests/l1/meta_schema_phase5.rs
+- darkmatter/lib/tests/l1/numeric_admission.rs
+- darkmatter/lib/tests/l1/raw_root_union_assertions.rs
+- darkmatter/lib/tests/l1/raw_schema_conversion.rs
+- darkmatter/lib/tests/l1/recursive_schema_golden.rs
+- darkmatter/lib/tests/l1/recursive_schema_merge.rs
+- darkmatter/lib/tests/l1/schema_cache_validity.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/raw_schema.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+- darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+- darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+- darkmatter/lib/tests/l1/schemas_source_projection.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/variable_type_projection.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/manifest.yaml
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-keywords-schema-json.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-detected-schema.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-enhancements-matrix-keywords-schema.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/inputs/darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_target_recognition.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/tests/fixtures/suggest_constraint/tagged.yaml
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- darkmatter/dmls/tests/l1/named_type_references.rs
+- claudine/lib/src/composition/completion/tests.rs
+- claudine/lib/src/composition/ownership/tests/setters.rs
+- claudine/lib/src/composition/prepare/service/tests.rs
+- claudine/lib/src/composition/schema/tests.rs
+- claudine/lib/src/system_prompt/prepare/tests.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- claudine/cli/src/commands/wrap/harness_orch/prompt/tests.rs
+- claudine/cli/src/commands/wrap/overlay.rs
+- claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+- claudine/cli/tests/l1/compose_schema_cli.rs
+- claudine/cli/tests/l1/ctx_launch_anchor.rs
+- claudine/cli/tests/l1/provider_tail_ownership.rs
+- prompts/_implement/implement.yaml
+docs_updated_during_phase_2:
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/design/research/r5-schema-error-range-mapping.md
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_3:
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/workspace/mod.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/schema_reference_parity.rs
+- darkmatter/dmls/tests/l1/schema_reference_sessions.rs
+- darkmatter/dmls/tests/l1/frontmatter_response_contracts.rs
+- darkmatter/dmls/tests/l1/repository_contexts.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/schema_reference_navigation.json
+- darkmatter/cli/tests/l1/schema_validate.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/file-references.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/dmls.md
 ---
 
 ## Summary and Definition of Done
@@ -596,7 +693,7 @@ over the files this phase touches and justify or remove every hit: `#[serde(defa
 
 ### Wave 3 (parallel: disjoint files)
 
-- [ ] **3.1 Standalone parser**
+- [x] **3.1 Standalone parser**
     - Implement Rule 9 in `standalone.rs` (new fields, `description` validation, envelope key
       sets, catalog refusal removed, `check_named_types` condition, docs).
     - Add `exports_schema` and `description` to the places that construct
@@ -604,14 +701,14 @@ over the files this phase touches and justify or remove every hit: `#[serde(defa
       other constructor).
     - The `resolve.rs` test `malformed_local_types_are_schema_errors_with_authored_locations`
       (lines ~4585-4600) asserts errors the new parser still raises and stays unchanged.
-- [ ] **3.2 Errors**
+- [x] **3.2 Errors**
     - Implement Rule 7 in `errors.rs`, `layer.rs`, the embedded `Ok(None)` branch, the
       `StatusBlock` rendering, DMLS `error_dependencies`, and the docs; update every test and
       doc that named `AmbiguousReferenced`.
 
 ### Wave 4 (parallel: separate crates, after Wave 3)
 
-- [ ] **4.1 Referenced-file loader**
+- [x] **4.1 Referenced-file loader**
     - Implement Rules 5 and 8: factor `classify_yaml_schema_text(path, text)` and
       `classify_json_schema_text(path, text)` (both return typed errors) out of the loader so
       Phase 4's inspection reuses them; `load_schema_from_path_in_context` calls them.
@@ -629,7 +726,7 @@ over the files this phase touches and justify or remove every hit: `#[serde(defa
       are untouched.
     - Docs: loader and `resolve_schema` `## Errors` sections; `simplified-schema/docs/topics/language/schema-documents.md`
       (envelope table, `description`, JSON recognition, migration of raw YAML JSON Schema).
-- [ ] **4.2 DMLS standalone claim**
+- [x] **4.2 DMLS standalone claim**
     - Update `standalone_envelope_claim` per Rule 9 and its tests in `overlay/schema.rs`;
       confirm an informal file with `description` keeps its last-good model while mid-edit.
 
@@ -640,23 +737,23 @@ Run each crate's `just test`, read every failure caused by `NotASchemaDocument`,
 file and its reason to `darkmatter/fixes/2026-10-30-reference-navigation-and-hover/implementation-log.md`
 (create it in 5.1).
 
-- [ ] **5.1 simplified-schema and the prompts migration**
+- [x] **5.1 simplified-schema and the prompts migration**
     - Create the log with an "Audit and migration" section; record the planning-time audit
       (Rule 6) and the `prompts/_implement/implement.yaml` rename (`types:` -> `$schema:`).
     - Fix `simplified-schema` tests (`shipped_corpus.rs`, `located_schema_errors.rs`,
       `schema_files.rs`, in-source tests).
-- [ ] **5.2 darkmatter lib and CLI**
+- [x] **5.2 darkmatter lib and CLI**
     - Fix `darkmatter/lib/tests/l1/*` and `darkmatter/cli/tests/l1/*` listed in Rule 6 plus any
       other failure; the `trigger_discovery_recovery.rs` and `schemas_*` suites write raw JSON
       payloads.
-- [ ] **5.3 dmls and claudine**
+- [x] **5.3 dmls and claudine**
     - Fix `darkmatter/dmls/tests/l1/*` (`invalid_trigger_warnings.rs`, `startup_log_lines.rs`,
       `suggest_constraint_phase1.rs`) and `claudine/cli/tests/l1/compose_schema_cli.rs`,
       `provider_tail_ownership.rs`, and the claudine in-source tests the grep lists.
 
 ### Wave 6 (parallel: new tests)
 
-- [ ] **6.1 Classifier tests** (`simplified-schema/lib/tests/l1/schema_files.rs`,
+- [x] **6.1 Classifier tests** (`simplified-schema/lib/tests/l1/schema_files.rs`,
       `located_schema_errors.rs`)
     - Every row of Rule 8's YAML and JSON tables through `resolve_schema_with_roots` at the
       public result (the returned `SchemaError` and its location), plus the matrix above
@@ -667,7 +764,7 @@ file and its reason to `darkmatter/fixes/2026-10-30-reference-navigation-and-hov
       but `Name@types-only.yaml` still imports; delegation and root-union file arms to a
       types-only or no-dialect file fail with that file named; a malformed winning file in the
       first root is reported and a valid file in a later root is not used.
-- [ ] **6.2 Corpus and normal invocation**
+- [x] **6.2 Corpus and normal invocation**
     - `simplified-schema/lib/tests/l1/shipped_corpus.rs` and
       `darkmatter/lib/tests/l1/shipped_schema_corpus.rs`: the passive corpus classifies every
       shipped schema file under the new rules; `GlobalCatalog::darkmatter()` and the Claudine
@@ -690,7 +787,7 @@ the response-contract fixtures.
 
 ### Wave 7 (sequential: foundation)
 
-- [ ] **7.1 Schema reference facts**
+- [x] **7.1 Schema reference facts**
     - Implement Rule 10: `overlay/references.rs`, the `schema_for` build, `CachedSchema.probes`,
       the `collect_dep_hashes` addition, `DocumentOverlay::schema_references` and its three
       other constructors.
@@ -703,12 +800,12 @@ the response-contract fixtures.
 
 ### Wave 8 (parallel: disjoint files)
 
-- [ ] **8.1 Links and definition**
+- [x] **8.1 Links and definition**
     - Implement Rule 11 in `providers/frontmatter.rs` (`schema_target` -> `schema_targets`,
       `nav_targets`, `definition`); the `looks_like_path` gate leaves `$schema`.
     - Update `docs` comments on `nav_targets` ("Resolution is never cached" is false for
       `$schema` now).
-- [ ] **8.2 Diagnostic policy**
+- [x] **8.2 Diagnostic policy**
     - Implement Rule 13 in `diagnostics/frontmatter.rs`.
     - Tests in the existing diagnostics test module (and `dmls/tests/l1/*` where eager-file
       diagnostics are asserted; find them with `grep -rn "invalid_file_reference\|NoMatch"
@@ -721,7 +818,7 @@ the response-contract fixtures.
 
 ### Wave 9 (parallel: tests after Wave 8)
 
-- [ ] **9.1 Response contracts and parity**
+- [x] **9.1 Response contracts and parity**
     - `dmls/tests/l1/frontmatter_response_contracts.rs` plus a new golden
       `dmls/tests/fixtures/response_contracts/schema_reference_navigation.json` (generate with
       `DMLS_UPDATE_GOLDEN=1`, then read it): `$schema: feature-review.yaml` in
@@ -738,7 +835,7 @@ the response-contract fixtures.
       for a failing target.
     - Assert URI and range with spaces, Markdown punctuation, and non-ASCII in folder names,
       using the existing portable/native path fixtures.
-- [ ] **9.2 Session tests** (`dmls/tests/l1/searched_candidates.rs` or a new
+- [x] **9.2 Session tests** (`dmls/tests/l1/searched_candidates.rs` or a new
       `schema_reference_sessions.rs`, using the existing `LspFixture` seams)
     - Change a schema file, delete it, create a nearer candidate (including in a root outside
       the workspace folder), and repair a malformed target: after each, links, definition, and

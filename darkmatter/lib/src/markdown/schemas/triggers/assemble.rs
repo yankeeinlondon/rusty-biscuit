@@ -304,13 +304,20 @@ fn resolve_file_payload(
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
     // The trigger file owns an inline payload's named types, so its
     // definitions never share keys with the document's or another trigger's.
+    // A trigger file is never a schema document, so the loader refuses a
+    // payload that names one before any cycle check could see it; that
+    // refusal is reported as the cycle it is.
     let resolved = resolve::resolve_yaml_schema_owned_by(
         payload,
         simplified_schema::resolve::InlineOwner::Trigger(source),
         base_dir,
         schema_roots,
         context,
-    )?;
+    )
+    .map_err(|error| match refused_trigger_file(&error) {
+        Some(path) => payload_cycle(source, &path).unwrap_or(error),
+        None => error,
+    })?;
 
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
@@ -872,47 +879,58 @@ fn check_payload_cycles(
     trigger: &Path,
     resolved: &ResolvedSchema,
 ) -> Result<(), SchemaError> {
-    let trigger_canonical = canonicalize(trigger);
     for ref_path in &resolved.referenced_files {
-        if *ref_path == trigger_canonical {
-            return Err(SchemaError::TriggerPayloadCycle {
-                trigger: trigger.to_path_buf(),
-                payload_path: ref_path.clone(),
-                chain: format!(
-                    "{} -> {} (self-reference)",
-                    trigger.display(),
-                    ref_path.display()
-                ),
-            });
-        }
-        if file_claims_trigger_envelope(ref_path)? {
-            return Err(SchemaError::TriggerPayloadCycle {
-                trigger: trigger.to_path_buf(),
-                payload_path: ref_path.clone(),
-                chain: format!(
-                    "{} -> {}",
-                    trigger.display(),
-                    ref_path.display()
-                ),
-            });
+        if let Some(cycle) = payload_cycle(trigger, ref_path) {
+            return Err(cycle);
         }
     }
     Ok(())
 }
 
+/// The cycle a payload forms by reaching `ref_path` (canonical): the trigger
+/// itself, or another file claiming the trigger envelope.
+fn payload_cycle(trigger: &Path, ref_path: &Path) -> Option<SchemaError> {
+    let chain = if *ref_path == canonicalize(trigger) {
+        format!("{} -> {} (self-reference)", trigger.display(), ref_path.display())
+    } else if file_claims_trigger_envelope(ref_path) {
+        format!("{} -> {}", trigger.display(), ref_path.display())
+    } else {
+        return None;
+    };
+    Some(SchemaError::TriggerPayloadCycle {
+        trigger: trigger.to_path_buf(),
+        payload_path: ref_path.to_path_buf(),
+        chain,
+    })
+}
+
+/// The canonical path of the file the loader refused as a schema document,
+/// when that file claims the `kind: schema-trigger` envelope. A refusal
+/// wrapped by a delegating schema file is found through the source chain.
+pub(crate) fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
+    let mut cause: &dyn std::error::Error = error;
+    loop {
+        if let Some(
+            SchemaError::NotASchemaDocument { path, .. } | SchemaError::SchemaDocument { path, .. },
+        ) = cause.downcast_ref::<SchemaError>()
+        {
+            let path = canonicalize(path);
+            return file_claims_trigger_envelope(&path).then_some(path);
+        }
+        cause = cause.source()?;
+    }
+}
+
 /// Returns `true` when `path`'s contents claim the `kind: schema-trigger`
 /// envelope, valid or not: a claimed envelope that discovery skips as invalid
 /// is still a trigger file, never a schema. An unreadable file returns
-/// `Ok(false)` — it is not the cycle detector's concern (the resolver
-/// surfaces it separately) — as does unclaimed YAML, malformed or not.
-fn file_claims_trigger_envelope(path: &Path) -> Result<bool, SchemaError> {
+/// `false` — it is not the cycle detector's concern (the resolver surfaces
+/// it separately) — as does unclaimed YAML, malformed or not.
+fn file_claims_trigger_envelope(path: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(path) else {
-        return Ok(false);
+        return false;
     };
-    match parse_trigger_envelope_from_str(&content) {
-        Ok(Some(_)) | Err(_) => Ok(true),
-        Ok(None) => Ok(false),
-    }
+    !matches!(parse_trigger_envelope_from_str(&content), Ok(None))
 }
 
 /// Checks whether the document `$schema` resolved to a schema-trigger file.
@@ -925,15 +943,20 @@ pub(crate) fn check_document_schema_not_trigger(
     referenced_files: &[PathBuf],
 ) -> Result<(), SchemaError> {
     for ref_path in referenced_files {
-        if file_claims_trigger_envelope(ref_path)? {
-            let suggestion = payload_suggestion(ref_path);
-            return Err(SchemaError::TriggerSchemaReferenced {
-                reference: ref_path.to_string_lossy().into_owned(),
-                suggestion,
-            });
+        if file_claims_trigger_envelope(ref_path) {
+            return Err(trigger_schema_referenced(ref_path));
         }
     }
     Ok(())
+}
+
+/// [`SchemaError::TriggerSchemaReferenced`] for a document `$schema` that
+/// reached the trigger file at `trigger_path`.
+pub(crate) fn trigger_schema_referenced(trigger_path: &Path) -> SchemaError {
+    SchemaError::TriggerSchemaReferenced {
+        reference: trigger_path.to_string_lossy().into_owned(),
+        suggestion: payload_suggestion(trigger_path),
+    }
 }
 
 /// Derives the payload filename suggestion from a `.trigger.yaml` path by

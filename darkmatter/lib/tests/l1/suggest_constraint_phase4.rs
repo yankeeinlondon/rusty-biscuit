@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use darkmatter::markdown::schemas::resolve::resolve_schema;
-use simplified_schema::{SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document, to_json_schema};
+use simplified_schema::{NotSchemaReason, SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document, to_json_schema};
 use serde_json::json;
 
 fn write(path: &Path, contents: &str) {
@@ -38,10 +38,18 @@ fn content_classifier_recognizes_only_the_two_envelopes() {
         to_json_schema(tagged_document.schema().expect("mapping payload")).unwrap()
     );
 
+    // `description` is an envelope key: it does not turn a pure document into
+    // ordinary YAML.
+    let described = parse_standalone_schema_document("$schema:\n  name: string\ndescription: people\n", "described.yaml")
+        .unwrap()
+        .expect("`$schema` plus `description` is a pure envelope");
+    assert_eq!(described.envelope, StandaloneSchemaEnvelope::Pure);
+    assert_eq!(described.description.as_deref(), Some("people"));
+
     for ordinary in [
         "name: string\n",
         "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\n",
-        "$schema:\n  name: string\ndescription: ordinary yaml\n",
+        "$schema:\n  name: string\nnotes: ordinary yaml\n",
         "kind: other\ntypes:\n  name: string\n",
     ] {
         assert!(
@@ -58,7 +66,9 @@ fn claimed_malformed_envelopes_are_schema_document_errors() {
     for source in [
         "kind: schema\n",
         "kind: schema\ntypes: []\n",
-        "kind: schema\ntypes: {}\ndescription: unsupported\n",
+        "kind: schema\ntypes: {}\nnotes: unsupported\n",
+        "kind: schema\ntypes: {}\ndescription: 42\n",
+        "$schema:\n  name: string\ndescription: [not, a, string]\n",
         "kind: schema\ntypes: {}\nextra: value\n",
         // A tagged `types` payload is a named-type mapping, so — unlike a pure
         // payload — a reference scalar is still malformed here.
@@ -111,7 +121,7 @@ fn mapping_envelopes_resolve_identically_with_origin_metadata() {
     write(&pure, "$schema:\n  name: string(suggest(Bob, Mary))\n");
     write(
         &tagged,
-        "kind: schema\ntypes:\n  name: string(suggest(Bob, Mary))\n",
+        "kind: schema\n$schema:\n  name: string(suggest(Bob, Mary))\n",
     );
 
     let pure_resolved = resolve_file(&pure);
@@ -121,6 +131,18 @@ fn mapping_envelopes_resolve_identically_with_origin_metadata() {
     assert_eq!(tagged_resolved.referenced_files, vec![biscuit_file::canonicalize_simplified(&tagged).unwrap()]);
     assert_eq!(pure_resolved.origin.file(), Some(pure.as_path()));
     assert_eq!(tagged_resolved.origin.file(), Some(tagged.as_path()));
+
+    // A tagged `types`-only document exports no document properties, so it is
+    // not a `$schema` target.
+    let types_only = dir.path().join("types-only.yaml");
+    write(&types_only, "kind: schema\ntypes:\n  name: string(suggest(Bob, Mary))\n");
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(types_only.to_string_lossy()), dir.path(), &context).unwrap_err();
+    assert!(
+        matches!(&error, SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly }
+            if path.ends_with("types-only.yaml")),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -179,7 +201,7 @@ fn tagged_schema_resolves_nested_imports_and_examples_from_its_directory() {
     );
     write(
         &schema,
-        "kind: schema\ntypes:\n  value: token@./nested/types.yaml\n  today: date(example(../examples/today.yaml))\n",
+        "kind: schema\n$schema:\n  value: token@./nested/types.yaml\n  today: date(example(../examples/today.yaml))\n",
     );
 
     let resolved = resolve_file(&schema);
@@ -211,12 +233,12 @@ fn import_cycles_remain_bounded_across_envelope_forms() {
 #[test]
 fn raw_json_schema_remains_distinct_and_cannot_supply_named_imports() {
     let dir = tempfile::tempdir().unwrap();
-    let raw_yaml = dir.path().join("raw.yaml");
+    let raw_json = dir.path().join("raw.json");
     write(
-        &raw_yaml,
-        "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    type: string\n    x-darkmatter-suggest: [hidden]\n",
+        &raw_json,
+        r#"{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": {"value": {"type": "string", "x-darkmatter-suggest": ["hidden"]}}}"#,
     );
-    let resolved = resolve_file(&raw_yaml);
+    let resolved = resolve_file(&raw_json);
     assert!(resolved.simplified.is_none());
     assert_eq!(
         resolved.json_schema["properties"]["value"]["x-darkmatter-suggest"],
@@ -224,8 +246,8 @@ fn raw_json_schema_remains_distinct_and_cannot_supply_named_imports() {
     );
 
     let consumer = dir.path().join("consumer.yaml");
-    write(&consumer, "$schema:\n  value: value@./raw.yaml\n");
+    write(&consumer, "$schema:\n  value: value@./raw.json\n");
     let context = biscuit_file::FileResolutionContext::new(dir.path());
     let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path(), &context).unwrap_err();
-    assert!(matches!(error, SchemaError::AmbiguousReferenced { .. }));
+    assert!(matches!(error, SchemaError::NotASchemaDocument { .. }), "{error:?}");
 }

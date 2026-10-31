@@ -1,5 +1,5 @@
 kind: schema
-types:
+$schema:
     log: file(required; eager; match(**implementation**.md)) -> the implementation log file location
     kind: enum(initial-spec-implementation, spec-review-implementation, review-implementation, review-implementation-followup; required; eager) -> identifies what _kind_ of implementation this is
     spec: file -> pass in a spec file when this implementation is based on a spec

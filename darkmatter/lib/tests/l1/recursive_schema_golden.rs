@@ -32,6 +32,7 @@ use darkmatter::markdown::{
     schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema, parse_trigger_envelope_from_str, resolve::{resolve_schema_with_roots, resolve_yaml_schema, resolve_yaml_schema_with_roots}},
 };
 use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::{NotSchemaReason, SchemaError};
 use serde::Deserialize;
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
@@ -316,7 +317,24 @@ fn lower(
         .ok_or("the input has no UTF-8 file name")?;
     let key = entry.key.as_deref().unwrap_or("$schema");
     match entry.kind {
-        Kind::SchemaFile | Kind::PureSchemaDocument => {
+        // A `kind: schema` document with only `types` is a named-type library,
+        // not a `$schema` target, so its table is lowered as an inline root
+        // from the file's own directory.
+        Kind::SchemaFile => {
+            match resolve_schema_with_roots(&serde_json::json!(format!("./{file_name}")), dir, &[], context) {
+                Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }) => {}
+                other => {
+                    return Err(format!(
+                        "a schema-file entry must be a types-only document, but `$schema` resolution gave {:?}",
+                        other.map(|_| ())
+                    ));
+                }
+            }
+            resolve_yaml_schema(&declared_value(&input, "types"), dir, context)
+                .map(Lowered::from)
+                .map_err(|error| error.to_string())
+        }
+        Kind::PureSchemaDocument => {
             resolve_schema_with_roots(&serde_json::json!(format!("./{file_name}")), dir, &[], context)
                 .map(Lowered::from)
                 .map_err(|error| error.to_string())

@@ -1230,6 +1230,11 @@ fn standalone_definition_failures_are_located_in_both_envelopes() {
             "$schema:\n  - a: string\n  - b: string(min(nope))\n",
             root().property("$schema").union_arm(1).property("b"),
         ),
+        // A tagged document may declare `$schema` without `types`.
+        (
+            "kind: schema\n$schema:\n  slug: string(min(nope))\n",
+            root().property("$schema").property("slug"),
+        ),
     ] {
         let failure = standalone_failure(source);
         assert_eq!(failure.path, path, "{source:?}");
@@ -1278,8 +1283,7 @@ fn outer_envelope_and_declaration_shape_failures_return_none() {
         "kind: schema\ntypes:\n  slug: string(min(nope))\n  slug: string\n",
         "kind: schema\ntypes:\n  slug: string(min(nope))\n---\nkind: note\n",
         "kind: schema\ntypes:\n  slug: string(min(nope))\n]\n",
-        // Envelopes: a global catalog, malformed `types`, extra tagged keys.
-        "kind: schema\n$schema:\n  slug: string(min(nope))\n",
+        // Envelopes: malformed `types`, neither `types` nor `$schema`, extra tagged keys.
         "kind: schema\ntypes: 7\n",
         "kind: schema\ntypes:\n",
         "kind: schema\n",

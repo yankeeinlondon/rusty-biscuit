@@ -25,6 +25,7 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
 use darkmatter::markdown::schemas::resolve::resolve_schema;
 use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::NotSchemaReason;
 use simplified_schema::simplified::{
     DefinitionTable, PropertyDef, SchemaDeclaration, SchemaRoot, StandaloneSchemaEnvelope, grammar,
     parse_property_definition, parse_standalone_schema_document, parse_yaml_schema, serialize_property_def, TypeExpr,
@@ -415,9 +416,9 @@ mod yaml_loader_matrix {
 
     // `types` on the tagged control.
     cells!(TAGGED_PERSON {
-        // PINNED: the "missing `types`" message is unreachable; the key-count
-        // check fires first and names an empty list of unsupported keys.
-        types_absent: Whole("kind: schema\n") => Rejects("found unsupported keys: ");
+        // A tagged document needs `types` or `$schema`; `$schema` alone is enough.
+        types_absent: Whole("kind: schema\n") => Rejects("tagged schema document needs a `$schema` or `types` property");
+        types_absent_beside_schema: Whole("kind: schema\n$schema:\n  name: string(required)\n") => Tagged;
         types_null_bare: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("`types` must be a mapping");
         types_null_explicit: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: null\n") => Rejects("`types` must be a mapping");
         types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("`types` must be a mapping");
@@ -512,18 +513,30 @@ mod yaml_loader_matrix {
     }
 
     /// The loader as the file resolver uses it: a `.yaml` reference in a
-    /// document's `$schema`.
+    /// document's `$schema`. The tagged control exports `Person` through
+    /// `$schema`; the `types`-only control is not a `$schema` target.
     #[test]
     fn file_wiring_control_loads_and_one_invalid_shape_is_located() {
         let workspace = tempfile::tempdir().expect("workspace");
         let dir = workspace.path();
-        std::fs::write(dir.join("person.yaml"), TAGGED_PERSON).expect("write control");
+        std::fs::write(dir.join("person.yaml"), apply(TAGGED_PERSON, Append("$schema:\n  person: Person\n")))
+            .expect("write control");
+        std::fs::write(dir.join("types.yaml"), TAGGED_PERSON).expect("write types-only control");
         std::fs::write(dir.join("broken.yaml"), apply(TAGGED_PERSON, Append("]\n"))).expect("write cell");
         let context = crate::request_support::context_at(dir);
 
         let control = resolve_schema(&json!("./person.yaml"), dir, &context).expect("control resolves");
         assert!(control.simplified.is_some(), "a tagged file is a SimplifiedSchema");
         assert_eq!(control.referenced_files.len(), 1);
+
+        let types_only = resolve_schema(&json!("./types.yaml"), dir, &context);
+        assert!(
+            matches!(
+                &types_only,
+                Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::TypesOnly }) if path.ends_with("types.yaml")
+            ),
+            "got {types_only:?}"
+        );
 
         let broken = resolve_schema(&json!("./broken.yaml"), dir, &context);
         assert!(
@@ -549,8 +562,12 @@ mod json_schema_loader_matrix {
         Loads,
         /// `Err(SchemaError::SchemaDocument)` whose message contains the text.
         Rejects(&'static str),
-        /// `Err(SchemaError::AmbiguousReferenced)`.
-        Ambiguous,
+        /// `Err(SchemaError::NotASchemaDocument)` with this reason.
+        NotSchema(NotSchemaReason),
+        /// `Err(SchemaError::UnsupportedJsonDialect)` declaring this text.
+        Dialect(&'static str),
+        /// `Err(SchemaError::InvalidJsonSchema)`.
+        InvalidJson,
     }
 
     fn load(source: &str) -> Result<ResolvedSchema, SchemaError> {
@@ -566,7 +583,9 @@ mod json_schema_loader_matrix {
         let ok = match (&outcome, expect) {
             (Ok(resolved), Expect::Loads) => resolved.simplified.is_none() && resolved.json_schema.is_object(),
             (Err(SchemaError::SchemaDocument { message, .. }), Expect::Rejects(fragment)) => message.contains(fragment),
-            (Err(SchemaError::AmbiguousReferenced { .. }), Expect::Ambiguous) => true,
+            (Err(SchemaError::NotASchemaDocument { reason, .. }), Expect::NotSchema(expected)) => *reason == expected,
+            (Err(SchemaError::UnsupportedJsonDialect { declared, .. }), Expect::Dialect(expected)) => declared == expected,
+            (Err(SchemaError::InvalidJsonSchema { .. }), Expect::InvalidJson) => true,
             _ => false,
         };
         assert!(
@@ -597,15 +616,19 @@ mod json_schema_loader_matrix {
 
     cells! {
         json_control: Control => Loads;
-        // `$schema` dialect field: the loader does not read it.
-        schema_absent: Replace(DIALECT, "") => Loads;
-        schema_null: Replace(DIALECT, "\"$schema\": null,\n") => Loads;
-        schema_wrong_type: Replace(DIALECT, "\"$schema\": 5,\n") => Loads;
-        schema_empty_string: Replace(DIALECT, "\"$schema\": \"\",\n") => Loads;
-        schema_empty_object: Replace(DIALECT, "\"$schema\": {},\n") => Loads;
-        schema_draft_07_dialect: Replace("draft/2020-12/schema", "draft-07/schema#") => Loads;
+        // `$schema` dialect field: a referenced JSON file must declare exactly
+        // the Draft 2020-12 dialect.
+        schema_absent: Replace(DIALECT, "") => NotSchema(NotSchemaReason::JsonMissingDialect);
+        schema_null: Replace(DIALECT, "\"$schema\": null,\n") => NotSchema(NotSchemaReason::JsonMissingDialect);
+        schema_wrong_type: Replace(DIALECT, "\"$schema\": 5,\n") => NotSchema(NotSchemaReason::JsonMissingDialect);
+        schema_empty_string: Replace(DIALECT, "\"$schema\": \"\",\n") => Dialect("");
+        schema_empty_object: Replace(DIALECT, "\"$schema\": {},\n") => NotSchema(NotSchemaReason::JsonMissingDialect);
+        schema_draft_07_dialect: Replace("draft/2020-12/schema", "draft-07/schema#") => Dialect("https://json-schema.org/draft-07/schema#");
+        schema_trailing_hash: Replace("draft/2020-12/schema\"", "draft/2020-12/schema#\"") => Dialect("https://json-schema.org/draft/2020-12/schema#");
+        // A declared 2020-12 schema the dialect's meta-schema rejects.
+        meta_schema_violation: Replace("\"type\": \"object\"", "\"type\": 5") => InvalidJson;
         // PINNED: `kind: schema` in a JSON file does not make it SimplifiedSchema.
-        kind_schema_in_json: Replace(DIALECT, "\"kind\": \"schema\",\n") => Loads;
+        kind_schema_in_json: Replace(DIALECT, "\"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"kind\": \"schema\",\n") => Loads;
         // PINNED: a remote `$ref` is loaded without complaint; only a remote
         // `$schema` *reference* is `RemoteUnsupported`.
         remote_ref: Replace("{ \"type\": \"string\" }", "{ \"$ref\": \"https://example.com/name.json\" }") => Loads;
@@ -617,10 +640,11 @@ mod json_schema_loader_matrix {
         // PINNED: a leading BOM is invalid JSON here.
         byte_order_mark: Prepend("\u{feff}") => Rejects("invalid JSON: expected value");
         json5_comment: Prepend("// comment\n") => Rejects("invalid JSON: expected value");
+        json5_trailing_comma: Replace("\"required\": [\"name\"]", "\"required\": [\"name\",]") => Rejects("invalid JSON");
         empty_file: Whole("") => Rejects("invalid JSON: EOF");
-        top_level_array: Whole("[]\n") => Ambiguous;
-        top_level_scalar: Whole("42\n") => Ambiguous;
-        empty_object: Whole("{}\n") => Loads;
+        top_level_array: Whole("[]\n") => NotSchema(NotSchemaReason::NotAMapping);
+        top_level_scalar: Whole("42\n") => NotSchema(NotSchemaReason::NotAMapping);
+        empty_object: Whole("{}\n") => NotSchema(NotSchemaReason::JsonMissingDialect);
     }
 
     #[test]

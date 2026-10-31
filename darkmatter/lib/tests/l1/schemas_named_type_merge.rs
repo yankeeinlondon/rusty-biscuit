@@ -118,7 +118,7 @@ fn required_and_generated_survive_every_reference_spelling() {
     write(
         dir.path(),
         "schema.yaml",
-        "kind: schema\ntypes:\n  code: string(required; generated)\n  a: code\n  b: code@this\n  c: code@./types.yaml\n",
+        "kind: schema\n$schema:\n  code: string(required; generated)\n  a: code\n  b: code@this\n  c: code@./types.yaml\n",
     );
 
     let resolved = resolve_reference(dir.path(), "./schema.yaml").expect("schema resolves");
@@ -823,7 +823,7 @@ fn a_schema_file_with_only_bare_references_expands() {
     write(
         dir.path(),
         "schema.yaml",
-        "kind: schema\ntypes:\n  base: string(required)\n  title: base\n",
+        "kind: schema\n$schema:\n  base: string(required)\n  title: base\n",
     );
     let resolved = resolve_reference(dir.path(), "./schema.yaml").expect("schema resolves");
     assert_eq!(properties(&resolved)["title"], json!({"type": "string"}));
@@ -878,7 +878,7 @@ fn suggestions_on_a_reference_are_linted_against_the_resolved_target() {
     let schema = write(
         dir.path(),
         "schema.yaml",
-        "kind: schema\ntypes:\n  label: string(max(3))\n  pick: 'label(suggest(ab, toolong))'\n",
+        "kind: schema\n$schema:\n  label: string(max(3))\n  pick: 'label(suggest(ab, toolong))'\n",
     );
     // Passive parsing cannot judge a candidate before the target is known, so
     // it neither fails nor reports a problem.

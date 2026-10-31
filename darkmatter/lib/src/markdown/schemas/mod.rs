@@ -400,8 +400,10 @@ impl DarkmatterSchemas {
     ///
     /// ## Errors
     ///
-    /// Propagates [`SchemaError::Io`], [`SchemaError::AmbiguousReferenced`],
-    /// or [`SchemaError::Baseline`] depending on the failure shape; a catalog
+    /// Propagates [`SchemaError::Io`], the referenced-file format errors
+    /// ([`SchemaError::NotASchemaDocument`], [`SchemaError::UnsupportedJsonDialect`],
+    /// [`SchemaError::InvalidJsonSchema`]), or [`SchemaError::Baseline`]
+    /// depending on the failure shape; a catalog
     /// that does not load is a [`SchemaError::Baseline`] whose message is the
     /// field-located [`catalog::CatalogError`].
     pub fn with_baseline_from_file(mut self, path: impl AsRef<Path>) -> Result<Self, SchemaError> {
@@ -424,7 +426,9 @@ impl DarkmatterSchemas {
         let resolved = resolve::resolve_yaml_schema(&yaml_value, base, &self.file_resolution_context)
             .map_err(|err| match err {
                 SchemaError::Io { .. } => err,
-                SchemaError::AmbiguousReferenced { .. } => err,
+                SchemaError::NotASchemaDocument { .. }
+                | SchemaError::UnsupportedJsonDialect { .. }
+                | SchemaError::InvalidJsonSchema { .. } => err,
                 other => SchemaError::Baseline {
                     message: format!("could not load baseline from `{}`", path.display()),
                     source: Some(Box::new(other)),
@@ -612,15 +616,20 @@ impl DarkmatterSchemas {
         // Resolve the document $schema with schema-root context.
         let resolved = match schema_value {
             Some(value) => {
+                // The document must not directly reference a schema-trigger
+                // file — triggers activate by placement and match, never by
+                // reference. The loader refuses a trigger file as a schema
+                // document, so its refusal is reported as that reference.
                 let r = resolve::resolve_schema_with_roots(
                     value,
                     &base_dir,
                     trigger_roots,
                     &self.file_resolution_context,
-                )?;
-                // The document must not directly reference a schema-trigger
-                // file — triggers activate by placement and match, never by
-                // reference.
+                )
+                .map_err(|error| match triggers::assemble::refused_trigger_file(&error) {
+                    Some(path) => triggers::assemble::trigger_schema_referenced(&path),
+                    None => error,
+                })?;
                 triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
                 Some(r)
             }
@@ -2490,7 +2499,7 @@ mod claudine_compat_tests {
         // schema.yaml lives ONLY in the document dir.
         std::fs::write(
             doc_dir.path().join("schema.yaml"),
-            "title: string(required)\n",
+            "$schema:\n  title: string(required)\n",
         )
         .expect("write schema");
         let doc_path = doc_dir.path().join("doc.md");
@@ -2519,7 +2528,7 @@ mod claudine_compat_tests {
         let fallback_dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(
             doc_dir.path().join("arm-a.yaml"),
-            "kind: string(required)\n",
+            "$schema:\n  kind: string(required)\n",
         )
         .expect("write arm-a");
         let doc_path = doc_dir.path().join("doc.md");

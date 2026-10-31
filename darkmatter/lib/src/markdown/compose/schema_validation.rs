@@ -2063,7 +2063,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("schema.json"),
-            r#"{"type":"object","properties":{"optional":{"type":["string","null"]}}}"#,
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"optional":{"type":["string","null"]}}}"#,
         )
         .unwrap();
         let doc_path = dir.path().join("doc.md");

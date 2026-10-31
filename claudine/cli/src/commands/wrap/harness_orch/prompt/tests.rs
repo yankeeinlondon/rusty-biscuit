@@ -156,14 +156,14 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
     .unwrap();
     std::fs::write(
         launch_dir.join("schema.yaml"),
-        "launch_only: string(required)\n",
+        "$schema:\n  launch_only: string(required)\n",
     )
     .unwrap();
     std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
     std::fs::write(
         source_dir.join("schema.yaml"),
-        "source_marker: string(required)\nspec: 'file(eager; required)'\nprepared_area: \
-         string(required)\nprepared_cwd: string(required)\nprepared_agent: string(required)\nprepared_model: string(required)\n",
+        "$schema:\n  source_marker: string(required)\n  spec: 'file(eager; required)'\n  prepared_area: \
+         string(required)\n  prepared_cwd: string(required)\n  prepared_agent: string(required)\n  prepared_model: string(required)\n",
     )
     .unwrap();
     std::fs::write(launch_dir.join("spec.md"), "LAUNCH-SPEC\n").unwrap();

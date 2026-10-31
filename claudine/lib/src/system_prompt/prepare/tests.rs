@@ -139,14 +139,14 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
 
     std::fs::write(
         launch_dir.join("schema.yaml"),
-        "launch_only: string(required)\n",
+        "$schema:\n  launch_only: string(required)\n",
     )
     .unwrap();
     std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
     for (dir, label) in [(&primary_dir, "PRIMARY"), (&appendix_dir, "APPENDIX")] {
         std::fs::write(
             dir.join("schema.yaml"),
-            "marker: string(required)\nspec: 'file(eager; required)'\n",
+            "$schema:\n  marker: string(required)\n  spec: 'file(eager; required)'\n",
         )
         .unwrap();
         std::fs::write(dir.join("spec.md"), format!("{label}-SOURCE-SPEC\n")).unwrap();

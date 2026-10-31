@@ -8,10 +8,17 @@
 //!
 //! Two envelopes are recognized:
 //!
-//! - **Pure**: a YAML mapping with `$schema` and an optional `types` mapping.
-//! - **Tagged**: a YAML mapping containing `kind: schema`, a `types`
-//!   mapping, an optional exported `$schema`, and optionally a `categories` list (see
+//! - **Pure** (informal): a YAML mapping without `kind: schema` that has
+//!   `$schema` and whose only other keys are an optional `types` mapping and
+//!   an optional string `description`.
+//! - **Tagged**: a YAML mapping containing `kind: schema` and at least one of
+//!   an exported `$schema` and a `types` mapping, plus optionally a
+//!   `description` string and a `categories` list (see
 //!   [`StandaloneSchemaDocument::categories`]).
+//!
+//! Only a document with a `$schema` property exports document properties
+//! ([`StandaloneSchemaDocument::exports_schema`]); a tagged `types`-only
+//! document is a valid envelope that serves named-type imports alone.
 //!
 //! A separate `types` mapping supplies local names and named imports without
 //! adding document properties. Otherwise mapping payload entries serve both
@@ -84,6 +91,13 @@ pub struct StandaloneSchemaDocument {
     pub path: PathBuf,
     /// Content envelope that claimed the document.
     pub envelope: StandaloneSchemaEnvelope,
+    /// Whether the document has a `$schema` property, and so can be the
+    /// target of a document's `$schema`. A `types`-only document serves
+    /// named-type imports only.
+    pub exports_schema: bool,
+    /// The top-level `description` string, `None` when absent. An empty
+    /// string is kept as `Some("")`.
+    pub description: Option<String>,
     /// The shared declaration product for the envelope payload: an inline
     /// schema (mapping or root-union sequence) or a syntax-checked whole-file
     /// reference. Without an explicit export, a tagged `types` table is the payload.
@@ -146,11 +160,13 @@ impl StandaloneSchemaDocument {
 
 /// Classifies and parses a standalone YAML SimplifiedSchema document.
 ///
-/// Returns `Ok(None)` for ordinary YAML and raw JSON Schema documents, and an
-/// error for text that is not valid YAML. Once
-/// `kind: schema` claims a tagged document, or `$schema` with optional `types`
-/// claims an untagged document, malformed envelope content is returned as a
-/// [`SchemaError::SchemaDocument`] instead of falling back to raw JSON Schema.
+/// Returns `Ok(None)` for ordinary YAML and raw JSON Schema documents
+/// (including an untagged mapping with `$schema` and any key outside
+/// `$schema`, `types`, and `description`), and an error for text that is not
+/// valid YAML. Once `kind: schema` claims a tagged document, or `$schema` with
+/// optional `types` and `description` claims an untagged document, malformed
+/// envelope content is returned as a [`SchemaError::SchemaDocument`] instead
+/// of falling back to raw JSON Schema.
 ///
 /// Every pure payload — mapping, root-union sequence, or whole-file reference
 /// scalar — is parsed by the shared
@@ -160,13 +176,12 @@ impl StandaloneSchemaDocument {
 ///
 /// ## Errors versus lint
 ///
-/// Text that is not valid YAML, and a malformed recognized envelope
-/// (missing/malformed `types`, unsupported tagged-envelope keys, a malformed
-/// `categories` list or an undeclared category, two overloads with one
-/// binding contract, unparseable SimplifiedSchema payload, invalid or
-/// remote reference) returns
-/// `Err(SchemaError::SchemaDocument)`, as does a global catalog
-/// (as a host such as Darkmatter loads them), which is never a document schema.
+/// Text that is not valid YAML, and a malformed recognized envelope (a
+/// tagged document with neither `$schema` nor `types`, a malformed `types`,
+/// a `description` that is not a string, unsupported tagged-envelope keys, a
+/// malformed `categories` list or an undeclared category, two overloads with
+/// one binding contract in `types`, unparseable SimplifiedSchema payload,
+/// invalid or remote reference) returns `Err(SchemaError::SchemaDocument)`.
 /// Invalid `suggest(...)` candidates
 /// within a valid envelope are returned as
 /// [`StandaloneSchemaDocument::suggestion_lints`] — they are lint data, not
@@ -195,6 +210,7 @@ pub fn parse_standalone_schema_document(
     let (envelope, payload_key) = (recognized.envelope, recognized.payload_key());
     let map = recognized.mapping();
     let payload = recognized.payload();
+    let description = map.get("description").and_then(YamlValue::as_str).map(str::to_string);
     let categories_key = YamlValue::String("categories".into());
     let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
         .map_err(|failure| failure.into_document_error(path, "invalid SimplifiedSchema payload"))?;
@@ -217,9 +233,10 @@ pub fn parse_standalone_schema_document(
         .get(&categories_key)
         .map(|value| parse_categories(path, value))
         .transpose()?;
+    // Only a `types` table is checked as one; `$schema` entries are document
+    // properties, never overloads or categorized types.
     if let SchemaDeclaration::Schema(SchemaRoot::Single(shape)) = &parsed.value
-        && envelope == StandaloneSchemaEnvelope::Tagged
-        && local_types.is_none()
+        && payload_key == "types"
     {
         check_named_types(path, shape, categories.as_deref())?;
     }
@@ -244,6 +261,8 @@ pub fn parse_standalone_schema_document(
     Ok(Some(StandaloneSchemaDocument {
         path: path.to_path_buf(),
         envelope,
+        exports_schema: payload_key == "$schema",
+        description,
         declaration: parsed.value,
         source_map: parsed.source_map,
         local_types,
@@ -287,7 +306,8 @@ impl RecognizedStandalone {
 ///
 /// `Ok(None)` is an ordinary document (not a mapping, or no envelope claims
 /// it). `Err` carries the message of an outer failure: text that is not YAML,
-/// a global catalog, or a malformed tagged envelope. The payload itself is
+/// a malformed tagged envelope, or a recognized envelope whose `types` is not
+/// a mapping or whose `description` is not a string. The payload itself is
 /// not parsed here.
 pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStandalone>, String> {
     // Numbers are admitted here too, so a schema file's numbers follow the
@@ -303,50 +323,45 @@ pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
         return Ok(None);
     };
 
-    let kind_key = YamlValue::String("kind".into());
     let types_key = YamlValue::String("types".into());
-    let categories_key = YamlValue::String("categories".into());
     let schema_key = YamlValue::String("$schema".into());
-    let tagged = map.get(&kind_key).and_then(YamlValue::as_str) == Some("schema");
+    let tagged = map.get("kind").and_then(YamlValue::as_str) == Some("schema");
 
     let envelope = if tagged {
-        if matches!(map.get(&schema_key), Some(YamlValue::Mapping(_))) && !map.contains_key(&types_key) {
-            return Err("is a global catalog (`kind: schema` with `$schema` declarations); a catalog declares \
-                 globals for a host to register and never applies as a document schema"
-                .into());
-        }
         let unsupported: Vec<String> = map
             .keys()
-            .filter_map(YamlValue::as_str)
-            .filter(|key| !matches!(*key, "kind" | "types" | "categories" | "$schema"))
-            .map(str::to_string)
+            .filter(|key| !matches!(key.as_str(), Some("kind" | "types" | "categories" | "$schema" | "description")))
+            .map(|key| key.as_str().map_or_else(|| format!("{key:?}"), str::to_string))
             .collect();
-        let expected_len = 2 + usize::from(map.contains_key(&categories_key))
-            + usize::from(map.contains_key(&schema_key));
-        if !unsupported.is_empty() || map.len() != expected_len {
+        if !unsupported.is_empty() {
             return Err(format!(
-                "tagged schema documents support only `kind`, `types`, `$schema`, and `categories`; \
-                 found unsupported keys: {}",
+                "tagged schema documents support only `kind`, `types`, `$schema`, `description`, and \
+                 `categories`; found unsupported keys: {}",
                 unsupported.join(", ")
             ));
         }
-        let Some(payload) = map.get(&types_key) else {
-            return Err("tagged schema document is missing the `types` mapping".into());
-        };
-        if !matches!(payload, YamlValue::Mapping(_)) {
+        if !map.contains_key(&schema_key) && !map.contains_key(&types_key) {
+            return Err("tagged schema document needs a `$schema` or `types` property".into());
+        }
+        if map.get(&types_key).is_some_and(|types| !matches!(types, YamlValue::Mapping(_))) {
             return Err("tagged schema document `types` must be a mapping".into());
         }
         StandaloneSchemaEnvelope::Tagged
     } else if map.contains_key(&schema_key)
-        && (map.len() == 1 || (map.len() == 2 && map.contains_key(&types_key)))
+        && map
+            .keys()
+            .all(|key| matches!(key.as_str(), Some("$schema" | "types" | "description")))
     {
-        if map.contains_key(&types_key) && !matches!(map.get(&types_key), Some(YamlValue::Mapping(_))) {
+        if map.get(&types_key).is_some_and(|types| !matches!(types, YamlValue::Mapping(_))) {
             return Err("`types` must be a mapping".into());
         }
         StandaloneSchemaEnvelope::Pure
     } else {
         return Ok(None);
     };
+    if map.get("description").is_some_and(|description| !matches!(description, YamlValue::String(_))) {
+        return Err("`description` must be a string".into());
+    }
     Ok(Some(RecognizedStandalone { document, envelope }))
 }
 

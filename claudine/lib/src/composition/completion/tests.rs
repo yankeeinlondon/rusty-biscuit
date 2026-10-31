@@ -366,7 +366,7 @@ fn raw_json_schema_required_is_enforced_at_completion() {
     let sidecar = dir.path().join("raw.json");
     std::fs::write(
         &sidecar,
-        r#"{"type":"object","properties":{"researched_by":{"type":"string"}},"required":["researched_by"]}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"researched_by":{"type":"string"}},"required":["researched_by"]}"#,
     )
     .expect("write raw JSON Schema");
     let schema = launch_schema(&format!(

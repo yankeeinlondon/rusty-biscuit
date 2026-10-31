@@ -6,7 +6,11 @@
 //! result: classification by [`parse_standalone_schema_document`], loading
 //! through [`resolve_schema_with_roots`], and — for accepted cells —
 //! validation through [`DarkmatterSchemas::effective_for`] of a document that
-//! references the edited schema file. A control row per seed proves each
+//! references the edited schema file. A `types`-only tagged document is not a
+//! `$schema` target, so its accepted cells load as
+//! `NotASchemaDocument { TypesOnly }` and validate through a document whose
+//! inline `$schema` imports each named type as the property of the same
+//! name (`title: title@./file.yaml`). A control row per seed proves each
 //! declaration under test changes validation, so every edit is load-bearing.
 //!
 //! The seeds are the conventional (indented, single-line) presentations. Each
@@ -22,8 +26,8 @@ use darkmatter::markdown::{
     Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, resolve::resolve_schema_with_roots},
 };
 use simplified_schema::{
-    SchemaError, SchemaSourcePath, SchemaSpanKind, StandaloneSchemaEnvelope, parse_standalone_schema_document,
-    parse_yaml_schema,
+    NotSchemaReason, SchemaDeclaration, SchemaError, SchemaRoot, SchemaSourcePath, SchemaSpanKind, StandaloneSchemaEnvelope,
+    parse_standalone_schema_document, parse_yaml_schema,
 };
 use simplified_schema::simplified::to_json_schema;
 use serde_json::json;
@@ -55,8 +59,8 @@ pub(crate) enum Edit {
 #[derive(Clone, Copy)]
 enum Outcome {
     /// No SimplifiedSchema is applied. Valid YAML is declined (`Ok(None)`)
-    /// and loads as raw JSON Schema; invalid YAML is a `SchemaDocument` error
-    /// naming the YAML problem, from the classifier and from loading.
+    /// and is never a `$schema` target; invalid YAML is a `SchemaDocument`
+    /// error naming the YAML problem, from the classifier and from loading.
     Declines,
     /// A recognized envelope with a malformed payload: `SchemaDocument`, and
     /// normal loading fails.
@@ -447,20 +451,18 @@ fn check_cell(
                     )),
                 };
             }
-            // Only a YAML mapping has a raw JSON Schema reading; anything else
-            // (an empty document, a scalar) is rejected by normal loading.
-            let valid_yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source)
-                .is_ok_and(|value| value.is_mapping());
-            match (&loaded, valid_yaml) {
-                (Ok(resolved), true) if resolved.simplified.is_none() => Ok(()),
-                (Ok(resolved), true) => Err(format!(
-                    "valid unrecognized YAML must load as raw JSON Schema, got a SimplifiedSchema: {:?}",
-                    resolved.simplified
-                )),
-                (Err(SchemaError::AmbiguousReferenced { .. }), false) => Ok(()),
+            // A declined document is never a `$schema` target: a mapping is
+            // rejected as having no `$schema` (or, with `$schema`, for its
+            // extra top-level keys), and anything else as not a mapping.
+            let mapping = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).is_ok_and(|value| value.is_mapping());
+            match (&loaded, mapping) {
+                (Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::NoSchemaProperty, .. }), true) => Ok(()),
+                (Err(SchemaError::SchemaDocument { message, .. }), true)
+                    if message.starts_with("unsupported top-level key(s)") => Ok(()),
+                (Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::NotAMapping, .. }), false) => Ok(()),
                 (result, _) => Err(format!(
                     "unexpected load result for {} YAML: {:?}",
-                    if valid_yaml { "mapping" } else { "non-mapping or invalid" },
+                    if mapping { "mapping" } else { "non-mapping" },
                     result.as_ref().map(|resolved| &resolved.json_schema)
                 )),
             }
@@ -486,18 +488,42 @@ fn check_cell(
             if document.envelope != envelope {
                 return Err(format!("expected {envelope:?}, got {:?}", document.envelope));
             }
-            match &loaded {
-                Ok(resolved) if resolved.simplified.is_some() => {}
-                other => {
-                    return Err(format!(
-                        "normal loading must apply a SimplifiedSchema, got {:?}",
-                        other.as_ref().map(|resolved| &resolved.json_schema)
-                    ));
+            let declaration = if document.exports_schema {
+                match &loaded {
+                    Ok(resolved) if resolved.simplified.is_some() => {}
+                    other => {
+                        return Err(format!(
+                            "normal loading must apply a SimplifiedSchema, got {:?}",
+                            other.as_ref().map(|resolved| &resolved.json_schema)
+                        ));
+                    }
                 }
-            }
+                format!("$schema: ./{file_name}")
+            } else {
+                match &loaded {
+                    Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }) => {}
+                    other => {
+                        return Err(format!(
+                            "a types-only document must load as NotASchemaDocument {{ TypesOnly }}, got {:?}",
+                            other.as_ref().map(|resolved| &resolved.json_schema)
+                        ));
+                    }
+                }
+                let SchemaDeclaration::Schema(SchemaRoot::Single(types)) = &document.declaration else {
+                    return Err(format!("a types-only document must declare a `types` mapping, got {:?}", document.declaration));
+                };
+                if types.properties.is_empty() {
+                    "$schema: {}".to_string()
+                } else {
+                    types
+                        .properties
+                        .keys()
+                        .fold("$schema:".to_string(), |text, name| format!("{text}\n  {name}: {name}@./{file_name}"))
+                }
+            };
             let mut wrong = Vec::new();
             for (instance, expected) in instances {
-                let markdown = Markdown::from(format!("---\n$schema: ./{file_name}\n{instance}\n---\nBody\n"))
+                let markdown = Markdown::from(format!("---\n{declaration}\n{instance}\n---\nBody\n"))
                     .with_source(ComposeSource::File(dir.join("document.md")));
                 let effective = api
                     .effective_for(&markdown)

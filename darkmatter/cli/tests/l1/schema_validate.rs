@@ -127,7 +127,7 @@ fn schema_validate_quiet_suppresses_success_lines() {
         .stdout(predicate::str::is_empty());
 }
 
-/// Advisories name the referenced file in its resolved spelling, which differs
+/// Errors name the referenced file in its resolved spelling, which differs
 /// from the temp path a test wrote on Windows (8.3 `RUNNER~1` versus the long
 /// name) and macOS (`/var` versus `/private/var`).
 fn resolved_display(path: &Path) -> String {
@@ -137,15 +137,14 @@ fn resolved_display(path: &Path) -> String {
         .to_string()
 }
 
+/// A bare map of SimplifiedSchema types with no `$schema:` wrapper.
+const BARE_SIDECAR: &str = "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
+
 #[test]
-fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
+fn schema_validate_pretty_rejects_bare_sidecar_without_schema_property() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    let sidecar = write_file(
-        tmp,
-        "schema.yaml",
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    );
+    write_file(tmp, "schema.yaml", BARE_SIDECAR);
     let doc = write_file(
         tmp,
         "doc.md",
@@ -157,28 +156,19 @@ fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
         .args(["schema", "validate"])
         .arg(&doc)
         .assert()
-        .success()
-        .stdout(predicate::str::contains("darkmatter.schema"))
-        .stdout(predicate::str::contains(
-            "dm.schema.missing_simplified_envelope",
-        ))
-        .stdout(predicate::str::contains(resolved_display(&sidecar)))
-        .stdout(predicate::str::contains(
-            "looks like a SimplifiedSchema but has no envelope",
-        ))
-        .stdout(predicate::str::contains("root `$schema:` key"))
-        .stdout(predicate::str::contains("`kind: schema` + `types:`"));
+        .code(2)
+        .stdout(predicate::str::contains("has a schema definition error"))
+        .stdout(predicate::str::contains("not a schema definition"))
+        .stdout(predicate::str::contains("schema.yaml"))
+        .stdout(predicate::str::contains("it has no"))
+        .stdout(predicate::str::contains("dm.schema.missing_simplified_envelope").not());
 }
 
 #[test]
-fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
+fn schema_validate_json_reports_bare_sidecar_as_not_a_schema_document() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    let sidecar = write_file(
-        tmp,
-        "schema.yaml",
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    );
+    let sidecar = write_file(tmp, "schema.yaml", BARE_SIDECAR);
     let doc = write_file(
         tmp,
         "doc.md",
@@ -190,36 +180,31 @@ fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
         .args(["schema", "validate", "--format", "json"])
         .arg(&doc)
         .assert()
-        .success()
+        .code(2)
         .get_output()
         .stdout
         .clone();
     let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
 
-    assert_eq!(value["valid"], true);
-    assert_eq!(value["problems"], serde_json::json!([]));
-    assert_eq!(value["warnings"].as_array().unwrap().len(), 1);
-    let warning = &value["warnings"][0];
-    assert_eq!(warning["source"], "darkmatter.schema");
-    assert_eq!(warning["code"], "dm.schema.missing_simplified_envelope");
-    assert_eq!(warning["path"], resolved_display(&sidecar));
-    assert!(
-        warning["message"]
-            .as_str()
-            .unwrap()
-            .contains("looks like a SimplifiedSchema but has no envelope")
+    assert_eq!(value["error"], "schema", "{value}");
+    assert_eq!(value["valid"], false, "{value}");
+    assert_eq!(value["schema"], serde_json::Value::Null, "{value}");
+    assert_eq!(
+        value["message"],
+        format!(
+            "`{}` is not a valid schema definition: it has no `$schema` property",
+            resolved_display(&sidecar)
+        ),
+        "{value}"
     );
+    assert!(value.get("warnings").is_none_or(|w| w.as_array().is_some_and(Vec::is_empty)), "{value}");
 }
 
 #[test]
-fn schema_validate_quiet_suppresses_bare_sidecar_advisory() {
+fn schema_validate_quiet_still_reports_bare_sidecar_rejection() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
-    write_file(
-        tmp,
-        "schema.yaml",
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    );
+    write_file(tmp, "schema.yaml", BARE_SIDECAR);
     let doc = write_file(
         tmp,
         "doc.md",
@@ -231,8 +216,9 @@ fn schema_validate_quiet_suppresses_bare_sidecar_advisory() {
         .args(["schema", "validate", "--quiet"])
         .arg(&doc)
         .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
+        .code(2)
+        .stdout(predicate::str::contains("not a schema definition"))
+        .stdout(predicate::str::contains("schema.yaml"));
 }
 
 #[test]
@@ -954,10 +940,11 @@ fn schema_validate_enforces_each_root_union_arm_match() {
 // and every list and continuation is followed by a sibling (`next`) whose own
 // constraint is asserted, so a loader that swallowed the sibling cannot pass.
 
-/// Tagged envelope: an indentless property union, and a definition whose
+/// Tagged envelope (`kind: schema` with a `$schema` mapping, which a document's
+/// `$schema` may target): an indentless property union, and a definition whose
 /// constraint list and description continue onto later physical lines.
-const TAGGED_PRESENTED: &str = "kind: schema\ntypes:\n  title: string(min(3);\n    max(8)) -> the display\n    title of the post\n  status:\n  - number\n  - code: number(min(1))\n  next: boolean\n";
-const TAGGED_CONVENTIONAL: &str = "kind: schema\ntypes:\n  title: string(min(3); max(8)) -> the display title of the post\n  status:\n    - number\n    - code: number(min(1))\n  next: boolean\n";
+const TAGGED_PRESENTED: &str = "kind: schema\n$schema:\n  title: string(min(3);\n    max(8)) -> the display\n    title of the post\n  status:\n  - number\n  - code: number(min(1))\n  next: boolean\n";
+const TAGGED_CONVENTIONAL: &str = "kind: schema\n$schema:\n  title: string(min(3); max(8)) -> the display title of the post\n  status:\n    - number\n    - code: number(min(1))\n  next: boolean\n";
 
 /// Pure `$schema` envelope: an indentless root union of compact mapping arms,
 /// the first carrying an indentless property union followed by a sibling.
@@ -1378,7 +1365,7 @@ fn schema_validate_unknown_bare_name_in_a_referenced_schema_names_that_file() {
     let broken = write_file(
         tmp,
         "broken.yaml",
-        "kind: schema\ntypes:\n  heading: nosuchtype\n",
+        "kind: schema\n$schema:\n  heading: nosuchtype\n",
     );
     let doc = write_file(tmp, "doc.md", "---\n$schema: ./broken.yaml\n---\nBody\n");
 
@@ -1809,4 +1796,28 @@ fn schema_validate_reports_a_failure_through_each_shared_use_at_its_location() {
         ],
         "{report}"
     );
+}
+
+/// DMLS leaves a missing `file(eager)` target to its value hover, but `md`
+/// still enforces the eager check at runtime; a missing plain `file` stays
+/// accepted.
+#[test]
+fn schema_validate_still_rejects_a_missing_eager_file() {
+    let process = CliProcessFixture::new();
+    let doc = write_file(
+        process.cwd(),
+        "doc.md",
+        "---\n$schema:\n  missing: file(eager)\n  plain: file\nmissing: ./nope.md\nplain: ./nope-too.md\n---\nBody\n",
+    );
+
+    process
+        .command()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(
+            predicate::str::contains("no existing file matched reference `./nope.md`")
+                .and(predicate::str::contains("nope-too.md").not()),
+        );
 }

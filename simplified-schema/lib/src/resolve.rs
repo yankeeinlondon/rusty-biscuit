@@ -47,7 +47,7 @@ use serde_yaml_ng::Value as YamlValue;
 use super::{
     SchemaAdvisory, SchemaArm,
     embedded::{self, EmbeddedDocument, ShippedSources}, SchemaOrigin, SchemaOriginKind, SchemaShape, SchemaRoot, StandaloneSchemaDocument,
-    errors::SchemaError,
+    errors::{DRAFT_2020_12_DIALECT, NotSchemaReason, SchemaError},
     simplified::{
         AlphanumericOptions, DefKey, DefNamespace, DefinitionTable, SchemaConstraintConflictKind,
         SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
@@ -131,8 +131,17 @@ pub struct ResolvedSchema {
 ///   resolver rejects it.
 /// - [`SchemaError::NoMatch`] when a file reference matches no file.
 /// - [`SchemaError::Io`] when reading the referenced file fails.
-/// - [`SchemaError::AmbiguousReferenced`] when the referenced file is neither
-///   a valid SimplifiedSchema nor a JSON Schema.
+/// - [`SchemaError::NotASchemaDocument`] when the referenced file is not a
+///   schema definition: a YAML document without a top-level `$schema` (a
+///   `types`-only document included), a non-mapping, or a JSON file that is
+///   not an object declaring its dialect.
+/// - [`SchemaError::UnsupportedJsonDialect`] when a referenced JSON file
+///   declares a dialect other than Draft 2020-12, and
+///   [`SchemaError::InvalidJsonSchema`] when it fails that dialect's
+///   meta-schema.
+/// - [`SchemaError::SchemaDocument`] when a referenced file is not valid YAML
+///   or JSON, is a malformed envelope, or is an untagged YAML mapping with
+///   `$schema` and a key outside `$schema`, `types`, and `description`.
 /// - [`SchemaError::FrontmatterShape`] for unsupported `$schema` shapes.
 /// - [`SchemaError::Grammar`] / [`SchemaError::Convert`] propagated from the
 ///   parser and converter.
@@ -956,6 +965,16 @@ pub mod observed {
     }
 }
 
+/// Reads a file a `$schema` (or a delegating payload or root-union arm)
+/// selected and resolves it. A `.json` file (case-insensitive) goes through
+/// [`classify_json_schema_text`]; any other extension through
+/// [`classify_yaml_schema_text`]. Each hop of a delegation is classified
+/// again.
+///
+/// ## Errors
+///
+/// [`SchemaError::Io`] when the file cannot be read, the classifiers' typed
+/// errors, and the resolver's errors for an accepted document.
 fn load_schema_from_path_in_context(
     path: &Path,
     schema_roots: &[PathBuf],
@@ -968,183 +987,175 @@ fn load_schema_from_path_in_context(
         source,
     })?;
     observed::read(path);
-    let extension = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_ascii_lowercase);
-
-    match extension.as_deref() {
-        Some("json") => parse_raw_json_schema(path, &bytes),
-        _ => parse_yaml_referenced_file(path, &bytes, schema_roots, request_context, stack, shipped),
-    }
-}
-
-fn parse_yaml_referenced_file(
-    path: &Path,
-    bytes: &[u8],
-    schema_roots: &[PathBuf],
-    request_context: &biscuit_file::FileResolutionContext,
-    stack: &mut ReferenceStack,
-    shipped: ShippedSources,
-) -> Result<ResolvedSchema, SchemaError> {
-    let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
+    let text = std::str::from_utf8(&bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
         message: format!("not UTF-8 text: {error}"),
         source: None,
         span: None,
     })?;
+    if is_json_schema_path(path) {
+        return parse_referenced_json_schema(path, text);
+    }
+    let document = classify_yaml_schema_text(path, text)?;
+    match document.declaration {
+        SchemaDeclaration::Schema(schema) => {
+            resolve_standalone_schema(schema, document.local_types.as_ref(), path, schema_roots, request_context, stack, shipped)
+        }
+        SchemaDeclaration::Reference(reference) => {
+            let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
+            resolve_reference_in_context(
+                reference.file_reference().raw(),
+                file_dir,
+                schema_roots,
+                request_context,
+                stack,
+                shipped,
+            )
+        }
+    }
+}
+
+/// Whether a referenced schema file is read as JSON: its extension is `json`
+/// in any case. Every other extension is read as YAML.
+pub(crate) fn is_json_schema_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+}
+
+/// Classifies YAML text as a `$schema` target: a recognized standalone
+/// envelope with a top-level `$schema` property. Performs no I/O.
+///
+/// ## Errors
+///
+/// - [`SchemaError::SchemaDocument`] for text that is not valid YAML (a
+///   duplicate key, trailing content, and a second document included), a
+///   malformed envelope, or an untagged mapping with `$schema` and a key
+///   outside `$schema`, `types`, and `description` (with a migration note when
+///   `$schema` is a `json-schema.org` URI, the raw JSON Schema form).
+/// - [`SchemaError::NotASchemaDocument`] with
+///   [`NotSchemaReason::TypesOnly`] for a `types`-only tagged document,
+///   [`NotSchemaReason::NotAMapping`] for a non-mapping, and
+///   [`NotSchemaReason::NoSchemaProperty`] for any other mapping.
+pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<StandaloneSchemaDocument, SchemaError> {
+    let not_schema = |reason| SchemaError::NotASchemaDocument {
+        path: path.to_path_buf(),
+        reason,
+    };
     if let Some(document) = parse_standalone_schema_document(text, path)? {
-        return match document.declaration {
-            SchemaDeclaration::Schema(schema) => {
-                resolve_standalone_schema(schema, document.local_types.as_ref(), path, schema_roots, request_context, stack, shipped)
-            }
-            SchemaDeclaration::Reference(reference) => {
-                let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
-                resolve_reference_in_context(
-                    reference.file_reference().raw(),
-                    file_dir,
-                    schema_roots,
-                    request_context,
-                    stack,
-                    shipped,
-                )
-            }
+        return if document.exports_schema {
+            Ok(document)
+        } else {
+            Err(not_schema(NotSchemaReason::TypesOnly))
         };
     }
-
-    // Treat the file's contents as a raw JSON Schema serialized in YAML.
-    // A duplicate key, trailing content, or a second document is a located
-    // syntax error in the file, not an unrecognizable schema.
-    let yaml: YamlValue = crate::numeric::load_admitted_yaml(text).map_err(|error| {
-        let message = if crate::numeric::is_yaml_admission_error(&error) {
-            error.to_string()
-        } else {
-            format!("not valid YAML: {error}")
-        };
-        SchemaError::SchemaDocument {
-            path: path.to_path_buf(),
-            message,
-            source: None,
-            span: None,
-        }
-    })?;
-    let advisories = missing_simplified_envelope_advisory(&yaml, path)
-        .into_iter()
+    // The standalone parser already rejected text that is not YAML, so this
+    // second load only explains why no envelope claimed the document.
+    let Ok(YamlValue::Mapping(map)) = crate::numeric::load_admitted_yaml(text) else {
+        return Err(not_schema(NotSchemaReason::NotAMapping));
+    };
+    let Some(schema) = map.get("$schema") else {
+        return Err(not_schema(NotSchemaReason::NoSchemaProperty));
+    };
+    if map.get("kind").and_then(YamlValue::as_str) == Some("schema") {
+        return Err(not_schema(NotSchemaReason::NoSchemaProperty));
+    }
+    let unsupported: Vec<String> = map
+        .keys()
+        .filter(|key| !matches!(key.as_str(), Some("$schema" | "types" | "description")))
+        .map(|key| key.as_str().map_or_else(|| format!("{key:?}"), str::to_string))
         .collect();
-    let json: Value =
-        serde_json::to_value(yaml).map_err(|_| SchemaError::AmbiguousReferenced {
+    let mut message = format!("unsupported top-level key(s): {}", unsupported.join(", "));
+    if schema.as_str().is_some_and(is_json_schema_dialect_uri) {
+        message.push_str(&format!(
+            "; raw JSON Schema in YAML is not a `$schema` target; write it as a `.json` file declaring \
+             `{DRAFT_2020_12_DIALECT}`"
+        ));
+    }
+    Err(SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message,
+        source: None,
+        span: None,
+    })
+}
+
+/// Whether `value` is a `json-schema.org` dialect URI.
+fn is_json_schema_dialect_uri(value: &str) -> bool {
+    let value = value.trim();
+    ["https://json-schema.org/", "http://json-schema.org/"]
+        .iter()
+        .any(|prefix| value.starts_with(prefix))
+}
+
+/// Classifies JSON text as a `$schema` target: one strict JSON object whose
+/// `$schema` is exactly [`DRAFT_2020_12_DIALECT`] and which satisfies that
+/// dialect's meta-schema (checked offline). Performs no I/O.
+///
+/// ## Errors
+///
+/// In order of the checks:
+/// - [`SchemaError::SchemaDocument`], naming the line and column, when the
+///   text is not one strict JSON value (invalid syntax, JSON5 comments or
+///   trailing commas, trailing content, a duplicate key, a number that
+///   cannot be admitted).
+/// - [`SchemaError::NotASchemaDocument`] with [`NotSchemaReason::NotAMapping`]
+///   for a non-object root, and [`NotSchemaReason::JsonMissingDialect`] when
+///   `$schema` is absent or not a string.
+/// - [`SchemaError::UnsupportedJsonDialect`] for any other string, the empty
+///   string and a trailing `#` included.
+/// - [`SchemaError::InvalidJsonSchema`] when the meta-schema rejects it.
+pub(crate) fn classify_json_schema_text(path: &Path, text: &str) -> Result<Value, SchemaError> {
+    let document_error = |message: String| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message,
+        source: None,
+        span: None,
+    };
+    if let Some(message) = crate::coercion::content_error(crate::coercion::ContentFormat::Json, text) {
+        return Err(document_error(message));
+    }
+    let value: Value = serde_json::from_str(text).map_err(|error| document_error(format!("invalid JSON: {error}")))?;
+    crate::numeric::admit_json_text_numbers(text).map_err(|error| document_error(error.to_string()))?;
+    let not_schema = |reason| SchemaError::NotASchemaDocument {
+        path: path.to_path_buf(),
+        reason,
+    };
+    let Some(object) = value.as_object() else {
+        return Err(not_schema(NotSchemaReason::NotAMapping));
+    };
+    let Some(Value::String(declared)) = object.get("$schema") else {
+        return Err(not_schema(NotSchemaReason::JsonMissingDialect));
+    };
+    if declared != DRAFT_2020_12_DIALECT {
+        return Err(SchemaError::UnsupportedJsonDialect {
             path: path.to_path_buf(),
-        })?;
-    if !json.is_object() {
-        return Err(SchemaError::AmbiguousReferenced {
-            path: path.to_path_buf(),
+            declared: declared.clone(),
         });
     }
+    if let Err(error) = jsonschema::draft202012::meta::validate(&value) {
+        return Err(SchemaError::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            message: format!("at `{}`: {error}", error.instance_path()),
+        });
+    }
+    Ok(value)
+}
+
+/// A referenced `.json` schema file accepted by
+/// [`classify_json_schema_text`], as a resolved raw JSON Schema.
+fn parse_referenced_json_schema(path: &Path, text: &str) -> Result<ResolvedSchema, SchemaError> {
     Ok(ResolvedSchema {
         simplified: None,
         definitions: Arc::default(),
-        json_schema: json,
+        json_schema: classify_json_schema_text(path, text)?,
         origin: SchemaOrigin::document(),
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
         searched: Vec::new(),
-        advisories,
+        advisories: Vec::new(),
     })
-}
-
-/// Returns whether `key` belongs to a Draft 2020-12 vocabulary understood by
-/// JSON Schema implementations.
-fn is_draft_2020_12_keyword(key: &str) -> bool {
-    matches!(
-        key,
-        // Core vocabulary.
-        "$schema"
-            | "$id"
-            | "$vocabulary"
-            | "$anchor"
-            | "$dynamicAnchor"
-            | "$dynamicRef"
-            | "$ref"
-            | "$defs"
-            | "$comment"
-            // Applicator vocabulary.
-            | "prefixItems"
-            | "items"
-            | "contains"
-            | "additionalProperties"
-            | "properties"
-            | "patternProperties"
-            | "dependentSchemas"
-            | "propertyNames"
-            | "if"
-            | "then"
-            | "else"
-            | "allOf"
-            | "anyOf"
-            | "oneOf"
-            | "not"
-            // Validation vocabulary.
-            | "type"
-            | "const"
-            | "enum"
-            | "multipleOf"
-            | "maximum"
-            | "exclusiveMaximum"
-            | "minimum"
-            | "exclusiveMinimum"
-            | "maxLength"
-            | "minLength"
-            | "pattern"
-            | "maxItems"
-            | "minItems"
-            | "uniqueItems"
-            | "maxContains"
-            | "minContains"
-            | "maxProperties"
-            | "minProperties"
-            | "required"
-            | "dependentRequired"
-            // Metadata, format, content, and unevaluated vocabularies.
-            | "title"
-            | "description"
-            | "default"
-            | "deprecated"
-            | "readOnly"
-            | "writeOnly"
-            | "examples"
-            | "format"
-            | "contentEncoding"
-            | "contentMediaType"
-            | "contentSchema"
-            | "unevaluatedItems"
-            | "unevaluatedProperties"
-    )
-}
-
-/// Classifies only the narrow shape that would otherwise silently act as an
-/// unconstrained raw JSON Schema. The supplied YAML value is already in
-/// memory; this performs no resolution or other I/O.
-fn missing_simplified_envelope_advisory(
-    root: &YamlValue,
-    path: &Path,
-) -> Option<SchemaAdvisory> {
-    let map = root.as_mapping()?;
-    if map.is_empty() {
-        return None;
-    }
-    for (key, value) in map {
-        let key = key.as_str()?;
-        if !value.is_string()
-            || key.starts_with('$')
-            || key.starts_with("x-")
-            || is_draft_2020_12_keyword(key)
-        {
-            return None;
-        }
-    }
-    parse_yaml_schema(root).ok()?;
-    Some(SchemaAdvisory::missing_simplified_envelope(path))
 }
 
 fn resolve_standalone_schema(
@@ -1250,8 +1261,9 @@ pub fn prepare_embedded_schema_in(
     let document = embedded::find(documents, path)
         .ok_or_else(|| unsupported("not a registered embedded schema document"))?;
     let Some(standalone) = parse_standalone_schema_document(document.text, Path::new(path))? else {
-        return Err(SchemaError::AmbiguousReferenced {
+        return Err(SchemaError::NotASchemaDocument {
             path: PathBuf::from(path),
+            reason: NotSchemaReason::NoSchemaProperty,
         });
     };
     let schema = match standalone.declaration {
@@ -1512,7 +1524,11 @@ pub(crate) fn resolve_standalone_root_union(
 /// duplicate key, a number too large for `f64` (`1e400`), or a number whose
 /// written value cannot be admitted (an inexact whole number or an
 /// underflow, which also names its JSON Pointer).
-/// [`SchemaError::AmbiguousReferenced`] when the value is not an object.
+/// [`SchemaError::NotASchemaDocument`] ([`NotSchemaReason::NotAMapping`])
+/// when the value is not an object. No dialect is required: the
+/// `SimplifiedSchema` file factories use this, while a referenced `$schema`
+/// file goes through [`classify_json_schema_text`].
+#[cfg(feature = "file")]
 pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
     let document_error = |message: String| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
@@ -1529,8 +1545,9 @@ pub(crate) fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<Resolve
     let value: Value = serde_json::from_str(text).map_err(|error| document_error(format!("invalid JSON: {error}")))?;
     crate::numeric::admit_json_text_numbers(text).map_err(|error| document_error(error.to_string()))?;
     if !value.is_object() {
-        return Err(SchemaError::AmbiguousReferenced {
+        return Err(SchemaError::NotASchemaDocument {
             path: path.to_path_buf(),
+            reason: NotSchemaReason::NotAMapping,
         });
     }
     Ok(ResolvedSchema {
@@ -2707,10 +2724,11 @@ pub fn canonical_path(path: &Path) -> PathBuf {
 ///
 /// ## Errors
 ///
-/// Returns [`SchemaError::AmbiguousReferenced`] when the file is not a
-/// SimplifiedSchema mapping (raw JSON Schema or a root union) —
-/// imports are only defined among a file's named types, so a raw JSON Schema
-/// has none to offer.
+/// Returns [`SchemaError::NotASchemaDocument`] when the file is not a
+/// standalone SimplifiedSchema envelope (raw JSON Schema, for instance), and
+/// [`SchemaError::SchemaDocument`] for a root union or text that is not
+/// UTF-8 — imports are only defined among a file's named types, so a raw
+/// JSON Schema has none to offer.
 fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
     let loaded = read_named_types(path);
     if loaded.is_err() {
@@ -2729,8 +2747,11 @@ fn read_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
         source,
     })?;
     observed::read(path);
-    let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
+    let text = std::str::from_utf8(&bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
+        message: format!("not UTF-8 text: {error}"),
+        source: None,
+        span: None,
     })?;
     let hash = biscuit_hash::xx_hash_bytes(&bytes);
     if let Some(entry) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(path)
@@ -2770,8 +2791,9 @@ struct FileTable {
 /// exists; `path` identifies the document in errors.
 fn named_types_from_text(text: &str, path: &Path) -> Result<NamedTypes, SchemaError> {
     let Some(document) = parse_standalone_schema_document(text, path)? else {
-        return Err(SchemaError::AmbiguousReferenced {
+        return Err(SchemaError::NotASchemaDocument {
             path: path.to_path_buf(),
+            reason: NotSchemaReason::NoSchemaProperty,
         });
     };
     if let Some(types) = document.local_types {
@@ -4257,8 +4279,6 @@ pub fn shape_to_schema(shape: &SchemaShape) -> Result<Value, SchemaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "file")]
-    use crate::SchemaAdvisoryKind;
     use serde_json::json;
 
     fn yaml_value(input: &str) -> YamlValue {
@@ -4484,7 +4504,7 @@ mod tests {
         write_schema_file(
             dir.path(),
             "schema.json",
-            r#"{"type":"object","properties":{"x":{"type":"number"}}}"#,
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"x":{"type":"number"}}}"#,
         );
         let v = yaml_value("./schema.json");
         let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
@@ -4494,7 +4514,7 @@ mod tests {
 
     #[cfg(feature = "file")]
     #[test]
-    fn yaml_without_schema_key_is_treated_as_json_schema() {
+    fn yaml_without_schema_key_is_not_a_schema_document() {
         let dir = tempfile::tempdir().unwrap();
         write_schema_file(
             dir.path(),
@@ -4502,132 +4522,101 @@ mod tests {
             "title: hello\nproperties:\n  x:\n    type: number\n",
         );
         let v = yaml_value("./no-schema.yaml");
-        let resolved = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
-        assert!(resolved.simplified.is_none());
+        let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
+        assert!(matches!(err, SchemaError::NotASchemaDocument { reason: NotSchemaReason::NoSchemaProperty, .. }), "{err:?}");
     }
 
     #[cfg(feature = "file")]
     #[test]
-    fn bare_simplified_map_remains_raw_json_schema_and_reports_advisory() {
+    fn bare_simplified_map_is_not_a_schema_document() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_schema_file(
             dir.path(),
             "schema.yaml",
             "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
         );
-        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
-
-        assert!(resolved.simplified.is_none());
-        assert_eq!(resolved.json_schema["source_marker"], "string(required)");
-        assert_eq!(resolved.json_schema["spec"], "file(eager; required)");
-        let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
-        assert!(validator.is_valid(&json!({ "anything": true })));
-        assert_eq!(resolved.advisories.len(), 1);
-        let advisory = &resolved.advisories[0];
-        assert_eq!(
-            advisory.kind(),
-            SchemaAdvisoryKind::MissingSimplifiedEnvelope
-        );
-        assert_eq!(advisory.source(), "darkmatter.schema");
-        assert_eq!(advisory.code(), "dm.schema.missing_simplified_envelope");
-        assert_eq!(advisory.path(), path);
-        let message = advisory.message();
-        assert!(message.contains(&path.display().to_string()));
-        assert!(message.contains("`$schema:`"));
-        assert!(message.contains("`kind: schema` + `types:`"));
+        let err = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
+        match err {
+            SchemaError::NotASchemaDocument { path: rejected, reason: NotSchemaReason::NoSchemaProperty } => {
+                assert_eq!(rejected, path);
+            }
+            other => panic!("expected NotASchemaDocument, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "file")]
     #[test]
-    fn bare_map_advisory_excludes_json_schema_envelopes_and_invalid_maps() {
-        let cases = [
-            (
-                "object-properties.yaml",
-                "type: object\nproperties:\n  name:\n    type: string\n",
-            ),
+    fn raw_yaml_maps_are_rejected_and_envelopes_report_no_advisory() {
+        let raw = [
+            ("object-properties.yaml", "type: object\nproperties:\n  name:\n    type: string\n"),
             ("format.yaml", "format: string\n"),
             ("title.yaml", "title: string(required)\n"),
             ("comment.yaml", "$comment: string\n"),
             ("custom-dollar.yaml", "$custom: string\n"),
             ("custom-extension.yaml", "x-custom: string\n"),
-            ("pure.yaml", "$schema:\n  name: string(required)\n"),
-            (
-                "kinded.yaml",
-                "kind: schema\ntypes:\n  name: string(required)\n",
-            ),
             ("mixed.yaml", "name: string(required)\ncount: 1\n"),
             ("invalid.yaml", "name: string(min(nope))\n"),
         ];
-
         let dir = tempfile::tempdir().unwrap();
-        for (name, body) in cases {
+        for (name, body) in raw {
             write_schema_file(dir.path(), name, body);
-            let resolved =
-                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
+            let err = resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE)
+                .expect_err(name);
             assert!(
-                resolved.advisories.is_empty(),
-                "unexpected advisory for {name}"
+                matches!(err, SchemaError::NotASchemaDocument { reason: NotSchemaReason::NoSchemaProperty, .. }),
+                "{name}: {err:?}"
             );
         }
 
-        write_schema_file(
-            dir.path(),
-            "target.yaml",
-            "$schema:\n  name: string(required)\n",
-        );
+        write_schema_file(dir.path(), "kinded.yaml", "kind: schema\ntypes:\n  name: string(required)\n");
+        let err = resolve_yaml_schema(&yaml_value("./kinded.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
+        assert!(matches!(err, SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }), "{err:?}");
+
+        write_schema_file(dir.path(), "target.yaml", "$schema:\n  name: string(required)\n");
         write_schema_file(dir.path(), "scalar.yaml", "$schema: ./target.yaml\n");
-        let resolved =
-            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
-        assert!(resolved.advisories.is_empty());
+        for name in ["target.yaml", "scalar.yaml"] {
+            let resolved = resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
+            assert!(resolved.advisories.is_empty(), "{name}");
+        }
     }
 
     #[cfg(feature = "file")]
     #[test]
-    fn root_union_sorts_and_deduplicates_schema_advisories() {
+    fn root_union_arm_naming_a_raw_map_fails_with_that_file() {
         let dir = tempfile::tempdir().unwrap();
         let z_path = write_schema_file(dir.path(), "z.yaml", "zeta: string(required)\n");
-        let a_path = write_schema_file(dir.path(), "a.yaml", "alpha: number(default(1))\n");
-        let resolved = resolve_yaml_schema(
-            &yaml_value("- ./z.yaml\n- ./a.yaml\n- ./z.yaml\n"),
-            dir.path(),
-            &biscuit_file::FileResolutionContext::new(dir.path()),
-            ShippedSources::NONE,
-        )
-        .unwrap();
-
-        assert_eq!(
-            resolved
-                .advisories
-                .iter()
-                .map(SchemaAdvisory::path)
-                .collect::<Vec<_>>(),
-            vec![a_path.clone(), z_path.clone()]
-        );
-
-        write_schema_file(
-            dir.path(),
-            "root.yaml",
-            "$schema:\n  - ./z.yaml\n  - ./a.yaml\n  - ./z.yaml\n",
-        );
-        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap();
-        assert_eq!(
-            nested
-                .advisories
-                .iter()
-                .map(SchemaAdvisory::path)
-                .collect::<Vec<_>>(),
-            vec![a_path, z_path]
-        );
+        write_schema_file(dir.path(), "a.yaml", "$schema:\n  alpha: number(default(1))\n");
+        for value in ["- ./a.yaml\n- ./z.yaml\n", "./root.yaml"] {
+            write_schema_file(dir.path(), "root.yaml", "$schema:\n  - ./a.yaml\n  - ./z.yaml\n");
+            let err = resolve_yaml_schema(
+                &yaml_value(value),
+                dir.path(),
+                &biscuit_file::FileResolutionContext::new(dir.path()),
+                ShippedSources::NONE,
+            )
+            .unwrap_err();
+            let mut cause: &dyn std::error::Error = &err;
+            let rejected = loop {
+                if let Some(SchemaError::NotASchemaDocument { path, reason }) = cause.downcast_ref::<SchemaError>() {
+                    break Some((path.clone(), *reason));
+                }
+                match cause.source() {
+                    Some(next) => cause = next,
+                    None => break None,
+                }
+            };
+            assert_eq!(rejected, Some((z_path.clone(), NotSchemaReason::NoSchemaProperty)), "{value}: {err:?}");
+        }
     }
 
     #[cfg(feature = "file")]
     #[test]
-    fn non_object_yaml_is_ambiguous() {
+    fn non_object_yaml_is_not_a_schema_document() {
         let dir = tempfile::tempdir().unwrap();
         write_schema_file(dir.path(), "bad.yaml", "- one\n- two\n");
         let v = yaml_value("./bad.yaml");
         let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path()), ShippedSources::NONE).unwrap_err();
-        assert!(matches!(err, SchemaError::AmbiguousReferenced { .. }));
+        assert!(matches!(err, SchemaError::NotASchemaDocument { reason: NotSchemaReason::NotAMapping, .. }), "{err:?}");
     }
 
     #[cfg(feature = "file")]
@@ -5071,7 +5060,7 @@ mod schema_plus_phase1 {
         let err = resolve_file(dir.path(), "main.yaml")
             .expect_err("import from a raw JSON Schema must error");
         assert!(
-            matches!(err, SchemaError::AmbiguousReferenced { .. }),
+            matches!(err, SchemaError::NotASchemaDocument { reason: NotSchemaReason::NoSchemaProperty, .. }),
             "importing from a non-SimplifiedSchema file must be an ambiguous-reference error: {err:?}"
         );
     }

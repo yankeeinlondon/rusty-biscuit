@@ -106,10 +106,15 @@ fn darkmatter_catalog_and_partials_resolve_from_supplied_sources() {
     ];
     const SHIPPED: ShippedSources = ShippedSources::new("darkmatter:", "darkmatter/schemas/partials", DOCUMENTS);
     assert_parses_passively(&DOCUMENTS[1..]);
-    // The global catalog declares globals for a host to register; it is never
-    // a document schema, so content parsing refuses it by structure.
-    let refused = SimplifiedSchema::try_from(DOCUMENTS[0].text).expect_err("a catalog is not document content");
-    assert!(refused.to_string().contains("global catalog"), "{refused}");
+    // The global catalog declares globals for a host to register through its
+    // own loader. Its envelope is an ordinary tagged schema document with a
+    // `description` and an exported `$schema`, so the standalone parser
+    // accepts it rather than refusing it by structure.
+    let catalog_document = parse_standalone_schema_document(DOCUMENTS[0].text, DARKMATTER_CATALOG)
+        .expect("the catalog envelope parses")
+        .expect("the catalog is a recognized envelope");
+    assert!(catalog_document.exports_schema);
+    assert_eq!(catalog_document.description.as_deref(), Some("the shapes of every Darkmatter global"));
 
     // Every global the catalog declares resolves on its own, as Darkmatter's
     // catalog loader resolves them.

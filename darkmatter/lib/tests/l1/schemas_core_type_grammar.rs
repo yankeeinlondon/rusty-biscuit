@@ -187,7 +187,7 @@ fn an_empty_value_and_an_empty_union_item_project_as_null() {
         );
     }
     let dir = TempDir::new().expect("tempdir");
-    write(dir.path(), "types.yaml", &format!("kind: schema\ntypes:\n  {}", source.replace('\n', "\n  ")));
+    write(dir.path(), "types.yaml", &format!("$schema:\n  {}", source.replace('\n', "\n  ")));
     let reference = "./types.yaml";
     assert!(validates(dir.path(), reference, "title: null\nstatus: null"));
     assert!(validates(dir.path(), reference, "status: 4"));
@@ -202,7 +202,7 @@ fn a_null_named_type_resolves_through_local_and_imported_references() {
     write(
         dir.path(),
         "local.yaml",
-        "kind: schema\ntypes:\n  nothing: null\n  a: nothing\n  b: [string, nothing@this]\n",
+        "kind: schema\ntypes:\n  nothing: null\n$schema:\n  a: nothing\n  b: [string, nothing@this]\n",
     );
     let resolved = resolve_inline(
         dir.path(),
@@ -414,12 +414,12 @@ fn every_route_to_a_different_option_set_conflicts() {
     write(
         dir.path(),
         "local.yaml",
-        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  wide: slug(allow-periods)\n  w: wide\n",
+        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  wide: slug(allow-periods)\n$schema:\n  w: wide\n",
     );
     write(
         dir.path(),
         "union.yaml",
-        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  u: [slug(allow-slashes), null]\n  w: u\n",
+        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  u: [slug(allow-slashes), null]\n$schema:\n  w: u\n",
     );
     for file in ["./local.yaml", "./union.yaml"] {
         let err = resolve_yaml_schema(
@@ -492,7 +492,7 @@ fn lowering_records_the_canonical_options() {
 #[test]
 fn type_definition_values_follow_the_same_null_rules() {
     let dir = TempDir::new().expect("tempdir");
-    write(dir.path(), "meta.yaml", "kind: schema\ntypes:\n  def: type-definition(required)\n");
+    write(dir.path(), "meta.yaml", "$schema:\n  def: type-definition(required)\n");
     for (data, valid) in [
         ("def: [string, null]", true),
         ("def: [string, ~]", true),

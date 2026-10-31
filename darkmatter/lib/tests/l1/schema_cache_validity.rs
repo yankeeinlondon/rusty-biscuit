@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle};
-use simplified_schema::{CompileCache, SchemaError, SchemaPhase, parse_yaml_schema};
+use simplified_schema::{CompileCache, DRAFT_2020_12_DIALECT, SchemaError, SchemaPhase, parse_yaml_schema};
 use serde_json::json;
 
 /// A temporary repository root (with `.git`), canonical so the paths
@@ -431,7 +431,8 @@ fn match_below_a_recursive_reference_beside_a_raw_arm_is_enforced() {
     let repo = Repo::new();
     repo.write(
         "schemas/number-arm.json",
-        &json!({"type": "object", "properties": {"spec": {"type": "number"}}, "required": ["spec"]}).to_string(),
+        &json!({"$schema": DRAFT_2020_12_DIALECT, "type": "object", "properties": {"spec": {"type": "number"}}, "required": ["spec"]})
+            .to_string(),
     );
     let schema = format!("$schema:\n  - node: {NODE}\n    spec: node(required)\n  - ../schemas/number-arm.json\n");
     assert_match_judged_from_each_folder("beside a raw arm", &repo, &schema);
@@ -558,7 +559,8 @@ fn acyclic_match_beside_a_raw_arm_only_suggests() {
     assert_acyclic_arms_only_suggest("beside a raw arm", false, |repo, _, arm| {
         repo.write(
             "schemas/boolean-arm.json",
-            &json!({"type": "object", "properties": {"spec": {"type": "boolean"}}, "required": ["spec"]}).to_string(),
+            &json!({"$schema": DRAFT_2020_12_DIALECT, "type": "object", "properties": {"spec": {"type": "boolean"}}, "required": ["spec"]})
+                .to_string(),
         );
         format!("$schema:\n{arm}  - ../schemas/boolean-arm.json\n")
     });
@@ -590,6 +592,7 @@ fn an_explicit_match_keyword_behind_a_raw_local_reference_is_enforced() {
     repo.write(
         "schemas/raw-node.json",
         &json!({
+            "$schema": DRAFT_2020_12_DIALECT,
             "type": "object",
             "properties": {"spec": {"$ref": "#/$defs/node"}},
             "required": ["spec"],

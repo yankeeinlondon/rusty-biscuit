@@ -2010,7 +2010,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
     // schema.yaml lives ONLY under the document dir.
     fs::write(
         doc_dir.path().join("schema.yaml"),
-        "title: string(required)\n",
+        "$schema:\n  title: string(required)\n",
     )
     .unwrap();
     let source = make_source(
@@ -2042,7 +2042,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
     let fallback_dir = TempDir::new().unwrap();
     fs::write(
         doc_dir.path().join("arm-a.yaml"),
-        "kind: string(required)\n",
+        "$schema:\n  kind: string(required)\n",
     )
     .unwrap();
     let source = make_source(

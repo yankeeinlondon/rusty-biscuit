@@ -219,12 +219,16 @@ fn ordinary_raw_schema_bounds_still_load_and_validate() {
     let dir = workspace.path();
     std::fs::write(
         dir.join("bounds.json"),
-        r#"{"type": "object", "properties": {"n": {"minimum": 0.5, "maximum": 9007199254740992, "multipleOf": 0.5}}}"#,
+        r#"{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": {"n": {"minimum": 0.5, "maximum": 9007199254740992, "multipleOf": 0.5}}}"#,
     )
     .unwrap();
-    std::fs::write(dir.join("bounds.yaml"), "type: object\nproperties:\n  n:\n    maximum: 1e3\n").unwrap();
+    std::fs::write(
+        dir.join("exponent.json"),
+        r#"{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "properties": {"n": {"maximum": 1e3}}}"#,
+    )
+    .unwrap();
     assert!(validate_against(dir, "bounds.json", "n: 2.5").unwrap());
     assert!(!validate_against(dir, "bounds.json", "n: 0.25").unwrap());
-    assert!(validate_against(dir, "bounds.yaml", "n: 1000").unwrap());
-    assert!(!validate_against(dir, "bounds.yaml", "n: 1001").unwrap());
+    assert!(validate_against(dir, "exponent.json", "n: 1000").unwrap());
+    assert!(!validate_against(dir, "exponent.json", "n: 1001").unwrap());
 }

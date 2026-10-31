@@ -15,15 +15,13 @@ flowchart LR
 The resolution rules:
 
 1. **Inline mapping** at `$schema` — parsed directly as SimplifiedSchema.
-2. **String reference** at `$schema` — resolved via `FileReference`, then disambiguated:
-   - Parse as YAML.
-   - Treat YAML as SimplifiedSchema only when it uses one of the two
-     [standalone envelopes](#standalone-schema-documents): `$schema` as the
-     sole root key, or `kind: schema` with a `types` mapping.
-   - Otherwise treat it as raw JSON Schema, including a document with a
-     `$schema` string URI such as
-     `https://json-schema.org/draft/2020-12/schema`.
-   - `.json` files are always treated as JSON Schema.
+2. **String reference** at `$schema` — resolved via `FileReference`, then the
+   file must be a [schema definition](#what-a-schema-reference-may-target):
+   - a `.json` file (any letter case) is a JSON Schema object that declares
+     `"$schema": "https://json-schema.org/draft/2020-12/schema"`;
+   - any other file is YAML in a [standalone envelope](#standalone-schema-documents)
+     that has a top-level `$schema`.
+   - Anything else is an error naming the file.
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
 4. **No `$schema`** — the baseline alone applies; `md schema validate` and `md compose` use the [built-in baseline](../../../../darkmatter/docs/topics/schemas/definition.md#the-built-in-baseline) unless told otherwise. With no baseline either, validation succeeds vacuously and `pretty` mode prints a note saying so (suppressed by `--quiet`).
 
@@ -61,19 +59,94 @@ match selection.outcome {
 
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
 
+## What a Schema Reference May Target
+
+A document's `$schema: ./file` (and a schema file that delegates with
+`$schema: ./other.yaml`, each file arm of a root union, and a trigger payload)
+accepts exactly two kinds of file. Every other file is an error that names it,
+so a typo or a stray YAML file can never silently constrain nothing.
+
+```mermaid
+flowchart TD
+    F[selected file] --> X{extension .json?}
+    X -->|yes| J{one strict JSON object?}
+    J -->|no| SD[SchemaDocument: syntax]
+    J -->|yes| D{"$schema is exactly the 2020-12 URI?"}
+    D -->|absent / not a string| NM[NotASchemaDocument: JsonMissingDialect]
+    D -->|another string| UD[UnsupportedJsonDialect]
+    D -->|yes| M{meta-schema valid?}
+    M -->|no| IJ[InvalidJsonSchema]
+    M -->|yes| OKJ[raw JSON Schema]
+    X -->|no| Y{YAML envelope with $schema?}
+    Y -->|yes| OKY[SimplifiedSchema]
+    Y -->|types only| TO[NotASchemaDocument: TypesOnly]
+    Y -->|$schema plus other keys| UK[SchemaDocument: unsupported top-level keys]
+    Y -->|no $schema| NS[NotASchemaDocument: NoSchemaProperty]
+```
+
+| File content | Result |
+|---|---|
+| YAML with `$schema` (informal, or `kind: schema`) | accepted |
+| `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`); its types still import as `Name@file.yaml` |
+| YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
+| YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
+| YAML with `$schema` and a key outside `$schema`, `types`, `description` (no `kind: schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
+| YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location |
+| JSON object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) |
+| JSON `$schema` other than exactly `https://json-schema.org/draft/2020-12/schema` (including `""` and a trailing `#`) | `UnsupportedJsonDialect` |
+| JSON declaring 2020-12 that fails the dialect's meta-schema | `InvalidJsonSchema` |
+
+The meta-schema check runs offline; nothing is fetched. These rules apply only
+to a `$schema` target. A named-type import (`Name@file.yaml`) reads any
+standalone envelope, a `types`-only one included.
+
+### Migrating Raw JSON Schema Written in YAML
+
+A raw JSON Schema written as YAML is no longer a `$schema` target. The error
+says so when the file's `$schema` is a `json-schema.org` URI:
+
+```yaml
+# schema.yaml: rejected — unsupported top-level key(s): type, properties
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  title: { type: string }
+```
+
+Write it as `schema.json`, declaring the dialect, and point `$schema` at that
+file:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": { "title": { "type": "string" } }
+}
+```
+
+A YAML map of SimplifiedSchema types written without the envelope
+(`title: string(required)`) is wrapped under `$schema:` instead.
+
 ## Standalone Schema Documents
 
 A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes two envelopes:
 
 ### Pure Envelope
 
-A YAML mapping with `$schema` and an optional reusable `types` mapping:
+A YAML mapping with `$schema`, an optional reusable `types` mapping, and an
+optional `description` string, and no other key:
 
 ```yaml
+description: A person record
 $schema:
     name: string(suggest(Bob, Mary, Sam))
     age: number(integer; min(0); suggest(21, 30, 40))
 ```
+
+`description` must be a string (`""` is allowed); `null`, a number, a list, or
+a mapping is a schema-document error. Editors show it when hovering a
+`$schema` value that names the file. A mapping with any other top-level key is
+not this envelope (see [Migrating Raw JSON Schema Written in YAML](#migrating-raw-json-schema-written-in-yaml)).
 
 The `$schema` value is the SimplifiedSchema payload. A mapping payload is usable both as a whole-file schema and as the namespace for `Name@fileref` named imports. A sequence payload is a root-level schema union for whole-file use only (it supplies no named-import namespace).
 
@@ -96,19 +169,30 @@ using this file has a `contacts` property; it does not gain a `person` property.
 
 ### Tagged Envelope
 
-A YAML mapping containing `kind: schema`, a `types` mapping, and an optional
-exported `$schema`:
+A YAML mapping containing `kind: schema` and at least one of an exported
+`$schema` and a `types` mapping, plus optionally `description` and
+`categories`:
 
 ```yaml
 kind: schema
+description: Reusable person fields
 types:
     name: string(suggest(Bob, Mary, Sam))
     age: number(integer; min(0); suggest(21, 30, 40))
 ```
 
-Without an explicit `$schema`, the `types` mapping remains the whole-file
-payload as well as the named-import namespace. With `$schema`, only that
-export supplies document properties; `types` supplies reusable definitions.
+A `types`-only document is a library: its types import as `Name@file.yaml`,
+but a document's `$schema` cannot target it (`NotASchemaDocument`,
+`TypesOnly`). With `$schema`, that export supplies document properties and
+`types`, when present, supplies reusable definitions; a tagged document with
+only `$schema` behaves like the pure envelope. A tagged document with neither
+is a schema-document error. Category and overload checks apply to a `types`
+table only.
+
+A host's global catalog (such as Darkmatter's `darkmatter.yaml`) is an
+ordinary tagged envelope with `$schema` declarations. The host registers it
+through its own loader; named by a document's `$schema`, it is read like any
+other schema document.
 
 ### Categories
 
@@ -162,11 +246,11 @@ $schema:
 
 ### Malformed Envelopes
 
-Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when `types` is missing, malformed, or accompanied by top-level keys other than `categories`. A file that is not valid YAML at all (for example one with a duplicate key) is also a schema-document error, `not valid YAML: ...`, rather than an unrecognized file. A definition the grammar rejects keeps the grammar's typed error and its byte range in the document; see [A rejected definition in a schema document](../diagnostics.md#a-rejected-definition-in-a-schema-document).
+Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when both `$schema` and `types` are missing, `types` is malformed, or a top-level key other than `$schema`, `types`, `description`, and `categories` is present. A file that is not valid YAML at all (for example one with a duplicate key) is also a schema-document error, `not valid YAML: ...`, rather than an unrecognized file. A definition the grammar rejects keeps the grammar's typed error and its byte range in the document; see [A rejected definition in a schema document](../diagnostics.md#a-rejected-definition-in-a-schema-document).
 
 ### Raw JSON Schema
 
-Existing raw JSON Schema reference support remains a distinct validation format. Raw JSON Schema:
+A referenced `.json` file declaring the Draft 2020-12 dialect is a distinct validation format. Raw JSON Schema:
 
 - does not provide `suggest(...)`;
 - cannot supply a `Name@fileref` named-import namespace;
@@ -218,11 +302,9 @@ value). A root `anyOf` that is empty, or has an arm that is neither a schema
 object nor a boolean (`anyOf: [7]`), cannot be prepared: validation fails with
 `ValidationFailure::Unprepared` holding `SchemaError::BuildValidator`.
 
-A referenced YAML map without either standalone envelope remains raw JSON
-Schema even when every property value is a valid SimplifiedSchema type string.
-If that complete non-empty map parses as SimplifiedSchema and none of its keys
-is a recognized or reserved JSON Schema/custom-vocabulary key, Darkmatter emits
-the `dm.schema.missing_simplified_envelope` advisory. The advisory does not
-change validation or exit status: the map still constrains nothing as raw JSON
-Schema. Wrap the properties under a sole root `$schema:` key, or use
-`kind: schema` with a `types:` mapping, to opt into SimplifiedSchema.
+A referenced YAML map without a standalone envelope is not a schema target
+(`NotASchemaDocument`, `NoSchemaProperty`), even when every value is a valid
+SimplifiedSchema type string. Wrap the properties under a root `$schema:` key
+to opt into SimplifiedSchema. The `dm.schema.missing_simplified_envelope`
+advisory that once reported such a map remains a public diagnostic code, but
+the loader no longer emits it.

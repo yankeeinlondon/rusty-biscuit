@@ -194,7 +194,9 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         SchemaError::Io { path, .. }
         | SchemaError::ReferencedSchema { path, .. }
         | SchemaError::SchemaDocument { path, .. }
-        | SchemaError::AmbiguousReferenced { path } => path,
+        | SchemaError::NotASchemaDocument { path, .. }
+        | SchemaError::UnsupportedJsonDialect { path, .. }
+        | SchemaError::InvalidJsonSchema { path, .. } => path,
         SchemaError::TriggerPayloadCycle { payload_path, .. } => payload_path,
         SchemaError::TriggerPayloadCompile { payload_path, .. }
         | SchemaError::TriggerPayloadNotMergeable { payload_path, .. } => payload_path.as_ref()?,

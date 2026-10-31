@@ -13,8 +13,12 @@
 //! - [`SchemaError::Unresolved`] — a `$schema` file reference could not be
 //!   resolved (invalid syntax or a resolver error).
 //! - [`SchemaError::NoMatch`] — a `$schema` file reference matched no file.
-//! - [`SchemaError::AmbiguousReferenced`] — a referenced file is neither a
-//!   SimplifiedSchema (missing root `$schema:` key) nor a valid JSON Schema.
+//! - [`SchemaError::NotASchemaDocument`] — a referenced file is not a schema
+//!   definition a document's `$schema` may target ([`NotSchemaReason`]).
+//! - [`SchemaError::UnsupportedJsonDialect`] — a referenced JSON file declares
+//!   a JSON Schema dialect other than Draft 2020-12.
+//! - [`SchemaError::InvalidJsonSchema`] — a referenced Draft 2020-12 JSON file
+//!   fails the dialect's meta-schema.
 //! - [`SchemaError::RemoteUnsupported`] — a `$schema` value is an `http(s)://`
 //!   URL; remote schemas are not supported in v1.
 //! - [`SchemaError::Baseline`] — the baseline schema could not be loaded or
@@ -26,7 +30,11 @@
 //! - [`SchemaError::FrontmatterShape`] — `$schema` is present in frontmatter
 //!   but is not a YAML mapping/sequence/string.
 
-use std::{ops::Range, path::PathBuf};
+use std::{
+    fmt,
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use thiserror::Error;
 
@@ -72,6 +80,65 @@ use super::simplified::{
 /// fenced so a backtick in the value cannot close it early.
 fn participant_code_span(participant: &SchemaConstraintParticipant) -> String {
     renderable::markdown::code_span(&participant.constraint.diagnostic_excerpt())
+}
+
+/// The Draft 2020-12 dialect URI, the only JSON Schema dialect a referenced
+/// `.json` schema file may declare.
+pub const DRAFT_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
+/// Why a referenced file is not a schema definition
+/// ([`SchemaError::NotASchemaDocument`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotSchemaReason {
+    /// A tagged `kind: schema` document with `types` and no `$schema`: it
+    /// serves named-type imports but declares no document properties.
+    TypesOnly,
+    /// A YAML mapping with no `$schema` property (or another `kind`).
+    NoSchemaProperty,
+    /// The document root is not a mapping (a JSON object for `.json`).
+    NotAMapping,
+    /// A JSON object without a string `$schema` dialect declaration.
+    JsonMissingDialect,
+}
+
+impl NotSchemaReason {
+    /// The migration hint for this reason in a file at `path`, when there is
+    /// one. A non-object `.json` root gets the same dialect hint as a missing
+    /// declaration.
+    pub fn hint(self, path: &Path) -> Option<&'static str> {
+        match self {
+            NotSchemaReason::TypesOnly => Some("use a named-type import (`Name@file.yaml`) to reuse its types"),
+            NotSchemaReason::JsonMissingDialect => Some(DECLARE_DIALECT_HINT),
+            NotSchemaReason::NotAMapping if is_json_path(path) => Some(DECLARE_DIALECT_HINT),
+            NotSchemaReason::NotAMapping | NotSchemaReason::NoSchemaProperty => None,
+        }
+    }
+}
+
+const DECLARE_DIALECT_HINT: &str = "declare `\"$schema\": \"https://json-schema.org/draft/2020-12/schema\"`";
+
+fn is_json_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+}
+
+impl fmt::Display for NotSchemaReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            NotSchemaReason::TypesOnly => "it declares only `types`, with no `$schema` property",
+            NotSchemaReason::NoSchemaProperty => "it has no `$schema` property",
+            NotSchemaReason::NotAMapping => "its root is not a mapping",
+            NotSchemaReason::JsonMissingDialect => "it does not declare its JSON Schema dialect in `$schema`",
+        })
+    }
+}
+
+fn not_schema_message(path: &Path, reason: NotSchemaReason) -> String {
+    with_hint_line(
+        format!("`{}` is not a valid schema definition: {reason}", path.display()),
+        reason.hint(path),
+    )
 }
 
 /// Errors produced by the schemas subsystem.
@@ -140,13 +207,27 @@ pub enum SchemaError {
     #[error("{}", crate::errors::with_glob_hint(format!("could not resolve $schema reference `{reference}`"), biscuit_file::ResolutionFailure::NoMatch, reference))]
     NoMatch { reference: String, bare_name: bool },
 
-    /// A referenced schema file is neither a recognized standalone
-    /// SimplifiedSchema envelope nor a recognizable JSON Schema.
+    /// A file is not a schema definition a document's `$schema` may target:
+    /// a YAML document needs a top-level `$schema`, a JSON file must be an
+    /// object declaring the Draft 2020-12 dialect. The message carries the
+    /// reason's migration hint ([`NotSchemaReason::hint`]) on a `hint:` line.
+    #[error("{}", not_schema_message(path, *reason))]
+    NotASchemaDocument { path: PathBuf, reason: NotSchemaReason },
+
+    /// A referenced JSON schema file declares a `$schema` dialect other than
+    /// exactly [`DRAFT_2020_12_DIALECT`] (an empty string or a trailing `#`
+    /// included).
     #[error(
-        "referenced schema file `{path}` is neither a valid standalone SimplifiedSchema nor a \
-         valid JSON Schema"
+        "`{path}` declares the unsupported JSON Schema dialect `{declared}`; only \
+         `https://json-schema.org/draft/2020-12/schema` is supported"
     )]
-    AmbiguousReferenced { path: PathBuf },
+    UnsupportedJsonDialect { path: PathBuf, declared: String },
+
+    /// A referenced Draft 2020-12 JSON schema file fails the dialect's
+    /// meta-schema. Distinct from a format rejection: the file is a JSON
+    /// Schema in the supported dialect, but not a valid one.
+    #[error("`{path}` is not a valid Draft 2020-12 JSON Schema: {message}")]
+    InvalidJsonSchema { path: PathBuf, message: String },
 
     /// A recognized standalone SimplifiedSchema envelope is malformed, or a
     /// schema document's text cannot be read as a schema.
@@ -716,20 +797,44 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )
             }
 
-            SchemaError::AmbiguousReferenced { path } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "SchemaError",
-                    "ambiguous schema reference",
-                ))
+            SchemaError::NotASchemaDocument { path, reason } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "not a schema definition"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<cyan>{}</cyan> is not a valid schema definition.",
+                        Prose::escape_text(&path.display().to_string())
+                    )),
+                    Prose::new(format!(
+                        "<dim>Reason:</dim> {}",
+                        Prose::escape_text_outside_code_spans(&reason.to_string())
+                    )),
+                ])
+                .hint(match reason.hint(path) {
+                    Some(hint) => Prose::escape_text_outside_code_spans(hint),
+                    None => "Give a YAML schema a top-level <cyan>$schema:</cyan>, or write a JSON \
+                             object declaring <cyan>https://json-schema.org/draft/2020-12/schema</cyan>."
+                        .to_string(),
+                }),
+
+            SchemaError::UnsupportedJsonDialect { path, declared } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "unsupported JSON Schema dialect"))
                 .body(Prose::new(format!(
-                    "<cyan>{}</cyan> is neither a recognized standalone SimplifiedSchema nor a \
-                     valid JSON Schema.",
-                    Prose::escape_text(&path.display().to_string())
+                    "<cyan>{}</cyan> declares the dialect <cyan>{}</cyan>.",
+                    Prose::escape_text(&path.display().to_string()),
+                    Prose::escape_text(declared)
                 )))
-                .hint(
-                    "Either prefix a SimplifiedSchema mapping with <cyan>$schema:</cyan>, or \
-                     supply a Draft 2020-12 JSON Schema.",
-                ),
+                .hint("Only <cyan>https://json-schema.org/draft/2020-12/schema</cyan> is supported."),
+
+            SchemaError::InvalidJsonSchema { path, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "invalid JSON Schema"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<cyan>{}</cyan> is not a valid Draft 2020-12 JSON Schema.",
+                        Prose::escape_text(&path.display().to_string())
+                    )),
+                    Prose::new(format!("<dim>Reason:</dim> {}", Prose::escape_text(message))),
+                ])
+                .hint("Fix the schema so it satisfies the Draft 2020-12 meta-schema."),
 
             SchemaError::SchemaDocument { path, message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -1381,11 +1486,39 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_referenced_display_includes_path() {
-        let err = SchemaError::AmbiguousReferenced {
+    fn not_a_schema_document_display_includes_path_reason_and_hint() {
+        let err = SchemaError::NotASchemaDocument {
             path: PathBuf::from("./schemas/post.yaml"),
+            reason: NotSchemaReason::TypesOnly,
         };
-        assert!(err.to_string().contains("post.yaml"));
+        let rendered = err.to_string();
+        assert!(rendered.contains("post.yaml"), "{rendered}");
+        assert!(rendered.contains("not a valid schema definition"), "{rendered}");
+        assert!(rendered.contains("\nhint: use a named-type import (`Name@file.yaml`)"), "{rendered}");
+        let json = SchemaError::NotASchemaDocument {
+            path: PathBuf::from("schema.JSON"),
+            reason: NotSchemaReason::NotAMapping,
+        };
+        assert!(json.to_string().contains(DRAFT_2020_12_DIALECT), "{json}");
+        let yaml = SchemaError::NotASchemaDocument {
+            path: PathBuf::from("schema.yaml"),
+            reason: NotSchemaReason::NotAMapping,
+        };
+        assert!(!yaml.to_string().contains("hint:"), "{yaml}");
+    }
+
+    #[test]
+    fn json_dialect_errors_display_path_and_detail() {
+        let dialect = SchemaError::UnsupportedJsonDialect {
+            path: PathBuf::from("s.json"),
+            declared: "http://json-schema.org/draft-07/schema#".into(),
+        };
+        assert!(dialect.to_string().contains("draft-07"), "{dialect}");
+        let invalid = SchemaError::InvalidJsonSchema {
+            path: PathBuf::from("s.json"),
+            message: "\"type\" is not valid".into(),
+        };
+        assert!(invalid.to_string().contains("s.json"), "{invalid}");
     }
 
     #[test]
@@ -1618,17 +1751,30 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_referenced_block_renders_path() {
-        let err = SchemaError::AmbiguousReferenced {
+    fn not_a_schema_document_block_renders_path() {
+        let err = SchemaError::NotASchemaDocument {
             path: PathBuf::from("./schemas/post.yaml"),
+            reason: NotSchemaReason::NoSchemaProperty,
         };
         let out = render(&err);
         assert!(out.contains("SchemaError"), "missing header type: {out}");
-        assert!(
-            out.contains("ambiguous schema reference"),
-            "missing summary: {out}",
-        );
+        assert!(out.contains("not a schema definition"), "missing summary: {out}");
         assert!(out.contains("post.yaml"), "missing path: {out}");
+    }
+
+    #[test]
+    fn json_dialect_blocks_render_path() {
+        let dialect = render(&SchemaError::UnsupportedJsonDialect {
+            path: PathBuf::from("s.json"),
+            declared: "http://json-schema.org/draft-07/schema#".into(),
+        });
+        assert!(dialect.contains("unsupported JSON Schema dialect"), "{dialect}");
+        assert!(dialect.contains("s.json"), "{dialect}");
+        let invalid = render(&SchemaError::InvalidJsonSchema {
+            path: PathBuf::from("s.json"),
+            message: "bad".into(),
+        });
+        assert!(invalid.contains("invalid JSON Schema"), "{invalid}");
     }
 
     #[test]

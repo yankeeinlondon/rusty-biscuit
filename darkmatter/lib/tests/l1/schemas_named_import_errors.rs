@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
-use simplified_schema::SchemaError;
+use simplified_schema::{NotSchemaReason, SchemaError};
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use simplified_schema::resolve::ResolvedSchema;
 use serde_yaml_ng::Value as YamlValue;
@@ -62,16 +62,16 @@ fn an_inadmissible_number_in_an_import_target_reports_the_admission_rule() {
 }
 
 #[test]
-fn valid_yaml_that_is_not_a_schema_is_an_ambiguous_import() {
+fn valid_yaml_that_is_not_a_schema_is_not_a_schema_document_import() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (types, result) = import_from(dir.path(), "title: notes\nname: string\n");
 
     match result {
-        Err(SchemaError::AmbiguousReferenced { path }) => assert_eq!(
+        Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::NoSchemaProperty }) => assert_eq!(
             biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
             biscuit_file::canonicalize_simplified(&types).expect("imported file canonicalizes")
         ),
-        other => panic!("expected AmbiguousReferenced, got {:?}", other.map(|resolved| resolved.json_schema)),
+        other => panic!("expected NotASchemaDocument, got {:?}", other.map(|resolved| resolved.json_schema)),
     }
 }
 
@@ -83,7 +83,7 @@ fn an_import_target_that_cannot_supply_named_types_is_a_located_schema_document_
         (
             "unsupported envelope key",
             "kind: schema\ntypes:\n  name: string\nextra: 1\n",
-            "tagged schema documents support only `kind`, `types`, `$schema`, and `categories`",
+            "tagged schema documents support only `kind`, `types`, `$schema`, `description`, and `categories`",
         ),
         ("implicit null types", "kind: schema\ntypes:\n", "tagged schema document `types` must be a mapping"),
         (
@@ -122,21 +122,24 @@ fn a_well_formed_import_target_supplies_its_named_type() {
     );
 }
 
-/// Undecodable bytes never reach the classifier; the import fails naming the
-/// file, as a target that is not a schema does.
+/// Undecodable bytes never reach the classifier; the import fails with a
+/// document error naming the file, as the `$schema` loader reports them.
 #[test]
-fn an_import_target_that_is_not_utf8_is_an_ambiguous_import() {
+fn an_import_target_that_is_not_utf8_is_a_schema_document_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let types = dir.path().join("types.yaml");
     std::fs::write(&types, b"kind: schema\ntypes:\n  name: \xff\n").expect("write imported file");
     let schema: YamlValue = serde_yaml_ng::from_str("value: name@./types.yaml\n").expect("fixture YAML parses");
 
     match resolve_yaml_schema(&schema, dir.path(), &FileResolutionContext::new(dir.path())) {
-        Err(SchemaError::AmbiguousReferenced { path }) => assert_eq!(
-            biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
-            biscuit_file::canonicalize_simplified(&types).expect("imported file canonicalizes")
-        ),
-        other => panic!("expected AmbiguousReferenced, got {:?}", other.map(|resolved| resolved.json_schema)),
+        Err(SchemaError::SchemaDocument { path, message, .. }) => {
+            assert!(message.starts_with("not UTF-8 text"), "{message}");
+            assert_eq!(
+                biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
+                biscuit_file::canonicalize_simplified(&types).expect("imported file canonicalizes")
+            );
+        }
+        other => panic!("expected SchemaDocument, got {:?}", other.map(|resolved| resolved.json_schema)),
     }
 }
 

@@ -12,7 +12,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
-use simplified_schema::{DefKey, DefNamespace, SchemaError, SchemaPhase};
+use simplified_schema::{DRAFT_2020_12_DIALECT, DefKey, DefNamespace, NotSchemaReason, SchemaError, SchemaPhase};
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
 use tempfile::TempDir;
@@ -116,6 +116,7 @@ fn a_raw_arm_keeps_its_definitions_and_an_inline_arm_keeps_its_keys() {
         dir.path(),
         "raw.json",
         &json!({
+            "$schema": DRAFT_2020_12_DIALECT,
             "type": "object",
             "properties": {"node": {"$ref": "#/$defs/item"}},
             "required": ["node"],
@@ -146,12 +147,12 @@ fn an_arm_reference_that_would_bind_to_another_arm_is_refused() {
     write(
         dir.path(),
         "orphan.json",
-        &json!({"type": "object", "properties": {"node": {"$ref": "#/$defs/item"}}}).to_string(),
+        &json!({"$schema": DRAFT_2020_12_DIALECT, "type": "object", "properties": {"node": {"$ref": "#/$defs/item"}}}).to_string(),
     );
     write(
         dir.path(),
         "rooted.json",
-        &json!({"type": "object", "properties": {"node": {"$ref": "#"}}, "$defs": {}}).to_string(),
+        &json!({"$schema": DRAFT_2020_12_DIALECT, "type": "object", "properties": {"node": {"$ref": "#"}}, "$defs": {}}).to_string(),
     );
     let schemas = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()));
     let inline = format!("  - item: {ITEM}\n    tree: item\n");
@@ -248,7 +249,7 @@ fn a_baseline_with_definitions_joins_every_arm_of_a_root_union_once() {
 #[test]
 fn a_baseline_cannot_move_its_definitions_into_an_arm_with_its_own_id() {
     let dir = TempDir::new().expect("tempdir");
-    write(dir.path(), "scoped.json", &json!({"$id": "urn:example:scoped", "type": "object"}).to_string());
+    write(dir.path(), "scoped.json", &json!({"$schema": DRAFT_2020_12_DIALECT, "$id": "urn:example:scoped", "type": "object"}).to_string());
     let schemas = DarkmatterSchemas::new(FileResolutionContext::new(dir.path()))
         .with_baseline_json_schema(raw_baseline())
         .expect("baseline");
@@ -274,7 +275,9 @@ enum Ingress {
     Enforced,
     /// Loads; the edit removed the assertion the negative instance breaks.
     Loosened,
-    /// `SchemaError::Baseline` (a shape or meta-schema error).
+    /// `SchemaError::Baseline` (a shape or meta-schema error), or — for a
+    /// file baseline, whose declared dialect is meta-schema checked when
+    /// loaded — `SchemaError::InvalidJsonSchema`.
     Invalid,
     /// `SchemaError::UnresolvedReference`.
     Unresolved,
@@ -384,12 +387,19 @@ fn judge_ingress(cell: &str, outcome: Result<DarkmatterSchemas, SchemaError>, ex
                 true => Ingress::Loosened,
             }
         }
-        Err(SchemaError::Baseline { .. }) => Ingress::Invalid,
+        Err(SchemaError::Baseline { .. } | SchemaError::InvalidJsonSchema { .. }) => Ingress::Invalid,
         Err(SchemaError::UnresolvedReference { .. }) => Ingress::Unresolved,
         Err(SchemaError::UnsupportedMergeReference { .. }) => Ingress::Unsupported,
         Err(other) => panic!("{cell}: unexpected error {other:?}"),
     };
     assert_eq!(actual, expected, "{cell}");
+}
+
+/// A JSON baseline file must declare the 2020-12 dialect to be loaded.
+fn declared_json(value: &Value) -> String {
+    let mut declared = value.clone();
+    declared["$schema"] = json!(DRAFT_2020_12_DIALECT);
+    serde_json::to_string_pretty(&declared).expect("json")
 }
 
 fn raw_ingress_cells(extension: &str, serialize: fn(&Value) -> String) {
@@ -411,10 +421,10 @@ fn raw_ingress_cells(extension: &str, serialize: fn(&Value) -> String) {
 
 #[test]
 fn raw_json_baseline_ingress_takes_every_cell_from_a_recursive_control() {
-    raw_ingress_cells("json", |value| serde_json::to_string_pretty(value).expect("json"));
+    raw_ingress_cells("json", declared_json);
 
     let dir = TempDir::new().expect("tempdir");
-    let control = serde_json::to_string_pretty(&raw_baseline()).expect("json");
+    let control = declared_json(&raw_baseline());
     for (cell, text) in [
         ("duplicate $defs", control.replacen("\"$defs\": {", "\"$defs\": {}, \"$defs\": {", 1)),
         ("duplicate definition name", control.replacen("\"item\": {", "\"item\": {}, \"item\": {", 1)),
@@ -430,12 +440,34 @@ fn raw_json_baseline_ingress_takes_every_cell_from_a_recursive_control() {
     }
 }
 
+/// A raw JSON Schema written in YAML is not a schema document, so a YAML
+/// baseline file never reaches the merge-ingress validator: without `$schema`
+/// it has no schema property, and with a dialect string beside JSON Schema
+/// keywords its extra top-level keys are unsupported. Text that is not one
+/// YAML mapping is still a schema-document error.
 #[test]
-fn raw_yaml_baseline_ingress_takes_every_cell_from_a_recursive_control() {
-    raw_ingress_cells("yaml", |value| serde_yaml_ng::to_string(value).expect("yaml"));
-
+fn raw_yaml_baseline_file_is_refused_before_merge_ingress() {
     let dir = TempDir::new().expect("tempdir");
     let control = serde_yaml_ng::to_string(&raw_baseline()).expect("yaml");
+
+    let path = write(dir.path(), "control.yaml", &control);
+    let outcome = DarkmatterSchemas::new(FileResolutionContext::new(dir.path())).with_baseline_from_file(&path);
+    assert!(
+        matches!(&outcome, Err(SchemaError::NotASchemaDocument { path: refused, reason: NotSchemaReason::NoSchemaProperty })
+            if refused.ends_with("control.yaml")),
+        "{:?}",
+        outcome.map(|_| ())
+    );
+
+    let declared = write(dir.path(), "declared.yaml", &format!("$schema: {DRAFT_2020_12_DIALECT}\n{control}"));
+    let outcome = DarkmatterSchemas::new(FileResolutionContext::new(dir.path())).with_baseline_from_file(&declared);
+    assert!(
+        matches!(&outcome, Err(SchemaError::Baseline { source: Some(source), .. })
+            if matches!(&**source, SchemaError::SchemaDocument { message, .. } if message.starts_with("unsupported top-level key(s)"))),
+        "{:?}",
+        outcome.map(|_| ())
+    );
+
     for (cell, text) in [
         ("duplicate $defs", format!("{control}$defs: {{}}\n")),
         ("duplicate definition name", control.replacen("  item:\n", "  item: {}\n  item:\n", 1)),
@@ -555,7 +587,12 @@ fn a_recursive_trigger_payload_merges_beside_a_recursive_document() {
 
 #[test]
 fn a_raw_trigger_payload_with_an_unresolved_reference_is_skipped_as_not_mergeable() {
-    let control = json!({"type": "object", "properties": {"tree": {"$ref": "#/$defs/item"}}, "$defs": {"item": {"type": "object"}}});
+    let control = json!({
+        "$schema": DRAFT_2020_12_DIALECT,
+        "type": "object",
+        "properties": {"tree": {"$ref": "#/$defs/item"}},
+        "$defs": {"item": {"type": "object"}},
+    });
     let trigger = TRIGGER.replace("payload.yaml", "payload.json");
     let repo = Repository::new(&[("tree.trigger.yaml", &trigger), ("payload.json", &control.to_string())]);
     assert!(repo.effective("---\nkind: tree\n---\nbody\n").expect("control merges").is_some());

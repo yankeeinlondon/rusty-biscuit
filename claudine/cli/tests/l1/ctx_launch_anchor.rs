@@ -163,12 +163,12 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
 
     write(
         &launch_dir.join("schema.yaml"),
-        "launch_only: string(required)\n",
+        "$schema:\n  launch_only: string(required)\n",
     );
     write(&launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n");
     write(
         &source_dir.join("schema.yaml"),
-        "source_marker: string(required)\nspec: 'file(eager; required)'\nmy_area: string(required)\nmy_cwd: string(required)\n",
+        "$schema:\n  source_marker: string(required)\n  spec: 'file(eager; required)'\n  my_area: string(required)\n  my_cwd: string(required)\n",
     );
     write(&source_dir.join("spec.md"), "SOURCE-SPEC\n");
     write(&source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n");

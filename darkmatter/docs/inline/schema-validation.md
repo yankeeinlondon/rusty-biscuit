@@ -68,29 +68,27 @@ $schema: ./schemas/post.yaml
 
 The referenced file may be:
 
-- a YAML file whose root uses one of the two SimplifiedSchema envelopes, or
-- a `.json` / `.yaml` file that is already a valid Draft 2020-12 JSON Schema.
+- a YAML file whose root uses a SimplifiedSchema envelope with a top-level
+  `$schema`, or
+- a `.json` file that is a JSON Schema object declaring
+  `"$schema": "https://json-schema.org/draft/2020-12/schema"`.
 
-The SimplifiedSchema envelopes are either `$schema:` as the sole root key, or
-`kind: schema` together with a `types:` mapping:
+The YAML envelope is a root `$schema:` mapping, optionally beside a `types:`
+mapping of reusable definitions and a `description:` string, or the same keys
+under `kind: schema`:
 
 ```yaml
+description: A blog post
 $schema:
     title: string(required)
 ```
 
-```yaml
-kind: schema
-types:
-    title: string(required)
-```
-
-Anything else is treated as raw JSON Schema, including a `$schema` string URI.
-A non-empty bare map whose string values all parse as SimplifiedSchema property
-definitions still remains raw JSON Schema and therefore constrains nothing. If
-its keys do not identify JSON Schema or a custom vocabulary, Darkmatter emits
-the `dm.schema.missing_simplified_envelope` warning without changing validity
-or exit status. Add either envelope above to make the file a SimplifiedSchema.
+Every other file is an error naming it: a YAML map without `$schema` (wrap its
+properties under `$schema:`), a `kind: schema` file with only `types:` (import
+its types with `Name@file.yaml` instead), raw JSON Schema written as YAML
+(write it as a `.json` file declaring the 2020-12 dialect), or a `.json` file
+without that exact dialect. See
+[What a Schema Reference May Target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
 Remote (`http(s)://`) references are **not** supported — download the schema
 locally first.
 

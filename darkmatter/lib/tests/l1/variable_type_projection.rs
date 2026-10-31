@@ -312,7 +312,7 @@ mod layers {
         write(
             dir.path(),
             "schema.json",
-            r#"{"type":"object","properties":{"flag":{"type":"boolean"},"size":{"type":"number"}},"required":["flag","size"]}"#,
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"flag":{"type":"boolean"},"size":{"type":"number"}},"required":["flag","size"]}"#,
         );
         let path = write(dir.path(), "doc.md", "---\n$schema: ./schema.json\nflag: true\nsize: 3\n---\nBody\n");
         let effective = DarkmatterSchemas::new(context_at(dir.path()))
@@ -691,6 +691,7 @@ mod bounds {
         for _ in 0..depth {
             schema = json!({ "type": "object", "properties": { "a": schema }, "required": ["a"] });
         }
+        schema["$schema"] = json!(simplified_schema::DRAFT_2020_12_DIALECT);
         schema.to_string()
     }
 

@@ -38,6 +38,8 @@ They are deliberately not kept in step with the files they were copied from:
 the goldens must move only when resolver code changes, never when a shipped
 schema is edited. Darkmatter's compiled-in baseline and the reserved
 `@darkmatter:` partials are the exception; they are read live from the library.
+An input changed after copying says so in its manifest `note` (for example, a
+JSON Schema copy given the `$schema` dialect declaration the loader requires).
 
 ## Regenerating
 

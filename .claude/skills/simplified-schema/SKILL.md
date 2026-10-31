@@ -101,6 +101,15 @@ grammar's typed error unchanged, `span` a byte range in the exact supplied
 text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
 `message` alone; see [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md#a-rejected-definition-in-a-schema-document).
 
+A referenced `$schema` file is classified by `classify_yaml_schema_text` /
+`classify_json_schema_text` (`resolve.rs`): YAML must be an envelope with a
+top-level `$schema` (`types`-only is `NotASchemaDocument { TypesOnly }`, a map
+without `$schema` is `NoSchemaProperty`); JSON must be an object whose
+`$schema` is exactly `DRAFT_2020_12_DIALECT` (else `JsonMissingDialect` or
+`UnsupportedJsonDialect`) and pass the offline meta-schema (else
+`InvalidJsonSchema`). There is no raw-YAML JSON Schema fallback; see
+[What a schema reference may target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
+
 ## Features
 
 | Feature | Default | Adds |

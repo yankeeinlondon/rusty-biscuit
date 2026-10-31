@@ -15,6 +15,7 @@ mod root_union_assertions;
 mod schema_file_selection;
 mod schema_files;
 mod schema_object;
+mod schema_target_classification;
 mod shipped_corpus;
 mod test_layout;
 mod validation_contract;

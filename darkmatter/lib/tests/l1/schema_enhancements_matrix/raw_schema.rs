@@ -1,20 +1,26 @@
-//! Reader (c): raw JSON Schema documents, in both supported formats — a
-//! `.json` file and a YAML file that is not a SimplifiedSchema envelope —
-//! through the public validation result.
+//! Reader (c): raw JSON Schema documents — a `.json` file declaring the
+//! Draft 2020-12 dialect — through the public validation result. Raw JSON
+//! Schema written in YAML is not a `$schema` target; one cell pins that
+//! rejection for each YAML control.
 //!
 //! Each row names one keyword at one location in a control fixture. The
 //! control proves the keyword is load-bearing: removing it flips the sample
-//! instance's validity or leaves a reference unresolved (a load error). The
-//! invalid shapes are each rejected when the validator is built
-//! (`SchemaError::BuildValidator`), through the Draft 2020-12 meta-schema. Edits are made on the decoded value and written
+//! instance's validity or leaves a reference unresolved (a
+//! `SchemaError::BuildValidator` load error). The invalid shapes are each
+//! rejected at load by the Draft 2020-12 meta-schema
+//! (`SchemaError::InvalidJsonSchema`), except an invalid `pattern`, which
+//! only the validator build refuses. Edits are made on the decoded value and written
 //! back with the same serializer that produced the fixture, so each cell
 //! differs from the control by exactly one value.
 //!
 //! The numeric-token cells edit the control's text instead, since a decoded
 //! value has already lost the written spelling they test.
 //!
-//! Whole-document cells (trailing content, a second value or document, a
-//! duplicate key in either format — ruling R3 for `.json`) fail as a located
+//! The keyword control is hand-written without `$schema`; [`declared`] adds the
+//! dialect declaration before any cell reads it.
+//!
+//! Whole-document cells (trailing content, a second value, a duplicate key —
+//! ruling R3 for `.json`) fail as a located
 //! `SchemaError::SchemaDocument`. `enum: []` and `prefixItems: []` follow the
 //! Draft 2020-12 meta-schema (R7) and are covered by the keyword rows.
 //!
@@ -26,7 +32,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use simplified_schema::SchemaError;
+use simplified_schema::{DRAFT_2020_12_DIALECT, NotSchemaReason, SchemaError};
 
 use super::validate_document;
 
@@ -62,6 +68,9 @@ enum Removal {
     Unresolved,
     /// No observable change today (see the row's comment).
     NoEffect,
+    /// The document no longer declares a dialect:
+    /// `NotASchemaDocument { JsonMissingDialect }`.
+    MissingDialect,
 }
 
 use Removal::*;
@@ -75,10 +84,15 @@ struct Row {
     instance: &'static str,
     valid_with: bool,
     removal: Removal,
-    /// Shapes rejected when the validator is built.
+    /// Shapes the meta-schema rejects at load.
     rejects: &'static [Shape],
     /// Shapes the meta-schema admits: the schema loads.
     loads: &'static [Shape],
+    /// Shapes the meta-schema admits but the validator refuses to build.
+    build_rejects: &'static [Shape],
+    /// Shapes that leave no string dialect declaration:
+    /// `NotASchemaDocument { JsonMissingDialect }`.
+    missing_dialect: &'static [Shape],
 }
 
 /// A single subschema value.
@@ -105,14 +119,15 @@ const fn row(
     removal: Removal,
     rejects: &'static [Shape],
 ) -> Row {
-    Row { keyword, fixture, pointer, instance, valid_with, removal, rejects, loads: &[] }
+    Row { keyword, fixture, pointer, instance, valid_with, removal, rejects, loads: &[], build_rejects: &[], missing_dialect: &[] }
 }
 
 use Fixture::*;
 
 const ROWS: &[Row] = &[
     // Keywords `md schema detect` emits, on its output.
-    row("$schema", Detected, "/$schema", "count: word", false, NoEffect, STRING),
+    // A `$schema` target must declare the dialect as a string.
+    Row { missing_dialect: STRING, ..row("$schema", Detected, "/$schema", "count: word", false, MissingDialect, &[]) },
     row("properties", Detected, "/properties", "count: word", false, Flips, SCHEMA_MAP),
     row("anyOf", Detected, "/properties/count/anyOf", "count: word", false, Flips, SCHEMA_ARRAY),
     row(
@@ -255,15 +270,20 @@ const ROWS: &[Row] = &[
         Flips,
         COUNT,
     ),
-    row(
-        "pattern",
-        Keywords,
-        "/properties/patterned/pattern",
-        "patterned: A1",
-        false,
-        Flips,
-        &[Null, Whole("5"), Whole("[\"x\"]"), Whole("{}"), Whole("\"[\"")],
-    ),
+    // The meta-schema's `format: regex` is an annotation, so an invalid
+    // pattern is only refused when the validator compiles it.
+    Row {
+        build_rejects: &[Whole("\"[\"")],
+        ..row(
+            "pattern",
+            Keywords,
+            "/properties/patterned/pattern",
+            "patterned: A1",
+            false,
+            Flips,
+            &[Null, Whole("5"), Whole("[\"x\"]"), Whole("{}")],
+        )
+    },
     row("format", Keywords, "/properties/formatted/format", "formatted: not-a-date", false, Flips, STRING),
     row(
         "uniqueItems",
@@ -337,33 +357,23 @@ const ROWS: &[Row] = &[
     ),
 ];
 
-#[derive(Clone, Copy)]
-enum Format {
-    Json,
-    Yaml,
+fn write(value: &Value) -> String {
+    serde_json::to_string_pretty(value).expect("JSON") + "\n"
 }
 
-impl Format {
-    fn extension(self) -> &'static str {
-        match self {
-            Format::Json => "json",
-            Format::Yaml => "yaml",
-        }
-    }
+fn read(text: &str) -> Value {
+    serde_json::from_str(text).expect("fixture JSON")
+}
 
-    fn write(self, value: &Value) -> String {
-        match self {
-            Format::Json => serde_json::to_string_pretty(value).expect("JSON") + "\n",
-            Format::Yaml => serde_yaml_ng::to_string(value).expect("YAML"),
-        }
+/// `control` with the Draft 2020-12 `$schema` declaration as its first key,
+/// in the serializer's own form.
+fn declared(control: &str) -> String {
+    let mut value = serde_json::Map::new();
+    value.insert("$schema".into(), Value::from(DRAFT_2020_12_DIALECT));
+    for (key, entry) in read(control).as_object().expect("control object") {
+        value.entry(key.clone()).or_insert_with(|| entry.clone());
     }
-
-    fn read(self, text: &str) -> Value {
-        match self {
-            Format::Json => serde_json::from_str(text).expect("fixture JSON"),
-            Format::Yaml => serde_yaml_ng::from_str(text).expect("fixture YAML"),
-        }
-    }
+    write(&Value::Object(value))
 }
 
 /// Splits a pointer into its parent and final token.
@@ -407,43 +417,65 @@ fn reshaped(control: &Value, pointer: &str, shape: Shape) -> Value {
 }
 
 /// Writes one cell and validates the row's instance against it.
-fn run_cell(dir: &Path, format: Format, index: &mut usize, text: &str, instance: &str) -> Result<bool, SchemaError> {
+fn run_cell(dir: &Path, index: &mut usize, text: &str, instance: &str) -> Result<bool, SchemaError> {
     *index += 1;
-    let file_name = format!("cell-{index}.{}", format.extension());
+    let file_name = format!("cell-{index}.json");
     std::fs::write(dir.join(&file_name), text).expect("write cell schema");
     validate_document(dir, &format!("$schema: ./{file_name}\n{instance}")).map(|report| report.valid)
 }
 
-/// Walks every row against the two controls of one format, then the
-/// whole-document cells, which are the same for every keyword.
-fn walk(format: Format, detected: &str, keywords: &str, whole_document: &[(&str, String, &str)]) {
+/// The expected result of one keyword cell.
+#[derive(Clone, Copy)]
+enum Expect {
+    /// The schema loads and the instance's validity is this.
+    Valid(bool),
+    /// The schema loads.
+    Loads,
+    /// The validator cannot be built (an unresolved reference, an invalid
+    /// pattern).
+    BuildValidator,
+    /// The Draft 2020-12 meta-schema rejects the document at load.
+    InvalidJsonSchema,
+    NotSchema(NotSchemaReason),
+}
+
+/// Walks every row against the two controls, then the whole-document
+/// cells, which are the same for every keyword.
+fn walk(detected: &str, keywords: &str, whole_document: &[(&str, String, &str)]) {
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let dir = workspace.path();
     let mut index = 0;
     let mut failures = Vec::new();
-    let detected_value = format.read(detected);
-    let keywords_value = format.read(keywords);
-    for (name, text, value) in [("detected", detected, &detected_value), ("keywords", keywords, &keywords_value)] {
-        assert_eq!(format.write(value), text, "{name}: the control must be the serializer's own output");
+    for (name, text) in [("detected", detected), ("keywords", keywords)] {
+        assert_eq!(write(&read(text)), text, "{name}: the control must be the serializer's own output");
     }
+    let keywords = declared(keywords);
+    let keywords = keywords.as_str();
+    let detected_value = read(detected);
+    let keywords_value = read(keywords);
 
     for row in ROWS {
         let (control_text, control) = match row.fixture {
             Detected => (detected, &detected_value),
             Keywords => (keywords, &keywords_value),
         };
-        let mut check = |label: String, text: String, expected: Result<Option<bool>, ()>| {
-            let result = run_cell(dir, format, &mut index, &text, row.instance);
-            let ok = match (&expected, &result) {
-                (Ok(Some(valid)), Ok(actual)) => valid == actual,
-                (Ok(None), Ok(_)) | (Err(()), Err(SchemaError::BuildValidator { .. })) => true,
+        let mut check = |label: String, text: String, expected: Expect| {
+            let result = run_cell(dir, &mut index, &text, row.instance);
+            let ok = match (expected, &result) {
+                (Expect::Valid(valid), Ok(actual)) => valid == *actual,
+                (Expect::Loads, Ok(_))
+                | (Expect::BuildValidator, Err(SchemaError::BuildValidator { .. }))
+                | (Expect::InvalidJsonSchema, Err(SchemaError::InvalidJsonSchema { .. })) => true,
+                (Expect::NotSchema(expected), Err(SchemaError::NotASchemaDocument { reason, .. })) => expected == *reason,
                 _ => false,
             };
             if !ok {
                 let wanted = match expected {
-                    Ok(Some(valid)) => format!("loads, valid={valid}"),
-                    Ok(None) => "loads".to_string(),
-                    Err(()) => "a BuildValidator load error".to_string(),
+                    Expect::Valid(valid) => format!("loads, valid={valid}"),
+                    Expect::Loads => "loads".to_string(),
+                    Expect::BuildValidator => "a BuildValidator load error".to_string(),
+                    Expect::InvalidJsonSchema => "an InvalidJsonSchema load error".to_string(),
+                    Expect::NotSchema(reason) => format!("NotASchemaDocument {{ {reason:?} }}"),
                 };
                 failures.push(format!(
                     "{} {label}: expected {wanted}, got {result:?}\n--- schema ---\n{text}",
@@ -451,24 +483,35 @@ fn walk(format: Format, detected: &str, keywords: &str, whole_document: &[(&str,
                 ));
             }
         };
-        check("control".into(), control_text.to_string(), Ok(Some(row.valid_with)));
-        let absent = format.write(&without(control, row.pointer));
+        check("control".into(), control_text.to_string(), Expect::Valid(row.valid_with));
+        let absent = write(&without(control, row.pointer));
         let removal = match row.removal {
-            Flips => Ok(Some(!row.valid_with)),
-            Unresolved => Err(()),
-            NoEffect => Ok(Some(row.valid_with)),
+            Flips => Expect::Valid(!row.valid_with),
+            Unresolved => Expect::BuildValidator,
+            NoEffect => Expect::Valid(row.valid_with),
+            MissingDialect => Expect::NotSchema(NotSchemaReason::JsonMissingDialect),
         };
         check("absent".into(), absent, removal);
         for shape in row.rejects {
-            check(format!("{shape:?}"), format.write(&reshaped(control, row.pointer, *shape)), Err(()));
+            check(format!("{shape:?}"), write(&reshaped(control, row.pointer, *shape)), Expect::InvalidJsonSchema);
         }
         for shape in row.loads {
-            check(format!("{shape:?}"), format.write(&reshaped(control, row.pointer, *shape)), Ok(None));
+            check(format!("{shape:?}"), write(&reshaped(control, row.pointer, *shape)), Expect::Loads);
+        }
+        for shape in row.build_rejects {
+            check(format!("{shape:?}"), write(&reshaped(control, row.pointer, *shape)), Expect::BuildValidator);
+        }
+        for shape in row.missing_dialect {
+            check(
+                format!("{shape:?}"),
+                write(&reshaped(control, row.pointer, *shape)),
+                Expect::NotSchema(NotSchemaReason::JsonMissingDialect),
+            );
         }
     }
 
     for (label, text, detail) in whole_document {
-        match run_cell(dir, format, &mut index, text, "count: 1") {
+        match run_cell(dir, &mut index, text, "count: 1") {
             Err(SchemaError::SchemaDocument { message, .. }) if message.contains(detail) => {}
             other => failures.push(format!(
                 "{label}: expected a SchemaDocument error naming {detail:?}, got {other:?}\n--- schema ---\n{text}"
@@ -499,26 +542,38 @@ fn raw_json_schema_keyword_matrix() {
     for (label, text, _) in &whole_document[2..] {
         assert_ne!(text, detected, "{label}: the duplicate edit must change the control");
     }
-    walk(Format::Json, detected, keywords, &whole_document);
+    walk(detected, keywords, &whole_document);
 }
 
+/// Raw JSON Schema written in YAML is not a `$schema` target: the detected
+/// control (which declares the dialect) names its unsupported keys and the
+/// `.json` migration, and the keyword control (which declares nothing) has
+/// no `$schema` property. The YAML keyword, numeric-token, and conversion
+/// matrices this replaces walked cells that now all stop here.
 #[test]
-fn raw_yaml_schema_keyword_matrix() {
-    let detected = include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.yaml");
-    let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml");
-    // serde_yaml_ng locates the syntax error but not the second document or
-    // the duplicate key; each message still names its problem.
-    let whole_document = [
-        ("trailing garbage", format!("{detected}]\n"), "at line"),
-        ("second document", format!("{detected}---\ntype: object\n"), "more than one document"),
-        (
-            "duplicate root key",
-            detected.replacen("\ntype: object\n", "\ntype: object\ntype: object\n", 1),
-            "duplicate entry with key \"type\"",
-        ),
-    ];
-    assert_ne!(whole_document[2].1, detected, "the duplicate edit must change the control");
-    walk(Format::Yaml, detected, keywords, &whole_document);
+fn raw_yaml_schema_is_not_a_schema_target() {
+    let workspace = tempfile::tempdir().expect("matrix workspace");
+    let dir = workspace.path();
+    for (name, text) in [
+        ("detected", include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.yaml")),
+        ("keywords", include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml")),
+    ] {
+        std::fs::write(dir.join(format!("{name}.yaml")), text).expect("write control");
+    }
+    match validate_document(dir, "$schema: ./detected.yaml\ncount: 1") {
+        Err(SchemaError::SchemaDocument { path, message, .. }) => {
+            assert_eq!(path.file_name().and_then(|name| name.to_str()), Some("detected.yaml"));
+            assert!(message.starts_with("unsupported top-level key(s)"), "{message}");
+            assert!(message.contains("`.json` file"), "{message}");
+        }
+        other => panic!("detected: expected an unsupported-key SchemaDocument error, got {other:?}"),
+    }
+    match validate_document(dir, "$schema: ./keywords.yaml\ncount: 1") {
+        Err(SchemaError::NotASchemaDocument { path, reason: NotSchemaReason::NoSchemaProperty }) => {
+            assert_eq!(path.file_name().and_then(|name| name.to_str()), Some("keywords.yaml"));
+        }
+        other => panic!("keywords: expected NotASchemaDocument {{ NoSchemaProperty }}, got {other:?}"),
+    }
 }
 
 /// One textual edit of a numeric token in the keyword control.
@@ -537,20 +592,19 @@ const fn numeric(label: &'static str, find: &'static str, replace: &'static str,
 
 const INEXACT: Option<&str> = Some("cannot be represented exactly");
 const UNDERFLOW: Option<&str> = Some("a non-zero value would become 0");
-const NOT_FINITE: Option<&str> = Some("not finite");
 
 /// Walks numeric-token cells, each one edit of the keyword control's text,
 /// validating `maximum: 7` (valid only when the bound is raised).
-fn walk_numeric_tokens(format: Format, control: &str, cells: &[NumericCell]) {
+fn walk_numeric_tokens(control: &str, cells: &[NumericCell]) {
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let dir = workspace.path();
     let mut index = 0;
     let mut failures = Vec::new();
-    assert_eq!(run_cell(dir, format, &mut index, control, "maximum: 7").ok(), Some(false), "control");
+    assert_eq!(run_cell(dir, &mut index, control, "maximum: 7").ok(), Some(false), "control");
     for cell in cells {
         assert_eq!(control.matches(cell.find).count(), 1, "{}: `{}` must occur once", cell.label, cell.find);
         let text = control.replacen(cell.find, cell.replace, 1);
-        let result = run_cell(dir, format, &mut index, &text, "maximum: 7");
+        let result = run_cell(dir, &mut index, &text, "maximum: 7");
         let ok = match (cell.rejects, &result) {
             (Some(reason), Err(error @ SchemaError::SchemaDocument { .. })) => error.to_string().contains(reason),
             (None, Ok(_)) => true,
@@ -565,7 +619,7 @@ fn walk_numeric_tokens(format: Format, control: &str, cells: &[NumericCell]) {
 
 #[test]
 fn raw_json_schema_numeric_token_matrix() {
-    let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json");
+    let keywords = &declared(include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json"))[..];
     let cells = [
         numeric("maximum 2^53 + 1 decimal", "\"maximum\": 5", "\"maximum\": 9007199254740993.0", INEXACT),
         numeric("minimum underflow", "\"minimum\": {\n      \"minimum\": 5", "\"minimum\": {\n      \"minimum\": 1e-400", UNDERFLOW),
@@ -581,38 +635,17 @@ fn raw_json_schema_numeric_token_matrix() {
         numeric("enum member exponent", "\"b\"\n      ]", "1e3\n      ]", None),
         numeric("default -(2^53)", "\"default\": \"x\"", "\"default\": -9007199254740992", None),
     ];
-    walk_numeric_tokens(Format::Json, keywords, &cells);
+    walk_numeric_tokens(keywords, &cells);
 
     // `serde_json` itself rejects an overflowing token before admission runs;
     // the located load error stands for "not finite" (author decision).
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let overflow = keywords.replacen("\"maximum\": 5", "\"maximum\": 1e400", 1);
-    let result = run_cell(workspace.path(), Format::Json, &mut 0, &overflow, "maximum: 7");
+    let result = run_cell(workspace.path(), &mut 0, &overflow, "maximum: 7");
     assert!(
         matches!(&result, Err(SchemaError::SchemaDocument { message, .. }) if message.contains("out of range")),
         "{result:?}"
     );
-}
-
-#[test]
-fn raw_yaml_schema_numeric_token_matrix() {
-    let keywords = include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml");
-    let cells = [
-        numeric("maximum inf", "maximum: 5", "maximum: .inf", NOT_FINITE),
-        numeric("maximum nan", "maximum: 5", "maximum: .nan", NOT_FINITE),
-        numeric("exclusiveMaximum -inf", "exclusiveMaximum: 5", "exclusiveMaximum: -.inf", NOT_FINITE),
-        numeric("minimum underflow", "  minimum:\n    minimum: 5", "  minimum:\n    minimum: 1e-400", UNDERFLOW),
-        numeric("exclusiveMinimum 2^53 + 1 decimal", "exclusiveMinimum: 5", "exclusiveMinimum: 9007199254740993.0", INEXACT),
-        numeric("multipleOf 2^53 + 1", "multipleOf: 2", "multipleOf: 9007199254740993", INEXACT),
-        numeric("enum member beyond u64", "enum:\n    - a\n    - b", "enum:\n    - a\n    - 99999999999999999999", INEXACT),
-        numeric("const 2^53 + 1 exponent", "const: a", "const: 9.007199254740993e15", INEXACT),
-        numeric("default -(2^53 + 1)", "default: x", "default: -9007199254740993", INEXACT),
-        numeric("maximum 2^53", "maximum: 5", "maximum: 9007199254740992", None),
-        numeric("maximum exponent", "maximum: 5", "maximum: 1e3", None),
-        numeric("multipleOf decimal", "multipleOf: 2", "multipleOf: 0.1", None),
-        numeric("const quoted 2^53 + 1", "const: a", "const: '9007199254740993'", None),
-    ];
-    walk_numeric_tokens(Format::Yaml, keywords, &cells);
 }
 
 /// One conversion through one keyword of a control fixture.
@@ -657,13 +690,13 @@ const CONVERSION_CELLS: &[ConversionCell] = &[
 
 /// Writes `schema` and binds each cell's instance through the public
 /// validation result and the effective schema's conversion.
-fn walk_conversions(format: Format, detected: &str, keywords: &str) {
+fn walk_conversions(detected: &str, keywords: &str) {
     use darkmatter::markdown::{Markdown, compose::ComposeSource, schemas::DarkmatterSchemas};
 
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let dir = workspace.path();
     for (name, text) in [("detected", detected), ("keywords", keywords)] {
-        std::fs::write(dir.join(format!("{name}.{}", format.extension())), text).expect("write control");
+        std::fs::write(dir.join(format!("{name}.json")), text).expect("write control");
     }
     let mut failures = Vec::new();
     for cell in CONVERSION_CELLS {
@@ -671,7 +704,7 @@ fn walk_conversions(format: Format, detected: &str, keywords: &str) {
             Detected => "detected",
             Keywords => "keywords",
         };
-        let frontmatter = format!("$schema: ./{name}.{}\n{}", format.extension(), cell.instance);
+        let frontmatter = format!("$schema: ./{name}.json\n{}", cell.instance);
         let report = validate_document(dir, &frontmatter).expect("the control loads");
         let markdown = Markdown::from(format!("---\n{frontmatter}\n---\nBody\n"))
             .with_source(ComposeSource::File(dir.join("document.md")));
@@ -708,17 +741,7 @@ fn walk_conversions(format: Format, detected: &str, keywords: &str) {
 #[test]
 fn raw_json_schema_conversion_controls() {
     walk_conversions(
-        Format::Json,
         include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.json"),
-        include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json"),
-    );
-}
-
-#[test]
-fn raw_yaml_schema_conversion_controls() {
-    walk_conversions(
-        Format::Yaml,
-        include_str!("../../fixtures/schema_enhancements_matrix/detected.schema.yaml"),
-        include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.yaml"),
+        &declared(include_str!("../../fixtures/schema_enhancements_matrix/keywords.schema.json")),
     );
 }

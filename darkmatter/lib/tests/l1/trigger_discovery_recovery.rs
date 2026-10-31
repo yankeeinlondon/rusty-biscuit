@@ -221,7 +221,7 @@ fn a_payload_that_is_neither_schema_form_names_the_payload() {
 
     let finding = assert_related(&repo, "schemas/payload.yaml");
 
-    assert!(matches!(finding.cause(), SchemaError::AmbiguousReferenced { .. }), "{finding:?}");
+    assert!(matches!(finding.cause(), SchemaError::NotASchemaDocument { .. }), "{finding:?}");
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn a_non_object_payload_reached_through_an_alias_names_the_schema_file() {
     let repo = Repo::new(&[
         ("schemas/host.yaml", &trigger_with_payload("./alias.yaml")),
         ("schemas/alias.yaml", "$schema: ./raw.json\n"),
-        ("schemas/raw.json", r#"{"type":"string"}"#),
+        ("schemas/raw.json", r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string"}"#),
     ]);
 
     let finding = assert_related(&repo, "schemas/raw.json");
@@ -272,7 +272,8 @@ fn a_payload_that_fails_to_compile_through_an_alias_names_the_schema_file() {
     let repo = Repo::new(&[
         ("schemas/host.yaml", &trigger_with_payload("./alias.yaml")),
         ("schemas/alias.yaml", "$schema: ./raw.json\n"),
-        ("schemas/raw.json", r#"{"type":"object","properties":{"x":{"type":12}}}"#),
+        // An invalid regex passes the meta-schema check but fails to compile.
+        ("schemas/raw.json", r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"x":{"type":"string","pattern":"["}}}"#),
     ]);
 
     let finding = assert_related(&repo, "schemas/raw.json");
@@ -403,7 +404,8 @@ fn a_raw_payload_that_fails_to_compile_is_skipped_even_when_a_later_layer_redecl
     let payload = "schemas/bad.json";
     let repo = Repo::new(&[
         (trigger, &trigger_with_payload("./bad.json")),
-        (payload, r#"{"type":"object","properties":{"x":{"type":12}}}"#),
+        // An invalid regex passes the meta-schema check but fails to compile.
+        (payload, r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"x":{"type":"string","pattern":"["}}}"#),
     ]);
 
     let schemas = repo.schemas();

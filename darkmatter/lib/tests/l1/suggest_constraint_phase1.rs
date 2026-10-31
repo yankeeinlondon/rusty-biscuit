@@ -248,7 +248,7 @@ fn suggest_phase1_standalone_envelopes_resolve_consistently() {
     std::fs::write(&pure, "$schema:\n  name: string(suggest(Bob, Mary))\n").unwrap();
     std::fs::write(
         &tagged,
-        "kind: schema\ntypes:\n  name: string(suggest(Bob, Mary))\n",
+        "kind: schema\n$schema:\n  name: string(suggest(Bob, Mary))\n",
     )
     .unwrap();
     std::fs::write(

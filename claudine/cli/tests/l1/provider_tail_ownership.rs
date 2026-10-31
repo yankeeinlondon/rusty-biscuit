@@ -292,7 +292,7 @@ fn a_raw_json_schema_contributes_its_top_level_names() {
     doc(
         &fixture,
         "plan.schema.json",
-        r#"{"type":"object","properties":{"phase":{"type":"string","properties":{"nested":{}}}}}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"phase":{"type":"string","properties":{"nested":{}}}}}"#,
     );
     let file = doc(&fixture, "plan.md", "---\n$schema: ./plan.schema.json\n---\nBody\n");
 

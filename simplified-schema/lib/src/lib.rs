@@ -75,7 +75,7 @@ pub(crate) use note_work;
 
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::{CycleReference, GrammarRelated, SchemaError};
+pub use errors::{CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, NotSchemaReason, SchemaError};
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
     frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
