@@ -116,7 +116,7 @@ Darkmatter uses the SimplifiedSchema language (the `simplified-schema` crate),
 compiled to Draft 2020-12 JSON Schema.
 `DarkmatterSchemas` owns baseline merging and validator caching. The standalone
 classifier is `parse_standalone_schema_document`; it recognizes an informal
-`$schema` document (optional `types`, `description`) or a `kind: schema`
+`$schema` document (optional `types`, `description`, `categories`) or a `kind: schema`
 document with `$schema` and/or `types`. A `$schema` target must export
 `$schema` (YAML) or be a JSON object declaring Draft 2020-12; anything else is
 `NotASchemaDocument`/`UnsupportedJsonDialect`/`InvalidJsonSchema`, while a
@@ -196,8 +196,9 @@ Read [schema.md](schema.md) for imports, recursive named types (`$defs`,
 DMLS schema behavior.
 
 The global catalog `darkmatter/schemas/darkmatter.yaml` declares every
-global's shape; the built-in baseline is its resolved `fm`. A catalog is
-registered explicitly, never applied as a document schema; see
+global's shape; the built-in baseline is its resolved `fm`. A catalog acts
+as globals only when registered explicitly; a document `$schema` naming one
+just gets its entries as optional properties; see
 [schema.md](schema.md#authored-global-catalog).
 
 ## Remote and cache safety

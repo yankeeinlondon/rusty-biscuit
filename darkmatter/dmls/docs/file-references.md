@@ -16,7 +16,9 @@ editor, and one that fails to compose is flagged.
 
 The sigils themselves are defined in
 [File references](../../../biscuit-file/docs/topics/file-references.md). This
-page covers how the editor gets the context they resolve in.
+page covers how the editor gets the context they resolve in, the
+schema-specific lookup a `$schema` value uses, and which failures become
+diagnostics.
 
 ## One context per repository
 
@@ -118,6 +120,92 @@ With folders in two or more repositories, or in none, the buffer gets the
 would make the same buffer resolve differently depending on which other
 folders happen to be open.
 
+## `$schema` references
+
+A `$schema` string is looked up with schema-specific rules, not the ordinary
+`./`-then-repository-root rule above. DMLS uses the same selection code as
+`md schema validate`, with the document's own context and schema roots, so
+the document link, go-to-definition, the value hover, and the validator
+always name the same file.
+
+| You write | DMLS searches |
+|---|---|
+| A bare name: `$schema: review.yaml` | The schema roots, in order, and nothing else: the folder `SCHEMAS_DIR` names, then `{package}/schemas/`, `{package-area}/schemas/`, `{file-tree-root}/schemas/`, and `~/schemas/`. The first root holding the file wins |
+| An explicit relative path: `$schema: ./review.yaml`, `../shared/review.yaml` | The document's folder only, never a schema root and never the process's working directory |
+| Any other form (`&`, `^`, `@`, `~`, `{{VAR}}`, absolute) | The ordinary file-reference rules for that form |
+
+A root folder that does not exist is skipped. When **no** schema root folder
+exists at all, a bare name is looked up like any other implicit path: the
+document's folder, then the repository root. The roots, `SCHEMAS_DIR`, and
+duplicate-root rules are described in
+[Schema roots](../../docs/topics/schemas/definition.md#schema-roots).
+
+```text
+repo/
+├── schemas/review.yaml         ← 4. file tree root: selected
+└── area/pkg/                   (a package: has Cargo.toml)
+    ├── schemas/                ← 2. package root: exists, no review.yaml
+    └── docs/
+        ├── review.yaml         ← beside the document: never used for a bare name
+        └── review-3.md         $schema: review.yaml
+```
+
+Here `review.yaml` resolves to `repo/schemas/review.yaml`. The file beside
+the document does not count, because a bare name never searches the
+document's folder while a schema root exists. Had no root held
+`review.yaml`, validation would report an error naming the file beside the
+document and suggesting `./review.yaml`; it never selects that file for you.
+
+### Where a link to a missing schema goes
+
+A `$schema` file that does not exist is still a validation error. But the
+document link and go-to-definition do not disappear: they point at the path
+where the file would be created, so following the link starts the file in
+the right place.
+
+| Reference | Creation path |
+|---|---|
+| A bare name, with at least one existing schema root | `{first existing schema root}/{name}` |
+| A bare name, with no schema root folder | The first ordinary candidate, `{document folder}/{name}`, only when no candidate matched (an existing file at the repository root is linked instead) |
+| A bare name that exists only beside the document | `{first existing schema root}/{name}`, never the sibling |
+| An explicit relative path | The path it names, relative to the document's folder |
+
+```text
+repo/schemas/ exists and is empty; repo/docs/plan.md has $schema: plan.yaml
+  link and definition → repo/schemas/plan.yaml   (does not exist yet)
+  diagnostic          → the missing-$schema error, unchanged
+```
+
+DMLS only returns the file URI. It creates no file or folder; what happens
+when you follow a link to a nonexistent file is up to the client (Zed opens
+an empty buffer, for example).
+
+Some references get **no** link and no creation path, because guessing one
+would be wrong:
+
+- a malformed reference
+- a reference whose anchor is missing, such as `&review.yaml` outside a
+  repository (`MissingContext`)
+- a location that could not be checked (`Io`), including a schema root that
+  could not be read: a lower-priority root never stands in for it
+- a remote URL; remote schemas are never fetched
+- any reference in a document without a file-resolution context
+
+Each of these is a typed failure, not a miss. The
+[`$schema` value hover](./hover.md#formatting-rule-schema-value-hover) says
+which one applies, lists the searched locations in order for a miss, and
+labels the creation path as missing.
+
+### When a `$schema` selection is redone
+
+The selection is kept with the document's schema and redone on the next
+request when the selected file changes or disappears, or when any location
+searched before it changes, for example a higher-priority root folder or a
+nearer copy of the file appearing. Deleting the selected file moves the link
+to the next candidate, or to the creation path when none is left; creating
+the missing file makes it the target. Repairing a malformed schema file
+refreshes its earlier failure the same way.
+
 ## Failure classes on diagnostics
 
 Every diagnostic about a reference that did not resolve carries the class in
@@ -132,6 +220,34 @@ its `data`, so a client never has to parse the message:
 
 The classes are biscuit-file's `ResolutionFailure` variants: `InvalidReference`,
 `MissingContext`, `NoMatch`, `Io`, and `UnsupportedRemote`.
+
+### Missing `file` values are explained, not flagged
+
+While you write a document, a file it names may not exist yet, so a
+well-formed `file(...)` value whose file is missing (`NoMatch`) gets no
+diagnostic, `eager` or not. Hover over the value instead: it says the file
+is missing and whether `md` will require it at run time (see the
+[`file` value hover](./hover.md#formatting-rule-file-value-hover)). Existence
+of an `eager` file stays a run-time check: `md compose` and
+`md schema validate` still fail on it.
+
+```yaml
+$schema:
+  source: file(eager)
+  notes: file
+  cover: file
+source: ./draft.md        # missing: no diagnostic in the editor; md fails at run time
+notes: ./later.md         # missing: no diagnostic anywhere
+cover: "@"                # InvalidReference: still a diagnostic
+```
+
+The rule matches on the typed `NoMatch` class, never on message text, and
+covers only the existence of a `file` value. Everything else keeps its
+diagnostic, code, range, and `resolution_failure` data: a malformed reference
+(`InvalidReference`), a reference that needs a missing anchor
+(`MissingContext`), a location that could not be checked (`Io`), a missing
+`$schema` file, named-type import, or `example(...)` file, a missing required
+value, and YAML syntax errors.
 
 ## Workspace documents and the disk
 

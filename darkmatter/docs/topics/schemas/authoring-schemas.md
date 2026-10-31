@@ -148,9 +148,10 @@ In a moment of "recursive truth" the external schema definition is defined as a 
 A schema file can export document properties and declare reusable types:
 
 - **pure**: `$schema` holds the export, with an optional sibling `types` mapping
-- **tagged**: `kind: schema` and `types`, with an optional `$schema` export and `categories` list
+- **tagged**: `kind: schema` and `types`, with an optional `$schema` export
 
-A tagged file accepts no other keys. When a file has both `$schema` and
+Either may also carry a `description` string and a `categories` list, and
+accepts no other keys. When a file has both `$schema` and
 `types`, only `$schema` defines document properties; `types` supplies local
 names and named imports. Without separate export and type tables, every
 top-level entry of the payload plays two roles. It is a property of the schema

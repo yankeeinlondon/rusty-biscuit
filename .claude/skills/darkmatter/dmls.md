@@ -359,6 +359,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `file` value (`frontmatter/file_value_hover.rs`, probes disk; skipped for
   `{{ expr }}`/`$(...)`, kept for biscuit-file `{{VAR}}`), then key/schema
   hover. All wording lives in the pure `providers/reference_hover.rs`.
+  User docs: `dmls/docs/hover.md` (every outcome) and `dmls/docs/file-references.md`.
 - Body-link summaries: `DocumentIndex::summary` (`graph/substrate.rs::summary_text`,
   first nonempty, non-pending YAML string of `excerpt`/`summary`/`description`/`about`)
   is content state on the per-snapshot `DocumentState` (`Clone`, not `Copy`),

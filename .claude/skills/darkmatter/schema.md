@@ -74,7 +74,10 @@ types:
 `parse_standalone_schema_document` is the passive authority. A pure schema has
 `$schema` and an optional sibling `types` mapping. A kinded schema declares
 `kind: schema` and a `types` mapping, with an optional `$schema` export.
-When both tables are present, `$schema` defines document properties and `types`
+Both may carry `description` and `categories`; the key sets have one
+definition, `StandaloneSchemaEnvelope::admits_top_level_key`, which the
+recognizer, `classify_yaml_schema_text`, and DMLS's lexical
+`standalone_envelope_claim` all read. When both tables are present, `$schema` defines document properties and `types`
 supplies local names and named imports; local definitions and cross-file imports
 can be mixed. Without a separate export, the mapping payload serves both roles.
 `StandaloneSchemaDocument.local_types` and its separate source map preserve
@@ -88,14 +91,14 @@ edits through the LSP handlers, not just successful standalone parsing.
 Standalone editor checks use `check_standalone_named_types` to check the
 export and every helper, including unused definitions, with each table's
 own source paths. Runtime expansion keeps helpers out of document properties.
-Referenced YAML without either envelope remains
-raw JSON Schema. When a non-empty bare map consists entirely of valid
-SimplifiedSchema property strings and has no recognized or reserved JSON
-Schema/custom-vocabulary keys, resolution emits the conservative
-`dm.schema.missing_simplified_envelope` advisory without changing validity or
-interpretation. Remedy it by wrapping the properties under the sole root
-`$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
-it uses the already-parsed YAML value and performs no additional I/O.
+A `$schema` target must export `$schema`: referenced YAML
+without one is `NotASchemaDocument` (`NoSchemaProperty`, or `TypesOnly` for a
+`types`-only library, which still serves `Name@file` imports), and there is no
+raw-YAML JSON Schema fallback (raw JSON Schema lives in a `.json` file declaring
+Draft 2020-12). The `dm.schema.missing_simplified_envelope` code remains public
+but the loader no longer emits it. Classification is passive: it uses the
+already-parsed YAML value and performs no additional I/O. User docs:
+`darkmatter/docs/topics/schemas/definition.md#what-a-schema-reference-may-point-at`.
 
 Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
@@ -708,8 +711,8 @@ User docs: `simplified-schema/docs/topics/language/types.md` (Tuples),
   description-only: `to_json_schema` fails on it with the property path, which
   is the one choke point keeping functions out of document schemas (the
   resolver inlines references first). Never emit JSON for a function.
-- `Constraint::Category` lowers to `x-darkmatter-category`; the tagged
-  envelope's `categories:` list (`StandaloneSchemaDocument::categories`)
+- `Constraint::Category` lowers to `x-darkmatter-category`; the envelope's
+  (informal or tagged) `categories:` list (`StandaloneSchemaDocument::categories`)
   limits names. Duplicate overloads are judged by
   `signature::duplicate_overload` over canonical binding contracts.
 - Numbers in schema metadata go through `simplified_schema::numeric` admission; an
@@ -1103,9 +1106,10 @@ shape: `kind: schema`, `description`, and a `$schema` mapping of `fm`, `ctx`,
 required, null/empty/wrong kinds rejected, `current` must equal `ctx`,
 duplicate keys and trailing YAML are errors. The `ctx.*` descriptors project
 its `ctx`; `err` and `timing` members equal the runtime
-`LifecycleErrorInfo`/`LifecycleTiming` values. A catalog (`kind: schema` with
-a `$schema` mapping and no `types`) is never a document schema: the
-standalone loader refuses it by content, wherever a `$schema` reaches it.
+`LifecycleErrorInfo`/`LifecycleTiming` values. Only explicit registration
+(`GlobalCatalog`) makes a catalog the baseline or a host's globals; a
+document `$schema` naming one is an ordinary tagged schema whose globals
+become optional document properties (no catalog-specific refusal).
 Hosts declare their own globals in a catalog of the same format
 (`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
 and the host's requirements). DMLS hovers and completes host globals from the

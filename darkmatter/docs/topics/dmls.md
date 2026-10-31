@@ -166,6 +166,53 @@ anchor. Transclusion targets
 and frontmatter file values are checked on disk, the way composition reads
 them.
 
+Hovering a link to a Markdown document shows its title, path, and heading,
+followed by the target's **summary**: the first of its top-level frontmatter
+properties `excerpt`, `summary`, `description`, and `about` that holds a
+nonempty string. Nulls, numbers, lists, blank strings, and pending
+`{{ … }}` or `$(…)` values are skipped, never shown as text. Links to other
+files, and `[[wiki]]` links, show no summary.
+
+```text
+docs/setup.md frontmatter:  summary: Install the toolchain and run the first build.
+hover over [setup](./setup.md) in another document:
+  **Setup**
+  → `/work/repo/docs/setup.md`
+  Install the toolchain and run the first build.
+```
+
+## `$schema` and `file` values
+
+A `$schema` string is looked up in the schema roots, not beside the document:
+a bare name searches the folder `SCHEMAS_DIR` names, then the package's,
+package area's, and file tree root's `schemas/` folders, then `~/schemas/`,
+and the first one holding the file wins. An explicit `./` or `../` path
+resolves from the document's folder only. The document link,
+go-to-definition, hover, and validation always select the same file (see
+[Schema roots](./schemas/definition.md#schema-roots)).
+
+When the file does not exist, validation still reports it, but the link
+opens the path the file would be created at (the first existing schema root
+for a bare name, else beside the document). DMLS creates nothing. A
+malformed reference, a missing anchor, an unreadable location, and a remote
+URL get no link at all.
+
+Hovering a value, rather than its key, explains the reference:
+
+```yaml
+$schema: review.yaml   # the target's description, the first 10 lines of its
+                       # definition, and "Resolves to schemas/review.yaml";
+                       # or the searched roots and the Missing: creation path
+source: ./draft.md     # file(eager): "Resolves to …", or that the file does not
+                       # exist yet and must exist at run time
+```
+
+A well-formed `file(...)` value whose file is missing is **not** an editor
+diagnostic, even when the property is `eager`: you may not have written the
+file yet. The hover says whether `md` will require it, and `md compose`
+still fails on a missing `eager` file. A malformed reference, a missing
+context, and an I/O failure remain diagnostics.
+
 ## Map and filter in the editor
 
 DMLS analyzes `::map` and `::filter` regions without running them: it
@@ -178,7 +225,10 @@ completes and hovers locals using the same scope the composer uses. See
 ## Learn more
 
 - [How DMLS resolves file references](../../dmls/docs/file-references.md):
-  the editor-facing contract, including failure classes on diagnostics
+  the editor-facing contract, including `$schema` lookup, the creation-path
+  link, and failure classes on diagnostics
+- [DMLS hover effects](../../dmls/docs/hover.md): every `$schema` and `file`
+  value hover outcome, and the link summary
 - [LSP architecture](../lsp/architecture.md#file-resolution-contexts): the
   context cache, its keys, and invalidation
 - [DMLS diagnostics](../../dmls/docs/diagnostics.md#file-resolution-context-source-darkmattercontext):

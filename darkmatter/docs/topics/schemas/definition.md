@@ -21,7 +21,7 @@ This topic covers how Darkmatter applies schemas: the `$schema` property, the ba
 `$schema` is **reserved** by Darkmatter inside frontmatter. Its value may be:
 
 1. An inline **SimplifiedSchema** dictionary.
-2. A string `FileReference` (resolved via `biscuit-file`) to a `.yaml` / `.json` file containing either a SimplifiedSchema or a JSON Schema.
+2. A string `FileReference` (resolved via `biscuit-file`) to a YAML schema document with a top-level `$schema`, or a `.json` JSON Schema declaring Draft 2020-12; see [What a `$schema` Reference May Point At](#what-a-schema-reference-may-point-at).
 3. A YAML sequence — a [root-level union](../../../../simplified-schema/docs/topics/language/unions.md#root-level-unions) where each arm is a complete object schema.
 
 The key is stripped from the frontmatter before validation, so a raw JSON Schema with `additionalProperties: false` will not reject every document for carrying a `$schema` field.
@@ -38,6 +38,188 @@ $schema:
 ---
 $schema: ./schemas/post.yaml
 ---
+```
+
+A bare file name such as `$schema: post.yaml` is looked up in the
+[schema roots](#schema-roots), in order; write `./post.yaml` for a file beside
+the document. A missing file is an error.
+
+### What a `$schema` Reference May Point At
+
+A `$schema` that names a file accepts two kinds of file. Every other file is
+an error that names it, so a typo or a stray data file can never silently
+validate nothing:
+
+| Target | Valid? |
+|---|---|
+| A YAML schema document with a top-level `$schema` (a mapping, a [root union](../../../../simplified-schema/docs/topics/language/unions.md#root-level-unions) sequence, or a reference to another schema file) | yes, if the payload and the files it uses are valid |
+| A `.json` object declaring `"$schema": "https://json-schema.org/draft/2020-12/schema"` | yes, if it is a valid Draft 2020-12 schema |
+| A YAML file with no top-level `$schema`, including a `kind: schema` file that exports only `types` | **no**: import its types with `Name@file.yaml` instead |
+| A `.json` file that is not a Draft 2020-12 JSON Schema document | **no** |
+
+The same rules apply to each file arm of a root union, to a schema file
+that delegates with `$schema: ./other.yaml`, and to a trigger's payload. The
+file's extension decides how it is read: `.json` (in any letter case) is
+JSON, everything else is YAML.
+
+#### YAML schema documents
+
+A YAML file is a schema document when its top-level keys form one of these
+envelopes:
+
+| Type | Identifier | Allowed top-level keys |
+|---|---|---|
+| `schema` | `kind: schema` | `$schema`, `types`, `description` (a string), `categories`; each is optional, but at least one of `$schema` or `types` is required |
+| informal `schema` | no `kind` | `$schema` (required), `types`, `description` (a string), `categories` |
+| `schema-trigger` | `kind: schema-trigger` | match rules and a `$schema` payload; see [Repository Trigger Schemas](#repository-trigger-schemas) |
+
+Any other top-level key is a malformed-envelope error. Only a document with
+a `$schema` property can be a Markdown document's `$schema` target; a
+`types`-only `schema` document is a library that other schemas import from.
+A `schema-trigger` file activates by placement and match, never by
+reference: naming one in `$schema` is an error that tells you which payload
+file to reference instead.
+
+```yaml
+# schemas/post.yaml: an informal schema, accepted as a `$schema` target
+description: A blog post
+$schema:
+    title: string(required)
+    tags: string[]
+```
+
+```yaml
+# schemas/people.yaml: a `types`-only library, never a `$schema` target
+kind: schema
+types:
+    person:
+        name: string(required)
+```
+
+A global catalog such as Darkmatter's own
+[`schemas/darkmatter.yaml`](../../../schemas/darkmatter.yaml) is a `kind: schema`
+document with a `$schema` mapping. It types the baseline only because the
+code registers it; a document whose `$schema` names it gets the catalog's
+entries as ordinary, optional document properties.
+
+The full envelope grammar, including `types` and `categories`, is in
+[Standalone Schema Documents](../../../../simplified-schema/docs/topics/language/schema-documents.md#standalone-schema-documents).
+
+#### JSON schema files
+
+A `.json` file is a schema only when its root is an object whose `$schema`
+is exactly `https://json-schema.org/draft/2020-12/schema`. It is then
+checked against the Draft 2020-12 meta-schema, offline; declaring the
+dialect does not by itself make the file valid.
+
+| JSON target | Outcome |
+|---|---|
+| An object declaring the 2020-12 URI | accepted, then checked as a schema (`InvalidJsonSchema` when the meta-schema rejects it) |
+| An object with no `$schema`, or a non-object root (array, boolean, number, string) | not a schema (`NotASchemaDocument`); the message suggests declaring `"$schema": "https://json-schema.org/draft/2020-12/schema"` |
+| An object declaring another dialect, such as `http://json-schema.org/draft-07/schema#` | `UnsupportedJsonDialect`, naming the declared URI |
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A blog post",
+  "type": "object",
+  "properties": { "title": { "type": "string" } },
+  "required": ["title"]
+}
+```
+
+#### How a target is classified
+
+```mermaid
+flowchart TD
+    F[file the reference selects] --> X{".json extension?"}
+    X -->|no: YAML| K{top-level keys}
+    K -->|"has $schema, all keys allowed"| OKY[SimplifiedSchema target]
+    K -->|"kind: schema with only types"| TO["NotASchemaDocument (TypesOnly)"]
+    K -->|"an unsupported key, or kind: schema with neither"| ME[malformed envelope: SchemaDocument]
+    K -->|"no $schema, or not a mapping"| NS[NotASchemaDocument]
+    X -->|yes: JSON| O{"an object with a string $schema?"}
+    O -->|no| NJ[NotASchemaDocument, with the declare-the-dialect hint]
+    O -->|yes| D{"exactly the 2020-12 URI?"}
+    D -->|no| UD[UnsupportedJsonDialect]
+    D -->|yes| V{meta-schema valid?}
+    V -->|no| IJ[InvalidJsonSchema]
+    V -->|yes| OKJ[raw JSON Schema target]
+```
+
+Every error names the file and the reason; the
+[Diagnostics](../../../../simplified-schema/docs/topics/diagnostics.md#when-a-file-is-not-a-schema-target)
+page lists each reason and its hint. A file at the winning location with
+invalid contents stays the selected file: its error is reported, and no
+copy in a later schema root is tried in its place.
+
+#### The `description` property
+
+Both YAML `schema` forms accept a top-level `description` string, and a JSON
+schema has the standard `description` keyword. It says what the schema is
+for, and editors show it first when you hover a `$schema` value that names
+the file. It does not become a document property and does not affect
+validation. In YAML it must be a string (`""` is allowed); any other value
+is a malformed-envelope error.
+
+```yaml
+kind: schema
+description: Frontmatter for release notes
+$schema:
+    version: string(required)
+```
+
+#### Migrating a file that is no longer a target
+
+Two kinds of file that `$schema` once accepted are now rejected.
+
+**Raw JSON Schema written in YAML.** A YAML file whose `$schema` is a
+JSON Schema dialect URI, beside JSON Schema keywords, is a malformed envelope,
+and the error says to rewrite it as JSON:
+
+```yaml
+# schemas/post.yaml: rejected, unsupported top-level key(s): type, properties
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+    title: { type: string }
+```
+
+Move it to a `.json` file that declares the 2020-12 URI, and point `$schema`
+at the new file (`$schema: post.json`):
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": { "title": { "type": "string" } }
+}
+```
+
+A JSON file without the declaration has no other migration path: add
+`"$schema": "https://json-schema.org/draft/2020-12/schema"`.
+
+**A `types`-only file.** A `kind: schema` file with only `types` exports no
+document properties, so `$schema: people.yaml` fails with a hint to use a
+named-type import. Import the type you need instead:
+
+```yaml
+---
+$schema:
+    author: person@people.yaml
+---
+```
+
+Or, when the file should describe whole documents, give it a `$schema`
+beside its `types`:
+
+```yaml
+kind: schema
+$schema:
+    author: person
+types:
+    person:
+        name: string(required)
 ```
 
 ## The SimplifiedSchema Language
