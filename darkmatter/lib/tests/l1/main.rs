@@ -182,6 +182,7 @@ mod validation_contract_parity;
 mod schema_expression_syntax_checks;
 mod schema_grammar_descriptors;
 mod schema_nested_template_deferral;
+mod schema_reference_parity;
 mod schema_roots;
 mod schema_yaml_spellings;
 mod schemas_conjunctive_lowering;

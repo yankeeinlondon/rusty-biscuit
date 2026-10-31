@@ -1168,26 +1168,36 @@ never evaluated. This holds even when the earlier file fails to load.
 
 #### Schema roots
 
-Darkmatter and DMLS look for schema files in exactly five folders, searched
-most local first:
+Darkmatter and DMLS look for schema files in exactly five folders.
+`SCHEMAS_DIR` comes first, so a team or host override outranks every copy in
+the repository; the rest are searched most local first:
 
 | # | Root | Present when | Example |
 |---|------|--------------|---------|
-| 1 | package root | the document is inside a package of a monorepo | `{package}/schemas/` |
-| 2 | package-area root | the document is inside a package area | `claudine/schemas/` |
-| 3 | file tree root | always | `{repo}/schemas/` in a repository |
-| 4 | the folder `SCHEMAS_DIR` names | the variable is set | `$SCHEMAS_DIR/` |
+| 1 | the folder `SCHEMAS_DIR` names | the variable is set | `$SCHEMAS_DIR/` |
+| 2 | package root | the document is inside a package of a monorepo | `{package}/schemas/` |
+| 3 | package-area root | the document is inside a package area | `claudine/schemas/` |
+| 4 | file tree root | always | `{repo}/schemas/` in a repository |
 | 5 | your home folder | a home folder is known | `~/schemas/` |
 
 ```mermaid
 flowchart LR
-    D[document being checked] --> P["1. package root/schemas"]
-    P --> A["2. package-area root/schemas"]
-    A --> T["3. file tree root/schemas"]
-    T --> S["4. $SCHEMAS_DIR (if set)"]
-    S --> H["5. ~/schemas"]
+    D[document being checked] --> S["1. $SCHEMAS_DIR (if set)"]
+    S --> P["2. package root/schemas"]
+    P --> A["3. package-area root/schemas"]
+    A --> T["4. file tree root/schemas"]
+    T --> H["5. ~/schemas"]
     H --> R["the first root holding a file name wins"]
 ```
+
+This one order applies everywhere a schema file is looked up by bare name: a
+`$schema` value, a named-type import (`Name@shared.yaml`), an
+`example(shared.yaml)` constraint, a trigger's payload, and which trigger file
+shadows another. With `SCHEMAS_DIR=/opt/team/dm-defs` and both
+`/opt/team/dm-defs/shared.yaml` and `{package}/schemas/shared.yaml` present,
+`$schema: shared.yaml` in a package document selects the `SCHEMAS_DIR` copy.
+If the selected copy is broken, that error is reported; the package copy is
+never used in its place.
 
 - The package and package area are those of the **document**, not of the
   directory you launched `md` from. `md` searches the roots only for a
@@ -1202,6 +1212,14 @@ flowchart LR
 - A folder that does not exist is skipped. A root that names the same folder
   as an earlier one (say `SCHEMAS_DIR` pointing at `~/schemas`) is searched
   once, at the earlier position.
+- Because `SCHEMAS_DIR` is first, pointing it at a package, package-area, or
+  file tree `schemas/` folder makes that folder the `SCHEMAS_DIR` root, and
+  the repository root of the same folder is reported as its duplicate. The
+  folder's triggers then read bare, `./`, and `../` `$path` patterns from the
+  document's tree root, as every `SCHEMAS_DIR` trigger does, rather than
+  from the folder holding `schemas/`. With
+  `SCHEMAS_DIR={repo}/area/pkg/schemas`, a trigger there matching
+  `docs/*.md` applies to `{repo}/docs/x.md`, not `{repo}/area/pkg/docs/x.md`.
 - A folder Darkmatter cannot inspect or read is an **error**, never a skipped
   root. If `locked/` has mode `000`, a root at `locked/anchor/schemas/` stops
   trigger discovery and bare-name `$schema` lookup with an I/O error naming
@@ -1319,10 +1337,10 @@ fails the command with the I/O error instead of a listing:
 
 ```text
 Schema roots (search order):
-1. package root: none (the document is not in a package)
-2. package-area root: /repo/claudine/schemas
-3. file tree root: /repo/schemas
-4. SCHEMAS_DIR: unset
+1. SCHEMAS_DIR: unset
+2. package root: none (the document is not in a package)
+3. package-area root: /repo/claudine/schemas
+4. file tree root: /repo/schemas
 5. home: /home/me/schemas (absent)
 ```
 

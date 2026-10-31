@@ -1000,8 +1000,10 @@ flowchart TD
 
 ### On disk
 
-Darkmatter searches five locations, most local first, and the first file of a
-name **shadows** every later file of that name. A document whose package area
+Darkmatter searches five locations: the folder `SCHEMAS_DIR` names first,
+then the package, package-area, and repository-root `schemas/` folders, then
+`~/schemas`. The first file of a name **shadows** every later file of that
+name, so a bundle in `SCHEMAS_DIR` replaces the one in `claudine/schemas/`. A document whose package area
 is `claudine/` therefore reaches `claudine/schemas/` with no setup. `md schema
 triggers <file>` lists the locations, the shadowed files, and which triggers
 matched.

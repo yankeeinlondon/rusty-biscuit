@@ -602,13 +602,13 @@ fn embedded_non_string_top_level_trigger_key_is_an_error() {
 
 // ── AC13: schema locations and the last-resort rule ────────────────────────
 
-/// The schema roots a fixture can write to, most local first.
+/// The schema roots a fixture can write to, in search order.
 #[derive(Clone, Copy, Debug)]
 enum Root {
+    SchemasDir,
     Package,
     Area,
     Tree,
-    SchemasDir,
     Home,
 }
 
@@ -754,16 +754,16 @@ fn is_load_failure(error: &CompositionError) -> bool {
     matches!(error, CompositionError::SchemaLoad { .. } | CompositionError::SchemaParse { .. })
 }
 
-/// The nearest root holding `claudine.yaml` wins over every farther one, and
+/// The first root holding `claudine.yaml` wins over every later one, and
 /// with no disk copy left the embedded one applies.
 #[test]
 fn nearest_claudine_trigger_shadows_farther_ones() {
     let locations = Locations::new();
     let order = [
+        (Root::SchemasDir, "defs"),
         (Root::Package, "package"),
         (Root::Area, "area"),
         (Root::Tree, "tree"),
-        (Root::SchemasDir, "defs"),
         (Root::Home, "home"),
     ];
     for (root, tier) in order {
@@ -774,7 +774,7 @@ fn nearest_claudine_trigger_shadows_farther_ones() {
     let kinds: Vec<SchemaRootKind> = roots.searched().iter().map(|root| root.kind).collect();
     assert_eq!(
         kinds,
-        [SchemaRootKind::Package, SchemaRootKind::PackageArea, SchemaRootKind::Tree, SchemaRootKind::SchemasDir, SchemaRootKind::Home],
+        [SchemaRootKind::SchemasDir, SchemaRootKind::Package, SchemaRootKind::PackageArea, SchemaRootKind::Tree, SchemaRootKind::Home],
         "the fixture has all five roots"
     );
 

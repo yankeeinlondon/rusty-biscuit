@@ -273,10 +273,10 @@ fn md_and_dmls_give_the_same_roots_triggers_and_bare_names() {
     assert_eq!(
         searched,
         [
+            (SchemaRootKind::SchemasDir, fixture.defs()),
             (SchemaRootKind::Package, package.join("schemas")),
             (SchemaRootKind::PackageArea, repo.join("area/schemas")),
             (SchemaRootKind::Tree, repo.join("schemas")),
-            (SchemaRootKind::SchemasDir, fixture.defs()),
             (SchemaRootKind::Home, fixture.home().join("schemas")),
         ]
     );

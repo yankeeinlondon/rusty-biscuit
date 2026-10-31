@@ -1062,16 +1062,16 @@ mod tests {
         let fixture = Fixture::new();
         let mut registries = TriggerRegistries::default();
         let expected = [
-            (fixture.tree_doc(), vec!["tree.trigger.yaml", "env.trigger.yaml", "home.trigger.yaml"]),
+            (fixture.tree_doc(), vec!["env.trigger.yaml", "tree.trigger.yaml", "home.trigger.yaml"]),
             (
                 fixture.area_doc(),
-                vec!["area.trigger.yaml", "tree.trigger.yaml", "env.trigger.yaml", "home.trigger.yaml"],
+                vec!["env.trigger.yaml", "area.trigger.yaml", "tree.trigger.yaml", "home.trigger.yaml"],
             ),
             // The package's ordinary `tree.trigger.yaml` shadows the tree
             // root's trigger of that name.
             (
                 fixture.pkg_doc(),
-                vec!["pkg.trigger.yaml", "area.trigger.yaml", "env.trigger.yaml", "home.trigger.yaml"],
+                vec!["env.trigger.yaml", "pkg.trigger.yaml", "area.trigger.yaml", "home.trigger.yaml"],
             ),
         ];
         for (doc, triggers) in expected {
@@ -1226,7 +1226,8 @@ mod tests {
         write(&created, &trigger("added", "tree-payload.yaml"));
         registries.invalidate_paths(std::slice::from_ref(&created));
         let added = fixture.ready(&mut registries, &doc);
-        assert_eq!(names(&added.registry)[0], "added.trigger.yaml");
+        // First in the tree root, after the `SCHEMAS_DIR` root's trigger.
+        assert_eq!(names(&added.registry)[..2], ["env.trigger.yaml", "added.trigger.yaml"]);
         assert_eq!(added.registry, scan(&fixture.context(&doc).for_source(&doc)).unwrap());
     }
 
@@ -1284,7 +1285,7 @@ mod tests {
         write(&missing, &payload("late_model"));
         registries.invalidate_paths(std::slice::from_ref(&missing));
         let recovered = fixture.ready(&mut registries, &fresh_doc);
-        assert_eq!(names(&recovered.registry)[0], "tree.trigger.yaml");
+        assert_eq!(names(&recovered.registry), ["env.trigger.yaml", "tree.trigger.yaml", "home.trigger.yaml"]);
         assert!(recovered.registry.findings.is_empty());
         let cleared = registries.take_transitions();
         assert!(cleared.iter().any(|transition| transition.path == envelope && transition.finding.is_none()));

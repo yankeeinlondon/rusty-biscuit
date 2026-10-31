@@ -175,9 +175,11 @@ Important contracts:
   kinded document and must retain its root `kind` declaration.
 - Triggers and bare-name `$schema` lookup use the five schema roots of the
   **document's** context (`schemas::roots::SchemaRoots::for_document`):
-  package, package area, `base_dir()`, `SCHEMAS_DIR` (the folder itself, from
-  `ctx.env()`), `~/schemas`. Never walk ancestors or read the process
-  environment for them. `$path` patterns are `GlobReference`s; see
+  `SCHEMAS_DIR` (the folder itself, from `ctx.env()`), package, package area,
+  `base_dir()`, `~/schemas`. Never walk ancestors or read the process
+  environment for them. Every bare-name consumer (`$schema`, `Name@file`,
+  `example(file)`, trigger payloads) selects through
+  `simplified_schema::resolve::select_schema_file`; never add another copy. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
 - The runtime baseline is compiled in with its imports (Content Policy's
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,

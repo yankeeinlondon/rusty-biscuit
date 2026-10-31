@@ -248,10 +248,10 @@ these markers. See [Universal Constraints](../../../../simplified-schema/docs/to
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 
-1. in a monorepo, `{package-root}/schemas` of the document's package
-2. in a monorepo, `{package-area-root}/schemas` of the document's package area
-3. `{root}/schemas`
-4. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended)
+1. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended), so a team or host override outranks every repository copy
+2. in a monorepo, `{package-root}/schemas` of the document's package
+3. in a monorepo, `{package-area-root}/schemas` of the document's package area
+4. `{root}/schemas`
 5. `~/schemas`
 
 `{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). `md` searches these folders only for a document in a repository; DMLS searches them for any document inside an open workspace folder. Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else, such as `{package-root}/docs/schemas`, are not searched. An earlier folder shadows a file of the same name in every later one.

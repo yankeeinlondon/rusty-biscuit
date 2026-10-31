@@ -262,13 +262,13 @@ and [DMLS Schema Support](../topics/schemas/dmls-schema-support.md).
 ### Where schema files are found
 
 Each document has the five schema roots described in
-[Schema roots](../topics/schemas/definition.md#schema-roots), most local
-first:
+[Schema roots](../topics/schemas/definition.md#schema-roots), `SCHEMAS_DIR`
+first and then most local first:
 
-1. `{package}/schemas/`
-2. `{package area}/schemas/`
-3. `{file tree root}/schemas/` (the repository root in a repository)
-4. the folder `SCHEMAS_DIR` names
+1. the folder `SCHEMAS_DIR` names
+2. `{package}/schemas/`
+3. `{package area}/schemas/`
+4. `{file tree root}/schemas/` (the repository root in a repository)
 5. `~/schemas/`
 
 Only the **immediate** `.yaml` and `.yml` children of a root are read;

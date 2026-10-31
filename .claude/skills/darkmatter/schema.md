@@ -931,7 +931,11 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
 ## Schema roots and `$path` triggers
 
 - `SchemaRoots::for_document(&ctx)` (`schemas/roots.rs`) is the one root list:
-  package, package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`, each with a
+  `SCHEMAS_DIR`, package, package area, `base_dir()`, `~/schemas` (reorder
+  only the `candidates` array; `SchemaRootKind` variants follow it). When
+  `SCHEMAS_DIR` aliases a repository `schemas/` folder, the `SchemasDir` root
+  searches it (tree-root pattern base) and the later kind is
+  `Duplicate { of: SchemasDir }`. Each root has a
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
   states; DMLS and `md` share them through `triggers::scan(&ctx)` (DMLS

@@ -54,7 +54,7 @@ Before any schema intelligence can fire, DMLS must decide *which* schema applies
 flowchart TD
     BASE["Darkmatter base baseline"] --> MERGE["combined baseline"]
     EXT["extension baselines<br/>from .dmls.toml [schema.extensions.*]<br/>(globs match the document)"] --> MERGE
-    TRIG["trigger envelopes<br/>discovered in the five schema roots<br/>(package, area, tree root, SCHEMAS_DIR, ~/schemas)"] --> REGISTRY["trigger registry"]
+    TRIG["trigger envelopes<br/>discovered in the five schema roots<br/>(SCHEMAS_DIR, package, area, tree root, ~/schemas)"] --> REGISTRY["trigger registry"]
     MERGE --> ENGINE["DarkmatterSchemas::effective_for"]
     REGISTRY --> ENGINE
     DOC["document frontmatter<br/>(including its own $schema)"] --> ENGINE

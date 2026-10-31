@@ -342,8 +342,8 @@ which is never watched, so it takes effect on the next rescan or restart.
 
 The folders DMLS searches for trigger schemas and bare-name `$schema` files
 are **defined by each document's context**, not by `[workspace]`: the
-document's package, its package area, the repository root's `schemas/`, the
-folder `SCHEMAS_DIR` names, and `~/schemas` (see [Schema
+folder `SCHEMAS_DIR` names, the document's package, its package area, the
+repository root's `schemas/`, and `~/schemas`, in that order (see [Schema
 roots](../topics/schemas/definition.md#schema-roots)). `include`, `exclude`,
 `root`, and ignore files have no effect on them:
 

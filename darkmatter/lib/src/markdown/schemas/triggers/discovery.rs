@@ -2,9 +2,9 @@
 //! registry.
 //!
 //! Trigger schemas live in the [schema roots](crate::markdown::schemas::roots):
-//! the document's package, package-area, and tree root `schemas/` folders,
-//! the `SCHEMAS_DIR` folder, and `~/schemas`, most local first. Folders
-//! between the document and those roots are not searched.
+//! the `SCHEMAS_DIR` folder, the document's package, package-area, and tree
+//! root `schemas/` folders, and `~/schemas`, in that order. Folders between
+//! the document and those roots are not searched.
 //!
 //! ## Discovery contract
 //!
