@@ -57,7 +57,9 @@ pub use frontmatter::{
 };
 pub use analysis::FrontmatterAnalysis;
 pub use named_types::NamedTypeCatalog;
-pub use references::{SchemaReferenceFact, SchemaReferenceFacts};
+pub use references::{
+    PREVIEW_LINES, SchemaReferenceFact, SchemaReferenceFacts, SchemaTargetPreview, SchemaTargetVerdict,
+};
 pub use registry::{RegistrySummary, RootFileClass};
 pub use schema::{
     FrontmatterSchemaValue, MetaSchemaKind, SchemaAuthoringState, SchemaBundle,
@@ -925,7 +927,7 @@ impl OverlayCache {
             Err(error) => {
                 self.schema.remove(uri_key);
                 let schema_references =
-                    Arc::new(SchemaReferenceFacts::select(text, path, Err(&error), context));
+                    Arc::new(SchemaReferenceFacts::select(text, path, Err(&error), context, false));
                 return FrontmatterSchema {
                     schema_references,
                     ..FrontmatterSchema::new(SchemaOutcome::Failed(error))
@@ -976,7 +978,13 @@ impl OverlayCache {
         };
         let named_types = Arc::new(frontmatter_named_types(text, path, &schema_roots, context));
         let schema_references =
-            Arc::new(SchemaReferenceFacts::select(text, path, Ok(&schema_roots), context));
+            Arc::new(SchemaReferenceFacts::select(
+                text,
+                path,
+                Ok(&schema_roots),
+                context,
+                matches!(outcome, SchemaOutcome::Ready(_)),
+            ));
         let probes = schema_references.probes();
         let reference_suggestions = Arc::new(
             FrontmatterAst::parse(text)

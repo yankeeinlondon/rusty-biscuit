@@ -1185,7 +1185,16 @@ fn classify_scalar<'p>(
             None => ExpressionTyping::Undecodable,
         }
     };
-    ScalarTyping { file: file_atom(def).is_some(), expression }
+    // A synthesized item definition drops the array's own constraints, so an
+    // item is eager when its array property is.
+    let item_of_eager_array = matches!(path.last(), Some(FmPathSegment::Index(_)))
+        && memo.def_at(&path[..path.len() - 1]).is_some_and(is_eager);
+    ScalarTyping {
+        file: file_atom(def).is_some(),
+        eager: is_eager(def) || item_of_eager_array,
+        mixed_arms: atoms_of(def).iter().any(|atom| !is_file(atom)),
+        expression,
+    }
 }
 
 /// The typing of the one scalar entry `index`, from the snapshot when any
@@ -1575,9 +1584,18 @@ fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
 
 // ── Hover ─────────────────────────────────────────────────────────────────
 
-/// Hover on a frontmatter key: schema type/constraints/default/description, or
-/// a `ctx.*` generated-key annotation.
+/// Hover in the frontmatter. A `$schema` string value explains the file it
+/// selects; a type definition in an inline schema describes the type; an
+/// Expression-typed value gets the expression hover; a static `file` value
+/// says where it resolves. Anywhere else, and on every key, the hover is the
+/// property's schema type/constraints/default/description, or a `ctx.*`
+/// generated-key annotation.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    // A `$schema` string or root-union string item is a file reference, not
+    // a type definition, so it is answered before the schema-authoring hover.
+    if let Some(hover) = schema_value_hover::schema_value_hover(ctx, offset) {
+        return Some(hover);
+    }
     if let Some(hover) = meta_schema_hover(ctx, offset) {
         return Some(hover);
     }
@@ -1590,14 +1608,16 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     // (parsed form + `ctx.*`/function catalog); a cursor on its key falls
     // through to the schema hover describing the `expression` type. Any other
     // scalar inside a lifecycle stack gets the hover of its own `{{ … }}` span
-    // or `when` guard. Only the cursor's scalar is typed.
+    // or `when` guard. A static value of a `file`-typed property then says
+    // where it resolves. Only the cursor's scalar is typed.
     if let Some(index) = cursor_scalar(ast, offset)
         && let Some(typing) = scalar_typing(ctx, index)
     {
         let hover = match expression_value(ast, index, typing) {
             Some(value) => expression_hover(ctx, ast, &value, offset),
             None => stack_expression_hover(ctx, ast, index, offset),
-        };
+        }
+        .or_else(|| file_value_hover::file_value_hover(ctx, ast, index, typing));
         if hover.is_some() {
             return hover;
         }
@@ -1800,7 +1820,9 @@ fn alphanumeric_hover_lines(atom: &PropertyAtom) -> Vec<String> {
     ]
 }
 
-/// Hover content for a schema-declared property, at any nesting depth.
+/// Hover content for a schema-declared property, at any nesting depth: on
+/// its key, and on a value no value hover (`$schema`, expression, `file`)
+/// answered.
 ///
 /// A scalar sequence item hovers as its item definition, labeled with its
 /// dotted path and ranged on the item value it describes.
@@ -3148,7 +3170,9 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
     })
 }
 
+mod file_value_hover;
 mod named_references;
+mod schema_value_hover;
 
 #[cfg(test)]
 mod sequence_tests;

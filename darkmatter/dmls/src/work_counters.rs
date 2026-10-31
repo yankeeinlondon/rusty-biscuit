@@ -32,7 +32,8 @@
 //! ([`record_item_synthesis`]), scalar entries classified against the schema
 //! ([`record_scalar_classification`]), whole-document typing walks
 //! ([`record_typing_walk`]), and whole-document lifecycle stack-expression
-//! walks ([`record_stack_walk`]).
+//! walks ([`record_stack_walk`]). Each `$schema` target read for a hover
+//! preview is [`record_schema_target_inspection`].
 //!
 //! [`record_definition_lookups`] starts recording the name of every recursive
 //! definition an editor walk opens, read back with [`definition_lookups`], so
@@ -64,6 +65,7 @@ static ITEM_SYNTHESES: AtomicUsize = AtomicUsize::new(0);
 static SCALAR_CLASSIFICATIONS: AtomicUsize = AtomicUsize::new(0);
 static TYPING_WALKS: AtomicUsize = AtomicUsize::new(0);
 static STACK_WALKS: AtomicUsize = AtomicUsize::new(0);
+static SCHEMA_TARGET_INSPECTIONS: AtomicUsize = AtomicUsize::new(0);
 static RECORDING_DEFINITION_LOOKUPS: AtomicBool = AtomicBool::new(false);
 static DEFINITION_LOOKUPS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -92,6 +94,9 @@ pub struct WorkCounts {
     pub typing_walks: usize,
     /// Whole-document lifecycle stack-expression walks.
     pub stack_walks: usize,
+    /// Files a `$schema` reference selected, read and inspected for a hover
+    /// preview.
+    pub schema_target_inspections: usize,
     /// Wiki universes constructed.
     pub wiki_universes: usize,
     /// Wiki path facts (canonical logical path and owning root) computed.
@@ -117,6 +122,7 @@ impl WorkCounts {
             scalar_classifications: self.scalar_classifications - earlier.scalar_classifications,
             typing_walks: self.typing_walks - earlier.typing_walks,
             stack_walks: self.stack_walks - earlier.stack_walks,
+            schema_target_inspections: self.schema_target_inspections - earlier.schema_target_inspections,
             wiki_universes: self.wiki_universes - earlier.wiki_universes,
             wiki_path_facts: self.wiki_path_facts - earlier.wiki_path_facts,
             wiki_portability_keys: self.wiki_portability_keys - earlier.wiki_portability_keys,
@@ -138,6 +144,7 @@ impl WorkCounts {
             scalar_classifications: self.scalar_classifications + other.scalar_classifications,
             typing_walks: self.typing_walks + other.typing_walks,
             stack_walks: self.stack_walks + other.stack_walks,
+            schema_target_inspections: self.schema_target_inspections + other.schema_target_inspections,
             wiki_universes: self.wiki_universes + other.wiki_universes,
             wiki_path_facts: self.wiki_path_facts + other.wiki_path_facts,
             wiki_portability_keys: self.wiki_portability_keys + other.wiki_portability_keys,
@@ -160,6 +167,7 @@ pub fn work_counts() -> WorkCounts {
         scalar_classifications: SCALAR_CLASSIFICATIONS.load(Ordering::SeqCst),
         typing_walks: TYPING_WALKS.load(Ordering::SeqCst),
         stack_walks: STACK_WALKS.load(Ordering::SeqCst),
+        schema_target_inspections: SCHEMA_TARGET_INSPECTIONS.load(Ordering::SeqCst),
         wiki_universes: WIKI_UNIVERSES.load(Ordering::SeqCst),
         wiki_path_facts: WIKI_PATH_FACTS.load(Ordering::SeqCst),
         wiki_portability_keys: WIKI_PORTABILITY_KEYS.load(Ordering::SeqCst),
@@ -223,6 +231,11 @@ pub(crate) fn record_typing_walk() {
 /// Counts one whole-document lifecycle stack-expression walk.
 pub(crate) fn record_stack_walk() {
     STACK_WALKS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Counts one schema target read and inspected for its hover preview.
+pub(crate) fn record_schema_target_inspection() {
+    SCHEMA_TARGET_INSPECTIONS.fetch_add(1, Ordering::SeqCst);
 }
 
 /// Counts one wiki universe constructed.
@@ -326,6 +339,7 @@ mod tests {
         record_scalar_classification();
         record_typing_walk();
         record_stack_walk();
+        record_schema_target_inspection();
         record_wiki_universe();
         record_wiki_path_facts();
         record_wiki_path_facts();
@@ -344,6 +358,7 @@ mod tests {
             scalar_classifications: 1,
             typing_walks: 1,
             stack_walks: 1,
+            schema_target_inspections: 1,
             wiki_universes: 1,
             wiki_path_facts: 2,
             wiki_portability_keys: 1,

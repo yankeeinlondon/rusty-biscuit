@@ -145,6 +145,12 @@ impl AnalysisIdentity {
 pub(crate) struct ScalarTyping {
     /// Whether any arm of the definition is a `file` type.
     pub(crate) file: bool,
+    /// Whether the definition, or for a sequence item the array property
+    /// holding it, declares `eager`.
+    pub(crate) eager: bool,
+    /// Whether an arm of the definition is not a `file` type, so the value
+    /// may be read as something other than a file reference.
+    pub(crate) mixed_arms: bool,
     pub(crate) expression: ExpressionTyping,
 }
 
@@ -162,7 +168,8 @@ pub(crate) enum ExpressionTyping {
 
 impl ScalarTyping {
     /// The outcome for an entry no definition reaches.
-    pub(crate) const UNRESOLVED: Self = Self { file: false, expression: ExpressionTyping::No };
+    pub(crate) const UNRESOLVED: Self =
+        Self { file: false, eager: false, mixed_arms: false, expression: ExpressionTyping::No };
 }
 
 /// Schema work shared by every snapshot of one overlay state and keyed by

@@ -73,6 +73,7 @@ mod type_scope_ownership_guard;
 mod undeclared_property;
 mod union_item_editor;
 mod validation_timing_log;
+mod value_hovers;
 mod wiki_universe_equivalence;
 mod workspace_file_list;
 mod workspace_formatting_settings;

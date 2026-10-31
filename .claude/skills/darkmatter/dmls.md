@@ -205,7 +205,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   a broken link; the list decides graph documents, never existence. A
   Markdown `File` target an open document needs (`prepare_targets`, hover,
   definition, anchor completion) is parsed as a dependency
-  (`DocumentRecord::dependency`: headings and transclusions only; excluded
+  (`DocumentRecord::dependency`: headings, transclusions, and summary only; excluded
   from wiki candidates, path completion, workspace symbols, `transcluded_by`,
   and the index store; its folder joins the schema-location watches; tests in
   `tests/l1/referenced_targets.rs`). Opening a dependency is a role change:
@@ -349,6 +349,23 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `creation` path (never a sibling). A `NoMatch` file-reference problem
   without `caller_file` is not published (`diagnostics/frontmatter.rs`); `md`
   keeps the runtime eager check.
+- Value hovers: each `Found` fact also carries `target: SchemaTargetPreview`
+  (format, description, first 10 lines, total, verdict), built on the same
+  cache miss from `simplified_schema::resolve::inspect_schema_target` and
+  counted by `work_counters::schema_target_inspections`; a hover reads no
+  file. A target is `Valid` when the schema assembled, else that one
+  reference is re-resolved. `frontmatter::hover` order: `$schema` value
+  (`frontmatter/schema_value_hover.rs`), meta-schema, expression/stack, then
+  `file` value (`frontmatter/file_value_hover.rs`, probes disk; skipped for
+  `{{ expr }}`/`$(...)`, kept for biscuit-file `{{VAR}}`), then key/schema
+  hover. All wording lives in the pure `providers/reference_hover.rs`.
+- Body-link summaries: `DocumentIndex::summary` (`graph/substrate.rs::summary_text`,
+  first nonempty, non-pending YAML string of `excerpt`/`summary`/`description`/`about`)
+  is content state on the per-snapshot `DocumentState` (`Clone`, not `Copy`),
+  exposed as `DocumentRecord::summary`; never in the shared `DocumentTable` or
+  `FileFacts` (`into_index` yields `None`, so `FACTS_VERSION` is unchanged).
+  `providers/hover.rs::resolved_hover` appends it last; existing target
+  preparation and invalidation refresh it (`referenced_targets.rs` summary cells).
 - `dmls/tests/l1/schema_roots_parity.rs` is the `md` vs DMLS parity gate for
   schema roots, applied triggers, bare-name `$schema`, and `$path`
   definition errors; DMLS shows missing required properties only with

@@ -22,6 +22,7 @@ pub mod hover;
 #[cfg(test)]
 mod lifecycle_host_tests;
 pub mod location;
+pub mod reference_hover;
 pub mod references;
 pub mod rename;
 pub mod semantic_tokens;

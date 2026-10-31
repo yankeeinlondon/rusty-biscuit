@@ -3,9 +3,9 @@
 //! Each test opens `repo/docs/x.md` declaring a bare-name `$schema` in a live
 //! session and changes the schema files on disk, reporting each change
 //! through `workspace/didChangeWatchedFiles`. After every step the document
-//! link, the definition at the `$schema` value, and every published
-//! diagnostic that names a schema file must name the same file, and all
-//! three must already reflect the step.
+//! link, the definition at the `$schema` value, the hover on that value, and
+//! every published diagnostic that names a schema file must name the same
+//! file, and all four must already reflect the step.
 //!
 //! The fixture holds a repository (`repo`, the only workspace folder) and,
 //! outside it, a fixture `HOME` and the folder `SCHEMAS_DIR` names
@@ -118,6 +118,7 @@ fn initialize_params(folder: &Path) -> Value {
 struct Session<'workspace> {
     lsp: LspFixture<'workspace>,
     doc: String,
+    repo: PathBuf,
     /// The `$schema` value's line and its first and last-plus-one columns.
     value: (u32, u32, u32),
 }
@@ -135,7 +136,7 @@ impl<'workspace> Session<'workspace> {
             json!({ "textDocument": { "uri": doc, "languageId": "markdown", "version": 1, "text": text } }),
         );
         let start = "$schema: ".len() as u32;
-        Self { lsp, doc, value: (1, start, start + reference.len() as u32) }
+        Self { lsp, doc, repo: fixture.repo(), value: (1, start, start + reference.len() as u32) }
     }
 
     /// Writes `text` to `path` and reports it, created or changed.
@@ -180,7 +181,12 @@ impl<'workspace> Session<'workspace> {
             .iter()
             .filter_map(|location| location["uri"].as_str().map(path_of))
             .collect();
-        Observation { diagnostics, links, definition, value_range: self.value_range() }
+        let hover = self.lsp.request(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": doc }, "position": { "line": line, "character": (start + end) / 2 } }),
+        );
+        let hover = hover.result.and_then(|hover| hover["contents"]["value"].as_str().map(str::to_string)).unwrap_or_default();
+        Observation { diagnostics, links, definition, hover, value_range: self.value_range(), repo: self.repo.clone() }
     }
 
     fn value_range(&self) -> Value {
@@ -199,7 +205,10 @@ struct Observation {
     diagnostics: Vec<Value>,
     links: Vec<Value>,
     definition: Vec<PathBuf>,
+    /// The Markdown of the hover on the `$schema` value.
+    hover: String,
     value_range: Value,
+    repo: PathBuf,
 }
 
 impl Observation {
@@ -215,6 +224,7 @@ impl Observation {
         assert_eq!(link["range"], self.value_range, "{step}: the link spans the value");
         assert_eq!(path_of(link["target"].as_str().unwrap()), expected, "{step}: link target");
         assert_eq!(self.definition, vec![expected.clone()], "{step}: definition target");
+        assert_eq!(self.hover_target().as_ref(), Some(&expected), "{step}: hover names the file: {}", self.hover);
         for diagnostic in &self.diagnostics {
             for related in diagnostic["relatedInformation"].as_array().into_iter().flatten() {
                 let related = path_of(related["location"]["uri"].as_str().unwrap());
@@ -227,6 +237,25 @@ impl Observation {
                 assert!(message.contains(named.as_ref()), "{step}: `{message}` names {named}");
             }
         }
+    }
+
+    /// The file the value hover names: its link for an existing file, else
+    /// the `Missing:` creation path (repository-relative inside the
+    /// repository).
+    fn hover_target(&self) -> Option<PathBuf> {
+        if let Some((_, rest)) = self.hover.rsplit_once("](") {
+            return Some(path_of(rest.strip_suffix(')').unwrap_or(rest).split(')').next().unwrap()));
+        }
+        let (_, rest) = self.hover.split_once("Missing: `")?;
+        let display = rest.split('`').next()?;
+        let path = Path::new(display);
+        Some(if path.is_absolute() { path.to_path_buf() } else { self.repo.join(display) })
+    }
+
+    /// Asserts the value hover previews a valid schema whose definition
+    /// holds `line`.
+    fn assert_hover_previews(&self, line: &str, step: &str) {
+        assert!(self.hover.contains("Schema Definition:") && self.hover.contains(line), "{step}: {}", self.hover);
     }
 
     fn codes(&self) -> Vec<&str> {
@@ -261,6 +290,11 @@ impl Observation {
             "{step}"
         );
         assert_eq!(diagnostic["range"], self.value_range, "{step}: ranged on the value");
+        assert!(
+            self.hover.starts_with(&format!("`{reference}` does not match a schema file.")),
+            "{step}: the hover explains the miss: {}",
+            self.hover
+        );
     }
 
     /// Asserts the only diagnostic is a load failure of the selected file.
@@ -269,6 +303,7 @@ impl Observation {
         assert_eq!(self.codes(), [PREPARE], "{step}: {self:#?}");
         assert!(messages[0].starts_with("invalid "), "{step}: a load failure, not a miss: {messages:?}");
         assert_eq!(self.diagnostics[0]["range"], self.value_range, "{step}: ranged on the value");
+        assert!(self.hover.contains("could not be used as a schema"), "{step}: {}", self.hover);
     }
 }
 
@@ -287,6 +322,7 @@ fn editing_the_selected_file_refreshes_diagnostics_and_keeps_navigation() {
     session.write(&shape, &yaml_schema("number"));
     let edited = session.observe();
     assert_eq!(edited.mismatch(), Some("number"), "the edit is validated: {edited:#?}");
+    edited.assert_hover_previews("title: number", "edited");
     edited.assert_agree_on(&shape, "edited");
 
     session.write(&shape, &yaml_schema("string"));
@@ -316,6 +352,7 @@ fn deleting_the_selected_file_moves_to_the_next_candidate_then_the_creation_path
     session.delete(&tree);
     let fallback = session.observe();
     assert_eq!(fallback.mismatch(), Some("number"), "the home copy is selected: {fallback:#?}");
+    fallback.assert_hover_previews("title: number", "tree copy deleted");
     fallback.assert_agree_on(&home, "tree copy deleted");
 
     session.delete(&home);
@@ -346,6 +383,7 @@ fn a_schemas_dir_candidate_outside_the_workspace_takes_over_and_hands_back() {
     session.write(&nearer, &yaml_schema("boolean"));
     let shadowed = session.observe();
     assert_eq!(shadowed.mismatch(), Some("boolean"), "the `SCHEMAS_DIR` file is selected: {shadowed:#?}");
+    shadowed.assert_hover_previews("title: boolean", "SCHEMAS_DIR file created");
     shadowed.assert_agree_on(&nearer, "SCHEMAS_DIR file created");
 
     session.delete(&nearer);
@@ -373,6 +411,7 @@ fn a_created_schemas_dir_root_outside_the_workspace_takes_over() {
     session.write(&nearer, &yaml_schema("boolean"));
     let shadowed = session.observe();
     assert_eq!(shadowed.mismatch(), Some("boolean"), "the new root's file is selected: {shadowed:#?}");
+    shadowed.assert_hover_previews("title: boolean", "SCHEMAS_DIR root created");
     shadowed.assert_agree_on(&nearer, "SCHEMAS_DIR root created");
     session.shutdown();
 }
@@ -395,6 +434,7 @@ fn a_candidate_in_a_created_home_root_resolves_a_missing_reference() {
     session.write(&home, &yaml_schema("number"));
     let found = session.observe();
     assert_eq!(found.mismatch(), Some("number"), "the home file is selected: {found:#?}");
+    found.assert_hover_previews("title: number", "home root created");
     found.assert_agree_on(&home, "home root created");
     session.shutdown();
 }
@@ -414,6 +454,7 @@ fn repairing_a_malformed_target_clears_the_error_and_keeps_the_link() {
     session.write(&shape, &yaml_schema("string"));
     let repaired = session.observe();
     assert!(repaired.diagnostics.is_empty(), "the repair clears the error: {repaired:#?}");
+    repaired.assert_hover_previews("title: string", "repaired");
     repaired.assert_agree_on(&shape, "repaired");
 
     session.write(&shape, "$schema:\n  title: [unclosed\n");
@@ -440,6 +481,7 @@ fn a_json_target_refreshes_like_a_yaml_one() {
     session.write(&shape, &json_schema("number"));
     let edited = session.observe();
     assert_eq!(edited.mismatch(), Some("number"), "{edited:#?}");
+    edited.assert_hover_previews("\"type\": \"number\"", "edited");
     edited.assert_agree_on(&shape, "edited");
 
     session.write(&shape, "{ \"$schema\": \"https://json-schema.org/draft/2020-12/schema\", ");

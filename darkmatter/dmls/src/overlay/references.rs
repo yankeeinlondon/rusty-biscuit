@@ -7,13 +7,24 @@
 //! context), through `simplified_schema::resolve::select_schema_file`, the
 //! function the validator's resolver uses. Providers read these facts and
 //! never repeat the lookup.
+//!
+//! Each selected file is also read once, on the same cache miss, into a
+//! [`SchemaTargetPreview`]: its format verdict, description, and the first
+//! lines of its definition, which the `$schema` value hover shows without
+//! touching the disk.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema_with_roots;
+use serde_yaml_ng::Value as YamlValue;
 use simplified_schema::SchemaError;
-use simplified_schema::resolve::{SchemaFileSelection, SelectionOutcome, select_schema_file};
+use simplified_schema::resolve::{
+    SchemaFileSelection, SchemaTargetFormat, SelectionOutcome, inspect_schema_target, select_schema_file,
+};
+
+use crate::work_counters;
 
 use super::{FmEntry, FmEntryRole, FmValueKind, FrontmatterAst};
 
@@ -35,6 +46,38 @@ pub struct SchemaReferenceFact {
     /// What the reference selects, or why the schema roots it is looked up in
     /// could not be read (no root is guessed then).
     pub selection: Result<SchemaFileSelection, Arc<SchemaError>>,
+    /// What the selected file holds, when the selection found one.
+    pub target: Option<SchemaTargetPreview>,
+}
+
+/// The most definition lines a [`SchemaTargetPreview`] keeps.
+pub const PREVIEW_LINES: usize = 10;
+
+/// What the file a `$schema` reference selected holds, as its value hover
+/// shows it.
+#[derive(Debug)]
+pub struct SchemaTargetPreview {
+    /// How the file is read.
+    pub format: SchemaTargetFormat,
+    /// The file's nonblank top-level `description`.
+    pub description: Option<String>,
+    /// The first [`PREVIEW_LINES`] lines of the authored definition; empty
+    /// when the file is not an accepted schema target.
+    pub preview: Vec<String>,
+    /// How many lines the whole definition has.
+    pub total_lines: usize,
+    /// Whether the reference can be used as a schema.
+    pub verdict: SchemaTargetVerdict,
+}
+
+/// Whether a selected `$schema` file can be used as the document's schema.
+#[derive(Debug)]
+pub enum SchemaTargetVerdict {
+    /// The file and everything it imports resolved.
+    Valid,
+    /// The error resolving this one reference reports: a format rejection,
+    /// an unreadable or malformed file, or a failure in what it imports.
+    Rejected(Arc<SchemaError>),
 }
 
 impl SchemaReferenceFacts {
@@ -43,11 +86,18 @@ impl SchemaReferenceFacts {
     ///
     /// Only an authored scalar that decodes to a YAML string is a reference:
     /// an inline mapping, `null`, a number, a boolean, or an alias is not.
+    ///
+    /// Every found file is read and inspected for its preview. `assembled`
+    /// says whether the document's schema assembled from these references:
+    /// then every target is valid; otherwise each accepted target is resolved
+    /// again on its own, so a failure of another reference or of a trigger
+    /// does not mislabel it.
     pub fn select(
         text: &str,
         path: &Path,
         schema_roots: Result<&[PathBuf], &Arc<SchemaError>>,
         context: &FileResolutionContext,
+        assembled: bool,
     ) -> Self {
         let Some(ast) = FrontmatterAst::parse(text).and_then(|parse| parse.ast) else {
             return Self::default();
@@ -55,11 +105,26 @@ impl SchemaReferenceFacts {
         let base_dir = path.parent().unwrap_or(path);
         let entries = references(&ast, text)
             .map(|(pointer, reference)| {
-                let selection = match schema_roots {
-                    Ok(roots) => Ok(select_schema_file(&reference, base_dir, roots, context)),
-                    Err(error) => Err(Arc::clone(error)),
+                let (selection, target) = match schema_roots {
+                    Ok(roots) => {
+                        let selection = select_schema_file(&reference, base_dir, roots, context);
+                        let target = match &selection.outcome {
+                            SelectionOutcome::Found(file) => Some(preview(file, assembled, || {
+                                resolve_yaml_schema_with_roots(
+                                    &YamlValue::String(reference.clone()),
+                                    base_dir,
+                                    roots,
+                                    context,
+                                )
+                                .map(drop)
+                            })),
+                            _ => None,
+                        };
+                        (Ok(selection), target)
+                    }
+                    Err(error) => (Err(Arc::clone(error)), None),
                 };
-                SchemaReferenceFact { pointer, reference, selection }
+                SchemaReferenceFact { pointer, reference, selection, target }
             })
             .collect();
         Self { entries }
@@ -88,8 +153,52 @@ impl SchemaReferenceFacts {
     }
 }
 
+/// Reads and inspects the selected `file`. An accepted file is
+/// [`SchemaTargetVerdict::Valid`] when the document's schema `assembled`, and
+/// otherwise whatever `resolve` (this reference alone) reports.
+fn preview(file: &Path, assembled: bool, resolve: impl FnOnce() -> Result<(), SchemaError>) -> SchemaTargetPreview {
+    work_counters::record_schema_target_inspection();
+    let format = if file.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("json")) {
+        SchemaTargetFormat::Json
+    } else {
+        SchemaTargetFormat::Yaml
+    };
+    let rejected = |error: SchemaError| SchemaTargetPreview {
+        format,
+        description: None,
+        preview: Vec::new(),
+        total_lines: 0,
+        verdict: SchemaTargetVerdict::Rejected(Arc::new(error)),
+    };
+    let bytes = match work_counters::read(file) {
+        Ok(bytes) => bytes,
+        Err(source) => return rejected(SchemaError::Io { path: file.to_path_buf(), source }),
+    };
+    let inspection = inspect_schema_target(file, &bytes);
+    if let Err(error) = inspection.classification {
+        return rejected(error);
+    }
+    let verdict = match assembled {
+        true => SchemaTargetVerdict::Valid,
+        false => match resolve() {
+            Ok(()) => SchemaTargetVerdict::Valid,
+            Err(error) => SchemaTargetVerdict::Rejected(Arc::new(error)),
+        },
+    };
+    let mut lines = inspection.lines.unwrap_or_default();
+    let total_lines = lines.len();
+    lines.truncate(PREVIEW_LINES);
+    SchemaTargetPreview {
+        format: inspection.format,
+        description: inspection.description,
+        preview: lines,
+        total_lines,
+        verdict,
+    }
+}
+
 /// The `(pointer, decoded string)` of each `$schema` reference in `ast`.
-fn references<'a>(ast: &'a FrontmatterAst, text: &'a str) -> impl Iterator<Item = (String, String)> + 'a {
+pub(crate) fn references<'a>(ast: &'a FrontmatterAst, text: &'a str) -> impl Iterator<Item = (String, String)> + 'a {
     let entries = ast.entries();
     let root = entries.iter().position(|entry| entry.pointer == "/$schema");
     let candidates: Vec<&FmEntry> = match root.map(|index| (index, &entries[index])) {
@@ -107,7 +216,7 @@ fn references<'a>(ast: &'a FrontmatterAst, text: &'a str) -> impl Iterator<Item 
 }
 
 /// The YAML string an authored scalar decodes to, if it is one.
-fn decoded_string(entry: &FmEntry, text: &str) -> Option<String> {
+pub(crate) fn decoded_string(entry: &FmEntry, text: &str) -> Option<String> {
     if entry.kind != FmValueKind::Scalar {
         return None;
     }
