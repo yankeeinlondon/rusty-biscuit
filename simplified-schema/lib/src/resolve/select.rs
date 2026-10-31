@@ -227,9 +227,9 @@ fn first_planned_candidate(
 }
 
 /// Returns `true` when a parsed reference is a non-recursive implicit-relative
-/// name with exactly one portable path component.
-#[cfg_attr(not(feature = "file"), allow(dead_code))]
-pub(super) fn is_bare_name(file_ref: &FileReference) -> bool {
+/// name with exactly one portable path component: the form
+/// [`select_schema_file`] looks up in the schema roots.
+pub fn is_bare_name(file_ref: &FileReference) -> bool {
     let class = file_ref.class();
     let portable = file_ref.raw().replace('\\', "/");
     let mut components = Path::new(&portable).components();

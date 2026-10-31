@@ -9,10 +9,11 @@
 //!   String items are file references (resolved here); mapping items are
 //!   inline arms.
 //! - **String scalar** — interpreted as a `biscuit-file` reference to a YAML
-//!   or JSON file. YAML SimplifiedSchemas are recognized by the pure
-//!   (`$schema` as the sole top-level key) and tagged (`kind: schema` plus
-//!   `types`) content envelopes; everything else remains raw JSON Schema.
-//!   JSON files are always raw JSON Schema.
+//!   or JSON file. A YAML target must be a recognized standalone envelope
+//!   with a top-level `$schema`; a JSON target must be an object declaring
+//!   Draft 2020-12 (see `classify_yaml_schema_text` and
+//!   `classify_json_schema_text`). [`inspect_schema_target`] applies the same
+//!   classification to bytes an editor already read.
 //!
 //! After resolution, a baseline schema (if configured) is merged with the
 //! document schema using property-keyed deep merge — the document side wins
@@ -6512,10 +6513,12 @@ mod reserved_namespace {
 mod searched_tests;
 
 mod graph;
+mod inspect;
 mod select;
 mod recursive;
 
-pub use select::{SchemaFileSelection, SelectionFailure, SelectionOutcome, select_schema_file};
+pub use inspect::{SchemaTargetFormat, SchemaTargetInspection, inspect_schema_target};
+pub use select::{SchemaFileSelection, SelectionFailure, SelectionOutcome, is_bare_name, select_schema_file};
 
 #[cfg(test)]
 mod embedded_recursion {
