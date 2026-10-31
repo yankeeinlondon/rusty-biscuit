@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-10-30
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 human_review: true
@@ -142,6 +142,40 @@ docs_updated_during_phase_3:
 - darkmatter/dmls/docs/file-references.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_4:
+- simplified-schema/lib/src/resolve/inspect.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/select.rs
+- simplified-schema/lib/tests/l1/schema_target_inspection.rs
+- simplified-schema/lib/tests/l1/main.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/work_counters.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/schema_value_hover.rs
+- darkmatter/dmls/src/providers/frontmatter/file_value_hover.rs
+- darkmatter/dmls/src/providers/reference_hover.rs
+- darkmatter/dmls/src/providers/reference_hover/tests.rs
+- darkmatter/dmls/tests/l1/value_hovers.rs
+- darkmatter/dmls/tests/l1/schema_reference_sessions.rs
+- darkmatter/dmls/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+- darkmatter/dmls/src/graph/substrate.rs
+- darkmatter/dmls/src/graph/arena.rs
+- darkmatter/dmls/src/index_store/facts.rs
+- darkmatter/dmls/src/providers/hover.rs
+- darkmatter/dmls/tests/l1/index_store_facts.rs
+- darkmatter/dmls/tests/l1/referenced_targets.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/dmls.md
 ---
 
@@ -868,7 +902,7 @@ searched locations; a `file` value that is dynamic gets no file hover.
 
 ### Wave 10 (parallel: disjoint crates)
 
-- [ ] **10.1 `inspect_schema_target`** (`simplified-schema/lib/src/resolve/inspect.rs`)
+- [x] **10.1 `inspect_schema_target`** (`simplified-schema/lib/src/resolve/inspect.rs`)
     - `pub fn inspect_schema_target(path: &Path, bytes: &[u8]) -> SchemaTargetInspection` with
       `format: SchemaTargetFormat` (`Json` for a `.json` extension, else `Yaml`),
       `classification: Result<(), SchemaError>` from `classify_yaml_schema_text` /
@@ -881,7 +915,7 @@ searched locations; a `file` value that is dynamic gets no file hover.
       the span kept, `\r\n` normalization, final newline not counted, ten-line and eleven-line
       boundaries via `total`, JSON whole document, a types-only file (classification error, no
       lines), and the description matrix.
-- [ ] **10.2 Hover helpers** (`dmls/src/providers/reference_hover.rs`)
+- [x] **10.2 Hover helpers** (`dmls/src/providers/reference_hover.rs`)
     - Implement Rule 14's helpers and the template functions (inputs are plain data; no
       `DocumentContext`), with unit tests: the exact strings for every template, ten-or-fewer
       lines show no truncation line, eleven lines show `*Showing **10** of **11** lines*`,
@@ -891,7 +925,7 @@ searched locations; a `file` value that is dynamic gets no file hover.
 
 ### Wave 11 (parallel: separate new modules)
 
-- [ ] **11.1 `$schema` value hover** (`dmls/src/providers/schema_value_hover.rs`)
+- [x] **11.1 `$schema` value hover** (`dmls/src/providers/schema_value_hover.rs`)
     - Extend `SchemaReferenceFact::target` (`SchemaTargetPreview { format, description,
       preview: Vec<String>, total_lines, verdict }`) in `overlay/references.rs`: on a cache
       miss, for each `Found` selection read the file with `work_counters::read_to_string`, call
@@ -903,14 +937,14 @@ searched locations; a `file` value that is dynamic gets no file hover.
       does not mislabel this one. Add the selected path to the dependency hashes (Rule 10).
     - `schema_value_hover(ctx, offset) -> Option<Hover>`: the facts entry at the cursor's
       pointer whose `reference` equals the entry's scalar; format with Rule 14.
-- [ ] **11.2 `file` value hover** (`dmls/src/providers/file_value_hover.rs`)
+- [x] **11.2 `file` value hover** (`dmls/src/providers/file_value_hover.rs`)
     - Implement Rule 12: extend `ScalarTyping` and `classify_scalar` (`ScalarTyping::UNRESOLVED`
       gains the new fields `false`), add `file_value_hover(ctx, ast, index, typing)`, resolve
       with `ctx.resolve_reference`, format with Rule 14.
 
 ### Wave 12 (sequential: wiring)
 
-- [ ] **12.1 Wire both hovers into `frontmatter::hover`**
+- [x] **12.1 Wire both hovers into `frontmatter::hover`**
     - In `providers/frontmatter.rs::hover`: call `schema_value_hover` first, before
       `meta_schema_hover` (a `$schema` string or root-union string item is not a type
       definition); call `file_value_hover` after the existing expression hover block
@@ -924,7 +958,7 @@ searched locations; a `file` value that is dynamic gets no file hover.
 
 ### Wave 13 (parallel: tests)
 
-- [ ] **13.1 Hover snapshots**
+- [x] **13.1 Hover snapshots**
     - `$schema`: success (a `review-3.md`-shaped fixture; asserts `Schema Definition:`, a
       10-line `yaml` block, `*Showing **10** of **{n}** lines*`, and the key hover equal to
       the pre-change text), a short file, exactly ten lines, over ten, description policy
@@ -941,13 +975,13 @@ searched locations; a `file` value that is dynamic gets no file hover.
       `{{DIR}}/x.md`, null, number, inline mapping, collection marker, and comment positions
       returning no file hover, and key hovers unchanged. Missing context, I/O failure, and
       remote URL get their own text and no creation link.
-- [ ] **13.2 Hover session and work counters**
+- [x] **13.2 Hover session and work counters**
     - Session test: change/delete a schema, create a nearer candidate, repair a malformed
       target; after each the hover agrees with links, definition, and diagnostics.
     - Counter test: two hovers on one unchanged snapshot increase
       `schema_target_inspections` by zero; hover never composes (`work_counters` compose
       count stays zero) and the formatting module performs no I/O (it takes no context).
-- [ ] **13.3 Range and URI encoding**
+- [x] **13.3 Range and URI encoding**
     - Value hover ranges are the value span under UTF-8, UTF-16, and UTF-32 position
       encodings with non-ASCII text before the value; label and URI cases from 10.2 hold
       end to end for a path with spaces, `[`, `(`, and non-ASCII characters.
@@ -983,7 +1017,7 @@ its precedence) and one invalid shape (null) proving it uses `summary_text`.
 
 ### Wave 14 (sequential: capture)
 
-- [ ] **14.1 Capture the summary**
+- [x] **14.1 Capture the summary**
     - Implement Rule 16 in `graph/substrate.rs` (`summary_text` plus the field walk over
       `ast.top_level()`), `graph/arena.rs` (`DocumentState`, `DocumentRecord`,
       `record_at`, every `states[..] = DocumentState { .. }` construction), and
@@ -997,13 +1031,13 @@ its precedence) and one invalid shape (null) proving it uses `summary_text`.
 
 ### Wave 15 (parallel: after 14.1)
 
-- [ ] **15.1 Hover addition**
+- [x] **15.1 Hover addition**
     - `providers/hover.rs::resolved_hover`: append the summary per Rule 16 for the resolved
       node's document, for both document and heading targets; update the module docs.
     - Unit tests: each field, precedence, blank/non-string/pending skipped, no summary
       leaves the hover byte-identical, a heading target keeps its `Heading:` line and
       gains the summary after it.
-- [ ] **15.2 Session tests** (`dmls/tests/l1/referenced_targets.rs`, which already runs a
+- [x] **15.2 Session tests** (`dmls/tests/l1/referenced_targets.rs`, which already runs a
       listed, an excluded, and an outside-workspace target)
     - Each case shows the summary in hover; editing the target's open buffer changes it (buffer
       beats disk); closing the buffer falls back to disk; a watched change and a save refresh

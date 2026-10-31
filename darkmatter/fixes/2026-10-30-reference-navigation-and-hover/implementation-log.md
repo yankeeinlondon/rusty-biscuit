@@ -107,6 +107,64 @@ decisions_for_review:
       `darkmatter/dmls/docs/file-references.md` (a missing file is no longer an editor diagnostic), plus
       the navigation bullet (the `$schema` link falls back to the creation path). Phase 6 should extend,
       not redo, them.
+    - |-
+      Where the two value-hover modules live. The plan named `dmls/src/providers/schema_value_hover.rs`
+      and `dmls/src/providers/file_value_hover.rs`. Choice: they are child modules of the frontmatter
+      provider (`dmls/src/providers/frontmatter/schema_value_hover.rs` and `.../file_value_hover.rs`), like
+      the existing `frontmatter/named_references.rs`, because they use that provider's private helpers
+      (the hover-range builder, the typed-scalar lookup). The pure wording module is where the plan said,
+      `dmls/src/providers/reference_hover.rs`. Alternative: the plan's paths, with those helpers made
+      crate-visible. Redo if rejected: move two files and widen two helpers; no behavior changes.
+    - |-
+      First-line indentation of a YAML preview. The plan's rule gives the first line of the `$schema`
+      value the column it starts at, always. Choice: that column counts only when nothing but spaces
+      precede the value on its line (a block mapping or list under the key, the normal shape); a value
+      written after the key on the same line (a flow mapping or a single reference) starts flush and its
+      continuation lines keep their indentation. The two rules give the same text for every block value
+      and every one-line value; they differ only for a flow mapping that spans several lines, where the
+      plan's rule would indent the first line by the width of `$schema: `. Redo if rejected: one line in
+      `simplified-schema/lib/src/resolve/inspect.rs::yaml_definition_lines`.
+    - |-
+      Telling "no schema root exists" apart from an explicit miss. The selector's `Missing { bare_name }`
+      is false both for `./x.yaml` and for a bare name looked up with no schema root, but the hover
+      words them differently. Choice: `simplified_schema::resolve::is_bare_name` is now public and the
+      hover asks it. Alternatives: a new field on `SelectionOutcome::Missing`, or a flag on the overlay
+      fact; both add state the selector already implies. Redo if rejected: add the field and drop the
+      export.
+    - |-
+      Unreadable targets. The spec asks that an unreadable file keep its own reason and path. That holds
+      for a target outside the schema roots (for example `./locked.yaml`): the hover says the file
+      "could not be used as a schema" with the I/O error and links it. A file in a schema root is read
+      first by the trigger-registry scan, which fails, so the hover says the schema roots could not be
+      read (no file is linked, no root guessed), exactly what diagnostics already report. Alternative:
+      make the registry scan skip unreadable files, a behavior change to trigger discovery outside this
+      fix. Nothing to redo unless the registry policy changes.
+    - |-
+      A `file` value in a document with no file-resolution context. Without a context DMLS assembles no
+      document schema (not even an inline one), and the built-in baseline has no `file`-typed property,
+      so no value is `file`-typed and the "no file-resolution context" sentence cannot appear on a `file`
+      value today; it does appear on a `$schema` value. The `file` hover keeps the branch for a future
+      file-typed baseline property, and a test pins that such a value gets no file hover. Redo if
+      rejected: delete one match arm.
+    - |-
+      Smaller choices. (1) The `file` hover resolves with `FileReference::resolve_in_context` directly
+      (what `ctx.resolve_reference` does internally) so an invalid reference found during resolution keeps
+      its error text. (2) The selected file is read as bytes (`work_counters::read`), so a non-UTF-8 file
+      gets the loader's own "not UTF-8 text" error. (3) A description is shown trimmed. (4) Range tests
+      cover UTF-8 and UTF-16 only: the plan also named UTF-32, which DMLS does not offer. (5) Rule 14
+      escapes backticks in a quoted reason, so a file-reference error's inline code shows as literal
+      backticks in the hover. Each is a one-line change if a reviewer prefers otherwise.
+    - |-
+      Wiki-link hovers do not show the target's summary. The spec and plan describe the summary for
+      "body links" and name only `providers/hover.rs::resolved_hover`; `[[wiki]]` links have their own
+      hover (`providers/wiki.rs`). Choice: only Markdown body links gain the summary, as written.
+      Alternative: append the same `DocumentRecord::summary` in the wiki hover too (a few lines plus
+      tests); the summary is already on every parsed document record, so nothing captured would change.
+    - |-
+      "Unreadable target" in the new session tests is a target file holding invalid UTF-8, which the
+      server's text read rejects on every OS. A permission-denied file was not used because Windows has
+      no portable way for a test to make a file unreadable. Both paths go through the same failed-read
+      branch, so a reviewer preferring a permission-based case would only add a Unix-only test.
 source_files_during_phase_1:
     - simplified-schema/lib/src/resolve/select.rs
     - simplified-schema/lib/src/resolve.rs
@@ -145,12 +203,10 @@ packages:
     - claudine
     - claudine-cli
 message_to_agent: |-
-  Phase 3 is done; `just test` (12812 passed) and `just lint` pass in darkmatter. Facts for Phase 4:
-  - `$schema` selection lives in `darkmatter/dmls/src/overlay/references.rs`: `SchemaReferenceFacts { entries }`, each `SchemaReferenceFact { pointer, reference, selection: Result<SchemaFileSelection, Arc<SchemaError>> }`, built in `OverlayCache::schema_for` (`overlay/mod.rs`) and exposed as `DocumentOverlay::schema_references`. There is NO `target` preview field yet; Phase 4 adds `target: Option<SchemaTargetPreview>` and fills it on the same cache miss (build it next to `SchemaReferenceFacts::select`; the cache already hashes each selected file via `collect_dep_hashes` and checks `CachedSchema.probes`).
-  - `providers/frontmatter.rs::schema_targets` is the one reader for links/definition; the `$schema` value hover should read the same facts (match by `pointer` and `reference == entry.scalar`).
-  - `dmls::workspace::file_path_to_uri` now percent-encodes `[`, `]`, `^`, `|`, `\` in paths (it used to return `None` for bracketed folders). Rule 14's `markdown_link` still needs `(`/`)` encoded on top of it.
-  - Rule 13 is in `diagnostics/frontmatter.rs` (NoMatch without `caller_file` is skipped). The `file` value hover (Rule 12) is now the only place a missing file is explained.
-  - New L1 tests to extend rather than duplicate: `dmls::l1 schema_reference_parity` (fixture with SCHEMAS_DIR, packages, bracketed/non-ASCII folders), `schema_reference_sessions` (live watcher flows), `frontmatter_response_contracts::schema_reference_navigation_is_unchanged` (golden `schema_reference_navigation.json`).
+  Phase 5 is done: body-link hovers append the target's frontmatter summary. `just lint` and `just test` pass in darkmatter (see the Phase 5 log). Facts for Phase 6:
+  - The summary is `DocumentIndex::summary`, read by `graph/substrate.rs::summary_text` (first nonempty, non-pending YAML string among `excerpt`, `summary`, `description`, `about`; trimmed; nothing stringified). It is stored on the per-snapshot `DocumentState` and exposed as `DocumentRecord::summary`; it is not in `FileFacts`, so `FACTS_VERSION` and `index_store_golden.txt` are unchanged.
+  - `providers/hover.rs::resolved_hover` appends `\n\n{summary}` after the title, path, and `Heading:` line. Wiki-link hover (`providers/wiki.rs::resolved_hover`) was NOT changed: the spec and Rule 16 name only body links; see decisions_for_review.
+  - Task 16.x owns the docs: `darkmatter/docs/lsp/features.md` still carries the MIME/image-preview claim and does not yet describe the summary.
 source_files_during_phase_2:
     - simplified-schema/lib/src/errors.rs
     - simplified-schema/lib/src/lib.rs
@@ -247,6 +303,41 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_4:
+    - simplified-schema/lib/src/resolve/inspect.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/resolve/select.rs
+    - simplified-schema/lib/tests/l1/schema_target_inspection.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - darkmatter/dmls/src/overlay/references.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/work_counters.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/schema_value_hover.rs
+    - darkmatter/dmls/src/providers/frontmatter/file_value_hover.rs
+    - darkmatter/dmls/src/providers/reference_hover.rs
+    - darkmatter/dmls/src/providers/reference_hover/tests.rs
+    - darkmatter/dmls/tests/l1/value_hovers.rs
+    - darkmatter/dmls/tests/l1/schema_reference_sessions.rs
+    - darkmatter/dmls/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_5:
+    - darkmatter/dmls/src/graph/substrate.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/index_store/facts.rs
+    - darkmatter/dmls/src/providers/hover.rs
+    - darkmatter/dmls/tests/l1/index_store_facts.rs
+    - darkmatter/dmls/tests/l1/referenced_targets.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+---
 ---
 
 # Implementation Log for 2026-10-30-reference-navigation-and-hover (6 phases)
@@ -697,3 +788,209 @@ No test was skipped, ignored, or left failing; there are no pre-existing failure
 | `md` runtime eager check unchanged | `darkmatter-cli::l1 schema_validate::schema_validate_still_rejects_a_missing_eager_file` |
 
 No test was skipped, ignored, or left failing.
+
+## Phase 4
+
+### 10.1 `inspect_schema_target` (Rule 15)
+
+- New `simplified-schema/lib/src/resolve/inspect.rs`, re-exported from `resolve`:
+  `inspect_schema_target(path, bytes) -> SchemaTargetInspection { format, classification, description, lines }`.
+  It classifies with the loader's own `classify_yaml_schema_text` / `classify_json_schema_text` (non-UTF-8
+  gets the loader's "not UTF-8 text" error), keeps a description only when it is a nonblank string (trimmed),
+  and returns lines only for an accepted file: YAML is the root `Declaration` span of the `$schema` value,
+  dedented; JSON is the whole document. `\r\n` normalized; a final newline is not a line. Decision on the
+  first line's indentation recorded in `decisions_for_review`.
+- `resolve.rs` module docs said unrecognized YAML "remains raw JSON Schema" and JSON is "always raw JSON
+  Schema", stale since Phase 2; corrected (code is right, comment was wrong).
+- `select.rs::is_bare_name` is now public (decision recorded).
+- Tests: `simplified-schema::l1 schema_target_inspection::` (8): block mapping with an inner comment, the
+  `feature-review.yaml` block-sequence shape with a header comment, flow mapping / scalar / quoted scalar
+  delegation, CRLF + final newline, ten and eleven lines, JSON whole document with a `.JSON` extension,
+  rejected targets (types-only, JSON without dialect, draft-07, duplicate key, non-UTF-8) with no preview,
+  and the description matrix (absent, `""`, blank, nonempty informal and tagged, comment block, `null` and
+  number rejected by the envelope; JSON absent, `null`, number, blank, nonempty).
+
+### 10.2 Hover helpers (Rule 14)
+
+- New `darkmatter/dmls/src/providers/reference_hover.rs` (pure: no context, no I/O): `markdown_escape`,
+  `code_span`, `fence_for`, `display_path`, `markdown_link` (`(`/`)` encoded on top of `file_path_to_uri`),
+  and one function per template (valid target, not a schema, unsupported dialect, unusable target, clean
+  miss / zero roots / sibling-only, unresolvable, remote, roots unreadable, no context, `file` invalid /
+  found / missing with `Eagerness::{Lazy, Eager, EagerFileArm}` / unchecked).
+- Unit tests `dmls providers::reference_hover::tests::` (12): exact template strings, ten vs eleven lines,
+  four-backtick fence, escaped `[`, `]`, `*`, `_` label, `%28`/`%29` URIs, repository-relative vs absolute
+  labels, non-ASCII.
+
+### 11.1 `$schema` value hover (Rules 10, 14)
+
+- `overlay/references.rs`: `SchemaReferenceFact` gained `target: Option<SchemaTargetPreview { format,
+  description, preview (≤ `PREVIEW_LINES` = 10), total_lines, verdict }>`, built inside `select` for every
+  `Found` selection: one counted read (`work_counters::read`), one `inspect_schema_target`, one
+  `record_schema_target_inspection`. `verdict` is `Valid` when the schema assembled (`SchemaOutcome::Ready`),
+  otherwise that reference alone is re-resolved with darkmatter's `resolve_yaml_schema_with_roots`
+  (so another union item or a trigger failing does not mislabel it). `select` takes the new `assembled`
+  flag; `schema_for` passes it. The selected path was already in `collect_dep_hashes` (Phase 3).
+- New counter `work_counters::schema_target_inspections` (struct, `since`, `plus`, `work_counts`, unit test).
+- New `providers/frontmatter/schema_value_hover.rs`: reads only the facts (pointer match and
+  `reference == entry.scalar`); with no context it finds the `$schema` string with the same reference
+  walker (`references`, now `pub(crate)`) and says so.
+
+### 11.2 `file` value hover (Rule 12)
+
+- `ScalarTyping` gained `eager` (definition, or the array property of a sequence item) and `mixed_arms`
+  (an arm that is not `file`), computed in `classify_scalar`.
+- New `providers/frontmatter/file_value_hover.rs`: `file_value_is_static` (pending `{{`/`$(` syntax that
+  is `$(` or not a `FileReference` is not static, so `{{DIR}}/x.md` is), `file_value_hover` (decoded YAML
+  string only; `FileReference::new` error -> invalid; resolve -> found / missing (property = nearest
+  mapping-property `dotted`) / unchecked class), Markdown from `reference_hover`.
+
+### 12.1 Wiring
+
+- `providers/frontmatter.rs::hover`: `schema_value_hover` first, then `meta_schema_hover`, then the
+  expression/stack block `.or_else(file_value_hover)` (only inside the scalar's value span), then the key
+  path. Docs of `hover` and `schema_hover` updated; the module header was still accurate.
+- No `a3_*hovers.json` or `a3_navigation.json` golden changed: the full suite passed without regeneration,
+  so no golden hovers a `file`-typed value position.
+
+### 13.1-13.3 Tests
+
+- New `dmls::l1 value_hovers::` (21 tests, in-process `Hovers` harness over a canonical temp root):
+  - the `review-3.md` acceptance case against the repository's real `schemas/feature-review.yaml`
+    (`include_str!`): `Schema Definition:`, the first ten dedented lines, `*Showing **10** of **N** lines*`
+    with N computed from the shipped file, and the link; key hover unchanged and ranged on the key;
+    2 / 10 / 11 lines; description policy (tagged, informal block scalar, blank, absent, comment);
+    JSON (`json` fence, CRLF normalized, description); delegation (`./real.yaml` preview, link to the
+    direct file); not-a-schema (types-only, no `$schema`, no-dialect JSON, JSON array); draft-07 dialect;
+    malformed / missing import / unreadable beside the document / unreadable in a root (roots-unreadable
+    text, no link); root-union items hovering independently while another item is missing, inline arm and
+    inline mapping keeping their hovers; clean miss with one and two roots (nothing created), zero roots,
+    sibling-only (sibling never linked); remote; no context.
+  - `file` values: found, missing lazy, missing eager, invalid (`@`), nested mapping (`nested.main`),
+    scalar array item (`items`), mixed union (eager-arm wording), discriminant-selected arm, ambiguous
+    arms, the other arm (no file hover), `{{ title }}.md` and `$(echo x.md)` keeping the property hover,
+    `{{DIR}}/x.md` resolving to the missing-context text, null / number / inline mapping / collection
+    marker / comment with no file hover, key hover kept, `&root-only.md` outside a repository
+    (missing context), remote URL, I/O (`./afile.md/inner.md`, Unix), and no context (no file hover).
+  - counters: preparing the overlay inspects the one target once; two hovers on the same snapshot add
+    0 inspections and 0 reads; no engine build or network attempt (`effects-instrumentation`).
+  - ranges and URIs: UTF-8 and UTF-16 ranges equal the value span with `é🎉` earlier in the document,
+    for a target and a file in `[x] (y) café`; labels escaped, URIs free of raw `( ) [ ]` and spaces.
+- `dmls::l1 schema_reference_sessions::` (7, extended, not duplicated): every observation also requests
+  the hover on the `$schema` value; `assert_agree_on` now requires the hover to name the same file (its
+  link, or its `Missing:` creation path), the missing and invalid assertions check the hover's lead, and
+  each edit/fallback/shadow/repair step checks the preview shows the new definition line.
+- Found and fixed while writing tests: none in production code. Two test expectations were corrected:
+  reasons are escaped per Rule 14 (backticks in a `FileReferenceError` show literally), and an unreadable
+  file inside a schema root fails the registry scan first (recorded as a decision).
+
+### Gates (run once, after all edits, nothing else running)
+
+- `simplified-schema/` `just test`: 1288 passed; minimal-features run 1118 passed. `just lint`: pass
+  (default, `work-counters,terminal`, and `--no-default-features`).
+- `darkmatter/` `just lint`: pass. `just test`: 12845 passed, 10 skipped, 0 failed.
+- `just check-tier-coverage darkmatter` and `simplified-schema`: nothing stranded.
+- Dependents: Claudine uses no changed symbol (the library changes are additions); `cargo check -p claudine
+  -p claudine-cli --tests` passes.
+- Cross-OS (display paths and URIs): `just cross-check dmls --os windows`: 1635 passed, 9 skipped.
+- `affected_scope.py` over the working tree: packages `dmls, simplified-schema, test-toolkit, darkmatter`,
+  change class `package`, so the gates were required and run.
+- Smell grep over new code: `inspection.lines.unwrap_or_default()` in `references.rs::preview` follows an
+  early return on every rejected classification, so `lines` is always `Some` there; no `.ok()` or
+  `#[serde(default)]` on a load-bearing parse was added.
+- Load-sensitive failures: none seen.
+
+### Checkpoint reading
+
+The `review-3.md` equivalent (the shipped `feature-review.yaml` in a tree root) hovers as:
+`Schema Definition:`, a `yaml` block starting `- description: string -> description of this _feature review_`
+with ten lines, `*Showing **10** of **N** lines*`, and `Resolves to [schemas/feature-review.yaml](file://…)`,
+which matches the spec's Acceptance section. Pinned by
+`value_hovers::a_review_document_previews_the_first_ten_lines_of_the_shipped_feature_review_schema`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| Preview extraction (Rule 15) incl. comments, CRLF, final newline, boundaries, JSON | `simplified-schema::l1 schema_target_inspection::*` |
+| Format verdict and description matrix from the loader's classifiers | `schema_target_inspection::rejected_targets_keep_the_loader_error_and_have_no_preview`, `description_is_kept_only_when_it_is_a_nonblank_string` |
+| Every Rule 14 template and helper, exact text | `dmls providers::reference_hover::tests::*` |
+| `$schema` hover: success, truncation, description, JSON, delegation, failures, misses, sibling, remote, no context, union items, inline hovers kept, key unchanged | `value_hovers::*` (`$schema` section) |
+| Shipped artifact through the normal hover path | `value_hovers::a_review_document_previews_the_first_ten_lines_of_the_shipped_feature_review_schema` |
+| `file` hover: every spec row, nested/item/union, expressions, non-strings, unchecked classes | `value_hovers::*` (`file` section) |
+| Prepared once, never on hover; no composition | `value_hovers::hovering_reuses_the_prepared_preview_and_never_composes` |
+| Hover agrees with links, definition, diagnostics after change, delete, nearer candidate, repair, JSON | `schema_reference_sessions::*` |
+| Ranges in negotiated encodings; URIs with spaces, `[`, `(`, non-ASCII | `value_hovers::value_hover_ranges_and_links_survive_unusual_text_and_paths` |
+
+No test was skipped, ignored, or left failing.
+
+## Phase 5
+
+### Wave 14: capture (14.1)
+
+- `graph/substrate.rs`: `DocumentIndex` gains `summary: Option<String>`; `SUMMARY_FIELDS`
+  (`excerpt`, `summary`, `description`, `about`) is walked over `ast.top_level()` in
+  `index_document_timed`, and `summary_text` decides each field: a `FmValueKind::Scalar` whose value
+  span decodes with `serde_yaml_ng` to a YAML string that is nonempty after trimming and has no
+  pending syntax (`simplified_schema::pending::holds_pending_syntax`, the same check Phase 4's `file`
+  hover uses). Everything else is `None` and the next field is tried; nothing is stringified.
+- `graph/arena.rs`: `DocumentState` is now `Clone` (not `Copy`) with `summary: Option<Arc<str>>`,
+  set in the one `states[..] = DocumentState { .. }` construction; `record_at` borrows the state and
+  `DocumentRecord` gains `summary: Option<&'a str>`. The shared `DocumentTable` is untouched.
+- `index_store/facts.rs`: `into_index` yields `summary: None`; the doc lists it with the unstored
+  fields. `tests/l1/index_store_facts.rs::stored_part` clears it. `FACTS_VERSION` and
+  `index_store_golden.txt` are unchanged (`git diff` shows neither); all 120 `index_store` tests pass.
+
+### Wave 15: hover (15.1) and sessions (15.2)
+
+- `providers/hover.rs::resolved_hover` appends `\n\n{summary}` after the title, path, and the
+  `Heading:` line; module docs updated. No disk read was added.
+- `tests/l1/referenced_targets.rs`: five new consumers, each run for the listed, excluded, and
+  outside-workspace target (15 `#[test]` cells through the existing `cells!` macro).
+- Mutation check: with the append disabled, all 15 positive tests (12 session + 3 unit) fail and the
+  4 negative ones (byte-identical / unreadable) pass, so the assertions are load-bearing.
+
+### Input Robustness Matrix (one validator: `summary_text`)
+
+| Shape | Outcome | Test |
+|---|---|---|
+| absent | next field | `an_unusable_summary_value_is_skipped_never_stringified` (`title:` only) |
+| null (`summary:`, `null`, `~`) | next field, never `"null"` | same; `"null"` quoted is accepted as text in `a_summary_is_a_nonempty_trimmed_yaml_string` |
+| wrong type (int, float, bool, flow/block sequence, flow/block mapping) | next field | same |
+| empty / blank | next field | same |
+| pending `{{ title }}`, `$(whoami)` | next field | same |
+| plain, single/double quoted, literal and folded block, quoted number | accepted, trimmed | `a_summary_is_a_nonempty_trimmed_yaml_string` |
+| each field control + null | per field | `every_summary_field_skips_a_null_value` |
+| precedence | `excerpt` > `summary` > `description` > `about` | `summary_fields_are_read_in_precedence_order` |
+| nested key / no frontmatter / broken YAML | `None` | `only_top_level_summary_fields_count`, `a_document_without_frontmatter_has_no_summary` |
+
+Smell grep over the new code: no `#[serde(default)]`, `unwrap_or_default()` on a parse, or
+`filter_map(.. as_str())`; the one `.ok()` (`serde_yaml_ng::from_str(..).ok()?`) is the intended
+"not a YAML string → next field" outcome.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| Field capture, matrix, precedence, no frontmatter | `dmls graph::substrate::tests::{a_summary_is_a_nonempty_trimmed_yaml_string, an_unusable_summary_value_is_skipped_never_stringified, summary_fields_are_read_in_precedence_order, every_summary_field_skips_a_null_value, only_top_level_summary_fields_count, a_document_without_frontmatter_has_no_summary}` |
+| Store untouched | `dmls::l1 index_store_*` (120 tests), golden unchanged |
+| Hover appends each field, precedence, unusable values byte-identical, heading line kept | `dmls providers::hover::tests::*` (4) |
+| Summary shown on document and heading links in all three target cases; only source + target parsed (a listed sibling with a summary is not) | `referenced_targets::{listed,excluded,outside}_target_summary_hover` |
+| Open buffer beats disk, edits change it, close falls back to disk | `referenced_targets::*_summary_from_buffer` |
+| Watched change / delete refresh | `referenced_targets::*_watched_summary_refresh` |
+| Save-based refresh / delete | `referenced_targets::*_save_summary_refresh` |
+| Unreadable target keeps the hover without a summary | `referenced_targets::*_unreadable_summary` |
+
+Fidelity: the capture and hover text are F1 unit tests; the refresh paths cross the LSP protocol,
+the filesystem, and the router's preparation, so they are F2 in-process-server L1 sessions
+(`LspFixture`). No window, no L2.
+
+### Gates
+
+- `just lint` (darkmatter area): pass.
+- `just test` (darkmatter area): 12870 passed, 10 skipped, exit 0 (70.5 s). No failures, so no
+  load-sensitive reruns.
+- Dependents: no package outside `darkmatter/` depends on `dmls`, and only `dmls` changed, so there
+  were no downstream tests to run.
+- Cross-OS: no path, `#[cfg]`, or OS-specific code changed; the unreadable-target fixture uses invalid
+  UTF-8 bytes, which fail the text read identically on every OS. No `just cross-check` was run.
+- No test was skipped, ignored, or left failing.
