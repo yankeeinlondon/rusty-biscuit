@@ -86,6 +86,9 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
   validation converts.
 - [Diagnostics](./docs/topics/diagnostics.md): typed errors, where each
   points, and where a schema came from.
+- [Selecting a schema file](./docs/topics/selecting-schema-files.md): which
+  file a schema reference names, what was probed, where a missing file would
+  be created, and whether the file is a valid `$schema` target.
 - [Custom vocabulary](./docs/topics/custom-vocabulary.md): the
   `darkmatter-*` formats and `x-darkmatter-*` keywords in a lowered schema,
   and what other JSON Schema validators miss.

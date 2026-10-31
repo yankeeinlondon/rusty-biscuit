@@ -44,7 +44,9 @@ editor's links agree on the file. Its `SchemaFileSelection` reports the
 outcome, every location probed in order, and, for a clean miss, the path the
 file would be created at: the first schema root for a bare name, else the
 reference's first candidate (beside the document for `./x.yaml`). A
-malformed, remote, or unresolvable reference offers no path.
+malformed, remote, or unresolvable reference offers no path. See
+[Selecting a Schema File](../selecting-schema-files.md) for every outcome and
+for inspecting the selected file.
 
 ```rust
 use simplified_schema::resolve::{select_schema_file, SelectionOutcome};
@@ -90,7 +92,7 @@ flowchart TD
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`); its types still import as `Name@file.yaml` |
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
-| YAML with `$schema` and a key outside `$schema`, `types`, `description` (no `kind: schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
+| YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
 | YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location |
 | JSON object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) |
 | JSON `$schema` other than exactly `https://json-schema.org/draft/2020-12/schema` (including `""` and a trailing `#`) | `UnsupportedJsonDialect` |
@@ -133,8 +135,9 @@ A standalone YAML file can be a SimplifiedSchema authoring document, recognized 
 
 ### Pure Envelope
 
-A YAML mapping with `$schema`, an optional reusable `types` mapping, and an
-optional `description` string, and no other key:
+A YAML mapping with `$schema`, an optional reusable `types` mapping, an
+optional `description` string, an optional [`categories`](#categories) list,
+and no other key:
 
 ```yaml
 description: A person record
@@ -196,7 +199,7 @@ other schema document.
 
 ### Categories
 
-A tagged envelope may also declare a `categories:` list beside `types:`. Each
+Either envelope may also declare a `categories:` list beside `types:`. Each
 entry is a name, optionally followed by `-> description`; a description may
 span lines. Documentation shows categories in list order.
 
@@ -236,7 +239,7 @@ age: 30
 ---
 ```
 
-Referencing either mapping envelope as a whole validates the document against that mapping's complete object shape. The `Name@fileref` named-import syntax extracts a single named type from the file's mapping payload and inlines it:
+Referencing a file whose `$schema` is a mapping, in either envelope, validates the document against that mapping's complete object shape. The `Name@fileref` named-import syntax extracts a single named type from the file's `types` table (or, without one, its `$schema` mapping) and inlines it:
 
 ```yaml
 $schema:

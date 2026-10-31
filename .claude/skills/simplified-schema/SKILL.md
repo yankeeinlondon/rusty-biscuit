@@ -104,7 +104,9 @@ text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
 A referenced `$schema` file is classified by `classify_yaml_schema_text` /
 `classify_json_schema_text` (`resolve.rs`): YAML must be an envelope with a
 top-level `$schema` (`types`-only is `NotASchemaDocument { TypesOnly }`, a map
-without `$schema` is `NoSchemaProperty`); JSON must be an object whose
+without `$schema` is `NoSchemaProperty`); each envelope's admitted keys,
+`description` and `categories` included, come from
+`StandaloneSchemaEnvelope::admits_top_level_key`. JSON must be an object whose
 `$schema` is exactly `DRAFT_2020_12_DIALECT` (else `JsonMissingDialect` or
 `UnsupportedJsonDialect`) and pass the offline meta-schema (else
 `InvalidJsonSchema`). There is no raw-YAML JSON Schema fallback; see
@@ -179,6 +181,7 @@ Language reference (`simplified-schema/docs/topics/language/`):
 - [Objects and named types](../../../simplified-schema/docs/topics/language/objects-and-named-types.md) — imports, recursive and shared types, dictionaries
 - [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) — `|`, named union references, root unions, narrowing
 - [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) — resolution, standalone envelopes, raw JSON Schema
+- [Selecting a schema file](../../../simplified-schema/docs/topics/selecting-schema-files.md) — `select_schema_file` outcomes, probes, creation paths; `inspect_schema_target`
 - [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md)
 - [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md)
 

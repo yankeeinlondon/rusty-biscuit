@@ -42,8 +42,8 @@ structure:
 
 - Markdown opening with a `---` frontmatter block: the frontmatter's `$schema`.
   The body is never read as schema.
-- A standalone schema document: root `$schema` (with an optional `types`
-  table), or `kind: schema` with `types`.
+- A standalone schema document: root `$schema` (with optional `types`,
+  `description`, and `categories`), or `kind: schema` with `types`.
 - A raw JSON Schema: a mapping whose `$schema` is a `json-schema.org` dialect
   URI.
 
