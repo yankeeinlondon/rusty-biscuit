@@ -10,6 +10,9 @@ skills_files_updated_during_phase_1: []
 packages:
     - simplified-schema
     - darkmatter
+    - dmls
+    - claudine
+    - claudine-cli
 source_files_during_phase_2:
     - simplified-schema/lib/src/expression/ast.rs
     - simplified-schema/lib/src/expression/lexer.rs
@@ -96,6 +99,35 @@ decisions_for_review:
         intent except the one the spec reverses (AC6: the nested `||` span is
         now offered a suggestion). Keeping the old names would leave tests
         named after behavior that no longer exists.
+    - |-
+        Phase 4 removed Claudine's `context --expressions` mode section, as the
+        plan's R12 said, but the plan did not list the tests built on it. One
+        L1 test asserted the section's intro sentence, and two L2 terminal
+        tests used its bullet list, the only list in that report, to prove
+        list layout (one blank line on each side, hanging indent, a 1-column
+        right margin). I rewrote the L1 test to assert the mode section is gone
+        while the precedence table still lists `||`. For L2, I moved the
+        blank-line and hanging-indent checks onto the side-effects report's
+        constraint list, which already had its own right-margin test, and
+        deleted the expressions right-margin test, which would otherwise
+        duplicate that one. The alternative was to keep a short `||` list in
+        the expressions report just so those tests had something to measure,
+        but that is output the spec does not ask for. If the reviewer wants
+        list coverage on the expressions report itself, that report needs a
+        list again first, and the two tests can then be restored there.
+    - |-
+        DMLS now flags an undeclared name on the right of `||` in an
+        Expression-typed frontmatter value (`f4: known || fm_rhs`), as the
+        body `{{ }}` form already did. This follows from the spec's decision
+        that one absence rule applies everywhere. The LSP test
+        `undeclared_property_fires_in_every_operand_position_at_warning_severity`
+        used to expect no warning there (its comment explained the old
+        condition-mode rule); it now expects the warning. The hover golden
+        `a3_lifecycle_value_hovers.json` was regenerated: a lifecycle guard
+        now hovers as `!total_phases || total_phases <= 0` (as written)
+        instead of `or(!total_phases, total_phases <= 0)`. Both are the
+        intended result; nothing needs redoing unless the absence decision
+        itself is reversed.
 source_files_during_phase_3:
     - darkmatter/lib/src/catalog/mod.rs
     - darkmatter/lib/src/lifecycle/action_shape.rs
@@ -132,21 +164,68 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/cli/tests/level2/level2_context_capture.rs
+    - claudine/cli/tests/prompts/shipped_prompt_contract.rs
+    - claudine/lib/benches/pipeline_work.rs
+    - claudine/lib/benches/pipeline_work_alloc.rs
+    - claudine/lib/src/composition/error/lifecycle_authoring/tests.rs
+    - claudine/lib/src/composition/lifecycle/binding_checks.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/looping/config.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - claudine/lib/src/dispatch/expression/tests.rs
+    - claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+    - claudine/lib/src/dispatch/matcher.rs
+    - claudine/lib/src/dispatch/runner/mod.rs
+    - claudine/lib/src/dispatch/template.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/semantic_tokens.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_value_hovers.json
+    - darkmatter/dmls/tests/l1/expression_scopes.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 message_to_agent: |-
-    Phase 3 finished darkmatter/lib (and darkmatter-cli needed no change): all
-    `Fallback` arms are `LogicalOr { left, right }`; `AuthoredMode::Expression`
-    is a unit variant; `lint_expression(source)` takes one argument (the
-    private helper is `lint_parsed(source, expr, suggest: bool)`);
-    `ModeDescriptor`/`MODE_DESCRIPTORS`/`mode_descriptors()` are deleted;
-    `compose::expression` no longer re-exports `ParseMode`, `parse_condition`,
-    or `parse_condition_spanned`. Green: darkmatter nextest 9720/9720,
-    doctests, prompts 10/10, darkmatter-cli 1460/1460, clippy on both.
-    Still red, as planned for Phase 4: dmls (10 errors, all R10 items) and
-    claudine (`claudine/cli/src/commands/context/expressions.rs` still imports
-    `mode_descriptors`, plus the R1/R8/R15 sites). The full darkmatter
-    `just test`/`just lint` cannot pass until dmls compiles, so run them
-    once Phase 4's DMLS task is done. Phase 1's baseline still applies:
-    6 named claudine `test-prompts` failures pre-exist.
+    Phase 5 added tests only (AC1, AC2, AC5); no production code changed.
+    darkmatter `just test` 12884/12884, darkmatter and claudine `just lint`
+    clean. The Phase 6 doc and skill list is unchanged from Phase 4's note:
+    darkmatter-expressions.md, schemas/definition.md,
+    schemas/parsing/{index,grammar,lexing}.md, schema-targeting.md,
+    simplified-schema expression-syntax.md, claudine expression-engine.md and
+    lifecycle.md, the darkmatter skill's expressions.md (names `Fallback`),
+    and the claudine skill's architecture.md line 362, plus the semantics.rs
+    operator descriptor and parser.rs precedence entry the spec lists. The
+    new tests can serve as doc examples: `length(items || []) > 0` in
+    darkmatter/lib/tests/l1/expression_regression.rs.
 ---
 
 # Implementation Log for 2026-10-16-unified-logical-or (7 phases)
@@ -338,3 +417,145 @@ message_to_agent: |-
 - No cross-OS check: pure parsing/renaming, no paths, processes, or OS code.
 - No darkmatter skill change this phase: the skill's expression topic pages
   are Phase 6's documentation task.
+
+## Phase 4
+
+- Did all three edit tasks directly (no subagents). They were mostly
+  mechanical renames, and doing them in one pass avoided running parallel
+  test suites on one host.
+- DMLS (R10): deleted `expressions::parse_condition`, `hover_markdown_condition`,
+  the `Dialect` enum and the `StackExpression::dialect` field; `hover_markdown_in_event`
+  lost its `parser` parameter and `nested_span_lints` (both forms) lost the mode
+  argument; `StackExpression::parse` calls `expressions::parse`. Callers in
+  `providers/{frontmatter,dsl,semantic_tokens}.rs` and `diagnostics/{frontmatter,nested_span}.rs`
+  use `parse`/`hover_markdown`. `parse`'s doc now states one grammar for every
+  surface. Three `Fallback` arms in `overlay/expressions.rs` became `LogicalOr`.
+  Fixed doc and test names that still said "dialect" (the `findings` `reparse` doc,
+  `condition_dialect_*` tests renamed to `logical_and_*`/`logical_or_*`).
+- Claudine (R1/R8/R15): `Parser::with_mode(..)` → `Parser::new(..)` (matcher,
+  template, dispatch expression tests, whose `parse_and_evaluate` harness lost
+  its mode); `parse_condition` → `parse` at every listed site (the local
+  `looping::config::parse_condition` helper is unrelated and kept);
+  `AuthoredMode::Expression` unit variant; `lint_expression` modeless;
+  `Expr`/`SpannedExprKind::Fallback` → `LogicalOr { left, right }` in matcher,
+  prewarm/classify, and prepare/tests (renamed
+  `lifecycle_logical_or_span_is_deferred_unresolved`). Updated the
+  `dispatch/expression.rs` module doc that called `||` "fallback syntax".
+- Claudine CLI (R12): deleted `render_expressions_modes`, its call, and the
+  `mode_descriptors`/`render_unordered_list` imports. Tests the plan did not list
+  depended on that section (see decisions_for_review):
+    - `tests/l1/context_command.rs`: `context_expressions_corrected_interpolation_wording`
+      → `context_expressions_reports_no_parse_modes` (mode heading, "two modes",
+      and "fallback sugar" absent; the precedence table still lists `||`).
+    - `tests/level2/level2_context_capture.rs`: the narrow expressions test
+      became `level2_context_expressions_narrow_inline_code_in_tmux` (inverse
+      inline code, no literal backticks, width); deleted
+      `level2_context_expressions_list_reserves_right_margin_in_tmux` because
+      `level2_context_side_effects_list_reserves_right_margin_in_tmux` already
+      covers it; moved the hanging-indent and one-blank-line checks onto the
+      side-effects list.
+- Behavior changes exposed by the DMLS suite (both intended by the spec):
+    - `frontmatter_response_contracts::a3_lifecycle_value_hovers_are_unchanged`:
+      golden regenerated with `DMLS_UPDATE_GOLDEN=1`; the only diff is the guard
+      hover `or(!total_phases, total_phases <= 0)` → `!total_phases || total_phases <= 0`.
+    - `lsp_session::undeclared_property_fires_in_every_operand_position_at_warning_severity`:
+      now also expects `f4: known || fm_rhs` to flag `fm_rhs` (D3: one absence
+      rule, right operand is an ordinary read), matching body `B4`.
+- Requirement → test mapping (Phase 4 slice):
+    - `||` hovers as authored on frontmatter values: `providers::frontmatter::tests::expression_value_hover_parses_logical_or`
+      (asserts `is_empty(title) || is_string(title)` shown and no `or(`);
+      `overlay::expressions::tests::hover_shows_logical_or_as_authored`; the a3 golden
+      on the shipped `implement-plan.md` bench fixture (end-to-end through the LSP).
+    - One grammar in DMLS: `overlay::expressions::tests::one_grammar_keeps_logical_or_and_lowers_logical_and`;
+      `hover_resolves_a_kebab_name_at_every_offset_beside_logical_or`.
+    - Stack-expression discovery unchanged without a dialect: event_views tests
+      keep text and reach assertions (the typed guard asserts its text and value span).
+    - Condition absence rule (AC5 in DMLS): the `lsp_session` operand test above.
+    - Claudine report has no mode section: `context_expressions_reports_no_parse_modes` (L1, spawns the CLI).
+    - AC3 shipped-prompt corpus parses with `parse`: `shipped_prompt_contract::shipped_prompts_have_parseable_schemas_and_expressions` passes.
+- Gates and runs:
+    - `cargo nextest run -p dmls --features effects-instrumentation` → 1664/1666
+      before the two updates above, then the two tests alone → pass.
+    - `cargo nextest run -p claudine` → 6491/6491; with `--features work-counters` → 6544/6544.
+    - `cargo nextest run -p claudine-cli --features test-fixtures -E 'test(/context/)'` → 111/111.
+    - `just _test_l2 claudine-cli --features terminal-tests` → 288/288 (tmux; includes the reworked context tests).
+    - `just test-prompts` (claudine) → 81/87; the 6 failures are exactly the
+      Phase 1 baseline (3 `review_fix_rehearsal`, 3 `shipped_prompt_route_drift`).
+    - `just test` (darkmatter) → 12873/12873, 10 skipped. `just lint` (darkmatter) → clean.
+    - `just lint` (claudine) → clean (only the pre-existing `__eh_frame` linker note).
+    - `just check-tier-coverage claudine` / `darkmatter` → 0 stranded.
+    - `cargo check -p claudine -p claudine-cli --all-targets --all-features` → clean (benches included).
+- Scope calculator: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → packages
+  `[claudine, claudine-cli, dmls, test-toolkit, darkmatter]`, change_class `package`;
+  gates not skippable (run as above).
+- No cross-OS check: renames and deletions only, no path, process, or OS code.
+- No darkmatter skill change: the parse-mode mentions in docs and skills
+  (`.claude/skills/claudine/architecture.md:362`, darkmatter and claudine
+  expression docs) are Phase 6's task.
+
+## Phase 5
+
+- Wrote the three test tasks directly (no subagents): the files were
+  disjoint, small, and running them in one pass kept the host unloaded.
+- AC1 (cross-surface value parity), `darkmatter/lib/tests/l1/expression_regression.rs`:
+    - Evaluator rows via public `parse` + `evaluate` against a `HashMap`
+      lookup, module `logical_or_value_parity` (all seven spec rows):
+      `a_present_left_operand_is_the_value` (`items || []`, `[1,2]`),
+      `an_absent_left_operand_yields_the_right_operand` (`[]`),
+      `a_defaulted_collection_feeds_length_in_a_condition` (`true` / `false`),
+      `a_truthy_left_operand_is_returned_not_coerced_to_a_boolean` (`"x"`),
+      `two_falsy_operands_yield_the_last_operand` (`0`),
+      `a_truthy_left_operand_short_circuits_the_right_operand`
+      (`Ok(true)`, with a `false || unknown_fn()` control proving the call
+      would be an `UnknownFunction` error).
+    - Surface rows through `Markdown::compose_with`:
+      `regression_logical_or_defaults_a_collection_in_a_page_block_gate`
+      (`::block when="length(items || []) > 0"` renders with `items: [q]`,
+      dropped when absent), `regression_logical_or_gate_takes_the_truth_of_the_deciding_operand`
+      (`a || b` gate dropped for `false`/`0`, shown for `"x"`/`true`),
+      `regression_logical_or_interpolates_the_deciding_operand`
+      (`{{ a || b }}` → `x`, `{{ c || d }}` → `0`, the two `length(..) > 0`
+      rows, and `{{ true || unknown_fn() }}` → `true`).
+- AC2 + AC1's third surface, `claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs`:
+    - `when_logical_or_defaulted_open_questions_fires_when_listed` /
+      `_skips_when_absent`: the exact spec guard
+      `length(frontmatter(plan, 'open_questions') || []) > 0` over a real
+      `plan.md` in the document's directory (`base_dir`, relative `plan`
+      value, no cwd change); the `message` action runs only when one open
+      question is listed; the outcome is the default (no error) both times.
+    - `when_logical_or_takes_the_truth_of_the_deciding_operand` (added beyond
+      the plan so the lifecycle `when:` surface covers every AC1 row, not only
+      the AC2 guard): one stack whose seven guards are the table's rows; only
+      the four truthy rows emit, in order, and the event does not fail.
+- AC5, `darkmatter/lib/tests/l1/unknown_identifier_warning.rs`:
+    - `a_page_block_gate_logical_or_handles_only_its_left_operand`:
+      `when="spce || plan"` warns for `plan` only (line 4); `when="plan || spce"`
+      warns for `spce` only; the block is dropped in both.
+    - `a_page_block_gate_logical_or_over_declared_roots_is_silent`: both
+      orders with `$schema` declaring `spce` and `plan` raise no advisory.
+- AC3 is covered by the rewritten AST tests of Phases 2–4 and the corpora;
+  AC4 is Phase 7's workspace build; AC6 by the Phase 3 lint rewrite
+  (`a_body_keeps_the_nested_span_the_lint_describes_literal` and siblings),
+  all of which are in the darkmatter `just test` run below.
+- Tier/placement: all new tests are L1 (no tier markers), in files already
+  declared by `darkmatter/lib/tests/l1/main.rs` and Claudine's in-crate test
+  module; nextest selected and ran each one (filters below).
+- Targeted runs:
+    - `cargo nextest run -p darkmatter -E 'binary(l1) & test(/logical_or/)'` → 9/9.
+    - `cargo nextest run -p darkmatter -E 'binary(l1) & test(/page_block_gate_logical_or/)'` → 2/2.
+    - `cargo nextest run -p claudine -E 'test(/when_logical_or/) | test(/when_unknown_function_fails_closed/)'` → 4/4.
+    - `cargo nextest run -p claudine -E 'test(/lifecycle::executor::tests::conditions_control/)'` → 21/21.
+- Gates (run once, after all edits, nothing else running):
+    - darkmatter `just test` → 12884/12884 passed, 10 skipped (includes dmls; +11 new tests over Phase 4's 12873).
+    - darkmatter `just lint` → clean. claudine `just lint` → clean.
+    - `just check-tier-coverage darkmatter` / `claudine` → 0 stranded.
+- Not run: the full claudine lib suite (only a test module changed; the
+  module's 21 tests were run) and `just test-prompts` (no prompt or corpus
+  input changed). No cross-OS check: test-only changes; the one file read
+  lives in a temp dir and is reached through a relative `plan.md` value
+  against `base_dir`, with no OS-specific path.
+- No darkmatter skill change: Phase 5 only adds tests.
+- Scope calculator (whole uncommitted tree, which still includes Phase 4's
+  uncommitted edits): packages `[claudine, claudine-cli, darkmatter, dmls,
+  test-toolkit]`, change_class `package`; gates not skippable (run above).

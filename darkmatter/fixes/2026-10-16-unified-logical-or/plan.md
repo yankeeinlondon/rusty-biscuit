@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-30
-phase: 4
+phase: 6
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1: []
@@ -11,6 +11,9 @@ skills_files_updated_during_phase_1: []
 packages:
 - simplified-schema
 - darkmatter
+- dmls
+- claudine
+- claudine-cli
 source_files_during_phase_2:
 - simplified-schema/lib/src/expression/ast.rs
 - simplified-schema/lib/src/expression/lexer.rs
@@ -58,6 +61,56 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- claudine/cli/src/commands/context/expressions.rs
+- claudine/cli/src/commands/context/mod.rs
+- claudine/cli/tests/l1/context_command.rs
+- claudine/cli/tests/level2/level2_context_capture.rs
+- claudine/cli/tests/prompts/shipped_prompt_contract.rs
+- claudine/lib/benches/pipeline_work.rs
+- claudine/lib/benches/pipeline_work_alloc.rs
+- claudine/lib/src/composition/error/lifecycle_authoring/tests.rs
+- claudine/lib/src/composition/lifecycle/binding_checks.rs
+- claudine/lib/src/composition/lifecycle/bindings.rs
+- claudine/lib/src/composition/lifecycle/bindings/rename.rs
+- claudine/lib/src/composition/lifecycle/bindings/tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+- claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+- claudine/lib/src/composition/looping/config.rs
+- claudine/lib/src/composition/looping/expression.rs
+- claudine/lib/src/composition/prepare/tests.rs
+- claudine/lib/src/composition/sequence/expr.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/dispatch/expression.rs
+- claudine/lib/src/dispatch/expression/tests.rs
+- claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+- claudine/lib/src/dispatch/matcher.rs
+- claudine/lib/src/dispatch/runner/mod.rs
+- claudine/lib/src/dispatch/template.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/nested_span.rs
+- darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+- darkmatter/dmls/src/overlay/event_views.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/overlay/expressions/frontmatter_inventory_tests.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_value_hovers.json
+- darkmatter/dmls/tests/l1/expression_scopes.rs
+- darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+- darkmatter/lib/tests/l1/expression_regression.rs
+- darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # One Meaning for `||` — Implementation Plan
@@ -445,7 +498,7 @@ the validation task runs after all six complete.
 
 Tasks:
 
-- [ ] DMLS migration
+- [x] DMLS migration
     - Files: `dmls/src/overlay/expressions.rs` (+ its
       `frontmatter_inventory_tests.rs`), `dmls/src/overlay/event_views.rs`,
       `dmls/src/diagnostics/{frontmatter.rs, nested_span.rs}` (+
@@ -470,7 +523,7 @@ Tasks:
       `nested_span.rs:180` and the inventory tests drop the mode argument;
       comment fixes at diagnostics/frontmatter.rs:1902 and
       providers/frontmatter.rs:3320.
-- [ ] Claudine dispatch, benches, CLI
+- [x] Claudine dispatch, benches, CLI
     - Files: `claudine/lib/src/dispatch/{matcher.rs, template.rs,
       runner/mod.rs, expression/tests.rs, expression/tests/hook_leaf_reads.rs}`,
       `claudine/lib/benches/{pipeline_work.rs, pipeline_work_alloc.rs}`,
@@ -489,7 +542,7 @@ Tasks:
     - Apply R12: delete `render_expressions_modes` and its call, and the
       `mode_descriptors` import.
     - matcher.rs:137's `Expr::Fallback` arm → `LogicalOr`.
-- [ ] Claudine composition
+- [x] Claudine composition
     - Files: `claudine/lib/src/composition/lifecycle/{bindings.rs,
       bindings/rename.rs, bindings/tests.rs, binding_checks.rs, executor.rs,
       tests/nested_span.rs, prewarm/classify.rs}`,
@@ -509,7 +562,7 @@ Tasks:
       (64); drop the import.
     - prewarm/classify.rs: `SpannedExprKind::Fallback` arms (252, 338) →
       `LogicalOr { left, right }`; prepare/tests.rs:579 likewise.
-- [ ] Phase 4 validation
+- [x] Phase 4 validation
     - `cargo nextest run -p dmls --features effects-instrumentation`,
       `cargo nextest run -p claudine`, then `just test-prompts` in `claudine/`
       (the AC3 corpus, green again once this wave's edits complete).
@@ -524,7 +577,7 @@ New tests only; every production change has landed.
 
 Tasks:
 
-- [ ] Cross-surface value parity (AC1)
+- [x] Cross-surface value parity (AC1)
     - File: `darkmatter/lib/tests/l1/expression_regression.rs` (extend).
     - Evaluator rows (via `evaluate(&parse(..), ..)` against a fixture state,
       following the file's existing helpers): the seven spec rows —
@@ -539,7 +592,7 @@ Tasks:
       body renders with `items: ["q"]` and is dropped when `items` is absent;
       one interpolation `{{ a || b }}` rendering `x`. Claudine lifecycle `when:`
       truth-value rows are covered by the AC2 test below (the third surface).
-- [ ] Claudine lifecycle guard (AC2)
+- [x] Claudine lifecycle guard (AC2)
     - File: `claudine/lib/src/composition/lifecycle/executor/tests/
       conditions_control.rs` (extend; the `when_guarded_fallback_*` tests are
       the pattern).
@@ -548,14 +601,14 @@ Tasks:
       `message` action: with a plan file whose frontmatter lists one open
       question the action runs; with the property absent it does not; no
       error in either case.
-- [ ] Absence advisory in conditions (AC5)
+- [x] Absence advisory in conditions (AC5)
     - File: `darkmatter/lib/tests/l1/unknown_identifier_warning.rs` (extend).
     - Compose a document with a `::block when="spce || plan"` (both roots
       undeclared): no `dm.expression.undeclared_property` advisory is raised
       for the left operand; a companion `when="plan || spce"` still raises it
       for the right operand. Schema-declared names stay validated (assert a
       declared-root document stays advisory-free in both positions).
-- [ ] Phase 5 validation
+- [x] Phase 5 validation
     - Run the three new/extended test files via the Phase 3/4 package
       commands (R16) and confirm every AC1–AC6 assertion passes: AC1/AC5 in
       darkmatter, AC2 in claudine, AC3 across the rewritten tests of Phases
