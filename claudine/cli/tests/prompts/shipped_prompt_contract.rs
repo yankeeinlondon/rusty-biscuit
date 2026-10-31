@@ -161,6 +161,8 @@ fn checkout_context() -> biscuit_file::FileResolutionContext {
     .unwrap()
 }
 
+/// Syntax only; the call-check verdict of these conditions is compared in
+/// Darkmatter's corpus (`shipped_conditions_keep_their_call_check_verdict`).
 #[test]
 fn shipped_prompts_have_parseable_schemas_and_expressions() {
     let paths = shipped_prompt_paths();

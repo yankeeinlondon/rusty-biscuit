@@ -24,20 +24,33 @@
 //! Excluded by construction: `{{{ … }}}` interpolation literals and fenced or
 //! indented code blocks (both skipped by [`ExpressionFinder`]), and GitHub
 //! Actions `${{ … }}` spans.
+//!
+//! A second gate, **condition call-check compatibility**, guards the unified
+//! `||` grammar (`2026-10-16-unified-logical-or`): condition
+//! surfaces once parsed `a || b` as a boolean `or(a, b)` call and now parse it
+//! as a `LogicalOr` node, whose type is its operands'. Every shipped condition
+//! is call-checked twice under its document's declarations, as parsed and
+//! with each `LogicalOr` projected back to the former `or(…)` call, and the
+//! two sets of rejected calls must be equal.
 
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::directives_api::scan_darkmatter_directives;
+use darkmatter::lifecycle::registry::EventRegistry;
+use darkmatter::lifecycle::shell_template::lifecycle_declared_types;
 use darkmatter::markdown::compose::expression::{
-    ExpressionFinder, Token, lex_spanned, parse,
+    DeclaredTypes, ExpressionFinder, SpannedExpr, Token, TypeScope, check_expression_calls, lex_spanned, parse,
+    parse_spanned,
 };
 use darkmatter::markdown::compose::{
     ComposeSource, FrontmatterShellBody, parse_frontmatter_shell_value_spanned,
 };
-use darkmatter::markdown::schemas::{DarkmatterSchemas, effective_property_shape};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, effective_property_shape};
+use simplified_schema::expression::ast::{SpannedCallArgument, SpannedExprKind};
 use simplified_schema::frontmatter_expression_values;
 use serde_json::Value;
 
@@ -123,13 +136,17 @@ struct Corpus {
     schema_documents: usize,
 }
 
-fn collect_corpus() -> Corpus {
+fn corpus_paths() -> Vec<PathBuf> {
     let mut files = Vec::new();
     for dir in corpus_dirs() {
         corpus_files(&dir, &mut files);
     }
     files.sort();
+    files
+}
 
+fn collect_corpus() -> Corpus {
+    let files = corpus_paths();
     let mut expressions = Vec::new();
     let mut schema_documents = 0;
     for path in &files {
@@ -143,6 +160,9 @@ fn collect_corpus() -> Corpus {
 struct ClassifiedFile {
     expressions: Vec<CorpusExpression>,
     has_document_schema: bool,
+    /// The document's effective schema; `None` for a YAML artifact or a
+    /// document no schema layer applies to.
+    effective: Option<EffectiveSchema>,
 }
 
 /// Every executable expression in one artifact, by surface.
@@ -159,29 +179,29 @@ fn classify_file(path: &Path) -> ClassifiedFile {
             .unwrap_or_else(|error| panic!("{} is not YAML: {error}", path.display()));
         let document = serde_json::to_value(document).expect("YAML projects to JSON");
         frontmatter_expressions(None, &document, &mut push);
-        return ClassifiedFile { expressions, has_document_schema: false };
+        return ClassifiedFile { expressions, has_document_schema: false, effective: None };
     }
 
     let document = Markdown::try_from_content(source)
         .unwrap_or_else(|error| panic!("{} does not parse: {error}", path.display()))
         .with_source(ComposeSource::File(path.to_path_buf()));
-    let has_document_schema = schema_expressions(path, &document, &mut push);
+    let effective = schema_expressions(path, &document, &mut push);
     for (key, value) in document.frontmatter().as_map() {
         frontmatter_expressions(Some(key), value, &mut push);
     }
     body_expressions(document.content(), &mut push);
-    ClassifiedFile { expressions, has_document_schema }
+    let has_document_schema = effective.as_ref().is_some_and(|effective| effective.simplified.is_some());
+    ClassifiedFile { expressions, has_document_schema, effective }
 }
 
 /// Pushes every Expression-typed frontmatter value under the document's
 /// effective schema (Darkmatter baseline plus its own `$schema`, resolved
-/// passively as DMLS does), and returns whether a document-level
-/// SimplifiedSchema was found.
+/// passively as DMLS does), and returns that effective schema.
 ///
 /// A value still holding `$(` or `{{` is pending, exactly as the `expression`
 /// format validator defers it; its interpolations and ternaries are audited
 /// by the other surfaces.
-fn schema_expressions(path: &Path, document: &Markdown, push: &mut impl FnMut(Surface, &str)) -> bool {
+fn schema_expressions(path: &Path, document: &Markdown, push: &mut impl FnMut(Surface, &str)) -> Option<EffectiveSchema> {
     let mut schemas = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_darkmatter_baseline_json_schema()
         .expect("the Darkmatter baseline schema loads");
@@ -206,7 +226,7 @@ fn schema_expressions(path: &Path, document: &Markdown, push: &mut impl FnMut(Su
             push(Surface::SchemaExpression, &value.expression);
         }
     }
-    simplified.is_some()
+    effective
 }
 
 fn body_expressions(body: &str, push: &mut impl FnMut(Surface, &str)) {
@@ -537,4 +557,228 @@ fn a_malformed_schema_typed_expression_fails_gate_b() {
     let failures = gate_b_failures(&classified.expressions);
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert!(failures[0].contains("[SchemaExpression] `phase-2 >`"), "{}", failures[0]);
+}
+
+/// The surfaces whose `||` was lowered to a boolean `or(…)` call before the
+/// unified grammar: everything once parsed in condition mode.
+const CONDITION_SURFACES: [Surface; 4] =
+    [Surface::ConditionKey, Surface::WhenDirective, Surface::ShellTernaryCondition, Surface::SchemaExpression];
+
+/// `expr` in the representation condition parsing produced before the
+/// unified grammar: every `LogicalOr` becomes `or(left, right)` over the
+/// node's own span. Returns the projected tree and the spans of the calls it
+/// synthesized, so an authored `or(…)` is still judged.
+fn project_logical_or(expr: &SpannedExpr) -> (SpannedExpr, HashSet<(usize, usize)>) {
+    fn project(expr: &mut SpannedExpr, synthesized: &mut HashSet<(usize, usize)>) {
+        match &mut expr.kind {
+            SpannedExprKind::Variable(_)
+            | SpannedExprKind::StringLiteral(_)
+            | SpannedExprKind::NumberLiteral(_)
+            | SpannedExprKind::BoolLiteral(_) => {}
+            SpannedExprKind::ArrayLiteral(items) | SpannedExprKind::FunctionCall { args: items, .. } => {
+                items.iter_mut().for_each(|item| project(item, synthesized));
+            }
+            SpannedExprKind::ObjectLiteral(entries) => {
+                entries.iter_mut().for_each(|(_, value)| project(value, synthesized));
+            }
+            SpannedExprKind::UnaryNot(inner)
+            | SpannedExprKind::UnaryMinus(inner)
+            | SpannedExprKind::Paren(inner)
+            | SpannedExprKind::MemberAccess { base: inner, .. } => project(inner, synthesized),
+            SpannedExprKind::Binary { left, right, .. }
+            | SpannedExprKind::Comparison { left, right, .. }
+            | SpannedExprKind::Index { base: left, index: right }
+            | SpannedExprKind::LogicalOr { left, right } => {
+                project(left, synthesized);
+                project(right, synthesized);
+            }
+            SpannedExprKind::Ternary { condition, then_branch, else_branch } => {
+                for branch in [condition, then_branch, else_branch] {
+                    project(branch, synthesized);
+                }
+            }
+            SpannedExprKind::CallbackCall { args, .. } => {
+                for arg in args {
+                    match arg {
+                        SpannedCallArgument::Value(value) => project(value, synthesized),
+                        SpannedCallArgument::Callback(callback) => project(&mut callback.body, synthesized),
+                    }
+                }
+            }
+        }
+        if matches!(expr.kind, SpannedExprKind::LogicalOr { .. }) {
+            let placeholder = SpannedExprKind::BoolLiteral(false);
+            let SpannedExprKind::LogicalOr { left, right } = std::mem::replace(&mut expr.kind, placeholder) else {
+                unreachable!("matched above");
+            };
+            expr.kind = SpannedExprKind::FunctionCall { name: "or".to_string(), args: vec![*left, *right] };
+            synthesized.insert((expr.span.start, expr.span.end));
+        }
+    }
+    let mut projected = expr.clone();
+    let mut synthesized = HashSet::new();
+    project(&mut projected, &mut synthesized);
+    (projected, synthesized)
+}
+
+/// One call composition would reject: function name and call span.
+type RejectedCall = (String, usize, usize);
+
+/// The calls in `expr` composition rejects at `scope`, by the predicate
+/// composition and lifecycle rejection share
+/// ([`CallCheck::rejection_diagnostic`]), excluding calls at `synthesized`.
+///
+/// [`CallCheck::rejection_diagnostic`]: darkmatter::markdown::compose::expression::CallCheck::rejection_diagnostic
+fn rejected_calls(expr: &SpannedExpr, scope: &TypeScope<'_>, synthesized: &HashSet<(usize, usize)>) -> BTreeSet<RejectedCall> {
+    check_expression_calls(expr, scope)
+        .into_iter()
+        .filter(|check| check.rejection_diagnostic().is_some())
+        .filter(|check| !(check.function == "or" && synthesized.contains(&(check.span.start, check.span.end))))
+        .map(|check| (check.function, check.span.start, check.span.end))
+        .collect()
+}
+
+/// The rejected calls of `text` as parsed and as the former `or(…)`
+/// projection, when they differ.
+///
+/// ## Errors
+///
+/// Returns the parser's message when `text` does not parse (gate B's to
+/// report).
+fn call_verdict_change(text: &str, scope: &TypeScope<'_>) -> Result<Option<String>, String> {
+    let parsed = parse_spanned(text).map_err(|error| error.to_string())?;
+    let (former, synthesized) = project_logical_or(&parsed);
+    let now = rejected_calls(&parsed, scope, &HashSet::new());
+    let before = rejected_calls(&former, scope, &synthesized);
+    Ok((now != before).then(|| format!("rejected as `or(…)`: {before:?}; rejected as `||`: {now:?}")))
+}
+
+/// A condition's site scope as far as the corpus can build it passively.
+///
+/// Lifecycle conditions get the declarations
+/// [`lifecycle_call_checks`](darkmatter::lifecycle::lifecycle_call_checks)
+/// gives them under Darkmatter's `md` host: Claudine's host globals belong to
+/// a registry this crate cannot build, and the surface's event is not known
+/// here, so those reads are untyped. Every other condition gets the
+/// document's declarations, as the compose call precheck does. Enclosing
+/// guards are not applied. Both trees are judged in the same scope, so a
+/// missing narrowing can hide a change only where that narrowing alone would
+/// decide the verdict.
+fn condition_declarations<'s>(
+    surface: Surface,
+    effective: Option<&'s EffectiveSchema>,
+    registry: &'s EventRegistry,
+) -> DeclaredTypes<'s> {
+    match surface {
+        Surface::ConditionKey => lifecycle_declared_types(effective, registry),
+        _ => DeclaredTypes::for_schema(effective),
+    }
+}
+
+/// What the call-check gate compared over the shipped corpus.
+#[derive(Default)]
+struct ConditionComparison {
+    /// Conditions compared, by surface.
+    compared: BTreeMap<String, usize>,
+    /// Conditions compared whose text contains `||`, by surface.
+    with_logical_or: BTreeMap<String, usize>,
+    /// Conditions present, by surface, whether or not they parse.
+    present: BTreeMap<String, usize>,
+    changes: Vec<String>,
+}
+
+fn compare_shipped_conditions() -> ConditionComparison {
+    let registry = EventRegistry::md();
+    let mut comparison = ConditionComparison::default();
+    for path in corpus_paths() {
+        let classified = classify_file(&path);
+        for expression in classified.expressions.iter().filter(|expression| CONDITION_SURFACES.contains(&expression.surface)) {
+            let surface = format!("{:?}", expression.surface);
+            *comparison.present.entry(surface.clone()).or_default() += 1;
+            let declared = condition_declarations(expression.surface, classified.effective.as_ref(), &registry);
+            let Ok(change) = call_verdict_change(&expression.text, &TypeScope::unguarded(&declared)) else {
+                continue;
+            };
+            *comparison.compared.entry(surface.clone()).or_default() += 1;
+            if expression.text.contains("||") {
+                *comparison.with_logical_or.entry(surface).or_default() += 1;
+            }
+            if let Some(change) = change {
+                comparison.changes.push(format!("{expression}: {change}"));
+            }
+        }
+    }
+    comparison
+}
+
+/// Gate: every shipped condition keeps the passive call-check verdict it had
+/// when its `||` was a boolean `or(…)` call.
+#[test]
+fn shipped_conditions_keep_their_call_check_verdict() {
+    let comparison = compare_shipped_conditions();
+
+    assert!(
+        comparison.changes.is_empty(),
+        "shipped conditions whose call-check verdict changed with `||`:\n{}",
+        comparison.changes.join("\n")
+    );
+    assert_eq!(comparison.compared, comparison.present, "every shipped condition must parse and be compared");
+    for surface in [Surface::ConditionKey, Surface::WhenDirective] {
+        let surface = format!("{surface:?}");
+        assert!(
+            comparison.with_logical_or.get(&surface).is_some_and(|count| *count > 0),
+            "no shipped {surface} condition uses `||`, so the comparison is vacuous there: {:?}",
+            comparison.with_logical_or
+        );
+    }
+}
+
+/// The checker tells a valid condition from one with a rejected call, both
+/// before and after the projection.
+#[test]
+fn call_check_distinguishes_a_rejected_condition_call() {
+    let declared = DeclaredTypes::for_schema(None);
+    let scope = TypeScope::unguarded(&declared);
+    let none = HashSet::new();
+
+    for text in ["!total_phases || total_phases <= 0", "length(true) > 0 || (!total_phases || total_phases <= 0)"] {
+        assert_eq!(call_verdict_change(text, &scope), Ok(None), "`{text}`");
+    }
+    let rejected = |text: &str| rejected_calls(&parse_spanned(text).expect("fixture parses"), &scope, &none);
+    assert!(rejected("!total_phases || total_phases <= 0").is_empty());
+    assert_eq!(
+        rejected("length(true) > 0 || (!total_phases || total_phases <= 0)"),
+        BTreeSet::from([("length".to_string(), 0, 12)])
+    );
+}
+
+/// The gate fails when `||` changes a verdict: as a boolean `or(…)` the
+/// operand of `length` is rejected, as `||` it is not.
+#[test]
+fn call_verdict_comparison_reports_a_changed_verdict() {
+    let declared = DeclaredTypes::for_schema(None);
+    let scope = TypeScope::unguarded(&declared);
+
+    let change = call_verdict_change("length(items || []) > 0", &scope).expect("fixture parses");
+
+    let change = change.expect("the `or(…)` projection rejects `length`, `||` does not");
+    assert!(change.contains("rejected as `or(…)`: {(\"length\", 0, 19)}"), "{change}");
+    assert!(change.contains("rejected as `||`: {}"), "{change}");
+}
+
+/// The projection keeps an authored `or(…)` call and every span, and only
+/// the synthesized calls are excluded from the verdict.
+#[test]
+fn projection_marks_only_synthesized_or_calls() {
+    let parsed = parse_spanned("or(a, b || c) || d").expect("fixture parses");
+
+    let (former, synthesized) = project_logical_or(&parsed);
+
+    assert_eq!(synthesized, HashSet::from([(6, 12), (0, 18)]));
+    assert_eq!(former.span, parsed.span);
+    let SpannedExprKind::FunctionCall { name, args } = &former.kind else { panic!("{former:?}") };
+    assert_eq!(name, "or");
+    let SpannedExprKind::FunctionCall { name: authored, args: inner } = &args[0].kind else { panic!("{:?}", args[0]) };
+    assert_eq!((authored.as_str(), args[0].span.clone()), ("or", 0..13));
+    assert!(matches!(&inner[1].kind, SpannedExprKind::FunctionCall { name, .. } if name == "or"));
 }
