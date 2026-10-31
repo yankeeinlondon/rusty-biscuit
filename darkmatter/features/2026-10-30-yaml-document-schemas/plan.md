@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-31
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 human_review: true
@@ -12,6 +12,8 @@ human_review_items:
 - 'Rule 19: `darkmatter/docs/schemas/err.yaml` loses its `$schema: ./schema-definition.yaml` and `name` header keys so it stops pointing at the deleted placeholder'
 packages:
 - darkmatter
+- darkmatter-cli
+- simplified-schema
 source_files_during_phase_1:
 - darkmatter/lib/src/markdown/schemas/embedded.rs
 - darkmatter/schemas/schema.yaml
@@ -20,6 +22,29 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/kind_documents.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/tests/embedded_sources.rs
+- darkmatter/lib/tests/l1/kind_documents.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/schema_validate_kind_documents.rs
+- darkmatter/cli/tests/l1/main.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/schema.md
 ---
 
@@ -538,13 +563,13 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Wave 3 (sequential: one author, one change set in `darkmatter/lib/src`)
 
-- [ ] **EffectiveSchema constructor.** In `schemas/mod.rs` add the
+- [x] **EffectiveSchema constructor.** In `schemas/mod.rs` add the
   `pub(super)` constructor of Rule 9 that builds an `EffectiveSchema` from a
   `ResolvedSchema`, mirroring the baseline-only arm of
   `effective_for_with_override` (fields: `simplified`, `definitions`,
   `json_schema`, `validators`, `origins`, `dependencies`, `advisories`, and the
   `OnceLock` caches left empty; no triggers; `base_dir: None`).
-- [ ] **Registry module.** Write `kind_documents.rs`: `SHIPPED_KINDS`,
+- [x] **Registry module.** Write `kind_documents.rs`: `SHIPPED_KINDS`,
   `KindDocuments::{shipped, from_documents, claimed_kind}`, `KindValidation`,
   and the three `DarkmatterSchemas` methods of Rule 9 (`with_kind_documents`,
   `effective_for_kind`, `validate_kind_document`). Load with
@@ -553,7 +578,7 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
   Add the module docs (a contract paragraph: passivity, raw mode, `$schema` kept,
   unclaimed outcome) and a Mermaid-free `//!` pointing at the shipped
   definitions as the authority.
-- [ ] **Unit tests in the module** (`#[cfg(test)]`, access to private items):
+- [x] **Unit tests in the module** (`#[cfg(test)]`, access to private items):
   the Rule 2 table assertions, and the key-set tie test: for each kind, the
   root property names of the shipped definition (union of arms) equal
   `StandaloneSchemaEnvelope::Tagged.admits_top_level_key`-admitted keys minus
@@ -564,7 +589,7 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Wave 4 (parallel: separate test files; all use `validate_kind_document`)
 
-- [ ] **Matrix tests.** New `darkmatter/lib/tests/l1/kind_documents.rs`
+- [x] **Matrix tests.** New `darkmatter/lib/tests/l1/kind_documents.rs`
   (declared in `l1/main.rs`): a control row per kind (valid document gives a
   valid report and `kind` in `KindValidation`); the document-shape table; the
   field-shape table for each validator in the Phase 1 matrix (walk the `schema`
@@ -574,36 +599,36 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
   asserted-valid cells. Build each cell from a real control fixture
   (`darkmatter/schemas/schema-trigger.yaml` text for the trigger kind,
   `darkmatter/schemas/schema.yaml` for the schema kind) with one edit.
-- [ ] **Agreement matrix.** In the same file or a sibling module, the Rule 12
+- [x] **Agreement matrix.** In the same file or a sibling module, the Rule 12
   table with the Rust oracles
   (`parse_standalone_schema_document`, `parse_trigger_envelope_from_str`); every
   gap row carries its Rule 11 reason; the invariant assertion is YAML-invalid
   implies Rust-invalid.
-- [ ] **Bootstrap and modified-copy tests.** Both shipped definitions validate
+- [x] **Bootstrap and modified-copy tests.** Both shipped definitions validate
   against the shipped registry (Rule 13); the Rule 18 modified-copy test through
   `DarkmatterSchemas::with_kind_documents`.
-- [ ] **Corpus check.** Extend `shipped_schema_corpus.rs` per Rule 17.
+- [x] **Corpus check.** Extend `shipped_schema_corpus.rs` per Rule 17.
 
 ### Wave 5 (parallel: after Wave 4; comment and doc-comment drift)
 
-- [ ] **Residual-rule docs in Rust.** Add the Rule 11 list to the module docs of
+- [x] **Residual-rule docs in Rust.** Add the Rule 11 list to the module docs of
   `simplified-schema/lib/src/simplified/standalone.rs` (under "Recognition", one
   sentence naming `darkmatter/schemas/schema.yaml` as the structural authority
   that `darkmatter` validates) and `triggers/envelope.rs`; make no behavior
   change.
-- [ ] **Smell grep.** Run the code-smell grep from the Phase 1 matrix section and
+- [x] **Smell grep.** Run the code-smell grep from the Phase 1 matrix section and
   resolve every hit.
 
 ### Phase 2 checkpoint
 
-- [ ] From `darkmatter/`: `just test` and `just lint`. The new L1 file, the
+- [x] From `darkmatter/`: `just test` and `just lint`. The new L1 file, the
   unit tests, and the extended corpus pass.
 
 ## Phase 3: `md schema validate` for YAML Documents
 
 ### Wave 6 (sequential: one file)
 
-- [ ] **YAML route.** Implement Rule 14 in
+- [x] **YAML route.** Implement Rule 14 in
   `darkmatter/cli/src/commands/schema/validate.rs`: extension check in
   `validate_one` (or a helper it calls) that reads the text from
   `OpenedArgument::path()`, applies `validate_kind_document`, and maps results to
@@ -613,7 +638,7 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Wave 7 (parallel: after Wave 6; one new CLI test file)
 
-- [ ] **CLI L1 tests.** New test file in `darkmatter/cli/tests/l1/` using
+- [x] **CLI L1 tests.** New test file in `darkmatter/cli/tests/l1/` using
   `CliProcessFixture`: spawn `md schema validate --format json` per outcome only:
   control (valid `kind: schema` file: exit 0, claimed), a structurally invalid
   `kind: schema` file (exit 1, the problem's line and column appear in the
@@ -624,7 +649,7 @@ section of that name in Phase 1. Phase 2 implements the tests that realize it.
 
 ### Phase 3 checkpoint
 
-- [ ] `just test` and `just lint` from `darkmatter/` pass.
+- [x] `just test` and `just lint` from `darkmatter/` pass.
 
 ## Phase 4: DMLS Diagnostics, Completion, and Hover
 
