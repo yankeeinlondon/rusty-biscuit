@@ -21,6 +21,7 @@ pub mod doc_links;
 pub mod event_views;
 pub mod expressions;
 pub mod frontmatter;
+pub mod kind_document;
 pub mod named_types;
 pub mod references;
 pub mod registry;
@@ -56,6 +57,7 @@ pub use frontmatter::{
     YamlParseError, format_dotted,
 };
 pub use analysis::FrontmatterAnalysis;
+pub use kind_document::KindDocumentOverlay;
 pub use named_types::NamedTypeCatalog;
 pub use references::{
     PREVIEW_LINES, SchemaReferenceFact, SchemaReferenceFacts, SchemaTargetPreview, SchemaTargetVerdict,
@@ -197,6 +199,12 @@ pub struct DocumentOverlay {
     /// built while the document's buffer and prepared schema inputs are
     /// unchanged. Its tree is [`ast`](Self::ast).
     pub analysis: Arc<FrontmatterAnalysis>,
+    /// The kind validation of a YAML document claimed by a shipped kind;
+    /// `None` for Markdown and for every other buffer. When set,
+    /// [`ast`](Self::ast), [`schema`](Self::schema), and
+    /// [`analysis`](Self::analysis) describe the whole document against the
+    /// kind's definition.
+    pub kind_document: Option<Arc<KindDocumentOverlay>>,
 }
 
 impl DocumentOverlay {
@@ -207,6 +215,37 @@ impl DocumentOverlay {
             SchemaOutcome::Ready(Some(bundle)) => Some(bundle),
             _ => None,
         }
+    }
+
+    /// This overlay serving the claimed kind document `kind`, when there is
+    /// one: its tree, bundle, and analysis replace the envelope path's.
+    fn with_kind(mut self, kind: Option<&kind_document::KindState>) -> Self {
+        if let Some(kind) = kind {
+            self.ast = Some(Arc::clone(&kind.overlay.ast));
+            self.schema = SchemaOutcome::Ready(Some(Arc::clone(&kind.overlay.bundle)));
+            self.analysis = Arc::clone(&kind.analysis);
+            self.kind_document = Some(Arc::clone(&kind.overlay));
+        }
+        self
+    }
+
+    /// The overlay of a claimed kind document that no envelope path serves.
+    fn kind_only(kind: &kind_document::KindState) -> Self {
+        DocumentOverlay {
+            ast: None,
+            stale: false,
+            parse_error: None,
+            schema: SchemaOutcome::Ready(None),
+            suggestions: SuggestionState::Inactive,
+            schema_authoring: SchemaAuthoringState::Inactive,
+            named_types: Arc::default(),
+            schema_references: Arc::default(),
+            standalone_resolution: None,
+            file_failures: FileFailures::default(),
+            analysis: Arc::new(FrontmatterAnalysis::detached()),
+            kind_document: None,
+        }
+        .with_kind(Some(kind))
     }
 
     /// Whether this overlay is a standalone schema authoring document.
@@ -247,6 +286,9 @@ struct OverlayCache {
     /// The current frontmatter analysis per document URI, replaced whenever
     /// any input it was built from changes.
     analysis: HashMap<String, Arc<FrontmatterAnalysis>>,
+    /// The kind validation of each open YAML document, keyed by its text,
+    /// revision, and context.
+    kinds: HashMap<String, kind_document::CachedKind>,
     /// Schema work shared by every document's analysis and kept across
     /// edits (see [`analysis::CrossSnapshotSchema`]).
     shared_schema: Arc<analysis::CrossSnapshotSchema>,
@@ -355,10 +397,11 @@ impl OverlayState {
     ///
     /// ## Returns
     ///
-    /// `None` for a document with no frontmatter block and no standalone
-    /// SimplifiedSchema envelope. `Some` otherwise, carrying the (possibly
-    /// stale) tree, the current parse error, effective schema outcome,
-    /// suggestion-lint state, and semantic schema-authoring state.
+    /// `None` for a document with no frontmatter block, no standalone
+    /// SimplifiedSchema envelope, and no shipped `kind` claiming it. `Some`
+    /// otherwise, carrying the (possibly stale) tree, the current parse error,
+    /// effective schema outcome, suggestion-lint state, semantic
+    /// schema-authoring state, and kind validation.
     pub fn for_document(
         &self,
         uri: &Uri,
@@ -453,6 +496,7 @@ impl OverlayState {
                     _ => None,
                 },
                 named_types: Arc::clone(&named_types),
+                kind_document: false,
             };
             let analysis = match cache.analysis.get(&uri_key) {
                 Some(current) if current.matches(&identity) => Arc::clone(current),
@@ -490,8 +534,19 @@ impl OverlayState {
                 standalone_resolution: None,
                 file_failures,
                 analysis,
+                kind_document: None,
             });
         }
+
+        // A YAML document claimed by a shipped kind is validated against the
+        // kind's definition whatever the envelope parsers below make of it;
+        // each overlay they return carries that state.
+        let kind = {
+            let mut cache = self.inner.lock().expect("overlay lock poisoned");
+            timings.time(Stage::SchemaAssembly, || {
+                cache.kind_document(uri.as_str(), revision, text, path, resolution)
+            })
+        };
 
         // Trigger-schema authoring path. A claimed, malformed envelope is an
         // error and a trigger discovery skipped is a warning; ordinary
@@ -516,7 +571,9 @@ impl OverlayState {
                         standalone_resolution: None,
                         file_failures: FileFailures::default(),
                         analysis: Arc::new(FrontmatterAnalysis::detached()),
-                    });
+                        kind_document: None,
+                    }
+                    .with_kind(kind.as_ref()));
                 }
                 Ok(Some(_)) => {
                     let cache = self.inner.lock().expect("overlay lock poisoned");
@@ -541,7 +598,9 @@ impl OverlayState {
                             standalone_resolution: None,
                             file_failures: FileFailures::default(),
                             analysis: Arc::new(FrontmatterAnalysis::detached()),
-                        });
+                            kind_document: None,
+                        }
+                        .with_kind(kind.as_ref()));
                     }
                 }
                 Ok(None) => {}
@@ -592,11 +651,15 @@ impl OverlayState {
                     standalone_resolution: resolved.error,
                     file_failures: resolved.file_failures,
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
-                });
+                    kind_document: None,
+                }
+                .with_kind(kind.as_ref()));
             }
             Ok(None) if claim.is_none() => {}
             result => {
-                let envelope = claim?;
+                let Some(envelope) = claim else {
+                    return kind.as_ref().map(DocumentOverlay::kind_only);
+                };
                 let error = match result {
                     Err(error) => Arc::new(error),
                     Ok(None) => {
@@ -610,7 +673,7 @@ impl OverlayState {
                         let Err(malformed) =
                             serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
                         else {
-                            return None;
+                            return kind.as_ref().map(DocumentOverlay::kind_only);
                         };
                         Arc::new(SchemaError::SchemaDocument {
                             path: path.to_path_buf(),
@@ -645,11 +708,13 @@ impl OverlayState {
                     standalone_resolution: None,
                     file_failures: FileFailures::default(),
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
-                });
+                    kind_document: None,
+                }
+                .with_kind(kind.as_ref()));
             }
         }
 
-        None
+        kind.as_ref().map(DocumentOverlay::kind_only)
     }
 
     /// Drops a closed document's cached state.
@@ -661,6 +726,7 @@ impl OverlayState {
         cache.schema.remove(uri.as_str());
         cache.standalone_resolution.remove(uri.as_str());
         cache.analysis.remove(uri.as_str());
+        cache.kinds.remove(uri.as_str());
     }
 
     /// The published warning for trigger file `path`, when a prepared
@@ -2124,8 +2190,7 @@ mod tests {
         let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
         let expected = std::collections::BTreeMap::from([
             ("env.yaml".to_string(), "ready"),
-            ("err.yaml".to_string(), "error"),
-            ("schema-definition.yaml".to_string(), "inactive"),
+            ("err.yaml".to_string(), "ready"),
         ]);
         let state = OverlayState::default();
         let roots = [root.clone()];

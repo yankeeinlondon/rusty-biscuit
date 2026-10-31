@@ -78,7 +78,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
         ));
     }
 
+    // A kind document is judged by its kind's definition alone: the
+    // frontmatter passes below assume Markdown (coercion, `style`,
+    // expressions, deferred values).
+    if overlay.kind_document.is_some() {
+        crate::diagnostics::kind_document::diagnostics(ctx, &mut out);
+    }
+
     match &overlay.schema {
+        _ if overlay.kind_document.is_some() => {}
         SchemaOutcome::Failed(error) => {
             schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, &mut out);
         }
@@ -122,7 +130,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 
     // A stale last-good tree does not describe the current buffer, so its
     // ranges and rewrites would land on the wrong bytes.
-    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale) {
+    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale && overlay.kind_document.is_none()) {
         crate::diagnostics::nested_span::whole_value_diagnostics(ctx, ast, &mut out);
     }
 
@@ -412,10 +420,37 @@ fn schema_problem_diagnostics(
         out.push(specialized);
     }
 
-    for problem in &report.problems {
-        if specialized_paths.contains(&problem.path) {
-            continue;
-        }
+    let generic = report.problems.iter().filter(|problem| {
+        !specialized_paths.contains(&problem.path)
+            && !(matches!(
+                problem.code,
+                ValidationProblemCode::TypeMismatch | ValidationProblemCode::ConstraintViolation
+            ) && expression_pointers.contains(problem.path.as_str()))
+    });
+    generic_problem_diagnostics(ctx, ast, bundle, generic, out);
+
+    // Deferred-composition values (`$(...)` / `{{ … }}`) are intentionally NOT
+    // diagnosed: an informational squiggle on every interpolated property is
+    // pure noise. The passive "never executed" guarantee is surfaced on hover
+    // (schema description for the key; policy verdict for `$()` shell), not as a
+    // per-value diagnostic. `report.pending` stays populated but unconsumed.
+}
+
+/// One `darkmatter.schema` diagnostic per problem, coded and graded by
+/// [`classify`] and ranged by the R-5 convention (see the module docs). A
+/// file-reference problem is dropped when the document has no context (its
+/// context-failure diagnostic stands in) and when its file does not exist yet
+/// (the value hover explains it). Shared by Markdown frontmatter and kind
+/// documents ([`crate::diagnostics::kind_document`]); the caller removes the
+/// problems a specialized pass owns.
+pub(crate) fn generic_problem_diagnostics<'r>(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    bundle: &SchemaBundle,
+    problems: impl Iterator<Item = &'r ValidationProblem>,
+    out: &mut Vec<Diagnostic>,
+) {
+    for problem in problems {
         let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
             continue;
         };
@@ -429,13 +464,6 @@ fn schema_problem_diagnostics(
         // an eager file at runtime. A projection's caller-owned failure stays.
         if matches!(problem.file_reference, Some(FileReferenceDiagnostic::NoMatch { .. }))
             && problem.caller_file.is_none()
-        {
-            continue;
-        }
-        if matches!(
-            problem.code,
-            ValidationProblemCode::TypeMismatch | ValidationProblemCode::ConstraintViolation
-        ) && expression_pointers.contains(problem.path.as_str())
         {
             continue;
         }
@@ -453,12 +481,6 @@ fn schema_problem_diagnostics(
         diagnostic.data = Some(schema_problem_data(problem));
         out.push(diagnostic);
     }
-
-    // Deferred-composition values (`$(...)` / `{{ … }}`) are intentionally NOT
-    // diagnosed: an informational squiggle on every interpolated property is
-    // pure noise. The passive "never executed" guarantee is surfaced on hover
-    // (schema description for the key; policy verdict for `$()` shell), not as a
-    // per-value diagnostic. `report.pending` stays populated but unconsumed.
 }
 
 /// The `data` payload of a schema-problem diagnostic:
@@ -660,6 +682,12 @@ fn dedent_entry_yaml(source: &str, indent: usize) -> String {
 enum SemanticProblemKind {
     TypeDefinition,
     Schema,
+}
+
+/// Whether `problem` is a `type-definition` or `schema` meta-type rejecting
+/// the authored definition text, rather than the value's structure.
+pub(crate) fn is_meta_type_problem(problem: &ValidationProblem) -> bool {
+    semantic_problem_kind(problem).is_some()
 }
 
 fn semantic_problem_kind(problem: &ValidationProblem) -> Option<SemanticProblemKind> {

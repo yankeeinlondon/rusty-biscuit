@@ -180,6 +180,9 @@ pub struct FrontmatterAst {
     /// Byte span of the root mapping (its entries), the visible range for
     /// root-level missing-required diagnostics.
     root_span: SourceSpan,
+    /// Whether the tree is a whole YAML document whose top-level `$schema` is
+    /// data, not a reference ([`Self::parse_yaml_document`]).
+    schema_key_is_data: bool,
 }
 
 /// The outcome of parsing a document's frontmatter.
@@ -226,14 +229,24 @@ impl FrontmatterAst {
 
     /// Parses a standalone YAML source into the same position-aware mapping view.
     pub fn parse_yaml(source: &str) -> FrontmatterParse {
+        Self::parse_whole_yaml(source, false)
+    }
+
+    /// [`Self::parse_yaml`] for a YAML document validated by its `kind`, in
+    /// which a top-level `$schema` is content: [`Self::schema_entry`] is
+    /// `None`, so no reader of it treats the value as a schema reference.
+    pub fn parse_yaml_document(source: &str) -> FrontmatterParse {
+        Self::parse_whole_yaml(source, true)
+    }
+
+    fn parse_whole_yaml(source: &str, schema_key_is_data: bool) -> FrontmatterParse {
         let block_span = 0..source.len();
         match loader::load(source) {
             Ok(documents) => {
                 let root = documents.into_iter().next().map(|document| document.root);
-                FrontmatterParse {
-                    ast: Some(lower(root.as_ref(), 0, block_span)),
-                    error: None,
-                }
+                let mut ast = lower(root.as_ref(), 0, block_span);
+                ast.schema_key_is_data = schema_key_is_data;
+                FrontmatterParse { ast: Some(ast), error: None }
             }
             Err(error) => FrontmatterParse {
                 ast: None,
@@ -486,8 +499,12 @@ impl FrontmatterAst {
         self.child_entry(parent_pointer, key).and_then(|entry| entry.key_span.clone())
     }
 
-    /// The `$schema` top-level entry, if present.
+    /// The top-level `$schema` entry, when it is a schema reference: `None`
+    /// for a tree from [`Self::parse_yaml_document`], where `$schema` is data.
     pub fn schema_entry(&self) -> Option<&FmEntry> {
+        if self.schema_key_is_data {
+            return None;
+        }
         self.entry_by_pointer("/$schema")
     }
 
@@ -526,7 +543,7 @@ fn lower(root: Option<&Node<YamlSpan>>, base: usize, block_span: SourceSpan) -> 
         // authored key/value entries; the block span is the only range.
         _ => block_span.clone(),
     };
-    FrontmatterAst { entries, block_span, root_span }
+    FrontmatterAst { entries, block_span, root_span, schema_key_is_data: false }
 }
 
 /// The already-lowered collection whose children are being lowered.

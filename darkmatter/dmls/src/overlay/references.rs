@@ -197,10 +197,11 @@ fn preview(file: &Path, assembled: bool, resolve: impl FnOnce() -> Result<(), Sc
     }
 }
 
-/// The `(pointer, decoded string)` of each `$schema` reference in `ast`.
+/// The `(pointer, decoded string)` of each `$schema` reference in `ast`
+/// (none when its `$schema` is data; see [`FrontmatterAst::schema_entry`]).
 pub(crate) fn references<'a>(ast: &'a FrontmatterAst, text: &'a str) -> impl Iterator<Item = (String, String)> + 'a {
     let entries = ast.entries();
-    let root = entries.iter().position(|entry| entry.pointer == "/$schema");
+    let root = ast.schema_entry().and_then(|entry| ast.index_of(entry));
     let candidates: Vec<&FmEntry> = match root.map(|index| (index, &entries[index])) {
         Some((_, entry)) if entry.kind == FmValueKind::Scalar => vec![entry],
         Some((index, entry)) if entry.kind == FmValueKind::Sequence => entries

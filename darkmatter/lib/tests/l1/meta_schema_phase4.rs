@@ -286,6 +286,19 @@ fn shipped_schema_artifacts_validate_through_semantic_keywords() {
             definitions.extend(catalog.values().cloned());
         }
     }
+    // The docs folder holds no `$schema` declaration of its own, so the
+    // shipped kind definitions supply the declarations under test.
+    for source in [
+        include_str!("../../../schemas/schema.yaml"),
+        include_str!("../../../schemas/schema-trigger.yaml"),
+    ] {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).expect("shipped YAML");
+        let declaration = value
+            .get("$schema")
+            .cloned()
+            .expect("a shipped kind definition exports `$schema`");
+        declarations.push(declaration);
+    }
     assert!(!declarations.is_empty(), "shipped schema declarations");
     assert!(!definitions.is_empty(), "shipped type definitions");
 

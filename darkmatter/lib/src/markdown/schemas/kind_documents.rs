@@ -105,6 +105,8 @@ pub struct KindValidation {
     pub kind: String,
     /// The raw validation report, with problems located in the document text.
     pub report: ValidationReport,
+    /// The document as the data the report judged, `$schema` included.
+    pub document: Value,
 }
 
 impl DarkmatterSchemas {
@@ -145,8 +147,8 @@ impl DarkmatterSchemas {
     /// ## Returns
     ///
     /// `Ok(None)` for an unclaimed document (see the module docs), otherwise
-    /// the claiming kind and the raw report. Problems carry the line and
-    /// column of the offending key or value in `text`.
+    /// the claiming kind, the raw report, and the document as data. Problems
+    /// carry the line and column of the offending key or value in `text`.
     ///
     /// ## Errors
     ///
@@ -188,9 +190,11 @@ impl DarkmatterSchemas {
             .expect("a claimed kind is registered");
         let positions = PositionMap::project(text, 0..text.len(), 1, &orders)
             .unwrap_or_else(|| PositionMap::top_level(text, 1));
+        let report = effective.validate_raw_with_positions(&document, &positions);
         Ok(Some(KindValidation {
             kind: kind.to_owned(),
-            report: effective.validate_raw_with_positions(&document, &positions),
+            report,
+            document,
         }))
     }
 }
