@@ -1,11 +1,11 @@
 //! The passive expression parser through the crate's public API: the entry
-//! points the schema checks call (`parse_condition` for expression-typed
+//! points the schema checks call (`parse` for expression-typed
 //! values and expression defaults, `parse_spanned` for function-example calls
 //! and their expected literals) accept any well-formed call, whether or not a
 //! host defines the function, and reject malformed text with a byte position.
 
 use simplified_schema::expression::{
-    Expr, ParseMode, SpannedExpr, SpannedExprKind, Token, lex_spanned, parse, parse_condition, parse_spanned,
+    Expr, SpannedExpr, SpannedExprKind, Token, lex_spanned, parse, parse_spanned,
 };
 
 /// The name and argument count of a top-level call, or `None` when `expr` is
@@ -20,15 +20,15 @@ fn call_of(expr: &SpannedExpr) -> Option<(&str, usize)> {
 #[test]
 fn an_unresolvable_call_is_an_expression_typed_value_and_default() {
     // The expression-typed value check and the expression-default check both
-    // ask `parse_condition`. No host defines `unknown_fn`; syntax is all that
+    // ask `parse`. No host defines `unknown_fn`; syntax is all that
     // is checked.
-    let expr = parse_condition("unknown_fn(1)").expect("a well-formed call parses");
+    let expr = parse("unknown_fn(1)").expect("a well-formed call parses");
     assert_eq!(
         expr,
         Expr::FunctionCall { name: "unknown_fn".into(), args: vec![Expr::NumberLiteral(1.0)] }
     );
-    // Nested unknown calls, unknown variables, and both dialects' operators.
-    assert!(parse_condition("unknown_fn(other_fn(x), y.z) && !missing || w").is_ok());
+    // Nested unknown calls, unknown variables, and both logical operators.
+    assert!(parse("unknown_fn(other_fn(x), y.z) && !missing || w").is_ok());
 }
 
 #[test]
@@ -60,32 +60,31 @@ fn an_example_expected_literal_parses_to_literal_nodes() {
 #[test]
 fn malformed_text_is_rejected_with_a_byte_position() {
     for (source, position) in [("unknown_fn(", 11), ("((", 2), ("unknown_fn(1,)", 13), ("1 +", 3)] {
-        let condition = parse_condition(source).expect_err(source);
+        let erased = parse(source).expect_err(source);
         let spanned = parse_spanned(source).expect_err(source);
-        assert_eq!((condition.position, spanned.position), (position, position), "{source}: {condition}");
-        assert!(condition.to_string().ends_with(&format!("at position {position}")));
+        assert_eq!((erased.position, spanned.position), (position, position), "{source}: {erased}");
+        assert!(erased.to_string().ends_with(&format!("at position {position}")));
     }
     // A lexer failure surfaces through the parser at the offending byte.
-    let unterminated = parse_condition("unknown_fn(\"open)").expect_err("unterminated string");
+    let unterminated = parse("unknown_fn(\"open)").expect_err("unterminated string");
     assert_eq!(unterminated.position, 11);
 }
 
 #[test]
-fn the_two_dialects_differ_only_in_how_or_parses() {
-    // Interpolation `||` is fallback; condition `||` is logical OR. `&&` is
-    // logical AND in both.
+fn or_keeps_its_own_node_and_and_lowers_to_a_call() {
+    // One grammar: `||` is the `LogicalOr` node wherever it is parsed, and
+    // `&&` lowers to `and(a, b)`.
     let call_name = |expr: Expr| match expr {
         Expr::FunctionCall { name, .. } => Some(name),
         _ => None,
     };
-    assert!(matches!(parse("a || b").unwrap(), Expr::Fallback { .. }));
-    assert_eq!(call_name(parse_condition("a || b").unwrap()).as_deref(), Some("or"));
+    assert_eq!(
+        parse("a || b").unwrap(),
+        Expr::LogicalOr { left: Box::new(Expr::Variable("a".into())), right: Box::new(Expr::Variable("b".into())) }
+    );
     assert_eq!(call_name(parse("a && b").unwrap()).as_deref(), Some("and"));
-    assert_eq!(call_name(parse_condition("a && b").unwrap()).as_deref(), Some("and"));
-    let interpolation = lex_spanned("a || b", ParseMode::Interpolation).unwrap();
-    let condition = lex_spanned("a || b", ParseMode::Condition).unwrap();
-    assert_eq!(interpolation[1].value, Token::Pipe);
-    assert_eq!(condition[1].value, Token::OrOr);
+    let tokens: Vec<Token> = lex_spanned("a || b").unwrap().into_iter().map(|token| token.value).collect();
+    assert_eq!(tokens, [Token::Variable("a".into()), Token::Pipe, Token::Variable("b".into()), Token::Eof]);
 }
 
 #[test]
@@ -108,7 +107,7 @@ fn each_parse_is_counted_once_whatever_the_outcome() {
     use simplified_schema::work_counters::{Work, snapshot};
 
     let before = snapshot();
-    parse_condition("unknown_fn(1)").unwrap();
+    parse("unknown_fn(1)").unwrap();
     parse_spanned("unknown_fn(").unwrap_err();
     parse("a || b").unwrap();
     assert_eq!(snapshot().since(&before).get(Work::ExpressionParse), 3);

@@ -50,12 +50,11 @@ fn the_darkmatter_expression_syntax_paths_are_the_library_parser() {
         &expression::parse_spanned("a || b").unwrap(),
     );
     assert_eq!(spanned.erase(), expression::parse("a || b").unwrap());
-    let error: simplified_schema::expression::ParseError = expression::parse_condition("((").unwrap_err();
+    let error: simplified_schema::expression::ParseError = expression::parse("((").unwrap_err();
     assert_eq!(error.position, 2);
     let token: simplified_schema::expression::Token = expression::Token::Pipe;
     let tokens = expression::Lexer::new("a || b").tokenize_all().unwrap();
     assert_eq!(tokens[1], token);
-    let mode: simplified_schema::expression::ParseMode = expression::ParseMode::Condition;
-    let lexed: Vec<simplified_schema::Spanned<simplified_schema::expression::Token>> = expression::lex_spanned("a || b", mode).unwrap();
-    assert_eq!(lexed[1].value, simplified_schema::expression::Token::OrOr);
+    let lexed: Vec<simplified_schema::Spanned<simplified_schema::expression::Token>> = expression::lex_spanned("a || b").unwrap();
+    assert_eq!(lexed[1].value, simplified_schema::expression::Token::Pipe);
 }

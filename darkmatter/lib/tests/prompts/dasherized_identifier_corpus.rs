@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::directives_api::scan_darkmatter_directives;
 use darkmatter::markdown::compose::expression::{
-    ExpressionFinder, ParseMode, Token, lex_spanned, parse, parse_condition,
+    ExpressionFinder, Token, lex_spanned, parse,
 };
 use darkmatter::markdown::compose::{
     ComposeSource, FrontmatterShellBody, parse_frontmatter_shell_value_spanned,
@@ -54,22 +54,6 @@ enum Surface {
     ConditionKey,
     ShellTernaryCondition,
     ShellTernaryValueBranch,
-}
-
-impl Surface {
-    fn mode(self) -> ParseMode {
-        match self {
-            Surface::WhenDirective
-            | Surface::SchemaExpression
-            | Surface::ConditionKey
-            | Surface::ShellTernaryCondition => {
-                ParseMode::Condition
-            }
-            Surface::BodyInterpolation
-            | Surface::FrontmatterInterpolation
-            | Surface::ShellTernaryValueBranch => ParseMode::Interpolation,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -296,7 +280,7 @@ fn is_value_branch(branch: &str) -> bool {
     if !branch.contains(char::is_whitespace) {
         return true;
     }
-    lex_spanned(branch, ParseMode::Interpolation).is_ok_and(|tokens| {
+    lex_spanned(branch).is_ok_and(|tokens| {
         matches!(
             tokens.as_slice(),
             [first, second, ..] if matches!(first.value, Token::Variable(_)) && second.value == Token::LParen
@@ -309,8 +293,8 @@ fn is_value_branch(branch: &str) -> bool {
 /// ## Errors
 ///
 /// Returns the lexer's message when `text` does not lex.
-fn dashed_variables(text: &str, mode: ParseMode) -> Result<Vec<String>, String> {
-    let tokens = lex_spanned(text, mode).map_err(|error| error.to_string())?;
+fn dashed_variables(text: &str) -> Result<Vec<String>, String> {
+    let tokens = lex_spanned(text).map_err(|error| error.to_string())?;
     Ok(tokens
         .into_iter()
         .filter_map(|token| match token.value {
@@ -321,11 +305,7 @@ fn dashed_variables(text: &str, mode: ParseMode) -> Result<Vec<String>, String> 
 }
 
 fn parses(expression: &CorpusExpression) -> Result<(), String> {
-    let result = match expression.surface.mode() {
-        ParseMode::Condition => parse_condition(&expression.text).map(drop),
-        ParseMode::Interpolation => parse(&expression.text).map(drop),
-    };
-    result.map_err(|error| error.to_string())
+    parse(&expression.text).map(drop).map_err(|error| error.to_string())
 }
 
 /// Gate B's per-expression verdict: one line per expression that does not
@@ -409,20 +389,20 @@ fn condition_keys_match_the_shipped_claudine_schema() {
 /// joined-dash grammar and is now one identifier, with no `-` operator left.
 #[test]
 fn former_breaking_forms_now_lex_as_one_variable() {
-    for (text, mode, expected) in [
+    for (text, expected) in [
         // The motivating incident, verbatim.
-        ("spec-name", ParseMode::Interpolation, vec!["spec-name"]),
-        ("iteration-1", ParseMode::Interpolation, vec!["iteration-1"]),
+        ("spec-name", vec!["spec-name"]),
+        ("iteration-1", vec!["iteration-1"]),
         // The collision gate A found in `prompts/_reviews/review-spec-inline.md`.
-        ("depends-on", ParseMode::Condition, vec!["depends-on"]),
-        ("fm.spec-name", ParseMode::Interpolation, vec!["fm.spec-name"]),
-        ("a-_b", ParseMode::Interpolation, vec!["a-_b"]),
-        ("false-1", ParseMode::Interpolation, vec!["false-1"]),
-        ("true-value", ParseMode::Condition, vec!["true-value"]),
-        ("phase-2 > 0 && level-3", ParseMode::Condition, vec!["phase-2", "level-3"]),
+        ("depends-on", vec!["depends-on"]),
+        ("fm.spec-name", vec!["fm.spec-name"]),
+        ("a-_b", vec!["a-_b"]),
+        ("false-1", vec!["false-1"]),
+        ("true-value", vec!["true-value"]),
+        ("phase-2 > 0 && level-3", vec!["phase-2", "level-3"]),
     ] {
-        assert_eq!(dashed_variables(text, mode), Ok(expected.iter().map(ToString::to_string).collect()), "`{text}`");
-        let tokens = lex_spanned(text, mode).expect("fixture lexes");
+        assert_eq!(dashed_variables(text), Ok(expected.iter().map(ToString::to_string).collect()), "`{text}`");
+        let tokens = lex_spanned(text).expect("fixture lexes");
         assert!(tokens.iter().all(|token| token.value != Token::Minus), "`{text}` still lexes a `-` operator");
     }
 }
@@ -451,7 +431,7 @@ fn subtraction_and_literal_dashes_never_join() {
         "dirname(spec) + '/review-plan-' + iteration + '.md'",
         "fm['spec-name']",
     ] {
-        assert_eq!(dashed_variables(text, ParseMode::Interpolation), Ok(vec![]), "`{text}`");
+        assert_eq!(dashed_variables(text), Ok(vec![]), "`{text}`");
     }
 }
 
@@ -514,9 +494,9 @@ fn ternary_conditions_and_value_branches_are_extracted() {
             (Surface::FrontmatterInterpolation, "spec-name".to_string()),
         ]
     );
-    for (surface, text) in &found {
+    for (_, text) in &found {
         assert!(
-            !dashed_variables(text, surface.mode()).expect("fixture lexes").is_empty(),
+            !dashed_variables(text).expect("fixture lexes").is_empty(),
             "fixture `{text}` must exercise a joined-dash identifier"
         );
     }

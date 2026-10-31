@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::expression::{
     AuthoredMode, Availability, BindingError, BindingView, EvaluationLookup, EvaluationSession,
-    ExpressionError, ParseMode, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
+    ExpressionError, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
     UnavailabilityReason,
     evaluate, evaluate_prepared, parse, prepare_value, reserved_root_descriptors,
     validate_prepared,
@@ -595,15 +595,9 @@ mod passive_validation {
         )
         .unwrap();
 
-        let condition =
-            prepare_value(&json!("label || count > 1"), AuthoredMode::Expression(ParseMode::Condition))
-                .unwrap();
+        let condition = prepare_value(&json!("label || count > 1"), AuthoredMode::Expression).unwrap();
         assert_eq!(evaluate_prepared(&condition, &runtime).unwrap(), json!(true));
-        let fallback = prepare_value(
-            &json!("label || 'unnamed'"),
-            AuthoredMode::Expression(ParseMode::Interpolation),
-        )
-        .unwrap();
+        let fallback = prepare_value(&json!("label || 'unnamed'"), AuthoredMode::Expression).unwrap();
         assert_eq!(evaluate_prepared(&fallback, &runtime).unwrap(), json!("unnamed"));
 
         let typed = prepare_value(&json!("{{ count }}"), AuthoredMode::InterpolatedValue).unwrap();
@@ -619,8 +613,7 @@ mod passive_validation {
             json!({ "text": "boom x2", "flag": true, "n": [1, 2] })
         );
 
-        let constant = prepare_value(&json!(false), AuthoredMode::Expression(ParseMode::Condition))
-            .unwrap();
+        let constant = prepare_value(&json!(false), AuthoredMode::Expression).unwrap();
         assert!(constant.expressions().is_empty());
         assert_eq!(evaluate_prepared(&constant, &runtime).unwrap(), json!(false));
     }
@@ -638,8 +631,7 @@ mod passive_validation {
         assert_eq!(&"before {{ a + }} after"[error.span.clone()], "{{ a + }}");
         assert!(matches!(*error.cause, ExpressionError::Parse(_)));
 
-        let condition_error =
-            prepare_value(&json!("a &&"), AuthoredMode::Expression(ParseMode::Condition)).unwrap_err();
+        let condition_error = prepare_value(&json!("a &&"), AuthoredMode::Expression).unwrap_err();
         assert_eq!(condition_error.pointer, "");
     }
 

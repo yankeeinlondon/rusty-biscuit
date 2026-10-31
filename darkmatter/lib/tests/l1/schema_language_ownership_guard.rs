@@ -7,10 +7,9 @@
 //! file listed for it (so a rename there cannot silently retire a row), and no
 //! production source of the three Darkmatter crates (comments, literals, and
 //! test-only code blanked by `source_scan`) may define an item of that name.
-//! Thin delegating wrappers that share a library name (DMLS's
-//! `parse_condition`, the expression evaluator's `json_number`, collection
-//! blocks' `parse_callback`) are not second implementations and are not
-//! listed.
+//! Thin delegating wrappers that share a library name (the expression
+//! evaluator's `json_number`, collection blocks' `parse_callback`) are not
+//! second implementations and are not listed.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -106,7 +105,7 @@ fn darkmatter_defines_no_second_schema_language_implementation() {
         (
             "expression/parser.rs",
             include_str!("../../../../simplified-schema/lib/src/expression/parser.rs"),
-            &["ParseError", "parse_spanned", "parse_callback_spanned", "parse_condition_spanned"],
+            &["ParseError", "parse_spanned", "parse_callback_spanned"],
         ),
         (
             "expression/ast.rs",

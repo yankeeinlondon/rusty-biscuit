@@ -372,7 +372,7 @@ pub fn closest_spelling(
 ///   passed through a whole-value interpolation span such as `{{ payload }}`.
 ///
 /// The `when`/`until`/`while` keys are **not** action parameters — they remain
-/// boolean expressions parsed by [`parse_condition`].
+/// expressions parsed by [`parse`] and judged by truthiness.
 pub fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
     match value {
         serde_json::Value::String(s) => {

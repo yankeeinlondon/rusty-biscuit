@@ -49,7 +49,7 @@ use super::types::{
     SimplifiedType, TupleType, TypeExpr,
 };
 use crate::numeric::json_number;
-use crate::expression::parse_condition;
+use crate::expression::parse as parse_expression;
 use crate::errors::SchemaError;
 use crate::file_match::{
     DARKMATTER_MATCH_KEYWORD, DARKMATTER_MATCH_PROPERTY_KEYWORD, file_match_groups,
@@ -2225,7 +2225,7 @@ fn expression_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, 
     reject_unsupported(name, "expression", constraints, &[])?;
     for c in constraints {
         if let Constraint::Default(v) = c
-            && parse_condition(&expression_default_source(v)).is_err()
+            && parse_expression(&expression_default_source(v)).is_err()
         {
             return Err(SchemaError::Convert {
                 property: name.to_string(),

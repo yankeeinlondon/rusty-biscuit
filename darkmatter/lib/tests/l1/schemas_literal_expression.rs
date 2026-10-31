@@ -3,7 +3,7 @@
 //! read-only document validation across the two type keywords.
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::{parse, parse_condition};
+use darkmatter::markdown::compose::expression::parse;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
 use simplified_schema::coerce::coerce_frontmatter;
 use simplified_schema::{
@@ -469,14 +469,14 @@ fn expression_compiles_to_string_with_format() {
 }
 
 #[test]
-fn expression_accepts_either_dialect() {
-    // Condition-dialect `&&` must be accepted by bare `expression` (Q2).
+fn expression_accepts_logical_operators() {
+    // `&&` and `||` are accepted by bare `expression` (Q2).
     let report = validate(
         "---\n$schema:\n  when: expression\nwhen: 'is_agent() && os == \"macos\"'\n---\nbody\n",
     );
     assert!(
         report.valid,
-        "either-dialect expression must validate: {:?}",
+        "an expression with logical operators must validate: {:?}",
         report.problems
     );
 }
@@ -576,15 +576,13 @@ fn expression_pending_shell_value_deferred() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Feature B — condition-mode parse superset (Phase 3)  [AC 5]
+// Feature B — one grammar for every expression surface  [AC 5]
 // ══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn value_dialect_is_condition_parse_superset() {
-    // The `expression` format is implemented as a single condition-mode parse.
-    // For "either dialect" to be sound, every value-dialect-valid string must
-    // also condition-parse (the condition dialect adds `&&` and re-lowers `||`,
-    // so it is a parse superset). This regression pins that property.
+fn expression_format_accepts_every_value_expression() {
+    // `||` and `&&` mean the same thing on every surface, so the `expression`
+    // format accepts each value expression exactly as `{{ }}` parses it.
     const CORPUS: &[&str] = &[
         "name",
         "ctx.os",
@@ -595,20 +593,11 @@ fn value_dialect_is_condition_parse_superset() {
         "file_exists(\"README.md\")",
         "length(tags)",
     ];
-    let mut value_dialect_valid = 0usize;
     for &expr in CORPUS {
-        if parse(expr).is_ok() {
-            value_dialect_valid += 1;
-            assert!(
-                parse_condition(expr).is_ok(),
-                "value-dialect-valid `{expr}` must also parse in condition mode",
-            );
-        }
+        assert!(parse(expr).is_ok(), "`{expr}` must parse");
+        let report = validate(&format!("---\n$schema:\n  when: expression\nwhen: '{expr}'\n---\nbody\n"));
+        assert!(report.valid, "`{expr}` must validate as `expression`: {:?}", report.problems);
     }
-    assert!(
-        value_dialect_valid >= 4,
-        "corpus should exercise several value-dialect expressions, got {value_dialect_valid}",
-    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════

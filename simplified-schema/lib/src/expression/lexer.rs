@@ -29,7 +29,7 @@ pub enum Token {
     /// Dotted paths are kept as single tokens for simpler AST representation.
     Variable(String),
 
-    /// The `||` fallback operator in interpolation mode.
+    /// The `||` logical OR operator.
     Pipe,
 
     /// The question mark `?` for ternary condition.
@@ -100,35 +100,11 @@ pub enum Token {
     /// Unary logical not `!`.
     Bang,
 
-    /// Logical AND `&&` (both modes).
+    /// Logical AND `&&`.
     AndAnd,
-
-    /// Logical OR `||` (condition mode only; interpolation tokenizes `||` as
-    /// [`Token::Pipe`] for fallback).
-    OrOr,
 
     /// End of input.
     Eof,
-}
-
-/// Parse mode controlling how `||` is tokenized.
-///
-/// `&&` maps to [`Token::AndAnd`] (logical AND) in both modes; only `||`
-/// differs. Interpolation mode: `||` maps to [`Token::Pipe`] (fallback
-/// operator) and bare `|` is invalid.
-///
-/// Condition mode enables `||` as an infix logical operator for `when="..."`
-/// expressions: `||` maps to [`Token::OrOr`] (logical OR), and bare `|` is
-/// invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ParseMode {
-    /// Interpolation parsing (default). `||` is fallback, `&&` is logical AND;
-    /// bare `|` is invalid.
-    #[default]
-    Interpolation,
-
-    /// Condition parsing. `||` is logical OR, `&&` is logical AND; bare `|` is invalid.
-    Condition,
 }
 
 impl fmt::Display for Token {
@@ -158,7 +134,6 @@ impl fmt::Display for Token {
             Token::CompOp(op) => write!(f, "{}", op),
             Token::Bang => write!(f, "!"),
             Token::AndAnd => write!(f, "&&"),
-            Token::OrOr => write!(f, "||"),
             Token::Eof => write!(f, "<EOF>"),
         }
     }
@@ -246,34 +221,15 @@ impl LexerError {
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
-    mode: ParseMode,
 }
 
 impl<'a> Lexer<'a> {
-    /// Creates a new lexer for the given expression content in interpolation mode.
+    /// Creates a new lexer for the given expression content.
     ///
     /// The input should be the content between `{{` and `}}`, not including
     /// the delimiters themselves.
     pub fn new(input: &'a str) -> Self {
-        Self::with_mode(input, ParseMode::Interpolation)
-    }
-
-    /// Creates a new lexer for the given expression content with a specific parse mode.
-    ///
-    /// `&&` is logical AND in both modes. Condition mode additionally treats
-    /// `||` as logical OR; interpolation mode collapses `||` to the fallback
-    /// operator.
-    pub fn with_mode(input: &'a str, mode: ParseMode) -> Self {
-        Self {
-            input,
-            pos: 0,
-            mode,
-        }
-    }
-
-    /// Returns the current parse mode for this lexer.
-    pub fn mode(&self) -> ParseMode {
-        self.mode
+        Self { input, pos: 0 }
     }
 
     /// Returns the next token from the input.
@@ -298,29 +254,15 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 if self.current_char() == Some('|') {
                     self.advance();
-                    match self.mode {
-                        ParseMode::Interpolation => Ok(Token::Pipe),
-                        ParseMode::Condition => Ok(Token::OrOr),
-                    }
+                    Ok(Token::Pipe)
                 } else {
-                    Err(LexerError::new(
-                        match self.mode {
-                            ParseMode::Interpolation => "Unexpected '|'. Use '||' for fallback.",
-                            ParseMode::Condition => "Unexpected '|'. Use '||' for logical OR.",
-                        },
-                        start_pos,
-                    ))
+                    Err(LexerError::new("Unexpected '|'. Use '||'.", start_pos))
                 }
             }
             '&' => {
                 self.advance();
                 if self.current_char() == Some('&') {
                     self.advance();
-                    // `&&` is logical AND in both modes. Interpolation lowers it
-                    // to `and(a, b)` (via `parse_logical_and`, shared by the
-                    // fallback ladder), mirroring how `||` is accepted in both
-                    // modes (fallback when interpolating, logical OR in
-                    // conditions).
                     Ok(Token::AndAnd)
                 } else {
                     Err(LexerError::new("Unexpected character: '&'", start_pos))
@@ -679,8 +621,8 @@ impl<'a> Lexer<'a> {
 ///
 /// Returns the first [`LexerError`] encountered, exactly as
 /// [`Lexer::tokenize_all`] would.
-pub fn lex_spanned(input: &str, mode: ParseMode) -> Result<Vec<Spanned<Token>>, LexerError> {
-    let mut lexer = Lexer::with_mode(input, mode);
+pub fn lex_spanned(input: &str) -> Result<Vec<Spanned<Token>>, LexerError> {
+    let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     loop {
         lexer.skip_whitespace();
@@ -1296,25 +1238,11 @@ mod tests {
         }
 
         #[test]
-        fn error_bare_pipe_in_interpolation() {
-            let mut lexer = Lexer::new("foo | bar");
-            let result = lexer.tokenize_all();
+        fn error_bare_pipe() {
+            let err = Lexer::new("foo | bar").tokenize_all().unwrap_err();
 
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.message.contains("Unexpected '|'"));
-            assert!(err.message.contains("fallback"));
-        }
-
-        #[test]
-        fn error_bare_pipe_in_condition() {
-            let mut lexer = Lexer::with_mode("foo | bar", ParseMode::Condition);
-            let result = lexer.tokenize_all();
-
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.message.contains("Unexpected '|'"));
-            assert!(err.message.contains("logical OR"));
+            assert_eq!(err.message, "Unexpected '|'. Use '||'.");
+            assert_eq!(err.position, 4);
         }
 
         #[test]
@@ -1465,7 +1393,7 @@ mod tests {
 
         #[test]
         fn spans_are_byte_ranges_excluding_whitespace() {
-            let tokens = lex_spanned("  foo  ||  bar  ", ParseMode::Interpolation).unwrap();
+            let tokens = lex_spanned("  foo  ||  bar  ").unwrap();
             // foo, ||, bar, Eof
             assert_eq!(tokens.len(), 4);
             assert_eq!(tokens[0].span, 2..5);
@@ -1479,7 +1407,7 @@ mod tests {
         #[test]
         fn trailing_eof_is_zero_width_at_input_end() {
             let input = "foo";
-            let tokens = lex_spanned(input, ParseMode::Interpolation).unwrap();
+            let tokens = lex_spanned(input).unwrap();
             let last = tokens.last().unwrap();
             assert!(matches!(last.value, Token::Eof));
             assert_eq!(last.span, input.len()..input.len());
@@ -1490,21 +1418,21 @@ mod tests {
             // "é" is two bytes, so the following `.foo` folds into one Variable
             // whose span runs from byte 0 to the input length.
             let input = "café.foo";
-            let tokens = lex_spanned(input, ParseMode::Interpolation).unwrap();
+            let tokens = lex_spanned(input).unwrap();
             assert!(matches!(&tokens[0].value, Token::Variable(v) if v == "café.foo"));
             assert_eq!(tokens[0].span, 0..input.len());
         }
 
         #[test]
-        fn condition_mode_double_pipe_spans_two_bytes() {
-            let tokens = lex_spanned("a || b", ParseMode::Condition).unwrap();
-            assert!(matches!(&tokens[1].value, Token::OrOr));
+        fn double_pipe_spans_two_bytes() {
+            let tokens = lex_spanned("a || b").unwrap();
+            assert!(matches!(&tokens[1].value, Token::Pipe));
             assert_eq!(tokens[1].span, 2..4);
         }
 
         #[test]
         fn propagates_lexer_error() {
-            let err = lex_spanned("@bad", ParseMode::Interpolation).unwrap_err();
+            let err = lex_spanned("@bad").unwrap_err();
             assert!(err.message.contains("Unexpected character"));
         }
     }
@@ -1517,7 +1445,7 @@ mod tests {
         use Token::*;
 
         fn tokens(input: &str) -> Vec<Token> {
-            lex_spanned(input, ParseMode::Interpolation)
+            lex_spanned(input)
                 .unwrap_or_else(|error| panic!("{input:?} should lex: {error:?}"))
                 .into_iter()
                 .map(|spanned| spanned.value)
@@ -1633,7 +1561,7 @@ mod tests {
         #[test]
         fn joined_span_covers_the_whole_dashed_name() {
             let input = "  fm.spec-name - café-x ";
-            let spanned = lex_spanned(input, ParseMode::Interpolation).unwrap();
+            let spanned = lex_spanned(input).unwrap();
             assert_eq!(spanned[0].value, var("fm.spec-name"));
             assert_eq!(&input[spanned[0].span.clone()], "fm.spec-name");
             assert_eq!(spanned[1].value, Minus);
@@ -1642,8 +1570,8 @@ mod tests {
         }
 
         #[test]
-        fn condition_mode_joins_the_same_way() {
-            let values: Vec<Token> = lex_spanned("depends-on && !is-draft", ParseMode::Condition)
+        fn logical_operators_join_the_same_way() {
+            let values: Vec<Token> = lex_spanned("depends-on && !is-draft")
                 .unwrap()
                 .into_iter()
                 .map(|spanned| spanned.value)
@@ -1711,76 +1639,45 @@ mod tests {
         #[test]
         fn agrees_with_the_lexer_on_complete_names() {
             for input in ["spec-name", "fm.spec-name", "a-b-c", "iteration-1", "café-name"] {
-                let first = lex_spanned(input, ParseMode::Interpolation).unwrap()[0].clone();
+                let first = lex_spanned(input).unwrap()[0].clone();
                 assert_eq!(first.span, 0..input.len(), "lexer for {input:?}");
                 assert_eq!(identifier_prefix_start(input), 0, "prefix for {input:?}");
             }
             for input in ["foo--bar", "a - b", "4-2"] {
-                let tokens = lex_spanned(input, ParseMode::Interpolation).unwrap();
+                let tokens = lex_spanned(input).unwrap();
                 let last = &tokens[tokens.len() - 2];
                 assert_eq!(identifier_prefix_start(input), last.span.start, "for {input:?}");
             }
         }
     }
 
-    mod condition_mode_tokens {
+    mod logical_operator_tokens {
         use super::*;
 
         #[test]
-        fn condition_mode_double_pipe_is_or_or() {
-            let mut lexer = Lexer::with_mode("a || b", ParseMode::Condition);
-            let tokens = lexer.tokenize_all().unwrap();
-            assert!(matches!(&tokens[1], Token::OrOr));
-        }
-
-        #[test]
-        fn condition_mode_double_amp_is_and_and() {
-            let mut lexer = Lexer::with_mode("a && b", ParseMode::Condition);
-            let tokens = lexer.tokenize_all().unwrap();
-            assert!(matches!(&tokens[1], Token::AndAnd));
-        }
-
-        #[test]
-        fn condition_mode_single_pipe_is_error() {
-            let mut lexer = Lexer::with_mode("a | b", ParseMode::Condition);
-            let result = lexer.tokenize_all();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.message.contains("Unexpected '|'"));
-            assert!(err.message.contains("logical OR"));
-        }
-
-        #[test]
-        fn condition_mode_single_amp_still_errors() {
-            let mut lexer = Lexer::with_mode("a & b", ParseMode::Condition);
-            let result = lexer.tokenize_all();
-            assert!(result.is_err());
-        }
-
-        #[test]
-        fn interpolation_mode_double_pipe_collapses_to_fallback() {
-            let mut lexer = Lexer::with_mode("a || b", ParseMode::Interpolation);
-            let tokens = lexer.tokenize_all().unwrap();
+        fn double_pipe_is_pipe() {
+            let tokens = Lexer::new("a || b").tokenize_all().unwrap();
             assert!(matches!(&tokens[1], Token::Pipe));
         }
 
         #[test]
-        fn interpolation_mode_double_amp_is_and_and() {
-            // `&&` is logical AND in interpolation mode too (lowered to
-            // `and(a, b)` by the parser), mirroring condition mode.
-            let mut lexer = Lexer::with_mode("a && b", ParseMode::Interpolation);
-            let tokens = lexer.tokenize_all().unwrap();
+        fn double_amp_is_and_and() {
+            let tokens = Lexer::new("a && b").tokenize_all().unwrap();
             assert!(matches!(&tokens[1], Token::AndAnd));
         }
 
         #[test]
-        fn condition_mode_mixed_operators_tokens() {
-            let mut lexer = Lexer::with_mode("a && b || c", ParseMode::Condition);
-            let tokens = lexer.tokenize_all().unwrap();
+        fn single_amp_errors() {
+            assert!(Lexer::new("a & b").tokenize_all().is_err());
+        }
+
+        #[test]
+        fn mixed_operators_tokens() {
+            let tokens = Lexer::new("a && b || c").tokenize_all().unwrap();
             assert!(matches!(&tokens[0], Token::Variable(v) if v == "a"));
             assert!(matches!(&tokens[1], Token::AndAnd));
             assert!(matches!(&tokens[2], Token::Variable(v) if v == "b"));
-            assert!(matches!(&tokens[3], Token::OrOr));
+            assert!(matches!(&tokens[3], Token::Pipe));
             assert!(matches!(&tokens[4], Token::Variable(v) if v == "c"));
         }
     }

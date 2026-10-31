@@ -1069,7 +1069,7 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
             reject_unsupported(path, keyword, constraints)?;
             for constraint in constraints {
                 if let Constraint::Default(value) = constraint
-                    && crate::markdown::compose::expression::parse_condition(&expression_source(value)).is_err()
+                    && crate::markdown::compose::expression::parse(&expression_source(value)).is_err()
                 {
                     return Err(invalid(path, format!("`default({value})` is not a valid Darkmatter expression")));
                 }

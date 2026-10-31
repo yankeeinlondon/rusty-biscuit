@@ -5,12 +5,9 @@
 //!
 //! ```text
 //! expression     = ternary
-//! ternary        = ternary_branch ("?" ternary ":" ternary)?
-//! ternary_branch = fallback                       (interpolation mode)
-//!                | logical_or                     (condition mode)
+//! ternary        = logical_or ("?" ternary ":" ternary)?
 //! logical_or     = logical_and ("||" logical_and)*
-//! fallback       = logical_and ("||" logical_and)*
-//! logical_and    = comparison ("&&" comparison)*  (both modes)
+//! logical_and    = comparison ("&&" comparison)*
 //! comparison     = additive (comp_op additive)?
 //! additive       = multiplicative (("+" | "-") multiplicative)*
 //! multiplicative = unary (("*" | "/" | "%") unary)*
@@ -32,7 +29,7 @@
 //! 4. **Additive** - `+`, `-`
 //! 5. **Comparison** - `==`, `!=`, `>`, `>=`, `<`, `<=`
 //! 6. **Logical AND** - `&&`
-//! 7. **Logical OR / Fallback** - `||`
+//! 7. **Logical OR** - `||`
 //! 8. **Ternary** - `? :` (right-associative)
 //!
 //! ## Examples
@@ -44,9 +41,9 @@
 //! let expr = parse("foo").unwrap();
 //! assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
 //!
-//! // Fallback
+//! // Logical OR
 //! let expr = parse(r#"foo || "default""#).unwrap();
-//! assert!(matches!(expr, Expr::Fallback { .. }));
+//! assert!(matches!(expr, Expr::LogicalOr { .. }));
 //!
 //! // Ternary
 //! let expr = parse(r#"x ? "yes" : "no""#).unwrap();
@@ -61,7 +58,7 @@ use super::{
     ast::{
         BinaryOp, Callback, Expr, SpannedBindingPattern, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind,
     },
-    lexer::{LexerError, ParseMode, Token, lex_spanned},
+    lexer::{LexerError, Token, lex_spanned},
 };
 use crate::span::Spanned;
 use std::collections::HashSet;
@@ -146,36 +143,21 @@ pub struct Parser<'a> {
     tokens: Vec<Spanned<Token>>,
     /// Index of the current token within `tokens`.
     idx: usize,
-    mode: ParseMode,
 }
 
 impl<'a> Parser<'a> {
-    /// Creates a new parser for the given expression in interpolation mode.
+    /// Creates a new parser for the given expression.
     ///
     /// ## Errors
     ///
     /// Returns an error if the lexer fails to tokenize the input.
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
-        Self::with_mode(input, ParseMode::Interpolation)
-    }
-
-    /// Creates a new parser for the given expression with a specific parse mode.
-    ///
-    /// `&&` is logical AND in both modes. Condition mode additionally enables
-    /// `||` as logical OR; interpolation mode keeps `||` as the fallback
-    /// operator.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if the lexer fails to tokenize the input.
-    pub fn with_mode(input: &'a str, mode: ParseMode) -> Result<Self, ParseError> {
         crate::note_work!(ExpressionParse);
-        let tokens = lex_spanned(input, mode)?;
+        let tokens = lex_spanned(input)?;
         Ok(Self {
             _input: input,
             tokens,
             idx: 0,
-            mode,
         })
     }
 
@@ -366,16 +348,12 @@ impl<'a> Parser<'a> {
         self.parse_ternary()
     }
 
-    /// Parses a ternary expression.
-    ///
-    /// In interpolation mode: `fallback ("?" ternary ":" ternary)?`
-    ///
-    /// In condition mode: `logical_or ("?" ternary ":" ternary)?`
+    /// Parses a ternary expression: `logical_or ("?" ternary ":" ternary)?`.
     ///
     /// Branches are parsed recursively so nested ternaries are supported
     /// without extra parentheses: `a ? b ? c : d : e`.
     fn parse_ternary(&mut self) -> Result<SpannedExpr, ParseError> {
-        let expr = self.parse_ternary_branch()?;
+        let expr = self.parse_logical_or()?;
 
         if matches!(self.current(), Token::Question) {
             self.advance(); // consume ?
@@ -398,47 +376,10 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a ternary branch — the level immediately below ternary.
-    ///
-    /// This is `logical_or` in condition mode and `fallback` in interpolation mode.
-    fn parse_ternary_branch(&mut self) -> Result<SpannedExpr, ParseError> {
-        match self.mode {
-            ParseMode::Condition => self.parse_logical_or(),
-            ParseMode::Interpolation => self.parse_fallback(),
-        }
-    }
-
-    /// Parses a logical OR expression (condition mode only):
-    /// `logical_and ("||" logical_and)*`.
-    ///
-    /// Infix `a || b` is lowered into the existing function-call AST as
-    /// `or(a, b)` so downstream evaluation and AST consumers do not need to
-    /// learn a new variant.
-    fn parse_logical_or(&mut self) -> Result<SpannedExpr, ParseError> {
-        let mut expr = self.parse_logical_and()?;
-
-        while matches!(self.current(), Token::OrOr) {
-            self.advance(); // consume ||
-            let rhs = self.parse_logical_and()?;
-            let span = expr.span.start..rhs.span.end;
-            expr = SpannedExpr::new(
-                SpannedExprKind::FunctionCall {
-                    name: "or".to_string(),
-                    args: vec![expr, rhs],
-                },
-                span,
-            );
-        }
-
-        Ok(expr)
-    }
-
     /// Parses a logical AND expression: `comparison ("&&" comparison)*`.
     ///
-    /// Reached in both parse modes — condition mode via `logical_or`, and
-    /// interpolation mode via the `fallback` ladder — so `&&` is available
-    /// wherever expressions are parsed. Infix `a && b` is lowered into the
-    /// existing function-call AST as `and(a, b)`.
+    /// Infix `a && b` is lowered into the function-call AST as `and(a, b)`,
+    /// so it returns a boolean, unlike `||`, which keeps its own node.
     fn parse_logical_and(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_comparison()?;
 
@@ -458,21 +399,20 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a fallback expression: `logical_and ("||" logical_and)*`.
+    /// Parses a logical OR expression: `logical_and ("||" logical_and)*`.
     ///
-    /// `logical_and` is shared with condition mode so the comparison ladder
-    /// behaves identically across both parse modes.
-    fn parse_fallback(&mut self) -> Result<SpannedExpr, ParseError> {
+    /// Left-associative; the node returns the operand that decided the result.
+    fn parse_logical_or(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_logical_and()?;
 
         while matches!(self.current(), Token::Pipe) {
             self.advance(); // consume ||
-            let fallback = self.parse_logical_and()?;
-            let span = expr.span.start..fallback.span.end;
+            let right = self.parse_logical_and()?;
+            let span = expr.span.start..right.span.end;
             expr = SpannedExpr::new(
-                SpannedExprKind::Fallback {
-                    primary: Box::new(expr),
-                    fallback: Box::new(fallback),
+                SpannedExprKind::LogicalOr {
+                    left: Box::new(expr),
+                    right: Box::new(right),
                 },
                 span,
             );
@@ -819,7 +759,7 @@ impl<'a> Parser<'a> {
 /// use simplified_schema::expression::{parse, Expr};
 ///
 /// let expr = parse("foo || \"default\"").unwrap();
-/// assert!(matches!(expr, Expr::Fallback { .. }));
+/// assert!(matches!(expr, Expr::LogicalOr { .. }));
 /// ```
 ///
 /// ## Errors
@@ -843,7 +783,7 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 ///
 /// let expr = parse_spanned("foo || \"bar\"").unwrap();
 /// assert_eq!(expr.span, 0..12);
-/// assert!(matches!(expr.kind, SpannedExprKind::Fallback { .. }));
+/// assert!(matches!(expr.kind, SpannedExprKind::LogicalOr { .. }));
 /// ```
 ///
 /// ## Errors
@@ -860,7 +800,7 @@ pub const INVALID_CALLBACK_CODE: &str = "dm.expression.invalid_callback";
 /// span-erased [`Callback`].
 ///
 /// The pattern is one identifier or a nonempty `{a, b}` field list; the body
-/// is one complete interpolation-mode expression.
+/// is one complete expression.
 ///
 /// ## Errors
 ///
@@ -880,50 +820,6 @@ pub fn parse_callback_spanned(input: &str) -> Result<SpannedCallback, ParseError
     Parser::new(input)?.parse_callback_spanned()
 }
 
-/// Parses an expression string using condition-mode grammar.
-///
-/// In condition mode, `&&` and `||` are recognized as infix logical operators
-/// and lowered into `and(...)` / `or(...)` function-call nodes. Use this
-/// entrypoint for every `when="..."` expression so interpolation parsing
-/// elsewhere is unaffected.
-///
-/// ## Examples
-///
-/// ```
-/// use simplified_schema::expression::{parse_condition, Expr};
-///
-/// let expr = parse_condition("a && b").unwrap();
-/// match expr {
-///     Expr::FunctionCall { name, args } => {
-///         assert_eq!(name, "and");
-///         assert_eq!(args.len(), 2);
-///     }
-///     _ => panic!("expected and(...) function call"),
-/// }
-/// ```
-///
-/// ## Errors
-///
-/// Returns an error for invalid syntax.
-pub fn parse_condition(input: &str) -> Result<Expr, ParseError> {
-    Parser::with_mode(input, ParseMode::Condition)?.parse()
-}
-
-/// Parses an expression string using condition-mode grammar, returning the
-/// span-carrying [`SpannedExpr`] AST.
-///
-/// The condition-mode analogue of [`parse_spanned`]: `parse_condition(input)`
-/// equals `parse_condition_spanned(input)?.erase()`. Infix `&&` / `||` lower
-/// into `and(...)` / `or(...)` [`SpannedExprKind::FunctionCall`] nodes exactly
-/// as in [`parse_condition`].
-///
-/// ## Errors
-///
-/// Returns an error for invalid syntax.
-pub fn parse_condition_spanned(input: &str) -> Result<SpannedExpr, ParseError> {
-    Parser::with_mode(input, ParseMode::Condition)?.parse_spanned()
-}
-
 /// Precedence table shared with the host's operator catalog.
 ///
 /// Each entry is `(name, operators)` ordered from highest precedence to
@@ -937,8 +833,8 @@ pub const PRECEDENCE_TABLE: &[(&str, &str)] = &[
     ("Multiplicative", "`*`, `/`, `%`"),
     ("Additive", "`+`, `-`"),
     ("Comparison", "`==`, `!=`, `>`, `>=`, `<`, `<=`"),
-    ("Logical AND", "`&&` (condition mode)"),
-    ("Logical OR / Fallback", "`||` (mode-dependent)"),
+    ("Logical AND", "`&&`"),
+    ("Logical OR", "`||`"),
     ("Ternary", "`? :`"),
 ];
 
@@ -1041,7 +937,6 @@ mod tests {
                 "a => b",
             ] {
                 assert!(parse(input).is_err(), "{input:?} should be rejected");
-                assert!(parse_condition(input).is_err(), "{input:?} condition");
             }
         }
 
@@ -1083,7 +978,6 @@ mod tests {
             ] {
                 let parsed = parse_spanned(source).unwrap();
                 assert_eq!(parsed.erase(), parse(source).unwrap(), "{source}");
-                assert!(parse_condition_spanned(source).is_ok(), "{source}");
                 assert_eq!(parse(&parsed.erase().to_string()).unwrap(), parsed.erase(), "{source}");
             }
         }
@@ -1103,7 +997,6 @@ mod tests {
                 "map([1], {x: y} => y)",
             ] {
                 assert_eq!(parse(source).unwrap_err().diagnostic_code(), Some(INVALID_CALLBACK_CODE), "{source}");
-                assert_eq!(parse_condition(source).unwrap_err().diagnostic_code(), Some(INVALID_CALLBACK_CODE), "{source}");
             }
         }
 
@@ -1167,7 +1060,7 @@ mod tests {
             assert!(matches!(parse("a >= b").unwrap(), Expr::Comparison { .. }));
             assert!(matches!(parse("a == b").unwrap(), Expr::Comparison { .. }));
             assert!(parse("a - > b").is_err());
-            assert!(parse_condition("a && b > 1 || c").is_ok());
+            assert!(parse("a && b > 1 || c").is_ok());
         }
     }
 
@@ -1273,79 +1166,78 @@ mod tests {
         }
     }
 
-    mod fallback_expressions {
+    mod logical_or_expressions {
         use super::*;
 
         #[test]
-        fn parses_fallback() {
+        fn parses_logical_or() {
             let expr = parse(r#"foo || "default""#).unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "foo"));
-                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "default"));
+                Expr::LogicalOr { left, right } => {
+                    assert!(matches!(*left, Expr::Variable(ref n) if n == "foo"));
+                    assert!(matches!(*right, Expr::StringLiteral(ref s) if s == "default"));
                 }
-                _ => panic!("Expected Fallback"),
+                _ => panic!("Expected LogicalOr"),
             }
         }
 
         #[test]
-        fn parses_fallback_with_variable() {
+        fn parses_logical_or_with_variable() {
             let expr = parse("foo || bar").unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "foo"));
-                    assert!(matches!(*fallback, Expr::Variable(ref n) if n == "bar"));
+                Expr::LogicalOr { left, right } => {
+                    assert!(matches!(*left, Expr::Variable(ref n) if n == "foo"));
+                    assert!(matches!(*right, Expr::Variable(ref n) if n == "bar"));
                 }
-                _ => panic!("Expected Fallback"),
+                _ => panic!("Expected LogicalOr"),
             }
         }
 
         #[test]
-        fn parses_chained_fallback() {
+        fn parses_chained_logical_or() {
             // foo || bar || baz parses as ((foo || bar) || baz)
             let expr = parse("foo || bar || baz").unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    // The fallback is baz
-                    assert!(matches!(*fallback, Expr::Variable(ref n) if n == "baz"));
-                    // The primary is (foo || bar)
-                    match *primary {
-                        Expr::Fallback {
-                            primary: p2,
-                            fallback: f2,
+                Expr::LogicalOr { left, right } => {
+                    // The right operand is baz
+                    assert!(matches!(*right, Expr::Variable(ref n) if n == "baz"));
+                    // The left operand is (foo || bar)
+                    match *left {
+                        Expr::LogicalOr {
+                            left: p2,
+                            right: f2,
                         } => {
                             assert!(matches!(*p2, Expr::Variable(ref n) if n == "foo"));
                             assert!(matches!(*f2, Expr::Variable(ref n) if n == "bar"));
                         }
-                        _ => panic!("Expected nested Fallback"),
+                        _ => panic!("Expected nested LogicalOr"),
                     }
                 }
-                _ => panic!("Expected Fallback"),
+                _ => panic!("Expected LogicalOr"),
             }
         }
 
         #[test]
-        fn parses_env_fallback() {
+        fn parses_env_logical_or() {
             let expr = parse(r#"env.FAVORITE_COLOR || "unknown""#).unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "env.FAVORITE_COLOR"));
-                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "unknown"));
+                Expr::LogicalOr { left, right } => {
+                    assert!(matches!(*left, Expr::Variable(ref n) if n == "env.FAVORITE_COLOR"));
+                    assert!(matches!(*right, Expr::StringLiteral(ref s) if s == "unknown"));
                 }
-                _ => panic!("Expected Fallback"),
+                _ => panic!("Expected LogicalOr"),
             }
         }
 
         #[test]
-        fn parses_double_pipe_as_fallback() {
-            // || is the fallback operator in interpolation mode
+        fn parses_double_pipe_as_logical_or() {
             let expr = parse(r#"plan || "plan.md""#).unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "plan"));
-                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "plan.md"));
+                Expr::LogicalOr { left, right } => {
+                    assert!(matches!(*left, Expr::Variable(ref n) if n == "plan"));
+                    assert!(matches!(*right, Expr::StringLiteral(ref s) if s == "plan.md"));
                 }
-                _ => panic!("Expected Fallback"),
+                _ => panic!("Expected LogicalOr"),
             }
         }
     }
@@ -1394,7 +1286,7 @@ mod tests {
         }
 
         #[test]
-        fn parses_ternary_with_fallback_in_branches() {
+        fn parses_ternary_with_logical_or_in_branches() {
             // x ? (a || b) : (c || d)
             let expr = parse(r#"x ? a || b : c || d"#).unwrap();
             match expr {
@@ -1404,8 +1296,8 @@ mod tests {
                     else_branch,
                 } => {
                     assert!(matches!(*condition, Expr::Variable(ref n) if n == "x"));
-                    assert!(matches!(*then_branch, Expr::Fallback { .. }));
-                    assert!(matches!(*else_branch, Expr::Fallback { .. }));
+                    assert!(matches!(*then_branch, Expr::LogicalOr { .. }));
+                    assert!(matches!(*else_branch, Expr::LogicalOr { .. }));
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -1676,7 +1568,7 @@ mod tests {
             // This should parse as: (foo || bar) ? "truthy" : "falsy"
             // But actually per precedence: foo || (bar ? "truthy" : "falsy")
             // Wait, ternary has lowest precedence, so:
-            // ternary parses fallback first, which consumes foo || bar
+            // ternary parses logical OR first, which consumes foo || bar
             // then sees ?, so the condition is (foo || bar)
             let expr = parse(r#"foo || bar ? "truthy" : "falsy""#).unwrap();
             match expr {
@@ -1686,7 +1578,7 @@ mod tests {
                     else_branch,
                 } => {
                     // Condition should be foo || bar
-                    assert!(matches!(*condition, Expr::Fallback { .. }));
+                    assert!(matches!(*condition, Expr::LogicalOr { .. }));
                     assert!(matches!(*then_branch, Expr::StringLiteral(ref s) if s == "truthy"));
                     assert!(matches!(*else_branch, Expr::StringLiteral(ref s) if s == "falsy"));
                 }
@@ -1778,7 +1670,7 @@ mod tests {
                 Expr::FunctionCall { name, args } => {
                     assert_eq!(name, "length");
                     assert_eq!(args.len(), 1);
-                    assert!(matches!(&args[0], Expr::Fallback { .. }));
+                    assert!(matches!(&args[0], Expr::LogicalOr { .. }));
                 }
                 _ => panic!("Expected FunctionCall"),
             }
@@ -1811,9 +1703,9 @@ mod tests {
         }
 
         #[test]
-        fn parses_parenthesized_fallback() {
+        fn parses_parenthesized_logical_or() {
             let expr = parse("(foo || bar)").unwrap();
-            assert!(matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. })));
+            assert!(matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::LogicalOr { .. })));
         }
 
         #[test]
@@ -1823,7 +1715,7 @@ mod tests {
             match expr {
                 Expr::Ternary { condition, .. } => {
                     assert!(
-                        matches!(*condition, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. }))
+                        matches!(*condition, Expr::Paren(inner) if matches!(*inner, Expr::LogicalOr { .. }))
                     );
                 }
                 _ => panic!("Expected Ternary"),
@@ -1841,33 +1733,9 @@ mod tests {
         }
 
         #[test]
-        fn error_bare_pipe_in_interpolation() {
-            let result = parse(r#"foo | "default""#);
-            assert!(
-                result.is_err(),
-                "bare '|' should be rejected in interpolation mode"
-            );
-            let err = result.unwrap_err();
-            assert!(
-                err.message.contains("Unexpected '|'"),
-                "error should mention '|', got: {}",
-                err.message
-            );
-        }
-
-        #[test]
-        fn error_bare_pipe_in_condition() {
-            let result = parse_condition("a | b");
-            assert!(
-                result.is_err(),
-                "bare '|' should be rejected in condition mode"
-            );
-            let err = result.unwrap_err();
-            assert!(
-                err.message.contains("Unexpected '|'"),
-                "error should mention '|', got: {}",
-                err.message
-            );
+        fn error_bare_pipe() {
+            let err = parse(r#"foo | "default""#).unwrap_err();
+            assert_eq!(err.message, "Unexpected '|'. Use '||'.");
         }
 
         #[test]
@@ -2027,13 +1895,13 @@ mod tests {
         }
 
         #[test]
-        fn roundtrip_parenthesized_fallback() {
+        fn roundtrip_parenthesized_logical_or() {
             let expr = parse(r#"(foo || "default")"#).unwrap();
             assert_eq!(expr.to_string(), "(foo || \"default\")");
         }
 
         #[test]
-        fn roundtrip_fallback() {
+        fn roundtrip_logical_or() {
             let expr = parse(r#"foo || "default""#).unwrap();
             assert_eq!(expr.to_string(), "foo || \"default\"");
         }
@@ -2120,15 +1988,15 @@ mod tests {
         }
 
         #[test]
-        fn fallback_is_left_associative() {
+        fn logical_or_is_left_associative() {
             // a || b || c parses as (a || b) || c
             let expr = parse("a || b || c").unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*fallback, Expr::Variable(ref n) if n == "c"));
-                    assert!(matches!(*primary, Expr::Fallback { .. }));
+                Expr::LogicalOr { left, right } => {
+                    assert!(matches!(*right, Expr::Variable(ref n) if n == "c"));
+                    assert!(matches!(*left, Expr::LogicalOr { .. }));
                 }
-                other => panic!("expected Fallback, got {other:?}"),
+                other => panic!("expected LogicalOr, got {other:?}"),
             }
         }
 
@@ -2159,15 +2027,15 @@ mod tests {
         }
 
         #[test]
-        fn comparison_binds_tighter_than_fallback() {
+        fn comparison_binds_tighter_than_logical_or() {
             // a + b * c <= d || e parses as ((a + b * c) <= d) || e
             let expr = parse("a + b * c <= d || e").unwrap();
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*fallback, Expr::Variable(ref n) if n == "e"));
-                    assert!(matches!(*primary, Expr::Comparison { .. }));
+                Expr::LogicalOr { left, right } => {
+                    assert!(matches!(*right, Expr::Variable(ref n) if n == "e"));
+                    assert!(matches!(*left, Expr::Comparison { .. }));
                 }
-                other => panic!("expected Fallback, got {other:?}"),
+                other => panic!("expected LogicalOr, got {other:?}"),
             }
         }
 
@@ -2332,7 +2200,7 @@ mod tests {
         }
     }
 
-    mod condition_mode_logic {
+    mod logical_operators {
         use super::*;
 
         fn extract_call(expr: &Expr) -> (&str, &[Expr]) {
@@ -2342,106 +2210,22 @@ mod tests {
             }
         }
 
-        #[test]
-        fn condition_parses_infix_and() {
-            let expr = parse_condition("a && b").unwrap();
-            let (name, args) = extract_call(&expr);
-            assert_eq!(name, "and");
-            assert_eq!(args.len(), 2);
-            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
-        }
-
-        #[test]
-        fn condition_parses_infix_or() {
-            let expr = parse_condition("a || b").unwrap();
-            let (name, args) = extract_call(&expr);
-            assert_eq!(name, "or");
-            assert_eq!(args.len(), 2);
-            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
-        }
-
-        #[test]
-        fn condition_and_binds_tighter_than_or_left() {
-            // a && b || c parses as (a && b) || c
-            let expr = parse_condition("a && b || c").unwrap();
-            let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "or");
-            assert_eq!(args.len(), 2);
-            let (inner, inner_args) = extract_call(&args[0]);
-            assert_eq!(inner, "and");
-            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
-            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
-            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
-        }
-
-        #[test]
-        fn condition_and_binds_tighter_than_or_right() {
-            // a || b && c parses as a || (b && c)
-            let expr = parse_condition("a || b && c").unwrap();
-            let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "or");
-            assert_eq!(args.len(), 2);
-            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            let (inner, inner_args) = extract_call(&args[1]);
-            assert_eq!(inner, "and");
-            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
-            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
-        }
-
-        #[test]
-        fn condition_parenthesized_or_then_and() {
-            // (a || b) && c parses as and(Paren(or(a, b)), c)
-            let expr = parse_condition("(a || b) && c").unwrap();
-            let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "and");
-            assert_eq!(args.len(), 2);
-            let paren = match &args[0] {
-                Expr::Paren(inner) => inner,
-                other => panic!("expected Paren, got {other:?}"),
-            };
-            let (inner, inner_args) = extract_call(paren);
-            assert_eq!(inner, "or");
-            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
-            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
-            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
-        }
-
-        #[test]
-        fn condition_or_inside_or() {
-            // a || (b || c) — chained OR
-            let expr = parse_condition("a || (b || c)").unwrap();
-            let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "or");
-            assert_eq!(args.len(), 2);
-            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            let paren = match &args[1] {
-                Expr::Paren(inner) => inner,
-                other => panic!("expected Paren, got {other:?}"),
-            };
-            let (inner, inner_args) = extract_call(paren);
-            assert_eq!(inner, "or");
-            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
-            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
-        }
-
-        #[test]
-        fn interpolation_double_pipe_still_fallback() {
-            let expr = parse(r#"plan || "plan.md""#).unwrap();
+        fn extract_or(expr: &Expr) -> (&Expr, &Expr) {
             match expr {
-                Expr::Fallback { primary, fallback } => {
-                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "plan"));
-                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "plan.md"));
-                }
-                _ => panic!("Expected Fallback"),
+                Expr::LogicalOr { left, right } => (left, right),
+                other => panic!("expected LogicalOr, got {other:?}"),
+            }
+        }
+
+        fn unparen(expr: &Expr) -> &Expr {
+            match expr {
+                Expr::Paren(inner) => inner,
+                other => panic!("expected Paren, got {other:?}"),
             }
         }
 
         #[test]
-        fn interpolation_parses_infix_and() {
-            // `&&` is valid in interpolation mode and lowers to `and(a, b)`,
-            // just like condition mode.
+        fn parses_infix_and() {
             let expr = parse("a && b").unwrap();
             let (name, args) = extract_call(&expr);
             assert_eq!(name, "and");
@@ -2451,7 +2235,64 @@ mod tests {
         }
 
         #[test]
-        fn interpolation_and_binds_tighter_than_ternary() {
+        fn parses_infix_or_as_logical_or_node() {
+            // `||` keeps its own node; it is never lowered to `or(a, b)`.
+            let expr = parse("a || b").unwrap();
+            let (left, right) = extract_or(&expr);
+            assert!(matches!(left, Expr::Variable(n) if n == "a"));
+            assert!(matches!(right, Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn and_binds_tighter_than_or_left() {
+            // a && b || c parses as (a && b) || c
+            let expr = parse("a && b || c").unwrap();
+            let (left, right) = extract_or(&expr);
+            let (inner, inner_args) = extract_call(left);
+            assert_eq!(inner, "and");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(right, Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn and_binds_tighter_than_or_right() {
+            // a || b && c parses as a || (b && c)
+            let expr = parse("a || b && c").unwrap();
+            let (left, right) = extract_or(&expr);
+            assert!(matches!(left, Expr::Variable(n) if n == "a"));
+            let (inner, inner_args) = extract_call(right);
+            assert_eq!(inner, "and");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn parenthesized_or_then_and() {
+            // (a || b) && c parses as and(Paren(a || b), c)
+            let expr = parse("(a || b) && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "and");
+            assert_eq!(args.len(), 2);
+            let (left, right) = extract_or(unparen(&args[0]));
+            assert!(matches!(left, Expr::Variable(n) if n == "a"));
+            assert!(matches!(right, Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn or_inside_or() {
+            // a || (b || c) — chained OR
+            let expr = parse("a || (b || c)").unwrap();
+            let (left, right) = extract_or(&expr);
+            assert!(matches!(left, Expr::Variable(n) if n == "a"));
+            let (inner_left, inner_right) = extract_or(unparen(right));
+            assert!(matches!(inner_left, Expr::Variable(n) if n == "b"));
+            assert!(matches!(inner_right, Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn and_binds_tighter_than_ternary() {
             // Mirrors the real `ready` frontmatter shape `x && y ? a : b`:
             // `&&` binds tighter than `?:`, so the condition is `and(x, y)`.
             let expr = parse("x && y ? a : b").unwrap();
@@ -2464,9 +2305,9 @@ mod tests {
         }
 
         #[test]
-        fn condition_chained_and_left_associative() {
+        fn chained_and_left_associative() {
             // a && b && c parses as and(and(a, b), c)
-            let expr = parse_condition("a && b && c").unwrap();
+            let expr = parse("a && b && c").unwrap();
             let (outer, args) = extract_call(&expr);
             assert_eq!(outer, "and");
             assert_eq!(args.len(), 2);
@@ -2478,14 +2319,24 @@ mod tests {
         }
 
         #[test]
-        fn condition_chained_or_left_associative() {
-            // a || b || c parses as or(or(a, b), c)
-            let expr = parse_condition("a || b || c").unwrap();
-            let (outer, args) = extract_call(&expr);
-            assert_eq!(outer, "or");
+        fn chained_or_left_associative() {
+            // a || b || c parses as (a || b) || c
+            let expr = parse("a || b || c").unwrap();
+            let (left, right) = extract_or(&expr);
+            assert!(matches!(right, Expr::Variable(n) if n == "c"));
+            let (inner_left, inner_right) = extract_or(left);
+            assert!(matches!(inner_left, Expr::Variable(n) if n == "a"));
+            assert!(matches!(inner_right, Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn or_function_call_still_parses_as_a_call() {
+            // The named `or(...)` function is unchanged and stays distinct
+            // from the infix operator's node.
+            let expr = parse("or(a, b)").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "or");
             assert_eq!(args.len(), 2);
-            let (inner, _) = extract_call(&args[0]);
-            assert_eq!(inner, "or");
         }
     }
 
@@ -2494,7 +2345,7 @@ mod tests {
     /// The single-grammar contract is that `parse` is exactly
     /// `parse_spanned(_).erase()`; these are the goldens that pin it. Every
     /// expression fixture in this module already exercises the erased path via
-    /// [`parse`]/[`parse_condition`] (which now lower from the spanned parser),
+    /// [`parse`] (which lowers from the spanned parser),
     /// so this module adds the erasure-equivalence corpus plus concrete byte
     /// spans.
     /// Requirement 1 of the dasherized-identifiers spec at the parser level.
@@ -2561,9 +2412,9 @@ mod tests {
         fn kebab_names_work_as_operands_and_arguments() {
             assert_eq!(
                 parse("spec-name || default-name").unwrap(),
-                Expr::Fallback {
-                    primary: Box::new(Expr::Variable("spec-name".to_string())),
-                    fallback: Box::new(Expr::Variable("default-name".to_string())),
+                Expr::LogicalOr {
+                    left: Box::new(Expr::Variable("spec-name".to_string())),
+                    right: Box::new(Expr::Variable("default-name".to_string())),
                 }
             );
             match parse("upper(spec-name)").unwrap() {
@@ -2623,7 +2474,7 @@ mod tests {
     mod spanned {
         use super::*;
 
-        /// Corpus spanning every grammar production, both parse modes.
+        /// Corpus spanning every grammar production.
         const CORPUS: &[&str] = &[
             "foo",
             "user.name",
@@ -2657,27 +2508,17 @@ mod tests {
             "(a || b)",
             "a && b",
             "x && y ? a : b",
+            "a && b || c",
+            "(a || b) && c",
+            "a || (b || c)",
         ];
 
-        /// Condition-mode-only corpus (infix `&&` / `||`).
-        const CONDITION_CORPUS: &[&str] =
-            &["a && b", "a || b", "a && b || c", "(a || b) && c", "a || (b || c)"];
-
         #[test]
-        fn interpolation_erasure_matches_parse() {
+        fn erasure_matches_parse() {
             for src in CORPUS {
                 let erased = parse_spanned(src).unwrap().erase();
                 let direct = parse(src).unwrap();
                 assert_eq!(erased, direct, "erasure mismatch for {src:?}");
-            }
-        }
-
-        #[test]
-        fn condition_erasure_matches_parse_condition() {
-            for src in CONDITION_CORPUS {
-                let erased = parse_condition_spanned(src).unwrap().erase();
-                let direct = parse_condition(src).unwrap();
-                assert_eq!(erased, direct, "condition erasure mismatch for {src:?}");
             }
         }
 
@@ -2747,9 +2588,9 @@ mod tests {
         }
 
         #[test]
-        fn condition_and_lowering_span_covers_both_operands() {
+        fn and_lowering_span_covers_both_operands() {
             let src = "a && b";
-            let expr = parse_condition_spanned(src).unwrap();
+            let expr = parse_spanned(src).unwrap();
             assert_eq!(expr.span, 0..src.len());
             assert!(matches!(
                 expr.kind,
@@ -2819,10 +2660,6 @@ mod tests {
         fn assert_indentation_is_insignificant(raw: &str, decoded: &str) {
             assert_ne!(raw, decoded, "fixture must actually carry indentation");
             assert_eq!(parse(raw).unwrap(), parse(decoded).unwrap());
-            assert_eq!(
-                parse_condition(raw).unwrap(),
-                parse_condition(decoded).unwrap()
-            );
             let spanned = parse_spanned(raw).unwrap();
             assert_eq!(spanned.erase(), parse(decoded).unwrap());
             let trimmed = raw.trim();

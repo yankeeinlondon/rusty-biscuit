@@ -193,9 +193,9 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
             };
             ScopeShape::array_of(&result)
         },
-        SpannedExprKind::Fallback { primary, fallback } => {
-            let present = expression_type(primary, scope).without_null();
-            present.union(&expression_type(fallback, &scope.assume(&primary.erase(), Polarity::False)))
+        SpannedExprKind::LogicalOr { left, right } => {
+            let present = expression_type(left, scope).without_null();
+            present.union(&expression_type(right, &scope.assume(&left.erase(), Polarity::False)))
         }
         SpannedExprKind::Ternary {
             condition,
@@ -1194,9 +1194,9 @@ fn unlocated(expr: &Expr) -> SpannedExpr {
             base: boxed(base),
             name: name.clone(),
         },
-        Expr::Fallback { primary, fallback } => SpannedExprKind::Fallback {
-            primary: boxed(primary),
-            fallback: boxed(fallback),
+        Expr::LogicalOr { left, right } => SpannedExprKind::LogicalOr {
+            left: boxed(left),
+            right: boxed(right),
         },
         Expr::Ternary {
             condition,
@@ -1300,9 +1300,9 @@ pub(crate) fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut
             visit_call_nodes(base, visit);
             visit_call_nodes(index, visit);
         }
-        SpannedExprKind::Fallback { primary, fallback } => {
-            visit_call_nodes(primary, visit);
-            visit_call_nodes(fallback, visit);
+        SpannedExprKind::LogicalOr { left, right } => {
+            visit_call_nodes(left, visit);
+            visit_call_nodes(right, visit);
         }
         SpannedExprKind::Ternary {
             condition,

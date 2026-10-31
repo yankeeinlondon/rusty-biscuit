@@ -131,9 +131,7 @@ pub const DARKMATTER_BOOLISH_FORMAT: &str = "darkmatter-boolish";
 /// Format name registered for the `expression` content-format string type
 /// (feature `2026-07-12-literal-expression`). The value must parse under the
 /// Darkmatter expression grammar and is **never evaluated** — validation is
-/// pure `parse_condition(value).is_ok()`. Condition mode accepts a parse
-/// superset of the value dialect (`&&` added, `||` re-lowered), so a string
-/// valid in either dialect passes.
+/// pure `parse(value).is_ok()`.
 pub const DARKMATTER_EXPRESSION_FORMAT: &str = "darkmatter-expression";
 
 /// Format name registered for the `shell` string type. The value must contain
@@ -285,18 +283,17 @@ pub(crate) fn register_darkmatter_formats_with(
             crate::numeric::parse_boolean_word(value).is_some()
         })
         // The `expression` content-format string type. Parse-only and
-        // side-effect-free: `parse_condition` never evaluates functions, shell,
-        // I/O, or context. Condition mode is the either-dialect superset (§Q2),
-        // so a value valid in either expression dialect validates here.
+        // side-effect-free: `parse` never evaluates functions, shell, I/O, or
+        // context.
         .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
             // A stored literal token is data: its text is the final value.
             if let Some(Ok(decoded)) = crate::pending::decode_leaf(value) {
-                return crate::expression::parse_condition(&decoded).is_ok();
+                return crate::expression::parse(&decoded).is_ok();
             }
             if is_pending_expression_value(value) {
                 return true;
             }
-            crate::expression::parse_condition(value).is_ok()
+            crate::expression::parse(value).is_ok()
         })
         // The `shell` string type: passive, never parsed or executed. Literal
         // decoding and pending-value deferral mirror `expression`.

@@ -60,7 +60,7 @@ use std::path::Path;
 
 use biscuit_terminal::components::status::StatusState;
 
-use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse, parse_condition};
+use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 
 use self::actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, IgnoredAction, LifecycleAction,

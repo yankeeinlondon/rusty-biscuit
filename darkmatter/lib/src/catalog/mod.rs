@@ -462,7 +462,6 @@ mod tests {
         use crate::markdown::compose::expression::semantics::*;
         check(OPERATOR_DESCRIPTORS, "semantics::operator", &mut failures);
         check(TRUTHINESS_DESCRIPTORS, "semantics::truthiness", &mut failures);
-        check(MODE_DESCRIPTORS, "semantics::mode", &mut failures);
         check(NULL_PROPAGATION_DESCRIPTORS, "semantics::null_propagation", &mut failures);
         check(UNARY_OPERATOR_DESCRIPTORS, "semantics::unary", &mut failures);
         check(COMPARISON_OPERATOR_DESCRIPTORS, "semantics::comparison", &mut failures);

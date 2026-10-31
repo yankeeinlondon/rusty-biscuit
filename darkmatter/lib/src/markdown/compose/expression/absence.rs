@@ -5,9 +5,9 @@
 //! author handled the absence explicitly. [`AbsenceScope`] is the one shared
 //! classifier of those explicit constructs (Ruling R-2). Two rules decide it:
 //!
-//! - **Intentional absence handling**, a warning policy only: the primary of a
-//!   fallback (`x || "d"`), and the operands of a fallback chain that is
-//!   itself a primary (`a || b || "d"`); the condition of a ternary
+//! - **Intentional absence handling**, a warning policy only: the left
+//!   operand of `||` (`x || "d"`), and the operands of an `||` chain that is
+//!   itself a left operand (`a || b || "d"`); the condition of a ternary
 //!   (`x ? a : b`); and a direct argument bound to a parameter whose
 //!   declared type explicitly includes `null` (`is_null(x)`, `is_empty(x)`,
 //!   `file_exists(x)`, `trim(x)`, a host function's `string | null`
@@ -101,7 +101,7 @@ impl<'a> AbsenceScope<'a> {
         }
     }
 
-    /// A fallback primary or ternary condition.
+    /// The left operand of `||` or a ternary condition.
     pub(crate) fn absence_check(self) -> Self {
         Self {
             handles_absence: true,
@@ -167,7 +167,7 @@ pub struct StaticVariableRead<'e> {
     pub path: &'e str,
     /// Byte span of the `Variable` node in the parsed expression text.
     pub span: SourceSpan,
-    /// Whether the author handled this read's absence (fallback primary,
+    /// Whether the author handled this read's absence (`||` left operand,
     /// ternary condition, or direct argument to a parameter declaring
     /// `null` of a call that is not itself another call's argument), or the
     /// branch facts around it prove it present.
@@ -185,7 +185,7 @@ impl StaticVariableRead<'_> {
 /// same absence rules the runtime applies.
 ///
 /// Unlike the runtime, this walk is static: it visits both ternary branches
-/// and every fallback operand, since it cannot know which one runs, each
+/// and every `||` operand, since it cannot know which one runs, each
 /// under its own side's branch facts. It does not parse or evaluate.
 pub fn static_variable_reads(expr: &SpannedExpr) -> Vec<StaticVariableRead<'_>> {
     let mut reads = Vec::new();
@@ -326,10 +326,7 @@ fn walk_access<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) {
         Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) => walk_access(inner, reads),
         Expr::Binary { left, right, .. }
         | Expr::Comparison { left, right, .. }
-        | Expr::Fallback {
-            primary: left,
-            fallback: right,
-        } => {
+        | Expr::LogicalOr { left, right } => {
             walk_access(left, reads);
             walk_access(right, reads);
         }
@@ -412,7 +409,7 @@ fn walk_access_chain<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) 
 /// `site` extended by the branch facts of `expr` that enclose the node
 /// spanning `target` (a span in the text `expr` was parsed from): the side of
 /// each enclosing ternary condition its branch is on, and, for a later operand
-/// of `and`/`&&` or `or`/`||`/fallback, the true or false side of the
+/// of `and`/`&&` or `or`/`||`, the true or false side of the
 /// operands before it. These are the facts [`static_variable_reads`] reads
 /// each variable under, applied to a typed scope so a static consumer (DMLS
 /// hover) sees the type at that node. A `target` no node spans gets the facts
@@ -420,9 +417,9 @@ fn walk_access_chain<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) 
 pub fn branch_scope<'d>(expr: &SpannedExpr, target: &SourceSpan, site: TypeScope<'d>) -> TypeScope<'d> {
     let holds = |node: &SpannedExpr| node.span.start <= target.start && target.end <= node.span.end;
     match &expr.kind {
-        SpannedExprKind::Fallback { primary, fallback } if holds(fallback) => {
-            let facts = site.assume(&primary.erase(), Polarity::False);
-            branch_scope(fallback, target, facts)
+        SpannedExprKind::LogicalOr { left, right } if holds(right) => {
+            let facts = site.assume(&left.erase(), Polarity::False);
+            branch_scope(right, target, facts)
         }
         SpannedExprKind::Ternary {
             condition,
@@ -482,7 +479,7 @@ fn child_holding<'e>(expr: &'e SpannedExpr, holds: &impl Fn(&SpannedExpr) -> boo
         }
         SpannedExprKind::Index { base, index } => vec![base, index],
         SpannedExprKind::MemberAccess { base, .. } => vec![base],
-        SpannedExprKind::Fallback { primary, .. } => vec![primary],
+        SpannedExprKind::LogicalOr { left, .. } => vec![left],
         SpannedExprKind::Ternary { condition, .. } => vec![condition],
         SpannedExprKind::ArrayLiteral(items) => items.iter().collect(),
         SpannedExprKind::ObjectLiteral(entries) => entries.iter().map(|(_, value)| value).collect(),
@@ -532,10 +529,10 @@ fn walk_static<'e>(
             walk_static(index, operand, reads);
         }
         SpannedExprKind::MemberAccess { base, .. } => walk_static(base, scope, reads),
-        SpannedExprKind::Fallback { primary, fallback } => {
-            walk_static(primary, scope.absence_check(), reads);
-            let facts = scope.facts().assume(&primary.erase(), Polarity::False);
-            walk_static(fallback, scope.with_facts(&facts), reads);
+        SpannedExprKind::LogicalOr { left, right } => {
+            walk_static(left, scope.absence_check(), reads);
+            let facts = scope.facts().assume(&left.erase(), Polarity::False);
+            walk_static(right, scope.with_facts(&facts), reads);
         }
         SpannedExprKind::Ternary {
             condition,
@@ -704,7 +701,7 @@ mod tests {
     }
 
     /// The Requirement 4 suppression table, read statically: both ternary
-    /// branches and every fallback operand are visited.
+    /// branches and every `||` operand are visited.
     const STATIC_ROWS: &[(&str, &[&str])] = &[
         ("x", &["x"]),
         ("x || \"d\"", &[]),

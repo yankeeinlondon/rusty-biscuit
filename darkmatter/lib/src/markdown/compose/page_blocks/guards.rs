@@ -44,7 +44,7 @@ use std::path::PathBuf;
 
 use super::parser::parse_page_blocks;
 use super::types::PageBlockRegion;
-use crate::markdown::compose::expression::{Expr, GuardOrigin, Polarity, TypeScope, parse_condition};
+use crate::markdown::compose::expression::{Expr, GuardOrigin, Polarity, TypeScope, parse};
 use crate::markdown::span::SourceSpan;
 
 /// One body `::block` whose `when` condition parsed.
@@ -151,7 +151,7 @@ pub fn within<'d>(guards: &[&BodyGuard], site: TypeScope<'d>) -> TypeScope<'d> {
 fn collect(regions: &[PageBlockRegion], label_offset: usize, guards: &mut Vec<BodyGuard>) {
     for region in regions {
         if let Some(when) = &region.options.when_expr
-            && let Ok(condition) = parse_condition(when)
+            && let Ok(condition) = parse(when)
         {
             guards.push(BodyGuard {
                 condition,
@@ -168,7 +168,7 @@ fn collect(regions: &[PageBlockRegion], label_offset: usize, guards: &mut Vec<Bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::expression::{DeclaredTypes, parse};
+    use crate::markdown::compose::expression::DeclaredTypes;
 
     fn proven(scope: &TypeScope<'_>, path: &str) -> bool {
         scope.type_of_expr(&parse(path).unwrap()).unwrap().guard_presence().is_some()

@@ -8,8 +8,7 @@
 //!
 //! - [`scan`]: where `{{ … }}` expressions sit in a text;
 //! - [`lexer`]: the tokens of one expression;
-//! - [`parser`] and [`ast`]: the expression tree, in interpolation or
-//!   condition [`ParseMode`].
+//! - [`parser`] and [`ast`]: the expression tree.
 
 pub mod ast;
 pub mod lexer;
@@ -20,8 +19,5 @@ pub use ast::{
     BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedBindingPattern, SpannedCallArgument, SpannedCallback,
     SpannedExpr, SpannedExprKind,
 };
-pub use lexer::{ComparisonOp, Lexer, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned};
-pub use parser::{
-    ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_condition, parse_condition_spanned,
-    parse_spanned,
-};
+pub use lexer::{ComparisonOp, Lexer, LexerError, Token, identifier_prefix_start, lex_spanned};
+pub use parser::{ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_spanned};

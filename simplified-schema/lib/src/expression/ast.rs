@@ -10,7 +10,7 @@
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
 //! 2. **Unary NOT** - `!x`
 //! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 4. **Fallback** - `||`
+//! 4. **Logical OR** - `||`
 //! 5. **Ternary** - `? :`
 //!
 //! ## Examples
@@ -20,9 +20,9 @@
 //! {{ foo }} -> Variable("foo")
 //! ```
 //!
-//! Fallback:
+//! Logical OR:
 //! ```text
-//! {{ foo || "default" }} -> Fallback { primary: Variable("foo"), fallback: StringLiteral("default") }
+//! {{ foo || "default" }} -> LogicalOr { left: Variable("foo"), right: StringLiteral("default") }
 //! ```
 //!
 //! Ternary with comparison:
@@ -136,14 +136,15 @@ pub enum Expr {
         name: String,
     },
 
-    /// Fallback expression: `expr || fallback`.
+    /// Logical OR: `left || right`.
     ///
-    /// Returns the primary if truthy, otherwise the fallback.
-    Fallback {
-        /// The expression to evaluate first.
-        primary: Box<Expr>,
-        /// The fallback if primary is falsy.
-        fallback: Box<Expr>,
+    /// Returns the operand that decided the result: `left` if truthy,
+    /// otherwise `right`. `right` is evaluated only when `left` is falsy.
+    LogicalOr {
+        /// The operand evaluated first.
+        left: Box<Expr>,
+        /// The operand evaluated when `left` is falsy.
+        right: Box<Expr>,
     },
 
     /// Ternary expression: `condition ? then_branch : else_branch`.
@@ -219,8 +220,8 @@ impl fmt::Display for Expr {
             Expr::Binary { op, left, right } => write!(f, "{} {} {}", left, op, right),
             Expr::Index { base, index } => write!(f, "{}[{}]", base, index),
             Expr::MemberAccess { base, name } => write!(f, "{}.{}", base, name),
-            Expr::Fallback { primary, fallback } => {
-                write!(f, "{} || {}", primary, fallback)
+            Expr::LogicalOr { left, right } => {
+                write!(f, "{} || {}", left, right)
             }
             Expr::Ternary {
                 condition,
@@ -317,12 +318,12 @@ pub enum SpannedExprKind {
         /// The member name (may contain `.` for nested access).
         name: String,
     },
-    /// Fallback expression: `expr || fallback`.
-    Fallback {
-        /// The expression to evaluate first.
-        primary: Box<SpannedExpr>,
-        /// The fallback if primary is falsy.
-        fallback: Box<SpannedExpr>,
+    /// Logical OR: `left || right`.
+    LogicalOr {
+        /// The operand evaluated first.
+        left: Box<SpannedExpr>,
+        /// The operand evaluated when `left` is falsy.
+        right: Box<SpannedExpr>,
     },
     /// Ternary expression: `condition ? then_branch : else_branch`.
     Ternary {
@@ -344,8 +345,8 @@ pub enum SpannedExprKind {
     },
     /// Function call: `name(args...)`.
     ///
-    /// Condition-mode infix `&&` / `||` lower into `and(...)` / `or(...)`
-    /// function calls here, identically to [`Expr`], so span erasure is exact.
+    /// Infix `&&` lowers into an `and(...)` function call here, identically
+    /// to [`Expr`], so span erasure is exact.
     FunctionCall {
         /// Function name (e.g., `length`, `number`, `and`, `or`).
         name: String,
@@ -406,9 +407,9 @@ impl SpannedExpr {
                 base: Box::new(base.erase()),
                 name: name.clone(),
             },
-            SpannedExprKind::Fallback { primary, fallback } => Expr::Fallback {
-                primary: Box::new(primary.erase()),
-                fallback: Box::new(fallback.erase()),
+            SpannedExprKind::LogicalOr { left, right } => Expr::LogicalOr {
+                left: Box::new(left.erase()),
+                right: Box::new(right.erase()),
             },
             SpannedExprKind::Ternary {
                 condition,
@@ -647,10 +648,10 @@ mod tests {
     }
 
     #[test]
-    fn display_fallback() {
-        let expr = Expr::Fallback {
-            primary: Box::new(Expr::Variable("foo".to_string())),
-            fallback: Box::new(Expr::StringLiteral("default".to_string())),
+    fn display_logical_or() {
+        let expr = Expr::LogicalOr {
+            left: Box::new(Expr::Variable("foo".to_string())),
+            right: Box::new(Expr::StringLiteral("default".to_string())),
         };
         assert_eq!(expr.to_string(), "foo || \"default\"");
     }

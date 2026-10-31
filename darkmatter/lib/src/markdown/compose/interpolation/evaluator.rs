@@ -458,7 +458,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             | Expr::UnaryMinus(inner) => self.walk_context_variables(inner, visitor),
             Expr::Binary { left, right, .. }
             | Expr::Comparison { left, right, .. }
-            | Expr::Fallback { primary: left, fallback: right } => {
+            | Expr::LogicalOr { left, right } => {
                 self.walk_context_variables(left, visitor);
                 self.walk_context_variables(right, visitor);
             }
