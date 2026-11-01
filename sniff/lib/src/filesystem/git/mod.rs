@@ -13,6 +13,9 @@ pub mod remote_resolver;
 pub mod status;
 pub mod types;
 pub mod worktree;
+pub mod working_state;
+#[cfg(test)]
+mod working_state_tests;
 
 pub use api::{
     branches_at, commit_browser_url, commit_by_sha_at, commit_files_at, commit_links_at,
@@ -44,6 +47,7 @@ pub use types::{
     LocalBranchInfo, RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus,
     UntrackedFile, WorktreeInfo, parse_commit_message,
 };
+pub use working_state::{ChangedContent, PathContent, WorkingState};
 pub use worktree::{
     WorktreeEntry, current_worktree_name_with_repo, get_current_worktree_info,
     get_current_worktree_name, list_worktrees, list_worktrees_with_repo,

@@ -454,6 +454,31 @@ truncated index while `detect_with_request(&GitRequest::identity())` still repor
 the repository's branch. Existing compatibility wrappers retain their documented
 error-suppression behavior.
 
+### Working-Tree State
+
+`GitRepo::working_state()` gives the working tree a content identity: the `HEAD` commit plus a hash
+of every path `changed_paths(ChangedBase::Omitted)` reports. Use it to know whether a result
+computed from the tree still describes it; the slow-test tool keys every recorded test run on it.
+
+```rust
+use sniff::filesystem::git::GitRepo;
+
+let repo = GitRepo::discover(std::path::Path::new("."))?.unwrap();
+let state = repo.working_state()?;
+println!("{}", state.id); // 16 hex digits
+```
+
+- The same commit with the same bytes gives the same `id`; an edit, a new untracked file, or a
+  deletion changes it, and undoing the change restores it. Timestamps and ignored files never count.
+- Each changed path carries a `PathContent`: `File(hash)` (xxHash of the bytes, via `biscuit-hash`),
+  `Symlink(hash)` of the target (never followed), `Directory` (presence only), or `Absent`.
+- Paths enter the id in Git's `/`-separated spelling, so it is the same on every OS for the same
+  bytes.
+- It inherits every `changed_paths` error: bare repositories and merge conflicts fail.
+- Cost: one status walk plus one read per changed path, counted as `git.working_state.paths_hashed`
+  alongside the shared `filesystem.io.*` counters. The CLI is `sniff repo state`
+  ([`repo_state.md`](cli/repo_state.md)).
+
 ### Focused Git Metadata
 
 `GitRequest.metadata` is an `Option<GitMetadataRequest>` giving fine-grained control over commits,

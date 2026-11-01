@@ -104,6 +104,14 @@ indexes valid and metadata-only consumers independent of readable index state.
 `changed_paths_tests::index_reads` covers every shared consumer; CLI
 `changed::index_corruption` partitions the full prefix/report matrix by shape.
 
+`GitRepo::working_state()` (CLI `sniff repo state`) builds on that: `HEAD`
+plus a `PathContent` per changed path, hashed into a 16-hex `id` that is equal
+exactly when commit and uncommitted bytes are equal (ignored files and
+timestamps never count; paths hash in Git spelling, so ids match across OSes).
+It reuses the one status walk, then reads each changed path once, counted as
+`git.working_state.paths_hashed`. `scripts/slow-tests.rs` keys test runs on it.
+Tests: `filesystem/git/working_state_tests.rs`.
+
 `filesystem::repo::{PackageNameSource, PackageOwnershipLookup}` support callers
 that need declared identity and repeated file ownership. Check `name_source ==
 Manifest`; a nonempty `name` alone may be a relative-path fallback. Legacy

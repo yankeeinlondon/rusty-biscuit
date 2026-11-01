@@ -262,6 +262,7 @@ fn assert_osc8_destination_identity(
 }
 
 /// Percent-decodes a file-URL path segment per RFC 3986 (tests only).
+#[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -284,6 +285,7 @@ fn percent_decode(value: &str) -> String {
 /// Converts a `file://` URL back to its native path for identity comparison,
 /// allowing the URL forms the encoder produces on Windows (forward slashes,
 /// lowered drive letter, `file://server/share` network shares).
+#[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
 fn file_url_to_native_path(url: &str) -> PathBuf {
     let rest = url.strip_prefix("file://").expect("file URL");
     // `file:///…` has an empty authority; `file://server/share/…` names a
@@ -326,6 +328,7 @@ fn file_url_to_native_path(url: &str) -> PathBuf {
 /// `canonicalize` returns extended-length `\\?\` paths while file URLs carry
 /// the plain drive spelling, and NTFS identity is case-insensitive; other
 /// platforms compare natively.
+#[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
 fn identity_path(path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
@@ -369,6 +372,7 @@ struct FilesListFixture {
     /// `repo/area/lib` — the workspace package whose files get captured.
     package_root: PathBuf,
     /// Canonical package root (fixture alias normalized once).
+    #[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
     canonical_package_root: PathBuf,
 }
 
@@ -5655,6 +5659,7 @@ fn corrupt_loose_object(repo_path: &Path, sha: &str) {
         perms.set_mode(0o644);
     }
     #[cfg(not(unix))]
+    #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
     perms.set_readonly(false);
     std::fs::set_permissions(&obj_path, perms).unwrap();
     std::fs::write(&obj_path, b"garbage").unwrap();
@@ -10768,4 +10773,33 @@ fn package_identity_shipped_manifest_through_cli() {
             assert!(value["packages"][0].get("name_source").is_none());
         }
     }
+}
+
+/// `repo state --json` reports the working-tree id, and an edit to a tracked
+/// file changes it while the clean tree's id is reproducible.
+#[test]
+fn test_repo_state_json_tracks_working_tree_content() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let state = |path: &std::path::Path| -> serde_json::Value {
+        let output = common::owned_sniff_command()
+            .args(["--base", path.to_str().unwrap(), "repo", "state", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).expect("valid json")
+    };
+
+    let clean = state(&path);
+    assert_eq!(clean["id"].as_str().map(str::len), Some(16), "{clean}");
+    assert_eq!(clean["head"].as_str().map(str::len), Some(40), "{clean}");
+    assert_eq!(clean["changed"], serde_json::json!([]));
+    assert_eq!(state(&path)["id"], clean["id"], "the same state has the same id");
+
+    std::fs::write(path.join("src/main.rs"), "fn main() { println!(); }").unwrap();
+    let edited = state(&path);
+    assert_ne!(edited["id"], clean["id"]);
+    assert_eq!(edited["changed"][0]["path"], "src/main.rs");
+    assert!(edited["changed"][0]["content"].as_str().unwrap().starts_with("file:"));
 }

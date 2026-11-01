@@ -288,7 +288,7 @@ mod tests {
         use std::fs;
         use tempfile::NamedTempFile;
         use winreg::RegKey;
-        use winreg::enums::{HKEY_CURRENT_USER, KEY_ALL_ACCESS};
+        use winreg::enums::HKEY_CURRENT_USER;
 
         let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 

@@ -968,6 +968,7 @@ impl Commands {
                     RepoAction::PackageAreaHasSourceCodeChanges
                 }
                 Some(RepoSubcommand::HasMergeConflict) => RepoAction::HasMergeConflict,
+                Some(RepoSubcommand::State) => RepoAction::State,
                 Some(RepoSubcommand::DirtySourceCode(args)) => {
                     RepoAction::DirtySourceCode(args.clone())
                 }
@@ -1219,6 +1220,8 @@ Git:
   sniff repo dirty-source-code        List dirty source code files
   sniff repo staged-source-code       List staged source code files
   sniff repo dirty-files              List all dirty files
+  sniff repo state                    Working-tree identity: HEAD plus changed content
+  sniff repo state --json             { \"id\": \"...\", \"head\": \"...\", \"changed\": [ { \"path\", \"content\" } ] }
   sniff repo remote origin            Inspect the 'origin' remote
   sniff repo pr                       List open pull requests
   sniff repo pr --status merged       List merged pull requests
