@@ -1134,21 +1134,25 @@ byte_grammar_first_late_refusal!(byte_grammar_first_forbidden_current, "{{ tool 
 
 /// A sequence task's quoted empty words are empty arguments: the first
 /// task's quoted hole filled with an empty string and a later task's
-/// authored `''` both run as resolved bytes under keys that spell them `""`,
-/// and a key without them approves nothing.
+/// authored empty word both run as resolved bytes under keys that spell them
+/// `""`, and a key without them approves nothing.
 #[test]
 fn sequence_task_exact_keys_keep_quoted_empty_arguments() {
+    // Exact bytes run through the host shell; `cmd.exe` on native Windows has
+    // no single quotes, so its authored empty word is `""` (YAML `\"\"`).
+    let empty = if cfg!(windows) { r#"\"\""# } else { "''" };
     let document = r#"---
 commit_message: ""
 sequence:
     - name: first
       shell: "argv-recorder -m \"{{ commit_message }}\""
     - name: second
-      shell: "argv-recorder second ''"
+      shell: "argv-recorder second EMPTY"
 ---
 Body.
-"#;
-    let sequence = Sequence::new("sequence-quoted-empty", document);
+"#
+    .replace("EMPTY", empty);
+    let sequence = Sequence::new("sequence-quoted-empty", &document);
     sequence.whitelist("exact argv-recorder -m\nexact argv-recorder second\n");
     let refused = sequence.run(&[]);
     assert!(!refused.success, "{}", refused.stderr);

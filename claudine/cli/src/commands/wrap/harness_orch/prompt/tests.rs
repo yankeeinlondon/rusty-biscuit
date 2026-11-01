@@ -234,9 +234,11 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
         assert_eq!(materialized.frontmatter["prepared_agent"], serde_json::json!("codex"));
         assert_eq!(materialized.frontmatter["prepared_model"], serde_json::json!("gpt-5"));
         assert_eq!(materialized.frontmatter["source_marker"], serde_json::json!("source-owned"));
+        // The caller passes the portable spelling; the schema's `file(eager)`
+        // arm stores the absolute native path in effective frontmatter.
         assert_eq!(
             materialized.frontmatter["spec"],
-            serde_json::json!(materialized_spec),
+            serde_json::json!(launch_dir.components().collect::<std::path::PathBuf>().join("spec.md").to_string_lossy()),
             "entry {entry:?} must preserve the caller-materialized launch file"
         );
     };

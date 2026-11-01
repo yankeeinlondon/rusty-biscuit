@@ -466,20 +466,29 @@ macro_rules! native_lifecycle_redirect_case {
 native_lifecycle_redirect_case!(native_lifecycle_merge_then_null_keeps_the_original_stdout_destination, "2>&1 > /dev/null", true, false);
 native_lifecycle_redirect_case!(native_lifecycle_route_then_null_keeps_the_original_stderr_destination, ">&2 2> /dev/null", false, true);
 
-const QUOTED_EMPTY_LIFECYCLE: &str = r#"---
+/// The document both quoted-empty tests run. Its authored empty word is the
+/// host shell's: exact bytes run through `sh -c` on Unix but `cmd.exe` on
+/// native Windows, which has no single quotes and would pass `''` through
+/// as two characters. Both spellings share the exact key `""`.
+fn quoted_empty_lifecycle() -> String {
+    // YAML double-quoted: `\"\"` is the command text `""`.
+    let empty = if cfg!(windows) { r#"\"\""# } else { "''" };
+    r#"---
 commit_message: ""
 start:
-    - shell: "argv-recorder -m \"{{ commit_message }}\" -s ''"
+    - shell: "argv-recorder -m \"{{ commit_message }}\" -s EMPTY"
 ---
 Body.
-"#;
+"#
+    .replace("EMPTY", empty)
+}
 
-/// A lifecycle `shell` with a quoted empty word, authored (`''`) or a quoted
-/// hole filled with an empty string, runs as resolved bytes with each one an
+/// A lifecycle `shell` with a quoted empty word, authored or a quoted hole
+/// filled with an empty string, runs as resolved bytes with each one an
 /// empty argument, approved by the key that spells them `""`.
 #[test]
 fn a_lifecycle_exact_key_keeps_a_quoted_empty_argument() {
-    let document = Document::new(QUOTED_EMPTY_LIFECYCLE);
+    let document = Document::new(&quoted_empty_lifecycle());
     document.whitelist("exact argv-recorder -m \"\" -s \"\"\n");
 
     let outcome = document.run(&[]);
@@ -492,7 +501,7 @@ fn a_lifecycle_exact_key_keeps_a_quoted_empty_argument() {
 /// showing the exact command with its empty arguments, and nothing runs.
 #[test]
 fn a_lifecycle_exact_key_without_the_empty_argument_approves_nothing() {
-    let document = Document::new(QUOTED_EMPTY_LIFECYCLE);
+    let document = Document::new(&quoted_empty_lifecycle());
     document.whitelist("exact argv-recorder -m -s\n");
 
     let outcome = document.run(&[]);
