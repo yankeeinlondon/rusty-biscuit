@@ -33,7 +33,6 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs,
     ops::Range,
     path::PathBuf,
 };
@@ -533,7 +532,7 @@ fn locate_reference_spans(cycles: &mut [Vec<CycleReference>]) {
             continue;
         };
         let map = maps.entry(path.clone()).or_insert_with(|| {
-            let text = fs::read_to_string(path).ok()?;
+            let text = String::from_utf8(super::buffers::read(path).ok()?).ok()?;
             Some(parse_standalone_schema_document(&text, path).ok()??.resolution_source_map())
         });
         reference.span = map.as_ref().and_then(|map| first_span(map, &reference.site.path));

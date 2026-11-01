@@ -68,6 +68,7 @@ use darkmatter::markdown::schemas::triggers::{
     parse_trigger_envelope_from_str, scan_with_source,
 };
 use darkmatter::markdown::schemas::{KindRegistry, RegistryScope, SchemaRootKind, SchemaRootState, SchemaRoots};
+use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::{SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
 use super::TriggerDiagnosticTransition;
@@ -260,19 +261,52 @@ fn read_text(path: &Path) -> std::io::Result<(String, u64)> {
 use super::is_yaml_path as is_yaml;
 
 /// The roots' contents as [`KindRegistry::build`] reads them: an open
-/// buffer's text in place of its file's, so an unsaved definition edit
-/// applies to the documents it can claim.
+/// buffer's text in place of its file's, and an open buffer directly inside
+/// a root listed beside its files even before it is saved (or before the
+/// root's folder exists), so an unsaved definition edit or a new unsaved
+/// definition applies to the documents it can claim.
 struct BufferedRoots<'a> {
     roots: &'a mut RootContents,
-    buffers: &'a HashMap<PathBuf, Arc<str>>,
+    buffers: &'a SourceBuffers,
     /// Each root file read, with the xxHash of the text read and whether it
     /// came from a buffer.
     read: HashMap<PathBuf, (u64, bool)>,
 }
 
+impl BufferedRoots<'_> {
+    /// The open YAML buffers directly inside `root` that `listed` (by
+    /// [`normalized`] path) does not hold, spelled under `root`.
+    fn unsaved_files(&self, root: &Path, listed: &HashSet<PathBuf>) -> Vec<PathBuf> {
+        let folder = normalized(root);
+        self.buffers
+            .paths()
+            .filter(|path| {
+                path.parent() == Some(folder.as_path())
+                    && path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| matches!(extension, "yaml" | "yml"))
+                    && !listed.contains(*path)
+            })
+            .filter_map(|path| path.file_name().map(|name| root.join(name)))
+            .collect()
+    }
+}
+
 impl SchemaRootSource for BufferedRoots<'_> {
     fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
-        self.roots.root_files(root)
+        let mut listing = self.roots.root_files(root)?;
+        let listed: HashSet<PathBuf> = listing.iter().map(|path| normalized(path)).collect();
+        let unsaved = self.unsaved_files(root, &listed);
+        if !unsaved.is_empty() {
+            // The order `enumerate_root_files` lists in: UTF-8 filename bytes.
+            listing.extend(unsaved);
+            listing.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        }
+        Ok(listing)
+    }
+
+    fn absent_root_files(&mut self, root: &Path) -> Vec<PathBuf> {
+        let mut unsaved = self.unsaved_files(root, &HashSet::new());
+        unsaved.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        unsaved
     }
 
     fn root_file_text(&mut self, path: &Path) -> Result<Arc<str>, SchemaError> {
@@ -465,9 +499,8 @@ pub struct Preparation {
     /// Whether the document is a YAML document, whose scope also prepares
     /// a [`KindRegistry`].
     kinds: bool,
-    /// The open YAML buffers when the preparation began, by
-    /// [`normalized`] path.
-    buffers: HashMap<PathBuf, Arc<str>>,
+    /// The open YAML and JSON buffers when the preparation began.
+    buffers: SourceBuffers,
 }
 
 /// A finished [`Preparation`], ready for [`TriggerRegistries::install`].
@@ -530,10 +563,13 @@ impl Preparation {
         }
         let kinds = self.kinds.then(|| {
             let mut source = BufferedRoots { roots: &mut self.roots, buffers: &self.buffers, read: HashMap::new() };
-            let registry = KindRegistry::build(&self.context, &mut source, RegistryScope::WithRoots);
+            // A definition's imports are read through the context, from the
+            // open buffers where one is open at the imported path.
+            let registry = buffers::with(&self.buffers, || {
+                KindRegistry::build(&self.context, &mut source, RegistryScope::WithRoots)
+            });
             deps.kind_sources = source.read;
-            // Root files already carry the hash the root contents recorded;
-            // a definition's imports are read through the context, from disk.
+            // Root files already carry the hash the root contents recorded.
             for (file, hash) in roots_read(&self.roots, &deps) {
                 deps.files.insert(file, Some(hash));
             }
@@ -542,9 +578,20 @@ impl Preparation {
                 if let Some(folder) = key.parent() {
                     deps.folders.insert(folder.to_path_buf());
                 }
-                deps.files.entry(key).or_insert_with(|| {
+                deps.files.entry(key.clone()).or_insert_with(|| {
                     work_counters::read(dependency).ok().map(|bytes| work_counters::hash_bytes(&bytes))
                 });
+                // An import's buffer edit changes the registry as a root
+                // file's does, so it is a kind source too.
+                if !deps.kind_sources.contains_key(&key) {
+                    let read = match self.buffers.get(&key) {
+                        Some(text) => Some((work_counters::hash_bytes(text.as_bytes()), true)),
+                        None => deps.files.get(&key).copied().flatten().map(|hash| (hash, false)),
+                    };
+                    if let Some(read) = read {
+                        deps.kind_sources.insert(key, read);
+                    }
+                }
             }
             deps.record_searched(registry.searched_locations().iter().map(PathBuf::as_path));
             Arc::new(registry)
@@ -597,9 +644,9 @@ pub struct TriggerRegistries {
     /// Invalidations since the oldest running preparation began, each with
     /// the epoch it produced.
     changes: Vec<(u64, Change)>,
-    /// The text of every open YAML buffer, by [`normalized`] path: what a
-    /// kind registry reads in place of the file.
-    buffers: HashMap<PathBuf, Arc<str>>,
+    /// The text of every open YAML and JSON buffer: what a kind registry and a YAML
+    /// document's schema resolution read in place of the file.
+    buffers: SourceBuffers,
 }
 
 impl TriggerRegistries {
@@ -674,14 +721,23 @@ impl TriggerRegistries {
         self.scopes.get(path)?.kinds.clone()
     }
 
-    /// Records the unsaved text of the open YAML buffer at `path` (`None`
+    /// The open YAML and JSON buffers, a snapshot a YAML document's schema
+    /// resolution reads through ([`buffers::with`]).
+    pub fn source_buffers(&self) -> &SourceBuffers {
+        &self.buffers
+    }
+
+    /// Records the unsaved text of the open YAML or JSON buffer at `path` (`None`
     /// once it closes), and marks stale every kind registry that read that
-    /// file with different text.
+    /// file (a root file or an import) with different text, and, when it
+    /// opens at a path no registry read, every kind registry it could join:
+    /// a buffer directly inside one of its roots, or at a location its
+    /// resolution searched.
     pub fn set_buffer(&mut self, path: &Path, text: Option<Arc<str>>) {
         let key = normalized(path);
         let hash = text.as_ref().map(|text| work_counters::hash_bytes(text.as_bytes()));
         let previous = match text {
-            Some(text) => self.buffers.insert(key.clone(), text),
+            Some(text) => self.buffers.insert(&key, text),
             None => self.buffers.remove(&key),
         };
         if previous.is_none() && hash.is_none() {
@@ -690,6 +746,7 @@ impl TriggerRegistries {
         self.record_change(Change::Path(key.clone()));
         for scope in self.scopes.values_mut() {
             let Some(&(recorded, from_buffer)) = scope.deps.kind_sources.get(&key) else {
+                scope.stale |= scope.kinds.is_some() && hash.is_some() && joins_kind_sources(&scope.deps, &key);
                 continue;
             };
             // A closed buffer the registry did not read leaves it as it was.
@@ -987,6 +1044,16 @@ fn record_roots(roots: &SchemaRoots, deps: &mut Dependencies) {
             deps.absent.push(folder);
         }
     }
+}
+
+/// Whether an unsaved file at [`normalized`] `path`, which the kind registry
+/// did not read, would be read once prepared again: it lies directly inside
+/// a searched or absent root, or at a location resolution searched.
+fn joins_kind_sources(deps: &Dependencies, path: &Path) -> bool {
+    let in_root = path.parent().is_some_and(|parent| {
+        deps.roots.iter().any(|(folder, _)| folder == parent) || deps.absent.iter().any(|folder| folder == parent)
+    });
+    (in_root && is_yaml(path)) || deps.searched.iter().any(|candidate| candidate == path)
 }
 
 /// The cached root files inside `deps`'s searched folders, with hashes.

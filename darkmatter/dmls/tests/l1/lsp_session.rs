@@ -4781,12 +4781,15 @@ fn original_voip_schema_definitions_are_clean() {
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    // The file is also data on the root-`$schema` route, which reports each
+    // required property it lacks; the declarations themselves are clean.
+    let schema: Vec<&Value> =
+        diagnostics.iter().filter(|diagnostic| diagnostic["source"] == json!("darkmatter.schema")).collect();
     assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic["source"] != json!("darkmatter.schema")),
-        "the original voip.md schema block must have no schema diagnostics: {diagnostics:#?}"
+        schema.iter().all(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
+        "the original voip.md schema block must have no declaration diagnostics: {diagnostics:#?}"
     );
+    assert_eq!(schema.len(), 4, "{diagnostics:#?}");
 
     fixture.shutdown();
 }
@@ -5119,10 +5122,12 @@ fn meta_schema_standalone_scalar_reference_completion() {
 #[test]
 fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() {
     let workspace = LspWorkspace::new();
-    let valid = "$schema: ./schema.yaml\n";
-    let malformed = "$schema: ./schema.yaml\n\tbad\n";
+    let valid = "kind: schema\n$schema: ./schema.yaml\n";
+    let malformed = "kind: schema\n$schema: ./schema.yaml\n\tbad\n";
     let path = workspace.path().join("scalar-reference.yaml");
     std::fs::write(&path, valid).unwrap();
+    // The `schema` kind check resolves the exported reference.
+    std::fs::write(workspace.path().join("schema.yaml"), "$schema:\n  title: string\n").unwrap();
 
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -5150,7 +5155,7 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
             "textDocument/completion",
             json!({
                 "textDocument": { "uri": uri.as_str() },
-                "position": { "line": 0, "character": 14 }
+                "position": { "line": 1, "character": 14 }
             }),
         )
         .result
@@ -5170,8 +5175,8 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
 #[test]
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
     let workspace = LspWorkspace::new();
-    let valid = "$schema:\n  title: string\n";
-    let malformed = "$schema:\n  title: str(\n";
+    let valid = "kind: schema\n$schema:\n  title: string\n";
+    let malformed = "kind: schema\n$schema:\n  title: str(\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5201,7 +5206,7 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
             "textDocument/completion",
             json!({
                 "textDocument": { "uri": uri.as_str() },
-                "position": { "line": 1, "character": 12 }
+                "position": { "line": 2, "character": 12 }
             }),
         )
         .result
@@ -5214,21 +5219,21 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
             .any(|item| item["label"] == json!("string")),
         "last-good schema state keeps completion alive: {completion:?}"
     );
-    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    let hover = hover_markup(&mut fixture, uri.as_str(), 2, 3);
     assert!(hover.contains("Type: **type-definition**"), "{hover}");
     assert!(hover.contains("Declares: **string**"), "{hover}");
 
     fixture.shutdown();
 }
 
-/// An informal envelope may carry a `description`; the lexical claim must
-/// still recognize it mid-edit, or the description would drop the last-good
-/// model the moment the payload stops parsing.
+/// A schema document may carry a `description` before its `kind`; the
+/// lexical claim must still recognize it mid-edit, or the description would
+/// drop the last-good model the moment the payload stops parsing.
 #[test]
 fn meta_schema_standalone_with_description_keeps_last_good_while_mid_edit() {
     let workspace = LspWorkspace::new();
-    let valid = "description: Feature reviews\n$schema:\n  title: string\n";
-    let malformed = "description: Feature reviews\n$schema:\n  title: str(\n";
+    let valid = "description: Feature reviews\nkind: schema\n$schema:\n  title: string\n";
+    let malformed = "description: Feature reviews\nkind: schema\n$schema:\n  title: str(\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5257,7 +5262,7 @@ fn meta_schema_standalone_with_description_keeps_last_good_while_mid_edit() {
             "textDocument/completion",
             json!({
                 "textDocument": { "uri": uri.as_str() },
-                "position": { "line": 2, "character": 12 }
+                "position": { "line": 3, "character": 12 }
             }),
         )
         .result
@@ -5270,7 +5275,7 @@ fn meta_schema_standalone_with_description_keeps_last_good_while_mid_edit() {
             .any(|item| item["label"] == json!("string")),
         "last-good schema state keeps completion alive: {completion:?}"
     );
-    let hover = hover_markup(&mut fixture, uri.as_str(), 2, 3);
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 3);
     assert!(hover.contains("Declares: **string**"), "{hover}");
 
     fixture.shutdown();
@@ -5591,10 +5596,10 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
     // (file, valid, malformed, character inside the `title` key token)
     let cases = [
         (
-            "flow-pure.yaml",
-            "{\"$schema\": {\"title\": \"string\"}}\n",
-            "{\"$schema\": {\"title\": \"str(\"}}\n",
-            16u32,
+            "flow-exports.yaml",
+            "{kind: schema, \"$schema\": {\"title\": \"string\"}}\n",
+            "{kind: schema, \"$schema\": {\"title\": \"str(\"}}\n",
+            30u32,
         ),
         (
             "flow-tagged.yaml",
@@ -5845,18 +5850,14 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
             "contentChanges": [ { "text": malformed } ]
         }),
     );
+    // The partial claims no `kind`: it is data of its root `$schema`, and a
+    // buffer that does not load is the YAML loader's one parse problem.
     let current = fixture.wait_for_diagnostics(uri.as_str());
-    assert_eq!(
-        current
-            .iter()
-            .filter(|diagnostic| { diagnostic["code"] == json!("dm.schema.document_malformed") })
-            .count(),
-        1,
-        "the malformed current buffer must own exactly one schema diagnostic: {current:?}"
-    );
+    assert_eq!(current.len(), 1, "the malformed current buffer must own exactly one diagnostic: {current:?}");
+    assert_eq!(current[0]["code"], json!("dm.frontmatter.yaml_parse"), "{current:?}");
     assert_eq!(
         current[0]["range"]["start"],
-        json!({ "line": 0, "character": 0 })
+        json!({ "line": 1, "character": 0 })
     );
 
     fixture.shutdown();
@@ -6168,8 +6169,8 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
     // (file, text, expected code, offending substring — `None` = whole buffer)
     let cases: [(&str, &str, &str, Option<&str>); 7] = [
         (
-            "pure-empty-union.yaml",
-            "$schema: []\n",
+            "export-empty-union.yaml",
+            "kind: schema\n$schema: []\n",
             "dm.schema.invalid_schema_shape",
             Some("[]"),
         ),
@@ -6180,27 +6181,27 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
             Some("[]"),
         ),
         (
-            "pure-invalid-arm.yaml",
-            "$schema:\n  - title: string\n  - 42\n",
+            "export-invalid-arm.yaml",
+            "kind: schema\n$schema:\n  - title: string\n  - 42\n",
             "dm.schema.invalid_schema_shape",
             Some("42"),
         ),
         (
-            "pure-invalid-reference.yaml",
-            "$schema: \"   \"\n",
+            "export-invalid-reference.yaml",
+            "kind: schema\n$schema: \"   \"\n",
             "dm.schema.invalid_schema_shape",
             Some("\"   \""),
         ),
         (
             // A tab cannot indent YAML, so this never becomes a mapping at all.
             "malformed.yaml",
-            "$schema:\n\tbad: string\n",
+            "kind: schema\n$schema:\n\tbad: string\n",
             "dm.schema.document_malformed",
             None,
         ),
         (
-            "pure-invalid-inner.yaml",
-            "$schema:\n  title: str(\n",
+            "export-invalid-inner.yaml",
+            "kind: schema\n$schema:\n  title: str(\n",
             "dm.schema.invalid_type_definition",
             Some("str("),
         ),
@@ -6274,28 +6275,28 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
         // valid reference must not depend on the file being present.
         (
             "valid-scalar-reference.yaml",
-            "$schema: ./other.yaml\n",
+            "kind: schema\n$schema: ./other.yaml\n",
             None,
         ),
         (
             "whitespace-arm.yaml",
-            "$schema: [\"   \"]\n",
+            "kind: schema\n$schema: [\"   \"]\n",
             Some("\"   \""),
         ),
         (
             "remote-arm.yaml",
-            "$schema: [https://example.com/schema.yaml]\n",
+            "kind: schema\n$schema: [https://example.com/schema.yaml]\n",
             Some("https://example.com/schema.yaml"),
         ),
         (
             // The valid first arm must not launder the invalid second one.
             "mixed-union.yaml",
-            "$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
+            "kind: schema\n$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
             Some("https://example.com/schema.yaml"),
         ),
         (
             "valid-reference-union.yaml",
-            "$schema:\n  - ./a.yaml\n  - ./b.yaml\n",
+            "kind: schema\n$schema:\n  - ./a.yaml\n  - ./b.yaml\n",
             None,
         ),
     ];

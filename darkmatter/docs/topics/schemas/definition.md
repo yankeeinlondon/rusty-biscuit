@@ -43,7 +43,10 @@ $schema: ./schemas/post.yaml
 
 A bare file name such as `$schema: post.yaml` is looked up in the
 [schema roots](#schema-roots), in order; write `./post.yaml` for a file beside
-the document. A missing file is an error.
+the document. The roots are searched only where they apply (a document in a
+repository for `md`, inside an open workspace folder for DMLS); elsewhere a
+bare name is a file beside the document, and an absolute or `~/` path names a
+schema anywhere. A missing file is an error.
 
 ### What a `$schema` Reference May Point At
 
@@ -681,7 +684,9 @@ flowchart TD
   `$schema` accepts: an inline mapping, a root union, or a reference to a
   SimplifiedSchema or JSON Schema file (see
   [What a `$schema` Reference May Point At](#what-a-schema-reference-may-point-at)).
-  A bare file name is looked up in the [schema roots](#schema-roots). The
+  A bare file name is looked up in the [schema roots](#schema-roots) where
+  they apply, exactly as for frontmatter: outside a repository (`md`) or every
+  workspace folder (DMLS) it is a file beside the document. The
   `$schema` key is removed only from the copy being validated, so a closed
   schema never sees it, while lines and columns still count it.
 - **A `$schema` that is present must be valid.** `$schema: null`, a number,
@@ -753,7 +758,19 @@ the same report:
 A kind check is an error in the file itself, with the problem code
 `KindCheck` (diagnostic code `dm.schema.kind_check`), located at the node it
 is about. A document that fails its definition reports only the definition's
-problems, so nothing is reported twice. A kind defined in your own
+problems, so nothing is reported twice.
+
+Kind checks judge meaning, never shape. The selected definition alone
+decides which keys a document may have and what type each value is, and the
+checks read the values as that definition accepted them (converted, so
+`categories: [2024]` is read as the category `"2024"`). In a source checkout
+of this repository the selected definition can be an edited copy of a
+shipped one (see [Schema Discovery](./schema-discovery.md)): with the root
+`$constraints: { closed: true }` line removed from the copy of
+`schema-trigger.yaml`, a trigger with an extra `note: hi` key passes, and
+its `$path` globs are still checked. What a document imports (`Name@file`)
+is loaded directly and is still checked against the definitions built into
+the binary. A kind defined in your own
 `yaml-schema` has no kind checks: its definition is its whole contract.
 
 ```yaml
@@ -833,8 +850,9 @@ let schemas = DarkmatterSchemas::new(context).with_kind_registry(registry);
 |---|---|
 | `YamlOutcome` | `NoSchema` (nothing was checked) or `Validated(YamlValidation)`. |
 | `YamlValidation` | `route` (`Route::Kind(kind)` or `Route::RootSchema`), `report` (a `ValidationReport`), `definition` (what validated it: a definition file's path, `built-in <path>` for a shipped definition, the `$schema` reference, or the text "the inline `$schema`"), and `byte_range(&problem)`, the byte range of a problem's token in the validated text. |
-| `KindRegistry` | The kinds one context can select. `from_filesystem(context, scope)` reads the schema roots from disk; `build(context, source, scope)` reads them through a `SchemaRootSource`, so an editor can supply unsaved buffers; `shipped()` holds the shipped definitions alone. `claim(kind)` and `claims()` read it; `incomplete()` and `root_failures()` list what it could not read; `dependencies()` and `searched_locations()` say which files and folders to watch before reusing it. |
-| `LoadedYamlDocument` | A document `load(text, path)` admitted, for `validate_loaded_yaml_document`; `validate_yaml_document` is the two in one. |
+| `KindRegistry` | The kinds one context can select. `from_filesystem(context, scope)` reads the schema roots from disk; `build(context, source, scope)` reads them through a `SchemaRootSource`, so an editor can supply unsaved buffers, also in a root whose folder does not exist yet (`absent_root_files`; run it inside `simplified_schema::resolve::buffers::with` for definitions' imports to read them too); `shipped()` holds the shipped definitions alone. `claim(kind)` and `claims()` read it; `incomplete()` and `root_failures()` list what it could not read; `dependencies()` and `searched_locations()` say which files and folders to watch before reusing it. |
+| `LoadedYamlDocument` | A document `load(text, path)` admitted, for `validate_loaded_yaml_document`; `validate_yaml_document` is the two in one. `declaration_key()` hashes its `kind` and root `$schema`, the parts a contract is prepared from. |
+| `YamlContract` | The selected schema, resolved and compiled: `prepare_yaml_contract(&document)` (`None` when no schema is selected). `validate(&document)` judges any text of the document with the same `declaration_key()`, without resolving or compiling again; it is passive unless `checks_read_files()` (a `schema` or `yaml-schema` document's checks resolve its own imports). `validate_loaded_yaml_document` is the two in one. |
 | `RegistryScope` | `WithRoots` (shipped definitions plus the schema roots) or `ShippedOnly`. `for_context` chooses `WithRoots` inside a repository and `ShippedOnly` outside one, as `md` does. |
 | `Claim`, `DefinitionSource`, `Incomplete` | In `darkmatter::markdown::schemas::yaml_documents`: a kind's claim (`Healthy`, `Duplicate`, `Reserved`), where a definition came from (`Shipped(path)` or `File(path)`), and a failure that leaves the registry unable to rule a kind out. |
 
@@ -853,6 +871,19 @@ use darkmatter::markdown::schemas::LoadedYamlDocument;
 
 let document = LoadedYamlDocument::load(&text, path)?; // the document's load error, only
 let outcome = DarkmatterSchemas::new(context).validate_loaded_yaml_document(&document)?; // selection and schema errors
+```
+
+An editor that judges a document on every keystroke prepares the contract
+once and validates each new text against it while the declaration holds:
+
+```rust
+let contract = schemas.prepare_yaml_contract(&document)?; // reads and compiles
+if let Some(contract) = contract {
+    let edited = LoadedYamlDocument::load(&edited_text, path)?;
+    if edited.declaration_key() == document.declaration_key() {
+        let validation = contract.validate(&edited); // no resolution, no compilation
+    }
+}
 ```
 
 ## CLI: `md schema validate`

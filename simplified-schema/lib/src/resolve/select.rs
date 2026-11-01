@@ -10,6 +10,10 @@
 //! - with no schema roots, or for any other form, the reference resolves
 //!   through `biscuit-file` from the referencing document's folder.
 //!
+//! A location probed while a [`buffers`] snapshot is in force selects an
+//! open buffer there when no file exists at it, so a file that exists only
+//! in the editor is found where it would be once saved.
+//!
 //! Besides the selected file, the selection reports every location it
 //! probed, in order, and the path a missing reference would be created at,
 //! so an editor can link to it without a second lookup rule.
@@ -19,6 +23,8 @@ use std::path::{Component, Path, PathBuf};
 
 use biscuit_file::{FileReference, FileReferenceError, FileReferenceKind, FileResolutionContext};
 
+#[cfg(feature = "file")]
+use super::buffers;
 use super::observed;
 use crate::errors::SchemaError;
 
@@ -152,12 +158,16 @@ fn select(
             return select_in_roots(&file_ref, trimmed, base_dir, schema_roots, request_context, probes);
         }
         let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
-        probes.extend(detailed.probed_paths());
+        let probed: Vec<PathBuf> = detailed.probed_paths().collect();
+        probes.extend(probed.iter().cloned());
         match detailed.into_convenience() {
             Ok(Some(path)) => SelectionOutcome::Found(path),
-            Ok(None) => SelectionOutcome::Missing {
-                bare_name: false,
-                creation: first_planned_candidate(&file_ref, base_dir, request_context),
+            Ok(None) => match buffers::first_open(&probed) {
+                Some(open) => SelectionOutcome::Found(open),
+                None => SelectionOutcome::Missing {
+                    bare_name: false,
+                    creation: first_planned_candidate(&file_ref, base_dir, request_context),
+                },
             },
             Err(error) => SelectionOutcome::Failed(SelectionFailure::Resolution(error)),
         }
@@ -190,10 +200,15 @@ fn select_in_roots(
     };
     for root in schema_roots {
         let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
-        probes.extend(detailed.probed_paths());
+        let probed: Vec<PathBuf> = detailed.probed_paths().collect();
+        probes.extend(probed.iter().cloned());
         match detailed.into_convenience() {
             Ok(Some(path)) => return SelectionOutcome::Found(path),
-            Ok(None) => {}
+            Ok(None) => {
+                if let Some(open) = buffers::first_open(&probed) {
+                    return SelectionOutcome::Found(open);
+                }
+            }
             Err(error) => return SelectionOutcome::Failed(SelectionFailure::Resolution(error)),
         }
     }

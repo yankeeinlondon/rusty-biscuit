@@ -676,16 +676,61 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   `Scope` (`Scope.kinds: Option<InstalledKinds>`; plan rule 26 called it
   `OverlayCache.kind_registries`), built in `Preparation::run` on the
   registry worker for `is_yaml_path` documents only, from the same
-  `RootContents` through `BufferedRoots` (open buffers win). Invalidation is
-  the trigger scope's, plus `TriggerRegistries::set_buffer` from
-  `didOpen`/`didChange`/`didClose` (`ServerState::note_yaml_buffer`), which
-  marks stale only scopes whose `deps.kind_sources` read that file with
-  other text. Outside a workspace folder: `KindRegistry::shipped()`.
-- `overlay/yaml_document.rs` is dispatch-thread only: `LoadedYamlDocument::load`
-  then `validate_loaded_yaml_document` with `with_kind_registry`, cached in
-  `OverlayCache.yaml_documents` by text, revision, context, and registry
-  version, plus `deps_unchanged`/`probes_unchanged` over the root-`$schema`
-  route's files. The `SchemaBundle` is the selected schema alone
+  `RootContents` through `BufferedRoots` (open buffers win, and an open
+  buffer directly inside a searched root is listed before it is saved),
+  inside `simplified_schema::resolve::buffers::with(&TriggerRegistries::source_buffers())`
+  so definitions' imports read open buffers too (the library seam: every
+  resolver read and `select_schema_file` probe consults the thread's
+  snapshot; never add a DMLS-side read path). Invalidation is the trigger
+  scope's, plus `TriggerRegistries::set_buffer` from
+  `didOpen`/`didChange`/`didClose` (`ServerState::note_schema_buffer`: YAML
+  and `.json` buffers, since a JSON file can be a `$schema` target), which
+  marks stale scopes whose `deps.kind_sources` (root files and imports) read
+  that file with other text, and, for a path never read, kind scopes it
+  could join (`joins_kind_sources`: directly inside a searched or absent
+  root, or a searched candidate). An absent root whose folder does not exist
+  is listed through `SchemaRootSource::absent_root_files` (default none;
+  `BufferedRoots` lists its buffers there), so an editor-only
+  `schemas/roster.yaml` claims before `schemas/` exists. Outside a workspace folder: `KindRegistry::shipped()`.
+  `SourceBuffers` is `Send + Sync`: carry the snapshot to whichever thread
+  prepares.
+- Every file-reading step of a YAML document runs in `overlay/yaml_contract.rs`
+  on the registry worker: `RegistryNeed.yaml: Option<YamlNeed>` (text, context
+  generation) makes `run_document` call `OverlayState::prepare_need`
+  (registry, then `prepare_yaml_contract`). `ContractJob::run` (inside
+  `buffers::with(&TriggerRegistries::source_buffers())` and
+  `observed::collect`) calls the library's `prepare_yaml_contract`
+  (selection, fallback resolution, compiled validators), the whole
+  `YamlContract::validate` only when `checks_read_files()` (`schema`/
+  `yaml-schema` kind checks), `SchemaReferenceFacts::select_in`, a
+  `kind: schema`/`yaml-schema` document's `resolve_standalone` (its model
+  read with `parse_selected_standalone_schema_document` from
+  `EffectiveSchema::data_copy`, never admitted again), and, off the kind
+  route, the root `$schema`'s `NamedTypeCatalog::build_tolerant`
+  (`PreparedYaml::named_types`, served by `yaml_only`). `YamlContracts` keys
+  an entry on `declaration_key()` + context identity + generation + kinds
+  version (+ text hash only when `kind_checks_read_files()`),
+  never on data; begin/run/install mirror the registry's (epoch, seq,
+  in-flight changes), and staleness is event-driven (`invalidate_paths`,
+  `set_buffer`, `invalidate_all` from the trigger hooks; deps compared by
+  buffer-aware hash, probes by presence, a failed entry stale on any change).
+  `registry_demand` reports a YAML need when the registry is stale or the
+  contract is not fresh for the current key, inside a workspace folder or
+  not; its folders join `trigger_watch_folders`.
+- `overlay/yaml_document.rs` (dispatch thread) reads no file: it looks the
+  entry up by key (`Pending` when none matches: never an earlier
+  declaration's), runs the passive `YamlContract::validate` (or takes the
+  worker's validation), and caches in `OverlayCache.yaml_documents` by text,
+  revision, context, and entry version. The envelope's YAML standalone
+  authoring state comes from `OverlayCache::prepared_standalone`; only a
+  non-YAML standalone keeps the synchronous `standalone_named_types`
+  (`yaml_document::{hash_files, deps_unchanged, probes_unchanged}`). Thread
+  evidence: `work_counters::yaml_preparation_threads()` and
+  `darkmatter::work_counters::threads(Work::{YamlContractPreparation,
+  YamlKindCheck, StandaloneImportCheck})`
+  (`yaml_document_session::a_yaml_documents_contract_is_prepared_and_compiled_off_the_dispatch_thread`,
+  `a_data_only_edit_reuses_the_prepared_contract_and_reads_no_schema_file`).
+  The `SchemaBundle` is the selected schema alone
   (`YamlValidation::effective()`); `AnalysisIdentity.yaml_document` makes
   `root()` the selected shape (empty without one, never `baseline_root`).
   The tree is `FrontmatterAst::parse_yaml_document(text, kind_route)`:
@@ -693,21 +738,38 @@ User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
   `whole_document` makes `contains_offset(len)` true.
 - `for_document_timed` routes YAML first, then attaches the state to the
   envelope overlay (`DocumentOverlay::with_yaml`) or builds `yaml_only`
-  (`frontmatter_authoring` from the definition). A standalone schema
-  envelope off the kind route keeps its envelope overlay untouched: its
-  root `$schema` is the definition it authors (the library would judge the
-  file as data; recorded for review).
+  (`frontmatter_authoring` from the definition, plus a root-`$schema`
+  contract's `suggest(...)` lints (`suggestions::yaml_document_lints`) and
+  import catalog). The selected contract is the only judge of a YAML
+  document's shape: `envelope_overlay(.., Some(yaml))` classifies only a
+  `kind: schema`/`yaml-schema` claim (`selected_standalone_document`, which
+  reads the accepted copy, never the compiled envelope), never the informal
+  `Pure` envelope, so `description`/`categories`/`types` beside a root
+  `$schema` are data and a sibling `types` is no type library (as `md schema
+  validate` judges them); and a `schemas/` trigger whose definition judged
+  it gets no strict-parser `TriggerError`. The trigger branch runs only for
+  text that `claims_trigger_envelope` (a string `kind` naming the envelope,
+  or a lexical claim in unparseable text); a null, non-string, or other
+  `kind` claims nothing, so `NoSchema`/`Failed`/`Validated` stands alone
+  (`yaml_document_editor::an_unclaimed_kind_*`). Non-YAML buffers keep the
+  informal classifier. Substrate hover declines inside a root-`$schema`
+  contract (`DocumentOverlay::yaml_contract_covers`), as inside a standalone
+  region.
 - Diagnostics (`diagnostics/yaml_document.rs`) replace every Markdown
   frontmatter pass when `overlay.yaml_document` is set.
   `ProblemGrading::YamlDocument` makes `missing_required` and `unknown_key`
   errors in either mode and ranges `KindCheck` by `YamlValidation::byte_range`.
   One publication per problem: `reports_definition_problems` (kind route,
   any problem that is neither a kind check nor a meta-type problem)
-  suppresses the envelope's `Standalone { error }` / `TriggerError`; a
-  `TriggerError` also yields to a `KindCheck`; a standalone error or
+  suppresses the envelope's `Standalone { error }`; a `TriggerError` exists
+  only for a file that claims the trigger envelope and only while no
+  definition judged it; a standalone error or
   `standalone_resolution` suppresses `KindCheck` (the envelope ranges it
-  with related info); an envelope error suppresses meta-type problems. A
-  load failure under a claiming envelope keeps the envelope's code.
+  with related info); an envelope error suppresses meta-type problems; a
+  root-`$schema` route `Failed` is always the route's
+  `schema_prepare_diagnostic` (located through
+  `located_inline_failure`, shape errors included). A load failure under a
+  claiming envelope keeps the envelope's code.
   `DslProvider` returns nothing for a YAML path.
 - Tests: `tests/l1/yaml_document_editor.rs` (in-process `Probe`, one
   `OverlayState` so texts of one URI replace each other),

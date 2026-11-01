@@ -18,22 +18,29 @@
 //!   required key is always an error, and a kind check
 //!   (`dm.schema.kind_check`) is ranged where the library located it.
 //!
-//! Beside these, a schema-trigger or standalone schema document keeps its
-//! envelope's own findings, and each problem is published once:
+//! The selected schema is the only judge of the document's shape. Only a
+//! claimed schema kind makes a document a schema document, so a root
+//! `$schema` with no such `kind` never adds envelope findings: its other
+//! fields are data. Beside the report, a `kind: schema` / `kind: yaml-schema`
+//! document keeps the findings of reading its declarations (as its selected
+//! definition accepted it, never admitted again), and each problem is
+//! published once:
 //!
-//! - a definition problem of a shipped kind is the report's: the envelope's
-//!   admission error, which judges the same text against the same
-//!   definition, is not published beside it ([`reports_definition_problems`]);
-//! - once the envelope has reported any other error, which locates the
+//! - a definition problem is the report's: the document's own reading, which
+//!   cannot interpret a shape the definition rejects, is not published
+//!   beside it ([`reports_definition_problems`]);
+//! - once that reading has reported any other error, which locates the
 //!   offending token, the report's coarser meta-type problem for the same
 //!   text is not repeated;
-//! - a standalone schema's own parse or named-type failure (ranged at the
+//! - a schema document's own parse or named-type failure (ranged at the
 //!   reference, with its declarations as related information) stands in for
 //!   the `schema` / `yaml-schema` kind check reporting the same failure;
-//! - a schema-trigger envelope error yields to the `schema-trigger` kind
-//!   check, which the library located on the offending node.
+//! - a schema-trigger file's strict envelope error is published only while no
+//!   definition has judged the document; once one has, its report (with the
+//!   `schema-trigger` kind check located on the offending node) is the only
+//!   verdict.
 
-use darkmatter::markdown::schemas::{ValidationReport, YamlValidation};
+use darkmatter::markdown::schemas::ValidationReport;
 use lsp_types::{Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range};
 use simplified_schema::{KindSelectionCause, SchemaError, ValidationProblemCode};
 
@@ -56,7 +63,7 @@ pub(crate) fn diagnostics(ctx: &DocumentContext, yaml: &YamlDocumentOverlay, out
         // failure, under the code its clients already key on.
         YamlDocumentOutcome::LoadFailed(_) if envelope_error(&overlay.suggestions) => {}
         YamlDocumentOutcome::LoadFailed(error) => out.push(load_diagnostic(ctx, error)),
-        YamlDocumentOutcome::Unvalidated | YamlDocumentOutcome::NoSchema => {}
+        YamlDocumentOutcome::Unvalidated | YamlDocumentOutcome::Pending | YamlDocumentOutcome::NoSchema => {}
         YamlDocumentOutcome::Failed(error) => match &**error {
             SchemaError::KindSelection { cause, .. } => out.push(selection_diagnostic(ctx, error, cause)),
             _ => schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, out),
@@ -96,14 +103,6 @@ pub(crate) fn reports_definition_problems(yaml: &YamlDocumentOverlay) -> bool {
                 .iter()
                 .any(|problem| problem.code != ValidationProblemCode::KindCheck && !is_meta_type_problem(problem))
         })
-}
-
-/// Whether the YAML document's report holds a kind check, which owns the
-/// problem a schema-trigger envelope error would otherwise repeat.
-pub(crate) fn reports_kind_check(yaml: &YamlDocumentOverlay) -> bool {
-    yaml.validation().is_some_and(|validation: &YamlValidation| {
-        validation.report.problems.iter().any(|problem| problem.code == ValidationProblemCode::KindCheck)
-    })
 }
 
 /// `report` without the problems an envelope diagnostic already reports:

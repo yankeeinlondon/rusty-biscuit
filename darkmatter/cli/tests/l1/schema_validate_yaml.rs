@@ -93,6 +93,63 @@ fn a_kind_semantic_check_failure_exits_1_as_a_kind_check_record() {
     assert_eq!((problems[0]["line"].as_u64(), problems[0]["column"].as_u64()), (Some(4), Some(12)));
 }
 
+/// A checkout copy of the shipped definition `shipped` at its
+/// repository-relative path `relative`, with its root closure removed, is
+/// the selected definition: `document` passes it (exit `0`), and so does
+/// `document` with an added `note`, which only the compiled closed
+/// definition would refuse.
+fn assert_an_opened_checkout_copy_admits_an_added_property(relative: &str, shipped: &str, document: &str) {
+    let process = CliProcessFixture::new();
+    if !process.initialize_repository() {
+        eprintln!("skipping: git is unavailable");
+        return;
+    }
+    let opened: String =
+        shipped.lines().filter(|line| line.trim() != "$constraints: { closed: true }").map(|line| format!("{line}\n")).collect();
+    assert_ne!(opened, shipped, "the definition had a root closure to remove");
+    let copy = write(&process, relative, &opened);
+    let roots = copy.parent().unwrap().to_path_buf();
+    for (name, text) in [("data/control.yaml", document.to_string()), ("data/added.yaml", format!("{document}note: hi\n"))] {
+        let doc = write(&process, name, &text);
+        let output = process
+            .command_builder()
+            .application_input("SCHEMAS_DIR", &roots)
+            .build()
+            .args(["schema", "validate"])
+            .arg(&doc)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{name}: {}", stdout_of(&output));
+    }
+}
+
+#[test]
+fn an_opened_checkout_schema_definition_admits_an_added_property() {
+    assert_an_opened_checkout_copy_admits_an_added_property(
+        "simplified-schema/schemas/schema.yaml",
+        include_str!("../../../../simplified-schema/schemas/schema.yaml"),
+        "kind: schema\n$schema:\n    title: string\n",
+    );
+}
+
+#[test]
+fn an_opened_checkout_yaml_schema_definition_admits_an_added_property() {
+    assert_an_opened_checkout_copy_admits_an_added_property(
+        "simplified-schema/schemas/yaml-schema.yaml",
+        include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml"),
+        "kind: yaml-schema\n$schema:\n    kind: literal(inventory; required)\n",
+    );
+}
+
+#[test]
+fn an_opened_checkout_trigger_definition_admits_an_added_property() {
+    assert_an_opened_checkout_copy_admits_an_added_property(
+        "darkmatter/schemas/schema-trigger.yaml",
+        include_str!("../../../schemas/schema-trigger.yaml"),
+        "kind: schema-trigger\nmatch:\n    all:\n        - $path: \"docs/**\"\n        - title: string(required)\n",
+    );
+}
+
 #[test]
 fn a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_2() {
     let process = CliProcessFixture::new();
@@ -170,6 +227,32 @@ fn a_root_schema_validates_softly_and_a_failure_exits_1_located_on_the_value() {
         .stdout(predicate::str::contains("line 3, column 7"));
 }
 
+/// A document holding only its root `$schema` is judged as data against
+/// that schema, so a required property it lacks fails it.
+/// A field named like schema metadata is data of the selected contract:
+/// an optional `string` description accepts a value and null alike.
+#[test]
+fn a_metadata_named_field_is_data_of_the_root_schema() {
+    let process = CliProcessFixture::new();
+    for (name, value) in [("control.yaml", "ops"), ("null.yaml", "null")] {
+        let doc = write(&process, name, &format!("$schema:\n    description: string\ndescription: {value}\n"));
+        process.command().args(["schema", "validate"]).arg(&doc).assert().success();
+    }
+}
+
+#[test]
+fn a_root_schema_without_data_fails_its_required_property() {
+    let process = CliProcessFixture::new();
+    let doc = write(&process, "team.yaml", "$schema:\n    owner: string(required)\n");
+
+    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
+    let record = json_record(&output);
+    let problems = record["problems"].as_array().unwrap();
+    assert_eq!(problems.len(), 1, "{record}");
+    assert!(problems[0]["message"].as_str().is_some_and(|message| message.contains("owner")), "{record}");
+}
+
 #[test]
 fn a_document_without_kind_or_schema_is_valid_and_its_json_record_says_no_schema() {
     let process = CliProcessFixture::new();
@@ -192,6 +275,32 @@ fn a_document_without_kind_or_schema_is_valid_and_its_json_record_says_no_schema
     assert!(record.get("error").is_none(), "{record}");
 }
 
+/// A null `kind` claims nothing, in a schema root as anywhere: with no
+/// `$schema` the file is not validated, and with an unresolvable one that
+/// reference is its one error.
+#[test]
+fn a_null_kind_in_a_schema_root_claims_nothing() {
+    let process = CliProcessFixture::new();
+    if !process.initialize_repository() {
+        eprintln!("skipping: git is unavailable");
+        return;
+    }
+    let doc = write(&process, "schemas/data.yaml", "kind:\nowner: ops\n");
+    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+    let record = json_record(&output);
+    assert_eq!(record["schema"], serde_json::Value::Null, "{record}");
+    assert_eq!(record["problems"], serde_json::json!([]), "{record}");
+
+    write(&process, "schemas/data.yaml", "kind:\n$schema: ./missing.yaml\nowner: ops\n");
+    let output = process.command().args(["schema", "validate", "--format", "json"]).arg(&doc).output().unwrap();
+    assert_eq!(output.status.code(), Some(2), "{}", stdout_of(&output));
+    let record = json_record(&output);
+    assert_eq!(record["error"], "schema", "{record}");
+    let message = record["message"].as_str().unwrap();
+    assert!(message.contains("missing.yaml") && !message.contains("kind"), "{message}");
+}
+
 #[test]
 fn an_unresolvable_root_schema_reference_exits_2() {
     let process = CliProcessFixture::new();
@@ -205,6 +314,39 @@ fn an_unresolvable_root_schema_reference_exits_2() {
         .code(2)
         .stdout(predicate::str::contains("has a schema definition error"))
         .stdout(predicate::str::contains("missing.yaml"));
+}
+
+/// Outside a repository a bare root `$schema` is not looked up in
+/// `SCHEMAS_DIR`, for a YAML document exactly as for Markdown frontmatter;
+/// the schema's path still names it.
+#[test]
+fn outside_a_repository_a_bare_root_schema_resolves_as_frontmatter_does() {
+    let process = CliProcessFixture::new();
+    let defs = process.workspace_path().join("dm-defs");
+    std::fs::create_dir_all(&defs).unwrap();
+    let contract = defs.join("contract.yaml");
+    std::fs::write(&contract, "kind: schema\n$schema:\n    owner: string(required)\n").unwrap();
+    let yaml = write(&process, "service.yaml", "$schema: contract.yaml\nowner: ops\n");
+    let markdown = write(&process, "service.md", "---\n$schema: contract.yaml\nowner: ops\n---\n");
+    let explicit = write(&process, "explicit.yaml", &format!("$schema: {}\nowner: ops\n", contract.display()));
+    let exit_code = |document: &PathBuf| {
+        let output = process
+            .command_builder()
+            .application_input("SCHEMAS_DIR", &defs)
+            .build()
+            .args(["schema", "validate"])
+            .arg(document)
+            .output()
+            .unwrap();
+        (output.status.code(), stdout_of(&output))
+    };
+
+    let (markdown_code, markdown_stdout) = exit_code(&markdown);
+    assert_eq!(markdown_code, Some(2), "{markdown_stdout}");
+    let (yaml_code, yaml_stdout) = exit_code(&yaml);
+    assert_eq!(yaml_code, markdown_code, "{yaml_stdout}");
+    let (explicit_code, explicit_stdout) = exit_code(&explicit);
+    assert_eq!(explicit_code, Some(0), "{explicit_stdout}");
 }
 
 /// A referenced schema that is not valid YAML is the schema's failure (exit

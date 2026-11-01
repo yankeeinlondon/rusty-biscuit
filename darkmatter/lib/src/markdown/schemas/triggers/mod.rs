@@ -42,7 +42,9 @@ pub use discovery::{
     enumerate_root_files, scan, scan_with_embedded, scan_with_source,
 };
 pub use finding::InvalidTriggerFinding;
-pub use envelope::{TriggerEnvelope, parse_trigger_envelope, parse_trigger_envelope_from_str};
+pub use envelope::{
+    TriggerEnvelope, claims_trigger_envelope, parse_trigger_envelope, parse_trigger_envelope_from_str,
+};
 pub use grammar::{
     COMBINATOR_KEYS, PATH_KEY, MatchConditions, MatchExpr, PathGlobs, is_match_safe_constraint,
     parse_match_conditions,

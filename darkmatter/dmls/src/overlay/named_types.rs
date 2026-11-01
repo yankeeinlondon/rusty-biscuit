@@ -38,8 +38,9 @@ pub struct AuthoredDeclaration {
     local_types: Option<SchemaShape>,
 }
 
-/// The authored bytes of the frontmatter `$schema` value.
-fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::Range<usize>> {
+/// The authored bytes of the frontmatter `$schema` value, a flow
+/// collection's closing bracket included.
+pub(crate) fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::Range<usize>> {
     let mut span = ast.schema_entry()?.value_span.clone();
     // A flow collection's recorded value span stops before its closing
     // bracket.
@@ -282,7 +283,12 @@ impl NamedTypeCatalog {
                 let path = named_type_reference_path(&target, base_dir, schema_roots, context)
                     .ok()
                     .flatten()?;
-                let text: Arc<str> = Arc::from(crate::work_counters::read_to_string(&path).ok()?);
+                // An open buffer in the snapshot in force replaces the file,
+                // as it does for the resolver.
+                let text: Arc<str> = match simplified_schema::resolve::buffers::text(&path) {
+                    Some(text) => text,
+                    None => Arc::from(crate::work_counters::read_to_string(&path).ok()?),
+                };
                 let (document, error) = match simplified_schema::resolve::parse_referenced_schema_document(&text, &path) {
                     Ok(document) => (document, None),
                     Err(error) => (None, Some(Arc::new(error))),

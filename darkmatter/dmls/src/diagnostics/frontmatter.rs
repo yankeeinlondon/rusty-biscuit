@@ -162,10 +162,9 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
         out.push(invalid_trigger_diagnostic_at(finding, range));
     }
 
-    if let SuggestionState::TriggerError(error) = &overlay.suggestions
-        && !definition_reported
-        && !overlay.yaml_document.as_deref().is_some_and(crate::diagnostics::yaml_document::reports_kind_check)
-    {
+    // Only a document whose `kind` names the trigger envelope, and that its
+    // selected definition has not judged, carries this error.
+    if let SuggestionState::TriggerError(error) = &overlay.suggestions {
         let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
         out.push(diagnostic(
             ctx.source_map
@@ -259,7 +258,7 @@ fn schema_prepare_diagnostic_with_origin(
     }
 
     let fallback_span = ast
-        .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
+        .and_then(|ast| crate::overlay::named_types::frontmatter_value_span(ctx.text, ast))
         .or_else(|| ast.map(FrontmatterAst::block_span));
     if named_types::is_named_type_error(error) {
         let scope = named_types::NamedTypeScope::frontmatter(ctx, ast, fallback_span);
@@ -291,14 +290,25 @@ fn schema_prepare_diagnostic_with_origin(
             }
             (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span.or_else(|| fallback_span.clone()))
         }
-        SchemaError::FrontmatterShape { message } => {
-            (code::SCHEMA_INVALID_SHAPE, message.clone(), fallback_span.clone())
-        }
-        SchemaError::RemoteUnsupported { .. } => {
-            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
-        }
-        SchemaError::Grammar { .. } | SchemaError::Convert { .. } => {
-            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
+        SchemaError::FrontmatterShape { .. } | SchemaError::RemoteUnsupported { .. } | SchemaError::Grammar { .. } | SchemaError::Convert { .. } => {
+            let message = match error {
+                SchemaError::FrontmatterShape { message } => message.clone(),
+                other => other.to_string(),
+            };
+            // The declaration's own shape: the source-aware parser locates
+            // the offending arm or value when it rejects it the same way.
+            let located = referenced_origin
+                .is_none()
+                .then(|| ast.and_then(|ast| located_inline_failure(ctx, ast, error, true)))
+                .flatten();
+            let span = match located {
+                Some((span, located)) => {
+                    related.extend(located_related(ctx, &located));
+                    Some(span)
+                }
+                None => fallback_span.clone(),
+            };
+            (code::SCHEMA_INVALID_SHAPE, message, span)
         }
         other => {
             // A standalone schema file folds its payload failure into this
@@ -362,18 +372,8 @@ fn inline_definition_span(
     error: &SchemaError,
     property: &str,
 ) -> Option<(Option<std::ops::Range<usize>>, Vec<LocatedRelated>)> {
-    let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
-    if let Some(failure) = fresh
-        .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
-        .flatten()
-        .filter(|failure| failure.error.to_string() == error.to_string())
-    {
-        let span = failure
-            .authored_span
-            .clone()
-            .or_else(|| failure.value_span.clone())
-            .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path));
-        return Some((span, failure.related));
+    if let Some((span, related)) = located_inline_failure(ctx, ast, error, false) {
+        return Some((Some(span), related));
     }
     let span = ast
         .entry_by_key_path(&["$schema", property])
@@ -384,6 +384,39 @@ fn inline_definition_span(
         })
         .map(|entry| entry.value_span.clone());
     Some((span, Vec::new()))
+}
+
+/// The located range of an inline `$schema` failure that the source-aware
+/// declaration parser reports as this same error, in the current buffer: its
+/// token, else the rejected value, else the deepest entry along its
+/// structural path, with its related locations. With `shape`, `error` is a
+/// declaration-shape error, which the parser words differently from the
+/// resolver; any shape failure the parser locates is then the same problem.
+fn located_inline_failure(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    error: &SchemaError,
+    shape: bool,
+) -> Option<(std::ops::Range<usize>, Vec<LocatedRelated>)> {
+    let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
+    let failure = fresh
+        .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
+        .flatten()
+        .filter(|failure| {
+            failure.error.to_string() == error.to_string() || (shape && is_declaration_shape_failure(&failure.error))
+        })?;
+    let span = failure
+        .authored_span
+        .clone()
+        .or_else(|| failure.value_span.clone())
+        .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path))?;
+    Some((span, failure.related))
+}
+
+/// Whether the declaration parser's `error` rejects the declaration's own
+/// shape (the root or a root-union arm) rather than a definition inside it.
+fn is_declaration_shape_failure(error: &SchemaError) -> bool {
+    matches!(error, SchemaError::Grammar { property, .. } if property == "<root>" || property.starts_with("<arm["))
 }
 
 /// How a schema problem's severity is decided, by what the instance is.
@@ -1484,13 +1517,11 @@ fn standalone_declaration_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic
     ))
 }
 
-/// The payload key of whichever envelope claimed a standalone document.
+/// The payload key of a standalone document: its exported `$schema`, else
+/// the `types` table a `kind: schema` document may hold alone (as the
+/// library's envelope reads it).
 fn standalone_payload_key(mapping: &serde_yaml_ng::Mapping) -> &'static str {
-    let tagged = mapping
-        .get(serde_yaml_ng::Value::String("kind".to_string()))
-        .and_then(serde_yaml_ng::Value::as_str)
-        == Some("schema");
-    if tagged { "types" } else { "$schema" }
+    if mapping.contains_key(serde_yaml_ng::Value::String("$schema".to_string())) { "$schema" } else { "types" }
 }
 
 /// The located payload value of a standalone envelope, in document offsets.

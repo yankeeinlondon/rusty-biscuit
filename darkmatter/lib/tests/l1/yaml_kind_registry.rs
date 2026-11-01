@@ -16,6 +16,8 @@ use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource, shipped_kind_definition_paths};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, Route, YamlOutcome};
+use darkmatter::markdown::schemas::triggers::discovery::SchemaRootSource;
+use simplified_schema::resolve::buffers::{self, SourceBuffers};
 use simplified_schema::{KindSelectionCause, SchemaError, ValidationProblemCode};
 
 pub(crate) fn write(path: &Path, contents: &str) {
@@ -187,6 +189,35 @@ fn a_registry_built_outside_a_repository_holds_the_shipped_kinds_only() {
     assert!(matches!(fixture.validate(&outside, ROSTER_DOCUMENT), Ok(YamlOutcome::NoSchema)));
 }
 
+/// A bare root `$schema` searches the schema roots exactly where `md`
+/// searches them for Markdown frontmatter: inside a repository. Outside one
+/// the bare name is a file next to the document, and an explicit path still
+/// names the contract.
+#[test]
+fn a_bare_root_schema_searches_the_schema_roots_only_inside_a_repository() {
+    let fixture = Fixture::new();
+    let contract = fixture.defs().join("contract.yaml");
+    write(&contract, "kind: schema\n$schema:\n    owner: string(required)\n");
+    let schemas_dir = fixture.defs().display().to_string();
+    let env = [("SCHEMAS_DIR", schemas_dir.as_str())];
+    let validate = |document: &Path, text: &str| {
+        write(document, text);
+        DarkmatterSchemas::new(fixture.context(document, &env)).validate_yaml_document(text, document)
+    };
+    let bare = "$schema: contract.yaml\nowner: ops\n";
+
+    let inside = validated(validate(&fixture.package().join("docs/service.yaml"), bare));
+    assert!(inside.report.valid, "{:?}", inside.report.problems);
+
+    let outside = fixture.root().join("loose/service.yaml");
+    let error = validate(&outside, bare).expect_err("no schema root is searched outside a repository");
+    assert!(error.to_string().contains("contract.yaml"), "{error}");
+
+    let explicit = format!("$schema: {}\nowner: ops\n", contract.display());
+    let outside_explicit = validated(validate(&outside, &explicit));
+    assert!(outside_explicit.report.valid, "{:?}", outside_explicit.report.problems);
+}
+
 // ── Discovery in the five roots ────────────────────────────────────────────
 
 #[test]
@@ -325,6 +356,70 @@ fn a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition() {
     assert_ne!(edited, include_str!("../../../schemas/schema-trigger.yaml"), "the edit applies");
     write(&copy, &edited);
     let validation = validated(validate(trigger));
+    assert!(!validation.report.valid);
+    assert_eq!(validation.report.problems[0].code, ValidationProblemCode::MissingRequired);
+    assert_eq!(validation.report.problems[0].property.as_deref(), Some("$schema"));
+}
+
+/// The editor's view of the schema roots: only the unsaved buffers directly
+/// inside each root, spelled under the root as the registry names it and
+/// read from the buffers snapshot.
+struct UnsavedRoots<'a>(&'a SourceBuffers);
+
+impl SchemaRootSource for UnsavedRoots<'_> {
+    fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
+        let folder = SourceBuffers::key(root);
+        let inside = self.0.paths().filter(|path| path.parent() == Some(folder.as_path()));
+        Ok(inside.filter_map(|path| path.file_name()).map(|name| root.join(name)).collect())
+    }
+
+    fn root_file_text(&mut self, path: &Path) -> Result<Arc<str>, SchemaError> {
+        Ok(Arc::clone(self.0.get(path).expect("only buffers are listed")))
+    }
+}
+
+/// A copy at a shipped definition's repository-relative path that exists only
+/// in the editor still replaces the compiled-in copy. The document and its
+/// roots are spelled through a symlinked alias of the checkout (as
+/// `/var/…` is of `/private/var/…` on macOS), so the identity is decided on
+/// the canonical spelling of the copy's nearest existing folder rather than
+/// of the file, which has none.
+#[test]
+fn an_unsaved_copy_at_the_shipped_path_replaces_the_built_in_definition() {
+    let fixture = Fixture::new();
+    #[cfg(unix)]
+    let checkout = {
+        let alias = fixture.root().join("alias");
+        std::os::unix::fs::symlink(fixture.repo(), &alias).expect("checkout alias");
+        alias
+    };
+    #[cfg(not(unix))]
+    let checkout = fixture.repo();
+    let folder = checkout.join("darkmatter/schemas");
+    std::fs::create_dir_all(&folder).unwrap();
+    let copy = folder.join("schema-trigger.yaml");
+    assert!(!copy.exists(), "the copy exists only in the editor");
+    let edited = include_str!("../../../schemas/schema-trigger.yaml").replace("schema(non-null)", "schema(required; non-null)");
+    let mut buffers = SourceBuffers::default();
+    buffers.insert(&copy, Arc::from(edited.as_str()));
+
+    let roots = folder.display().to_string();
+    let document = checkout.join("docs/trigger.yaml");
+    let context = fixture.context(&document, &[("SCHEMAS_DIR", roots.as_str())]);
+    let registry = buffers::with(&buffers, || {
+        KindRegistry::build(&context, &mut UnsavedRoots(&buffers), RegistryScope::WithRoots)
+    });
+    match healthy_source(&registry, "schema-trigger") {
+        DefinitionSource::File(file) => assert_eq!(SourceBuffers::key(&file), SourceBuffers::key(&copy)),
+        other => panic!("the unsaved copy replaces the shipped definition: {other:?}"),
+    }
+
+    // The unsaved edit requires `$schema`, so a matcher-only trigger fails.
+    let trigger = "kind: schema-trigger\nmatch:\n    title: string(required)\n";
+    write(&document, trigger);
+    let validation = validated(
+        DarkmatterSchemas::new(context).with_kind_registry(Arc::new(registry)).validate_yaml_document(trigger, &document),
+    );
     assert!(!validation.report.valid);
     assert_eq!(validation.report.problems[0].code, ValidationProblemCode::MissingRequired);
     assert_eq!(validation.report.problems[0].property.as_deref(), Some("$schema"));

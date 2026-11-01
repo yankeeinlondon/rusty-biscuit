@@ -184,7 +184,12 @@ fn preview(file: &Path, assembled: bool, resolve: impl FnOnce() -> Result<(), Sc
         total_lines: 0,
         verdict: SchemaTargetVerdict::Rejected(Arc::new(error)),
     };
-    let bytes = match work_counters::read(file) {
+    // An open buffer is previewed as the YAML document path resolved it.
+    let read = match simplified_schema::resolve::buffers::text(file) {
+        Some(text) => Ok(text.as_bytes().to_vec()),
+        None => work_counters::read(file),
+    };
+    let bytes = match read {
         Ok(bytes) => bytes,
         Err(source) => return rejected(SchemaError::Io { path: file.to_path_buf(), source }),
     };

@@ -286,7 +286,9 @@ pub fn frontmatter_authoring(
 /// YAML and raw JSON Schema, which carry a top-level key the informal
 /// envelope does not admit
 /// ([`StandaloneSchemaEnvelope::admits_top_level_key`]) and never carry
-/// `kind: schema` or `kind: yaml-schema`.
+/// `kind: schema` or `kind: yaml-schema`. A whole YAML document is a schema
+/// document only by its `kind`, so only the `Tagged` and `YamlSchema` claims
+/// serve it; the informal (`Pure`) claim serves other buffers alone.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
     let top_level = match flow_mapping_start(text) {
         Some(start) => flow_top_level_entries(&text[start + 1..]),

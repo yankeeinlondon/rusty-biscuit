@@ -103,7 +103,10 @@ column 18, the quoted glob. A Markdown document that discovers it gets the
 skipped-trigger warning instead, positioned at the same line. The trigger
 file's kind checks cover the trigger grammar: `$path` globs, an empty `match`
 list, a vacuous match, `min-match` count bounds, and match-safe conditions
-(see [Kind Checks](./definition.md#kind-checks)). Validate a trigger file
+(see [Kind Checks](./definition.md#kind-checks)); which keys the file may
+have is its definition's question alone. Discovery for a Markdown document
+loads a trigger with the trigger parser, which accepts only `kind`, `match`,
+and `$schema`. Validate a trigger file
 with `md schema validate`, which exits `1` and reports the
 problem as `"kind": "kind_check"` in JSON. DMLS publishes the same check on
 the open trigger file as a `dm.schema.kind_check` error on the quoted glob

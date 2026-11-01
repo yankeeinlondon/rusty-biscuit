@@ -138,7 +138,29 @@ impl DarkmatterSchemas {
     ///
     /// The selection and schema errors of [`Self::validate_yaml_document`].
     pub fn validate_loaded_yaml_document(&self, document: &LoadedYamlDocument) -> Result<YamlOutcome, SchemaError> {
-        let (text, path, loaded) = (document.text.as_str(), document.path.as_path(), &document.loaded);
+        Ok(match self.prepare_yaml_contract(document)? {
+            None => YamlOutcome::NoSchema,
+            Some(contract) => YamlOutcome::Validated(contract.validate(document)),
+        })
+    }
+
+    /// Selects and prepares the schema `document` is judged against, without
+    /// judging it: the selection, the resolution of a root `$schema` (its
+    /// files read), and the compiled validators. The result judges any later
+    /// text of the same document whose [`LoadedYamlDocument::declaration_key`]
+    /// is unchanged, in this instance's context
+    /// ([`YamlContract::validate`]). [`Self::validate_loaded_yaml_document`]
+    /// is this call and that one.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when no schema is selected.
+    ///
+    /// ## Errors
+    ///
+    /// The selection and schema errors of [`Self::validate_yaml_document`].
+    pub fn prepare_yaml_contract(&self, document: &LoadedYamlDocument) -> Result<Option<YamlContract>, SchemaError> {
+        let (path, loaded) = (document.path.as_path(), &document.loaded);
         let context = &self.file_resolution_context;
         let registry = match &self.kind_registry {
             Some(registry) => Arc::clone(registry),
@@ -149,11 +171,15 @@ impl DarkmatterSchemas {
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| context.cwd().to_path_buf(), Path::to_path_buf);
         let schema_roots = registry.roots().search_paths().to_vec();
-        let (route, definition, effective, instance) = match select::select(&registry, &loaded.value)? {
-            select::Selection::NoSchema => return Ok(YamlOutcome::NoSchema),
+        let selection = select::select(&registry, &loaded.value)?;
+        if !matches!(selection, select::Selection::NoSchema) {
+            crate::note_work!(YamlContractPreparation);
+        }
+        let (route, definition, effective) = match selection {
+            select::Selection::NoSchema => return Ok(None),
             select::Selection::Kind { kind, definition } => {
                 let effective = EffectiveSchema::for_yaml_document(definition.resolved().clone(), base_dir, self)?;
-                (Route::Kind(kind), definition.source().label(), effective, loaded.json.clone())
+                (Route::Kind(kind), definition.source().label(), effective)
             }
             select::Selection::RootSchema(value) => {
                 let json = serde_json::to_value(value).map_err(|error| SchemaError::FrontmatterShape {
@@ -169,28 +195,95 @@ impl DarkmatterSchemas {
                     Some(reference) => reference.to_string(),
                     None => "the inline `$schema`".to_string(),
                 };
-                let mut instance = loaded.json.clone();
-                if let serde_json::Value::Object(map) = &mut instance {
-                    map.shift_remove("$schema");
-                }
-                (Route::RootSchema, label, EffectiveSchema::for_yaml_document(resolved, base_dir, self)?, instance)
+                (Route::RootSchema, label, EffectiveSchema::for_yaml_document(resolved, base_dir, self)?)
             }
         };
-        let mut report = effective.validate_data(&instance, &loaded.positions);
-        if report.valid
-            && let Route::Kind(kind) = &route
-            && semantic::CHECKED_KINDS.contains(&kind.as_str())
-        {
-            report.problems = semantic::kind_checks(kind, text, path, loaded, &schema_roots, context);
-            report.valid = report.problems.is_empty();
-        }
-        Ok(YamlOutcome::Validated(YamlValidation {
+        effective.prepare_conversion();
+        Ok(Some(YamlContract {
             route,
-            report,
             definition,
             effective: Arc::new(effective),
-            loaded: Arc::clone(loaded),
+            schema_roots,
+            context: context.clone(),
         }))
+    }
+}
+
+/// The schema a whole YAML document selected, prepared and compiled
+/// ([`DarkmatterSchemas::prepare_yaml_contract`]), ready to judge the
+/// document's text.
+#[derive(Clone)]
+pub struct YamlContract {
+    route: Route,
+    definition: String,
+    effective: Arc<EffectiveSchema>,
+    schema_roots: Vec<PathBuf>,
+    context: biscuit_file::FileResolutionContext,
+}
+
+impl std::fmt::Debug for YamlContract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("YamlContract")
+            .field("route", &self.route)
+            .field("definition", &self.definition)
+            .finish_non_exhaustive()
+    }
+}
+
+impl YamlContract {
+    /// How the schema was selected.
+    #[must_use]
+    pub fn route(&self) -> &Route {
+        &self.route
+    }
+
+    /// The selected schema alone, as [`YamlValidation::effective`].
+    #[must_use]
+    pub fn effective(&self) -> &Arc<EffectiveSchema> {
+        &self.effective
+    }
+
+    /// Whether [`Self::validate`] reads files: the kind checks of a
+    /// `schema` or `yaml-schema` document resolve what the document itself
+    /// imports, so they depend on its whole text. Every other judgment is
+    /// passive.
+    #[must_use]
+    pub fn checks_read_files(&self) -> bool {
+        matches!(&self.route, Route::Kind(kind) if semantic::FILE_READING_KINDS.contains(&kind.as_str()))
+    }
+
+    /// Judges `document`, which must have the
+    /// [`declaration_key`](LoadedYamlDocument::declaration_key) of the
+    /// document this contract was prepared from, against the prepared
+    /// schema, then (only when the schema reports nothing) runs its kind's
+    /// checks over the copy the schema accepted. Passive unless
+    /// [`Self::checks_read_files`].
+    #[must_use]
+    pub fn validate(&self, document: &LoadedYamlDocument) -> YamlValidation {
+        let (text, path, loaded) = (document.text.as_str(), document.path.as_path(), &document.loaded);
+        let mut instance = loaded.json.clone();
+        if self.route == Route::RootSchema
+            && let serde_json::Value::Object(map) = &mut instance
+        {
+            map.shift_remove("$schema");
+        }
+        let mut report = self.effective.validate_data(&instance, &loaded.positions);
+        if report.valid
+            && let Route::Kind(kind) = &self.route
+            && semantic::CHECKED_KINDS.contains(&kind.as_str())
+        {
+            let accepted = self.effective.data_copy(&instance);
+            report.problems =
+                semantic::kind_checks(kind, text, path, loaded, &accepted, &self.schema_roots, &self.context);
+            report.valid = report.problems.is_empty();
+        }
+        YamlValidation {
+            route: self.route.clone(),
+            report,
+            definition: self.definition.clone(),
+            effective: Arc::clone(&self.effective),
+            loaded: Arc::clone(loaded),
+        }
     }
 }
 
@@ -219,6 +312,37 @@ impl LoadedYamlDocument {
     pub fn load(text: &str, path: &Path) -> Result<Self, SchemaError> {
         let loaded = Arc::new(load::load_yaml_document(text, path)?);
         Ok(Self { text: text.to_string(), path: path.to_path_buf(), loaded })
+    }
+
+    /// A hash of what [`DarkmatterSchemas::prepare_yaml_contract`] reads
+    /// from this document: its top-level `kind` and root `$schema`, as
+    /// authored. Two texts of one document with the same key select and
+    /// prepare the same contract in the same context and registry, so a
+    /// prepared [`YamlContract`] judges both.
+    #[must_use]
+    pub fn declaration_key(&self) -> u64 {
+        let map = self.loaded.value.as_mapping();
+        let declaration = (
+            map.is_some(),
+            map.and_then(|map| map.get("kind")),
+            map.and_then(|map| map.get("$schema")),
+        );
+        // The loader admitted these values (string keys, admissible
+        // numbers), so serializing them does not fail.
+        biscuit_hash::xx_hash(&serde_yaml_ng::to_string(&declaration).unwrap_or_default())
+    }
+
+    /// Whether this document's `kind` names a kind whose checks read files
+    /// (`schema`, `yaml-schema`): judging it then depends on its whole text,
+    /// not only on its [`Self::declaration_key`]
+    /// ([`YamlContract::checks_read_files`]).
+    #[must_use]
+    pub fn kind_checks_read_files(&self) -> bool {
+        self.loaded
+            .value
+            .get("kind")
+            .and_then(serde_yaml_ng::Value::as_str)
+            .is_some_and(|kind| semantic::FILE_READING_KINDS.contains(&kind))
     }
 
     /// The whole document as JSON, exactly as loaded: no soft conversion,

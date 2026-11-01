@@ -44,7 +44,7 @@ use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::{SchemaArm, SchemaError, SchemaRoot, SimplifiedType, claimed_values};
 
 use super::super::embedded::{SHIPPED_SOURCES, shipped_kind_definitions};
-use super::super::roots::SchemaRoots;
+use super::super::roots::{SchemaRootState, SchemaRoots};
 use super::super::triggers::discovery::SchemaRootSource;
 use super::super::triggers::envelope::lexically_declared_kind;
 
@@ -174,7 +174,9 @@ impl KindRegistry {
     /// area, tree root, `SCHEMAS_DIR`, and home decide the schema roots.
     /// `source` supplies the roots' file lists and texts (DMLS passes its
     /// unsaved buffers); imports of a discovered definition are read through
-    /// `context`.
+    /// `context`, from the
+    /// [`buffers`](simplified_schema::resolve::buffers) snapshot in force
+    /// where it holds one.
     pub fn build(context: &FileResolutionContext, source: &mut dyn SchemaRootSource, scope: RegistryScope) -> Self {
         let _discover = simplified_schema::timings::stage(simplified_schema::ValidationStage::Discover);
         let mut builder = Builder::default();
@@ -278,15 +280,40 @@ impl Builder {
                     continue;
                 }
             };
-            for file in files {
-                self.dependencies.insert(file.clone());
-                match source.root_file_text(&file) {
-                    Ok(text) => self.add_candidate(context, &roots, file, &text),
-                    Err(error) => self.incomplete.push(Incomplete { file, problem: Arc::new(error) }),
-                }
+            self.add_root_files(context, &roots, source, files);
+        }
+        // A root whose folder does not exist yet is a searched missing
+        // location: the source may hold a definition there that is not saved.
+        // A folder that exists but is skipped (a file, or a symlinked
+        // package root) stays skipped.
+        let mut absent = BTreeSet::new();
+        for entry in roots.entries() {
+            if let SchemaRootState::Absent(folder) = &entry.state
+                && std::fs::symlink_metadata(folder).is_err()
+                && absent.insert(folder.clone())
+            {
+                let files = source.absent_root_files(folder);
+                self.add_root_files(context, &roots, source, files);
             }
         }
         self.roots = Some(roots);
+    }
+
+    /// Adds each of a root's `files` read through `source`.
+    fn add_root_files(
+        &mut self,
+        context: &FileResolutionContext,
+        roots: &SchemaRoots,
+        source: &mut dyn SchemaRootSource,
+        files: Vec<PathBuf>,
+    ) {
+        for file in files {
+            self.dependencies.insert(file.clone());
+            match source.root_file_text(&file) {
+                Ok(text) => self.add_candidate(context, roots, file, &text),
+                Err(error) => self.incomplete.push(Incomplete { file, problem: Arc::new(error) }),
+            }
+        }
     }
 
     /// Adds `file`, whose text is `text`, when it is a definition.
@@ -426,11 +453,13 @@ fn shipped_claims(path: &str, kind: &str) -> bool {
 
 /// The shipped definition `file` is the source of, by repository-relative
 /// path: `file` relative to the context's repository root, compared as
-/// `/`-joined components.
+/// `/`-joined components. `file` may exist only as an unsaved buffer, so only
+/// its nearest existing ancestor is canonicalized.
 fn shipped_identity(context: &FileResolutionContext, file: &Path) -> Option<&'static str> {
     let root = context.repository_root()?;
-    let canonical = |path: &Path| biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
-    let relative = canonical(file).strip_prefix(canonical(root)).ok()?.to_path_buf();
+    let root = biscuit_file::canonicalize_simplified(root).unwrap_or_else(|_| root.to_path_buf());
+    let file = simplified_schema::resolve::buffers::SourceBuffers::key(file);
+    let relative = file.strip_prefix(root).ok()?.to_path_buf();
     let mut segments = Vec::new();
     for component in relative.components() {
         let Component::Normal(segment) = component else {

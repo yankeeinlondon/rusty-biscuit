@@ -112,8 +112,7 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
         .get(YamlValue::String("match".into()))
         .ok_or_else(|| field_error("match", "a schema-trigger envelope requires a `match:` key".into()))?;
 
-    let conditions = parse_match_conditions(match_value)?;
-    lint::lint(&conditions)?;
+    let conditions = match_semantics(match_value)?;
 
     let payload = match map.get(YamlValue::String("$schema".into())) {
         None => None,
@@ -138,6 +137,30 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
         conditions,
         payload,
     }))
+}
+
+/// Checks the meaning of a `kind: schema-trigger` document a selected
+/// definition already accepted: its `match` grammar, `$path` globs, and the
+/// vacuous-trigger lint. The document's shape (its keys, whether `match` is
+/// present, the `$schema` carrier) is the definition's alone, so an unknown
+/// key or an absent `match` is not reported here; trigger discovery still
+/// loads a trigger with [`parse_trigger_envelope`].
+///
+/// ## Errors
+///
+/// As [`parse_trigger_envelope`] for the `match` payload.
+pub(crate) fn check_trigger_semantics(value: &YamlValue) -> Result<(), SchemaError> {
+    match value.get("match") {
+        Some(match_value) => match_semantics(match_value).map(|_| ()),
+        None => Ok(()),
+    }
+}
+
+/// The parsed, lint-clean conditions of a `match` payload.
+fn match_semantics(match_value: &YamlValue) -> Result<MatchConditions, SchemaError> {
+    let conditions = parse_match_conditions(match_value)?;
+    lint::lint(&conditions)?;
+    Ok(conditions)
 }
 
 /// The instance path, in the trigger document, of the node `error` is about:
@@ -254,9 +277,7 @@ fn describe_key(key: &YamlValue) -> String {
 /// normalized source: identical to the original's, except that a first-line
 /// column does not count the BOM.
 pub fn parse_trigger_envelope_from_str(source: &str) -> Result<Option<TriggerEnvelope>, SchemaError> {
-    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
-    let source: std::borrow::Cow<'_, str> =
-        if source.contains('\r') { source.replace("\r\n", "\n").into() } else { source.into() };
+    let source = normalized(source);
     match serde_yaml_ng::from_str::<YamlValue>(&source) {
         Ok(value) => parse_trigger_envelope(&value),
         Err(err) => match claims_envelope(&source) {
@@ -265,6 +286,32 @@ pub fn parse_trigger_envelope_from_str(source: &str) -> Result<Option<TriggerEnv
             Some(Claim::Current) => Err(yaml_error(&err)),
         },
     }
+}
+
+/// Whether `source` names the envelope in its top-level `kind`: the string
+/// `schema-trigger` or `trigger-schema`, or, for text that is not valid YAML,
+/// a declaration line [`claims_envelope`] can place.
+///
+/// Unlike [`parse_trigger_envelope`], a null or non-string `kind` claims
+/// nothing. A whole YAML document is selected by its `kind` alone, so a
+/// caller judging one asks this before applying the strict parse: a file
+/// that never named the envelope is not a malformed trigger.
+pub fn claims_trigger_envelope(source: &str) -> bool {
+    let source = normalized(source);
+    match serde_yaml_ng::from_str::<YamlValue>(&source) {
+        Ok(value) => value
+            .as_mapping()
+            .and_then(|map| map.get(YamlValue::String("kind".into())))
+            .and_then(YamlValue::as_str)
+            .is_some_and(|kind| kind == ENVELOPE_KIND || kind == RENAMED_KIND),
+        Err(_) => claims_envelope(&source).is_some(),
+    }
+}
+
+/// `source` as [`parse_trigger_envelope_from_str`] parses it.
+fn normalized(source: &str) -> std::borrow::Cow<'_, str> {
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    if source.contains('\r') { source.replace("\r\n", "\n").into() } else { source.into() }
 }
 
 /// A claimed envelope's YAML failure, with the location moved out of the text.
@@ -565,6 +612,38 @@ mod tests {
         for source in ["kind: ''", "kind: schema", "title: x"] {
             let v: YamlValue = serde_yaml_ng::from_str(source).unwrap();
             assert!(parse_trigger_envelope(&v).unwrap().is_none(), "{source}");
+        }
+    }
+
+    /// Only a string naming the envelope claims it; the shapes the strict
+    /// parser rejects claim nothing.
+    #[test]
+    fn only_a_string_naming_the_envelope_claims_it() {
+        for source in [
+            "kind: schema-trigger\n",
+            "kind: trigger-schema\n",
+            "\u{feff}kind: 'schema-trigger'\r\nmatch: {}\r\n",
+            // Not YAML, but a placeable declaration line.
+            "kind: schema-trigger\nmatch: [\n",
+            "kind: trigger-schema\nmatch: [\n",
+        ] {
+            assert!(claims_trigger_envelope(source), "{source:?}");
+        }
+        for source in [
+            "",
+            "owner: ops\n",
+            "kind:\nowner: ops\n",
+            "kind: null\n",
+            "kind: 42\n",
+            "kind: true\n",
+            "kind: [schema-trigger]\n",
+            "kind: {schema-trigger: x}\n",
+            "kind: \"\"\n",
+            "kind: inventory\n",
+            "- kind: schema-trigger\n",
+            "kind: inventory\nmatch: [\n",
+        ] {
+            assert!(!claims_trigger_envelope(source), "{source:?}");
         }
     }
 }

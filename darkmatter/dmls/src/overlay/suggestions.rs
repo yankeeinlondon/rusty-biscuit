@@ -9,7 +9,9 @@
 //!   into document-relative byte ranges.
 //! - **Standalone** YAML SimplifiedSchema envelopes (pure `$schema`-only or
 //!   tagged `kind: schema`): the whole buffer is the source, and spans are
-//!   already document-relative (offset zero).
+//!   already document-relative (offset zero). An open whole YAML document is
+//!   a standalone schema only by its `kind`; its inline root `$schema`
+//!   contract is linted as Markdown's is ([`yaml_document_lints`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -59,6 +61,27 @@ pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<SchemaR
     let value_span = crate::overlay::frontmatter::line_aligned_span(text, schema_entry.value_span.clone());
     let schema_yaml_source = &text[value_span.start..value_span.end];
     parse_yaml_schema_with_source(schema_value, schema_yaml_source, value_span.start).ok()
+}
+
+/// [`inline_lints`]'s problems for a whole YAML document (`ast` from
+/// [`FrontmatterAst::parse_yaml_document`]) whose root `$schema` is an inline
+/// mapping it selects as its contract; empty on the kind route, where
+/// `$schema` is data and has no schema entry.
+pub fn yaml_document_lints(text: &str, ast: &FrontmatterAst) -> Vec<SuggestionLintProblem> {
+    let Some(entry) = ast.schema_entry().filter(|entry| entry.kind == crate::overlay::FmValueKind::Mapping) else {
+        return Vec::new();
+    };
+    let Some(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
+        .ok()
+        .and_then(|document| document.get("$schema").cloned())
+    else {
+        return Vec::new();
+    };
+    let span = crate::overlay::frontmatter::line_aligned_span(text, entry.value_span.clone());
+    parse_yaml_schema_with_source(&value, &text[span.clone()], span.start)
+        .ok()
+        .and_then(|schema| lint_suggestions(&schema).ok())
+        .unwrap_or_default()
 }
 
 /// Lints the `suggest(...)` candidates written on named-type references

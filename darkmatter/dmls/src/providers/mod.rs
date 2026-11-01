@@ -214,11 +214,13 @@ impl Provider for SubstrateProvider {
         // type, not prose — and the ordering cannot be reversed without giving
         // the overlay precedence over Markdown everywhere. Declining here is
         // the narrow fix: it is scoped to spans a schema document already owns,
-        // so no ordinary Markdown buffer can reach it.
+        // so no ordinary Markdown buffer can reach it. A whole YAML
+        // document's root `$schema` contract is such a declaration too.
         if ctx
             .overlay
             .is_some_and(|overlay| {
                 standalone_semantic_region_covers(&overlay.schema_authoring, offset)
+                    || overlay.yaml_contract_covers(offset)
             })
         {
             return None;

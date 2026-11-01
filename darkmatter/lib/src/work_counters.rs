@@ -78,6 +78,17 @@ pub enum Work {
     /// action's shell values execute against: the values the frontmatter view
     /// owns, never its shared base.
     ShellValueStateNodes,
+    /// A whole YAML document's selected schema prepared: its `$schema`
+    /// resolved (on the fallback route) and its validators built. The
+    /// threads it ran on are recorded ([`threads`]).
+    YamlContractPreparation,
+    /// The file-reading kind checks of a `schema` or `yaml-schema` document
+    /// run (its own imports resolved). The threads are recorded.
+    YamlKindCheck,
+    /// A standalone schema document's named-type imports checked through
+    /// [`check_standalone_named_types`](crate::markdown::schemas::resolve::check_standalone_named_types)
+    /// (an editor's schema-authoring state). The threads are recorded.
+    StandaloneImportCheck,
 }
 
 impl Work {
@@ -105,7 +116,15 @@ impl Work {
         Work::LifecycleConfigParse,
         Work::DeferredRootScanParse,
         Work::ShellValueStateNodes,
+        Work::YamlContractPreparation,
+        Work::YamlKindCheck,
+        Work::StandaloneImportCheck,
     ];
+
+    /// Whether [`add`] records the thread this work ran on.
+    fn records_thread(self) -> bool {
+        matches!(self, Work::YamlContractPreparation | Work::YamlKindCheck | Work::StandaloneImportCheck)
+    }
 }
 
 static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work::ALL.len()];
@@ -114,6 +133,23 @@ static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work
 /// call site so it compiles away without the feature.
 pub fn add(work: Work, count: u64) {
     COUNTS[work as usize].fetch_add(count, Ordering::Relaxed);
+    if work.records_thread() {
+        let thread = std::thread::current().id();
+        let mut threads = THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !threads.contains(&(work, thread)) {
+            threads.push((work, thread));
+        }
+    }
+}
+
+/// Distinct `(work, thread)` pairs, for the kinds that record their thread.
+static THREADS: std::sync::Mutex<Vec<(Work, std::thread::ThreadId)>> = std::sync::Mutex::new(Vec::new());
+
+/// Every thread `work` has run on, in first-run order; empty for a kind
+/// that does not record its thread.
+pub fn threads(work: Work) -> Vec<std::thread::ThreadId> {
+    let threads = THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    threads.iter().filter(|(kind, _)| *kind == work).map(|(_, thread)| *thread).collect()
 }
 
 /// Every counter's value at one moment, or the work between two

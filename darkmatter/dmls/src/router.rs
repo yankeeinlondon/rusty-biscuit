@@ -550,7 +550,7 @@ impl RegistryWorker {
         // count the job's lookups.
         let _own_tally = PayloadMemoTally::start();
         self.hold();
-        self.overlay.prepare_registry(&need.path, &self.roots, &need.context);
+        self.overlay.prepare_need(&need, &self.roots);
         self.report(RegistryJobKind::Document, Some(need.path))
     }
 
@@ -745,13 +745,14 @@ impl ServerState {
         self.snapshot.store(index.snapshot());
     }
 
-    /// Records an open YAML buffer's unsaved text (`None` once it closes)
-    /// for the kind registries, which read a definition's buffer in place of
-    /// its file; a registry that read other text goes stale and is prepared
-    /// again before the documents it serves are refreshed.
-    fn note_yaml_buffer(&self, uri: &Uri, text: Option<&str>) {
+    /// Records an open YAML or JSON buffer's unsaved text (`None` once it closes)
+    /// for the kind registries and YAML documents' schema resolution, which
+    /// read a buffer in place of its file; a registry that read other text
+    /// goes stale and is prepared again before the documents it serves are
+    /// refreshed.
+    fn note_schema_buffer(&self, uri: &Uri, text: Option<&str>) {
         if let Some(path) = uri_to_file_path(uri) {
-            self.overlay.set_yaml_buffer(&path, text);
+            self.overlay.set_schema_buffer(&path, text);
         }
     }
 
@@ -2550,7 +2551,7 @@ impl Router {
                 self.state
                     .documents
                     .open(uri.clone(), document.version, text.clone());
-                self.state.note_yaml_buffer(&uri, Some(&text));
+                self.state.note_schema_buffer(&uri, Some(&text));
                 self.state.index_buffer(&uri, &text);
                 self.state.refresh_all_diagnostics();
             }
@@ -2574,7 +2575,7 @@ impl Router {
                     tracing::warn!("{error}");
                 }
                 self.state.close_buffer(&uri);
-                self.state.note_yaml_buffer(&uri, None);
+                self.state.note_schema_buffer(&uri, None);
                 self.state.overlay.forget(&uri);
                 // Replace the closed document's markers with what a closed file
                 // keeps (a skipped trigger's warning), then refresh the rest
@@ -2703,7 +2704,7 @@ impl Router {
             }
         }
         if let Some(text) = applied_text {
-            self.state.note_yaml_buffer(&uri, Some(&text));
+            self.state.note_schema_buffer(&uri, Some(&text));
             self.state.index_buffer(&uri, &text);
             self.state.refresh_all_diagnostics();
         }

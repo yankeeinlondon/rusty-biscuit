@@ -131,16 +131,30 @@ deferral). `load.rs` is the only loader (BOM offset, one document, non-string
 keys). `KindRegistry` (`registry.rs`) = shipped definitions
 (`embedded::shipped_kind_definitions()`; guard
 `every_shipped_yaml_schema_definition_is_in_the_shipped_table`) + `kind:
-yaml-schema` files in the five roots for `RegistryScope::WithRoots`; never
+yaml-schema` files in the five roots for `RegistryScope::WithRoots` (an
+`Absent` root whose folder does not exist adds the source's
+`absent_root_files`, an editor's unsaved definitions there); never
 `Result`: `Claim::{Healthy, Duplicate, Reserved}`, `incomplete()`,
 `root_failures()` become `SchemaError::KindSelection` only for documents they
 can affect. Source-path identity: a root file at a shipped definition's
 repo-relative path claiming its kind replaces the built-in (so this checkout's
-own definition files never duplicate). A private `Builder` keeps the context
+own definition files never duplicate); the path is compared through
+`SourceBuffers::key`, so an editor-only copy matches too. A private `Builder` keeps the context
 required (the context-construction guard rejects `Option<&FileResolutionContext>`).
 Kind checks (`semantic.rs`, `ValidationProblemCode::KindCheck`,
 `dm.schema.kind_check`) run for `schema`/`schema-trigger`/`yaml-schema` only
-after the definition passes. `TriggerMatch` carries `span`; it is filled by
+after the definition passes, over the copy it accepted
+(`EffectiveSchema::data_copy`). They never re-judge shape: `schema` and
+`yaml-schema` parse with `simplified_schema::parse_selected_standalone_schema_document`
+(no compiled-envelope admission; metadata from the accepted copy) and
+`yaml-schema` prepares with `resolve::prepare_standalone_yaml_schema`;
+`schema-trigger` runs `triggers::envelope::check_trigger_semantics` (the
+`match` grammar and lint only, no `KNOWN_KEYS`). A checkout copy with its
+root closure removed therefore admits an added key
+(`kind_semantic_checks.rs::an_opened_*`). Strict loads keep their own
+authority: trigger discovery uses `parse_trigger_envelope*`, and imports,
+factories, and the registry's `prepare_candidate` admit against the compiled
+definitions. `TriggerMatch` carries `span`; it is filled by
 `triggers::envelope::locate_trigger_error` from the message's leading field, and
 discovery findings get a `position()` from it. Tests:
 `lib/tests/l1/{yaml_kind_registry,yaml_document_loading,yaml_document_selection,kind_semantic_checks}.rs`
@@ -149,10 +163,17 @@ spawning `git`). It is `LoadedYamlDocument::load(text, path)` (the only
 load error) plus `validate_loaded_yaml_document(&loaded)` (selection and
 schema errors only): call the two steps when the caller must tell a document
 load error from a referenced schema's, which is also a `SchemaDocument`.
-`md schema validate` and DMLS both call the two steps (see [cli.md](cli.md)
-and [dmls.md](dmls.md#whole-yaml-documents)); DMLS passes its worker-prepared
-registry with `with_kind_registry` and reads `YamlValidation::effective()` /
-`document_json()` for completion and hover. Never add a second YAML route.
+`validate_loaded_yaml_document` is itself `prepare_yaml_contract(&loaded)`
+(selection, resolution, compiled validators: `YamlContract`, `None` for no
+schema) then the passive `YamlContract::validate(&loaded)` (passive unless
+`checks_read_files()`: the `schema`/`yaml-schema` kind checks resolve the
+document's imports). A contract judges any text with the same
+`LoadedYamlDocument::declaration_key()` (`kind` + root `$schema`) in the same
+context and registry. `md schema validate` calls load + validate (see
+[cli.md](cli.md)); DMLS prepares the contract on its registry worker with
+`with_kind_registry` and validates data against it on the request thread (see
+[dmls.md](dmls.md#whole-yaml-documents)), reading
+`YamlValidation::effective()` / `document_json()` for completion and hover. Never add a second YAML route.
 A host that must read a YAML file's values before validating (Messenger's
 research loader binds `$schema` first) reads `LoadedYamlDocument::json()`
 from the same load, never a second parser.
@@ -178,9 +199,16 @@ Ownership and lifecycle:
   after the definition passes, so a document reports definition problems
   first, then kind checks, never both.
 - **Informal schema files.** A root-`$schema` file without `kind` is judged
-  as data against its own `$schema` by `md schema validate` (DMLS shows only
-  its envelope diagnostics); `$schema: {title: string(required)}` fails
-  "title is required". That is the selection rule, not a data defect.
+  as data against its own `$schema` by `md schema validate` and DMLS;
+  `$schema: {title: string(required)}` fails "title is required". That is the
+  selection rule, not a data defect. As an opened document it is never an
+  envelope: its `description`/`categories`/`types` are data, and a sibling
+  `types` is no type library (a `$schema` naming an entry is an unknown named
+  type, exit `2`). The informal envelope applies only where a file is loaded
+  as a schema (a `$schema` target, a `Name@file` import, a root-file
+  classification). DMLS reads an opened `kind: schema`/`yaml-schema` with
+  `parse_selected_standalone_schema_document` over
+  `EffectiveSchema::data_copy`, like the kind checks.
 
 Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root

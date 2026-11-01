@@ -109,6 +109,28 @@ attempted: ["/team/schemas/person.yaml", "/repo/schemas/person.yaml"]
 frame, so a caller whose later resolution fails still learns which
 locations to watch: a file appearing at any of them can change the result.
 
+### Unsaved editor buffers
+
+An editor can run a resolution over the texts it has not saved. Build a
+`resolve::buffers::SourceBuffers` snapshot (path to text) and call the
+resolver inside `resolve::buffers::with(&snapshot, || ...)`. Inside it, every
+schema source the resolver reads (a `$schema` target, a `Name@file` import,
+an `example(file)`, and a file an error's spans are re-read from) comes from
+the snapshot when it holds that path, and a probed location with no file but
+an open buffer is `Found`:
+
+```rust
+let mut open = SourceBuffers::default();
+open.insert(Path::new("/repo/contract.yaml"), Arc::from("$schema:\n  owner: number\n"));
+// `./contract.yaml` selects the buffer even before it is saved.
+let resolved = buffers::with(&open, || resolve_yaml_schema(&reference, base_dir, &ctx, ShippedSources::NONE));
+```
+
+Outside `with`, resolution reads only the disk. The snapshot is plain
+`Send + Sync` data, applies to the calling thread only, and is restored when
+`with` returns, so the host captures it once per preparation and may run
+that preparation on any thread.
+
 ### As an error
 
 `SchemaFileSelection::into_result()` turns the selection into the same

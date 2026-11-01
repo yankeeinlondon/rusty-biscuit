@@ -79,6 +79,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Build from text | `SimplifiedSchema::try_from(&str)` |
 | Build from a file (`file` feature) | `try_from_yaml`, `try_from_markdown`, `try_from_json_schema`, `resolve` (by extension), each taking `impl Into<SchemaSource>` |
 | Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
+| Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
 | One named type as its own schema | `schema.select("Person")` |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
 | Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |
@@ -130,7 +131,13 @@ returns `None` when the envelope itself is malformed). The definitions
 bootstrap unadmitted (`parse_standalone_unadmitted`) through a private
 validator cache, never `SHARED_VALIDATOR_CACHE`. A host prepares a
 `yaml-schema`'s export with `resolve::prepare_embedded_yaml_schema` and reads
-its kinds with `claimed_values`. Tests: `envelope_admission.rs`,
+its kinds with `claimed_values`. A host that has already judged a whole file
+against a definition it selected (Darkmatter's kind checks, where the
+definition may be an edited checkout copy) reads it with
+`parse_selected_standalone_schema_document(source, path, accepted)` (no
+admission; metadata from `accepted`) and prepares a `yaml-schema` with
+`resolve::prepare_standalone_yaml_schema`, so the compiled envelope never
+judges its shape twice. Tests: `envelope_admission.rs`,
 `yaml_schema_envelope.rs`.
 
 Ownership boundary: this crate owns the `schema` and `yaml-schema`

@@ -57,7 +57,8 @@ pub use source::{
 pub use source::locate_frontmatter_value;
 pub(crate) use source::parse_keyed_declaration;
 pub use standalone::{
-    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
+    parse_standalone_schema_document,
 };
 pub use types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,

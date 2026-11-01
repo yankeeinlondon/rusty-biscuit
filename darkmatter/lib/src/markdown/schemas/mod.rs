@@ -105,11 +105,11 @@ pub use roots::{
     SchemaRoots, SearchedRoot,
 };
 pub use embedded::EmbeddedSchemaBundle;
-pub use yaml_documents::{KindRegistry, LoadedYamlDocument, RegistryScope, Route, YamlOutcome, YamlValidation};
+pub use yaml_documents::{KindRegistry, LoadedYamlDocument, RegistryScope, Route, YamlContract, YamlOutcome, YamlValidation};
 pub use triggers::{
     InvalidTriggerFinding, LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
     TriggerConditionTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
-    TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
+    TriggerTraceEntry, claims_trigger_envelope, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
 use simplified_schema::{
@@ -1002,6 +1002,12 @@ pub struct EffectiveSchema {
 }
 
 impl EffectiveSchema {
+    /// Builds the conversion plan validation uses now, so a prepared schema
+    /// judges its first document without building it.
+    pub(crate) fn prepare_conversion(&self) {
+        self.conversion();
+    }
+
     /// The conversion plan for [`Self::json_schema`].
     fn conversion(&self) -> &simplified_schema::coerce::ConversionPlan {
         self.conversion.get_or_init(|| {
@@ -1232,12 +1238,27 @@ impl EffectiveSchema {
         let _validate = timings::stage(ValidationStage::Validate);
         let templates = simplified_schema::coerce::NestedTemplates::default();
         let positions = ProblemPositions::Built(positions);
-        if self.accepts_as_is(instance) {
-            return self.validate_instance(instance, instance, instance, &positions, &templates);
-        }
-        let working_copy =
-            simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, instance, &templates);
+        let working_copy = self.data_copy(instance);
         self.validate_instance(&working_copy, instance, instance, &positions, &templates)
+    }
+
+    /// The copy of `instance` [`Self::validate_data`] judges: `instance`
+    /// itself when it is accepted as written, the softly converted copy
+    /// otherwise. A host that reads a document's meaning after this schema
+    /// accepted it (an editor reading a `kind: schema` document with
+    /// [`simplified_schema::parse_selected_standalone_schema_document`])
+    /// reads it from this copy, as the kind checks do.
+    pub fn data_copy<'a>(&self, instance: &'a Value) -> std::borrow::Cow<'a, Value> {
+        if self.accepts_as_is(instance) {
+            return std::borrow::Cow::Borrowed(instance);
+        }
+        let templates = simplified_schema::coerce::NestedTemplates::default();
+        std::borrow::Cow::Owned(simplified_schema::coerce::validation_copy_with_plan(
+            self.conversion(),
+            &self.json_schema,
+            instance,
+            &templates,
+        ))
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.

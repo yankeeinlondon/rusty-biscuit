@@ -71,6 +71,20 @@ impl Probe {
         Self { workspace, contexts, config, state: OverlayState::default() }
     }
 
+    /// A probe whose `SCHEMAS_DIR` is the folder of `relative`, a
+    /// repository-relative definition path holding `definition`.
+    fn with_schemas_dir(relative: &str, definition: &str) -> Self {
+        let workspace = LspWorkspace::new();
+        init_repository(workspace.path());
+        let copy = workspace.path().join(relative);
+        write(&copy, definition);
+        let folder = copy.parent().expect("definition folder").to_string_lossy().into_owned();
+        let snapshot = LspFixture::fixture_snapshot(&workspace)
+            .with_env(std::collections::HashMap::from([("SCHEMAS_DIR".to_string(), folder)]));
+        let contexts = RepositoryContexts::new(snapshot);
+        Self { workspace, contexts, config: DmlsConfig::default(), state: OverlayState::default() }
+    }
+
     fn path(&self, name: &str) -> PathBuf {
         self.workspace.path().join(name)
     }
@@ -123,6 +137,7 @@ impl Probe {
             match &yaml.outcome {
                 YamlDocumentOutcome::LoadFailed(_) => "load-failed",
                 YamlDocumentOutcome::Unvalidated => "unvalidated",
+                YamlDocumentOutcome::Pending => "pending",
                 YamlDocumentOutcome::NoSchema => "no-schema",
                 YamlDocumentOutcome::Failed(_) => "failed",
                 YamlDocumentOutcome::Validated(_) => "validated",
@@ -334,6 +349,66 @@ fn a_root_schema_validates_softly_and_is_not_an_unknown_key() {
     assert_eq!(start(unknown), position_of(text, "extra"), "{unknown:#?}");
 }
 
+/// A document holding only an inline root `$schema` (once read as an
+/// informal standalone schema) is data on the root-`$schema` route, so the
+/// property it lacks is an error with the add-key action, and a declaration
+/// failure is that route's one prepare error.
+#[test]
+fn an_informal_standalone_schema_is_judged_as_data_and_each_problem_is_published_once() {
+    let probe = Probe::new();
+    let text = "$schema:\n    owner: string(required)\n";
+    assert_eq!(probe.outcome("team.yaml", text), "validated");
+    let diagnostics = probe.schema_diagnostics("team.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.missing_required", "{diagnostic:#?}");
+    let titles: Vec<String> = probe.with("team.yaml", text, |ctx| {
+        dmls::providers::code_actions::code_actions(ctx, &diagnostics)
+            .into_iter()
+            .map(|action| match action {
+                lsp_types::CodeActionOrCommand::CodeAction(action) => action.title,
+                lsp_types::CodeActionOrCommand::Command(command) => command.title,
+            })
+            .collect()
+    });
+    assert!(titles.iter().any(|title| title == "Add required key `owner`"), "{titles:?}");
+
+    // A sibling `types` is data, so `team` names no type: the route's one
+    // named-type error, whatever `types` holds.
+    let text = "$schema:\n    owner: team\ntypes:\n    team: missing\n";
+    assert_eq!(probe.outcome("team.yaml", text), "failed");
+    let diagnostics = probe.schema_diagnostics("team.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.invalid_type_definition", "{diagnostic:#?}");
+}
+
+/// The kind route's own judgment of a `kind: schema` document, apart from
+/// the envelope that also reports a broken import: the `schema` kind check
+/// reads the imported type library's unsaved text, and the cached judgment
+/// is rebuilt when that text changes or the buffer closes.
+#[test]
+fn a_schema_documents_kind_check_reads_an_imported_type_librarys_unsaved_text() {
+    let probe = Probe::new();
+    let library = probe.path("shared/types.yaml");
+    write(&library, "kind: schema\ntypes:\n    Owner: string\n");
+    let text = "kind: schema\n$schema:\n    owner: Owner@./shared/types.yaml\n";
+    let kind_check_valid = || {
+        probe.with("contract.yaml", text, |ctx| {
+            let yaml = ctx.overlay.and_then(|overlay| overlay.yaml_document.as_deref()).expect("a YAML overlay");
+            match &yaml.outcome {
+                YamlDocumentOutcome::Validated(validation) => validation.report.valid,
+                _ => panic!("the `schema` kind validates the document"),
+            }
+        })
+    };
+    assert!(kind_check_valid(), "saved control");
+
+    probe.state.set_schema_buffer(&library, Some("kind: schema\ntypes:\n    Team: string\n"));
+    assert!(!kind_check_valid(), "the unsaved library no longer defines `Owner`");
+
+    probe.state.set_schema_buffer(&library, None);
+    assert!(kind_check_valid(), "closed unsaved");
+}
+
 #[test]
 fn an_interpolation_string_is_ordinary_data_in_a_yaml_document() {
     let probe = Probe::new();
@@ -404,6 +479,89 @@ fn a_document_that_does_not_load_gets_one_parse_error_and_no_schema_problems() {
     let text = "kind: roster\nroster_version: [1\n";
     let diagnostic = only(&probe.schema_diagnostics("roster.data.yaml", text)).clone();
     assert_eq!(diagnostic.range.start.line, 2, "{diagnostic:#?}");
+}
+
+// ── Kinds that claim nothing ────────────────────────────────────────────────
+
+/// Every `kind` that claims no kind and no trigger envelope: absent, null
+/// (explicit and empty-value), non-string scalars and collections, the empty
+/// string, and a string no definition claims.
+const UNCLAIMED_KINDS: &[Option<&str>] = &[
+    None,
+    Some(" null"),
+    Some(""),
+    Some(" 42"),
+    Some(" true"),
+    Some(" [roster]"),
+    Some(" []"),
+    Some(" [roster, 1]"),
+    Some(" [1, 2]"),
+    Some(" {a: b}"),
+    Some(" {}"),
+    Some(" \"\""),
+    Some(" inventory"),
+];
+
+/// `rest` behind each [`UNCLAIMED_KINDS`] line, opened inside the tree's
+/// schema root and outside it: a file in a `schemas/` folder whose `kind`
+/// does not name the trigger envelope is judged by whole-document selection
+/// alone, exactly as the same file elsewhere.
+fn each_unclaimed_kind(rest: &str, mut check: impl FnMut(&str, &str)) {
+    for name in ["schemas/data.yaml", "docs/data.yaml"] {
+        for kind in UNCLAIMED_KINDS {
+            let text = match kind {
+                Some(value) => format!("kind:{value}\n{rest}"),
+                None => rest.to_string(),
+            };
+            check(name, &text);
+        }
+    }
+}
+
+#[test]
+fn an_unclaimed_kind_without_a_root_schema_is_not_validated_inside_or_outside_a_schema_folder() {
+    let probe = Probe::new();
+    each_unclaimed_kind("owner: ops\n", |name, text| {
+        assert_eq!(probe.outcome(name, text), "no-schema", "{name}: {text:?}");
+        assert_eq!(probe.diagnostics(name, text), Vec::new(), "{name}: {text:?}");
+    });
+}
+
+#[test]
+fn an_unclaimed_kind_with_a_missing_root_schema_reports_only_the_reference_error() {
+    let probe = Probe::new();
+    each_unclaimed_kind("$schema: ./missing.yaml\nowner: ops\n", |name, text| {
+        assert_eq!(probe.outcome(name, text), "failed", "{name}: {text:?}");
+        let diagnostics = probe.diagnostics(name, text);
+        let diagnostic = only(&diagnostics);
+        assert_eq!(code_of(diagnostic), "dm.schema.prepare", "{name}: {diagnostic:#?}");
+        assert_eq!(start(diagnostic), position_of(text, "./missing.yaml"), "{name}: {diagnostic:#?}");
+    });
+}
+
+#[test]
+fn an_unclaimed_kind_with_an_inline_root_schema_is_judged_by_it_alone() {
+    let probe = Probe::new();
+    each_unclaimed_kind("$schema:\n    owner: string\nowner: ops\n", |name, text| {
+        assert_eq!(fallback_diagnostics(&probe, name, text), Vec::new(), "{name}: {text:?}");
+    });
+}
+
+/// An unloadable file in a schema folder whose text still declares the
+/// trigger envelope reports its parse problem once, as the trigger's error;
+/// one that declares no envelope reports the loader's.
+#[test]
+fn an_unloadable_file_in_a_schema_folder_reports_its_parse_problem_once() {
+    let probe = Probe::new();
+    for (text, expected) in [
+        ("kind: schema-trigger\nmatch: [\n", "dm.schema.prepare"),
+        ("kind:\nowner: [\n", "dm.frontmatter.yaml_parse"),
+        ("kind: 42\nowner: [\n", "dm.frontmatter.yaml_parse"),
+    ] {
+        assert_eq!(probe.outcome("schemas/broken.yaml", text), "load-failed", "{text:?}");
+        let diagnostics = probe.diagnostics("schemas/broken.yaml", text);
+        assert_eq!(code_of(only(&diagnostics)), expected, "{text:?}: {diagnostics:#?}");
+    }
 }
 
 #[test]
@@ -489,4 +647,142 @@ fn an_undeclared_key_of_a_closed_definition_is_an_error_without_strict_mode() {
     let diagnostic = only(&probe.schema_diagnostics("roster.data.yaml", &text)).clone();
     assert_eq!(code_of(&diagnostic), "dm.schema.unknown_key", "{diagnostic:#?}");
     assert_eq!(diagnostic.severity, Some(lsp_types::DiagnosticSeverity::ERROR), "{diagnostic:#?}");
+}
+
+// ── The selected contract alone judges data ─────────────────────────────────
+//
+// A document with no claimed `kind` selects its root `$schema` as its
+// contract. Its other root fields are data of that contract, even when
+// their names (`description`, `categories`, `types`) are those of a schema
+// document's metadata, so nothing judges them as a schema envelope.
+
+/// The data shapes each metadata-looking field takes under a selected
+/// `{field}: unknown`; every one must be clean.
+const ANY_SHAPES: &[&str] = &["null", "123", "[ops, 123]", "[123]", "\"\"", "[]", "{}", "ops"];
+
+/// The diagnostics of `text`, opened as `name`, which its root `$schema`
+/// must validate.
+fn fallback_diagnostics(probe: &Probe, name: &str, text: &str) -> Vec<Diagnostic> {
+    assert_eq!(probe.outcome(name, text), "validated", "{text}");
+    probe.diagnostics(name, text)
+}
+
+macro_rules! any_shape_of_a_metadata_named_field_is_data {
+    ($($test:ident: $field:literal,)*) => {$(
+        #[test]
+        fn $test() {
+            let probe = Probe::new();
+            let absent = format!("$schema:\n    {field}: unknown\nowner: ops\n", field = $field);
+            assert_eq!(fallback_diagnostics(&probe, "data.yaml", &absent), Vec::new(), "absent");
+            for shape in ANY_SHAPES {
+                let text = format!("$schema:\n    {field}: unknown\n{field}: {shape}\n", field = $field);
+                assert_eq!(fallback_diagnostics(&probe, "data.yaml", &text), Vec::new(), "{text}");
+            }
+        }
+    )*};
+}
+
+any_shape_of_a_metadata_named_field_is_data! {
+    any_description_shape_is_data_of_the_selected_contract: "description",
+    any_categories_shape_is_data_of_the_selected_contract: "categories",
+    any_types_shape_is_data_of_the_selected_contract: "types",
+}
+
+#[test]
+fn metadata_named_data_the_selected_contract_accepts_is_clean() {
+    let probe = Probe::new();
+    write(&probe.path("contract.yaml"), "$schema:\n    description: string\n");
+    for text in [
+        // An optional `string` admits null.
+        "$schema:\n    description: string\ndescription: null\n",
+        // The same with a declared ordinary property beside it.
+        "$schema:\n    description: string\n    owner: string\ndescription: null\nowner: ops\n",
+        "$schema:\n    categories: string[]\ncategories: [ops, ops]\n",
+        "$schema:\n    types: string[]\ntypes: [ops]\n",
+        "$schema:\n    types: unknown\ntypes: { mode: production }\n",
+        "$schema: ./contract.yaml\ndescription: null\n",
+        "$schema:\n    - { description: string, kind: literal(a) }\n    - { description: string, kind: literal(b) }\ndescription: null\n",
+    ] {
+        assert_eq!(fallback_diagnostics(&probe, "data.yaml", text), Vec::new(), "{text}");
+    }
+}
+
+/// The selected contract still judges the same fields: a value it rejects
+/// is its problem, reported once.
+#[test]
+fn metadata_named_data_the_selected_contract_rejects_is_its_problem_alone() {
+    let probe = Probe::new();
+    let text = "$schema:\n    categories: number[]\ncategories: [ops]\n";
+    let diagnostics = fallback_diagnostics(&probe, "data.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.type_mismatch", "{diagnostic:#?}");
+    assert_eq!(start(diagnostic), position_of(text, "ops]"), "{diagnostic:#?}");
+}
+
+/// A sibling `types` of a fallback document is data, not a type library its
+/// `$schema` can name: the bare name is the route's one prepare error, as
+/// `md schema validate` reports it, and nothing navigates into `types`.
+#[test]
+fn a_fallback_schema_names_no_sibling_types() {
+    let probe = Probe::new();
+    let text = "$schema:\n    owner: team\ntypes:\n    team: string\n";
+    assert_eq!(probe.outcome("team.yaml", text), "failed");
+    let diagnostics = probe.diagnostics("team.yaml", text);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.invalid_type_definition", "{diagnostic:#?}");
+    assert!(diagnostic.message.contains("unknown named type"), "{diagnostic:#?}");
+    assert_eq!(start(diagnostic), position_of(text, "team\n"), "{diagnostic:#?}");
+}
+
+/// `shipped` with every root-closure line removed.
+fn opened(shipped: &str) -> String {
+    let opened: String =
+        shipped.lines().filter(|line| line.trim() != "$constraints: { closed: true }").map(|line| format!("{line}\n")).collect();
+    assert_ne!(opened, shipped, "the definition had a root closure to remove");
+    opened
+}
+
+/// A trigger whose `match` passes the trigger grammar.
+const VALID_TRIGGER: &str = "kind: schema-trigger\nmatch:\n    all:\n        - $path: \"docs/**\"\n        - title: string(required)\n";
+
+/// A checkout copy of a shipped definition with its root closure removed
+/// is the selected definition of its kind, so a key that copy admits is
+/// clean; the compiled envelope and the trigger parser never judge the
+/// document's shape again. The trigger is judged both as an ordinary
+/// document and as a trigger file in a schema root.
+#[test]
+fn an_opened_checkout_definition_alone_judges_its_documents_shape() {
+    let cases = [
+        (
+            "simplified-schema/schemas/schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/schema.yaml"),
+            "docs/contract.yaml",
+            "kind: schema\ncategories: [text]\n$schema:\n    title: string(category(text))\n",
+        ),
+        (
+            "simplified-schema/schemas/yaml-schema.yaml",
+            include_str!("../../../../simplified-schema/schemas/yaml-schema.yaml"),
+            "docs/inventory.yaml",
+            "kind: yaml-schema\n$schema:\n    kind: literal(inventory; required)\n    count: number\n",
+        ),
+        ("darkmatter/schemas/schema-trigger.yaml", include_str!("../../../schemas/schema-trigger.yaml"), "docs/trigger.yaml", VALID_TRIGGER),
+        (
+            "darkmatter/schemas/schema-trigger.yaml",
+            include_str!("../../../schemas/schema-trigger.yaml"),
+            "darkmatter/schemas/review.yaml",
+            VALID_TRIGGER,
+        ),
+    ];
+    for (relative, shipped, name, text) in cases {
+        let probe = Probe::with_schemas_dir(relative, &opened(shipped));
+        assert_eq!(probe.outcome(name, text), "validated", "{name}");
+        assert_eq!(probe.schema_diagnostics(name, text), Vec::new(), "{name}: control");
+        let added = format!("{text}note: hi\n");
+        let errors: Vec<Diagnostic> = probe
+            .schema_diagnostics(name, &added)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity == Some(lsp_types::DiagnosticSeverity::ERROR))
+            .collect();
+        assert_eq!(errors, Vec::new(), "{name}: added `note`");
+    }
 }

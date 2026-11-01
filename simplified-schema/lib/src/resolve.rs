@@ -35,10 +35,12 @@
 
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
-    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
+// Schema sources are read through `buffers::read`; the tests write fixtures.
+#[cfg(all(test, feature = "file"))]
+use std::fs;
 
 use biscuit_file::FileResolutionContext;
 use indexmap::IndexMap;
@@ -984,7 +986,7 @@ fn load_schema_from_path_in_context(
     stack: &mut ReferenceStack,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let bytes = fs::read(path).map_err(|source| SchemaError::Io {
+    let bytes = buffers::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
         source,
     })?;
@@ -1381,19 +1383,43 @@ pub fn prepare_yaml_schema_text(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let standalone = parse_standalone_schema_document(text, path)?
-        .filter(|standalone| standalone.envelope == StandaloneSchemaEnvelope::YamlSchema)
-        .ok_or_else(|| SchemaError::NotASchemaDocument {
-            path: path.to_path_buf(),
-            reason: NotSchemaReason::NoSchemaProperty,
-        })?;
+    let standalone = parse_standalone_schema_document(text, path)?.ok_or_else(|| SchemaError::NotASchemaDocument {
+        path: path.to_path_buf(),
+        reason: NotSchemaReason::NoSchemaProperty,
+    })?;
+    prepare_standalone_yaml_schema(standalone, schema_roots, request_context, shipped)
+}
+
+/// [`prepare_yaml_schema_text`] for an already parsed `kind: yaml-schema`
+/// document, resolved from its own [`path`](StandaloneSchemaDocument::path).
+/// A host that judged the file against a definition it selected parses it
+/// with [`crate::parse_selected_standalone_schema_document`] and prepares it
+/// here, so the compiled `yaml-schema.yaml` never judges its shape again;
+/// what it imports is still admitted against the compiled definitions.
+///
+/// ## Errors
+///
+/// [`SchemaError::NotASchemaDocument`] when `document` is not a
+/// `yaml-schema` ([`NotSchemaReason::NoSchemaProperty`]); every resolver
+/// error of its export and imports.
+pub fn prepare_standalone_yaml_schema(
+    document: StandaloneSchemaDocument,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let StandaloneSchemaDocument { path, envelope, declaration, local_types, .. } = document;
+    let path = path.as_path();
+    if envelope != StandaloneSchemaEnvelope::YamlSchema {
+        return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty });
+    }
     let canonical = canonical_path(path);
     let mut stack = ReferenceStack::default();
     stack.enter(&canonical)?;
-    let resolved = match standalone.declaration {
+    let resolved = match declaration {
         SchemaDeclaration::Schema(schema) => resolve_standalone_schema(
             schema,
-            standalone.local_types.as_ref(),
+            local_types.as_ref(),
             path,
             schema_roots,
             request_context,
@@ -2938,7 +2964,7 @@ fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
 /// Reads and hashes `path`, reusing its memo entry when the hash matches and
 /// otherwise parsing and replacing the entry.
 fn read_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
-    let bytes = fs::read(path).map_err(|source| SchemaError::Io {
+    let bytes = buffers::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
         source,
     })?;
@@ -3059,7 +3085,7 @@ fn locate_origin_spans<'a>(origins: impl Iterator<Item = &'a mut SchemaConstrain
             continue;
         }
         let document = documents.entry(path.clone()).or_insert_with(|| {
-            let text = fs::read_to_string(path).ok()?;
+            let text = String::from_utf8(buffers::read(path).ok()?).ok()?;
             let model = parse_standalone_schema_document(&text, path).ok()??;
             let source_map = model.resolution_source_map();
             Some((text, source_map))
@@ -4090,7 +4116,7 @@ fn resolve_one_example(
     let bytes = match reads.get(&canonical) {
         Some(cached) => cached.clone(),
         None => {
-            let read = fs::read(&path).map_err(|source| SchemaError::Io {
+            let read = buffers::read(&path).map_err(|source| SchemaError::Io {
                 path: path.clone(),
                 source,
             })?;
@@ -6702,6 +6728,7 @@ mod reserved_namespace {
 #[cfg(all(test, feature = "file"))]
 mod searched_tests;
 
+pub mod buffers;
 mod graph;
 mod inspect;
 mod select;

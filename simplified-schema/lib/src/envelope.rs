@@ -7,7 +7,10 @@
 //! library ([`ENVELOPE_DEFINITIONS`]). Every recognized envelope, on every
 //! load path (the [`SimplifiedSchema`](crate::SimplifiedSchema) factories,
 //! `$schema` targets, `Name@file` imports, embedded documents), is admitted
-//! by soft validation against its definition before its payload is read:
+//! by soft validation against its definition before its payload is read
+//! (only a host that already judged a file against a definition it selected
+//! reads it unadmitted, through
+//! [`parse_selected_standalone_schema_document`](crate::parse_selected_standalone_schema_document)):
 //!
 //! | Envelope | Definition |
 //! |---|---|

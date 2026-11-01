@@ -283,3 +283,42 @@ fn the_envelope_s_own_problem_outranks_a_definition_which_outranks_the_carrier()
     assert!(message.contains("the declaration must be a mapping, not a list"), "{message}");
     assert_eq!(at.as_deref(), Some("[5, true]"));
 }
+
+/// A file a host already judged against a definition it selected is read
+/// without admission: an unknown key is ignored, metadata comes from the
+/// host's accepted copy, and the semantic checks still run. The same text
+/// loaded directly is still admitted against the compiled definition.
+#[test]
+fn a_selected_document_is_read_without_admission_and_keeps_its_semantic_checks() {
+    use simplified_schema::parse_selected_standalone_schema_document;
+
+    let text = "kind: schema\nnote: hi\ncategories: [text]\ntypes:\n  Id: string(category(text))\n";
+    let accepted = json!({"kind": "schema", "note": "hi", "categories": ["text"], "types": {"Id": "string(category(text))"}});
+    let document = parse_selected_standalone_schema_document(text, "subject.yaml", &accepted)
+        .expect("read")
+        .expect("recognized");
+    assert_eq!(document.categories.as_ref().map(|categories| categories[0].name.as_str()), Some("text"));
+    assert_rejected("direct load", text, SCHEMA_DEFINITION_PATH, "`/note`", "note");
+
+    let undeclared = text.replace("category(text)", "category(media)");
+    let error = parse_selected_standalone_schema_document(&undeclared, "subject.yaml", &accepted).unwrap_err();
+    assert!(error.to_string().contains("category `media` is not declared"), "{error}");
+    // The categories are the accepted copy's, not the text's.
+    let declared = json!({"kind": "schema", "categories": ["text", "media"]});
+    assert!(parse_selected_standalone_schema_document(&undeclared, "subject.yaml", &declared).is_ok());
+}
+
+#[test]
+fn a_selected_yaml_schema_prepares_and_claims_its_kinds() {
+    use simplified_schema::parse_selected_standalone_schema_document;
+    use simplified_schema::resolve::prepare_standalone_yaml_schema;
+
+    let text = "kind: yaml-schema\nnote: hi\n$schema:\n  kind: literal(review; required)\n";
+    let accepted = json!({"kind": "yaml-schema", "note": "hi", "$schema": {"kind": "literal(review; required)"}});
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("review.yaml");
+    let document = parse_selected_standalone_schema_document(text, &path, &accepted).unwrap().unwrap();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let resolved = prepare_standalone_yaml_schema(document, &[], &context, ShippedSources::NONE).expect("prepared");
+    assert_eq!(claimed_values(&resolved, "kind").unwrap(), ["review"]);
+}

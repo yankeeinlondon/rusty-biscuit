@@ -543,6 +543,34 @@ document and stay in the library's code, after admission:
 - [suggestion lints](./types.md#advisory-suggestions-suggest), returned as
   `StandaloneSchemaDocument::suggestion_lints` rather than as errors.
 
+#### Reading a File a Host Already Judged
+
+A host can judge a whole schema file against a definition it chose itself,
+for example an edited copy of `schema.yaml` that drops the closed root.
+Admitting that file against the compiled definition afterwards would reject
+what the chosen definition allowed. For that case
+`parse_selected_standalone_schema_document(source, path, accepted)` runs only
+the checks above: it skips admission, reads metadata such as `categories`
+from `accepted` (the document as the host's definition accepted it), and
+ignores keys it does not interpret.
+`resolve::prepare_standalone_yaml_schema(document, …)` then prepares a
+`yaml-schema` it returned.
+
+```rust
+use serde_json::json;
+use simplified_schema::parse_selected_standalone_schema_document;
+
+let text = "kind: schema\nnote: hi\ntypes:\n  age: number\n";
+let accepted = json!({"kind": "schema", "note": "hi", "types": {"age": "number"}});
+assert!(parse_selected_standalone_schema_document(text, "ages.yaml", &accepted)?.is_some());
+// The same text loaded directly is admitted, and `note` is refused.
+assert!(simplified_schema::parse_standalone_schema_document(text, "ages.yaml").is_err());
+# Ok::<(), simplified_schema::SchemaError>(())
+```
+
+Everything a file loaded this way imports (`Name@file`) is loaded directly,
+so it is still admitted against the compiled definitions.
+
 ### Raw JSON Schema
 
 A referenced `.json` file declaring the Draft 2020-12 dialect is a distinct validation format. Raw JSON Schema:

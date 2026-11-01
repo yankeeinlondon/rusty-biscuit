@@ -28,6 +28,7 @@ pub mod schema;
 pub mod shell;
 pub mod suggestions;
 pub mod yaml_document;
+mod yaml_contract;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,8 +47,9 @@ use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRootState, SchemaRoots
 use simplified_schema::{
     SchemaError, SchemaSourceId, StandaloneSchemaDocument, ValidationStage, StandaloneSchemaEnvelope,
     LocatedDefinitionFailure, SuggestionLintProblem, locate_standalone_definition_failure,
-    parse_standalone_schema_document,
+    parse_selected_standalone_schema_document, parse_standalone_schema_document,
 };
+use simplified_schema::resolve::{buffers, observed};
 use lsp_types::Uri;
 
 use crate::config::DmlsConfig;
@@ -165,6 +167,27 @@ fn file_failures(error: &SchemaError) -> FileFailures {
     Arc::new(out)
 }
 
+/// A whole YAML document claiming `kind: schema` or `kind: yaml-schema`,
+/// read as a standalone schema document from the copy the selected
+/// definition accepted (the loaded document while none has judged it), never
+/// admitted against the compiled envelope again: that definition, which a
+/// checkout may have edited, alone decides its shape. `Ok(None)` for any other
+/// document.
+fn selected_standalone_document(
+    text: &str,
+    path: &Path,
+    yaml: &yaml_document::YamlState,
+) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
+    let accepted = match yaml.overlay.validation() {
+        Some(validation) => validation.effective().data_copy(validation.document_json()).into_owned(),
+        None => darkmatter::markdown::schemas::LoadedYamlDocument::load(text, path)
+            .map(|loaded| loaded.json().clone())
+            .unwrap_or_default(),
+    };
+    let document = parse_selected_standalone_schema_document(text, path, &accepted)?;
+    Ok(document.filter(|document| document.envelope != StandaloneSchemaEnvelope::Pure))
+}
+
 /// The per-request overlay snapshot for one open document.
 pub struct DocumentOverlay {
     /// The frontmatter tree. `None` when the current buffer failed to parse and
@@ -234,7 +257,10 @@ impl DocumentOverlay {
     }
 
     /// The overlay of a whole YAML document that no schema-envelope path
-    /// serves: definition-driven authoring of any schema-typed values.
+    /// serves: definition-driven authoring of any schema-typed values, and
+    /// on the root-`$schema` route the authoring of that inline contract
+    /// (its suggestion lints and the files its named types import), as
+    /// Markdown frontmatter's inline `$schema` has.
     fn yaml_only(yaml: &yaml_document::YamlState) -> Self {
         let schema = SchemaOutcome::Ready(yaml.bundle.clone());
         let schema_authoring = schema::frontmatter_authoring(yaml.ast.as_deref(), &schema);
@@ -243,9 +269,13 @@ impl DocumentOverlay {
             stale: false,
             parse_error: None,
             schema: SchemaOutcome::Ready(None),
-            suggestions: SuggestionState::Inactive,
+            suggestions: if yaml.suggestions.is_empty() {
+                SuggestionState::Inactive
+            } else {
+                SuggestionState::Inline(yaml.suggestions.clone())
+            },
             schema_authoring,
-            named_types: Arc::default(),
+            named_types: Arc::clone(&yaml.named_types),
             schema_references: Arc::default(),
             standalone_resolution: None,
             file_failures: FileFailures::default(),
@@ -260,6 +290,18 @@ impl DocumentOverlay {
     /// than being data of a YAML document its `kind` selected.
     pub fn schema_key_is_reference(&self) -> bool {
         !self.yaml_document.as_ref().is_some_and(|yaml| yaml.kind_route())
+    }
+
+    /// Whether `offset` lies in the root `$schema` declaration a whole YAML
+    /// document selected as its contract (never `$schema` data of a kind).
+    pub fn yaml_contract_covers(&self, offset: usize) -> bool {
+        self.yaml_document.is_some()
+            && self.schema_key_is_reference()
+            && self
+                .ast
+                .as_deref()
+                .and_then(FrontmatterAst::schema_entry)
+                .is_some_and(|entry| entry.value_span.contains(&offset))
     }
 
     /// Whether this overlay is a standalone schema authoring document.
@@ -304,8 +346,11 @@ struct OverlayCache {
     /// edits (see [`analysis::CrossSnapshotSchema`]).
     shared_schema: Arc<analysis::CrossSnapshotSchema>,
     /// The judgment of each open YAML document, rebuilt when its text, its
-    /// context, its kind registry, or a file its schema read changes.
+    /// context, or its prepared contract changes.
     yaml_documents: HashMap<String, yaml_document::CachedYaml>,
+    /// Each open YAML document's prepared contract, by path (see
+    /// [`yaml_contract`]).
+    contracts: yaml_contract::YamlContracts,
 }
 
 /// A document's trigger registry that is not fresh: what
@@ -316,6 +361,19 @@ pub struct RegistryNeed {
     pub path: PathBuf,
     /// The document's context, which the registry is prepared in.
     pub context: FileResolutionContext,
+    /// For a whole YAML document, what its contract is prepared from: the
+    /// worker prepares it after the registry.
+    pub yaml: Option<YamlNeed>,
+}
+
+/// What a YAML document's contract is prepared from: the text the need was
+/// found for, and its context's generation.
+#[derive(Clone)]
+pub struct YamlNeed {
+    /// The document's text.
+    pub text: Arc<str>,
+    /// [`DocumentResolution::generation`] of the document's context.
+    pub generation: u64,
 }
 
 /// A skipped-trigger warning that must be published or cleared.
@@ -384,6 +442,8 @@ impl FrontmatterSchema {
 struct CachedStandalone {
     key: u64,
     deps: Vec<(PathBuf, u64)>,
+    /// Every location resolution probed, and whether a source was there.
+    probes: Vec<(PathBuf, bool)>,
     resolved: StandaloneNamedTypes,
 }
 
@@ -400,7 +460,7 @@ struct StandaloneNamedTypes {
 
 impl OverlayState {
     /// Builds the overlay for one open document, first preparing on the
-    /// calling thread the trigger registry it needs (see
+    /// calling thread the trigger registry and YAML contract it needs (see
     /// [`prepare_for_document`](Self::prepare_for_document)).
     ///
     /// The entry point for a caller with no server around it (a test, a
@@ -433,11 +493,13 @@ impl OverlayState {
     /// registries, recording the schema-assembly and trigger-registry stages
     /// into the dispatched message's `timings`.
     ///
-    /// Never prepares a registry: a document whose registry is not fresh
-    /// ([`registry_demand`](Self::registry_demand)) is served the scope's
-    /// installed state (none, for a document never prepared). The server
-    /// therefore builds an overlay only once the registry the document needs
-    /// is prepared.
+    /// Never prepares a registry or a YAML contract: a document whose
+    /// registry is not fresh ([`registry_demand`](Self::registry_demand)) is
+    /// served the scope's installed state (none, for a document never
+    /// prepared), and a YAML document whose contract is not prepared for its
+    /// declaration is [`Pending`](YamlDocumentOutcome::Pending). The server
+    /// therefore builds an overlay only once what the document needs is
+    /// prepared.
     ///
     /// `revision` is the client's version of the buffer, which the shared
     /// [`FrontmatterAnalysis`] is keyed on with the text: a new version starts
@@ -466,12 +528,10 @@ impl OverlayState {
                     cache.yaml_document(uri.as_str(), revision, text, path, resolution, kinds)
                 })
             };
-            return Some(match self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings) {
-                // A standalone schema document's root `$schema` is the
-                // definition it authors, which its envelope diagnostics
-                // judge (as they judge a buffer that does not load); only
-                // its `kind` route is the YAML document's to report.
-                Some(overlay) if overlay.is_standalone_schema() && !yaml.overlay.kind_route() => overlay,
+            // Only a claimed schema kind makes a YAML document a schema
+            // document; a root `$schema` without one is the contract of the
+            // document's data, as in Markdown frontmatter.
+            return Some(match self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings, Some(&yaml)) {
                 Some(overlay) => overlay.with_yaml(&yaml),
                 None => DocumentOverlay::yaml_only(&yaml),
             });
@@ -573,11 +633,23 @@ impl OverlayState {
             });
         }
 
-        self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings)
+        self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings, None)
     }
 
     /// The overlay of a schema-trigger or standalone SimplifiedSchema
     /// envelope document, or `None` for any other buffer.
+    ///
+    /// `yaml` is the judgment of a whole YAML document. Such a document is
+    /// a schema document only by its claimed `kind` (`schema`, `yaml-schema`,
+    /// or a `schema-trigger` in a `schemas/` folder), and the definition
+    /// that kind selected is the only judge of its shape: the document is
+    /// read without the compiled envelope's admission
+    /// ([`selected_standalone_document`]), and a trigger envelope's strict
+    /// parse yields to that judgment. A `kind` that is not a string naming
+    /// the trigger envelope claims nothing, so the strict parse never sees
+    /// it. A root `$schema` with no such kind is never an informal schema
+    /// envelope here: its other fields are data.
+    #[allow(clippy::too_many_arguments)]
     fn envelope_overlay(
         &self,
         uri: &Uri,
@@ -586,18 +658,22 @@ impl OverlayState {
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
         timings: &RequestTimings,
+        yaml: Option<&yaml_document::YamlState>,
     ) -> Option<DocumentOverlay> {
+        let judged = yaml.is_some_and(|yaml| yaml.overlay.validation().is_some());
         // Trigger-schema authoring path. A claimed, malformed envelope is an
-        // error and a trigger discovery skipped is a warning; ordinary
-        // schema-root YAML remains silent.
+        // error and a trigger discovery skipped is a warning. Schema-root
+        // YAML whose `kind` does not name the envelope, including a null or
+        // non-string one, keeps its whole-document judgment alone.
         if path
             .parent()
             .and_then(Path::file_name)
             .is_some_and(|name| name == "schemas")
             && is_yaml_path(path)
+            && darkmatter::markdown::schemas::claims_trigger_envelope(text)
         {
             match darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text) {
-                Err(error) => {
+                Err(error) if !judged => {
                     return Some(DocumentOverlay {
                         ast: None,
                         stale: false,
@@ -613,6 +689,10 @@ impl OverlayState {
                         yaml_document: None,
                     });
                 }
+                // The selected definition's report owns the shape of a
+                // document it judged; the strict parse Markdown trigger
+                // discovery uses is not a second verdict on it.
+                Err(_) => {}
                 Ok(Some(_)) => {
                     let cache = self.inner.lock().expect("overlay lock poisoned");
                     if resolution.context().is_ok() {
@@ -648,7 +728,16 @@ impl OverlayState {
         // claim keeps the last-good semantic model alive through malformed
         // edits; the current parse result always owns diagnostics.
         let claim = schema::standalone_envelope_claim(text);
-        match parse_standalone_schema_document(text, path) {
+        let parsed = match yaml {
+            Some(yaml) => {
+                if !claim.is_some_and(|envelope| envelope != StandaloneSchemaEnvelope::Pure) {
+                    return None;
+                }
+                selected_standalone_document(text, path, yaml)
+            }
+            None => parse_standalone_schema_document(text, path),
+        };
+        match parsed {
             Ok(Some(document)) => {
                 let envelope = document.envelope;
                 let mut problems = document.suggestion_lints.clone();
@@ -657,15 +746,15 @@ impl OverlayState {
                 cache
                     .standalone_last_good
                     .insert(uri.as_str().to_string(), Arc::clone(&model));
-                let resolved = timings.time(Stage::SchemaAssembly, || {
-                    cache.standalone_named_types(
-                        uri.as_str(),
-                        text,
-                        &model,
-                        workspace_roots,
-                        resolution,
-                    )
-                });
+                // A YAML document's resolution is prepared with its contract,
+                // off the dispatch thread.
+                let resolved = if is_yaml_path(path) {
+                    cache.prepared_standalone(path, text, workspace_roots, resolution)
+                } else {
+                    timings.time(Stage::SchemaAssembly, || {
+                        cache.standalone_named_types(uri.as_str(), text, &model, workspace_roots, resolution)
+                    })
+                };
                 problems.extend(resolved.suggestions.iter().cloned());
                 return Some(DocumentOverlay {
                     ast: None,
@@ -760,18 +849,26 @@ impl OverlayState {
         cache.standalone_resolution.remove(uri.as_str());
         cache.analysis.remove(uri.as_str());
         cache.yaml_documents.remove(uri.as_str());
+        if let Some(path) = crate::workspace::uri_to_file_path(uri) {
+            cache.contracts.forget(&path);
+        }
     }
 
-    /// Records the unsaved text of the open YAML buffer at `path` (`None`
-    /// once it closes), which the kind registries read in place of the file;
-    /// a registry that read the file with other text goes stale. Does
-    /// nothing for any other path.
-    pub fn set_yaml_buffer(&self, path: &Path, text: Option<&str>) {
-        if !is_yaml_path(path) {
+    /// Records the unsaved text of the open YAML or JSON buffer at `path`
+    /// (`None` once it closes), which the kind registries and schema
+    /// resolution for YAML documents read in place of the file (a JSON file
+    /// can be a `$schema` target); a registry that read the file with other
+    /// text, or could read a new one there, goes stale. Does nothing for any
+    /// other path.
+    pub fn set_schema_buffer(&self, path: &Path, text: Option<&str>) {
+        let json = path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
+        if !is_yaml_path(path) && !json {
             return;
         }
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.set_buffer(path, text.map(Arc::from));
+        let OverlayCache { triggers, contracts, .. } = &mut *cache;
+        contracts.set_buffer(path, triggers.source_buffers());
     }
 
     /// The published warning for trigger file `path`, when a prepared
@@ -794,6 +891,8 @@ impl OverlayState {
     pub fn invalidate_trigger_inputs(&self, paths: &[PathBuf]) {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.invalidate_paths(paths);
+        let OverlayCache { triggers, contracts, .. } = &mut *cache;
+        contracts.invalidate_paths(paths, triggers.source_buffers());
     }
 
     /// Marks every trigger registry stale: a server rescan, a configuration
@@ -801,13 +900,16 @@ impl OverlayState {
     pub fn invalidate_all_trigger_registries(&self) {
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.invalidate_all();
+        cache.contracts.invalidate_all();
     }
 
     /// The folders the prepared trigger registries read from or searched,
     /// for schema-location watches.
     pub fn trigger_watch_folders(&self) -> std::collections::BTreeSet<crate::workspace::watch::WatchedFolder> {
         let cache = self.inner.lock().expect("overlay lock poisoned");
-        cache.triggers.watch_folders()
+        let mut folders = cache.triggers.watch_folders();
+        folders.extend(cache.contracts.watch_folders());
+        folders
     }
 
     /// The probe documents of the workspace scopes (see [`workspace_probes`]),
@@ -898,14 +1000,16 @@ impl OverlayState {
         self.workspace_repositories.lock().expect("repository list lock poisoned").clone()
     }
 
-    /// The trigger registry the document at `path` with source `text` needs
-    /// prepared, or `None` when it needs none or its registry is fresh. A
-    /// lookup only: it reads nothing from disk.
+    /// The trigger registry, and for a whole YAML document the contract,
+    /// the document at `path` with source `text` needs prepared, or `None`
+    /// when it needs neither or both are fresh. A lookup only: it reads
+    /// nothing from disk.
     ///
     /// A document needs a registry when [`for_document_timed`](Self::for_document_timed)
-    /// would look one up: it has a frontmatter block, or it is a claimed
-    /// trigger envelope in a `schemas` folder, and it lies in a workspace
-    /// folder and has a context.
+    /// would look one up: it has a frontmatter block or is a YAML document,
+    /// and it lies in a workspace folder and has a context. A YAML document
+    /// with a context needs its contract prepared for its current
+    /// declaration ([`yaml_contract`]), inside a workspace folder or not.
     pub fn registry_demand(
         &self,
         text: &str,
@@ -913,16 +1017,77 @@ impl OverlayState {
         workspace_roots: &[PathBuf],
         resolution: &DocumentResolution,
     ) -> Option<RegistryNeed> {
+        let yaml = is_yaml_path(path);
         let has_frontmatter =
             matches!(darkmatter::markdown::extract_frontmatter_block(text), Ok(Some(_)));
-        if !has_frontmatter && !is_yaml_path(path) {
+        if !has_frontmatter && !yaml {
             return None;
         }
         let context = resolution.context().ok()?;
-        schema::trigger_boundary(path, workspace_roots)?;
-        let cache = self.inner.lock().expect("overlay lock poisoned");
-        (!cache.triggers.is_fresh(path, context))
-            .then(|| RegistryNeed { path: path.to_path_buf(), context: context.clone() })
+        let bounded = schema::trigger_boundary(path, workspace_roots).is_some();
+        if !bounded && !yaml {
+            return None;
+        }
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        let registry_stale = bounded && !cache.triggers.is_fresh(path, context);
+        // A stale registry is prepared first, and the contract after it.
+        let contract_stale = yaml && !registry_stale && {
+            let kinds = if bounded { cache.triggers.lookup_kinds(path) } else { None };
+            cache
+                .contracts
+                .key(text, path, context, resolution.generation(), kinds.as_ref())
+                .is_some_and(|key| !cache.contracts.is_fresh(path, key))
+        };
+        (registry_stale || contract_stale).then(|| RegistryNeed {
+            path: path.to_path_buf(),
+            context: context.clone(),
+            yaml: yaml.then(|| YamlNeed { text: Arc::from(text), generation: resolution.generation() }),
+        })
+    }
+
+    /// Prepares what `need` names: the document's trigger registry unless
+    /// it is fresh, then a YAML document's contract unless it is fresh. Does
+    /// I/O, without holding the overlay lock across it: the server calls it
+    /// only off its dispatch thread.
+    pub fn prepare_need(&self, need: &RegistryNeed, workspace_roots: &[PathBuf]) {
+        self.prepare_registry(&need.path, workspace_roots, &need.context);
+        if let Some(yaml) = &need.yaml {
+            self.prepare_yaml_contract(&need.path, yaml, workspace_roots, &need.context);
+        }
+    }
+
+    /// Prepares the contract of the YAML document at `path` with the text
+    /// and context `yaml` names, under the document's installed kind
+    /// registry, unless it is fresh ([`yaml_contract`]). The overlay lock is
+    /// held only to begin and to install.
+    ///
+    /// ## Returns
+    ///
+    /// Whether the contract is fresh afterwards; `false` when a change
+    /// arrived during the preparation and touched what it read.
+    pub fn prepare_yaml_contract(
+        &self,
+        path: &Path,
+        yaml: &YamlNeed,
+        workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
+    ) -> bool {
+        let bounded = schema::trigger_boundary(path, workspace_roots).is_some();
+        let job = {
+            let mut cache = self.inner.lock().expect("overlay lock poisoned");
+            let kinds = if bounded { cache.triggers.lookup_kinds(path) } else { None };
+            let Some(key) = cache.contracts.key(&yaml.text, path, context, yaml.generation, kinds.as_ref()) else {
+                return true;
+            };
+            let OverlayCache { triggers, contracts, .. } = &mut *cache;
+            contracts.begin(path, Arc::clone(&yaml.text), key, context, kinds, workspace_roots, triggers.source_buffers())
+        };
+        let Some(job) = job else {
+            return true;
+        };
+        let prepared = job.run();
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.contracts.install(prepared)
     }
 
     /// Prepares the trigger registry of the document at `path` in `context`
@@ -987,7 +1152,7 @@ impl OverlayState {
         (outcome, cache.triggers.install(prepared))
     }
 
-    /// [`prepare_registry`](Self::prepare_registry) for the registry
+    /// [`prepare_need`](Self::prepare_need) for what
     /// [`registry_demand`](Self::registry_demand) says the document needs.
     pub fn prepare_for_document(
         &self,
@@ -997,7 +1162,7 @@ impl OverlayState {
         resolution: &DocumentResolution,
     ) {
         if let Some(need) = self.registry_demand(text, path, workspace_roots, resolution) {
-            self.prepare_registry(&need.path, workspace_roots, &need.context);
+            self.prepare_need(&need, workspace_roots);
         }
     }
 
@@ -1145,7 +1310,10 @@ impl OverlayCache {
     /// imported file changes.
     ///
     /// Local references read nothing; explicit references read their targets
-    /// through the document's context, as resolving the saved file would.
+    /// through the document's context, as resolving the saved file would,
+    /// from the open YAML and JSON buffers where one is open
+    /// ([`buffers::with`]), so an unsaved edit of an imported file, or an
+    /// unsaved file at a probed location, counts as that file's change.
     fn standalone_named_types(
         &mut self,
         uri_key: &str,
@@ -1161,12 +1329,40 @@ impl OverlayCache {
         let key = xx_hash_bytes(text.as_bytes())
             ^ file_resolution_context_identity(context)
             ^ xx_hash_bytes(resolution.generation().to_string().as_bytes());
+        let sources = self.triggers.source_buffers().clone();
         if let Some(cached) = self.standalone_resolution.get(uri_key)
             && cached.key == key
-            && deps_unchanged(&cached.deps)
+            && yaml_document::deps_unchanged(&cached.deps, &sources)
+            && yaml_document::probes_unchanged(&cached.probes, &sources)
         {
             return cached.resolved.clone();
         }
+        let ((resolved, deps), observed) = buffers::with(&sources, || {
+            observed::collect(|| Self::resolve_standalone(model, workspace_roots, context))
+        });
+        let deps = yaml_document::hash_files(deps.iter().chain(&observed.read), &sources);
+        let probes = observed
+            .searched
+            .into_iter()
+            .map(|probe| {
+                let present = yaml_document::present(&probe, &sources);
+                (probe, present)
+            })
+            .collect();
+        self.standalone_resolution.insert(
+            uri_key.to_string(),
+            CachedStandalone { key, deps, probes, resolved: resolved.clone() },
+        );
+        resolved
+    }
+
+    /// [`Self::standalone_named_types`]'s resolution, with every file it
+    /// read.
+    fn resolve_standalone(
+        model: &StandaloneSchemaDocument,
+        workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
+    ) -> (StandaloneNamedTypes, Vec<PathBuf>) {
         let path = model.path.as_path();
         // A schema file's bare-name targets use the same roots a consuming
         // document in its workspace folder would use.
@@ -1199,14 +1395,9 @@ impl OverlayCache {
                 &simplified_schema::SchemaRoot::Single(types.clone()), Some(types), base_dir, Some(path), &schema_roots, context,
             ));
         }
-        let deps = hash_files(imports.iter().chain(named_types.dependencies()));
+        let deps = imports.iter().chain(named_types.dependencies()).cloned().collect();
         let file_failures = error.as_deref().map(file_failures).unwrap_or_default();
-        let resolved = StandaloneNamedTypes { named_types, error, file_failures, suggestions };
-        self.standalone_resolution.insert(
-            uri_key.to_string(),
-            CachedStandalone { key, deps, resolved: resolved.clone() },
-        );
-        resolved
+        (StandaloneNamedTypes { named_types, error, file_failures, suggestions }, deps)
     }
 
     /// The document's installed trigger registry, looked up in the registry
@@ -1551,6 +1742,7 @@ mod tests {
             let path = root.join(name);
             let uri_text = url::Url::from_file_path(&path).unwrap().to_string();
             let uri_text = uri_text.as_str();
+            let path_buf = path.clone();
             let path = path.as_path();
             let overlay = state
                 .for_document(
@@ -1574,7 +1766,9 @@ mod tests {
                 .schema
                 .get(uri_text)
                 .map(|cached| cached.deps.len())
-                .or_else(|| cache.standalone_resolution.get(uri_text).map(|cached| cached.deps.len()));
+                .or_else(|| cache.standalone_resolution.get(uri_text).map(|cached| cached.deps.len()))
+                // A YAML standalone schema is prepared with its contract.
+                .or_else(|| cache.contracts.dependency_count(path_buf.as_path()));
             assert_eq!(deps, Some(0), "{path}: a local reference reads no file");
         }
     }
@@ -2135,12 +2329,12 @@ mod tests {
     fn combined_schema_retains_its_local_types_through_malformed_edits() {
         for (good, malformed) in [
             (
-                "$schema:\n  title: label\ntypes:\n  label: string(required)\n",
-                "$schema:\n  title: label\ntypes:\n  label: [\n",
+                "kind: schema\n$schema:\n  title: label\ntypes:\n  label: string(required)\n",
+                "kind: schema\n$schema:\n  title: label\ntypes:\n  label: [\n",
             ),
             (
-                "{$schema: {title: label}, types: {label: string}}",
-                "{$schema: {title: label}, types: {label: [}}",
+                "{kind: schema, $schema: {title: label}, types: {label: string}}",
+                "{kind: schema, $schema: {title: label}, types: {label: [}}",
             ),
         ] {
             let state = OverlayState::default();
@@ -2170,7 +2364,7 @@ mod tests {
         let doc = uri("file:///w/schema.yaml");
         let path = Path::new("/w/schema.yaml");
         let roots = [PathBuf::from("/w")];
-        let good = "$schema:\n  title: string(required)\n";
+        let good = "kind: schema\n$schema:\n  title: string(required)\n";
         let first = state
             .for_document(&doc, good, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
             .expect("valid schema overlay");
@@ -2180,7 +2374,7 @@ mod tests {
             panic!("valid standalone model");
         };
 
-        for malformed in ["$schema:\n\tbad: string\n", "$schema: 42\n"] {
+        for malformed in ["kind: schema\n$schema:\n\tbad: string\n", "kind: schema\n$schema: 42\n"] {
             let current = state
                 .for_document(&doc, malformed, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
                 .expect("lexical claim remains active");
@@ -2203,7 +2397,7 @@ mod tests {
         let malformed = fresh
             .for_document(
                 &uri("file:///w/fresh.yaml"),
-                "$schema:\n\tbad: string\n",
+                "kind: schema\n$schema:\n\tbad: string\n",
                 Path::new("/w/fresh.yaml"),
                 &DmlsConfig::default(),
                 &roots,
@@ -2229,7 +2423,7 @@ mod tests {
         state
             .for_document(
                 &doc,
-                "$schema:\n  title: string\n",
+                "kind: schema\n$schema:\n  title: string\n",
                 path,
                 &DmlsConfig::default(),
                 &roots,
@@ -2240,7 +2434,7 @@ mod tests {
         let overlay = state
             .for_document(
                 &doc,
-                "$schema: 42\n",
+                "kind: schema\n$schema: 42\n",
                 path,
                 &DmlsConfig::default(),
                 &roots,

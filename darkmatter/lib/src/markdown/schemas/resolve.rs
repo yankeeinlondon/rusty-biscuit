@@ -126,6 +126,7 @@ pub fn check_standalone_named_types(
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
 ) -> Result<Vec<PathBuf>, SchemaError> {
+    crate::note_work!(StandaloneImportCheck);
     simplified_schema::resolve::check_standalone_named_types(document, schema_roots, request_context, SHIPPED_SOURCES)
 }
 

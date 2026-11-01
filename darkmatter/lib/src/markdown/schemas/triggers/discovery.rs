@@ -494,6 +494,17 @@ pub trait SchemaRootSource {
     ///
     /// [`SchemaError::Io`] naming `path` when it cannot be read as UTF-8 text.
     fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError>;
+
+    /// Files the source holds directly inside `root`, a schema root whose
+    /// folder does not exist on disk (an editor's unsaved definitions there),
+    /// in [`enumerate_root_files`] order. [`KindRegistry`] discovery reads
+    /// them as it reads a searched root's files; trigger discovery does not.
+    /// None by default.
+    ///
+    /// [`KindRegistry`]: crate::markdown::schemas::KindRegistry
+    fn absent_root_files(&mut self, _root: &Path) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 /// The filesystem [`SchemaRootSource`] that [`scan`] uses.

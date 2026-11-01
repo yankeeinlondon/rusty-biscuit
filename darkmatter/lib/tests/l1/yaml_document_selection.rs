@@ -154,13 +154,33 @@ fn template_and_shell_strings_are_data() {
 #[test]
 fn a_kind_that_is_not_a_string_claims_nothing() {
     let fixture = with_roster();
-    let document = fixture.package().join("doc.yaml");
-    for kind in ["", "kind: null\n", "kind:\n", "kind: 3\n", "kind: [roster]\n", "kind: { name: roster }\n", "kind: \"\"\n"] {
-        assert!(matches!(fixture.validate(&document, &format!("{kind}a: 1\n")), Ok(YamlOutcome::NoSchema)), "{kind:?}");
-        let text = format!("{kind}$schema:\n    a: number(required)\na: x\n");
-        let validation = validated(fixture.validate(&document, &text));
-        assert_eq!(validation.route, Route::RootSchema, "{kind:?}");
-        assert!(!validation.report.valid, "{kind:?}: the fallback schema applies");
+    // A schema root is no exception: its files are selected the same way.
+    for document in [fixture.package().join("doc.yaml"), fixture.repo().join("schemas/doc.yaml")] {
+        for kind in [
+            "",
+            "kind: null\n",
+            "kind:\n",
+            "kind: 3\n",
+            "kind: true\n",
+            "kind: [roster]\n",
+            "kind: []\n",
+            "kind: [roster, 1]\n",
+            "kind: { name: roster }\n",
+            "kind: {}\n",
+            "kind: \"\"\n",
+        ] {
+            assert!(matches!(fixture.validate(&document, &format!("{kind}a: 1\n")), Ok(YamlOutcome::NoSchema)), "{kind:?}");
+            let text = format!("{kind}$schema:\n    a: number(required)\na: x\n");
+            let validation = validated(fixture.validate(&document, &text));
+            assert_eq!(validation.route, Route::RootSchema, "{kind:?}");
+            assert!(!validation.report.valid, "{kind:?}: the fallback schema applies");
+            // An unresolvable fallback is its own failure, never a kind error.
+            let result = fixture.validate(&document, &format!("{kind}$schema: ./missing.yaml\na: 1\n"));
+            assert!(
+                matches!(&result, Err(error) if !matches!(error, SchemaError::KindSelection { .. } | SchemaError::TriggerMatch { .. })),
+                "{kind:?}: {result:?}"
+            );
+        }
     }
 }
 
@@ -190,6 +210,36 @@ fn a_present_but_invalid_fallback_schema_is_a_schema_error_never_absence() {
         let result = fixture.validate(&document, &text);
         assert!(result.is_err(), "`$schema: {schema}` must be a schema error, got {result:?}");
         assert!(!matches!(result, Err(SchemaError::SchemaDocument { .. })), "{schema}: not a load error: {result:?}");
+    }
+}
+
+/// A document's root fields are data of the `$schema` it selects, even when
+/// named like a schema document's metadata: under `{field}: unknown`, every
+/// shape is valid, as are the shapes the contract declares.
+#[test]
+fn metadata_named_fields_are_data_of_the_selected_contract() {
+    let fixture = Fixture::new();
+    let folder = fixture.package().join("data");
+    write(&folder.join("contract.yaml"), "$schema:\n    description: string\n");
+    let document = folder.join("doc.yaml");
+    for field in ["description", "categories", "types"] {
+        for shape in ["null", "123", "[ops, 123]", "[123]", "\"\"", "[]", "{}", "ops"] {
+            let text = format!("$schema:\n    {field}: unknown\n{field}: {shape}\n");
+            let validation = validated(fixture.validate(&document, &text));
+            assert!(validation.report.valid, "{text}: {:?}", validation.report.problems);
+        }
+    }
+    for text in [
+        "$schema:\n    description: string\ndescription: null\n",
+        "$schema:\n    description: string\n    owner: string\ndescription: null\nowner: ops\n",
+        "$schema:\n    categories: string[]\ncategories: [ops, ops]\n",
+        "$schema:\n    types: string[]\ntypes: [ops]\n",
+        "$schema:\n    types: unknown\ntypes: { mode: production }\n",
+        "$schema: ./contract.yaml\ndescription: null\n",
+        "$schema:\n    - { description: string, kind: literal(a) }\n    - { description: string, kind: literal(b) }\ndescription: null\n",
+    ] {
+        let validation = validated(fixture.validate(&document, text));
+        assert!(validation.report.valid, "{text}: {:?}", validation.report.problems);
     }
 }
 
@@ -247,4 +297,75 @@ fn null_metadata_and_payloads_fail_the_shipped_definitions_on_their_line() {
     assert!(validated(fixture.validate(&document, trigger)).report.valid);
     let validation = validated(fixture.validate(&document, &format!("{trigger}$schema: null\n")));
     assert_eq!(validation.report.problems[0].line, Some(4), "{:?}", validation.report.problems);
+}
+
+// ── Prepared contracts ─────────────────────────────────────────────────────
+
+/// A contract prepared once judges a later text of the document with the
+/// same declaration exactly as validating that text does, compiling
+/// nothing (counted with `work-counters`), on the kind route and on a referenced fallback `$schema`; the
+/// declaration key ignores data and follows `kind` and `$schema`.
+#[test]
+fn a_prepared_contract_judges_later_data_as_validation_does_without_compiling() {
+    use darkmatter::markdown::schemas::LoadedYamlDocument;
+    #[cfg(feature = "work-counters")]
+    use darkmatter::work_counters::{Work, snapshot};
+
+    let fixture = with_roster();
+    write(&fixture.package().join("contract.yaml"), "$schema:\n    owner: string\n");
+    let cases = [
+        (fixture.package().join("roster.yaml"), ROSTER_DOCUMENT.to_string(), ("slack", "[slack]")),
+        (fixture.package().join("service.yaml"), "$schema: ./contract.yaml\nowner: ops\n".to_string(), ("ops", "[ops]")),
+    ];
+    for (document, text, (data, edited_data)) in &cases {
+        write(document, text);
+        let schemas = DarkmatterSchemas::new(fixture.context(document, &[]));
+        let loaded = LoadedYamlDocument::load(text, document).unwrap();
+        let contract = schemas.prepare_yaml_contract(&loaded).unwrap().expect("a selected schema");
+        assert!(!contract.checks_read_files());
+
+        let edited_text = text.replace(data, edited_data);
+        let edited = LoadedYamlDocument::load(&edited_text, document).unwrap();
+        assert_eq!(edited.declaration_key(), loaded.declaration_key(), "data is not the declaration");
+        #[cfg(feature = "work-counters")]
+        let before = snapshot();
+        let judged = contract.validate(&edited);
+        #[cfg(feature = "work-counters")]
+        {
+            let work = snapshot().since(&before);
+            assert_eq!(
+                (work.get(Work::ValidatorCompile), work.get(Work::YamlContractPreparation)),
+                (0, 0),
+                "{:?}",
+                work.nonzero()
+            );
+        }
+        let direct = validated(schemas.validate_loaded_yaml_document(&edited));
+        assert_eq!(judged.route, direct.route);
+        assert_eq!(judged.definition, direct.definition);
+        assert_eq!(format!("{:?}", judged.report), format!("{:?}", direct.report));
+        assert_eq!(judged.report.problems[0].code, ValidationProblemCode::TypeMismatch, "{}", document.display());
+    }
+
+    let key = |text: &str| LoadedYamlDocument::load(text, &cases[1].0).unwrap().declaration_key();
+    let base = key("$schema: ./contract.yaml\nowner: ops\n");
+    assert_ne!(base, key("$schema: ./other.yaml\nowner: ops\n"), "a changed `$schema`");
+    assert_ne!(base, key("kind: roster\n$schema: ./contract.yaml\nowner: ops\n"), "an added `kind`");
+}
+
+/// The kind checks of a `schema` document resolve its own imports, so its
+/// contract reports that judging it reads files.
+#[test]
+fn a_schema_documents_contract_reads_files_to_judge_it() {
+    use darkmatter::markdown::schemas::LoadedYamlDocument;
+
+    let fixture = Fixture::new();
+    let document = fixture.package().join("owners.yaml");
+    let text = "kind: schema\n$schema:\n    owner: string\n";
+    write(&document, text);
+    let loaded = LoadedYamlDocument::load(text, &document).unwrap();
+    assert!(loaded.kind_checks_read_files());
+    let contract = DarkmatterSchemas::new(fixture.context(&document, &[])).prepare_yaml_contract(&loaded).unwrap().unwrap();
+    assert!(contract.checks_read_files());
+    assert!(contract.validate(&loaded).report.valid);
 }

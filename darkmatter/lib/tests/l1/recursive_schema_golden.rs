@@ -168,7 +168,17 @@ fn load_manifest(fixtures: &Path) -> Manifest {
 
 /// `path` relative to `base`, `/`-separated; `None` outside `base`.
 fn relative(path: &Path, base: &Path) -> Option<String> {
-    let rest = path.strip_prefix(base).ok()?;
+    // `canonicalize_simplified` keeps a result past MAX_PATH in its `\\?\C:\`
+    // form, whose prefix component never matches a simplified `C:\` base.
+    let without_verbatim_disk = |path: &Path| {
+        let text = path.to_string_lossy();
+        match text.strip_prefix(r"\\?\") {
+            Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+            _ => path.to_path_buf(),
+        }
+    };
+    let (path, base) = (without_verbatim_disk(path), without_verbatim_disk(base));
+    let rest = path.strip_prefix(&base).ok()?;
     Some(
         rest.components()
             .map(|component| component.as_os_str().to_string_lossy())

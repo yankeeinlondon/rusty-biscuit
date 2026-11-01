@@ -48,7 +48,7 @@ exit 2; problems → 1; `NoSchema` → the Markdown no-schema record). A
 A YAML file with Markdown `---` fences is two documents and exits 3; a
 leading `---` alone is a document marker. A root-`$schema` file with no
 `kind` (an informal schema file) is judged as data against its own
-`$schema`, so such a file can fail here while DMLS shows no problem.
+`$schema`, so such a file can fail here, and DMLS reports the same failure.
 
 A custom baseline path (`schema validate --schema`, `BASELINE_SCHEMA`, and
 `compose --baseline-schema`) is a launch-context file argument too, resolved

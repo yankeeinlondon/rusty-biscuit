@@ -4,10 +4,12 @@
 //! library's one entry point: its claimed `kind` selects that kind's
 //! definition, otherwise a root `$schema` is the contract, and a document
 //! with neither is not validated
-//! ([`DarkmatterSchemas::validate_loaded_yaml_document`]). The kinds come
-//! from the document's [`KindRegistry`], prepared on the registry worker
-//! beside its trigger registry ([`super::registry`]); this module only looks
-//! that registry up, so building an overlay never scans a schema root.
+//! ([`DarkmatterSchemas::prepare_yaml_contract`](darkmatter::markdown::schemas::DarkmatterSchemas::prepare_yaml_contract)).
+//! Selection, schema resolution, validator compilation, and every other step
+//! that reads a file run on the registry worker, beside the document's kind
+//! registry ([`super::yaml_contract`]); this module only looks the prepared
+//! contract up and judges the current data against it, passively, so
+//! building an overlay reads no file.
 //!
 //! The selected schema's report, the whole document's tree
 //! ([`FrontmatterAst::parse_yaml_document`]), and a [`SchemaBundle`] holding
@@ -18,30 +20,26 @@
 //! shape is the selected schema's alone.
 //!
 //! The cached state is reused while the text, the buffer version, the
-//! document's context, the registry version, and every file the selected
-//! schema read (and every location a `$schema` lookup probed) are unchanged.
-//! Any change rebuilds it whole, so a changed or removed `kind` or `$schema`
-//! never keeps an earlier selection's results.
+//! document's context, and the prepared contract are unchanged. A contract
+//! prepared for another declaration is never used, so a changed or removed
+//! `kind` or `$schema` never keeps an earlier selection's results.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use biscuit_file::FileResolutionContext;
 use biscuit_hash::xx_hash_bytes;
 use darkmatter::markdown::compose::file_resolution_context_identity;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, KindRegistry, LoadedYamlDocument, Route, YamlOutcome, YamlValidation,
-};
-use simplified_schema::SchemaError;
+use darkmatter::markdown::schemas::{LoadedYamlDocument, Route, YamlValidation};
+use simplified_schema::{SchemaError, SuggestionLintProblem};
+use simplified_schema::resolve::buffers::SourceBuffers;
 
 use super::analysis::{AnalysisIdentity, CrossSnapshotSchema, FrontmatterAnalysis};
 use super::references::SchemaReferenceFacts;
 use super::registry::InstalledKinds;
-use super::{
-    FileFailures, FrontmatterAst, NamedTypeCatalog, OverlayCache, SchemaBundle, deps_unchanged, error_dependencies,
-    file_failures, hash_files, probes_unchanged,
-};
+use super::yaml_contract::PreparedYaml;
+use super::{FileFailures, FrontmatterAst, NamedTypeCatalog, OverlayCache, SchemaBundle, file_failures, suggestions};
 use crate::context::DocumentResolution;
+use crate::work_counters;
 
 /// What judging one YAML document produced.
 pub enum YamlDocumentOutcome {
@@ -54,6 +52,11 @@ pub enum YamlDocumentOutcome {
     /// No schema was selected: the root is not a mapping, or it has neither
     /// a claimed `kind` nor a `$schema`.
     NoSchema,
+    /// The document's contract is not prepared for its current declaration
+    /// yet: nothing is judged until the registry worker installs it. The
+    /// server waits for that before publishing diagnostics or answering a
+    /// schema-dependent request.
+    Pending,
     /// Selecting or preparing the schema failed: an ambiguous, reserved, or
     /// unavailable `kind`, or a root `$schema` that does not resolve.
     Failed(Arc<SchemaError>),
@@ -88,12 +91,6 @@ impl YamlDocumentOverlay {
 /// One YAML document's cached state and what it was built from.
 pub(super) struct CachedYaml {
     key: u64,
-    /// Every file the selected schema (or its failure) read, with its
-    /// xxHash; a hit requires each to be unchanged.
-    deps: Vec<(PathBuf, u64)>,
-    /// Every location a root `$schema` lookup probed, with whether a file
-    /// existed there.
-    probes: Vec<(PathBuf, bool)>,
     state: YamlState,
 }
 
@@ -110,14 +107,22 @@ pub(super) struct YamlState {
     pub(super) analysis: Arc<FrontmatterAnalysis>,
     pub(super) schema_references: Arc<SchemaReferenceFacts>,
     pub(super) file_failures: FileFailures,
+    /// The files a root-`$schema` contract's named types import.
+    pub(super) named_types: Arc<NamedTypeCatalog>,
+    /// The `suggest(...)` lint problems of an inline root-`$schema`
+    /// contract, in the current text's offsets.
+    pub(super) suggestions: Vec<SuggestionLintProblem>,
 }
 
 impl OverlayCache {
     /// The YAML document state of `text`, rebuilt only when an input changed.
     ///
     /// `kinds` is the document's installed registry, or `None` outside a
-    /// workspace folder, where only the shipped kinds apply.
-    #[allow(clippy::too_many_arguments)]
+    /// workspace folder, where only the shipped kinds apply. Reads no file:
+    /// the document's contract is looked up among the prepared ones
+    /// ([`super::yaml_contract`]), and the document is
+    /// [`Pending`](YamlDocumentOutcome::Pending) until one is installed for
+    /// its declaration.
     pub(super) fn yaml_document(
         &mut self,
         uri_key: &str,
@@ -127,20 +132,25 @@ impl OverlayCache {
         resolution: &DocumentResolution,
         kinds: Option<InstalledKinds>,
     ) -> YamlState {
+        let prepared = resolution
+            .context()
+            .ok()
+            .and_then(|context| self.contracts.key(text, path, context, resolution.generation(), kinds.as_ref()))
+            .and_then(|key| self.contracts.lookup(path, key))
+            .cloned();
         let context_key = match resolution.context() {
-            Ok(context) => {
-                file_resolution_context_identity(context) ^ xx_hash_bytes(resolution.generation().to_string().as_bytes())
-            }
+            Ok(context) => file_resolution_context_identity(context),
             Err(_) => 0,
         };
-        let key = xx_hash_bytes(text.as_bytes())
-            ^ context_key
-            ^ xx_hash_bytes(&revision.unwrap_or(i32::MIN).to_le_bytes())
-            ^ kinds.as_ref().map_or(0, |kinds| xx_hash_bytes(&kinds.version.to_le_bytes()));
+        let mut bytes = Vec::with_capacity(40);
+        bytes.extend_from_slice(&xx_hash_bytes(text.as_bytes()).to_le_bytes());
+        bytes.extend_from_slice(&context_key.to_le_bytes());
+        bytes.extend_from_slice(&resolution.generation().to_le_bytes());
+        bytes.extend_from_slice(&revision.unwrap_or(i32::MIN).to_le_bytes());
+        bytes.extend_from_slice(&prepared.as_ref().map_or(0, |prepared| prepared.version).to_le_bytes());
+        let key = xx_hash_bytes(&bytes);
         if let Some(cached) = self.yaml_documents.get(uri_key)
             && cached.key == key
-            && deps_unchanged(&cached.deps)
-            && probes_unchanged(&cached.probes)
         {
             return cached.state.clone();
         }
@@ -149,24 +159,9 @@ impl OverlayCache {
             .get(uri_key)
             .map(|cached| cached.state.clone())
             .filter(|state| state.ast.is_some());
-        let shared = Arc::clone(&self.shared_schema);
-        let Built { state, deps, probes } = build(text, path, revision, key, resolution, kinds, last_good, &shared);
-        self.yaml_documents.insert(uri_key.to_owned(), CachedYaml { key, deps, probes, state: state.clone() });
+        let state = build(text, path, revision, key, resolution, prepared.as_deref(), last_good, &self.shared_schema);
+        self.yaml_documents.insert(uri_key.to_owned(), CachedYaml { key, state: state.clone() });
         state
-    }
-}
-
-/// A freshly built [`YamlState`] and the inputs a later hit re-checks.
-struct Built {
-    state: YamlState,
-    deps: Vec<(PathBuf, u64)>,
-    probes: Vec<(PathBuf, bool)>,
-}
-
-impl Built {
-    /// A state that read no file.
-    fn alone(state: YamlState) -> Self {
-        Self { state, deps: Vec::new(), probes: Vec::new() }
     }
 }
 
@@ -177,45 +172,44 @@ fn build(
     revision: Option<i32>,
     key: u64,
     resolution: &DocumentResolution,
-    kinds: Option<InstalledKinds>,
+    prepared: Option<&PreparedYaml>,
     last_good: Option<YamlState>,
     shared: &Arc<CrossSnapshotSchema>,
-) -> Built {
+) -> YamlState {
     let loaded = match LoadedYamlDocument::load(text, path) {
         Ok(loaded) => loaded,
         Err(error) => {
             let error = YamlDocumentOutcome::LoadFailed(Arc::new(error));
             // The last tree that loaded keeps completion and hover alive
             // while the buffer is mid-edit; nothing is validated.
-            return Built::alone(match last_good {
-                Some(previous) => YamlState { overlay: Arc::new(YamlDocumentOverlay { outcome: error }), stale: true, ..previous },
+            return match last_good {
+                Some(previous) => YamlState {
+                    overlay: Arc::new(YamlDocumentOverlay { outcome: error }),
+                    stale: true,
+                    // Located in the last text that loaded.
+                    suggestions: Vec::new(),
+                    ..previous
+                },
                 None => empty_state(error, revision, text, key, shared),
-            });
+            };
         }
     };
-    let Ok(context) = resolution.context() else {
-        return Built::alone(parsed_state(YamlDocumentOutcome::Unvalidated, None, revision, text, key, shared));
+    if resolution.context().is_err() {
+        return parsed_state(YamlDocumentOutcome::Unvalidated, None, revision, text, key, shared);
+    }
+    let Some(prepared) = prepared else {
+        return parsed_state(YamlDocumentOutcome::Pending, None, revision, text, key, shared);
     };
-    let context: FileResolutionContext = context.for_source(path);
-    let registry = kinds.map_or_else(KindRegistry::shipped, |kinds| kinds.registry);
-    let schema_roots = registry.roots().search_paths().to_vec();
-    let schemas = DarkmatterSchemas::new(context.clone()).with_kind_registry(registry);
-    let outcome = match schemas.validate_loaded_yaml_document(&loaded) {
-        Ok(YamlOutcome::NoSchema) => YamlDocumentOutcome::NoSchema,
-        Ok(YamlOutcome::Validated(validation)) => YamlDocumentOutcome::Validated(Arc::new(validation)),
-        Err(error) => YamlDocumentOutcome::Failed(Arc::new(error)),
+    let outcome = match (&prepared.contract, &prepared.validation) {
+        (Err(error), _) => YamlDocumentOutcome::Failed(Arc::clone(error)),
+        (Ok(None), _) => YamlDocumentOutcome::NoSchema,
+        // Judged on the worker: its kind checks read files.
+        (Ok(Some(_)), Some(validation)) => YamlDocumentOutcome::Validated(Arc::clone(validation)),
+        (Ok(Some(contract)), None) => YamlDocumentOutcome::Validated(Arc::new(contract.validate(&loaded))),
     };
     let bundle = match &outcome {
         YamlDocumentOutcome::Validated(validation) => Some(Arc::new(bundle(validation))),
         _ => None,
-    };
-    let mut deps: Vec<PathBuf> = match (&outcome, &bundle) {
-        // A definition's own files are the registry's to track.
-        (YamlDocumentOutcome::Validated(validation), Some(bundle)) if validation.route == Route::RootSchema => {
-            bundle.effective.dependencies().to_vec()
-        }
-        (YamlDocumentOutcome::Failed(error), _) => error_dependencies(error),
-        _ => Vec::new(),
     };
     let failures = match &outcome {
         YamlDocumentOutcome::Failed(error) => file_failures(error),
@@ -223,16 +217,42 @@ fn build(
     };
     let mut state = parsed_state(outcome, bundle, revision, text, key, shared);
     state.file_failures = failures;
-    let assembled = state.bundle.is_some();
-    if let Some(ast) = state.ast.as_deref()
-        && ast.schema_entry().is_some()
-    {
-        let facts = SchemaReferenceFacts::select_in(ast, text, path, Ok(&schema_roots), &context, assembled);
-        deps.extend(facts.selected().cloned());
-        state.schema_references = Arc::new(facts);
+    state.schema_references = Arc::clone(&prepared.schema_references);
+    state.named_types = Arc::clone(&prepared.named_types);
+    state
+}
+
+/// The xxHash of `path`'s text: its open buffer's, else the file's.
+pub(super) fn source_hash(path: &Path, sources: &SourceBuffers) -> Option<u64> {
+    match sources.get(path) {
+        Some(text) => Some(work_counters::hash_bytes(text.as_bytes())),
+        None => work_counters::read(path).ok().map(|bytes| work_counters::hash_bytes(&bytes)),
     }
-    let probes = state.schema_references.probes();
-    Built { state, deps: hash_files(deps.iter()), probes }
+}
+
+/// Whether a file exists at `path`, on disk or as an open buffer.
+pub(super) fn present(path: &Path, sources: &SourceBuffers) -> bool {
+    path.is_file() || sources.get(path).is_some()
+}
+
+/// Hashes each distinct readable source once.
+pub(super) fn hash_files<'a>(paths: impl Iterator<Item = &'a PathBuf>, sources: &SourceBuffers) -> Vec<(PathBuf, u64)> {
+    let mut seen = std::collections::HashSet::new();
+    paths
+        .filter(|path| seen.insert((*path).clone()))
+        .filter_map(|path| source_hash(path, sources).map(|hash| (path.clone(), hash)))
+        .collect()
+}
+
+/// Whether every recorded source still hashes to its recorded value; a
+/// missing source counts as changed.
+pub(super) fn deps_unchanged(deps: &[(PathBuf, u64)], sources: &SourceBuffers) -> bool {
+    deps.iter().all(|(path, hash)| source_hash(path, sources) == Some(*hash))
+}
+
+/// Whether a source is present at every probed location exactly where it was.
+pub(super) fn probes_unchanged(probes: &[(PathBuf, bool)], sources: &SourceBuffers) -> bool {
+    probes.iter().all(|(path, existed)| present(path, sources) == *existed)
 }
 
 /// The selected schema alone as the frontmatter providers read it. On the
@@ -269,6 +289,7 @@ fn parsed_state(
     let overlay = YamlDocumentOverlay { outcome };
     let ast = FrontmatterAst::parse_yaml_document(text, overlay.kind_route()).ast.map(Arc::new);
     let analysis = analysis(revision, text, key, bundle.as_ref(), ast.as_ref(), shared);
+    let suggestions = ast.as_deref().map(|ast| suggestions::yaml_document_lints(text, ast)).unwrap_or_default();
     YamlState {
         overlay: Arc::new(overlay),
         ast,
@@ -277,6 +298,8 @@ fn parsed_state(
         analysis,
         schema_references: Arc::default(),
         file_failures: FileFailures::default(),
+        named_types: Arc::default(),
+        suggestions,
     }
 }
 
@@ -296,6 +319,8 @@ fn empty_state(
         analysis: analysis(revision, text, key, None, None, shared),
         schema_references: Arc::default(),
         file_failures: FileFailures::default(),
+        named_types: Arc::default(),
+        suggestions: Vec::new(),
     }
 }
 

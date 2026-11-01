@@ -25,6 +25,11 @@
 //! and duplicate overloads. Metadata is read from the admitted, softly
 //! converted copy, so a `description: 123` reads as `"123"`.
 //!
+//! A host that has already validated a whole file against a definition it
+//! selected reads it with [`parse_selected_standalone_schema_document`],
+//! which skips admission and reads metadata from the host's accepted copy:
+//! the selected definition is then the only judge of the file's shape.
+//!
 //! Only a document with a `$schema` property exports document properties
 //! ([`StandaloneSchemaDocument::exports_schema`]); a tagged `types`-only
 //! document is a valid envelope that serves named-type imports alone.
@@ -242,6 +247,37 @@ pub fn parse_standalone_schema_document(
     parse_standalone(source, path.as_ref(), Admission::Required)
 }
 
+/// [`parse_standalone_schema_document`] for a document whose shape a selected
+/// definition already accepted, so it is not admitted again: `accepted` is
+/// that document as the definition accepted it (softly converted), and the
+/// metadata the library interprets (`categories`) is read from it. Keys the
+/// library does not interpret are ignored.
+///
+/// A host that validates a whole `kind: schema` or `kind: yaml-schema` file
+/// against a definition it selected (which may be an edited copy of the
+/// compiled-in one) reads the file's meaning with this, so the compiled
+/// envelope never judges the shape a second time. Every direct load (the
+/// [`SimplifiedSchema`](crate::SimplifiedSchema) factories, `$schema`
+/// targets, `Name@file` imports) still admits against the compiled
+/// definitions.
+///
+/// ## Errors
+///
+/// As [`parse_standalone_schema_document`], without the envelope's admission:
+/// text that is not valid YAML, a payload or `types` definition the grammar
+/// rejects, a malformed `categories` entry or an undeclared category, and two
+/// overloads with one binding contract. A carrier or metadata value of a
+/// shape the library cannot read (a `types` that is not a mapping,
+/// `categories` that is not a list of strings, neither `$schema` nor `types`)
+/// is an error too, since its meaning cannot be checked.
+pub fn parse_selected_standalone_schema_document(
+    source: &str,
+    path: impl AsRef<Path>,
+    accepted: &serde_json::Value,
+) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
+    parse_standalone(source, path.as_ref(), Admission::Selected(accepted))
+}
+
 /// [`parse_standalone_schema_document`] without admission: only the library's
 /// own envelope definitions are read this way, to bootstrap the definitions
 /// every other document is admitted against.
@@ -249,16 +285,20 @@ pub(crate) fn parse_standalone_unadmitted(source: &str, path: &Path) -> Result<O
     parse_standalone(source, path, Admission::Skip)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Admission {
+#[derive(Clone, Copy)]
+enum Admission<'a> {
+    /// Admitted against the compiled definition.
     Required,
+    /// Already accepted by a selected definition, as this value.
+    Selected(&'a serde_json::Value),
+    /// Read as written: the bootstrap of the compiled definitions.
     Skip,
 }
 
 fn parse_standalone(
     source: &str,
     path: &Path,
-    admission: Admission,
+    admission: Admission<'_>,
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
     let Some(recognized) =
         recognize_standalone(source).map_err(|message| schema_document_error(path, message))?
@@ -274,9 +314,10 @@ fn parse_standalone(
             if !admitted.problems.is_empty() {
                 return Err(rejected_envelope(&recognized, source, path, &admitted));
             }
-            admitted.value
+            std::borrow::Cow::Owned(admitted.value)
         }
-        Admission::Skip => crate::envelope::document_json(&recognized, path)?,
+        Admission::Selected(accepted) => std::borrow::Cow::Borrowed(accepted),
+        Admission::Skip => std::borrow::Cow::Owned(crate::envelope::document_json(&recognized, path)?),
     };
     let envelope = recognized.envelope;
     let payload_key = recognized.payload_key();
@@ -298,8 +339,8 @@ fn parse_standalone(
     let (local_types, local_type_source_map) = match local {
         Some(parsed) => match parsed.value {
             SchemaDeclaration::Schema(SchemaRoot::Single(shape)) => (Some(shape), Some(parsed.source_map)),
-            // Admission rejects every other `types` carrier.
-            _ => return Err(schema_document_error(path, "`types` was not admitted as a mapping")),
+            // Admission, or the selected definition, rejects every other carrier.
+            _ => return Err(schema_document_error(path, "`types` is not a mapping of named types")),
         },
         None => (None, None),
     };
@@ -460,16 +501,16 @@ fn rejected_envelope(
 
 /// Reads an admitted `categories:` list: each entry `Name` or
 /// `Name -> description`, names unique and non-blank, order kept. Admission
-/// already made the list one of strings.
+/// makes the list one of strings; a selected definition may not have.
 fn parse_categories(path: &Path, value: &serde_json::Value) -> Result<Vec<SchemaCategory>, SchemaError> {
     let Some(entries) = value.as_array() else {
-        return Err(schema_document_error(path, "`categories` was not admitted as a list"));
+        return Err(schema_document_error(path, "`categories` is not a list of category entries"));
     };
     let mut categories: Vec<SchemaCategory> = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
         let at = |message: String| schema_document_error(path, format!("`categories[{index}]`: {message}"));
         let Some(text) = entry.as_str() else {
-            return Err(at("a category entry was not admitted as a string".into()));
+            return Err(at("a category entry is not a string".into()));
         };
         let (name, description) = match text.split_once("->") {
             Some((name, description)) => {

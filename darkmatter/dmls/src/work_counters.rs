@@ -20,6 +20,9 @@
 //! them, which is why scans are counted), and hashes that only build an
 //! in-memory cache key.
 //!
+//! [`yaml_preparation_threads`] likewise names every thread a YAML document's
+//! contract was prepared on ([`record_yaml_preparation`]).
+//!
 //! [`registry_scan_threads`] also names every thread a registry scan ran on,
 //! so a test can show that none ran on the server's dispatch thread, and
 //! [`peak_concurrent_registry_scans`] is the most scans ever in progress at
@@ -59,6 +62,8 @@ static DOCUMENT_TABLES: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static REGISTRY_SCANS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCANS_PEAK: AtomicUsize = AtomicUsize::new(0);
+static YAML_PREPARATIONS: AtomicUsize = AtomicUsize::new(0);
+static YAML_PREPARATION_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static ROOT_ASSEMBLIES: AtomicUsize = AtomicUsize::new(0);
 static MERGED_SHAPES: AtomicUsize = AtomicUsize::new(0);
 static ITEM_SYNTHESES: AtomicUsize = AtomicUsize::new(0);
@@ -82,6 +87,10 @@ pub struct WorkCounts {
     pub enumerations: usize,
     /// Trigger-registry scans (root classification and payload resolution).
     pub registry_scans: usize,
+    /// YAML document contracts prepared (selection, schema resolution,
+    /// validator compilation, file-reading kind checks, and a standalone
+    /// schema's named types).
+    pub yaml_preparations: usize,
     /// Effective frontmatter root shapes assembled.
     pub root_assemblies: usize,
     /// Merged views of several union arms built.
@@ -116,6 +125,7 @@ impl WorkCounts {
             parses: self.parses - earlier.parses,
             enumerations: self.enumerations - earlier.enumerations,
             registry_scans: self.registry_scans - earlier.registry_scans,
+            yaml_preparations: self.yaml_preparations - earlier.yaml_preparations,
             root_assemblies: self.root_assemblies - earlier.root_assemblies,
             merged_shapes: self.merged_shapes - earlier.merged_shapes,
             item_syntheses: self.item_syntheses - earlier.item_syntheses,
@@ -138,6 +148,7 @@ impl WorkCounts {
             parses: self.parses + other.parses,
             enumerations: self.enumerations + other.enumerations,
             registry_scans: self.registry_scans + other.registry_scans,
+            yaml_preparations: self.yaml_preparations + other.yaml_preparations,
             root_assemblies: self.root_assemblies + other.root_assemblies,
             merged_shapes: self.merged_shapes + other.merged_shapes,
             item_syntheses: self.item_syntheses + other.item_syntheses,
@@ -161,6 +172,7 @@ pub fn work_counts() -> WorkCounts {
         parses: PARSES.load(Ordering::SeqCst),
         enumerations: ENUMERATIONS.load(Ordering::SeqCst),
         registry_scans: REGISTRY_SCANS.load(Ordering::SeqCst),
+        yaml_preparations: YAML_PREPARATIONS.load(Ordering::SeqCst),
         root_assemblies: ROOT_ASSEMBLIES.load(Ordering::SeqCst),
         merged_shapes: MERGED_SHAPES.load(Ordering::SeqCst),
         item_syntheses: ITEM_SYNTHESES.load(Ordering::SeqCst),
@@ -293,6 +305,22 @@ pub fn registry_scan_threads() -> Vec<ThreadId> {
     REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
+/// Counts one YAML document contract preparation and the thread it runs on.
+pub(crate) fn record_yaml_preparation() {
+    let thread = std::thread::current().id();
+    let mut threads = YAML_PREPARATION_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !threads.contains(&thread) {
+        threads.push(thread);
+    }
+    YAML_PREPARATIONS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Every thread a YAML document contract preparation has run on, in
+/// first-preparation order.
+pub fn yaml_preparation_threads() -> Vec<ThreadId> {
+    YAML_PREPARATION_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
 /// Clears the definition-lookup record and starts recording every lookup,
 /// on any thread, until [`definition_lookups`] is read.
 pub fn record_definition_lookups() {
@@ -345,6 +373,7 @@ mod tests {
         record_wiki_path_facts();
         record_wiki_portability_key();
         record_document_table();
+        record_yaml_preparation();
         let middle = work_counts();
         let one = WorkCounts {
             reads: 2,
@@ -352,6 +381,7 @@ mod tests {
             parses: 1,
             enumerations: 1,
             registry_scans: 1,
+            yaml_preparations: 1,
             root_assemblies: 1,
             merged_shapes: 1,
             item_syntheses: 1,
