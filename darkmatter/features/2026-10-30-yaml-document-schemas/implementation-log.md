@@ -249,29 +249,182 @@ decisions_for_review:
         count a `yaml-schema` as a named schema (it is never referable by name); phase 6
         may give it its own class. Redo cost: the corpus class and one match arm in
         `dmls/src/overlay/registry.rs`.
+    - |-
+        Phase 4: the three shipped `yaml-schema` definitions live in their own
+        table (`embedded::shipped_kind_definitions()`: the library's two plus
+        `schema-trigger.yaml`), not in `embedded::SHIPPED` as the plan said.
+        `SHIPPED` is the catalog-and-partials set behind `Name@darkmatter:` and
+        an exact-table test; mixing the kind definitions in would make them look
+        like importable partials. Alternative: append to `SHIPPED`. Redo cost:
+        one table entry and the table test.
+    - |-
+        Phase 4: an unreadable schema root makes every document with a string
+        `kind` a selection error (`RootUnreadable`), even one a healthy shipped
+        definition claims, because the unread root could hold a duplicate
+        claim. Documents without a `kind` are unaffected. The plan listed the
+        cause but not which documents it reaches. Alternative: only unclaimed
+        kinds are affected (like an incomplete registry). Redo cost: one branch
+        in `yaml_documents/select.rs` and one test.
+    - |-
+        Phase 4: a file in a schema root that is not valid YAML counts as a
+        failed definition (registry incomplete) only when a lexical scan shows
+        it declaring `kind: yaml-schema` at the top level (the same scanner
+        trigger discovery uses for `kind: schema-trigger`). An unrelated broken
+        YAML file, such as a mid-edit trigger, does not make every unclaimed
+        kind "unavailable". The plan's matrix said "malformed YAML in a root
+        reveals nothing -> unavailable" without this qualification. Alternative:
+        any malformed YAML file marks the registry incomplete. Redo cost: one
+        line in `registry.rs::Candidate::classify` and one test.
+    - |-
+        Phase 4: the `schema` kind check does not move the category checks out
+        of the library parser (plan rule 22 said "moved from
+        check_named_types"); it runs the library's own parse
+        (`parse_standalone_schema_document`) and then resolves the document's
+        named-type imports (`check_standalone_named_types`), reporting the
+        first failure as a located `kind_check` problem. Phase 3 kept those
+        checks in the library so direct library loads keep enforcing them;
+        moving them would have dropped that. Alternative: move them and have
+        library loads skip them. Redo cost: `semantic.rs::schema_checks` plus the
+        library parser.
+    - |-
+        Phase 4: trigger grammar errors are located after the fact:
+        `TriggerMatch` gained `span`, but the grammar's constructors still pass
+        `None`; `triggers::envelope::locate_trigger_error` reads the field the
+        message already starts with (`` `match.all[0].$path`: ``, written only by
+        the grammar's own `located` helper) and looks it up in the document's
+        position map. Threading positions through every grammar function would
+        have touched ~20 constructors for the same result. Errors without a
+        field (unknown envelope keys, mixed mappings) are located at `match` or
+        the root. Alternative: pass node spans into each constructor. Redo cost:
+        the grammar module's constructors and `trigger_error_segments`.
+    - |-
+        Phase 4: the YAML route validates with no template deferral at all: a
+        `{{ ... }}` string nested at a place the schema marks `deferred` is
+        judged as text too (Markdown frontmatter defers those). The spec says
+        these strings are ordinary YAML data. Alternative: keep deferral at
+        `deferred` places. Redo cost: one argument in
+        `EffectiveSchema::validate_data`.
+    - |-
+        Phase 4: the failed-definition, duplicate, and unavailable selection
+        errors carry the definition's defect as text (`defect: String` in
+        `KindSelectionCause`), not the typed `SchemaError`, so the cause stays
+        `Clone + PartialEq` for tests and rendering. The typed defect is still
+        available from `KindRegistry::claim` / `incomplete`. Redo cost: the
+        enum's field types and their Display.
+    - |-
+        Phase 4: the duplicate-key load error is located where the YAML parser
+        reports it (the start of the mapping holding the key), not on the
+        second occurrence. The parser gives no other position, and the
+        position map cannot represent a mapping with a repeated key. Redo cost:
+        a lexical scan for the repeated key in `yaml_documents/load.rs`.
+    - |-
+        Phase 5: to tell a YAML file's own load error (exit 3) from a load error
+        of the schema file its `$schema` names (exit 2), the library entry point
+        gained a two-step form, `LoadedYamlDocument::load` then
+        `validate_loaded_yaml_document`; `validate_yaml_document` still does
+        both. The previous phase suggested comparing the error's file path with
+        the document's path, which misclassifies a document whose `$schema`
+        names a file at that same path, or a dedicated error variant, which
+        would add a loader-only variant to the shared `SchemaError` enum. Redo
+        cost: the CLI's `validate_yaml` and one library test.
+    - |-
+        Phase 5: an argument that does not open has no resolved path, so the
+        preflight judges whether it is YAML by its spelling (`missing.yaml`).
+        That decides whether a batch "has YAML" (the exit-64 checks) and
+        whether the baseline is loaded. The plan only says "classify by the
+        resolved path". Alternative: treat an unopened argument as Markdown,
+        which would load (and possibly fail on) the baseline for a batch of
+        only YAML names. Redo cost: one expression in `run_validate`.
+    - |-
+        Phase 5: the JSON record's `schema` field for a YAML file is what
+        validated it (`YamlValidation::definition`): the definition label such
+        as `built-in simplified-schema/schemas/schema.yaml` on the kind route,
+        the `$schema` reference, or the text "the inline `$schema`" for an
+        inline one. For Markdown it is the document's `$schema` string or null.
+        Alternative: null on the kind route and for inline schemas, matching
+        Markdown exactly. Redo cost: one match in `validate_yaml`.
+    - |-
+        Phase 5: a YAML load error is reported as "is not a valid YAML
+        document:" with the parser's message and `(at line L, column C)` from
+        the span (JSON `error: "yaml_parse"` plus `line`/`column`), and a file
+        that cannot be read is the same outcome (exit 3) without a location.
+        Redo cost: wording in `emit_pretty`/`emit_json`.
 message_to_agent: |-
-    Phase 3 is complete. The library now admits every standalone envelope
-    against its compiled definitions (`simplified_schema::envelope`:
-    `ENVELOPE_DEFINITIONS`, `admit_envelope_text`, `EnvelopeAdmission`), and
-    `kind: yaml-schema` is a standalone envelope (`StandaloneSchemaEnvelope::YamlSchema`)
-    refused as a `$schema` target / import source with
-    `NotASchemaDocument { reason: NotSchemaReason::SelectedByKind }` (not a new
-    SchemaError variant). The library definitions moved to
-    `simplified-schema/schemas/{schema,yaml-schema}.yaml`; `darkmatter/schemas/schema-trigger.yaml`
-    is still Darkmatter's (now closed, `$schema: schema(non-null)`, no
-    description/categories because the trigger parser rejects them). For phase 4:
-    prepare a yaml-schema's export with
-    `simplified_schema::resolve::prepare_embedded_yaml_schema(path, documents, shipped)`
-    then `claimed_values(&resolved, "kind")` (a test already shows the three shipped
-    files claim `schema`, `yaml-schema`, `schema-trigger`). There is no file-based
-    yaml-schema preparer yet (filesystem candidates that import a `kind: schema`
-    file need one; add it beside `prepare_embedded_yaml_schema` in resolve.rs rather
-    than calling `prepare_embedded_schema`, which refuses yaml-schemas). Use
-    `envelope::admit_envelope_text` for the located definition report of a whole
-    YAML file (problems carry line/column; `positions.byte_range(problem)` gives the
-    span). The darkmatter corpus class for schema-trigger.yaml is
-    `YamlSchemaDefinition` in shipped_schema_corpus.rs. Phase 2's edits are still
-    uncommitted in the working tree alongside phase 3's.
+    Phase 5 is complete: `md schema validate` routes `.yaml`/`.yml` (resolved path,
+    ASCII case-insensitive) through the library. The library entry point now has a
+    two-step form: `LoadedYamlDocument::load(text, path)` (the ONLY place a document's
+    own load error comes from) and `DarkmatterSchemas::validate_loaded_yaml_document(&loaded)`
+    (selection/schema errors only); `validate_yaml_document` is both in one and is
+    unchanged. Use the two steps in DMLS when you must tell "the open YAML file is not
+    valid YAML" (publish the loader error once, skip validation) from "its `$schema`
+    names a file that fails to load" (both are `SchemaError::SchemaDocument`). All
+    four `docs/topics/schemas/*.md` pages now describe the CLI as shipped; the only
+    remaining **planned** markers for this feature are DMLS ones: definition.md
+    ("YAML Documents" intro: "DMLS diagnostics, completion, and hover inside YAML files
+    are **planned**") and schema-triggers.md ("DMLS reporting these errors in the open
+    trigger file is **planned**"). Remove them when DMLS lands. The skill
+    `.claude/skills/darkmatter/schema.md` ("Whole YAML documents") still says DMLS
+    does not call the entry point yet; update it.
+source_files_during_phase_4:
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+    - darkmatter/lib/tests/l1/kind_semantic_checks.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+    - darkmatter/lib/tests/l1/yaml_document_loading.rs
+    - darkmatter/lib/tests/l1/yaml_document_selection.rs
+    - darkmatter/lib/tests/l1/yaml_kind_registry.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/index.md
+    - darkmatter/docs/topics/schemas/schema-discovery.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - simplified-schema/docs/topics/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_yaml.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+    - darkmatter/lib/tests/l1/yaml_document_loading.rs
+docs_updated_during_phase_5:
+    - darkmatter/cli/README.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/schema-discovery.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/darkmatter/schema.md
 ---
 
 # Implementation Log for 2026-10-30-yaml-document-schemas (7 phases)
@@ -704,4 +857,278 @@ locator, whose contract is `Option` (the classifier reports the error).
   3244/3244 passed.
 - Cross-OS: not run. No path, process, or OS-specific code was added (only
   `/`-joined virtual-path constants and a relative `include_str!`).
+- No load-sensitive or pre-existing failures observed.
+
+## Phase 4
+
+### 4.1 Shipped table
+
+- `embedded.rs`: `SCHEMA_TRIGGER_DEFINITION_PATH` and `shipped_kind_definitions()`, the
+  library's `ENVELOPE_DEFINITIONS` plus `include_str!` of
+  `darkmatter/schemas/schema-trigger.yaml`. Kept separate from `SHIPPED` (the
+  catalog/partials table behind `Name@darkmatter:`); decision recorded.
+  `schema-trigger.yaml` already had its final text from phase 3.
+
+### 4.2 Load, selection, entry point
+
+- New module `darkmatter/lib/src/markdown/schemas/yaml_documents/`
+  (`mod.rs`, `load.rs`, `registry.rs`, `select.rs`, `semantic.rs`; the
+  plan's `validate.rs` content lives in `mod.rs`).
+- `DarkmatterSchemas::validate_yaml_document(text, path) -> Result<YamlOutcome, SchemaError>`,
+  `with_kind_registry(Arc<KindRegistry>)`; `YamlOutcome::{NoSchema, Validated(YamlValidation)}`,
+  `YamlValidation { route, report, definition }` with `byte_range(problem)`;
+  `Route::{Kind(String), RootSchema}`. Re-exported from `markdown::schemas`.
+- `EffectiveSchema::for_yaml_document` (no baseline, no triggers) and
+  `EffectiveSchema::validate_data` (soft copy, no template deferral: nested
+  templates at `deferred` places are judged too).
+- Loader: strips one BOM (offset kept for spans; BOM+CRLF parsed fine),
+  `load_admitted_yaml` (duplicate keys, second document, numbers), plus a
+  non-string-key walk; `---`/`...` accepted.
+- Library (`simplified-schema`): `SchemaError::KindSelection { kind, cause: KindSelectionCause }`
+  (Display + terminal rendering), `ValidationProblemCode::KindCheck` with
+  `SCHEMA_KIND_CHECK_CODE = "dm.schema.kind_check"`, and
+  `resolve::prepare_yaml_schema_text` (the file/text-based yaml-schema
+  preparer the phase-3 message asked for). DMLS `codes::SCHEMA_KIND_CHECK`
+  and its `classify` arm were added so DMLS compiles (error severity).
+
+### 4.3 Registry
+
+- `KindRegistry::{build, from_filesystem, shipped, claim, claims, incomplete,
+  root_failures, roots, dependencies, searched_locations}`; `RegistryScope::{ShippedOnly, WithRoots, for_context}`;
+  `Claim::{Healthy, Duplicate, Reserved}`; `DefinitionSource::{Shipped, File}`.
+  Build never fails. Shipped definitions prepared once per process.
+- Candidate = parsed top-level `kind: yaml-schema`, or unparseable text the
+  trigger envelope's lexical scanner (generalized to
+  `triggers::envelope::lexically_declared_kind`) shows declaring it.
+- Source-path identity: file path relative to `repository_root()` after
+  `canonicalize_simplified` on both sides, compared as `/`-joined normal
+  components.
+- The context-construction guard rejected an `Option<&FileResolutionContext>`
+  in my first draft; restructured into a private `Builder` whose `discover`
+  takes a required context.
+
+### 4.4 Semantic checks
+
+- `semantic.rs`: `schema` (library parse + `check_standalone_named_types`),
+  `schema-trigger` (`parse_trigger_envelope` on the loaded value),
+  `yaml-schema` (`prepare_yaml_schema_text` + `claimed_values`). Problems are
+  `KindCheck`, located by instance path through the document's `PositionMap`
+  or by the library's span.
+- `SchemaError::TriggerMatch` gained `span`; constructors pass `None`;
+  `triggers::envelope::locate_trigger_error` fills it from the message's
+  leading `` `field` `` (`trigger_error_segments`), and Markdown discovery
+  (`scan_with_source`) now locates the cause and positions the finding
+  (`InvalidTriggerFinding::located_in`). Warning severity there is unchanged.
+
+### 4.5 Guard + corpus
+
+- `shipped_schema_corpus.rs`: `every_shipped_yaml_schema_definition_is_in_the_shipped_table`
+  and `every_kinded_schema_artifact_passes_its_definition_through_the_registry`
+  (one context per corpus folder, real checkout, no home; asserts no duplicate
+  claims and that `darkmatter/schemas` uses the checkout copy of
+  `schema-trigger.yaml`). 1.5 s.
+- `meta_schema_phase*.rs`, `trigger_spelling_guard.rs`,
+  `schema_language_ownership_guard.rs` needed no change (all guard tests pass).
+
+### Checkpoint 4 ad-hoc check
+
+A temporary test validated `messenger/docs/platforms.yaml` with its `---`
+lines removed through `validate_yaml_document`: route `RootSchema`, valid;
+`roster_version: two` fails at line 20, column 17 ("1 was expected"). The
+test was removed afterwards (phase 7 owns the data file and its CLI check).
+
+### Requirement → test mapping
+
+| Requirement | Tests (darkmatter `lib/tests/l1/` unless noted) |
+|---|---|
+| Shipped registry claims `schema`, `yaml-schema`, `schema-trigger`; each shipped file passes `yaml-schema.yaml` (itself included) | `yaml_kind_registry::the_shipped_registry_claims_…`, `…each_shipped_definition_validates_against_the_shipped_yaml_schema_definition` |
+| Claim in each of the five roots (home via the fixture `HOME`) | `yaml_kind_registry::a_definition_in_each_of_the_five_roots_claims_its_kind` |
+| Duplicate naming both files, order-independent; repo file claiming a shipped kind; shipped filename elsewhere | `…two_definitions_claiming_one_kind_are_a_duplicate…`, `…a_repository_file_claiming_a_shipped_kind_is_a_duplicate`, `…a_copy_with_the_shipped_file_name_elsewhere_is_a_duplicate` |
+| Same filename, different definition still a candidate; exact-case kinds | `…a_same_named_file_in_a_later_root_is_still_a_candidate`, `…kinds_compare_exactly_including_case` |
+| Modified checkout copy replaces the built-in and changes validation with no Rust change (acceptance) | `…a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition`; copy claiming another kind: `…is_an_ordinary_candidate` |
+| Ruling 9: reserved claim (exit-2 error naming file; others unaffected; defect reported once in the file) | `…a_definition_that_fails_to_import_reserves_its_inline_claim` |
+| Ruling 9: malformed definition → unavailable for unclaimed kinds only; unrelated broken file ignored; unreadable root (unix) | `…malformed_yaml_that_claims_yaml_schema_makes_unclaimed_kinds_unavailable`, `…an_unrelated_malformed_file_in_a_root_leaves_the_registry_complete`, `…an_unreadable_root_is_an_error_never_an_empty_registry` |
+| `ShippedOnly` outside a repository | `…a_registry_built_outside_a_repository_holds_the_shipped_kinds_only` |
+| `kind: string` fails on the `kind` line; root-union claims and an optional arm | `…a_yaml_schema_whose_kind_is_a_plain_string_fails_on_the_kind_line`, `…root_union_definitions_claim_each_arm_s_kinds_and_reject_an_optional_arm` |
+| Registry reuse, dependencies, searched locations | `…a_registry_can_be_shared_by_every_document_of_its_context` |
+| Document shapes (loader matrix) | `yaml_document_loading::*` (9: control, duplicate key, non-string key, inadmissible number, malformed, second document, markers, BOM/CRLF/BOM+CRLF/Unicode spans, scalar/sequence/empty roots) |
+| Route precedence; `darkmatter.yaml` and triggers judged by their definition only | `yaml_document_selection::a_claimed_kind_wins…`, `…the_global_catalog_is_validated_as_a_schema_document…`, `…a_trigger_is_validated_by_its_definition_never_against_its_payload`, `…an_unclaimed_kind_falls_back…` |
+| Fallback `$schema` stripped from the copy only; positions unchanged | `…the_fallback_schema_is_stripped_from_the_validation_copy_only` |
+| No baseline/trigger layering | `…no_baseline_or_trigger_layer_applies_to_a_yaml_document` |
+| Soft conversion, nothing written back; `{{ }}`/`$()` are data | `…validation_is_soft_and_writes_nothing_back`, `…template_and_shell_strings_are_data` |
+| `kind` field shapes; fallback `$schema` field shapes (null, "", number, boolean, `[123]`, `["a", 123]`; every valid form; trigger file refused) | `…a_kind_that_is_not_a_string_claims_nothing`, `…a_present_but_invalid_fallback_schema_is_a_schema_error…`, `…every_valid_fallback_schema_form_is_a_contract`, `…a_fallback_schema_naming_a_trigger_file_is_refused` |
+| `non-null` wiring of `description`/`categories`/`types`/`$schema` (yaml-schema) and `$schema` (trigger) | `…null_metadata_and_payloads_fail_the_shipped_definitions_on_their_line` |
+| Semantic checks: glob on the glob, empty/vacuous match, `min-match` bounds, undeclared category, unresolvable import, definition failure stops checks, user kind has none | `kind_semantic_checks::*` (9) |
+| Markdown discovery keeps the warning, now positioned | `trigger_discovery_recovery::an_invalid_path_glob_is_a_finding_positioned_on_the_glob` |
+| Guard: every on-disk `yaml-schema` is in the shipped table | `shipped_schema_corpus::every_shipped_yaml_schema_definition_is_in_the_shipped_table` |
+| Corpus through the registry with source-path identity, no manufactured duplicates | `shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry` |
+| File-based yaml-schema preparer; `KindSelection` message | simplified-schema `yaml_schema_envelope::files::a_yaml_schema_on_disk_prepares_its_export_with_file_imports`, `yaml_schema_envelope::a_kind_selection_error_names_the_kind_and_its_cause` |
+
+Fidelity: F1 in-process at the crate's public API (`validate_yaml_document`,
+`KindRegistry`) over real temp-dir files and the real shipped definitions;
+the corpus test reads the real checkout. The CLI and DMLS boundaries are
+phases 5 and 6 (no surface calls the entry point yet), so no spawned-binary
+test belongs to this phase.
+
+Input robustness: one loader (`load.rs`), document shapes tested once in
+`yaml_document_loading.rs`. Field validators: selection `kind` (`select.rs`,
+every shape), fallback `$schema` (the frontmatter resolver, every shape),
+`non-null` (the coercion engine, phase 2) wired per field, closed roots
+(phase 2) wired through the roster and trigger definitions. Exceptions to
+the default outcome: absent/null/non-string/empty `kind` claims nothing;
+scalar/sequence/empty roots are `NoSchema`; markers, BOM, CRLF accepted.
+Code-smell grep over `yaml_documents/*` and `triggers/envelope.rs`: no
+`serde(default)`; the `unwrap_or_default`/`.ok()` hits are on non-load-bearing
+paths (an already-string key, a non-repository path, an `enum` with no
+members, a `u32` overflow).
+
+### 4.6 Docs
+
+Documentation subagent: `darkmatter/docs/topics/schemas/definition.md` (new
+"YAML Documents" section: selection flowchart, loading, validation, kind
+checks, selection errors, library API), `authoring-schemas.md` ("Defining a
+YAML Document Kind"), `schema-discovery.md` (was an empty stub: discovery of
+kind definitions, claims vs shadowing, source-path identity, failure policy),
+`schema-triggers.md` (two severities; where a failure is positioned). I then
+corrected `index.md`'s stale entry for Schema Discovery and added
+`KindCheck`/`KindSelection`/`TriggerMatch.span` to
+`simplified-schema/docs/topics/diagnostics.md`. The `md schema validate` and
+DMLS YAML surfaces are marked **planned** (phases 5 and 6).
+`darkmatter/docs/errors/` was left alone (selection errors do not fit its one
+page). The agent noticed that a vacuous trigger's discovery warning had no
+position although the in-file kind check locates it; fixed in code
+(`triggers::envelope::trigger_error_span`, used by
+`InvalidTriggerFinding::located_in`) with
+`trigger_discovery_recovery::a_vacuous_match_is_a_finding_positioned_on_the_match_value`.
+An existing contract (`invalid_triggers::a_trigger_failure_without_a_position_reports_no_source`)
+keeps errors that name no node (unknown envelope keys) unpositioned.
+
+### Gates (run once each, after all edits, no subagent running)
+
+- `simplified-schema`: `just test` 1396/1396 + minimal leg 1209/1209;
+  `just lint` clean (re-run after the last test edit).
+- `darkmatter`: `just test` 12954 passed, 10 skipped, 0 failed (one run);
+  `just lint` clean; `just check-tier-coverage darkmatter` and
+  `simplified-schema`: 0 stranded.
+- After the gates, one test-only edit (Windows path comparison below); its
+  18 tests re-run on macOS and passed.
+- Affected scope (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [darkmatter, dmls, simplified-schema, test-toolkit, darkmatter-cli]`,
+  `change_class: package`; gates required and run.
+- Dependents: `cargo check --all-targets -p claudine -p claudine-gen -p claudine-cli -p messenger -p messenger-cli -p research`
+  clean; `cargo nextest run -p claudine -p claudine-cli -E 'test(/schema|trigger|finding|composition|envelope/)'`
+  3704/3704 passed.
+- Cross-OS (path comparison in source-path identity): `just cross-check darkmatter --os windows`
+  over `yaml_ kind_semantic shipped_schema_corpus trigger_discovery_recovery trigger_envelope schema_roots`:
+  297/298 on the first attempt. The failure was the test comparing the
+  definition label (`repo\darkmatter\schemas\…`) with a display string built
+  by `join("darkmatter/schemas/…")` (mixed separators); production identity
+  worked. Fixed by comparing as paths; attempt 2 (`yaml_kind_registry`):
+  17/17 passed. (A first invocation with a `-E 'test(/…/)'` filterset failed
+  in the remote shell's quoting before running anything; pass substrings.)
+- No load-sensitive or pre-existing failures observed.
+
+## Phase 5
+
+### 5.1 Preflight and routing (`cli/src/commands/schema/validate.rs`, `args/target.rs`)
+
+- A preflight opens every argument (`open_argument`) before any validation or
+  output and classifies it as YAML by the resolved path's extension
+  (`.yaml`/`.yml`, ASCII case-insensitive; an unopened argument by its
+  spelling, see decisions). With any YAML input, an assignment or `--schema`
+  exits `64` with nothing on stdout.
+- The baseline (`load_api`) is loaded only when some input is not YAML; a
+  YAML-only batch builds a bare `DarkmatterSchemas` at the launch context.
+  `--disable baseline-schema` / `schema-triggers` are accepted and inert for
+  YAML (the registry ignores trigger disablement, rule 18).
+- `validate_yaml` reads the file, loads it with the new
+  `LoadedYamlDocument::load` (failure → new `FileOutcome::YamlLoadError`,
+  exit 3, pretty "is not a valid YAML document" with `(at line L, column C)`
+  from `simplified_schema::line_col_of_offset`, JSON `error: "yaml_parse"` +
+  `line`/`column`), re-anchors the API on the document context, and calls
+  `validate_loaded_yaml_document`: `NoSchema` → the Markdown no-schema record,
+  problems → exit 1, any error → `SchemaError` (exit 2). Precedence 3 > 2 > 1
+  unchanged. JSON problem `kind` is `kind_check` for `ValidationProblemCode::KindCheck`.
+- **Departure from the plan (library API):** the plan/previous phase left load
+  vs. schema error classification to the CLI (compare paths). A referenced
+  schema's load error is also a `SchemaDocument`, so the entry point was split:
+  `LoadedYamlDocument::load` + `DarkmatterSchemas::validate_loaded_yaml_document`
+  (`validate_yaml_document` = both; signature unchanged). Recorded in
+  `decisions_for_review`.
+- Help text for `schema validate` and its `inputs` names Markdown or YAML.
+- Manual Definition-of-Done check: `md schema validate
+  darkmatter/schemas/schema-trigger.yaml simplified-schema/schemas/schema.yaml
+  simplified-schema/schemas/yaml-schema.yaml` exits 0 (all three "has a schema
+  definition and is valid").
+
+### 5.2 Tests
+
+Requirement → test (`darkmatter/cli/tests/l1/schema_validate_yaml.rs`, F3 spawn of
+the real `md`, L1; 18 tests, declared in `cli/tests/l1/main.rs`):
+
+| Requirement | Test |
+|---|---|
+| kind route control (shipped kind) → 0 | `a_claimed_shipped_kind_validates_against_its_definition` |
+| kind definition failure → 1, located | `a_kind_definition_failure_exits_1_located_on_the_value` (line 2, column 8) |
+| kind semantic check → 1, JSON `kind_check` with path/line/column | `a_kind_semantic_check_failure_exits_1_as_a_kind_check_record` |
+| repository claim selects definition (control + roster break → 1 located) and duplicate claim → 2 naming both files | `a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_2` |
+| reserved kind → 2 naming the definition | `a_kind_reserved_by_a_failed_definition_exits_2_naming_the_definition` |
+| root `$schema` control (soft `"8080"`, file not rewritten) + failure → 1 located | `a_root_schema_validates_softly_and_a_failure_exits_1_located_on_the_value` |
+| no schema → 0, JSON record `schema: null`, no `error` | `a_document_without_kind_or_schema_is_valid_and_its_json_record_says_no_schema` |
+| bad `$schema` reference → 2 | `an_unresolvable_root_schema_reference_exits_2` |
+| referenced malformed schema → 2, not 3 | `a_root_schema_naming_malformed_yaml_exits_2_not_3` |
+| malformed YAML → 3, located, JSON `yaml_parse` with line/column | `malformed_yaml_exits_3_located_and_reported_as_yaml_parse` |
+| `---`/`...` markers are YAML, not fences | `leading_and_trailing_document_markers_are_yaml_not_frontmatter` |
+| `.YAML` / `.Yml` route as YAML | `upper_and_mixed_case_extensions_route_as_yaml` |
+| `@` reference resolving to YAML | `a_magic_reference_resolving_to_a_yaml_file_routes_as_yaml` |
+| assignment + YAML → 64, stdout empty, earlier Markdown file unchanged | `an_assignment_with_a_yaml_input_exits_64_before_any_file_is_validated` |
+| `--schema` + YAML → 64 | `a_custom_baseline_with_a_yaml_input_exits_64` |
+| broken `BASELINE_SCHEMA` ignored for YAML-only; loaded (exit 2) once Markdown joins | `a_yaml_only_batch_never_loads_the_baseline` |
+| `--disable baseline-schema` accepted | `disabling_the_baseline_is_accepted_with_a_yaml_input` |
+| mixed batch precedence 1 / 2 / 3 | `a_mixed_batch_exits_with_the_most_specific_failure` |
+
+Library (in-process, `darkmatter/lib/tests/l1/yaml_document_loading.rs`):
+`loading_and_validating_are_separate_steps_so_a_referenced_files_load_error_is_not_the_documents`
+proves the two-step API: the one-call form fails with `SchemaDocument` for a
+referenced malformed schema, the document itself loads, the validate step
+fails naming `contract.yaml`, and a malformed document fails the load step
+naming the document. The document-shape and field-shape matrices stay in the
+Phase 4 library suites; the CLI spawns only for wiring (control + one invalid
+per route/loader), per the matrix rules.
+
+Code-smell grep (`serde(default)`, `unwrap_or_default()`, `.ok()`,
+`filter_map(.. as_str())`) over `validate.rs` and `yaml_documents/mod.rs`: none.
+
+### 5.3 Docs and skills
+
+- `docs/topics/schemas/definition.md`: new "YAML Documents on the Command
+  Line" section (routing, no baseline/triggers, preflight 64s, exit 3/2/1,
+  `kind_check`, `schema` field), the CLI table row, exit-code table, JSON
+  `error`/`kind` values, and `LoadedYamlDocument` in "Validating from the
+  Library". The "planned" markers for the CLI are removed from
+  definition.md, authoring-schemas.md, schema-discovery.md, schema-triggers.md;
+  DMLS markers remain (Phase 6).
+- `docs/cli/{index,policy,report-json}.md`: resolved-path routing, inert
+  `--disable` ids for YAML, link to the JSON record docs.
+- `cli/README.md`: a short "Schema Validation" overview with a link.
+- Skills: `.claude/skills/darkmatter/cli.md` (the YAML route),
+  `.claude/skills/darkmatter/schema.md` (two-step API; md now calls it).
+
+### Gates (run once each, after all edits)
+
+- Targeted: `cargo nextest run -p darkmatter-cli --test l1 -E 'test(schema_validate_yaml)'`
+  18/18; `cargo nextest run -p darkmatter --test l1 -E 'test(yaml_document_loading)'` 10/10.
+- `darkmatter`: `just lint` clean (exit 0); `just test` 12973 passed, 10
+  skipped, 0 failed, in one run; `just check-tier-coverage darkmatter`: 0 stranded.
+- Affected scope (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [darkmatter, darkmatter-cli, dmls, simplified-schema, test-toolkit]`,
+  `change_class: package` (the tree still holds Phase 4's uncommitted work);
+  gates required and run.
+- Dependents: the library change is additive (`LoadedYamlDocument`,
+  `validate_loaded_yaml_document`; `validate_yaml_document` behaves as
+  before), so `cargo check --all-targets -p claudine -p claudine-cli -p messenger -p research`
+  (clean) was the downstream check; no dependent test touches the new API.
+- Cross-OS: not run. The new code's only path logic is an extension
+  comparison and the `canonicalize_simplified` call the Markdown route
+  already uses; no new path comparison.
 - No load-sensitive or pre-existing failures observed.

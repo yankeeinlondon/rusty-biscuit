@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-31
-phase: 4
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -146,6 +146,66 @@ skills_files_updated_during_phase_2:
 - .claude/skills/darkmatter/schema.md
 - .claude/skills/simplified-schema/SKILL.md
 - .claude/skills/simplified-schema/declaration-narrowing.md
+source_files_during_phase_4:
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schema_roots.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/l1/yaml_document_selection.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+docs_updated_during_phase_4:
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/index.md
+- darkmatter/docs/topics/schemas/schema-discovery.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- simplified-schema/docs/topics/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_validate_yaml.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+docs_updated_during_phase_5:
+- darkmatter/cli/README.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/report-json.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/schema-discovery.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Plan: Schemas for YAML Documents
@@ -765,28 +825,28 @@ Prerequisite: Phase 3. Rules 17–24.
 
 **Wave 1**
 
-- [ ] **4.1 Shipped table and `schema-trigger.yaml`**
+- [x] **4.1 Shipped table and `schema-trigger.yaml`**
     - Rule 24: `include_str!` entry in `embedded.rs::SHIPPED`; re-export library definitions; rule 16 final text for `schema-trigger.yaml`.
     - Tests: `yaml_kind_registry.rs` control: the shipped registry holds claims `schema`, `yaml-schema`, `schema-trigger`; each shipped file validates against the shipped registry, `yaml-schema.yaml` against itself (ruling 2 L1 test).
 
 **Wave 2** (parallel; different files)
 
-- [ ] **4.2 Load + selection + entry point**
+- [x] **4.2 Load + selection + entry point**
     - Rules 20–21: `load.rs`, `select.rs`, `validate.rs`, `DarkmatterSchemas::validate_yaml_document`, `with_kind_registry`; `SchemaError::KindSelection`.
     - Tests (`yaml_document_loading.rs`, `yaml_document_selection.rs`): the full document-shape and field-shape matrices above; route precedence (claimed kind wins, root `$schema` is an ordinary property; `darkmatter.yaml` never validated against its exported globals; a trigger never against its payload); fallback `$schema` stripped from the copy only; no baseline/trigger layering (a `title`/`content_policy` property has only the selected schema's meaning); soft conversion (`"8080"` passes, `"2.5"` for `number(integer)` fails, nothing written back); `{{ 1 }}`/`$(x)` in numeric property fails, in string property passes; spans against original text including BOM/CRLF/Unicode; unrecognized kind with a complete registry → `NoSchema`.
-- [ ] **4.3 Registry build, claims, failures**
+- [x] **4.3 Registry build, claims, failures**
     - Rules 18–19, 23: discovery over `SchemaRootSource`, duplicate/reserved/incomplete states, source-path identity, root failures.
     - Tests (`yaml_kind_registry.rs`): claim in each of the five roots; two claims of one kind → error naming both files, independent of root order; a repo file claiming a shipped kind → duplicate; a modified copy at the shipped relative path **replaces** it and changes validation with no Rust change (acceptance); same filename, different definition is still a candidate; exact-case kinds; ruling-9 matrix (fails to import → reserved, exit-2 error naming the file; malformed YAML reveals nothing → `Unavailable` for unclaimed kinds, claimed kinds and no-kind documents unaffected; unreadable root (permissions on unix, `#[cfg(unix)]`) → error not empty registry); symlink/case-fold rules inherited; `~/schemas` via the test context's home; `ShippedOnly` scope; a `yaml-schema` whose `kind: string` fails on the `kind` line; the root-union cases of the constructor-narrowing acceptance bullet.
-- [ ] **4.4 Semantic checks with spans**
+- [x] **4.4 Semantic checks with spans**
     - Rule 22: `semantic.rs`, `TriggerMatch.span`, `ValidationProblemCode::KindCheck`; Markdown trigger discovery keeps warnings with the now-located message.
     - Tests (`kind_semantic_checks.rs`): invalid `$path` glob located on the glob; empty/vacuous `match`; `min-match` count bounds; undeclared category; definition failure stops semantic checks; semantic problems are errors in-file and warnings in `trigger_discovery_recovery.rs`-style Markdown discovery (extend that test); one report object serves both consumers.
-- [ ] **4.5 Guard + corpus**
+- [x] **4.5 Guard + corpus**
     - Guard (rule 24) in `shipped_schema_corpus.rs`; extend the corpus test so every shipped and repository schema, trigger, and `yaml-schema` document passes its definition via the registry using source-path identity, producing no manufactured duplicates.
     - Reconcile `meta_schema_phase*.rs`, `trigger_spelling_guard.rs`, `schema_language_ownership_guard.rs` for the new modules.
 
 **Wave 3**
 
-- [ ] **4.6 Library docs**
+- [x] **4.6 Library docs**
     - `darkmatter/docs/topics/schemas/definition.md` (selection flow with the spec's Mermaid chart), `authoring-schemas.md` (writing a `yaml-schema`, from the shipped files), `schema-discovery.md`, `schema-triggers.md` (semantic severity), `docs/errors/...` where selection errors are described.
 
 **Validation checkpoint 4:** `just test` + `just lint` for `darkmatter` green; an ad-hoc library test validates `messenger/docs/platforms.yaml` text (fences removed in a temp copy) through `validate_yaml_document`.
@@ -797,14 +857,14 @@ Prerequisite: Phase 4. Rule 25. Parallel with Phase 6.
 
 **Wave 1** (sequential, one file)
 
-- [ ] **5.1 Preflight and routing**
+- [x] **5.1 Preflight and routing**
     - Implement rule 25 in `validate.rs` (+ `args/target.rs` help/doc text): preflight, `--schema` usage error, baseline skipped for YAML-only batches, registry scope, outcome mapping, JSON records unchanged.
 
 **Wave 2**
 
-- [ ] **5.2 CLI tests** (`cli/tests/l1/schema_validate_yaml.rs`, declare in `main.rs`)
+- [x] **5.2 CLI tests** (`cli/tests/l1/schema_validate_yaml.rs`, declare in `main.rs`)
     - Wiring only (matrix says spawn per loader): per route control + one invalid, asserting rendered line:column and no side effects; exit codes `0` passing/unvalidated, `1` kind semantic check failure, `2` bad `$schema` reference / duplicate claim / reserved kind, `3` malformed YAML; `.YAML`/`.Yml` extensions; `@`-style reference resolving to YAML; `key=value` + YAML → 64 with the earlier Markdown file **not** modified (preflight before writes); `--schema` + YAML → 64; `--disable baseline-schema` accepted; mixed batch precedence 3 > 2 > 1; JSON record for `NoSchema`; baseline env settings ignored for YAML-only (set a broken `BASELINE_SCHEMA`, still exit 0).
-- [ ] **5.3 CLI docs**
+- [x] **5.3 CLI docs**
     - `darkmatter/docs/cli/{index,policy,report-json}.md`, `darkmatter/cli/README.md` (overview + link only), `.claude/skills/darkmatter/cli.md`.
 
 **Validation checkpoint 5:** `just test`/`just lint` in `darkmatter` green (cli crate); manual run of the three definition-file validation command from the Definition of Done exits 0.
