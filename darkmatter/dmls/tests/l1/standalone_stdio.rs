@@ -5,8 +5,6 @@
 //!
 //! `content_policy_baseline` proves the editor features in memory; this file
 //! proves the shipped binary reaches the same schema with nothing on disk.
-//! It also proves the binary publishes a YAML kind document's diagnostics
-//! (`kind_document_editor` covers them in memory).
 
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -296,74 +294,4 @@ fn the_built_server_validates_and_completes_policies_without_schema_files() {
     documents.extend(["complete.md".to_string(), "example.md".to_string()]);
     documents.sort();
     assert_eq!(entries, documents, "the server wrote nothing beside the test documents");
-}
-
-/// A YAML document claimed by a shipped `kind` gets its kind diagnostics over
-/// stdio: `description: 5` in a `kind: schema` file is published as one
-/// `darkmatter.schema` type mismatch on the value, with its instance path.
-#[test]
-fn kind_document_diagnostics_reach_a_stdio_client() {
-    const DOCUMENT: &str = "kind: schema\ndescription: 5\ntypes: {}\n";
-    let fixture = tempfile::tempdir().expect("fixture root");
-    let fixture_root = biscuit_file::canonicalize_simplified(fixture.path()).expect("canonical fixture root");
-    for name in ["cwd", "home", "config", "cache", "data"] {
-        std::fs::create_dir(fixture_root.join(name)).unwrap();
-    }
-    let cwd: PathBuf = fixture_root.join("cwd");
-    let mut child = spawn_server(&fixture_root, &cwd);
-    let mut client = Client {
-        stdin: child.child_mut().stdin.take().expect("child stdin"),
-        reader: BufReader::new(child.child_mut().stdout.take().expect("child stdout")),
-        notifications: Vec::new(),
-        next_id: 0,
-    };
-    let (tx, rx) = mpsc::channel();
-    let root = cwd.clone();
-    let worker = thread::spawn(move || {
-        let mut converse = || -> Result<Vec<Value>, String> {
-            let root_uri = url::Url::from_directory_path(&root).expect("absolute root").to_string();
-            client.request(
-                "initialize",
-                json!({
-                    "processId": null,
-                    "capabilities": { "general": { "positionEncodings": ["utf-16"] } },
-                    "workspaceFolders": [{ "uri": root_uri, "name": "kind" }]
-                }),
-            )?;
-            client.notify("initialized", json!({}));
-            let (_, diagnostics) = client.open(&root.join("shape.yaml"), DOCUMENT)?;
-            client.request("shutdown", Value::Null)?;
-            client.notify("exit", Value::Null);
-            Ok(diagnostics)
-        };
-        let _ = tx.send(converse());
-    });
-    let outcome = rx.recv_timeout(Duration::from_secs(20));
-    if outcome.is_err() {
-        child.terminate();
-    }
-    let _ = worker.join();
-    let status = child
-        .wait_timeout(Duration::from_secs(10))
-        .expect("wait for dmls")
-        .unwrap_or_else(|| {
-            child.terminate();
-            panic!("dmls did not exit within 10 seconds after the exit notification")
-        });
-    let diagnostics = outcome
-        .expect("the conversation finished before the timeout")
-        .unwrap_or_else(|error| panic!("the conversation failed: {error}"));
-    assert!(status.success(), "dmls exited unsuccessfully: {status}");
-
-    let kind: Vec<&Value> = diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic["data"]["instance_path"].is_string())
-        .collect();
-    let [diagnostic] = kind.as_slice() else {
-        panic!("one kind diagnostic: {diagnostics:#?}");
-    };
-    assert_eq!(diagnostic["source"], "darkmatter.schema", "{diagnostic:#}");
-    assert_eq!(diagnostic["code"], "dm.schema.type_mismatch", "{diagnostic:#}");
-    assert_eq!(diagnostic["data"]["instance_path"], "/description", "{diagnostic:#}");
-    assert_eq!(diagnostic["range"]["start"], json!({ "line": 1, "character": 13 }), "{diagnostic:#}");
 }

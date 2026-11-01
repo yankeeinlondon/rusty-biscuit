@@ -76,6 +76,12 @@ enum Class {
     /// ordinary tagged schema document, and its declarations parse and
     /// resolve inline from its own directory.
     GlobalCatalog,
+    /// A YAML document whose top-level `kind` no loader claims (the
+    /// `kind: yaml-schema` definitions): never a standalone schema or a
+    /// trigger, refused as a `$schema` target, and every definition it carries
+    /// parses passively. Its `$schema` may name its own `types`, so it is not
+    /// resolved inline.
+    UnclaimedKind,
     /// A function catalog (`kind: schema` with `categories:` and `function`
     /// types, and no `$schema`): it parses as a standalone schema, but as a
     /// `types`-only document it is never a `$schema` target; each of its
@@ -109,12 +115,44 @@ const fn exception(
 
 /// Every shipped schema artifact that does not load through `$schema: ./file`.
 const EXCEPTIONS: &[Exception] = &[
+    // darkmatter/docs/schemas
+    exception(
+        "darkmatter/docs/schemas",
+        "schema-definition.yaml",
+        Class::Placeholder,
+        "reserved meta-schema name that `err.yaml` declares as its `$schema`",
+    ),
+    exception(
+        "darkmatter/docs/schemas",
+        "err.yaml",
+        Class::EnvelopeRejected,
+        "tagged envelope carries `$schema`, `name`, and `description` header keys",
+    ),
     // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
         "darkmatter.yaml",
         Class::GlobalCatalog,
         "Darkmatter's global catalog, registered explicitly",
+    ),
+    // The `kind: yaml-schema` definitions: no loader claims that kind yet.
+    exception(
+        "darkmatter/schemas",
+        "schema.yaml",
+        Class::UnclaimedKind,
+        "a `kind: yaml-schema` definition, which no envelope parser claims yet",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "schema-trigger.yaml",
+        Class::UnclaimedKind,
+        "a `kind: yaml-schema` definition, which no envelope parser claims yet",
+    ),
+    exception(
+        "darkmatter/schemas",
+        "yaml-schema.yaml",
+        Class::Draft { error: "non-null" },
+        "a `kind: yaml-schema` definition using declaration options the language does not parse yet",
     ),
     exception(
         "darkmatter/schemas",
@@ -762,6 +800,16 @@ fn shipped_schema_artifacts_parse_passively() {
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
             }
+            Class::UnclaimedKind => {
+                assert_eq!(outcome, Ok(None), "{label} is now claimed as a schema; reclassify it");
+                assert!(
+                    matches!(parse_trigger_envelope_from_str(&artifact.source), Ok(None)),
+                    "{label} is now claimed as a trigger; reclassify it",
+                );
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
             Class::EnvelopeRejected => {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
@@ -936,6 +984,11 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     }
                     inline_bodies += 1;
                 }
+            }
+            Class::UnclaimedKind => {
+                let error = resolve_schema_with_roots(&reference, dir, &[], &context)
+                    .expect_err(&format!("{label} now loads; reclassify it"));
+                assert!(matches!(error, SchemaError::SchemaDocument { .. }), "{label}: {error}");
             }
             Class::FunctionCatalog => {
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)
@@ -1604,65 +1657,4 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
         before == fingerprint(inputs.iter().copied()),
         "loading a trigger mutated a fixture"
     );
-}
-
-/// Every repository schema and trigger document the Rust envelope parsers
-/// accept also passes its YAML kind definition
-/// (`DarkmatterSchemas::validate_kind_document`). Files the parsers reject
-/// (placeholders, drafts, rejected envelopes) are outside that contract. A
-/// document that fails here is fixed by correcting the definition, never by
-/// skipping the file.
-#[test]
-fn rust_accepted_kind_documents_pass_their_kind_definition() {
-    let root = repo_root();
-    let dirs = [
-        ("schemas", root.join("schemas")),
-        ("darkmatter/schemas", root.join("darkmatter/schemas")),
-        ("darkmatter/docs/schemas", root.join("darkmatter/docs/schemas")),
-        ("claudine/schemas", root.join("claudine/schemas")),
-        ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
-        ("claudine/docs/research", root.join("claudine/docs/research")),
-        ("content-policy/schemas", root.join("content-policy/schemas")),
-    ];
-    let scratch = tempfile::tempdir().expect("scratch dir");
-    let api = darkmatter::markdown::schemas::DarkmatterSchemas::new(crate::request_support::context_at(scratch.path()));
-    let mut checked = BTreeSet::new();
-    for (label, dir) in &dirs {
-        let files = files_below(dir, "yaml").into_iter().chain(files_below(dir, "yml"));
-        for file in files {
-            let name = format!("{label}/{}", relative(&file, dir));
-            let source = fs::read_to_string(&file).unwrap_or_else(|error| panic!("{name}: {error}"));
-            let Ok(document) = serde_yaml_ng::from_str::<YamlValue>(&source) else {
-                continue;
-            };
-            let accepted = match document.get("kind").and_then(YamlValue::as_str) {
-                Some("schema") => matches!(parse_standalone_schema_document(&source, &file), Ok(Some(_))),
-                Some("schema-trigger") => matches!(parse_trigger_envelope_from_str(&source), Ok(Some(_))),
-                _ => false,
-            };
-            if !accepted {
-                continue;
-            }
-            let validation = api
-                .validate_kind_document(&source, &file)
-                .unwrap_or_else(|error| panic!("{name}: {error}"))
-                .unwrap_or_else(|| panic!("{name}: a Rust-accepted kind document must be claimed"));
-            assert!(
-                validation.report.valid,
-                "{name} passes the Rust `{}` envelope but not its YAML definition: {:#?}",
-                validation.kind,
-                validation.report.problems,
-            );
-            checked.insert(name);
-        }
-    }
-    for required in [
-        "darkmatter/schemas/schema.yaml",
-        "darkmatter/schemas/schema-trigger.yaml",
-        "claudine/schemas/claudine.yaml",
-        "claudine/schemas/inline-compose.yaml",
-        "claudine/schemas/sequence.yaml",
-    ] {
-        assert!(checked.contains(required), "{required} was not checked; checked: {checked:#?}");
-    }
 }

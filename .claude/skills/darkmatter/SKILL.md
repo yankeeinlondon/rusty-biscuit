@@ -120,13 +120,7 @@ classifier is `parse_standalone_schema_document`; it recognizes an informal
 document with `$schema` and/or `types`. A `$schema` target must export
 `$schema` (YAML) or be a JSON object declaring Draft 2020-12; anything else is
 `NotASchemaDocument`/`UnsupportedJsonDialect`/`InvalidJsonSchema`, while a
-`types`-only file still serves `Name@file` imports. A whole YAML file whose
-top-level `kind` is `schema` or `schema-trigger` is also validated against a
-shipped definition (`darkmatter/schemas/schema.yaml`,
-`schema-trigger.yaml`) by `DarkmatterSchemas::validate_kind_document`; those
-definitions own the structure, and the Rust envelope parsers keep only the
-rules the definitions cannot express (see
-[schema.md](schema.md#kind-document-validation-whole-yaml-files)). A loader refusal of a
+`types`-only file still serves `Name@file` imports. A loader refusal of a
 trigger file is reported as `TriggerSchemaReferenced`/`TriggerPayloadCycle`
 (`triggers::assemble::refused_trigger_file`).
 

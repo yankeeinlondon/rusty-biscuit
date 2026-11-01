@@ -28,7 +28,6 @@ mod frontmatter_response_contracts;
 mod full_index_removal_guard;
 mod host_function_diagnostics;
 mod host_globals;
-mod kind_document_editor;
 mod incremental_graph_equivalence;
 mod index_build;
 mod invalid_trigger_warnings;

@@ -141,15 +141,14 @@ In the example above:
       category: enum(good food, yuck, bad before expiry)
   ```
 
-An external schema file is itself a YAML document with a schema: its
-top-level `kind` selects a definition that ships with Darkmatter, and
-`md schema validate` and the language server check the file against it. See
-[External Grammar Files](#external-grammar-files) for both definitions.
+In a moment of "recursive truth" the external schema definition is defined as a schema:
+
+::code ^darkmatter/docs/schemas/schema-definition.yaml
 
 A schema file can export document properties and declare reusable types:
 
 - **pure**: `$schema` holds the export, with an optional sibling `types` mapping
-- **tagged**: `kind: schema` with `types`, a `$schema` export, or both
+- **tagged**: `kind: schema` and `types`, with an optional `$schema` export
 
 Either may also carry a `description` string and a `categories` list, and
 accepts no other keys. When a file has both `$schema` and
@@ -280,16 +279,14 @@ Schema triggers let you choose a schema based on the document and its surroundin
 - Host OS
 - Repository membership or absence
 
-Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. A property condition names a frontmatter property and the type expression its value must satisfy. This trigger defines `foo`, `bar`, and `baz` when one of them is present in the document:
+Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. An `expression` uses normal Darkmatter expression syntax to check document values:
 
 ```yaml
 kind: schema-trigger
+description: defines 'foo', 'bar', and 'baz' when one of them is present in the document
 match:
-    group:
-        - foo: string(required)
-        - bar: string(required)
-        - baz: string(required)
-$schema:
+    - expression: foo || bar || baz
+$schema: 
     foo: string -> my favorite fake thing
     bar: string -> not bad, but no foo
     baz: string -> I wish we could leave him at home
@@ -519,7 +516,7 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    A tagged schema file has `kind: schema` and a `$schema` export, a `types` mapping, or both, an optional `description`, and optionally a [`categories:` list](../../../../simplified-schema/docs/topics/language/schema-documents.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
+    A tagged schema file has `kind: schema`, a `types` mapping, an optional `$schema` export, and optionally a [`categories:` list](../../../../simplified-schema/docs/topics/language/schema-documents.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
     
   ```yaml
   kind: schema
@@ -530,39 +527,27 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Trigger Files (`kind: schema-trigger`)
     
-    The schema _trigger_ file is used to establish a matching pattern that _when matched_ will trigger the schema definition on a given file. Its `match` conditions are required; its `$schema` is optional (a trigger without one only matches).
+    The schema _trigger_ file is used to establish a matching pattern that _when matched_ will trigger the schema definition on a given file.
+    
+    This file follows the following schema definition:
+    
+  ```yaml
+  kind: "const(schema-trigger,required)"
+  match: TODO
+  $schema:
 
-A conditional trigger supplies its schema under `$schema`; a `kind: schema` file supplies it under `$schema`, `types`, or both.
+      - schema
+      - file
 
-Both kinds are defined by YAML documents that ship inside Darkmatter. A YAML
-file is checked against one of them only when its top-level `kind` is exactly
-`schema` or `schema-trigger`; any other `kind`, or none, leaves the file
-unchecked. Each definition is itself a `kind: schema` document and validates
-against the first one.
+  description: |-
+      string -> allows you to describe the intent of this trigger in prose
+  ```
+
+A conditional trigger supplies its schema under `$schema`; a `kind: schema` file supplies it under `types`. The trigger predicate catalog and complete envelope validation rules are still being finalized; these sketches do not establish additional required fields.
 
 #### Schema Definition Files
 
-A `kind: schema` file must carry `$schema`, `types`, or both, so the definition
-is a union of two shapes that differ only in which key is required:
-
-::code ^darkmatter/schemas/schema.yaml
-
 #### Trigger Files
-
-A `kind: schema-trigger` file requires `kind` and `match`. A `match` is one
-expression or a list of expressions that must all hold; an expression combines
-others with `all`, `group` (at least one), `none`, or `min-match`, tests the
-document path with `$path`, or tests a frontmatter property with a type
-expression:
-
-::code ^darkmatter/schemas/schema-trigger.yaml
-
-Some rules are not part of these definitions and are checked by Darkmatter's
-parsers instead: unknown top-level keys are rejected, an explicit `null` for an
-optional key is rejected, `types` must be a mapping, category names must be
-declared, and a trigger's `match` must not be empty and its `$path` globs must
-be valid. See [How a YAML document is validated by its `kind`](./definition.md#how-a-yaml-document-is-validated-by-its-kind)
-for the full list.
 
 ## CLI Grammar Support
 

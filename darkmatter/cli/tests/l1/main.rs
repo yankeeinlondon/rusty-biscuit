@@ -104,7 +104,6 @@ mod schema_validate_baseline_selection;
 mod schema_robustness_matrix;
 mod schema_target_recognition;
 mod schema_validate_core_types;
-mod schema_validate_kind_documents;
 mod schema_grammar_types;
 mod schema_validate_shipped_artifacts;
 mod schema_validate_phase;

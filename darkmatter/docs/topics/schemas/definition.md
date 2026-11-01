@@ -12,7 +12,6 @@ This topic covers how Darkmatter applies schemas: the `$schema` property, the ba
 - A `$schema` frontmatter property that can hold an inline schema, point at a YAML/JSON file, or list a root-level union.
 - A **baseline schema** that every document inherits. Darkmatter ships a built-in one, compiled into the library, which `md compose`, `md schema validate`, and DMLS apply by default.
 - A `md schema validate` CLI subcommand with `pretty` and `json` output.
-- Validation of `kind: schema` and `kind: schema-trigger` YAML files against their shipped definitions; see [How a YAML document is validated by its `kind`](#how-a-yaml-document-is-validated-by-its-kind).
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
 - A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
 - Schema-aware completion hints for downstream shell-completion tooling.
@@ -222,119 +221,6 @@ types:
     person:
         name: string(required)
 ```
-
-## How a YAML document is validated by its `kind`
-
-Markdown frontmatter is validated by the schema a document names. Two kinds of
-YAML file are validated differently: by their top-level `kind`. A YAML file
-whose `kind` is `schema` or `schema-trigger` is checked against a definition
-that ships inside Darkmatter, and you need to write nothing to get that check.
-
-| `kind` | Definition | Describes |
-|---|---|---|
-| `schema` | [`darkmatter/schemas/schema.yaml`](../../../schemas/schema.yaml) | a schema file: a `$schema` export, reusable `types`, or both |
-| `schema-trigger` | [`darkmatter/schemas/schema-trigger.yaml`](../../../schemas/schema-trigger.yaml) | a trigger: `match` conditions and an optional `$schema` |
-
-Both definitions are themselves `kind: schema` documents, so each one is
-checked against the first. The full text of each is shown in
-[External Grammar Files](./authoring-schemas.md#external-grammar-files).
-
-```mermaid
-flowchart LR
-    Y["YAML text"] --> L["load the YAML<br/>(duplicate keys, a second<br/>document, bad syntax fail)"]
-    L --> K{"top-level kind is<br/>schema or schema-trigger?"}
-    K -- no --> N["unclaimed:<br/>no problems, valid by default"]
-    K -- yes --> V["validate the whole mapping<br/>against the kind's definition<br/>(no coercion, $schema kept)"]
-    V --> R["problems with line and column"]
-    R --> M["md schema validate"]
-    R --> D["DMLS diagnostics"]
-    V --> C["DMLS completion and hover"]
-```
-
-### The `kind` claims the definition
-
-Only an exact string match selects a definition. A missing `kind`, `kind:`
-with no value, a number, any other string (including the retired spelling
-`trigger-schema`), and a file whose top level is not a mapping are all
-**unclaimed**: the file has no kind problems, and `md schema validate` reports
-it as valid by default.
-
-```yaml
-# claimed by the `schema-trigger` definition, which requires `match`
-kind: schema-trigger
-$schema:
-    title: string
-```
-
-```text
-- ✗ the document trigger.yaml failed schema validation:
-    - match is a required property (at line 1, column 1)
-```
-
-```yaml
-# unclaimed: no definition has the kind `prompt`
-kind: prompt
-model: opus
-```
-
-### Values are checked as written
-
-Frontmatter validation coerces a value toward its declared type before it
-judges it. A kind document is validated **raw**: a value of the wrong YAML type
-is a problem, never quietly converted.
-
-```yaml
-kind: schema
-description: 5          # a number, not a string: reported at line 2, column 14
-types:
-    title: string
-```
-
-### `$schema` is data
-
-In Markdown frontmatter `$schema` names the schema to apply and is removed
-before validation. In a kind document `$schema` **is** the content being
-described (the schema the file exports, or the schema a trigger applies), so it
-stays in the document and the definition judges it like any other key. A
-`$schema` value of `5` is a problem; a mapping, a list of mappings, or a
-string reference to a schema file is accepted.
-
-### What the definitions do not check
-
-A definition describes structure. A few rules cannot be written in the
-SimplifiedSchema language, so Darkmatter's own parsers of these files still
-check them, and a file can pass its definition and still be rejected:
-
-- **unknown top-level keys**: a root schema always allows extra keys, so
-  `name: x` passes the definition and the parser rejects it;
-- **explicit `null` for an optional key**: `description:` with no value passes
-  the definition, because an optional property accepts `null`, and the parser
-  rejects it;
-- **`types` must be a mapping**: the `schema` type the definition uses also
-  accepts a list;
-- **categories**: the entry grammar (`Name` or `Name -> description`),
-  duplicate names, and `category(...)` constraints that name an undeclared
-  category;
-- **type definitions in `types`**: duplicate overloads and invalid
-  `suggest(...)` candidates;
-- **triggers**: an empty or vacuous `match`, a type in `match` that cannot be
-  checked passively, invalid `$path` globs and forbidden prefixes, `min-match`
-  counts outside their bounds, a null or non-string `kind`, and the retired
-  `any:` combinator.
-
-The reverse never holds: a file the definition rejects is always rejected by
-the parser too.
-
-### Where the check runs
-
-- `md schema validate` accepts `.yaml` and `.yml` files beside Markdown files
-  and validates them this way; see
-  [YAML documents](../../inline/schema-validation.md#yaml-documents).
-- The language server reports the same problems as you edit, and completes and
-  hovers the definition's keys; see
-  [DMLS Schema Support](./dmls-schema-support.md#yaml-kind-documents).
-- The library entry point is `DarkmatterSchemas::validate_kind_document`; see
-  [Kind documents](#kind-documents).
 
 ## The SimplifiedSchema Language
 
@@ -714,7 +600,7 @@ md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --disable baseline
 
 | Flag                       | Effect                                                                                                 |
 |----------------------------|--------------------------------------------------------------------------------------------------------|
-| `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). A `.yaml`/`.yml` file is validated by its `kind` instead; see [YAML documents](../../inline/schema-validation.md#yaml-documents). |
+| `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). |
 | `--schema <path>`          | Custom baseline replacing the built-in one, used even when `DARKMATTER_NO_BASELINE_SCHEMA` is set. See [Selecting the Baseline](#selecting-the-baseline). |
 | `--disable baseline-schema`| Validate with no baseline, ignoring `BASELINE_SCHEMA`. Conflicts with `--schema`. See [Policy Flags](../../cli/policy.md). |
 | `--disable schema-triggers`| Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
@@ -798,7 +684,7 @@ user:
 | 0    | All files validated successfully.                                                       |
 | 1    | One or more files failed validation.                                                    |
 | 2    | Schema or baseline could not be loaded (CLI baseline **or** a per-document `$schema`). |
-| 3    | At least one file's frontmatter, or a YAML document, could not be parsed.               |
+| 3    | At least one file's frontmatter could not be parsed.                                    |
 | 64   | Usage error (bad flags, malformed `<prop>=<value>` YAML, no files supplied).            |
 
 When multiple kinds of failure occur in the same invocation, the more specific failure wins: parse error (`3`) outranks schema-load failure (`2`), which outranks validation failure (`1`).
@@ -1190,36 +1076,6 @@ Detection is passive: it derives the supplied context to each document and never
 
 Use `DarkmatterSchemas::with_darkmatter_baseline_json_schema()` when configuring
 the built-in baseline; each configured instance shares the cached JSON Schema.
-
-### Kind documents
-
-`darkmatter::markdown::schemas::kind_documents` validates a whole YAML document
-by its top-level `kind` (see
-[How a YAML document is validated by its `kind`](#how-a-yaml-document-is-validated-by-its-kind)).
-
-```rust
-let api = DarkmatterSchemas::new(context);
-match api.validate_kind_document(&text, Path::new("schemas/post.yaml"))? {
-    None => { /* unclaimed or not a mapping: no kind problems */ }
-    Some(validation) => {
-        // validation.kind is "schema" or "schema-trigger"
-        for problem in &validation.report.problems { /* line, column, path */ }
-    }
-}
-```
-
-- `validate_kind_document(text, path)` returns `Err(SchemaError::SchemaDocument)`
-  when the text does not load (its message starts `not valid YAML`),
-  `Ok(None)` when no kind claims it, and `Ok(Some(KindValidation))` otherwise.
-  `KindValidation` carries the claiming `kind`, the `report`, and the
-  `document` the report judged.
-- `effective_for_kind(kind)` returns the `EffectiveSchema` for a shipped kind,
-  or `None` for any other string.
-- `KindDocuments::shipped()` is the compiled-in registry, built from
-  `SHIPPED_KINDS`; it is the default. `KindDocuments::from_documents` builds a
-  registry from other definition text (for tests), and
-  `DarkmatterSchemas::with_kind_documents` installs it. Callers cannot add
-  kinds to the shipped registry.
 
 ### Span-Aware Validation and Normalization
 

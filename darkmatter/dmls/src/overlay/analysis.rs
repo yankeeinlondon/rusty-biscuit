@@ -120,9 +120,6 @@ pub(crate) struct AnalysisIdentity {
     pub schema_key: Option<u64>,
     pub bundle: Option<Arc<SchemaBundle>>,
     pub named_types: Arc<NamedTypeCatalog>,
-    /// Whether `bundle` is a kind definition for a whole YAML document, whose
-    /// root shape is the definition alone, with no Darkmatter base properties.
-    pub kind_document: bool,
 }
 
 impl AnalysisIdentity {
@@ -138,7 +135,6 @@ impl AnalysisIdentity {
                 _ => false,
             }
             && Arc::ptr_eq(&self.named_types, &other.named_types)
-            && self.kind_document == other.kind_document
     }
 }
 
@@ -331,21 +327,10 @@ impl FrontmatterAnalysis {
     /// properties, then each matched extension baseline, the matching trigger
     /// payloads, and the document's own `$schema`
     /// ([`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape)).
-    /// For a kind document it is the kind definition's shape alone.
     pub(crate) fn root(&self) -> &SchemaShape {
-        let kind_document = self.identity.as_ref().is_some_and(|identity| identity.kind_document);
         match self.bundle() {
             Some(bundle) => self.root.get_or_init(|| {
                 work_counters::record_root_assembly();
-                if kind_document {
-                    return simplified_schema::layered_property_shape(
-                        SchemaShape::default(),
-                        &[],
-                        &[],
-                        bundle.effective.simplified.as_ref(),
-                        &bundle.frontmatter_json,
-                    );
-                }
                 bundle
                     .effective
                     .property_shape(&bundle.extension_shapes, &bundle.frontmatter_json)

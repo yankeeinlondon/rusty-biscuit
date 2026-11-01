@@ -40,9 +40,6 @@ enum FileOutcome {
     Unopened(color_eyre::eyre::Report),
     /// Frontmatter could not be parsed.
     ParseError(String),
-    /// A YAML document argument could not be read or loaded (exit `3`, like
-    /// a frontmatter parse error).
-    YamlLoadError(String),
     /// Schema could not be resolved/built for this file.
     SchemaError(Box<SchemaError>),
 }
@@ -67,12 +64,6 @@ enum FileOutcome {
 /// status: it is reported once per invocation, on the first file that
 /// discovers it, whatever that file's outcome (stderr in pretty mode, the
 /// record's `warnings` in JSON mode).
-///
-/// A `.yaml`/`.yml` argument is a whole YAML document, validated against the
-/// shipped definition its top-level `kind` claims (see [`validate_one`]); a
-/// load failure is exit `3`. `key=value` assignments edit Markdown
-/// frontmatter only, so an assignment alongside a YAML argument is a usage
-/// error (exit `64`) reported before any file is validated.
 #[allow(clippy::too_many_arguments)]
 pub fn run_validate(
     inputs: &[String],
@@ -101,12 +92,6 @@ pub fn run_validate(
         std::process::exit(64);
     }
 
-    if !assignments.is_empty()
-        && let Some(yaml) = files.iter().find(|file| is_yaml_document(file))
-    {
-        exit_assignment_on_yaml(yaml, &terminal);
-    }
-
     let api = match load_api(schema, no_baseline_schema, request) {
         Ok(api) => api,
         Err(err) => {
@@ -123,10 +108,6 @@ pub fn run_validate(
     for file in &files {
         let (outcome, timings, findings, document) = match open_argument(file, request) {
             Ok(opened) => {
-                // An argument whose spelling hid its extension (`@name`).
-                if !assignments.is_empty() && is_yaml_document(opened.path()) {
-                    exit_assignment_on_yaml(file, &terminal);
-                }
                 let checked = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
                 (checked.outcome, checked.timings, checked.findings, Some(opened.into_path()))
             }
@@ -137,7 +118,7 @@ pub fn run_validate(
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
             }
-            FileOutcome::ParseError(_) | FileOutcome::YamlLoadError(_) | FileOutcome::Unopened(_) => {
+            FileOutcome::ParseError(_) | FileOutcome::Unopened(_) => {
                 any_parse_error = true;
             }
             FileOutcome::SchemaError(_) => {
@@ -241,11 +222,6 @@ struct CheckedFile {
 
 /// Validates a single file, capturing parse/schema failures separately so the
 /// caller can map them to the spec's exit codes.
-///
-/// A YAML document (by the opened path's extension) takes the kind route
-/// ([`validate_yaml_document`]): no baseline, no trigger discovery, and no
-/// assignments apply to it. Any other file is Markdown whose frontmatter is
-/// validated against its effective schema.
 fn validate_one(
     api: &DarkmatterSchemas,
     opened: &OpenedArgument,
@@ -254,9 +230,6 @@ fn validate_one(
     request: &MdRequest,
 ) -> CheckedFile {
     let early = |outcome, timings| CheckedFile { outcome, timings, findings: Vec::new() };
-    if is_yaml_document(opened.path()) {
-        return early(validate_yaml_document(api, opened.path()), None);
-    }
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
     let discovery_path = biscuit_file::canonicalize_simplified(opened.path())
@@ -322,61 +295,6 @@ fn validate_one(
         Err(err) => FileOutcome::SchemaError(Box::new(err)),
     };
     checked(outcome, timings)
-}
-
-/// Validates the YAML document at `path` against the shipped definition its
-/// top-level `kind` claims.
-///
-/// An unclaimed document is valid by default. A document that cannot be read
-/// or does not load as one admissible YAML document (or as a mapping of string
-/// keys) is a [`FileOutcome::YamlLoadError`]; any other [`SchemaError`] is the definition's.
-fn validate_yaml_document(api: &DarkmatterSchemas, path: &Path) -> FileOutcome {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) => return FileOutcome::YamlLoadError(format!("could not read `{}`: {err}", path.display())),
-    };
-    match api.validate_kind_document(&text, path) {
-        Ok(None) => FileOutcome::Validated {
-            report_valid: true,
-            problems: Vec::new(),
-            advisories: Vec::new(),
-            schema_label: None,
-            no_schema: true,
-        },
-        Ok(Some(validation)) => FileOutcome::Validated {
-            report_valid: validation.report.valid,
-            problems: validation.report.problems,
-            advisories: validation.report.advisories,
-            schema_label: None,
-            no_schema: false,
-        },
-        // `validate_kind_document` reports the document's own load failure as
-        // a `SchemaDocument` naming the document; a definition failure never
-        // names it.
-        Err(SchemaError::SchemaDocument { path: failed, message, .. }) if failed == path => {
-            FileOutcome::YamlLoadError(message)
-        }
-        Err(err) => FileOutcome::SchemaError(Box::new(err)),
-    }
-}
-
-/// Whether `path` names a YAML document (`.yaml`/`.yml`, any ASCII case).
-fn is_yaml_document(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml"))
-}
-
-/// Reports an assignment given alongside the YAML document `file` and exits
-/// with the usage status.
-fn exit_assignment_on_yaml(file: &Path, terminal: &Terminal) -> ! {
-    let message = format!(
-        "assignments apply to Markdown frontmatter, not to YAML document {}",
-        file.display()
-    );
-    let line = format!("<red>Error:</red> {}", escape_prose(&message));
-    eprintln!("{}", Prose::new(line).render(terminal));
-    std::process::exit(64);
 }
 
 /// Prints one document's validation stage timings to stderr.
@@ -510,14 +428,6 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
         FileOutcome::ParseError(message) => {
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has unparseable frontmatter:</dim>_"
-            );
-            println!("{}", Prose::new(header).render(terminal));
-            let bullet = format!("    - {}", escape_prose(message));
-            println!("{}", Prose::new(bullet).render(terminal));
-        }
-        FileOutcome::YamlLoadError(message) => {
-            let header = format!(
-                "- <red>✗</red> _<dim>the YAML document</dim>_ {link} _<dim>could not be loaded:</dim>_"
             );
             println!("{}", Prose::new(header).render(terminal));
             let bullet = format!("    - {}", escape_prose(message));
@@ -699,14 +609,6 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
             "valid": false,
             "schema": serde_json::Value::Null,
             "error": "frontmatter_parse",
-            "message": message,
-            "problems": [],
-        }),
-        FileOutcome::YamlLoadError(message) => json!({
-            "file": file_str,
-            "valid": false,
-            "schema": serde_json::Value::Null,
-            "error": "yaml_parse",
             "message": message,
             "problems": [],
         }),

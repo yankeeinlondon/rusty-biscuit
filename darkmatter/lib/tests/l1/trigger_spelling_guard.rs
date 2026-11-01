@@ -18,13 +18,10 @@ use biscuit_test_harness::manifest_dir;
 const ALLOWED: &[&str] = &[
     // The rejecting code and its diagnostics.
     "darkmatter/lib/src/markdown/schemas/triggers/envelope.rs",
-    // The kind-document registry's unit test: the retired kind is unclaimed.
-    "darkmatter/lib/src/markdown/schemas/kind_documents.rs",
     "simplified-schema/lib/src/errors.rs",
     "darkmatter/cli/src/main.rs",
     // Negative fixtures and the tests that prove the rejection.
     "darkmatter/lib/tests/l1/trigger_envelope_claim.rs",
-    "darkmatter/lib/tests/l1/kind_documents.rs",
     "darkmatter/lib/tests/l1/trigger_input_matrix.rs",
     "darkmatter/lib/tests/l1/trigger_match_grammar.rs",
     "darkmatter/lib/tests/l1/trigger_selection_parity.rs",

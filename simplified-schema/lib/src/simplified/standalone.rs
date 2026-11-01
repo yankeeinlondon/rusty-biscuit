@@ -19,16 +19,6 @@
 //! [`StandaloneSchemaEnvelope::admits_top_level_key`] is the one definition
 //! of each envelope's key set.
 //!
-//! `darkmatter/schemas/schema.yaml` is the authority for the tagged
-//! envelope's structure, and `darkmatter` validates `kind: schema` documents
-//! against it. The rules that definition cannot express stay here: unknown
-//! top-level keys (a root schema is open); an explicit null `description`,
-//! `categories`, `types`, or `$schema` (an optional property admits null);
-//! `types` as a mapping (the `schema` meta-type also accepts a sequence); and
-//! everything that needs the parsed document, namely category entry grammar,
-//! duplicate and undeclared categories, overload duplicates, and suggestion
-//! lints.
-//!
 //! Only a document with a `$schema` property exports document properties
 //! ([`StandaloneSchemaDocument::exports_schema`]); a tagged `types`-only
 //! document is a valid envelope that serves named-type imports alone.

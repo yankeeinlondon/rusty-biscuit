@@ -34,15 +34,6 @@ uses `detect_schema_with_contexts` (library detection is passive and turns a
 context that does not admit the document into `string`). User contract:
 `darkmatter/docs/cli/index.md#every-file-argument-uses-this-grammar`.
 
-`schema validate` routes by the opened path's extension: `.yaml`/`.yml`
-(ASCII case-insensitive) goes to `validate_yaml_document`, which calls the
-library's `validate_kind_document` (validation by top-level `kind`; no
-baseline, triggers, or assignments, and no coercion). Assignments with a YAML
-argument are a usage error (exit 64); a YAML load failure is
-`FileOutcome::YamlLoadError` (exit 3, JSON `"error": "yaml_parse"`). See
-[schema.md](schema.md#kind-document-validation-whole-yaml-files) and
-`darkmatter/docs/inline/schema-validation.md#yaml-documents`.
-
 A custom baseline path (`schema validate --schema`, `BASELINE_SCHEMA`, and
 `compose --baseline-schema`) is a launch-context file argument too, resolved
 with `resolve_file_path`; it never falls back when it fails. Baseline

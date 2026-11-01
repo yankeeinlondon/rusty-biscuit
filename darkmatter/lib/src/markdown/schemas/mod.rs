@@ -52,7 +52,6 @@ pub mod resolve;
 pub mod rewrite;
 pub mod roots;
 pub mod triggers;
-pub mod kind_documents;
 mod positions;
 pub(crate) mod embedded;
 
@@ -252,9 +251,6 @@ pub struct DarkmatterSchemas {
     /// Bundles [`Self::with_trigger_discovery`] appends after the roots.
     embedded_bundles: Vec<EmbeddedSchemaBundle>,
     file_resolution_context: biscuit_file::FileResolutionContext,
-    /// The YAML kind-document registry; `None` is the shipped one
-    /// ([`kind_documents::KindDocuments::shipped`]).
-    kind_documents: Option<Arc<kind_documents::KindDocuments>>,
 }
 
 use simplified_schema::prepared::{CompiledValidators, wrapped_root_arms};
@@ -319,7 +315,6 @@ impl DarkmatterSchemas {
             triggers: None,
             embedded_bundles: Vec::new(),
             file_resolution_context: context,
-            kind_documents: None,
         }
     }
 
@@ -704,37 +699,6 @@ impl DarkmatterSchemas {
             layered_definitions: OnceLock::new(),
             raw_declarations: OnceLock::new(),
         }))
-    }
-
-    /// The effective schema of a resolved standalone schema alone: no
-    /// baseline, no trigger layers, no document `$schema`, and no document
-    /// directory. Kind documents ([`kind_documents`]) validate through it.
-    pub(super) fn effective_for_resolved(
-        &self,
-        resolved: &simplified_schema::resolve::ResolvedSchema,
-    ) -> Result<EffectiveSchema, SchemaError> {
-        let json_schema = Arc::new(resolved.json_schema.clone());
-        let validators =
-            CompiledValidators::build(&json_schema, &self.cache, None, &self.file_resolution_context)?;
-        let origins = build_origin_map_with_triggers(Some(resolved), &[], false, &json_schema);
-        Ok(EffectiveSchema {
-            simplified: resolved.simplified.clone(),
-            definitions: Arc::clone(&resolved.definitions),
-            trigger_shapes: Vec::new(),
-            trigger_definitions: Vec::new(),
-            json_schema,
-            origins,
-            validators,
-            base_dir: None,
-            file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
-            file_resolution_context: self.file_resolution_context.clone(),
-            caller_origins: self.cache.caller_origins().clone(),
-            dependencies: build_dependencies(Some(resolved), &[]),
-            advisories: build_advisories(None, &[], Some(resolved)),
-            conversion: OnceLock::new(),
-            layered_definitions: OnceLock::new(),
-            raw_declarations: OnceLock::new(),
-        })
     }
 
     /// Matches the configured trigger registry against the document and

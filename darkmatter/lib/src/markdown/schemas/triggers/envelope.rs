@@ -18,21 +18,6 @@
 //! performs no I/O: it validates shape, parses the match grammar, and runs
 //! the vacuous-trigger lint, then hands the parsed result back to the caller.
 //!
-//! ## Structure and residual rules
-//!
-//! `darkmatter/schemas/schema-trigger.yaml` is the authority for the
-//! envelope's structure (its keys, the `kind` literal, the required `match`,
-//! and the shape of a match expression); `darkmatter` validates a trigger
-//! document against it ([`crate::markdown::schemas::kind_documents`]). This
-//! module keeps the rules that definition cannot express:
-//!
-//! - unknown top-level keys (`KNOWN_KEYS`), since a root schema is open;
-//! - an explicit null `$schema`, since an optional property admits null;
-//! - a null or non-string `kind`, and the retired `trigger-schema` kind and
-//!   `any:` combinator;
-//! - an empty or vacuous `match`, `min-match` count bounds, match-safe type
-//!   constraints, and `$path` glob validity and forbidden prefixes.
-//!
 //! See the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
@@ -50,7 +35,7 @@ pub const ENVELOPE_KIND: &str = "schema-trigger";
 const RENAMED_KIND: &str = "trigger-schema";
 
 /// The recognized top-level keys of a schema-trigger envelope.
-pub(crate) const KNOWN_KEYS: &[&str] = &["kind", "match", "$schema"];
+const KNOWN_KEYS: &[&str] = &["kind", "match", "$schema"];
 
 /// A parsed `kind: schema-trigger` envelope.
 ///
