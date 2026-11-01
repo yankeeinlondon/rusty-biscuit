@@ -98,13 +98,16 @@ documents**, selected by their `kind`.
   [Open Questions](#open-questions); identical filenames alone never establish
   that two definitions are the same source.
 
-Darkmatter ships three, in `darkmatter/schemas/`, compiled into the binary:
+Three are shipped, compiled into the binary. The two envelopes that belong to
+the SimplifiedSchema language live with the library
+([ruling 4](#4-rules-the-definitions-cannot-express--closed)); the trigger
+envelope is Darkmatter's:
 
-| File | Claims | Defines |
-|---|---|---|
-| `schema.yaml` | `schema` | schema documents |
-| `schema-trigger.yaml` | `schema-trigger` | trigger documents |
-| `yaml-schema.yaml` | `yaml-schema` | `yaml-schema` documents, including itself |
+| File | Home | Claims | Defines |
+|---|---|---|---|
+| `schema.yaml` | `simplified-schema/schemas/` | `schema` | schema documents |
+| `yaml-schema.yaml` | `simplified-schema/schemas/` | `yaml-schema` | `yaml-schema` documents, including itself |
+| `schema-trigger.yaml` | `darkmatter/schemas/` | `schema-trigger` | trigger documents |
 
 ```yaml
 # darkmatter/schemas/schema-trigger.yaml
@@ -441,10 +444,37 @@ rules in Rust.** Two general additions to `simplified-schema`:
 
 "`types` must be a mapping" is a narrowing of the `schema` meta-type, the same
 mechanism as [ruling 1](#1-declaring-the-claimed-kind-the-abstract-constraint--closed).
-With these, the shipped definitions state the whole shape and the Rust
-parsers' structural checks are deleted. The semantic rules stay in Rust,
-documented as checks beyond the definition, and reach `md` and DMLS the same
-way:
+With these, the shipped definitions state the whole shape.
+
+**Ruling (2026-10-31): `simplified-schema` owns the envelope definitions.**
+A library user loads schema files directly (`SimplifiedSchema` factories,
+`Name@file` imports) without Darkmatter, so envelope admission must live in
+the library, and the library cannot depend on Darkmatter. The `kind: schema`
+and `kind: yaml-schema` envelopes are part of the SimplifiedSchema language,
+so their definitions, `schema.yaml` and `yaml-schema.yaml`, live in
+`simplified-schema/schemas/` and are compiled into the library. The library
+admits every envelope, on every path, by validating it against them; the
+hand-written structural checks are deleted, leaving one authority. The
+library bootstraps its own two definitions in
+[ruling 2](#2-bootstrapping-yaml-schemayaml--closed)'s order. Darkmatter's
+registry takes those two from the library and adds `schema-trigger.yaml`
+(triggers are a Darkmatter concept) and the discovered files.
+
+Whole-file validation checks the definition first; only on success does it
+run the kind's semantic checks, on the accepted, softly converted copy. It
+never re-admits the original text after accepting its converted view, so
+optional scalar metadata that soft validation converts cannot produce a
+contradictory outcome. Authored schema declarations and their source spans
+are preserved: conversion never stringifies mapping or sequence meta-type
+carriers.
+
+Rejected: keeping the structural checks in the parsers beside the
+definitions with an agreement test (every rule twice, held together only by
+the test), and leaving direct loads unchecked (a malformed schema file would
+import silently).
+
+The semantic rules stay in Rust, documented as checks beyond the
+definition, and reach `md` and DMLS the same way:
 
 1. **Located.** Every semantic check returns a typed problem with a source
    span taken from the YAML loader's position map, exactly as a definition
@@ -485,7 +515,8 @@ optional, so such a document would claim no kind.
 
 **Ruling (2026-10-31): one shape, `$schema` required.** A types-only library
 is a `kind: schema` file, so the union and its named types go. The target
-file, written to `darkmatter/schemas/yaml-schema.yaml`:
+file (drafted in `darkmatter/schemas/yaml-schema.yaml`; its home is
+`simplified-schema/schemas/` under ruling 4):
 
 ```yaml
 kind: yaml-schema
@@ -525,8 +556,9 @@ review-cycle edits are discarded. Kept:
 
 - the inline root-union support for embedded schemas in
   `simplified-schema` (a parity fix, independent of this design);
-- `darkmatter/schemas/schema.yaml`, `schema-trigger.yaml`, and
-  `yaml-schema.yaml` in this spec's shape.
+- `schema.yaml`, `schema-trigger.yaml`, and `yaml-schema.yaml` in this spec's
+  shape (`schema.yaml` and `yaml-schema.yaml` move to
+  `simplified-schema/schemas/` under ruling 4).
 
 The `{{{ … }}}` escapes of inline-code examples in the documentation are
 redone as a separate docs fix on the reverted pages. The reverted commits stay
@@ -555,7 +587,14 @@ same metadata and named-type namespace as `schema` and a required export.
 The lower-level parser admits its structure without consulting a kind
 registry; claim verification is a separate preparation step.
 
-A `types`-only `kind: schema` remains valid for imports
+A `yaml-schema` is reached **only through `kind`**: it is neither a `$schema`
+target nor a `Name@file` import source, and naming it in either place is a
+schema error saying it is selected by `kind`. Types shared between a YAML
+kind and Markdown go in a `kind: schema` file that both import; a
+`yaml-schema` may import from one through its own `types`. (Rejected: an
+import source only, which duplicates what `kind: schema` provides; and both,
+which lets one file be applied by `kind` to YAML and by `$schema` to
+Markdown.) A `types`-only `kind: schema` remains valid for imports
 but invalid as a `$schema` target. An ordinary `kind: roster` data file is
 still not a standalone schema target. A `schema-trigger` remains forbidden
 as a `$schema` target, including when discovery skipped it as invalid.
@@ -597,9 +636,10 @@ Darkmatter-only spellings. Settle their exact authoring syntax under
 
 ### How should a checkout's shipped definitions avoid conflicting with the binary?
 
-In this repository, the disk `darkmatter/schemas/` files are also compiled
-into the binary. Searching the package-area root therefore finds a second
-claim for each shipped kind. The current duplicate rule would make the
+In this repository, the disk `darkmatter/schemas/` and
+`simplified-schema/schemas/` files are also compiled into the binary.
+Searching either package-area root therefore finds a second claim for each
+shipped kind. The current duplicate rule would make the
 project's own YAML files fail. Filename shadowing would hide genuine
 conflicts, so this needs an explicit source-identity policy.
 
@@ -695,8 +735,9 @@ syntax during implementation.
 
 ## Acceptance
 
-- `darkmatter/schemas/yaml-schema.yaml` exists; `schema.yaml`,
-  `schema-trigger.yaml`, and `yaml-schema.yaml` are `kind: yaml-schema`, are
+- `simplified-schema/schemas/schema.yaml`,
+  `simplified-schema/schemas/yaml-schema.yaml`, and
+  `darkmatter/schemas/schema-trigger.yaml` are `kind: yaml-schema`, are
   shipped, and each passes its claiming definition (`yaml-schema.yaml`
   itself).
 - A `yaml-schema` in any of the five schema roots claims its kind for
@@ -715,6 +756,9 @@ syntax during implementation.
   checkout-source policy so the corpus does not manufacture duplicate claims.
 - Constructor narrowing rejects optional/non-string kind declarations and
   accepts valid finite claims across root unions and imports.
+- Direct library loads (factories and `Name@file` imports) reject a malformed
+  `schema` or `yaml-schema` envelope through the library-owned definitions,
+  with no hand-written structural check remaining.
 - Opt-in closure and non-null optional properties work at roots and nested
   objects, preserve current defaults, and survive canonical serialization,
   JSON export, imports, and layering. Test mapping-only `types` independently
