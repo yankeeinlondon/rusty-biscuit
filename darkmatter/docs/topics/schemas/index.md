@@ -44,7 +44,7 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
             - from the terminal using the CLI 
             - as a library author calling into the Darkmatter library
     - [Schema Discovery](./schema-discovery.md)
-        - extract _observed_ schema structure from a schemaless file
+        - how the definitions of YAML document kinds (`kind: yaml-schema`) are found in the schema roots, and what happens when two claim one kind or one fails
     - [Visual Support of Schemas from DMLS](dmls-schema-support.md)
         - DMLS provides a full Markdown/CommonMark language server that extends Markdown's grammar to support schemas
     - [Understanding the Schema's Role in Composition](./schema-in-composition.md)

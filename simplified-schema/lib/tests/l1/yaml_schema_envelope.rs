@@ -207,4 +207,48 @@ mod files {
             other => panic!("a trigger must not be a `$schema` target: {other:?}"),
         }
     }
+    /// A definition on disk (or unsaved text for it) prepares like the
+    /// embedded ones: its `Name@file` imports resolve from its own folder,
+    /// it claims its kinds, and it is a dependency of its own preparation.
+    #[test]
+    fn a_yaml_schema_on_disk_prepares_its_export_with_file_imports() {
+        use simplified_schema::resolve::prepare_yaml_schema_text;
+        let fixture = Fixture::new();
+        fixture.write("platform.yaml", "kind: schema\ntypes:\n  platform:\n    name: string(required)\n");
+        let text = ROSTER.replace("  platform:\n    name: string(required)\n", "  platform: platform@./platform.yaml\n");
+        assert_ne!(text, ROSTER);
+        let path = fixture.write("roster.yaml", &text);
+        let resolved = prepare_yaml_schema_text(&path, &text, &[], &fixture.context, ShippedSources::NONE)
+            .expect("prepares");
+        assert_eq!(simplified_schema::claimed_values(&resolved, "kind").unwrap(), ["roster"]);
+        assert!(resolved.referenced_files.contains(&canonicalize_simplified(&path).unwrap()));
+        assert!(resolved.imports.iter().any(|import| import.ends_with("platform.yaml")), "{:?}", resolved.imports);
+
+        // Not a yaml-schema: refused, never prepared as a schema export.
+        let schema = "kind: schema\n$schema:\n  a: string\n";
+        let error = prepare_yaml_schema_text(&path, schema, &[], &fixture.context, ShippedSources::NONE).unwrap_err();
+        assert_eq!(not_schema(&error), Some(NotSchemaReason::NoSchemaProperty), "{error}");
+        // An import that does not resolve is the preparation's error.
+        let broken = text.replace("./platform.yaml", "./absent.yaml");
+        assert!(prepare_yaml_schema_text(&path, &broken, &[], &fixture.context, ShippedSources::NONE).is_err());
+    }
+}
+
+#[test]
+fn a_kind_selection_error_names_the_kind_and_its_cause() {
+    use simplified_schema::KindSelectionCause;
+    use std::path::PathBuf;
+    let duplicate = SchemaError::KindSelection {
+        kind: "roster".into(),
+        cause: KindSelectionCause::Duplicate { files: vec![PathBuf::from("a.yaml"), PathBuf::from("b.yaml")] },
+    };
+    assert_eq!(
+        duplicate.to_string(),
+        "cannot select a schema for `kind: roster`: it is claimed by more than one definition: `a.yaml`, `b.yaml`"
+    );
+    let unavailable = SchemaError::KindSelection {
+        kind: "inventory".into(),
+        cause: KindSelectionCause::Unavailable { file: PathBuf::from("broken.yaml"), defect: "not valid YAML".into() },
+    };
+    assert!(unavailable.to_string().contains("schema selection is unavailable: definition `broken.yaml`"), "{unavailable}");
 }

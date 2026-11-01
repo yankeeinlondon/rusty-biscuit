@@ -103,6 +103,7 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
                  unknown keys: {}",
                 unknown.join(", ")
             ),
+            span: None,
         });
     }
 
@@ -139,6 +140,69 @@ pub fn parse_trigger_envelope(value: &YamlValue) -> Result<Option<TriggerEnvelop
     }))
 }
 
+/// The instance path, in the trigger document, of the node `error` is about:
+/// the field a [`SchemaError::TriggerMatch`] or
+/// [`SchemaError::TriggerRenamed`] names (`` `match[0].all[1].$path` ``
+/// becomes `["match", "0", "all", "1", "$path"]`), `match` for an error about
+/// the match expression as a whole, and the document root otherwise.
+pub(crate) fn trigger_error_segments(error: &SchemaError) -> Vec<String> {
+    let field = match error {
+        SchemaError::TriggerMatch { message, .. } => {
+            message.strip_prefix('`').and_then(|rest| rest.split_once("`:")).map(|(field, _)| field)
+        }
+        SchemaError::TriggerRenamed { field, .. } => Some(field.as_str()),
+        SchemaError::TriggerMixedMapping { .. }
+        | SchemaError::TriggerVacuousMatch
+        | SchemaError::TriggerForbiddenConstraint { .. } => Some("match"),
+        _ => None,
+    };
+    let Some(field) = field else {
+        return Vec::new();
+    };
+    let mut segments = Vec::new();
+    for part in field.split('.') {
+        let (name, mut indexes) = part.split_once('[').map_or((part, ""), |(name, rest)| (name, rest));
+        if !name.is_empty() {
+            segments.push(name.to_string());
+        }
+        while let Some((index, rest)) = indexes.split_once(']') {
+            segments.push(index.to_string());
+            indexes = rest.strip_prefix('[').unwrap_or(rest);
+        }
+    }
+    segments
+}
+
+/// The byte span, in `source` (a trigger file's text), of the node `error`
+/// is about (see [`trigger_error_segments`]); `None` for an error naming no
+/// node or a `source` whose structure cannot be located.
+pub(crate) fn trigger_error_span(error: &SchemaError, source: &str) -> Option<std::ops::Range<usize>> {
+    if let SchemaError::TriggerMatch { span: Some(span), .. } = error {
+        return Some(span.clone());
+    }
+    let segments = trigger_error_segments(error);
+    // An error naming no node (an unknown top-level key) gets no invented
+    // position at the document root.
+    if segments.is_empty() {
+        return None;
+    }
+    let offset = if source.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+    let positions = simplified_schema::positions::build_position_map(&source[offset..]);
+    let located = crate::markdown::schemas::yaml_documents::locating_problem(&segments);
+    positions.byte_range(&located).map(|range| range.start + offset..range.end + offset)
+}
+
+/// `error` with the byte span, in `source`, of the node it is about, when it
+/// is a [`SchemaError::TriggerMatch`] without one. Any other error is
+/// returned unchanged.
+pub(crate) fn locate_trigger_error(error: SchemaError, source: &str) -> SchemaError {
+    let span = trigger_error_span(&error, source);
+    match error {
+        SchemaError::TriggerMatch { message, span: None } => SchemaError::TriggerMatch { message, span },
+        other => other,
+    }
+}
+
 /// The error for `kind: trigger-schema`.
 fn renamed_kind() -> SchemaError {
     SchemaError::TriggerRenamed {
@@ -150,7 +214,7 @@ fn renamed_kind() -> SchemaError {
 
 /// A [`SchemaError::TriggerMatch`] about envelope field `field`.
 fn field_error(field: &str, message: String) -> SchemaError {
-    SchemaError::TriggerMatch { message: format!("`{field}`: {message}") }
+    SchemaError::TriggerMatch { message: format!("`{field}`: {message}"), span: None }
 }
 
 fn yaml_kind(value: &YamlValue) -> &'static str {
@@ -240,8 +304,18 @@ enum Claim {
 /// multi-line quoted scalar, a block scalar, or an open flow collection never
 /// claim, and anything this scan cannot place is unclaimed.
 fn claims_envelope(source: &str) -> Option<Claim> {
+    match lexically_declared_kind(source, &[ENVELOPE_KIND, RENAMED_KIND])? {
+        ENVELOPE_KIND => Some(Claim::Current),
+        _ => Some(Claim::Renamed),
+    }
+}
+
+/// Which of `kinds` source that failed to parse as YAML still provably
+/// declares as its top-level `kind`, by the scan [`claims_envelope`]
+/// describes; the first declaration line decides.
+pub(crate) fn lexically_declared_kind<'k>(source: &str, kinds: &[&'k str]) -> Option<&'k str> {
     let mut scan = ClaimScan::default();
-    source.lines().find_map(|line| scan.line(line))
+    source.lines().find_map(|line| scan.line(line, kinds))
 }
 
 /// Cross-line state of [`claims_envelope`]'s scan.
@@ -261,7 +335,7 @@ struct ClaimScan {
 
 impl ClaimScan {
     /// Consumes one line and reports the declaration it provably is, if any.
-    fn line(&mut self, line: &str) -> Option<Claim> {
+    fn line<'k>(&mut self, line: &str, kinds: &[&'k str]) -> Option<&'k str> {
         let indent = line.len() - line.trim_start_matches(' ').len();
         let blank = line.trim().is_empty();
         if self.root_block {
@@ -274,7 +348,7 @@ impl ClaimScan {
             self.block_parent = None;
         }
         let provably_top_level = self.quote.is_none() && self.flow_depth == 0;
-        let claim = if provably_top_level { claim_line(line) } else { None };
+        let claim = if provably_top_level { claim_line(line, kinds) } else { None };
         self.advance(line, indent);
         claim
     }
@@ -354,16 +428,16 @@ fn strip_comment(line: &str) -> &str {
     line
 }
 
-/// The declaration `line` is when it is exactly a column-0
-/// `kind: schema-trigger` or `kind: trigger-schema` line.
-fn claim_line(line: &str) -> Option<Claim> {
+/// The one of `kinds` that `line` declares when it is exactly a column-0
+/// `kind: <kind>` line.
+fn claim_line<'k>(line: &str, kinds: &[&'k str]) -> Option<&'k str> {
     let rest = line.strip_prefix("kind")?;
     let rest = rest.trim_start_matches(' ').strip_prefix(':')?;
     if !rest.starts_with([' ', '\t']) {
         return None;
     }
     let rest = rest.trim_start();
-    [(ENVELOPE_KIND, Claim::Current), (RENAMED_KIND, Claim::Renamed)].into_iter().find_map(|(kind, claim)| {
+    kinds.iter().copied().find(|kind| {
         let after = [
             rest.strip_prefix(kind),
             rest.strip_prefix(&format!("'{kind}'")),
@@ -376,7 +450,6 @@ fn claim_line(line: &str) -> Option<Claim> {
                 let trailing = after.trim_start();
                 trailing.is_empty() || (after.len() > trailing.len() && trailing.starts_with('#'))
             })
-            .then_some(claim)
     })
 }
 
@@ -446,7 +519,7 @@ mod tests {
         ] {
             let v: YamlValue = serde_yaml_ng::from_str(source).unwrap();
             match parse_trigger_envelope(&v) {
-                Err(SchemaError::TriggerMatch { message }) => assert!(
+                Err(SchemaError::TriggerMatch { message, .. }) => assert!(
                     message.contains("unknown keys") && message.ends_with(shown),
                     "{source:?}: {message}"
                 ),
@@ -483,7 +556,7 @@ mod tests {
         for (source, shown) in [("kind: null", "got null"), ("kind: 42", "got number"), ("kind: [schema-trigger]", "got sequence")] {
             let v: YamlValue = serde_yaml_ng::from_str(source).unwrap();
             match parse_trigger_envelope(&v) {
-                Err(SchemaError::TriggerMatch { message }) => {
+                Err(SchemaError::TriggerMatch { message, .. }) => {
                     assert!(message.starts_with("`kind`:") && message.ends_with(shown), "{source}: {message}");
                 }
                 other => panic!("{source:?}: {other:?}"),

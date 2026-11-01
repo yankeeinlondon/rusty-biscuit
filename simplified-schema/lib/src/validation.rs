@@ -131,6 +131,10 @@ pub enum ValidationProblemCode {
     /// A `format: darkmatter-file` / `darkmatter-file-reference` value failed
     /// to parse, resolve, or match an existing file.
     InvalidFileReference,
+    /// A whole-file YAML document of a host's own kind satisfies its
+    /// definition but fails a check the definition cannot state (an
+    /// invalid trigger `$path` glob, an undeclared category).
+    KindCheck,
 }
 
 /// Code of a frontmatter value whose type does not match its declaration.
@@ -143,6 +147,8 @@ pub const SCHEMA_MISSING_REQUIRED_CODE: &str = "dm.schema.missing_required";
 pub const SCHEMA_UNKNOWN_KEY_CODE: &str = "dm.schema.unknown_key";
 /// Code of a `file(...)`-typed value that failed to parse, resolve, or match.
 pub const SCHEMA_INVALID_FILE_REFERENCE_CODE: &str = "dm.schema.invalid_file_reference";
+/// Code of a document-kind check beyond its definition.
+pub const SCHEMA_KIND_CHECK_CODE: &str = "dm.schema.kind_check";
 /// Code of a schema that could not be resolved, merged, or compiled.
 pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
 
@@ -156,6 +162,7 @@ impl ValidationProblemCode {
             Self::ConstraintViolation => SCHEMA_CONSTRAINT_CODE,
             Self::UnknownKey => SCHEMA_UNKNOWN_KEY_CODE,
             Self::InvalidFileReference => SCHEMA_INVALID_FILE_REFERENCE_CODE,
+            Self::KindCheck => SCHEMA_KIND_CHECK_CODE,
         }
     }
 }

@@ -497,7 +497,7 @@ pub trait SchemaRootSource {
 }
 
 /// The filesystem [`SchemaRootSource`] that [`scan`] uses.
-struct FilesystemRoots;
+pub(crate) struct FilesystemRoots;
 
 impl SchemaRootSource for FilesystemRoots {
     fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
@@ -709,7 +709,8 @@ pub fn scan_with_source(
             Ok(None) => continue,
             Ok(Some(envelope)) => envelope,
             Err(cause) => {
-                findings.push(InvalidTriggerFinding::new(trigger_source, cause));
+                let cause = super::envelope::locate_trigger_error(cause, &content);
+                findings.push(InvalidTriggerFinding::new(trigger_source, cause).located_in(&content));
                 continue;
             }
         };
@@ -1386,6 +1387,7 @@ mod tests {
             path: PathBuf::from("/repo/schemas/bad.trigger.yaml"),
             source: Box::new(SchemaError::TriggerMatch {
                 message: "missing match key".into(),
+                span: None,
             }),
         };
         let msg = err.to_string();

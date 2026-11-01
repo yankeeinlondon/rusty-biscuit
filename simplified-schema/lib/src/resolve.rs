@@ -1358,6 +1358,64 @@ pub fn prepare_embedded_yaml_schema(
     lower_embedded_definition(schema, standalone.local_types.as_ref(), path, documents, shipped)
 }
 
+/// Prepares the exported `$schema` of the `kind: yaml-schema` document at
+/// `path`, whose text is `text` (a host may supply unsaved editor text): the
+/// contract a document of its claimed kind must meet. It is
+/// [`prepare_embedded_yaml_schema`] for a definition on disk: `Name@file`
+/// imports and file arms resolve from `path`'s folder in `request_context`,
+/// and bare names against `schema_roots`. The claimed kinds are then read
+/// from the result with [`crate::claimed_values`].
+///
+/// The result's `referenced_files` include `path` itself, so a host caching
+/// the preparation invalidates it when the definition changes.
+///
+/// ## Errors
+///
+/// [`SchemaError::NotASchemaDocument`] when `text` is not a `yaml-schema`
+/// ([`NotSchemaReason::NoSchemaProperty`]); the envelope's admission against
+/// `yaml-schema.yaml`; and every resolver error of its export and imports.
+pub fn prepare_yaml_schema_text(
+    path: &Path,
+    text: &str,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let standalone = parse_standalone_schema_document(text, path)?
+        .filter(|standalone| standalone.envelope == StandaloneSchemaEnvelope::YamlSchema)
+        .ok_or_else(|| SchemaError::NotASchemaDocument {
+            path: path.to_path_buf(),
+            reason: NotSchemaReason::NoSchemaProperty,
+        })?;
+    let canonical = canonical_path(path);
+    let mut stack = ReferenceStack::default();
+    stack.enter(&canonical)?;
+    let resolved = match standalone.declaration {
+        SchemaDeclaration::Schema(schema) => resolve_standalone_schema(
+            schema,
+            standalone.local_types.as_ref(),
+            path,
+            schema_roots,
+            request_context,
+            &mut stack,
+            shipped,
+        ),
+        SchemaDeclaration::Reference(reference) => resolve_reference_in_context(
+            reference.file_reference().raw(),
+            path.parent().unwrap_or_else(|| Path::new(".")),
+            schema_roots,
+            request_context,
+            &mut stack,
+            shipped,
+        ),
+    };
+    stack.leave();
+    let mut resolved = resolved?;
+    attribute_origin(&mut resolved, path);
+    resolved.referenced_files = accumulate_referenced_file(resolved.referenced_files, canonical);
+    Ok(resolved)
+}
+
 /// Lowers the parsed export of the embedded definition `path` (a schema or
 /// `yaml-schema` document already parsed by the caller) with its imports
 /// resolved among `documents`. The library's envelope definitions are

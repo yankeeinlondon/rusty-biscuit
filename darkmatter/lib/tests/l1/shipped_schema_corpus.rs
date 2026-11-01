@@ -1653,3 +1653,111 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
         "loading a trigger mutated a fixture"
     );
 }
+
+/// The `kind` an artifact declares at its top level, when it is a string.
+fn declared_kind(source: &str) -> Option<String> {
+    let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let document: YamlValue = serde_yaml_ng::from_str(body).ok()?;
+    yaml_key(&document, "kind").and_then(YamlValue::as_str).map(str::to_string)
+}
+
+/// Every `kind: yaml-schema` file in the two folders that ship definitions
+/// is in the compiled-in table (and nothing else is): a definition added on
+/// disk without its `include_str!` entry would apply in this checkout only.
+#[test]
+fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
+    let root = repo_root();
+    let mut on_disk = Vec::new();
+    for (dir, path) in [
+        ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
+    ] {
+        for file in files_below(&path, "yaml") {
+            let source = fs::read_to_string(&file).expect("readable");
+            if declared_kind(&source).as_deref() == Some("yaml-schema") {
+                on_disk.push(PathBuf::from(format!("{dir}/{}", relative(&file, &path))));
+            }
+        }
+    }
+    on_disk.sort();
+    let mut shipped = darkmatter::markdown::schemas::yaml_documents::shipped_kind_definition_paths();
+    shipped.sort();
+    assert_eq!(on_disk, shipped);
+}
+
+/// Every repository schema, trigger, and `yaml-schema` document passes its
+/// definition through the registry of its own package area, where the
+/// checkout copies of the shipped definitions sit in a schema root: each copy
+/// is recognized as the source of its built-in (source-path identity), so the
+/// corpus manufactures no duplicate claim, and validation follows the copy.
+#[test]
+fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
+    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+    use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource};
+    use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, YamlOutcome};
+
+    let root = repo_root();
+    let areas = [
+        ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("darkmatter/docs/schemas", root.join("darkmatter/docs/schemas")),
+        ("darkmatter/example-docs/schemas", root.join("darkmatter/example-docs/schemas")),
+        ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
+        ("content-policy/schemas", root.join("content-policy/schemas")),
+        ("claudine/schemas", root.join("claudine/schemas")),
+        ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
+        (".claudine/schemas", root.join(".claudine/schemas")),
+        ("schemas", root.join("schemas")),
+    ];
+    // Artifacts the corpus above already knows are not valid schema documents.
+    let known_invalid = |dir: &str, file: &str| {
+        EXCEPTIONS.iter().any(|exception| {
+            exception.dir == dir
+                && exception.file == file
+                && matches!(exception.class, Class::Draft { .. } | Class::EnvelopeRejected | Class::Placeholder)
+        })
+    };
+    let mut checked = 0usize;
+    let mut failures = Vec::new();
+    for (dir, path) in &areas {
+        let files = files_below(path, "yaml");
+        // One context and registry per folder: the folder's package area
+        // decides its schema roots, and every artifact in it shares them.
+        let snapshot = RequestSnapshot::new(path).with_home(None);
+        let context = build_resolution_context(&snapshot).expect("checkout context");
+        let registry = std::sync::Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::WithRoots));
+        for (kind, claim) in registry.claims() {
+            if let Claim::Duplicate(files) = claim {
+                failures.push(format!("{dir}: `{kind}` is claimed twice: {files:?}"));
+            }
+        }
+        if dir.starts_with("darkmatter/schemas") {
+            let Some(Claim::Healthy(trigger)) = registry.claim("schema-trigger") else {
+                panic!("schema-trigger is claimed in {dir}");
+            };
+            assert!(
+                matches!(trigger.source(), DefinitionSource::File(file) if file.ends_with("darkmatter/schemas/schema-trigger.yaml")),
+                "the checkout copy replaces the built-in: {:?}",
+                trigger.source()
+            );
+        }
+        let schemas = DarkmatterSchemas::new(context).with_kind_registry(registry);
+        for file in files {
+            let file_label = relative(&file, path);
+            let source = fs::read_to_string(&file).expect("readable");
+            let Some(kind) = declared_kind(&source) else { continue };
+            if !matches!(kind.as_str(), "schema" | "schema-trigger" | "yaml-schema") || known_invalid(dir, &file_label) {
+                continue;
+            }
+            checked += 1;
+            match schemas.validate_yaml_document(&source, &file) {
+                Ok(YamlOutcome::Validated(validation)) if validation.report.valid => {}
+                Ok(YamlOutcome::Validated(validation)) => {
+                    failures.push(format!("{dir}/{file_label}: {:?}", validation.report.problems))
+                }
+                other => failures.push(format!("{dir}/{file_label}: {other:?}")),
+            }
+        }
+    }
+    assert!(checked >= 20, "the corpus checked {checked} kinded artifacts");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

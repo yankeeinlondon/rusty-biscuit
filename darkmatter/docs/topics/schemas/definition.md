@@ -5,12 +5,13 @@ kind: canonical-documentation
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
 
-This topic covers how Darkmatter applies schemas: the `$schema` property, the baseline, standalone validation and detection, and validation within the compose pipeline. The SimplifiedSchema language itself is documented with its library; see [The SimplifiedSchema Language](#the-simplifiedschema-language).
+This topic covers how Darkmatter applies schemas: the `$schema` property, the baseline, whole YAML documents, standalone validation and detection, and validation within the compose pipeline. The SimplifiedSchema language itself is documented with its library; see [The SimplifiedSchema Language](#the-simplifiedschema-language).
 
 ## What You Get
 
 - A `$schema` frontmatter property that can hold an inline schema, point at a YAML/JSON file, or list a root-level union.
 - A **baseline schema** that every document inherits. Darkmatter ships a built-in one, compiled into the library, which `md compose`, `md schema validate`, and DMLS apply by default.
+- Validation of whole **YAML documents** (`.yaml`, `.yml`), selected by the document's `kind` or its root `$schema`; see [YAML Documents](#yaml-documents).
 - A `md schema validate` CLI subcommand with `pretty` and `json` output.
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
 - A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
@@ -72,6 +73,7 @@ envelopes:
 | `schema` | `kind: schema` | `$schema`, `types`, `description` (a string), `categories`; each is optional, but at least one of `$schema` or `types` is required |
 | informal `schema` | no `kind` | `$schema` (required), `types`, `description` (a string), `categories` |
 | `schema-trigger` | `kind: schema-trigger` | match rules and a `$schema` payload; see [Repository Trigger Schemas](#repository-trigger-schemas) |
+| `yaml-schema` | `kind: yaml-schema` | `$schema` (required), `types`, `description`, `categories`; it defines a YAML document kind and is never a `$schema` target; see [YAML Documents](#yaml-documents) |
 
 Any other top-level key is a malformed-envelope error. Only a document with
 a `$schema` property can be a Markdown document's `$schema` target; a
@@ -594,6 +596,263 @@ Those definitions move to the merged root, so the baseline's references must kee
 
 This semantics is chosen because per-constraint merging produces surprising results (e.g. a baseline `min(5)` silently shadowing a document `min(3)`).
 
+## YAML Documents
+
+Darkmatter can validate a whole YAML file (`.yaml`, `.yml`), not only the
+frontmatter of a Markdown document: a data file, a configuration file, or one
+of Darkmatter's own schema and trigger files. A YAML document picks its schema
+in one of two ways:
+
+- **By `kind`.** A `kind: yaml-schema` file defines a document _kind_, and
+  every YAML document whose top-level `kind` names that kind is judged by the
+  definition. This is the way to give a family of files one contract without
+  each file pointing at it.
+- **By a root `$schema`.** A document whose `kind` no definition claims can
+  carry its own `$schema`, exactly as frontmatter does.
+
+Validate one from the command line with
+[`md schema validate`](#yaml-documents-on-the-command-line), or from the
+library with
+[`DarkmatterSchemas::validate_yaml_document`](#validating-from-the-library).
+DMLS diagnostics, completion, and hover inside YAML files are **planned**.
+
+For example, this definition in a repository's `schemas/roster.yaml` defines
+the kind `roster` (see
+[Defining a YAML Document Kind](./authoring-schemas.md#defining-a-yaml-document-kind)
+for how to write one):
+
+```yaml
+kind: yaml-schema
+types:
+    platform:
+        name: string(required)
+$schema:
+    kind: literal(roster; required)
+    roster_version: literal(1; required)
+    platforms: platform[](required)
+    $constraints: { closed: true }
+```
+
+Any YAML document in that repository that says `kind: roster` is then
+validated against it, wherever the document lives:
+
+```yaml
+kind: roster
+roster_version: 1
+platforms:
+    - name: slack
+```
+
+Misspelling `platforms` as `platfroms` fails with an unknown-key problem at
+line 3, because the definition's root is closed.
+
+### Which Schema a YAML Document Gets
+
+```mermaid
+flowchart TD
+    Y[YAML document] --> M{root is a mapping?}
+    M -- no --> N[not validated]
+    M -- yes --> K{"top-level kind is a string<br/>a yaml-schema claims?"}
+    K -- yes --> V1["the claiming definition only<br/>(a root $schema is an ordinary property)"]
+    K -- no --> S{"root $schema present?"}
+    S -- yes --> V2["that schema; $schema is removed<br/>from the copy being validated"]
+    S -- no --> N
+```
+
+- **`kind` is read as written, before any conversion.** Only a non-empty
+  string can claim a definition. A missing, null, numeric, list, mapping, or
+  empty-string `kind` claims nothing, and the document falls through to its
+  `$schema`, if any. Kinds compare exactly: `kind: Roster` is not a `roster`.
+- **A claimed `kind` wins.** The definition is the document's whole contract,
+  and a root `$schema` beside it is just another property, which the
+  definition must declare like any other. Under the closed `roster` definition
+  above, a `$schema: ./other.yaml` line in a roster is reported as an unknown
+  key and the file it names is never read.
+- **This is how Darkmatter's own files are judged.**
+  [`schemas/darkmatter.yaml`](../../../schemas/darkmatter.yaml) says
+  `kind: schema`, so it is validated as a schema document against the shipped
+  `schema` definition, never against the global variables it declares. A
+  `kind: schema-trigger` file is validated against the trigger definition,
+  never against its own `$schema` payload, which describes the Markdown
+  documents it matches.
+- **An unclaimed document uses its root `$schema`**, in any form a frontmatter
+  `$schema` accepts: an inline mapping, a root union, or a reference to a
+  SimplifiedSchema or JSON Schema file (see
+  [What a `$schema` Reference May Point At](#what-a-schema-reference-may-point-at)).
+  A bare file name is looked up in the [schema roots](#schema-roots). The
+  `$schema` key is removed only from the copy being validated, so a closed
+  schema never sees it, while lines and columns still count it.
+- **A `$schema` that is present must be valid.** `$schema: null`, a number,
+  `""`, or a root union with a non-schema element is a schema error, never
+  treated as "no schema". So is a `$schema` naming a trigger file or a
+  `kind: yaml-schema` file.
+- **With neither**, the document is not validated (`YamlOutcome::NoSchema`).
+  Scalar, sequence, and empty documents are never validated either.
+
+Where `kind: yaml-schema` definitions are found, and what happens when two
+claim the same kind or one is broken, is described in
+[Schema Discovery](./schema-discovery.md).
+
+### Loading a YAML Document
+
+The file is read as exactly one YAML document:
+
+- A leading `---` and a trailing `...` are YAML document markers, not
+  frontmatter fences; the file needs neither.
+- A leading byte-order mark and CRLF line endings are accepted.
+- Malformed YAML, a second document, a duplicate key, a mapping key that is
+  not a string, and a number the [numeric model](../numbers.md) rejects
+  (such as `9007199254740993`, which no `f64` holds exactly) are load
+  errors (`SchemaError::SchemaDocument` naming the file, with the byte span
+  of the failure when the parser reports one). Quote a key such as `1:` or
+  `true:` to keep it as text.
+
+```yaml
+---
+kind: roster
+roster_version: 1
+platforms: []
+...
+```
+
+### How a YAML Document Is Validated
+
+- **Only the selected schema applies.** No baseline schema and no
+  [trigger](#repository-trigger-schemas) layers apply, on either route, even
+  when the `DarkmatterSchemas` instance was configured with them. A YAML file
+  is not a Markdown document, so frontmatter properties such as `title` mean
+  nothing to it.
+- **Validation is soft and changes nothing.** Values are
+  [converted](../../../../simplified-schema/docs/topics/conversion.md) on a
+  copy before they are judged, and the file is never written back. With
+  `port: number(integer)`, `port: "8080"` passes and `port: "2.5"` fails.
+- **Templates and shell text are data.** A YAML document is not composed,
+  so a whole-value `"{{ count }}"` or `"$(date)"` is an ordinary string: it
+  fails a `number` property and passes a `string` one, and it is never
+  deferred as a pending value.
+- **Locations refer to the file as written.** Lines count from the first line
+  of the file, including a leading `---`, and the
+  [Problem Locations](#problem-locations) rules choose the node, as they do
+  for frontmatter.
+
+### Kind Checks
+
+Darkmatter's own kinds have rules that their definitions cannot express, such
+as whether a trigger's `$path` glob is valid. Once a document satisfies its
+definition, these checks run on the same document and add their problems to
+the same report:
+
+| Kind | What is checked |
+|---|---|
+| `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves |
+| `schema-trigger` | the trigger grammar: each `$path` glob, an empty `match` list, a vacuous match, `min-match` count bounds, and match-safe conditions (see [Repository Trigger Schemas](#repository-trigger-schemas)) |
+| `yaml-schema` | its exported `$schema` prepares and claims a finite set of kinds |
+
+A kind check is an error in the file itself, with the problem code
+`KindCheck` (diagnostic code `dm.schema.kind_check`), located at the node it
+is about. A document that fails its definition reports only the definition's
+problems, so nothing is reported twice. A kind defined in your own
+`yaml-schema` has no kind checks: its definition is its whole contract.
+
+```yaml
+kind: schema-trigger
+match:
+    all:
+        - $path: "@/docs/**"
+        - title: string(required)
+```
+
+This trigger satisfies its definition, but `$path` cannot use `@`, so the
+report holds one `kind_check` problem at line 4, column 18, the quoted glob.
+The same defect found while discovering triggers for a Markdown document is a
+warning instead; see
+[Invalid discovered triggers](./schema-triggers.md#invalid-discovered-triggers).
+
+### When a Kind Cannot Be Selected
+
+When a document's string `kind` cannot be settled, validation fails with
+`SchemaError::KindSelection { kind, cause }` rather than falling through to
+its `$schema` or to "not validated":
+
+| `cause` | When | Message after ``cannot select a schema for `kind: roster`:`` |
+|---|---|---|
+| `Duplicate { files }` | two or more definitions claim the kind | `` it is claimed by more than one definition: `…/a.yaml`, `…/b.yaml` `` (sorted by path) |
+| `Reserved { file, defect }` | the one definition that claims it failed | `` its definition `…/roster.yaml` failed: … `` |
+| `Unavailable { file, defect }` | no healthy definition claims it, and a definition failed before showing what it claims | `` schema selection is unavailable: definition `…/broken.yaml` failed before revealing its kind: … `` |
+| `RootUnreadable { root, defect }` | a schema root could not be read | `` schema root `…/schemas` could not be read: … `` |
+
+A document with no string `kind` is never affected by these failures. The
+failed definition's own defect is reported when that file itself is
+validated. [Schema Discovery](./schema-discovery.md#when-a-definition-fails)
+explains each case.
+
+### Validating from the Library
+
+`DarkmatterSchemas::validate_yaml_document(text, path)` validates the text of
+the YAML document at `path`. Build the `DarkmatterSchemas` with the
+**document's own** file-resolution context: its schema roots supply the kind
+definitions, and its folder resolves the document's relative file values.
+
+```rust
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, YamlOutcome};
+use std::path::Path;
+
+let path = Path::new("/work/repo/config/roster.yaml");
+let text = std::fs::read_to_string(path)?;
+let context = build_resolution_context(&RequestSnapshot::new("/work/repo/config"))?;
+
+match DarkmatterSchemas::new(context).validate_yaml_document(&text, path)? {
+    YamlOutcome::NoSchema => println!("no schema selected"),
+    YamlOutcome::Validated(validation) => {
+        println!("validated by {}", validation.definition);
+        for problem in &validation.report.problems {
+            eprintln!("{:?}:{:?} {}", problem.line, problem.column, problem.message);
+        }
+    }
+}
+```
+
+Without a registry of its own, each call builds the kind registry for its
+context with `KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context))`.
+To validate many documents that share one context, build it once and pass it
+with `with_kind_registry`; the registry must have been built for that same
+context:
+
+```rust
+use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope};
+use std::sync::Arc;
+
+let registry = Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::for_context(&context)));
+let schemas = DarkmatterSchemas::new(context).with_kind_registry(registry);
+```
+
+| Item | Purpose |
+|---|---|
+| `YamlOutcome` | `NoSchema` (nothing was checked) or `Validated(YamlValidation)`. |
+| `YamlValidation` | `route` (`Route::Kind(kind)` or `Route::RootSchema`), `report` (a `ValidationReport`), `definition` (what validated it: a definition file's path, `built-in <path>` for a shipped definition, the `$schema` reference, or the text "the inline `$schema`"), and `byte_range(&problem)`, the byte range of a problem's token in the validated text. |
+| `KindRegistry` | The kinds one context can select. `from_filesystem(context, scope)` reads the schema roots from disk; `build(context, source, scope)` reads them through a `SchemaRootSource`, so an editor can supply unsaved buffers; `shipped()` holds the shipped definitions alone. `claim(kind)` and `claims()` read it; `incomplete()` and `root_failures()` list what it could not read; `dependencies()` and `searched_locations()` say which files and folders to watch before reusing it. |
+| `LoadedYamlDocument` | A document `load(text, path)` admitted, for `validate_loaded_yaml_document`; `validate_yaml_document` is the two in one. |
+| `RegistryScope` | `WithRoots` (shipped definitions plus the schema roots) or `ShippedOnly`. `for_context` chooses `WithRoots` inside a repository and `ShippedOnly` outside one, as `md` does. |
+| `Claim`, `DefinitionSource`, `Incomplete` | In `darkmatter::markdown::schemas::yaml_documents`: a kind's claim (`Healthy`, `Duplicate`, `Reserved`), where a definition came from (`Shipped(path)` or `File(path)`), and a failure that leaves the registry unable to rule a kind out. |
+
+`validate_yaml_document` returns `Err` for a load error
+(`SchemaError::SchemaDocument`), a `KindSelection` error, every resolution
+error of a root `$schema`, and validator-construction errors. A document that
+was judged, valid or not, is `Ok(YamlOutcome::Validated(..))`.
+
+A referenced schema file that fails to load is also a
+`SchemaError::SchemaDocument`, so to tell the document's own load error from
+its schema's, load and validate in two steps. `md schema validate` does this
+to exit `3` for the first and `2` for the second:
+
+```rust
+use darkmatter::markdown::schemas::LoadedYamlDocument;
+
+let document = LoadedYamlDocument::load(&text, path)?; // the document's load error, only
+let outcome = DarkmatterSchemas::new(context).validate_loaded_yaml_document(&document)?; // selection and schema errors
+```
+
 ## CLI: `md schema validate`
 
 ```
@@ -602,13 +861,59 @@ md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --disable baseline
 
 | Flag                       | Effect                                                                                                 |
 |----------------------------|--------------------------------------------------------------------------------------------------------|
-| `<FILE_OR_PROP=VALUE>...`  | Markdown files **and/or** `<prop>=<value>` assignments. See [Frontmatter Assignments](#frontmatter-assignments). |
+| `<FILE_OR_PROP=VALUE>...`  | Markdown or YAML files **and/or** `<prop>=<value>` assignments. A `.yaml` or `.yml` file is validated as a whole [YAML document](#yaml-documents-on-the-command-line). See [Frontmatter Assignments](#frontmatter-assignments). |
 | `--schema <path>`          | Custom baseline replacing the built-in one, used even when `DARKMATTER_NO_BASELINE_SCHEMA` is set. See [Selecting the Baseline](#selecting-the-baseline). |
 | `--disable baseline-schema`| Validate with no baseline, ignoring `BASELINE_SCHEMA`. Conflicts with `--schema`. See [Policy Flags](../../cli/policy.md). |
 | `--disable schema-triggers`| Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
 | `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). |
 | `--format json`            | Newline-delimited JSON, one object per file. Pipe-friendly.                                            |
 | `--quiet`                  | Suppress success lines; only failures print.                                                           |
+
+### YAML Documents on the Command Line
+
+An argument whose file ends in `.yaml` or `.yml` (in any letter case, judged
+on the file the argument opened, so `@service.yaml` counts) is validated as a
+whole [YAML document](#yaml-documents): its claimed `kind` or, failing that,
+its root `$schema` selects the schema, and nothing else applies.
+
+```bash
+md schema validate schemas/roster.yaml data/platforms.yaml
+```
+
+- **No baseline, no triggers.** A YAML document is judged by its selected
+  schema alone. A batch of YAML files never loads the baseline, so a broken
+  `BASELINE_SCHEMA` does not affect it; a batch that also holds Markdown
+  loads it for the Markdown files only. `--disable baseline-schema` and
+  `--disable schema-triggers` are accepted and change nothing for YAML.
+- **No assignments and no `--schema`.** Both concern Markdown frontmatter.
+  Every argument is opened before anything is validated, and a batch with a
+  YAML file and either one is a usage error (exit `64`) that prints nothing
+  on stdout.
+- **No schema is not an error.** A YAML file with no claimed `kind` and no
+  `$schema`, or whose root is not a mapping, is reported like a Markdown file
+  without one: "doesn't have a schema definition so is valid by default", and
+  `"schema": null` in JSON.
+- **Load errors exit `3`.** A file that is not one admissible YAML document
+  (malformed YAML, a duplicate key, a second document) is reported as "is not
+  a valid YAML document" with its location, and in JSON with
+  `"error": "yaml_parse"` plus `line` and `column`. A `$schema` naming a file
+  that fails to load is a schema error of the document (exit `2`), not a load
+  error.
+- **Selection errors exit `2`.** A kind claimed by two definitions, or by a
+  definition that fails, is a schema error naming the definition files.
+- **Kind checks.** A problem from the checks Darkmatter's own kinds carry
+  beyond their definitions (for example a category used in `types` that
+  `categories` does not declare) has `"kind": "kind_check"` in JSON.
+
+```text
+$ md schema validate service.yaml
+- ✗ the document service.yaml failed schema validation:
+    - port "2.5" is not of type "integer": converted to 2.5, which fails integer (whole, below 2^64) (at line 3, column 7)
+```
+
+In JSON the `schema` field names what validated the file: the definition of
+its kind (for example `built-in simplified-schema/schemas/schema.yaml`), or
+the root `$schema` reference (the words "the inline `$schema`" for an inline one).
 
 ### Frontmatter Assignments
 
@@ -686,8 +991,8 @@ user:
 | 0    | All files validated successfully.                                                       |
 | 1    | One or more files failed validation.                                                    |
 | 2    | Schema or baseline could not be loaded (CLI baseline **or** a per-document `$schema`). |
-| 3    | At least one file's frontmatter could not be parsed.                                    |
-| 64   | Usage error (bad flags, malformed `<prop>=<value>` YAML, no files supplied).            |
+| 3    | At least one file could not be opened, its frontmatter could not be parsed, or a YAML file is not valid YAML. |
+| 64   | Usage error (bad flags, malformed `<prop>=<value>` YAML, no files supplied, or an assignment or `--schema` with a YAML file). |
 
 When multiple kinds of failure occur in the same invocation, the more specific failure wins: parse error (`3`) outranks schema-load failure (`2`), which outranks validation failure (`1`).
 
@@ -746,7 +1051,7 @@ For root-union failures, problems are prefixed with `arm[N]`:
 Each problem carries a `path` (a JSON pointer; a missing property's `path` is the
 mapping that lacks it, `""` for the root), a `property` field (the missing
 property's name, when resolvable) and a `kind` field — one of `missing`,
-`type`, or `invalid`. `line` and `column` give the problem's
+`type`, `invalid`, or (YAML documents only) `kind_check`. `line` and `column` give the problem's
 [location](#problem-locations), or are `null` when it has none.
 
 Each problem also carries a `description` field: the failing property's declared
@@ -756,7 +1061,7 @@ byte-for-byte equal to the problem message).
 
 The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when the built-in or a custom baseline validated it; the pretty output still says such a document "has a schema definition", because its effective schema is the baseline.
 
-Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"` or `"schema"`) and an empty `problems` array.
+Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"`, `"yaml_parse"`, or `"schema"`) and an empty `problems` array; a `yaml_parse` entry also has the failure's `line` and `column`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 
@@ -1021,9 +1326,12 @@ let refs: Vec<&Markdown> = docs.iter().collect();
 let detected = api.detect(&refs, DetectOptions { merge: true });
 ```
 
+A whole YAML file is validated with `api.validate_yaml_document(&text, path)`
+instead; see [Validating from the Library](#validating-from-the-library).
+
 ### Key Types
 
-`DarkmatterSchemas`, `EffectiveSchema`, `ValidationReport`, `PreparationSummary`, `ValidationTimings`, `ValidationOptions`, and `PendingValue` are Darkmatter's. The rest belong to the `simplified-schema` library, so import them from `simplified_schema`; the [library docs](../../../../simplified-schema/README.md) describe them in full, including the `SimplifiedSchema` object for callers that need the language without Darkmatter's document policy.
+`DarkmatterSchemas`, `EffectiveSchema`, `ValidationReport`, `PreparationSummary`, `ValidationTimings`, `ValidationOptions`, and `PendingValue` are Darkmatter's, as are the YAML document types (`YamlOutcome`, `YamlValidation`, `Route`, `KindRegistry`, `RegistryScope`) listed in [Validating from the Library](#validating-from-the-library). The rest belong to the `simplified-schema` library, so import them from `simplified_schema`; the [library docs](../../../../simplified-schema/README.md) describe them in full, including the `SimplifiedSchema` object for callers that need the language without Darkmatter's document policy.
 
 | Type                  | Purpose                                                                                                             |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
@@ -1034,7 +1342,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 | `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: `has_schema` is `false` when no baseline, trigger, or `$schema` applied. |
 | `ValidationTimings`   | Stage breakdown of one validation, from `DarkmatterSchemas::validate_timed` (same result as `validate`, timings on failure too) or `ValidationTimings::record(|| ...)`: per-`ValidationStage` durations (`discover`, `match`, `resolve`, `compile`, `validate`), `total()`, `unassigned()`, `compile_cache()` (`CompileCache::Hit` / `Miss` / `NotRequested`), and `matched_triggers()`. See [Stage timings](../../inline/schema-validation.md#stage-timings--vv). |
 | `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
-| `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`. |
+| `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`, and `KindCheck` (a YAML document's [kind check](#kind-checks)). |
 | `ValidationOptions` / `PendingValue` | Mirror the compose deferral rules as data: `pending_policy` (`Defer` / `Report`) plus `excluded_keys`; a `PendingValue` records a value validation skipped because it is a whole-value `$(...)` shell expression or still holds an unresolved `{{ }}` template. |
 | `SchemaRoot`          | A parsed `$schema`: either `Single(SchemaShape)` or `Union(Vec<SchemaArm>)`.                                        |
 | `SchemaShape`         | Ordered map of property names to `PropertyDef`.                                                                     |
@@ -1382,6 +1690,11 @@ shadows another. With `SCHEMAS_DIR=/opt/team/dm-defs` and both
 `$schema: shared.yaml` in a package document selects the `SCHEMAS_DIR` copy.
 If the selected copy is broken, that error is reported; the package copy is
 never used in its place.
+
+`kind: yaml-schema` definitions are read from the same five roots, but never
+by name: every definition in every root counts, and two that claim one kind
+are an error rather than one shadowing the other (see
+[Schema Discovery](./schema-discovery.md)).
 
 - The package and package area are those of the **document**, not of the
   directory you launched `md` from. `md` searches the roots only for a

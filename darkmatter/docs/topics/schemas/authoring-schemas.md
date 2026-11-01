@@ -257,7 +257,7 @@ To make an exported schema apply automatically, place its definition in one of t
 
 `{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). `md` searches these folders only for a document in a repository; DMLS searches them for any document inside an open workspace folder. Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else, such as `{package-root}/docs/schemas`, are not searched. An earlier folder shadows a file of the same name in every later one.
 
-Today only a `kind: schema-trigger` file in these folders applies automatically (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
+Today two kinds of file in these folders apply automatically: a `kind: schema-trigger` file to the Markdown documents it matches (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)), and a `kind: yaml-schema` file to the YAML documents whose `kind` it claims (see [Defining a YAML Document Kind](#defining-a-yaml-document-kind)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
 
 Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. The `SCHEMAS_DIR` folder and `~/schemas` are in every document's roots, so their definitions can apply to documents in any repository; they add to the package, package-area, and `{root}` folders rather than replacing them. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
 
@@ -333,6 +333,122 @@ The explicit-base form requires an explicit-relative `path`, preventing a fallba
 The consuming root is independent of schema-source location, including external `SCHEMAS_DIR` sources. It does not expand the applicability of automatically discovered nested schemas. Additional base selectors remain under design review; these examples describe the intended contract, not current support.
 
 For the matching model and its implementation status, read [Schema Triggers in Darkmatter](./schema-targeting.md).
+
+### Defining a YAML Document Kind
+
+A schema trigger picks Markdown documents by their frontmatter. When you have
+a family of **YAML files** that should all follow one contract (rosters,
+service manifests, fixture files), write a `kind: yaml-schema` definition
+instead. Each file then only has to say what it is, with `kind: roster`, and
+the definition does the rest: no file carries its own copy of the schema, and
+none can point at the wrong one.
+
+Put this in your repository's `schemas/roster.yaml`:
+
+```yaml
+kind: yaml-schema
+description: The platforms a team publishes to
+types:
+    platform:
+        name: string(required)
+$schema:
+    kind: literal(roster; required) -> the document kind this file defines
+    roster_version: literal(1; required)
+    platforms: platform[](required)
+    $constraints: { closed: true }
+```
+
+Every YAML document in the repository that says `kind: roster` is now
+validated against that `$schema`:
+
+```yaml
+kind: roster
+roster_version: 1
+platforms:
+    - name: slack
+```
+
+The rules for a definition:
+
+- **`kind: yaml-schema` and a `$schema` are required.** `$schema` is the
+  contract every document of the kind must meet. `description`, `categories`,
+  and `types` are optional and mean what they mean in a `kind: schema` file;
+  `types` entries are local names for `$schema`, not properties of a roster.
+- **The `kind` property of `$schema` names the kinds you claim.** Declare it
+  as `literal(roster; required)` or, to claim several,
+  `enum(roster, team; required)`. It must be `required`: `literal(roster)` alone, or a plain
+  `kind: string(required)`, claims nothing and the definition is rejected.
+- **A root union claims every arm's kinds.** Each arm declares its own `kind`,
+  and a document must satisfy one of the arms:
+
+  ```yaml
+  kind: yaml-schema
+  $schema:
+      - kind: literal(left; required)
+        a: string
+      - kind: enum(right, middle; required)
+        b: string
+  ```
+
+- **Close the root.** `$constraints: { closed: true }` turns a misspelled key
+  into an unknown-key problem instead of an ignored property. It also means a
+  roster cannot carry a stray `$schema`: once a definition claims the kind, a
+  root `$schema` is an ordinary property that the definition must declare.
+- **A definition is never referenced.** Naming a `yaml-schema` file in a
+  `$schema` or a `Name@file` import is an error. Put types that a definition
+  and a Markdown schema share in a `kind: schema` file and import them from
+  both (see [A `yaml-schema` Is Selected by `kind`, Never Referenced](../../../../simplified-schema/docs/topics/language/schema-documents.md#a-yaml-schema-is-selected-by-kind-never-referenced)).
+
+Darkmatter's own definitions are worked examples of each form:
+
+- [`yaml-schema.yaml`](../../../../simplified-schema/schemas/yaml-schema.yaml)
+  defines `yaml-schema` itself, and validates itself. Its
+  `property(kind, ...)` declaration option is what requires your `$schema` to
+  declare a literal or enum `kind`.
+- [`schema-trigger.yaml`](../../../schemas/schema-trigger.yaml) uses `types`
+  for a recursive `match-expression` and a closed root.
+- [`schema.yaml`](../../../../simplified-schema/schemas/schema.yaml) uses a
+  root union whose two arms claim the same `schema` kind: one requires
+  `$schema`, the other requires `types`.
+
+#### Where to put a definition
+
+Place the file directly in one of the five
+[schema roots](./definition.md#schema-roots), not in a subfolder. Its reach
+follows the root: a package's `schemas/` covers that package's documents, the
+repository's `schemas/` covers the whole repository, and `~/schemas` or the
+`SCHEMAS_DIR` folder covers every repository you work in. Definitions are only
+read for documents inside a repository; elsewhere only the shipped `schema`,
+`yaml-schema`, and `schema-trigger` kinds exist.
+
+Unlike triggers, file names never shadow each other: what matters is the kinds
+a file claims. Two definitions that claim one kind, in any roots and under any
+names, make every document of that kind fail with an error naming both files.
+That includes claiming a shipped kind such as `schema-trigger`. See
+[Schema Discovery](./schema-discovery.md) for the full rules, including what a
+broken definition does to the documents around it.
+
+#### Changing a shipped definition
+
+In this repository the shipped definitions are ordinary files in schema roots:
+[`darkmatter/schemas/schema-trigger.yaml`](../../../schemas/schema-trigger.yaml)
+sits in the `darkmatter` package area's root. Edit it in place and the edit
+applies at once to documents whose roots include that folder, with no
+rebuild, because a file at a shipped definition's repository-relative path
+that claims the same kind replaces the compiled-in copy. Documents elsewhere
+keep the compiled-in copy until Darkmatter is rebuilt. A copy saved under any
+other path is a second claim, and therefore a duplicate.
+
+#### Checking a definition
+
+A definition is itself a YAML document of kind `yaml-schema`, so validating
+it checks it against `yaml-schema.yaml` and then checks that its `$schema`
+prepares and claims a finite set of kinds (a
+[kind check](./definition.md#kind-checks)). Validate one with
+`md schema validate schemas/roster.yaml`
+([YAML documents on the command line](./definition.md#yaml-documents-on-the-command-line));
+the library's entry point is
+[`validate_yaml_document`](./definition.md#validating-from-the-library).
 
 ### Schemas for Global Variables
 
@@ -542,6 +658,8 @@ There are two primary types of grammar files which are distinguished by their `k
   description: |-
       string -> allows you to describe the intent of this trigger in prose
   ```
+
+A third kind, `kind: yaml-schema`, defines a kind of YAML document rather than a Markdown schema; see [Defining a YAML Document Kind](#defining-a-yaml-document-kind).
 
 A conditional trigger supplies its schema under `$schema`; a `kind: schema` file supplies it under `types`. The trigger predicate catalog and complete envelope validation rules are still being finalized; these sketches do not establish additional required fields.
 

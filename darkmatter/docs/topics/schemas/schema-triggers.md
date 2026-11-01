@@ -75,6 +75,56 @@ Recovery covers automatic discovery only. A document `$schema` that cannot
 load is still an error, and so is a `$schema` that names a trigger file,
 including one discovery skipped.
 
+### A warning for documents, an error for the trigger file
+
+The same trigger defect is reported with two severities, depending on what is
+being checked:
+
+| What is checked | How a bad trigger is reported |
+| --- | --- |
+| A Markdown document whose schema roots hold the trigger | the trigger is skipped with a `dm.schema.invalid_trigger` **warning**, as above |
+| The trigger file itself, validated as a [YAML document](./definition.md#yaml-documents) | **errors** in that file: its problems against the shipped `schema-trigger` definition, then any `kind_check` problem (`dm.schema.kind_check`) |
+
+A broken trigger is not the fault of the Markdown document that happened to
+discover it, so that document only gets a warning. When you check the
+trigger file, the defect is the file's own. For example, this trigger
+satisfies the `schema-trigger` definition, but `$path` cannot use `@`:
+
+```yaml
+kind: schema-trigger
+match:
+    all:
+        - $path: "@/docs/**"
+        - title: string(required)
+```
+
+Validated as a YAML document, it reports one `kind_check` error at line 4,
+column 18, the quoted glob. A Markdown document that discovers it gets the
+skipped-trigger warning instead, positioned at the same line. The trigger
+file's kind checks cover the trigger grammar: `$path` globs, an empty `match`
+list, a vacuous match, `min-match` count bounds, and match-safe conditions
+(see [Kind Checks](./definition.md#kind-checks)). Validate a trigger file
+with `md schema validate`, which exits `1` and reports the
+problem as `"kind": "kind_check"` in JSON. DMLS reporting these errors in the
+open trigger file is **planned**.
+
+### Where a failure is positioned
+
+A skipped trigger's warning carries a one-based line and column in the
+trigger file when Darkmatter can find the node the failure is about:
+
+- for YAML that does not parse, the parser's error position;
+- for an envelope or `match` grammar failure whose message names a field,
+  such as `` `match.all[0].$path` ``, the node at that field: the offending
+  `$path` glob, the `count` of a `min-match`, or an empty `match` list;
+- for a vacuous match, a mapping that mixes combinators with property
+  conditions, or a forbidden constraint in a condition, the `match` value.
+
+Any other envelope failure (an unknown top-level key) has no position.
+
+A failure inside a payload or import file has no position in the trigger
+file (see [Where the warning appears](#where-the-warning-appears)).
+
 ### Shadowing is unchanged
 
 A skipped file keeps its file name. It still shadows a file of the same name
@@ -107,11 +157,11 @@ instead and does not repeat it on stderr.
 
 | Command | Ordinary output | Report mode |
 | --- | --- | --- |
-| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output report-json`](../../cli/report-json.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at a YAML error's line and column, else `null` |
+| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output report-json`](../../cli/report-json.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at the [failure's position](#where-a-failure-is-positioned), else `null` |
 | `md schema validate` | stderr, before the file's result (also with `--quiet`) | `--format json`: a row in the `warnings` of the first file that discovers the trigger |
 | `md schema triggers` | stderr; the trace on stdout names each skipped trigger and its code in a "Skipped invalid triggers" section, between the shadowed envelopes and the triggers, without repeating the warning | — |
 | `md clean` | stderr; on a schema failure, before the error | [`--json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array, also in the envelope a schema failure prints |
-| DMLS | a warning diagnostic on the trigger file; see [Failures](../../lsp/indexing.md#failures) | — |
+| DMLS | a warning diagnostic on the trigger file, at the start of the line of the [failure's position](#where-a-failure-is-positioned) when it has one; see [Failures](../../lsp/indexing.md#failures) | — |
 
 A JSON row has the same four fields everywhere it appears outside
 `report-json`:

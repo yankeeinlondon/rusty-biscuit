@@ -136,6 +136,7 @@ impl PathGlobs {
         if patterns.is_empty() {
             return Err(SchemaError::TriggerMatch {
                 message: "$path must have at least one glob pattern".into(),
+                span: None,
             });
         }
         let mut compiled = Vec::with_capacity(patterns.len());
@@ -246,6 +247,7 @@ fn path_error(pattern: Option<&str>, reason: &str) -> SchemaError {
             Some(pattern) => format!("$path pattern `{pattern}` {reason}"),
             None => format!("$path {reason}"),
         },
+        span: None,
     }
 }
 
@@ -304,14 +306,14 @@ pub fn parse_match_conditions(value: &YamlValue) -> Result<MatchConditions, Sche
 
 /// A [`SchemaError::TriggerMatch`] whose message starts with the field `at`.
 fn located(at: &str, message: String) -> SchemaError {
-    SchemaError::TriggerMatch { message: format!("`{at}`: {message}") }
+    SchemaError::TriggerMatch { message: format!("`{at}`: {message}"), span: None }
 }
 
 /// Re-locates an unlocated [`SchemaError::TriggerMatch`] at `at`; any other
 /// error, or one already located, is returned unchanged.
 fn relocate(at: &str, error: SchemaError) -> SchemaError {
     match error {
-        SchemaError::TriggerMatch { message } if !message.starts_with('`') => located(at, message),
+        SchemaError::TriggerMatch { message, .. } if !message.starts_with('`') => located(at, message),
         other => other,
     }
 }
@@ -497,6 +499,7 @@ fn parse_property_condition_atom(name: &str, value: &YamlValue) -> Result<Proper
                 "property `{name}` in a match condition may not be a property-level union; use \
                  a `group:` of conditions instead"
             ),
+            span: None,
         }),
     }
 }
@@ -519,6 +522,7 @@ fn parse_property_condition_def(name: &str, value: &YamlValue) -> Result<Propert
                  got {}",
                 yaml_kind(other)
             ),
+            span: None,
         }),
     }
 }
@@ -537,6 +541,7 @@ fn single_shape_from_yaml(
             message: format!(
                 "property `{name}` inline object must be a single mapping shape",
             ),
+            span: None,
         }),
     }
 }
@@ -555,6 +560,7 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
                 SchemaRoot::Union(_) => {
                     return Err(SchemaError::TriggerMatch {
                         message: format!("property `{name}` union arm must be a single shape",),
+                        span: None,
                     });
                 }
             },
@@ -564,6 +570,7 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
                         "property `{name}` union arm must be a string or mapping, got {}",
                         yaml_kind(other)
                     ),
+                    span: None,
                 });
             }
         }
@@ -571,6 +578,7 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
     if atoms.is_empty() {
         return Err(SchemaError::TriggerMatch {
             message: format!("property `{name}` union must have at least one arm"),
+            span: None,
         });
     }
     Ok(atoms)

@@ -82,6 +82,44 @@ fn participant_code_span(participant: &SchemaConstraintParticipant) -> String {
     renderable::markdown::code_span(&participant.constraint.diagnostic_excerpt())
 }
 
+/// Why a YAML document's `kind` selects no definition
+/// ([`SchemaError::KindSelection`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KindSelectionCause {
+    /// Two or more definitions claim the kind; `files` names each, sorted
+    /// by path (a compiled-in definition by its repository-relative path).
+    Duplicate { files: Vec<PathBuf> },
+    /// The definition that claims the kind failed; `defect` is its failure.
+    Reserved { file: PathBuf, defect: String },
+    /// No healthy definition claims the kind, and `file` is a definition
+    /// that failed before revealing what it claims, so the kind may be its.
+    Unavailable { file: PathBuf, defect: String },
+    /// A schema root could not be read, so its definitions are unknown.
+    RootUnreadable { root: PathBuf, defect: String },
+}
+
+impl fmt::Display for KindSelectionCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Duplicate { files } => {
+                let files: Vec<String> = files.iter().map(|file| format!("`{}`", file.display())).collect();
+                write!(f, "it is claimed by more than one definition: {}", files.join(", "))
+            }
+            Self::Reserved { file, defect } => {
+                write!(f, "its definition `{}` failed: {defect}", file.display())
+            }
+            Self::Unavailable { file, defect } => write!(
+                f,
+                "schema selection is unavailable: definition `{}` failed before revealing its kind: {defect}",
+                file.display()
+            ),
+            Self::RootUnreadable { root, defect } => {
+                write!(f, "schema root `{}` could not be read: {defect}", root.display())
+            }
+        }
+    }
+}
+
 /// The Draft 2020-12 dialect URI, the only JSON Schema dialect a referenced
 /// `.json` schema file may declare.
 pub const DRAFT_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -449,9 +487,18 @@ pub enum SchemaError {
     /// `` `match[1].group[0]`: ``) and describes the failure; the trigger
     /// grammar is documented in the "Repository Trigger Schemas" section of
     /// `darkmatter/docs/topics/schemas/definition.md`. A `$path` pattern that
-    /// is not an allowed glob reference is reported here too.
+    /// is not an allowed glob reference is reported here too. `span` is the
+    /// byte range, in the trigger file's text, of the node the message is
+    /// about; `None` until a caller holding that text locates it.
     #[error("invalid schema-trigger: {message}")]
-    TriggerMatch { message: String },
+    TriggerMatch { message: String, span: Option<Range<usize>> },
+
+    /// A YAML document's `kind` names a document kind whose definition
+    /// cannot be selected: two definitions claim it, its definition failed,
+    /// or the registry of definitions could not be completed. `kind` is the
+    /// document's authored `kind`.
+    #[error("cannot select a schema for `kind: {kind}`: {cause}")]
+    KindSelection { kind: String, cause: KindSelectionCause },
 
     /// A schema-trigger file uses a spelling that was renamed without an
     /// alias: `kind: trigger-schema` (now `schema-trigger`) or the `any:`
@@ -1124,7 +1171,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )
             }
 
-            SchemaError::TriggerMatch { message } => StatusBlock::new(StatusState::Error)
+            SchemaError::TriggerMatch { message, .. } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "SchemaError",
                     "schema-trigger invalid",
@@ -1138,6 +1185,23 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                      <cyan>none</cyan>/<cyan>min-match</cyan>), property conditions, and the \
                      <cyan>$path</cyan> predicate.",
                 ),
+
+            SchemaError::KindSelection { kind, cause } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "YAML document kind cannot be selected"))
+                .body(Prose::new(format!(
+                    "<dim>kind:</dim> <cyan>{}</cyan>\n<dim>Reason:</dim> {}",
+                    Prose::escape_text(kind),
+                    Prose::escape_text_outside_code_spans(&cause.to_string())
+                )))
+                .hint(match cause {
+                    KindSelectionCause::Duplicate { .. } => {
+                        "Keep exactly one <cyan>kind: yaml-schema</cyan> definition claiming this kind in the schema roots."
+                    }
+                    KindSelectionCause::Reserved { .. } | KindSelectionCause::Unavailable { .. } => {
+                        "Fix the named definition; run <cyan>md schema validate</cyan> on it to see its defect."
+                    }
+                    KindSelectionCause::RootUnreadable { .. } => "Make the schema root readable, or remove it.",
+                }),
 
             SchemaError::TriggerRenamed { field, found, replacement } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "schema-trigger spelling renamed"))

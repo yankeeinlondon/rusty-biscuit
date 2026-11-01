@@ -118,6 +118,40 @@ but the loader no longer emits it. Classification is passive: it uses the
 already-parsed YAML value and performs no additional I/O. User docs:
 `darkmatter/docs/topics/schemas/definition.md#what-a-schema-reference-may-point-at`.
 
+### Whole YAML documents (`schemas/yaml_documents/`)
+
+`DarkmatterSchemas::validate_yaml_document(text, path)` is the one entry point
+for a `.yaml`/`.yml` file (`YamlOutcome::{NoSchema, Validated}`; the instance's
+context must be the document's). Selection (`select.rs`): non-mapping root →
+`NoSchema`; an authored string `kind` claimed in the `KindRegistry` → that
+definition only (root `$schema` is ordinary data); else root `$schema` (via
+`resolve_schema_with_roots`, stripped from the copy); else `NoSchema`. No
+baseline, no trigger layer, `EffectiveSchema::validate_data` (soft, no template
+deferral). `load.rs` is the only loader (BOM offset, one document, non-string
+keys). `KindRegistry` (`registry.rs`) = shipped definitions
+(`embedded::shipped_kind_definitions()`; guard
+`every_shipped_yaml_schema_definition_is_in_the_shipped_table`) + `kind:
+yaml-schema` files in the five roots for `RegistryScope::WithRoots`; never
+`Result`: `Claim::{Healthy, Duplicate, Reserved}`, `incomplete()`,
+`root_failures()` become `SchemaError::KindSelection` only for documents they
+can affect. Source-path identity: a root file at a shipped definition's
+repo-relative path claiming its kind replaces the built-in (so this checkout's
+own definition files never duplicate). A private `Builder` keeps the context
+required (the context-construction guard rejects `Option<&FileResolutionContext>`).
+Kind checks (`semantic.rs`, `ValidationProblemCode::KindCheck`,
+`dm.schema.kind_check`) run for `schema`/`schema-trigger`/`yaml-schema` only
+after the definition passes. `TriggerMatch` carries `span`; it is filled by
+`triggers::envelope::locate_trigger_error` from the message's leading field, and
+discovery findings get a `position()` from it. Tests:
+`lib/tests/l1/{yaml_kind_registry,yaml_document_loading,yaml_document_selection,kind_semantic_checks}.rs`
+(the `Fixture` in `yaml_kind_registry.rs` writes a bare `.git/` instead of
+spawning `git`). It is `LoadedYamlDocument::load(text, path)` (the only
+load error) plus `validate_loaded_yaml_document(&loaded)` (selection and
+schema errors only): call the two steps when the caller must tell a document
+load error from a referenced schema's, which is also a `SchemaDocument`.
+`md schema validate` does (see [cli.md](cli.md)); DMLS does not call it yet:
+wire it to these entry points rather than adding a second YAML route.
+
 Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.

@@ -104,6 +104,9 @@ pub mod code {
     pub const SCHEMA_TYPE_MISMATCH: &str = simplified_schema::SCHEMA_TYPE_MISMATCH_CODE;
     /// A non-type constraint (range, length, pattern, enum, …) failed.
     pub const SCHEMA_CONSTRAINT: &str = simplified_schema::SCHEMA_CONSTRAINT_CODE;
+    /// A YAML document of one of Darkmatter's kinds fails a check its
+    /// definition cannot state (an invalid trigger `$path` glob).
+    pub const SCHEMA_KIND_CHECK: &str = simplified_schema::SCHEMA_KIND_CHECK_CODE;
     /// A required key is absent.
     pub const SCHEMA_MISSING_REQUIRED: &str = simplified_schema::SCHEMA_MISSING_REQUIRED_CODE;
     /// A key the schema does not declare is present (strict mode).

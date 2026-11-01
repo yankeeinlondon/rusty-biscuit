@@ -108,6 +108,7 @@ mod schema_grammar_types;
 mod schema_validate_shipped_artifacts;
 mod schema_validate_phase;
 mod schema_validate_summary;
+mod schema_validate_yaml;
 mod spawn_site_guard;
 mod standalone_baseline;
 mod test_layout;

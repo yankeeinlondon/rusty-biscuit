@@ -187,6 +187,29 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     },
 ];
 
+/// Virtual path of Darkmatter's definition of `kind: schema-trigger`
+/// documents.
+pub(crate) const SCHEMA_TRIGGER_DEFINITION_PATH: &str = "darkmatter/schemas/schema-trigger.yaml";
+
+/// The shipped `kind: yaml-schema` definitions, keyed by repository-relative
+/// path: the library's two envelope definitions
+/// ([`simplified_schema::envelope::ENVELOPE_DEFINITIONS`]) and Darkmatter's
+/// trigger definition. They seed every YAML document-kind registry, and the
+/// key is the path a checkout copy must have to replace one (see
+/// [`super::yaml_documents`]). They reference each other by relative path
+/// only, so the slice is also the document set their imports resolve in.
+pub(crate) fn shipped_kind_definitions() -> &'static [EmbeddedDocument<'static>] {
+    static DEFINITIONS: std::sync::OnceLock<Vec<EmbeddedDocument<'static>>> = std::sync::OnceLock::new();
+    DEFINITIONS.get_or_init(|| {
+        let mut documents = simplified_schema::envelope::ENVELOPE_DEFINITIONS.to_vec();
+        documents.push(EmbeddedDocument {
+            path: SCHEMA_TRIGGER_DEFINITION_PATH,
+            text: include_str!("../../../../schemas/schema-trigger.yaml"),
+        });
+        documents
+    })
+}
+
 /// The reserved namespace of a named-type reference to one of Darkmatter's
 /// shipped partials: `Name@darkmatter:<stem>` names the type `Name` in the
 /// [`SHIPPED`] document `darkmatter/schemas/partials/<stem>.yaml`, whoever

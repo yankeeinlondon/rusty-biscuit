@@ -703,3 +703,36 @@ fn a_self_referencing_trigger_found_through_a_symlink_names_no_other_file() {
     assert!(matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }), "{finding:?}");
     assert_eq!(finding.cause_path(), None, "the payload is the trigger itself: {finding:?}");
 }
+
+/// A grammar failure the trigger's definition cannot state (an invalid
+/// `$path` glob) skips the trigger with a warning positioned on the glob,
+/// the same failure `md schema validate` reports as an error in the file.
+#[test]
+fn an_invalid_path_glob_is_a_finding_positioned_on_the_glob() {
+    let trigger = "schemas/globbed.yaml";
+    let repo = Repo::new(&[(trigger, "kind: schema-trigger\nmatch:\n  all:\n    - $path: \"@/docs/**\"\n")]);
+
+    let registry = repo.scan();
+
+    let finding = the_finding(registry.findings());
+    let SchemaError::TriggerMatch { message, span } = finding.cause() else {
+        panic!("a grammar failure: {finding:?}");
+    };
+    assert!(message.contains("`match.all[0].$path`") && message.contains("cannot use `@`"), "{message}");
+    assert!(span.is_some(), "{finding:?}");
+    assert_eq!(finding.position(), Some((4, 14)), "{finding:?}");
+}
+
+/// A failure about the match expression as a whole (vacuous) is positioned
+/// on the `match` value.
+#[test]
+fn a_vacuous_match_is_a_finding_positioned_on_the_match_value() {
+    let trigger = "schemas/vacuous.yaml";
+    let repo = Repo::new(&[(trigger, "kind: schema-trigger\nmatch:\n  title: string\n")]);
+
+    let registry = repo.scan();
+
+    let finding = the_finding(registry.findings());
+    assert!(matches!(finding.cause(), SchemaError::TriggerVacuousMatch), "{finding:?}");
+    assert_eq!(finding.position(), Some((3, 3)), "{finding:?}");
+}

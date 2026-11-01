@@ -14,8 +14,10 @@ use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, InvalidTriggerFinding};
-use simplified_schema::{SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemKind, ValidationTimings};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, InvalidTriggerFinding, LoadedYamlDocument, YamlOutcome};
+use simplified_schema::{
+    SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
+};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -40,6 +42,9 @@ enum FileOutcome {
     Unopened(color_eyre::eyre::Report),
     /// Frontmatter could not be parsed.
     ParseError(String),
+    /// A YAML document is not one admissible YAML document (exit `3`); the
+    /// location is the 1-based line and UTF-8 byte column of the failure.
+    YamlLoadError { message: String, location: Option<(usize, usize)> },
     /// Schema could not be resolved/built for this file.
     SchemaError(Box<SchemaError>),
 }
@@ -54,8 +59,15 @@ enum FileOutcome {
 /// - `1` — one or more files failed validation
 /// - `2` — schema or baseline could not be loaded (CLI baseline _or_ a
 ///   per-document `$schema` reference)
-/// - `3` — at least one file could not be opened or its frontmatter could
-///   not be parsed
+/// - `3` — at least one file could not be opened, its frontmatter could
+///   not be parsed, or (a YAML document) it is not admissible YAML
+///
+/// An input whose resolved path ends in `.yaml` or `.yml` (any letter case)
+/// is a whole YAML document, validated by the schema it selects (its claimed
+/// `kind`, else its root `$schema`) with no baseline and no triggers. A
+/// preflight opens every argument before anything is validated and refuses
+/// (exit `64`) assignments or `--schema` alongside any YAML input. The
+/// baseline is loaded only when some input is not YAML.
 ///
 /// At `verbose >= 2` each validated document's stage timings follow its
 /// outcome on stderr; stdout and the exit code are unaffected.
@@ -87,12 +99,41 @@ pub fn run_validate(
     };
 
     if files.is_empty() {
-        let line = "<red>Error:</red> no Markdown files were provided".to_string();
+        let line = "<red>Error:</red> no Markdown or YAML files were provided".to_string();
         eprintln!("{}", Prose::new(line).render(&terminal));
         std::process::exit(64);
     }
 
-    let api = match load_api(schema, no_baseline_schema, request) {
+    // Preflight: every argument is opened, and the batch judged, before any
+    // file is validated or any outcome printed.
+    let opened: Vec<(Result<OpenedArgument>, bool)> = files
+        .iter()
+        .map(|file| {
+            let opened = open_argument(file, request);
+            // An argument that did not open has no resolved path; its own
+            // spelling decides whether it would have been YAML.
+            let yaml = is_yaml_path(opened.as_ref().map_or(file.as_path(), OpenedArgument::path));
+            (opened, yaml)
+        })
+        .collect();
+    let any_yaml = opened.iter().any(|(_, yaml)| *yaml);
+    if any_yaml && let Some(message) = yaml_usage_error(&assignments, schema) {
+        let line = format!("<red>Error:</red> {}", escape_prose(message));
+        eprintln!("{}", Prose::new(line).render(&terminal));
+        std::process::exit(64);
+    }
+
+    // YAML documents never use the baseline, so a YAML-only batch never
+    // loads (or fails on) one.
+    let api = if opened.iter().any(|(_, yaml)| !*yaml) {
+        load_api(schema, no_baseline_schema, request)
+    } else {
+        request
+            .launch_context()
+            .map(|context| DarkmatterSchemas::new(context.clone()))
+            .map_err(|error| SchemaError::Baseline { message: format!("{error:#}"), source: None })
+    };
+    let api = match api {
         Ok(api) => api,
         Err(err) => {
             emit_schema_error(&err);
@@ -105,8 +146,9 @@ pub fn run_validate(
     let mut any_validation_failure = false;
     let mut delivered = DeliveredFindings::default();
 
-    for file in &files {
-        let (outcome, timings, findings, document) = match open_argument(file, request) {
+    for (file, (opened, yaml)) in files.iter().zip(opened) {
+        let (outcome, timings, findings, document) = match opened {
+            Ok(opened) if yaml => (validate_yaml(&api, &opened, request), None, Vec::new(), Some(opened.into_path())),
             Ok(opened) => {
                 let checked = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
                 (checked.outcome, checked.timings, checked.findings, Some(opened.into_path()))
@@ -118,7 +160,7 @@ pub fn run_validate(
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
             }
-            FileOutcome::ParseError(_) | FileOutcome::Unopened(_) => {
+            FileOutcome::ParseError(_) | FileOutcome::YamlLoadError { .. } | FileOutcome::Unopened(_) => {
                 any_parse_error = true;
             }
             FileOutcome::SchemaError(_) => {
@@ -297,6 +339,74 @@ fn validate_one(
     checked(outcome, timings)
 }
 
+/// Whether `path` names a whole YAML document: its extension is `yaml` or
+/// `yml`, ASCII case-insensitively.
+fn is_yaml_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml"))
+}
+
+/// Why a batch holding a YAML document is a usage error, if it is: an
+/// assignment edits frontmatter, which a YAML document does not have, and
+/// `--schema` replaces a baseline YAML documents never use.
+fn yaml_usage_error(assignments: &[Assignment], schema: Option<&Path>) -> Option<&'static str> {
+    if !assignments.is_empty() {
+        Some("`<prop>=<value>` assignments apply to Markdown frontmatter and cannot be used with a YAML document")
+    } else if schema.is_some() {
+        Some("`--schema` replaces the Markdown baseline and cannot be used with a YAML document")
+    } else {
+        None
+    }
+}
+
+/// Validates one whole YAML document in its own context: its claimed `kind`
+/// or root `$schema` selects the schema, and nothing else applies.
+fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdRequest) -> FileOutcome {
+    let path = biscuit_file::canonicalize_simplified(opened.path()).unwrap_or_else(|_| opened.path().to_path_buf());
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) => {
+            return FileOutcome::YamlLoadError { message: format!("could not read the file: {err}"), location: None };
+        }
+    };
+    let document = match LoadedYamlDocument::load(&text, &path) {
+        Ok(document) => document,
+        Err(err) => {
+            let location = match &err {
+                SchemaError::SchemaDocument { span: Some(span), .. } => Some(simplified_schema::line_col_of_offset(&text, span.start)),
+                _ => None,
+            };
+            let message = match err {
+                SchemaError::SchemaDocument { message, .. } => message,
+                other => other.to_string(),
+            };
+            return FileOutcome::YamlLoadError { message, location };
+        }
+    };
+    let context = match request.document_context(Some(opened.reference()), &path) {
+        Ok(context) => context,
+        Err(err) => return FileOutcome::YamlLoadError { message: format!("{err:#}"), location: None },
+    };
+    match api.clone().with_file_resolution_context(context).validate_loaded_yaml_document(&document) {
+        Ok(YamlOutcome::NoSchema) => FileOutcome::Validated {
+            report_valid: true,
+            problems: Vec::new(),
+            advisories: Vec::new(),
+            schema_label: None,
+            no_schema: true,
+        },
+        Ok(YamlOutcome::Validated(validation)) => FileOutcome::Validated {
+            report_valid: validation.report.valid,
+            problems: validation.report.problems,
+            advisories: validation.report.advisories,
+            schema_label: Some(validation.definition),
+            no_schema: false,
+        },
+        Err(err) => FileOutcome::SchemaError(Box::new(err)),
+    }
+}
+
 /// Prints one document's validation stage timings to stderr.
 fn emit_timings(file: &Path, timings: &ValidationTimings, terminal: &Terminal) {
     let triggers = match timings.matched_triggers() {
@@ -431,6 +541,18 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             );
             println!("{}", Prose::new(header).render(terminal));
             let bullet = format!("    - {}", escape_prose(message));
+            println!("{}", Prose::new(bullet).render(terminal));
+        }
+        FileOutcome::YamlLoadError { message, location } => {
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>is not a valid YAML document:</dim>_"
+            );
+            println!("{}", Prose::new(header).render(terminal));
+            let suffix = match location {
+                Some((line, column)) => format!(" <dim>(at line {line}, column {column})</dim>"),
+                None => String::new(),
+            };
+            let bullet = format!("    - {}{suffix}", escape_prose(message));
             println!("{}", Prose::new(bullet).render(terminal));
         }
         FileOutcome::SchemaError(err) => {
@@ -571,7 +693,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
                         "path": p.path,
                         "property": p.property,
                         "message": p.message,
-                        "kind": kind_str(p.kind),
+                        "kind": kind_str(p),
                         "line": p.line,
                         "column": p.column,
                         "arm_index": p.arm_index,
@@ -612,6 +734,16 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
             "message": message,
             "problems": [],
         }),
+        FileOutcome::YamlLoadError { message, location } => json!({
+            "file": file_str,
+            "valid": false,
+            "schema": serde_json::Value::Null,
+            "error": "yaml_parse",
+            "message": message,
+            "line": location.map(|(line, _)| line),
+            "column": location.map(|(_, column)| column),
+            "problems": [],
+        }),
         FileOutcome::SchemaError(err) => json!({
             "file": file_str,
             "valid": false,
@@ -633,9 +765,13 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
     println!("{}", value);
 }
 
-/// Stable lowercase token for a [`ValidationProblemKind`], used in JSON output.
-fn kind_str(kind: ValidationProblemKind) -> &'static str {
-    match kind {
+/// Stable lowercase token for a problem's kind, used in JSON output; a YAML
+/// document kind's own check is `kind_check` whatever its underlying kind.
+fn kind_str(problem: &ValidationProblem) -> &'static str {
+    if problem.code == ValidationProblemCode::KindCheck {
+        return "kind_check";
+    }
+    match problem.kind {
         ValidationProblemKind::Missing => "missing",
         ValidationProblemKind::Type => "type",
         ValidationProblemKind::Invalid => "invalid",

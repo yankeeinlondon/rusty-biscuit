@@ -125,6 +125,10 @@ and admits each against the library's compiled envelope definitions. A `$schema`
 `types`-only file still serves `Name@file` imports. A loader refusal of a
 trigger file is reported as `TriggerSchemaReferenced`/`TriggerPayloadCycle`
 (`triggers::assemble::refused_trigger_file`).
+A whole `.yaml`/`.yml` document is validated by
+`DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
+none, no baseline or triggers) over a per-context `KindRegistry`; read
+[schema.md](schema.md#whole-yaml-documents-schemasyaml_documents) first.
 
 Important contracts:
 

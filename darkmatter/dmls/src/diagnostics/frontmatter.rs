@@ -1528,6 +1528,7 @@ fn classify(
         ValidationProblemCode::InvalidFileReference => {
             (code::SCHEMA_INVALID_FILE_REFERENCE, DiagnosticSeverity::ERROR)
         }
+        ValidationProblemCode::KindCheck => (code::SCHEMA_KIND_CHECK, DiagnosticSeverity::ERROR),
     })
 }
 

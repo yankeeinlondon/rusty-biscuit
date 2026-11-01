@@ -77,6 +77,19 @@ impl InvalidTriggerFinding {
         }
     }
 
+    /// This finding positioned, in `source` (the trigger file's text), at the
+    /// node its envelope or match-grammar cause is about, when it has no
+    /// position yet.
+    #[must_use]
+    pub(crate) fn located_in(mut self, source: &str) -> Self {
+        if self.position.is_none()
+            && let Some(span) = super::envelope::trigger_error_span(&self.cause, source)
+        {
+            self.position = Some(simplified_schema::line_col_of_offset(source, span.start));
+        }
+        self
+    }
+
     /// This finding with the observations of the failed payload resolution.
     #[must_use]
     pub(crate) fn with_observations(mut self, read: Vec<PathBuf>, searched: Vec<PathBuf>) -> Self {
@@ -123,7 +136,10 @@ impl InvalidTriggerFinding {
     }
 
     /// The 1-based `(line, column)` in the trigger file of a malformed
-    /// envelope's YAML error; `None` for every other cause.
+    /// envelope's YAML error, or of the node an envelope or match-grammar
+    /// error is about (the field a [`SchemaError::TriggerMatch`] or
+    /// [`SchemaError::TriggerRenamed`] names, `match` for a vacuous or mixed
+    /// match); `None` for every other cause.
     #[must_use]
     pub fn position(&self) -> Option<(usize, usize)> {
         self.position
@@ -227,6 +243,7 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         | SchemaError::ReferenceDepthExceeded { .. }
         | SchemaError::InvalidExample { .. }
         | SchemaError::TriggerMatch { .. }
+        | SchemaError::KindSelection { .. }
         | SchemaError::TriggerRenamed { .. }
         | SchemaError::TriggerEnvelopeYaml { .. }
         | SchemaError::TriggerForbiddenConstraint { .. }

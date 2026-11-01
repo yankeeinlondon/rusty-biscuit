@@ -52,6 +52,7 @@ pub mod resolve;
 pub mod rewrite;
 pub mod roots;
 pub mod triggers;
+pub mod yaml_documents;
 mod positions;
 pub(crate) mod embedded;
 
@@ -104,6 +105,7 @@ pub use roots::{
     SchemaRoots, SearchedRoot,
 };
 pub use embedded::EmbeddedSchemaBundle;
+pub use yaml_documents::{KindRegistry, LoadedYamlDocument, RegistryScope, Route, YamlOutcome, YamlValidation};
 pub use triggers::{
     InvalidTriggerFinding, LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
     TriggerConditionTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
@@ -252,6 +254,9 @@ pub struct DarkmatterSchemas {
     /// Bundles [`Self::with_trigger_discovery`] appends after the roots.
     embedded_bundles: Vec<EmbeddedSchemaBundle>,
     file_resolution_context: biscuit_file::FileResolutionContext,
+    /// The YAML document kinds [`Self::validate_yaml_document`] selects from;
+    /// built per call when `None`.
+    kind_registry: Option<Arc<KindRegistry>>,
 }
 
 use simplified_schema::prepared::{CompiledValidators, wrapped_root_arms};
@@ -316,6 +321,7 @@ impl DarkmatterSchemas {
             triggers: None,
             embedded_bundles: Vec::new(),
             file_resolution_context: context,
+            kind_registry: None,
         }
     }
 
@@ -1183,6 +1189,55 @@ impl EffectiveSchema {
         let templates = self.nested_templates(stored);
         let working_copy = simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, &templates);
         self.validate_instance(&working_copy, frontmatter, stored, positions, &templates)
+    }
+
+    /// The effective schema of a whole YAML document: `resolved` alone, with
+    /// no baseline and no trigger layer, judging file values from `base_dir`
+    /// in `schemas`' context and validator cache.
+    pub(crate) fn for_yaml_document(
+        resolved: simplified_schema::resolve::ResolvedSchema,
+        base_dir: PathBuf,
+        schemas: &DarkmatterSchemas,
+    ) -> Result<Self, SchemaError> {
+        let json_schema = Arc::new(resolved.json_schema.clone());
+        let validators =
+            CompiledValidators::build(&json_schema, &schemas.cache, Some(&base_dir), &schemas.file_resolution_context)?;
+        let origins = build_origin_map_with_triggers(Some(&resolved), &[], false, &json_schema);
+        let dependencies = build_dependencies(Some(&resolved), &[]);
+        let advisories = resolved.advisories.clone();
+        Ok(Self {
+            definitions: Arc::clone(&resolved.definitions),
+            simplified: resolved.simplified,
+            trigger_shapes: Vec::new(),
+            trigger_definitions: Vec::new(),
+            json_schema,
+            origins,
+            validators,
+            base_dir: Some(base_dir),
+            file_ref_fallback_dir: schemas.cache.file_ref_fallback_dir().map(Path::to_path_buf),
+            file_resolution_context: schemas.file_resolution_context.clone(),
+            caller_origins: schemas.cache.caller_origins().clone(),
+            dependencies,
+            advisories,
+            conversion: OnceLock::new(),
+            layered_definitions: OnceLock::new(),
+            raw_declarations: OnceLock::new(),
+        })
+    }
+
+    /// Validates `instance` as data: softly, on a converted copy, with no
+    /// template deferred, so a whole-value or nested `{{ … }}` / `$(…)`
+    /// string is judged as the text it is. `positions` locates problems.
+    pub(crate) fn validate_data(&self, instance: &Value, positions: &PositionMap) -> ValidationReport {
+        let _validate = timings::stage(ValidationStage::Validate);
+        let templates = simplified_schema::coerce::NestedTemplates::default();
+        let positions = ProblemPositions::Built(positions);
+        if self.accepts_as_is(instance) {
+            return self.validate_instance(instance, instance, instance, &positions, &templates);
+        }
+        let working_copy =
+            simplified_schema::coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, instance, &templates);
+        self.validate_instance(&working_copy, instance, instance, &positions, &templates)
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.

@@ -529,7 +529,7 @@ fn forbidden_path_prefixes_are_definition_errors_naming_the_pattern() {
     ] {
         let error = PathGlobs::new(vec!["**/*.md".into(), pattern.into()])
             .expect_err(&format!("`{pattern}` must be refused"));
-        let SchemaError::TriggerMatch { message } = &error else {
+        let SchemaError::TriggerMatch { message, .. } = &error else {
             panic!("`{pattern}`: expected a trigger match error, got {error:?}");
         };
         assert!(message.contains(&format!("`{pattern}`")), "`{pattern}`: {message}");

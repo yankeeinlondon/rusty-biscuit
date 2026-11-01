@@ -80,7 +80,7 @@ pub(crate) use note_work;
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::{CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, NotSchemaReason, SchemaError};
+pub use errors::{CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError};
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
     frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
@@ -124,7 +124,7 @@ pub use timings::{CompileCache, ValidationStage, ValidationTimings};
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 pub use validation::{
     CallerFileReferenceProvenance, FileReferenceDiagnostic, JsonPointer, SCHEMA_CONSTRAINT_CODE,
-    SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
+    SCHEMA_INVALID_FILE_REFERENCE_CODE, SCHEMA_KIND_CHECK_CODE, SCHEMA_MISSING_REQUIRED_CODE, SCHEMA_PREPARE_CODE,
     SCHEMA_TYPE_MISMATCH_CODE, SCHEMA_UNKNOWN_KEY_CODE, ValidationProblem, ValidationProblemCode,
     ValidationProblemKind, authored_node_at,
 };

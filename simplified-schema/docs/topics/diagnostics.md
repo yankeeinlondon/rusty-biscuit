@@ -235,6 +235,14 @@ lowered schema, `arm_index` the root-union arm it was raised under, and
 such as `dm.schema.constraint`. A file-value failure also carries a typed
 `FileReferenceDiagnostic` (malformed syntax, unresolvable, or no such file).
 
+`ValidationProblemCode::KindCheck` (`dm.schema.kind_check`,
+`SCHEMA_KIND_CHECK_CODE`) is never produced by the library's own validators.
+It is the code a host gives a problem found by a check of one of its own
+document kinds that the kind's definition cannot state: Darkmatter reports an
+invalid trigger `$path` glob or an undeclared category this way, located in
+the document like any other problem, after the document satisfies its
+definition.
+
 `validate_strict` and `validate_soft` judge a `serde_json::Value`, which has
 no source text, so their problems carry no `line` or `column`. A caller that
 holds the YAML the value came from fills them in afterwards; positions are
@@ -381,7 +389,25 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 The remaining variants (`TriggerMatch`, `TriggerLoad`, `EmbeddedBundle`, and
 the other `Trigger*` and `EmbeddedTriggerLoad` variants) describe a host's
 schema-trigger files and embedded schema bundles. Darkmatter raises them; they
-live here so that every schema failure is one type.
+live here so that every schema failure is one type. `TriggerMatch` carries an
+optional byte `span` of the trigger-file node its message names, filled in by
+the host that holds the file's text.
+
+`KindSelection { kind, cause }` is raised by a host that selects a whole YAML
+document's schema by its `kind` (Darkmatter's `kind: yaml-schema` registry):
+the document's `kind` has no single usable definition. `cause` is a
+`KindSelectionCause`:
+
+| Cause | Meaning |
+|---|---|
+| `Duplicate { files }` | Two or more definitions claim the kind; every file is named, sorted by path. |
+| `Reserved { file, defect }` | The one definition claiming the kind failed; `defect` is its failure. |
+| `Unavailable { file, defect }` | No healthy definition claims the kind, and `file` failed before revealing what it claims. |
+| `RootUnreadable { root, defect }` | A folder searched for definitions could not be read. |
+
+```text
+cannot select a schema for `kind: roster`: it is claimed by more than one definition: `a.yaml`, `b.yaml`
+```
 
 With the opt-in `terminal` feature (see [Cargo features](./features.md)),
 `SchemaError` implements `biscuit_terminal::errors::BlockError`, so a host
