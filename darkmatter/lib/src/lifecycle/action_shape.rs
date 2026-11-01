@@ -392,9 +392,11 @@ pub fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExp
                 Ok(parse(&span.expression).map_err(|e| ActionExprError::Parse(Box::new(e)))?)
             } else {
                 for span in spans {
-                    parse(&span.expression).map_err(|source| ActionExprError::SpanParse {
-                        expression: span.expression.trim().to_string(),
-                        source: Box::new(source),
+                    parse(&span.expression).map_err(|source| {
+                        ActionExprError::SpanParse(Box::new(SpanParseError {
+                            expression: span.expression.trim().to_string(),
+                            source,
+                        }))
                     })?;
                 }
                 Ok(Expr::StringLiteral(s.clone()))

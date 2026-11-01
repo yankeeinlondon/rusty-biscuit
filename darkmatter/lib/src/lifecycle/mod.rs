@@ -68,7 +68,7 @@ use self::actions::{
     RuntimeSetError, ShellAction, SideEffectAction, WithOverlay, WithOverlayError, all_lifecycle_verbs,
     expression_function_signature, is_known_lifecycle_verb, rewrite_to_positional, side_effect_signature,
 };
-use self::error::{ActionExprError, LifecycleError};
+use self::error::{ActionExprError, LifecycleError, SpanParseError};
 
 mod action_shape;
 pub mod actions;
