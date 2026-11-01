@@ -1,4 +1,4 @@
-kind: schema
+kind: yaml-schema
 description: |-
     The definition of a `kind: schema-trigger` document: a YAML file whose
     `match` conditions select the Markdown documents its `$schema` applies to.
