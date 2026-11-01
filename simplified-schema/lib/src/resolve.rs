@@ -1045,7 +1045,7 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
         path: path.to_path_buf(),
         reason,
     };
-    if let Some(document) = parse_standalone_schema_document(text, path)? {
+    if let Some(document) = parse_referenced_schema_document(text, path)? {
         return if document.exports_schema {
             Ok(document)
         } else {
@@ -1084,6 +1084,33 @@ pub(crate) fn classify_yaml_schema_text(path: &Path, text: &str) -> Result<Stand
         source: None,
         span: None,
     })
+}
+
+/// [`parse_standalone_schema_document`] for a file named as a `$schema`
+/// target or a `Name@file` import source, where a `kind: yaml-schema`
+/// document is refused as selected by `kind`
+/// ([`NotSchemaReason::SelectedByKind`]), whether or not its envelope is
+/// well formed: naming it is the mistake to report. Hosts reading a
+/// referenced file themselves (an editor's import catalog) use this too.
+///
+/// ## Errors
+///
+/// As [`parse_standalone_schema_document`], plus
+/// [`SchemaError::NotASchemaDocument`] with
+/// [`NotSchemaReason::SelectedByKind`].
+pub fn parse_referenced_schema_document(
+    text: &str,
+    path: &Path,
+) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
+    let selected_by_kind = || SchemaError::NotASchemaDocument {
+        path: path.to_path_buf(),
+        reason: NotSchemaReason::SelectedByKind,
+    };
+    match parse_standalone_schema_document(text, path) {
+        Ok(Some(document)) if document.envelope == StandaloneSchemaEnvelope::YamlSchema => Err(selected_by_kind()),
+        Err(_) if crate::simplified::standalone::claims_yaml_schema(text) => Err(selected_by_kind()),
+        other => other,
+    }
 }
 
 /// Whether `value` is a `json-schema.org` dialect URI.
@@ -1267,7 +1294,7 @@ pub fn prepare_embedded_schema_in(
     };
     let document = embedded::find(documents, path)
         .ok_or_else(|| unsupported("not a registered embedded schema document"))?;
-    let Some(standalone) = parse_standalone_schema_document(document.text, Path::new(path))? else {
+    let Some(standalone) = parse_referenced_schema_document(document.text, Path::new(path))? else {
         return Err(SchemaError::NotASchemaDocument {
             path: PathBuf::from(path),
             reason: NotSchemaReason::NoSchemaProperty,
@@ -1287,6 +1314,63 @@ pub fn prepare_embedded_schema_in(
         }
     };
     lower_embedded_schema(schema, standalone.local_types.as_ref(), path, documents, bundle, Sharing::Automatic, shipped)
+}
+
+/// Prepares the exported `$schema` of the embedded `kind: yaml-schema`
+/// document `path`: the contract a document of its claimed kind must meet.
+/// Its imports resolve among `documents`. This is how a host prepares a YAML
+/// document kind's definition (a `yaml-schema` is never a `$schema` target,
+/// so [`prepare_embedded_schema`] refuses it); the claimed kinds are then
+/// read from the result with [`crate::claimed_values`].
+///
+/// ## Errors
+///
+/// [`SchemaError::NotASchemaDocument`] when `path` is not a `yaml-schema`
+/// ([`NotSchemaReason::NoSchemaProperty`]); otherwise as
+/// [`prepare_embedded_schema`], including the envelope's admission against
+/// `yaml-schema.yaml`.
+pub fn prepare_embedded_yaml_schema(
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let refused = || SchemaError::NotASchemaDocument {
+        path: PathBuf::from(path),
+        reason: NotSchemaReason::NoSchemaProperty,
+    };
+    let document = embedded::find(documents, path).ok_or_else(|| SchemaError::SchemaDocument {
+        path: PathBuf::from(path),
+        message: "not a registered embedded schema document".into(),
+        source: None,
+        span: None,
+    })?;
+    let standalone = parse_standalone_schema_document(document.text, Path::new(path))?
+        .filter(|standalone| standalone.envelope == StandaloneSchemaEnvelope::YamlSchema)
+        .ok_or_else(refused)?;
+    let SchemaDeclaration::Schema(schema) = standalone.declaration else {
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(path),
+            message: "an embedded definition cannot be a whole-file reference".into(),
+            source: None,
+            span: None,
+        });
+    };
+    lower_embedded_definition(schema, standalone.local_types.as_ref(), path, documents, shipped)
+}
+
+/// Lowers the parsed export of the embedded definition `path` (a schema or
+/// `yaml-schema` document already parsed by the caller) with its imports
+/// resolved among `documents`. The library's envelope definitions are
+/// prepared this way, before admission exists.
+pub(crate) fn lower_embedded_definition(
+    schema: SchemaRoot,
+    local_types: Option<&SchemaShape>,
+    path: &str,
+    documents: &[EmbeddedDocument<'_>],
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    lower_embedded_schema(schema, local_types, path, documents, "", Sharing::Automatic, shipped)
+        .map(|(resolved, _)| resolved)
 }
 
 /// Prepares an inline `$schema` mapping authored in the embedded document
@@ -2199,7 +2283,7 @@ impl ImportEngine<'_> {
                 // A list of a shared definition keeps the reference on its
                 // items whatever the postfix, so forcing stops at `[]`.
                 let force_inline = force_inline && !is_array;
-                return self.expand_import(
+                let expanded = self.expand_import(
                     NamedReference {
                         name,
                         reference,
@@ -2211,7 +2295,9 @@ impl ImportEngine<'_> {
                     current,
                     path,
                     Use { as_arm, force_inline },
-                );
+                )?;
+                self.check_non_null_use(&expanded, path)?;
+                return Ok(expanded);
             }
             TypeExpr::Primitive(p) => TypeExpr::Primitive(p),
             TypeExpr::InlineObject(shape) => {
@@ -2249,6 +2335,47 @@ impl ImportEngine<'_> {
         }
         (*list, *origins) = existing.into_iter().unzip();
         Ok(ExpandedDef::Single(Box::new(atom), provenance))
+    }
+
+    /// Rejects a `non-null` use of a named type whose value admits null
+    /// (`Opt(non-null)` for `Opt: string | null`), which the grammar cannot
+    /// see before the reference is resolved. A use kept as a reference reads
+    /// null admission from its definition's summary; the first pass, which
+    /// has none, defers the check to the final pass.
+    fn check_non_null_use(&self, expanded: &ExpandedDef, path: &SchemaSourcePath) -> Result<(), SchemaError> {
+        let message = match expanded {
+            ExpandedDef::Single(atom, _) if !atom.marks_non_null() => None,
+            ExpandedDef::Single(atom, _) => match (&atom.ty, atom.is_array) {
+                (TypeExpr::Ref(key), false) => {
+                    let admits_null = self
+                        .summaries
+                        .as_ref()
+                        .and_then(|summaries| summaries.get(key))
+                        .is_some_and(|summary| summary.admits_null);
+                    if admits_null {
+                        // The reference stands for a null-admitting value,
+                        // which `null` represents for the shared check.
+                        let mut value = (**atom).clone();
+                        value.ty = TypeExpr::Primitive(SimplifiedType::Null);
+                        PropertyDef::Single(value).non_null_problem()
+                    } else {
+                        None
+                    }
+                }
+                _ => PropertyDef::Single((**atom).clone()).non_null_problem(),
+            },
+            ExpandedDef::Union(arms) if !arms.iter().any(PropertyAtom::marks_non_null) => None,
+            ExpandedDef::Union(arms) => PropertyDef::Union(arms.clone()).non_null_problem(),
+        };
+        match message {
+            None => Ok(()),
+            Some(message) => Err(SchemaError::Grammar {
+                property: path.to_string(),
+                message,
+                span: 0..0,
+                related: Vec::new(),
+            }),
+        }
     }
 
     /// Expands the reference written at `path` in `current`.
@@ -2801,7 +2928,7 @@ struct FileTable {
 /// The explicit `types` table, or the mapping payload when no separate table
 /// exists; `path` identifies the document in errors.
 fn named_types_from_text(text: &str, path: &Path) -> Result<NamedTypes, SchemaError> {
-    let Some(document) = parse_standalone_schema_document(text, path)? else {
+    let Some(document) = parse_referenced_schema_document(text, path)? else {
         return Err(SchemaError::NotASchemaDocument {
             path: path.to_path_buf(),
             reason: NotSchemaReason::NoSchemaProperty,
@@ -3343,7 +3470,7 @@ fn apply_union_postfix(
 fn is_union_marker(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::Required | Constraint::Generated | Constraint::Eager
+        Constraint::Required | Constraint::NonNull | Constraint::Generated | Constraint::Eager
     )
 }
 
@@ -3480,6 +3607,7 @@ fn is_flag(constraint: &Constraint) -> bool {
             | Constraint::Unique
             | Constraint::Eager
             | Constraint::Required
+            | Constraint::NonNull
             | Constraint::Generated
     )
 }
@@ -4116,13 +4244,13 @@ pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, Sc
     if !document_obj.contains_key("$schema") && baseline_obj.get("$schema").is_some() {
         document_obj.insert("$schema".into(), baseline_obj["$schema"].clone());
     }
+    // Closure (`additionalProperties: false`) belongs to the layer that
+    // declares it; copying it would close a document that never asked to be.
     if !document_obj.contains_key("additionalProperties")
-        && baseline_obj.get("additionalProperties").is_some()
+        && let Some(additional) = baseline_obj.get("additionalProperties")
+        && additional != &Value::Bool(false)
     {
-        document_obj.insert(
-            "additionalProperties".into(),
-            baseline_obj["additionalProperties"].clone(),
-        );
+        document_obj.insert("additionalProperties".into(), additional.clone());
     }
 
     Ok(Value::Object(document_obj))
@@ -4134,7 +4262,7 @@ pub fn validate_baseline_schema(baseline: &Value) -> Result<(), SchemaError> {
 
 /// Validates that a JSON Schema is a simple object schema: rooted at
 /// `"type": "object"` with only `properties` / `required` (plus the cosmetic
-/// `$schema` / `additionalProperties: true` / `description` / `title`, and a
+/// `$schema` / boolean `additionalProperties` / `description` / `title`, and a
 /// root `$defs` table its properties refer to).
 ///
 /// This is the merge-compatibility contract: both caller baselines and trigger
@@ -4169,7 +4297,8 @@ pub fn validate_simple_object_schema(schema: &Value, label: &str) -> Result<(), 
 /// The root-key half of [`validate_simple_object_schema`].
 pub(super) fn validate_simple_object_root(schema: &Map<String, Value>) -> Result<(), SchemaError> {
     // `additionalProperties: true` is permitted (SimplifiedSchema-generated
-    // baselines emit it); `false` and schema-shaped values are not.
+    // baselines emit it), and so is `false` (a `closed` root), which the merge
+    // never copies onto the document; schema-shaped values are not.
     const ALLOWED_KEYS: &[&str] = &[
         "$schema",
         "type",
@@ -4209,11 +4338,11 @@ pub(super) fn validate_simple_object_root(schema: &Map<String, Value>) -> Result
 
     if let Some(ap) = schema.get("additionalProperties") {
         match ap {
-            Value::Bool(true) => {}
+            Value::Bool(_) => {}
             _ => {
                 return Err(SchemaError::Baseline {
                     message: "baseline uses unsupported JSON Schema construct \
-                              `additionalProperties: false`; only simple object \
+                              schema-valued `additionalProperties`; only simple object \
                               schemas (properties + required) are allowed"
                         .into(),
                     source: None,
@@ -4715,23 +4844,16 @@ mod tests {
     }
 
     #[test]
-    fn baseline_rejects_additional_properties_false() {
+    fn closed_baseline_is_admitted_without_closing_the_document() {
         let baseline = json!({
             "type": "object",
             "properties": { "owner": { "type": "string" } },
             "additionalProperties": false,
         });
         let doc = json!({"type":"object","properties":{}});
-        let err = merge_baseline(&baseline, doc).unwrap_err();
-        match err {
-            SchemaError::Baseline { message, .. } => {
-                assert!(
-                    message.contains("additionalProperties"),
-                    "expected message to mention additionalProperties, got: {message}"
-                );
-            }
-            other => panic!("expected SchemaError::Baseline, got {other:?}"),
-        }
+        let merged = merge_baseline(&baseline, doc).unwrap();
+        assert_eq!(merged["properties"]["owner"]["type"], "string");
+        assert!(merged.get("additionalProperties").is_none(), "{merged}");
     }
 
     #[test]

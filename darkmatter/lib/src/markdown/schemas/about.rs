@@ -27,7 +27,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "string",
         aliases: &[],
         description: "Text.",
-        accepted_constraints: &["eager", "min", "max", "not-empty", "pattern", "suggest", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "min", "max", "not-empty", "pattern", "suggest", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
         type_options: &[],
     },
@@ -35,7 +35,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "date",
         aliases: &[],
         description: "ISO-8601 date (`YYYY-MM-DD`).",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"date\" }",
         type_options: &[],
     },
@@ -43,7 +43,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "datetime",
         aliases: &[],
         description: "ISO-8601 datetime; the timezone offset is optional.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-datetime\" }",
         type_options: &[],
     },
@@ -51,7 +51,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "time",
         aliases: &[],
         description: "Time of day with optional timezone.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-time\" }",
         type_options: &[],
     },
@@ -59,7 +59,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "number",
         aliases: &[],
         description: "A numeric value.",
-        accepted_constraints: &["eager", "min", "max", "integer", "suggest", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "min", "max", "integer", "suggest", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
         type_options: &[],
     },
@@ -67,7 +67,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "numberlike",
         aliases: &[],
         description: "A number, or text that reads as a number; kept exactly as written (`\"02134\"` stays text).",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": [\"number\", \"string\"], \"format\": \"darkmatter-numberlike\" }",
         type_options: &[],
     },
@@ -75,7 +75,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "boolean",
         aliases: &[],
         description: "A true or false value.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"boolean\" } with optional default",
         type_options: &[],
     },
@@ -83,7 +83,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "boolish",
         aliases: &[],
         description: "A boolean, or a boolean word (`yes`, `On`, `0`, any case); kept exactly as written.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": [\"boolean\", \"string\"], \"format\": \"darkmatter-boolish\" }",
         type_options: &[],
     },
@@ -91,7 +91,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "object",
         aliases: &[],
         description: "Any object shape. Use an inline object literal when you want to validate nested fields.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"object\" } with no `additionalProperties: false` (root-schema behavior preserved)",
         type_options: &[],
     },
@@ -99,7 +99,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "file",
         aliases: &[],
         description: "A path-like file reference. Lazy by default (syntax-only); add `eager` to require the file to exist. Use `match(...)` to suggest accepted paths.",
-        accepted_constraints: &["eager", "match", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "match", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file-reference\" } (lazy); `file(eager)` emits `format: darkmatter-file` (eager existence check). In a root union each simplified arm's `match(...)` emits `x-darkmatter-match`.",
         type_options: &[],
     },
@@ -107,7 +107,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "enum",
         aliases: &[],
         description: "Value must be one of the constraint-supplied members.",
-        accepted_constraints: &["<members>", "eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["<members>", "eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"enum\": [ ... ] } with optional default",
         type_options: &[],
     },
@@ -115,7 +115,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "url",
         aliases: &[],
         description: "Absolute URL.",
-        accepted_constraints: &["eager", "scheme", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "scheme", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"uri\" } plus x-darkmatter-url-scheme when `scheme(...)` is set",
         type_options: &[],
     },
@@ -123,7 +123,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "email",
         aliases: &[],
         description: "RFC 5322 addr-spec.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
         type_options: &[],
     },
@@ -131,7 +131,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "literal",
         aliases: &[],
         description: "The value must equal exactly one scalar of any scalar type. Bare `true`/`false` types as boolean, a bare numberlike token as number, and quoted or any other bare token as string. Replaces the single-member enum and makes discriminated unions first-class. Coerces a document value to the literal's scalar type (`\"2\"` against `literal(2)` → `2`); string literals never coerce.",
-        accepted_constraints: &["<value>", "eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["<value>", "eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"const\": <value> } with the value's lexed type, wrapped by the optional-nullable wrapper; `literal(x)[]` places the `const` under `items`",
         type_options: &[],
     },
@@ -139,7 +139,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "expression",
         aliases: &[],
         description: "A string that must parse under the Darkmatter expression grammar. Parse-only and never evaluated — the third content-format string type alongside `yaml` and `json`. Native boolean/number values coerce to their string forms (`true` → `\"true\"`); mappings and sequences are type mismatches.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
         type_options: &[],
     },
@@ -147,16 +147,16 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "type-definition",
         aliases: &[],
         description: "One complete SimplifiedSchema property definition carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for schema-language completion, hover, and diagnostics.",
-        accepted_constraints: &["default", "required", "generated", "deferred"],
-        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }",
+        accepted_constraints: &["forms", "declared-required", "default", "required", "non-null", "generated", "deferred"],
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }, or an options object such as { \"forms\": [\"literal\"], \"declaredRequired\": true } in place of `true`",
         type_options: &[],
     },
     SchemaTypeDescriptor {
         keyword: "schema",
         aliases: &[],
         description: "One complete `$schema` declaration carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for declaration completion, hover, and diagnostics.",
-        accepted_constraints: &["default", "required", "generated", "deferred"],
-        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }",
+        accepted_constraints: &["mapping", "property", "default", "required", "non-null", "generated", "deferred"],
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }, or an options object such as { \"mapping\": true, \"property\": [{ \"name\": \"kind\", \"declaration\": <type-definition options> }] } in place of `true`",
         type_options: &[],
     },
     SchemaTypeDescriptor {
@@ -179,7 +179,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "alphanumeric",
         aliases: &[],
         description: "A string of ASCII letters and digits (`[A-Za-z0-9]`); no option is on by default. Options written before the first `;` widen or narrow the character set and are part of the type's identity; redundant options are dropped from its canonical form.",
-        accepted_constraints: &["<options>", "min", "max", "not-empty", "pattern", "suggest", "eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["<options>", "min", "max", "not-empty", "pattern", "suggest", "eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"pattern\": <regex of the canonical options>, \"x-darkmatter-type\": \"alphanumeric\", \"x-darkmatter-options\": [ ... ] }",
         type_options: ALPHANUMERIC_OPTION_DESCRIPTORS,
     },
@@ -187,7 +187,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "shell",
         aliases: &[],
         description: "A string holding a shell command: at least one non-whitespace character. Passive: never parsed as shell syntax, approved, or executed. Constraints, coercion of native booleans and numbers to text, and pending-value deferral mirror `expression`.",
-        accepted_constraints: &["eager", "default", "required", "generated", "deferred"],
+        accepted_constraints: &["eager", "default", "required", "non-null", "generated", "deferred"],
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-shell\" }",
         type_options: &[],
     },
@@ -269,6 +269,15 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "0",
         description: "The property must be present.",
         json_schema_effect: "parent's `required` list contains the property name",
+    },
+    SchemaConstraintDescriptor {
+        name: "non-null",
+        keyword: "non-null",
+        form: "non-null",
+        target_types: "all types except null and unknown",
+        argument_arity: "0",
+        description: "The property may be omitted, but a present value must not be null. Declaring it on a type that admits null (`null`, `unknown`/`any`, a union with such an alternative, or a named type that is one) is a schema error. Before `[]` it marks the property the same way as after.",
+        json_schema_effect: "the property stays out of the parent's `required` list and gets no optional `null` alternative, so an explicit `null` fails as a wrong type",
     },
     SchemaConstraintDescriptor {
         name: "default",
@@ -423,6 +432,43 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         description: "Marks a value as the short or long form of a Darkmatter lifecycle verb (an expression function or side effect). Schema validation binds the value's operands through that verb's runtime registration, and the binder's verdict replaces the type's for them: numeric recovery, source exclusions, and overload selection decide. `{{ … }}` operands stay deferred, but a span that does not parse is a positioned problem. The lifecycle schema generator writes it on every generated verb arm; a verb the parser owns itself (`say`, `proxy`, `set`, …) carries it on its hand-written type, where it only checks the strings the parser reads as templates.",
         json_schema_effect: "emits `x-darkmatter-operands: \"<verb>-short\"` (or `-long`) on the node the arm lowers to; never fails a value by itself",
     },
+    // ── declaration options ────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "mapping",
+        keyword: "mapping",
+        form: "mapping",
+        target_types: "schema",
+        argument_arity: "0",
+        description: "The declaration must be written as a YAML mapping; a reference string or a root-union list is rejected.",
+        json_schema_effect: "sets `\"mapping\": true` in the `x-darkmatter-schema` options object",
+    },
+    SchemaConstraintDescriptor {
+        name: "property",
+        keyword: "property",
+        form: "property(name, ...)",
+        target_types: "schema",
+        argument_arity: "2",
+        description: "Every inline object the declaration exports must declare the property `name`, and that property's declaration must satisfy the `type-definition(...)` options (`forms`, `declared-required`). Repeat it for several names. A reference carrier or a root-union file arm is not followed.",
+        json_schema_effect: "appends `{ \"name\", \"declaration\" }` to the `property` list of the `x-darkmatter-schema` options object",
+    },
+    SchemaConstraintDescriptor {
+        name: "forms",
+        keyword: "forms",
+        form: "forms(type, ...)",
+        target_types: "type-definition",
+        argument_arity: "1+",
+        description: "Every top-level alternative of the declaration must be a non-list atom built with one of the listed type keywords; a `literal` or `enum` alternative must denote non-empty strings. A named-type alternative passes until it is resolved.",
+        json_schema_effect: "sets `forms` in the `x-darkmatter-type-definition` options object",
+    },
+    SchemaConstraintDescriptor {
+        name: "declared-required",
+        keyword: "declared-required",
+        form: "declared-required",
+        target_types: "type-definition",
+        argument_arity: "0",
+        description: "The declaration must be marked `required` and admit no null alternative.",
+        json_schema_effect: "sets `\"declaredRequired\": true` in the `x-darkmatter-type-definition` options object",
+    },
     // ── array ──────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
         name: "unique",
@@ -438,6 +484,61 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
 /// Returns all schema-language constraint descriptors in display order.
 pub fn schema_constraint_descriptors() -> &'static [SchemaConstraintDescriptor] {
     SCHEMA_CONSTRAINT_DESCRIPTORS
+}
+
+/// The keys of a block object's `$constraints:` mapping, in display order.
+///
+/// The test [`block_constraint_keys_match_the_lowering`] asserts this is
+/// exactly the set of keys the grammar parses and the lowering accepts, at
+/// each placement.
+pub const BLOCK_CONSTRAINT_DESCRIPTORS: &[BlockConstraintDescriptor] = &[
+    BlockConstraintDescriptor {
+        keyword: "min-keys",
+        form: "min-keys: <count>",
+        on_root: true,
+        description: "The object must have at least this many keys; the block form of `min-keys(n)` after an inline object.",
+    },
+    BlockConstraintDescriptor {
+        keyword: "max-keys",
+        form: "max-keys: <count>",
+        on_root: true,
+        description: "The object may have at most this many keys; the block form of `max-keys(n)` after an inline object.",
+    },
+    BlockConstraintDescriptor {
+        keyword: "uncounted-keys",
+        form: "uncounted-keys: [<key>, ...]",
+        on_root: true,
+        description: "Declared keys that `min-keys` and `max-keys` do not count.",
+    },
+    BlockConstraintDescriptor {
+        keyword: "closed",
+        form: "closed: true",
+        on_root: true,
+        description: "The object admits only its declared properties and pattern-key matches. A root is open without it; a nested object is always closed, so there it changes nothing.",
+    },
+    BlockConstraintDescriptor {
+        keyword: "required",
+        form: "required: true",
+        on_root: false,
+        description: "Marks the property holding this object `required`, as `required` after it would.",
+    },
+    BlockConstraintDescriptor {
+        keyword: "non-null",
+        form: "non-null: true",
+        on_root: false,
+        description: "Marks the property holding this object `non-null`: it may be omitted, but never null.",
+    },
+    BlockConstraintDescriptor {
+        keyword: "generated",
+        form: "generated: true",
+        on_root: false,
+        description: "Marks the property holding this object `generated`: the host supplies it.",
+    },
+];
+
+/// Returns the `$constraints:` key descriptors in display order.
+pub fn block_constraint_descriptors() -> &'static [BlockConstraintDescriptor] {
+    BLOCK_CONSTRAINT_DESCRIPTORS
 }
 
 /// All supported `$schema` shapes, in display order.
@@ -716,6 +817,11 @@ pub const MATCH_SAFE_CONSTRAINT_DESCRIPTORS: &[MatchSafeConstraintDescriptor] = 
     MatchSafeConstraintDescriptor { keyword: "unique", description: "Requires distinct array items." },
     MatchSafeConstraintDescriptor { keyword: "min-keys", description: "Checks a minimum object key count." },
     MatchSafeConstraintDescriptor { keyword: "max-keys", description: "Checks a maximum object key count." },
+    MatchSafeConstraintDescriptor { keyword: "non-null", description: "Defeats the condition when the property is present and null." },
+    MatchSafeConstraintDescriptor { keyword: "mapping", description: "Requires a `schema` declaration written as a mapping." },
+    MatchSafeConstraintDescriptor { keyword: "property", description: "Requires a `schema` declaration to declare a property whose declaration satisfies its options." },
+    MatchSafeConstraintDescriptor { keyword: "forms", description: "Requires a `type-definition` built from the listed type keywords." },
+    MatchSafeConstraintDescriptor { keyword: "declared-required", description: "Requires a `type-definition` marked `required` with no null alternative." },
 ];
 
 /// Returns the constraint subset accepted in trigger matches.
@@ -823,9 +929,23 @@ impl SchemaConstraintDescriptor {
     /// same [`target_types`](Self::target_types) contract the catalog already
     /// publishes, so the two cannot drift apart.
     pub fn accepts_array_level(&self) -> bool {
-        self.target_types == "all types"
+        self.target_types.starts_with("all types")
             || self.target_types.split(" | ").any(|target| target == "array")
     }
+}
+
+/// Descriptor for one key of a block object's `$constraints:` mapping.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockConstraintDescriptor {
+    /// The key as written in the mapping.
+    pub keyword: &'static str,
+    /// The entry as authored, with a placeholder for its value.
+    pub form: &'static str,
+    /// Whether the key is valid on a declaration's root object (or a
+    /// root-union arm); every key is valid on a nested property's object.
+    pub on_root: bool,
+    /// Short description of the key's effect.
+    pub description: &'static str,
 }
 
 /// Descriptor for a single schema shape / grammar form.
@@ -920,7 +1040,9 @@ mod tests {
             .collect();
         assert_eq!(
             accepted,
-            HashSet::from(["required", "default", "generated", "deferred", "eager", "min", "max", "unique", "operands"]),
+            HashSet::from([
+                "required", "non-null", "default", "generated", "deferred", "eager", "min", "max", "unique", "operands",
+            ]),
         );
         for keyword in accepted {
             let form = match keyword {
@@ -1123,6 +1245,8 @@ mod tests {
                     "pattern" => "pattern(^a)".to_string(),
                     "match" => "match(*.md)".to_string(),
                     "scheme" => "scheme(https)".to_string(),
+                    "forms" => "forms(literal)".to_string(),
+                    "property" => "property(kind, type-definition)".to_string(),
                     bare => bare.to_string(),
                 };
                 match positional {
@@ -1177,6 +1301,56 @@ mod tests {
         assert!(mismatches.is_empty(), "{mismatches:#?}");
     }
 
+    /// A bare `type-definition` declaration, for `Constraint::Property`.
+    fn type_definition() -> PropertyDef {
+        simplified_schema::simplified::parse_property_definition(
+            "p",
+            &serde_yaml_ng::Value::String("type-definition".into()),
+        )
+        .expect("parses")
+    }
+
+    /// The `$constraints:` key catalog is exactly what the grammar parses and
+    /// the lowering accepts: every key on a nested property's object, and
+    /// `on_root` keys on the root.
+    #[test]
+    fn block_constraint_keys_match_the_lowering() {
+        fn lowers(yaml: &str) -> bool {
+            let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml");
+            parse_yaml_schema(&yaml)
+                .is_ok_and(|schema| simplified_schema::simplified::to_json_schema(&schema).is_ok())
+        }
+        // Every key `$constraints` parses, with a value of its kind
+        // (`uncounted-keys` needs a bound beside it).
+        let parsed = [
+            ("min-keys", "1"),
+            ("max-keys", "1"),
+            ("uncounted-keys", "[a], min-keys: 1"),
+            ("min-items", "1"),
+            ("max-items", "1"),
+            ("required", "true"),
+            ("not-empty", "true"),
+            ("unique", "true"),
+            ("generated", "true"),
+            ("integer", "true"),
+            ("non-null", "true"),
+            ("closed", "true"),
+        ];
+        let mut mismatches = Vec::new();
+        for (key, value) in parsed {
+            let descriptor = BLOCK_CONSTRAINT_DESCRIPTORS.iter().find(|d| d.keyword == key);
+            let root = lowers(&format!("a: string\n$constraints: {{ {key}: {value} }}\n"));
+            let nested = lowers(&format!("p:\n  a: string\n  $constraints: {{ {key}: {value} }}\n"));
+            if root != descriptor.is_some_and(|d| d.on_root) || nested != descriptor.is_some() {
+                mismatches.push(format!("`{key}`: root {root}, nested {nested}, catalog {descriptor:?}"));
+            }
+        }
+        assert!(mismatches.is_empty(), "{mismatches:#?}");
+        for descriptor in BLOCK_CONSTRAINT_DESCRIPTORS {
+            assert!(parsed.iter().any(|(key, _)| *key == descriptor.keyword), "`{}` is probed", descriptor.keyword);
+        }
+    }
+
     /// Every implemented `Constraint` variant has descriptor coverage, and
     /// every descriptor maps to a real variant.
     #[test]
@@ -1210,6 +1384,11 @@ mod tests {
             Constraint::MinItems(0),
             Constraint::MaxItems(0),
             Constraint::Operands(String::new()),
+            Constraint::NonNull,
+            Constraint::Mapping,
+            Constraint::Property { name: String::new(), declaration: Box::new(type_definition()) },
+            Constraint::Forms(Vec::new()),
+            Constraint::DeclaredRequired,
         ] {
             implemented.insert(c.keyword());
         }
@@ -1334,6 +1513,7 @@ mod tests {
         let _ = validation_behavior_descriptors();
         let _ = trigger_grammar_descriptors();
         let _ = match_safe_constraint_descriptors();
+        let _ = block_constraint_descriptors();
     }
 
     #[test]
@@ -1376,6 +1556,13 @@ mod tests {
             Constraint::MaxItems(0),
             Constraint::MinKeys(0),
             Constraint::MaxKeys(0),
+            Constraint::NonNull,
+            Constraint::Mapping,
+            Constraint::Property { name: String::new(), declaration: Box::new(type_definition()) },
+            Constraint::Forms(Vec::new()),
+            Constraint::DeclaredRequired,
+            Constraint::Closed,
+            Constraint::UncountedKeys(Vec::new()),
         ];
         let implemented: HashSet<&str> = constraints
             .iter()

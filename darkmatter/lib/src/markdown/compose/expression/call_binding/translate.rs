@@ -39,6 +39,7 @@ use simplified_schema::coercion::{
     ObjectShape, PatternScope, PatternSlot, PropertySlot, RefSlot, Shape, ShapeRef, TextPattern, TextShape,
     TupleShape, TupleSlot, accepts_exactly,
 };
+use simplified_schema::SchemaError;
 use simplified_schema::numeric::json_number;
 use simplified_schema::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_REFERENCE_FORMAT,
@@ -47,7 +48,7 @@ use simplified_schema::format::{
 };
 use simplified_schema::simplified::{
     AlphanumericOptions, Constraint, DefKey, DefinitionOuter, DefinitionTable, PatternKey, PropertyAtom, PropertyDef,
-    SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TupleType, TypeExpr,
+    SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TupleType, TypeExpr, declaration_options_payload,
 };
 use simplified_schema::validate::ValidatorCache;
 
@@ -247,6 +248,7 @@ fn is_annotation(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::Required
+            | Constraint::NonNull
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Deferred
@@ -471,6 +473,8 @@ impl<'r> Translator<'r> {
                     (shape, false)
                 } else if def.is_required() {
                     (shape, !matches!(def, PropertyDef::Single(atom) if is_generated(atom)))
+                } else if def.marks_non_null() {
+                    (shape, false)
                 } else {
                     (Shape::Union(vec![Shape::Null, shape]), false)
                 });
@@ -549,8 +553,10 @@ impl<'r> Translator<'r> {
         let required = !admits_null
             && container.map_or_else(|| arms.iter().any(marks_required), marks_required);
         let generated = container.map_or_else(|| arms.iter().any(is_generated), is_generated);
+        let non_null =
+            container.map_or_else(|| arms.iter().any(PropertyAtom::marks_non_null), PropertyAtom::marks_non_null);
         let mut options = Vec::with_capacity(arms.len() + 1);
-        if !required && !admits_null {
+        if !(required || admits_null || non_null) {
             options.push(Shape::Null);
         }
         let mut hoisted: Option<Value> = None;
@@ -571,6 +577,10 @@ impl<'r> Translator<'r> {
         }
         if required {
             return Ok((shape, !is_generated(atom)));
+        }
+        // Optional, but a present `null` is a wrong type.
+        if atom.marks_non_null() {
+            return Ok((shape, false));
         }
         let wrapped = match shape {
             // The optional scalar `file` already carries its `""` option.
@@ -597,7 +607,10 @@ impl<'r> Translator<'r> {
             .constraints
             .iter()
             .filter(|constraint| {
-                !matches!(constraint, Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred)
+                !matches!(
+                    constraint,
+                    Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred | Constraint::NonNull
+                )
             })
             .cloned()
             .collect();
@@ -733,10 +746,12 @@ impl<'r> Translator<'r> {
         Ok(Shape::Object(object))
     }
 
-    /// The lowering's `shape_to_object_schema`: open unless it declares
-    /// pattern keys.
+    /// The lowering's `shape_to_object_schema`: open unless it is `closed` or
+    /// declares pattern keys.
     fn root_object(&mut self, shape: &SchemaShape) -> Result<Shape, TranslateError> {
-        let mut object = self.object_body("", shape, Additional::Any)?;
+        let closed = shape.constraints.contains(&Constraint::Closed);
+        let mut object =
+            self.object_body("", shape, if closed { Additional::Forbidden } else { Additional::Any })?;
         reject_block_constraints("<root>", shape, "the root object")?;
         object_arity("<root>", &mut object, shape.constraints.iter())?;
         Ok(Shape::Object(object))
@@ -954,7 +969,10 @@ fn reject_block_constraints(path: &str, shape: &SchemaShape, place: &str) -> Res
     match shape
         .constraints
         .iter()
-        .find(|constraint| !matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_)))
+        .find(|constraint| {
+            // `closed` is a no-op on an inline object, which is closed already.
+            !matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::Closed)
+        })
     {
         Some(constraint) => Err(invalid(
             path,
@@ -1078,7 +1096,26 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
         }
         SimplifiedType::Shell => shell(path, constraints),
         SimplifiedType::TypeDefinition | SimplifiedType::Schema => {
-            reject_unsupported(path, keyword, constraints)?;
+            // The declaration options lower into the keyword payload,
+            // exactly as `semantic_type_fragment` lowers them.
+            let rest: Vec<Constraint> = constraints
+                .iter()
+                .filter(|constraint| {
+                    !matches!(
+                        constraint,
+                        Constraint::Mapping
+                            | Constraint::Property { .. }
+                            | Constraint::Forms(_)
+                            | Constraint::DeclaredRequired
+                    )
+                })
+                .cloned()
+                .collect();
+            reject_unsupported(path, keyword, &rest)?;
+            let payload = declaration_options_payload(path, constraints).map_err(|error| match error {
+                SchemaError::Convert { message, .. } => invalid(path, message),
+                other => invalid(path, other.to_string()),
+            })?;
             let flag = if ty == SimplifiedType::Schema {
                 DARKMATTER_SCHEMA_KEYWORD
             } else {
@@ -1089,7 +1126,7 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
                 Shape::Object(ObjectShape::opaque()),
                 Shape::array(Shape::Any),
             ]);
-            Ok(structure.assert(format_assertion(keyword, json!({ flag: true }))?))
+            Ok(structure.assert(format_assertion(keyword, json!({ flag: payload }))?))
         }
         SimplifiedType::Unknown => {
             reject_unsupported(path, keyword, constraints)?;

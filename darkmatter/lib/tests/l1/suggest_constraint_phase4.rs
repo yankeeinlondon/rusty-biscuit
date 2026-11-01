@@ -67,7 +67,7 @@ fn claimed_malformed_envelopes_are_schema_document_errors() {
         "kind: schema\n",
         "kind: schema\ntypes: []\n",
         "kind: schema\ntypes: {}\nnotes: unsupported\n",
-        "kind: schema\ntypes: {}\ndescription: 42\n",
+        "kind: schema\ntypes: {}\ndescription: null\n",
         "$schema:\n  name: string\ndescription: [not, a, string]\n",
         "kind: schema\ntypes: {}\nextra: value\n",
         // A tagged `types` payload is a named-type mapping, so — unlike a pure

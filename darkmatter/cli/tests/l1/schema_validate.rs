@@ -1072,7 +1072,7 @@ fn schema_validate_rejects_indentless_types_sequence() {
         .assert()
         .code(2)
         .stdout(predicate::str::contains("has a schema definition error"))
-        .stdout(predicate::str::contains("must be a mapping"));
+        .stdout(predicate::str::contains("`/types`"));
 }
 
 /// Each presented spelling, loaded from a real file through the library's

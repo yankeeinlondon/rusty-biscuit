@@ -177,6 +177,27 @@ impl PropertyDef {
         }
     }
 
+    /// Whether some atom carries the `non-null` marker.
+    pub fn marks_non_null(&self) -> bool {
+        match self {
+            Self::Single(atom) => atom.marks_non_null(),
+            Self::Union(atoms) => atoms.iter().any(PropertyAtom::marks_non_null),
+        }
+    }
+
+    /// The message of a `non-null` declared over a value that admits null
+    /// (`null | string(non-null)`, `unknown(non-null)`), if this definition
+    /// has one. Expects a definition whose references are resolved; an
+    /// unresolved reference never admits null, so the resolver repeats the
+    /// check after expansion.
+    pub fn non_null_problem(&self) -> Option<String> {
+        (self.marks_non_null() && self.admits_null()).then(|| {
+            "`non-null` cannot mark a type that admits null (`null`, `unknown`, or a union with \
+             such an alternative); drop `non-null` or the null-admitting alternative"
+                .to_string()
+        })
+    }
+
     /// Whether any atom supplies a property default.
     ///
     /// Valid union defaults are identical and collapse to one value during
@@ -653,6 +674,16 @@ impl PropertyAtom {
                 .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_required))
     }
 
+    /// Whether this atom carries a `non-null` marker in either constraint
+    /// list, or on a union type's arms.
+    pub fn marks_non_null(&self) -> bool {
+        self.property_constraints()
+            .any(|constraint| matches!(constraint, Constraint::NonNull))
+            || self
+                .union_arms()
+                .is_some_and(|arms| arms.iter().any(PropertyAtom::marks_non_null))
+    }
+
     /// Whether this atom's whole value admits null: a non-array `null` or
     /// `unknown`, or a non-array union type with such an arm.
     pub fn admits_null(&self) -> bool {
@@ -888,6 +919,13 @@ pub enum Constraint {
     /// The property must be present.
     Required,
 
+    /// `non-null`: the property may be omitted, but a present value is never
+    /// `null`. A presence marker like [`Constraint::Required`], read from
+    /// either constraint list. Declaring it on a type whose whole value
+    /// admits null (`null`, `unknown`, or a union with such an alternative)
+    /// is a schema error.
+    NonNull,
+
     /// Default value (emitted as JSON Schema `default`).
     Default(serde_json::Value),
 
@@ -1003,6 +1041,39 @@ pub enum Constraint {
     /// `minProperties`/`maxProperties` by that many more.
     UncountedKeys(Vec<String>),
 
+    /// `$constraints: { closed: true }`: the object admits only its declared
+    /// properties and pattern-key matches. Object-level; lives in
+    /// [`SchemaShape::constraints`]. Roots are open without it; nested
+    /// objects are always closed, so there it changes nothing.
+    Closed,
+
+    // ── declaration options (`schema` / `type-definition`) ─────────────────
+    // Each judges the authored declaration a value carries, never a data
+    // value; see
+    // `simplified-schema/docs/topics/language/schema-types.md`.
+    /// `schema(mapping)`: the declaration's YAML carrier must be a mapping.
+    Mapping,
+
+    /// `schema(property(name, type-definition(...)))`: every inline object
+    /// the declaration exports must declare `name`, and that property's
+    /// declaration must satisfy `declaration` (a `type-definition` atom).
+    /// May repeat with different names.
+    Property {
+        /// The property every exported object must declare.
+        name: String,
+        /// The `type-definition(...)` judging that property's declaration.
+        declaration: Box<PropertyDef>,
+    },
+
+    /// `type-definition(forms(literal, enum))`: every top-level alternative
+    /// of the declaration is a non-array atom built with one of these type
+    /// keywords. A set: order and repeats carry no meaning.
+    Forms(Vec<SimplifiedType>),
+
+    /// `type-definition(declared-required)`: the declaration is marked
+    /// `required` and admits no null alternative.
+    DeclaredRequired,
+
     // ── documentation ──────────────────────────────────────────────────────
     /// One or more example artifact file references (`example(...)`, Feature
     /// A). Non-validating for the annotated property — each referenced file is
@@ -1034,6 +1105,7 @@ impl Constraint {
     pub fn keyword(&self) -> &'static str {
         match self {
             Constraint::Required => "required",
+            Constraint::NonNull => "non-null",
             Constraint::Default(_) => "default",
             Constraint::Generated => "generated",
             Constraint::Deferred => "deferred",
@@ -1059,6 +1131,11 @@ impl Constraint {
             Constraint::MinKeys(_) => "min-keys",
             Constraint::MaxKeys(_) => "max-keys",
             Constraint::UncountedKeys(_) => "uncounted-keys",
+            Constraint::Closed => "closed",
+            Constraint::Mapping => "mapping",
+            Constraint::Property { .. } => "property",
+            Constraint::Forms(_) => "forms",
+            Constraint::DeclaredRequired => "declared-required",
             Constraint::Example(_) => "example",
             Constraint::Category(_) => "category",
             Constraint::Operands(_) => "operands",

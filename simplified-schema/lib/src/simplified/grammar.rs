@@ -582,6 +582,11 @@ fn is_constraint_keyword(name: &str) -> bool {
             | "max-keys"
             | "uncounted-keys"
             | "category"
+            | "non-null"
+            | "mapping"
+            | "declared-required"
+            | "forms"
+            | "property"
     )
 }
 
@@ -817,7 +822,15 @@ impl<'a> Parser<'a> {
         if let Some(problem) = narrowing::overload_arms_problem(&arms) {
             return self.narrows_err(problem);
         }
-        Ok(arms_to_def(arms))
+        let marked = arms.iter().position(PropertyAtom::marks_non_null);
+        let def = arms_to_def(arms);
+        if let Some(message) = def.non_null_problem() {
+            let span = marked
+                .and_then(|index| self.arm_spans.get(index).cloned())
+                .unwrap_or(0..self.src.len());
+            return self.err(message, span);
+        }
+        Ok(def)
     }
 
     /// Reads one or more `|`-separated options. A parenthesized group without
@@ -1048,6 +1061,7 @@ impl<'a> Parser<'a> {
                 !matches!(
                     constraint,
                     Constraint::Required
+                        | Constraint::NonNull
                         | Constraint::Default(_)
                         | Constraint::Generated
                         | Constraint::Deferred
@@ -1942,10 +1956,16 @@ impl<'a> Parser<'a> {
         for constraint in constraints {
             match constraint {
                 Constraint::Required
+                | Constraint::NonNull
                 | Constraint::Generated
                 | Constraint::Deferred
                 | Constraint::Category(_)
                 | Constraint::Operands(_) => {}
+                Constraint::Mapping
+                | Constraint::Property { .. }
+                | Constraint::Forms(_)
+                | Constraint::DeclaredRequired
+                    if !is_array_level => {}
                 Constraint::Default(value) => {
                     let Some(default) = value.as_str() else {
                         return self.err(
@@ -2582,6 +2602,59 @@ impl<'a> Parser<'a> {
             ("unique", false) => Constraint::Unique,
             ("generated", false) => Constraint::Generated,
             ("deferred", false) => Constraint::Deferred,
+            ("non-null", false) => Constraint::NonNull,
+            ("mapping", false) => {
+                self.check_declaration_option(&keyword, SimplifiedType::Schema, owner, is_array_level, &kw_span)?;
+                Constraint::Mapping
+            }
+            ("declared-required", false) => {
+                self.check_declaration_option(
+                    &keyword,
+                    SimplifiedType::TypeDefinition,
+                    owner,
+                    is_array_level,
+                    &kw_span,
+                )?;
+                Constraint::DeclaredRequired
+            }
+            ("forms", true) => {
+                self.check_declaration_option(
+                    &keyword,
+                    SimplifiedType::TypeDefinition,
+                    owner,
+                    is_array_level,
+                    &kw_span,
+                )?;
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.is_empty() {
+                    return self.err(
+                        "`forms` requires at least one type keyword",
+                        kw_span.start..self.lex.pos,
+                    );
+                }
+                let mut forms = Vec::with_capacity(args.len());
+                for arg in &args {
+                    let Some(ty) = (!arg.quoted).then(|| SimplifiedType::from_keyword(&arg.lex)).flatten() else {
+                        return self.err(
+                            format!("`forms` lists type keywords; `{}` is not one", arg.lex),
+                            arg.span.clone(),
+                        );
+                    };
+                    if !forms.contains(&ty) {
+                        forms.push(ty);
+                    }
+                }
+                Constraint::Forms(forms)
+            }
+            ("property", true) => {
+                self.check_declaration_option(&keyword, SimplifiedType::Schema, owner, is_array_level, &kw_span)?;
+                self.parse_property_option(kw_span)?
+            }
+            ("non-null" | "mapping" | "declared-required", true) => {
+                return self.err(format!("`{keyword}` does not take arguments"), kw_span);
+            }
             ("required", true) => {
                 return self.err("`required` does not take arguments", kw_span);
             }
@@ -2781,7 +2854,11 @@ impl<'a> Parser<'a> {
                 }
                 Constraint::UncountedKeys(keys)
             }
-            ("min-keys" | "max-keys" | "uncounted-keys" | "example" | "suggest" | "category" | "operands", false) => {
+            (
+                "min-keys" | "max-keys" | "uncounted-keys" | "example" | "suggest" | "category" | "operands"
+                | "forms" | "property",
+                false,
+            ) => {
                 return self.err(format!("`{keyword}` requires arguments"), kw_span);
             }
             (other, has_args_) => {
@@ -2791,6 +2868,70 @@ impl<'a> Parser<'a> {
         };
 
         Ok(constraint)
+    }
+
+    /// Rejects a declaration option (`mapping`, `property`, `forms`,
+    /// `declared-required`) anywhere but the value list of the one
+    /// meta-type that takes it.
+    fn check_declaration_option(
+        &self,
+        keyword: &str,
+        host: SimplifiedType,
+        owner: ListOwner,
+        is_array_level: bool,
+        span: &Range<usize>,
+    ) -> Result<(), SchemaError> {
+        if owner == ListOwner::Type(host) && !is_array_level {
+            return Ok(());
+        }
+        self.err(
+            format!(
+                "`{keyword}` is an option of `{}` and is not valid on {}",
+                host.as_keyword(),
+                owner.describe(is_array_level)
+            ),
+            span.clone(),
+        )
+    }
+
+    /// Reads `(name, type-definition(...))` after `property`: a property
+    /// name, then one `type-definition` type expression that judges that
+    /// property's declaration.
+    fn parse_property_option(&mut self, kw_span: Range<usize>) -> Result<Constraint, SchemaError> {
+        let open = self.lex.pos;
+        self.enter(open)?;
+        self.lex.pos += 1;
+        self.lex.skip_ws();
+        let (name, _) = self.lex.read_word();
+        if name.is_empty() {
+            return self.err("`property` requires a property name", kw_span.start..self.lex.pos.max(open + 1));
+        }
+        self.lex.skip_ws();
+        if self.lex.peek_byte() != Some(b',') {
+            return self.err(
+                "`property` takes a name and a `type-definition(...)`, as in \
+                 `property(kind, type-definition(declared-required))`",
+                kw_span.start..self.lex.pos,
+            );
+        }
+        self.lex.pos += 1;
+        self.lex.skip_ws();
+        let declaration_start = self.lex.pos;
+        let declaration = self.parse_type_expr()?;
+        let declaration_span = declaration_start..self.lex.pos;
+        if !matches!(declaration.ty, TypeExpr::Primitive(SimplifiedType::TypeDefinition)) || declaration.is_array {
+            return self.err(
+                format!("`property({name}, …)` judges a declaration with a `type-definition(...)` expression"),
+                declaration_span,
+            );
+        }
+        self.lex.skip_ws();
+        self.expect_byte(b')', "expected `)` to close `property(...)`")?;
+        self.leave();
+        Ok(Constraint::Property {
+            name,
+            declaration: Box::new(PropertyDef::Single(declaration)),
+        })
     }
 
     fn parse_arglist(&mut self) -> Result<Vec<Arg>, SchemaError> {

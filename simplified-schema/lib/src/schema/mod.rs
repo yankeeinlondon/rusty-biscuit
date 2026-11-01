@@ -24,6 +24,7 @@
 mod error;
 mod export;
 mod layer;
+pub(crate) use layer::content_context;
 mod layering;
 mod view;
 

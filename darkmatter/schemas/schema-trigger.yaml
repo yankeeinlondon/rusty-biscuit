@@ -16,4 +16,5 @@ types:
 $schema:
     kind: literal(schema-trigger; required) -> the document kind that claims this definition
     match: match-payload(required) -> the conditions that select a document (one expression, or a list that must all hold)
-    $schema: schema -> the schema applied to matching documents; omit it for a matcher-only trigger
+    $schema: schema(non-null) -> the schema applied to matching documents; omit it for a matcher-only trigger
+    $constraints: { closed: true }

@@ -83,9 +83,13 @@ fn an_import_target_that_cannot_supply_named_types_is_a_located_schema_document_
         (
             "unsupported envelope key",
             "kind: schema\ntypes:\n  name: string\nextra: 1\n",
-            "tagged schema documents support only `kind`, `types`, `$schema`, `description`, and `categories`",
+            "the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/extra`",
         ),
-        ("implicit null types", "kind: schema\ntypes:\n", "tagged schema document `types` must be a mapping"),
+        (
+            "implicit null types",
+            "kind: schema\ntypes:\n",
+            "the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/types`",
+        ),
         (
             "root union",
             "$schema:\n  - name: string\n  - other: string\n",

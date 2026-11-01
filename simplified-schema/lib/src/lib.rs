@@ -12,6 +12,8 @@
 //!   serializers, subtyping, and JSON Schema lowering;
 //! - [`resolve`]: named-type expansion, cycle checks, use-site merges, and
 //!   layering over explicitly supplied sources ([`embedded::ShippedSources`]);
+//! - [`claims`]: the string values a resolved schema claims for a property
+//!   ([`claimed_values`]);
 //! - [`coercion`] and [`coerce`]: the conversion engine and frontmatter
 //!   conversion against a JSON Schema;
 //! - [`validate`], [`format`], [`file_match`]: compiled validators, the
@@ -29,11 +31,13 @@
 //! the package's `docs/` for the crate boundary.
 
 pub mod advisory;
+pub mod claims;
 pub mod coerce;
 pub mod coercion;
 pub mod completion;
 pub mod discriminant;
 pub mod embedded;
+pub mod envelope;
 pub mod errors;
 pub mod example;
 pub mod expression;
@@ -74,6 +78,7 @@ macro_rules! note_work {
 pub(crate) use note_work;
 
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
+pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::{CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, NotSchemaReason, SchemaError};
 pub use frontmatter_shape::{

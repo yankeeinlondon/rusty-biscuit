@@ -542,7 +542,15 @@ pub fn parse_schema_declaration_with_source(
 /// evaluates nothing.
 pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefinitionFailure> {
     let recognized = super::standalone::recognize_standalone(source).ok()??;
-    let (payload_key, payload, failure) = std::iter::once((recognized.payload_key(), recognized.payload()))
+    // The classifier reports a malformed envelope ahead of any definition.
+    let admitted = crate::envelope::admit_recognized(&recognized, source, std::path::Path::new("")).ok()?;
+    if admitted.has_envelope_problem() {
+        return None;
+    }
+    let (payload_key, payload, failure) = recognized
+        .payload()
+        .map(|payload| (recognized.payload_key(), payload))
+        .into_iter()
         .chain(recognized.local_types().map(|types| ("types", types)))
         .find_map(|(key, payload)| parse_schema_declaration_located(payload).err().map(|failure| (key, payload, failure)))?;
     // A failure on no property is the declaration's own shape, not a definition.

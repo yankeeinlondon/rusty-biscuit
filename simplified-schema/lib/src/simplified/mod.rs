@@ -29,7 +29,7 @@ pub use alphanumeric::{AlphanumericOption, AlphanumericOptions, AsciiCharSet};
 pub use subtype::{
     is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions,
 };
-pub use convert::{DARKMATTER_DEFERRED_KEYWORD, DARKMATTER_OPERANDS_KEYWORD, DARKMATTER_UNCOUNTED_KEYWORD, DRAFT_2020_12, to_json_schema, to_json_schema_with_definitions};
+pub use convert::{DARKMATTER_DEFERRED_KEYWORD, DARKMATTER_OPERANDS_KEYWORD, DARKMATTER_UNCOUNTED_KEYWORD, DRAFT_2020_12, declaration_options_payload, to_json_schema, to_json_schema_with_definitions};
 pub use definitions::{
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, definition_pointer,
 };
@@ -392,6 +392,14 @@ fn parse_dollar_constraint(context: &str, key: &str, v: &YamlValue) -> Result<Co
             constraints_flag(context, key, v)?;
             Constraint::Integer
         }
+        "non-null" => {
+            constraints_flag(context, key, v)?;
+            Constraint::NonNull
+        }
+        "closed" => {
+            constraints_flag(context, key, v)?;
+            Constraint::Closed
+        }
         other => {
             return Err(SchemaError::Grammar {
                 property: context.to_string(),
@@ -581,6 +589,18 @@ fn parse_property_definition_at_depth(
                     related,
                 }));
             }
+            if let Some(message) = PropertyDef::Union(arms.clone()).non_null_problem() {
+                let marked = arms.iter().position(PropertyAtom::marks_non_null).unwrap_or(0);
+                return Err(DefinitionFailure::at(&path.union_arm(marked))(SchemaError::Grammar {
+                    property: name.to_string(),
+                    message,
+                    span: match items.get(marked) {
+                        Some(YamlValue::String(text)) => 0..text.len(),
+                        _ => 0..0,
+                    },
+                    related: Vec::new(),
+                }));
+            }
             Ok(PropertyDef::Union(arms))
         }
         other => Err(DefinitionFailure::at(path)(SchemaError::Grammar {
@@ -618,13 +638,13 @@ fn parse_mapping_atom(
         }));
     }
     let mut shape = parse_schema_shape(context, value, nested_object_depth + 1, path)?;
-    // A block `required` / `generated` on a property's object means the same
+    // A block `required` / `non-null` / `generated` on a property's object means the same
     // as the postfix on that property, so it moves onto the atom where every
     // presence consumer (`is_required`, phase projection, lowering) reads it.
     let (presence, block): (Vec<_>, Vec<_>) = shape
         .constraints
         .into_iter()
-        .partition(|c| matches!(c, Constraint::Required | Constraint::Generated));
+        .partition(|c| matches!(c, Constraint::Required | Constraint::NonNull | Constraint::Generated));
     shape.constraints = block;
     let mut atom = PropertyAtom::bare_inline_object(shape);
     atom.constraints = presence;

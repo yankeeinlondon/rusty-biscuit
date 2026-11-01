@@ -200,18 +200,24 @@ impl PositionMap {
         // An unknown key's pointer names the parent mapping, and a missing key
         // has no node of its own, so the category picks the authored token to
         // report.
-        let target = match (problem.code, problem.offending_property.as_deref()) {
-            (ValidationProblemCode::MissingRequired, _) => PositionTarget::Mapping,
-            (_, Some(key)) => PositionTarget::Key(key),
-            _ => PositionTarget::Value,
-        };
-        let located = self.locate(problem.instance_path.segments(), target);
+        let located = self.locate(problem.instance_path.segments(), problem_target(problem));
         problem.line = located.map(|(line, _)| line);
         problem.column = located.map(|(_, column)| column);
     }
 }
 
 impl PositionMap {
+    /// The authored byte range of the token `problem` is reported at (the
+    /// node at its instance path, or the offending key of an unknown-key
+    /// problem), as offsets into the text the map was built from. `None`
+    /// when the map holds no authored tree (empty, or top-level keys only).
+    pub fn byte_range(&self, problem: &ValidationProblem) -> Option<Range<usize>> {
+        let PositionSource::Located { root, .. } = &self.source else {
+            return None;
+        };
+        locate_range_in(root, problem.instance_path.segments(), problem_target(problem))
+    }
+
     /// Locates every problem of a settled report; does nothing when
     /// `problems` is empty.
     pub fn locate_all(&self, problems: &mut [ValidationProblem]) {
@@ -221,13 +227,29 @@ impl PositionMap {
     }
 }
 
+/// The authored token a problem's category identifies.
+fn problem_target(problem: &ValidationProblem) -> PositionTarget<'_> {
+    match (problem.code, problem.offending_property.as_deref()) {
+        (ValidationProblemCode::MissingRequired, _) => PositionTarget::Mapping,
+        (_, Some(key)) => PositionTarget::Key(key),
+        _ => PositionTarget::Value,
+    }
+}
+
 /// The authored start selected for `target` at `segments` below `root`.
 fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget<'_>) -> Option<usize> {
+    locate_range_in(root, segments, target).map(|range| range.start)
+}
+
+/// The authored byte range selected for `target` at `segments` below `root`:
+/// the node's whole span, or the key's for [`PositionTarget::Key`]. A path
+/// that leaves the authored tree yields the deepest authored non-root node.
+fn locate_range_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget<'_>) -> Option<Range<usize>> {
     let mut node = root;
     let mut deepest_non_root = None;
     for segment in segments {
         let child = match &node.kind {
-            SchemaValueKind::Scalar => return Some(node.span.start),
+            SchemaValueKind::Scalar => return Some(node.span.clone()),
             SchemaValueKind::Mapping(entries) => entries
                 .iter()
                 .find(|entry| {
@@ -242,7 +264,7 @@ fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget
         match child {
             Some(child) => {
                 node = child;
-                deepest_non_root = Some(child.span.start);
+                deepest_non_root = Some(child.span.clone());
             }
             None => return deepest_non_root,
         }
@@ -254,11 +276,11 @@ fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget
                 crate::note_work!(PositionKeyComparison);
                 entry.key == key
             })
-            .map(|entry| entry.key_span.start)
+            .map(|entry| entry.key_span.clone())
             .or(deepest_non_root),
-        (PositionTarget::Key(_), SchemaValueKind::Scalar) => Some(node.span.start),
+        (PositionTarget::Key(_), SchemaValueKind::Scalar) => Some(node.span.clone()),
         (PositionTarget::Key(_), SchemaValueKind::Sequence(_)) => deepest_non_root,
-        (PositionTarget::Value | PositionTarget::Mapping, _) => Some(node.span.start),
+        (PositionTarget::Value | PositionTarget::Mapping, _) => Some(node.span.clone()),
     }
 }
 

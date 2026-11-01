@@ -99,6 +99,10 @@ pub enum NotSchemaReason {
     NotAMapping,
     /// A JSON object without a string `$schema` dialect declaration.
     JsonMissingDialect,
+    /// A `kind: yaml-schema` document: it defines a YAML document kind and is
+    /// applied to documents by their `kind`, so it is neither a `$schema`
+    /// target nor a `Name@file` import source.
+    SelectedByKind,
 }
 
 impl NotSchemaReason {
@@ -110,6 +114,9 @@ impl NotSchemaReason {
             NotSchemaReason::TypesOnly => Some("use a named-type import (`Name@file.yaml`) to reuse its types"),
             NotSchemaReason::JsonMissingDialect => Some(DECLARE_DIALECT_HINT),
             NotSchemaReason::NotAMapping if is_json_path(path) => Some(DECLARE_DIALECT_HINT),
+            NotSchemaReason::SelectedByKind => {
+                Some("move shared types into a `kind: schema` file and import them from there")
+            }
             NotSchemaReason::NotAMapping | NotSchemaReason::NoSchemaProperty => None,
         }
     }
@@ -130,6 +137,9 @@ impl fmt::Display for NotSchemaReason {
             NotSchemaReason::NoSchemaProperty => "it has no `$schema` property",
             NotSchemaReason::NotAMapping => "its root is not a mapping",
             NotSchemaReason::JsonMissingDialect => "it does not declare its JSON Schema dialect in `$schema`",
+            NotSchemaReason::SelectedByKind => {
+                "it is a `yaml-schema`; it is selected by `kind`, not referenced"
+            }
         })
     }
 }
@@ -852,8 +862,10 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                     )),
                 ])
                 .hint(
-                    "Use either a sole top-level <cyan>$schema:</cyan> mapping/sequence or exactly \
-                     <cyan>kind: schema</cyan> with a <cyan>types:</cyan> mapping.",
+                    "A schema document is a <cyan>$schema:</cyan> export with optional <cyan>types:</cyan>, \
+                     <cyan>description:</cyan>, and <cyan>categories:</cyan>; a <cyan>kind: schema</cyan> \
+                     or <cyan>kind: yaml-schema</cyan> document follows its definition in \
+                     <cyan>simplified-schema/schemas/</cyan>.",
                 ),
 
             SchemaError::RemoteUnsupported { reference } => StatusBlock::new(StatusState::Error)

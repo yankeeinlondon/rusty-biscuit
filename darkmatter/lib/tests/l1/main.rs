@@ -151,6 +151,7 @@ mod mermaid_text_line_numbers;
 mod meta_schema_repo_schemas;
 mod missing_ctx_capture;
 mod more_is_more_literals_and_indexes;
+mod non_null_frontmatter;
 mod numeric_admission;
 mod path_function_contracts;
 mod path_lookup_guard;

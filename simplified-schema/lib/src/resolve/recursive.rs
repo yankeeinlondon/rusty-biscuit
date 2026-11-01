@@ -72,7 +72,7 @@ pub(super) struct UseSummary {
     /// reported with both declarations.
     bounds: Vec<Tagged>,
     /// Whether the value admits null, which makes every use optional.
-    admits_null: bool,
+    pub(super) admits_null: bool,
 }
 
 /// A constraint that describes a definition's use site rather than its value.
@@ -80,6 +80,7 @@ fn is_use_site_marker(constraint: &Constraint) -> bool {
     matches!(
         constraint,
         Constraint::Required
+            | Constraint::NonNull
             | Constraint::Generated
             | Constraint::Eager
             | Constraint::Default(_)
@@ -95,7 +96,7 @@ fn is_use_site_marker(constraint: &Constraint) -> bool {
 fn is_arm_property_marker(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::Required | Constraint::Generated | Constraint::Default(_)
+        Constraint::Required | Constraint::NonNull | Constraint::Generated | Constraint::Default(_)
     )
 }
 

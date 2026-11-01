@@ -23,7 +23,7 @@ use simplified_schema::{
     LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape,
     SchemaSourceMap, SourceAware, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot,
     StandaloneSchemaDocument, TypeExpr, flow_collection_end, parse_property_definition,
-    parse_schema_declaration_with_source, parse_standalone_schema_document,
+    parse_schema_declaration_with_source,
 };
 
 use super::FrontmatterAst;
@@ -283,7 +283,7 @@ impl NamedTypeCatalog {
                     .ok()
                     .flatten()?;
                 let text: Arc<str> = Arc::from(crate::work_counters::read_to_string(&path).ok()?);
-                let (document, error) = match parse_standalone_schema_document(&text, &path) {
+                let (document, error) = match simplified_schema::resolve::parse_referenced_schema_document(&text, &path) {
                     Ok(document) => (document, None),
                     Err(error) => (None, Some(Arc::new(error))),
                 };

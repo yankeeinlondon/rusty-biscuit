@@ -230,23 +230,26 @@ fn walk_types(seed_name: &str, seed: &str, cells: &[TypesCell]) {
 const CATEGORY_CELLS: &[TypesCell] = &[
     types_cell("control", Control, Loads),
     types_cell("categories absent", Remove("categories"), Loads),
-    types_cell("categories null", Set("categories", " null"), RejectsWith("`categories` must be a list")),
-    types_cell("categories number", Set("categories", " 5"), RejectsWith("`categories` must be a list")),
+    // The shape of the list is `schema.yaml`'s `categories: string[](non-null)`.
+    types_cell("categories null", Set("categories", " null"), RejectsWith("schema.yaml`: `/categories`")),
+    types_cell("categories number", Set("categories", " 5"), RejectsWith("schema.yaml`: `/categories`")),
     types_cell(
         "categories mapping",
         Set("categories", " {Math: numbers}"),
-        RejectsWith("`categories` must be a list"),
+        RejectsWith("schema.yaml`: `/categories`"),
     ),
     types_cell(
         "categories one wrong element",
-        Replace("    - Devops\n", "    - Devops\n    - 5\n"),
-        RejectsWith("`categories[2]`: a category entry must be a string"),
+        Replace("    - Devops\n", "    - Devops\n    - {a: b}\n"),
+        RejectsWith("schema.yaml`: `/categories/2`"),
     ),
     types_cell(
         "categories every element wrong",
-        Set("categories", " [5, true]"),
-        RejectsWith("`categories[0]`: a category entry must be a string"),
+        Set("categories", " [[a], {b: c}]"),
+        RejectsWith("schema.yaml`: `/categories/0`"),
     ),
+    // A number entry converts softly to its text, as in frontmatter.
+    types_cell("categories number element", Replace("    - Devops\n", "    - Devops\n    - 5\n"), Loads),
     types_cell(
         "categories empty list",
         Set("categories", " []"),

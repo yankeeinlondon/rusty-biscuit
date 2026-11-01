@@ -176,6 +176,10 @@ conformance! {
     deferred_property => "\"{ id: number(deferred) }\"";
     deferred_file => "\"file(deferred)\"";
     deferred_tuple => "\"tuple([number, number]; deferred)\"";
+    non_null_number => "\"number(non-null)\"";
+    non_null_file => "\"file(non-null)\"";
+    non_null_union => "\"number(non-null) | boolean\"";
+    non_null_object_property => "\"{ id: number(non-null) }\"";
 }
 
 /// The `deferred` cases above agree because both translators mark the same
@@ -334,4 +338,23 @@ fn use_site_constraints_beside_a_recursive_reference() {
         json!({ "one": { "value": 1 }, "kids": [{ "value": 2 }, { "value": 3 }] }),
     ];
     assert_recursive_translators_agree(schema, &probes);
+}
+
+/// A `closed` root rejects undeclared keys through both translators, and an
+/// open root keeps them.
+#[test]
+fn a_closed_root_rejects_undeclared_keys_in_both_translators() {
+    for (schema, expected) in [
+        ("$constraints: { closed: true }\nv: number\n", (Outcome::Rejected, Outcome::Rejected)),
+        ("v: number\n", (Outcome::Kept, Outcome::Kept)),
+    ] {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(schema).expect("YAML");
+        let schema_root = parse_yaml_schema(&yaml).expect("the schema parses");
+        let grammar_shape = shape_from_simplified_schema(&schema_root, &NoNamedTypes).expect("grammar translates");
+        let json_shape = shape_from_json_schema(&to_json_schema(&schema_root).expect("the schema lowers"));
+        let document = json!({ "v": 1, "extra": true });
+        assert_eq!(outcomes(&grammar_shape, &document), expected, "grammar: {schema}");
+        assert_eq!(outcomes(&json_shape, &document), expected, "JSON Schema: {schema}");
+        assert_eq!(outcomes(&grammar_shape, &json!({ "v": 1 })), (Outcome::Kept, Outcome::Kept), "{schema}");
+    }
 }

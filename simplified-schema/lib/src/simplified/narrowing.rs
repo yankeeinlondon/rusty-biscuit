@@ -99,12 +99,13 @@ pub(crate) fn is_exact_fact_type(atom: &PropertyAtom) -> bool {
 }
 
 /// Constraints that restrict values beyond the type identity. Markers and
-/// annotations (`required`, defaults, suggestions, examples) do not.
+/// annotations (`required`, `non-null`, defaults, suggestions, examples) do not.
 pub fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
     atom.constraints.iter().chain(&atom.array_constraints).any(|constraint| {
         !matches!(
             constraint,
             Constraint::Required
+                | Constraint::NonNull
                 | Constraint::Default(_)
                 | Constraint::Generated
                 | Constraint::Eager
@@ -125,6 +126,7 @@ pub fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
         matches!(
             constraint,
             Constraint::Required
+                | Constraint::NonNull
                 | Constraint::Default(_)
                 | Constraint::Generated
                 | Constraint::Eager

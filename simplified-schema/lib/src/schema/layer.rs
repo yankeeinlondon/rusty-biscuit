@@ -122,7 +122,7 @@ impl SchemaProvenance {
 /// The context of a schema with no file: no anchors, no home, no
 /// environment, and a relative directory, so it fails validation before any
 /// candidate is probed. Building it reads no process state.
-pub(super) fn content_context() -> FileResolutionContext {
+pub(crate) fn content_context() -> FileResolutionContext {
     FileResolutionContext::from_snapshot(PathBuf::new(), None, HashMap::new())
 }
 

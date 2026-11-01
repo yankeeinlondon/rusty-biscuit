@@ -417,12 +417,12 @@ mod yaml_loader_matrix {
     // `types` on the tagged control.
     cells!(TAGGED_PERSON {
         // A tagged document needs `types` or `$schema`; `$schema` alone is enough.
-        types_absent: Whole("kind: schema\n") => Rejects("tagged schema document needs a `$schema` or `types` property");
+        types_absent: Whole("kind: schema\n") => Rejects("schema.yaml`: `/$schema`: \"$schema\" is a required property");
         types_absent_beside_schema: Whole("kind: schema\n$schema:\n  name: string(required)\n") => Tagged;
-        types_null_bare: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("`types` must be a mapping");
-        types_null_explicit: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: null\n") => Rejects("`types` must be a mapping");
-        types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("`types` must be a mapping");
-        types_empty_string: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: \"\"\n") => Rejects("`types` must be a mapping");
+        types_null_bare: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("schema.yaml`: `/types`");
+        types_null_explicit: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: null\n") => Rejects("schema.yaml`: `/types`");
+        types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("schema.yaml`: `/types`");
+        types_empty_string: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: \"\"\n") => Rejects("schema.yaml`: `/types`");
         types_empty_mapping: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: {}\n") => Tagged;
         types_entry_non_string: Replace("  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "  Person: 5\n") => Rejects("invalid SimplifiedSchema payload");
     });
@@ -450,21 +450,21 @@ mod yaml_loader_matrix {
         yaml_string_alone: Whole("./person.yaml\n") => NotSchema;
         empty_document: Whole("") => NotSchema;
         not_yaml_at_all: Whole("{ unclosed\n") => Rejects("not valid YAML");
-        unsupported_tagged_key: Append("extra: 1\n") => Rejects("found unsupported keys: extra");
+        unsupported_tagged_key: Append("extra: 1\n") => Rejects("schema.yaml`: `/extra`: Additional properties are not allowed");
     });
 
     // `$schema` on the pure control.
     cells!(PURE_PERSON {
         pure_control: Control => Pure;
         schema_absent: Replace("$schema:\n  person: Person\n", "") => NotSchema;
-        schema_null_bare: Replace("$schema:\n  person: Person\n", "$schema:\n") => Rejects("invalid SimplifiedSchema payload");
-        schema_null_explicit: Replace("$schema:\n  person: Person\n", "$schema: null\n") => Rejects("invalid SimplifiedSchema payload");
-        schema_wrong_type: Replace("$schema:\n  person: Person\n", "$schema: 5\n") => Rejects("invalid SimplifiedSchema payload");
-        schema_empty_string: Replace("$schema:\n  person: Person\n", "$schema: \"\"\n") => Rejects("invalid SimplifiedSchema payload");
+        schema_null_bare: Replace("$schema:\n  person: Person\n", "$schema:\n") => Rejects("schema.yaml`: `/$schema`");
+        schema_null_explicit: Replace("$schema:\n  person: Person\n", "$schema: null\n") => Rejects("schema.yaml`: `/$schema`");
+        schema_wrong_type: Replace("$schema:\n  person: Person\n", "$schema: 5\n") => Rejects("schema.yaml`: `/$schema`");
+        schema_empty_string: Replace("$schema:\n  person: Person\n", "$schema: \"\"\n") => Rejects("schema.yaml`: `/$schema`");
         schema_empty_mapping: Replace("$schema:\n  person: Person\n", "$schema: {}\n") => Pure;
-        schema_remote_reference: Replace("$schema:\n  person: Person\n", "$schema: https://example.com/person.yaml\n") => Rejects("invalid SimplifiedSchema payload");
-        pure_types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("`types` must be a mapping");
-        pure_types_null: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("`types` must be a mapping");
+        schema_remote_reference: Replace("$schema:\n  person: Person\n", "$schema: https://example.com/person.yaml\n") => Rejects("schema.yaml`: `/$schema`");
+        pure_types_wrong_type: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types: [Person]\n") => Rejects("schema.yaml`: `/types`");
+        pure_types_null: Replace("types:\n  Person:\n    name: string(required)\n    age: number(min(0); integer)\n", "types:\n") => Rejects("schema.yaml`: `/types`");
     });
 
     /// A `$schema` file reference is classified by the loader, not opened:

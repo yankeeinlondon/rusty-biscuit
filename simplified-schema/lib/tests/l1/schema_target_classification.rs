@@ -32,6 +32,9 @@ const SCHEMA_JSON: &str = r#"{
 }
 "#;
 const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+/// The phrase every envelope admission failure carries, naming the
+/// library's definition of `kind: schema` documents.
+const DEFINITION: &str = "does not satisfy its definition `simplified-schema/schemas/schema.yaml`";
 
 struct Fixture {
     _tmp: tempfile::TempDir,
@@ -185,7 +188,8 @@ fn an_informal_mapping_with_an_unknown_key_is_a_document_error() {
     let (path, result) = fixture.target("extra.yaml", &format!("notes: draft\n{INFORMAL}"));
     let message = assert_document_error(result, &path, &["unsupported top-level key(s): notes"]);
     assert!(!message.contains("raw JSON Schema"), "{message}");
-    // Another `kind` never claims the informal envelope.
+    // Another `kind` never claims the informal envelope; an unrecognized
+    // document gets no admission, so no definition is named.
     let (path, result) = fixture.target("other-kind.yaml", "kind: config\n$schema:\n  title: string\n");
     assert_document_error(result, &path, &["unsupported top-level key(s): kind"]);
 }
@@ -196,12 +200,13 @@ fn tagged_envelope_rules() {
     // `$schema` without `types` behaves like an informal document.
     let (_, result) = fixture.target("schema-only.yaml", "kind: schema\ndescription: Reviews\n$schema:\n  title: string\n");
     assert!(result.expect("tagged `$schema`-only").simplified.is_some());
-    // Neither payload key is an envelope error.
+    // Neither payload key is an envelope error: `schema.yaml`'s root union
+    // requires one of them.
     let (path, result) = fixture.target("neither.yaml", "kind: schema\ndescription: Reviews\n");
-    assert_document_error(result, &path, &["needs a `$schema` or `types` property"]);
-    // An unknown key is an envelope error.
+    assert_document_error(result, &path, &[DEFINITION, "is a required property"]);
+    // An unknown key is an envelope error at the key: both arms are closed.
     let (path, result) = fixture.target("unknown.yaml", &format!("notes: draft\n{TAGGED}"));
-    assert_document_error(result, &path, &["found unsupported keys: notes"]);
+    assert_document_error(result, &path, &[DEFINITION, "`/notes`", "'notes' was unexpected"]);
 }
 
 #[test]
@@ -260,15 +265,23 @@ fn description_field_shapes() {
         let (_, result) = fixture.target(&format!("description-{label}.yaml"), text);
         assert!(result.is_ok(), "{label}: {result:?}");
     }
-    for (label, value) in [("null", "null"), ("implicit-null", ""), ("number", "5"), ("sequence", "[a]"), ("mapping", "{a: b}")] {
+    // `string(non-null)`: an explicit null is not "absent", and a collection
+    // is not text.
+    for (label, value) in [("null", "null"), ("implicit-null", ""), ("sequence", "[a]"), ("mapping", "{a: b}")] {
         let text = INFORMAL.replace("description: Feature reviews", &format!("description: {value}"));
         let (path, result) = fixture.target(&format!("description-{label}.yaml"), &text);
-        assert_document_error(result, &path, &["`description` must be a string"]);
-        // The tagged envelope shares the validator.
+        assert_document_error(result, &path, &[DEFINITION, "`/description`"]);
+        // The tagged envelope shares the definition.
         let tagged = TAGGED.replace("description: Reviews", &format!("description: {value}"));
         let (path, result) = fixture.target(&format!("tagged-description-{label}.yaml"), &tagged);
-        assert_document_error(result, &path, &["`description` must be a string"]);
+        assert_document_error(result, &path, &[DEFINITION, "`/description`"]);
     }
+    // A number converts softly, as in frontmatter, and is read as its text.
+    let text = INFORMAL.replace("description: Feature reviews", "description: 5");
+    let document = parse_standalone_schema_document(&text, "s.yaml").unwrap().expect("recognized");
+    assert_eq!(document.description.as_deref(), Some("5"));
+    let (_, result) = fixture.target("description-number.yaml", &text);
+    assert!(result.is_ok(), "{result:?}");
 }
 
 #[test]
@@ -291,10 +304,10 @@ fn types_field_shapes() {
     assert!(result.is_ok(), "{result:?}");
     for (label, value) in [("null", "null"), ("scalar", "word"), ("sequence", "[a]")] {
         let (path, result) = fixture.target(&format!("types-{label}.yaml"), &format!("$schema:\n  title: string\ntypes: {value}\n"));
-        assert_document_error(result, &path, &["`types` must be a mapping"]);
+        assert_document_error(result, &path, &[DEFINITION, "`/types`"]);
         let tagged = format!("kind: schema\n$schema:\n  title: string\ntypes: {value}\n");
         let (path, result) = fixture.target(&format!("tagged-types-{label}.yaml"), &tagged);
-        assert_document_error(result, &path, &["`types` must be a mapping"]);
+        assert_document_error(result, &path, &[DEFINITION, "`/types`"]);
     }
 }
 
@@ -310,7 +323,7 @@ fn categories_field_shapes() {
     for (label, value) in [("null", "null"), ("scalar", "Core")] {
         let text = TAGGED.replace("[Core]", value);
         let (path, result) = fixture.target(&format!("categories-{label}.yaml"), &text);
-        assert_document_error(result, &path, &["`categories` must be a list"]);
+        assert_document_error(result, &path, &[DEFINITION, "`/categories`"]);
     }
 }
 
@@ -397,8 +410,9 @@ fn an_informal_document_with_categories_is_a_delegation_and_root_union_arm() {
 }
 
 /// Every `categories` shape through the resolver: absent and `[]` declare no
-/// restriction; any other non-list or non-string entry is a located error
-/// from the shared category validator, never an envelope refusal.
+/// restriction; a non-list, or an entry that does not convert to text, is a
+/// located error from `schema.yaml`'s `categories: string[](non-null)`; a
+/// number entry converts softly to its text.
 #[test]
 fn informal_categories_field_shapes() {
     let fixture = Fixture::new();
@@ -411,18 +425,26 @@ fn informal_categories_field_shapes() {
         assert!(result.is_ok(), "{label}: {result:?}");
     }
     for (label, value, fragment) in [
-        ("null", "null", "`categories` must be a list"),
-        ("scalar", "Core", "`categories` must be a list"),
-        ("mapping", "{}", "`categories` must be a list"),
-        ("mixed", "[Core, 3]", "`categories[1]`: a category entry must be a string"),
-        ("all-wrong", "[3]", "`categories[0]`: a category entry must be a string"),
+        ("null", "null", "`/categories`"),
+        ("scalar", "Core", "`/categories`"),
+        ("mapping", "{}", "`/categories`"),
+        ("mixed", "[Core, {a: b}]", "`/categories/1`"),
+        ("all-wrong", "[[a]]", "`/categories/0`"),
     ] {
         let text = INFORMAL_CATEGORIES.replace("[Core]", value);
         let (path, result) = fixture.target(&format!("informal-categories-{label}.yaml"), &text);
-        let message = assert_document_error(result, &path, &[fragment]);
+        let message = assert_document_error(result, &path, &[DEFINITION, fragment]);
         assert!(!message.contains("unsupported top-level"), "{label}: {message}");
     }
-    // An unknown key is still refused beside `categories`.
+    let converted = INFORMAL_CATEGORIES.replace("[Core]", "[Core, 3]");
+    let document = parse_standalone_schema_document(&converted, "s.yaml").unwrap().expect("recognized");
+    let names: Vec<_> = document.categories.unwrap().into_iter().map(|category| category.name).collect();
+    assert_eq!(names, ["Core", "3"]);
+    // The entry grammar stays in Rust: a blank name is still refused.
+    let (path, result) = fixture.target("informal-categories-blank.yaml", &INFORMAL_CATEGORIES.replace("[Core]", "['  ']"));
+    assert_document_error(result, &path, &["`categories[0]`: a category name cannot be blank"]);
+    // An informal document with an unknown key is not recognized as an
+    // envelope at all, so the classifier names the key.
     let (path, result) = fixture.target("informal-categories-unknown.yaml", &format!("foo: 1\n{INFORMAL_CATEGORIES}"));
     assert_document_error(result, &path, &["unsupported top-level key(s): foo"]);
 }

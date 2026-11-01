@@ -123,6 +123,17 @@ fn write_document(authored: &AuthoredSchema) -> Result<Mapping, SimplifiedSchema
                 document.insert("types".into(), YamlValue::Mapping(write_shape(types)?));
             }
         }
+        StandaloneSchemaEnvelope::YamlSchema => {
+            // A `yaml-schema` always exports `$schema`.
+            document.insert("kind".into(), "yaml-schema".into());
+            if let Some(categories) = &authored.categories {
+                document.insert("categories".into(), write_categories(categories));
+            }
+            if let Some(types) = &authored.local_types {
+                document.insert("types".into(), YamlValue::Mapping(write_shape(types)?));
+            }
+            document.insert("$schema".into(), write_declaration(&authored.declaration)?);
+        }
         StandaloneSchemaEnvelope::Tagged => {
             document.insert("kind".into(), "schema".into());
             if let Some(categories) = &authored.categories {
@@ -214,6 +225,8 @@ fn write_object_constraints(constraints: &[Constraint]) -> Result<Mapping, Simpl
             Constraint::Unique => ("unique", true.into()),
             Constraint::Generated => ("generated", true.into()),
             Constraint::Integer => ("integer", true.into()),
+            Constraint::NonNull => ("non-null", true.into()),
+            Constraint::Closed => ("closed", true.into()),
             other => {
                 return Err(unsupported(&format!(
                     "the object constraint `{}` has no `$constraints` spelling",
@@ -241,10 +254,22 @@ fn write_def(def: &PropertyDef) -> Result<YamlValue, SimplifiedSchemaError> {
 
 fn write_atom(atom: &PropertyAtom) -> Result<YamlValue, SimplifiedSchemaError> {
     match &atom.ty {
+        // The parser moves a block object's presence flags onto its atom, so
+        // they return to the block's `$constraints`.
         TypeExpr::InlineObject(shape)
-            if !atom.is_array && atom.constraints.is_empty() && atom.description.is_none() =>
+            if !atom.is_array
+                && atom.description.is_none()
+                && atom
+                    .constraints
+                    .iter()
+                    .all(|c| matches!(c, Constraint::Required | Constraint::NonNull | Constraint::Generated)) =>
         {
-            write_shape(shape).map(YamlValue::Mapping)
+            if atom.constraints.is_empty() {
+                return write_shape(shape).map(YamlValue::Mapping);
+            }
+            let mut block = shape.clone();
+            block.constraints.splice(0..0, atom.constraints.iter().cloned());
+            write_shape(&block).map(YamlValue::Mapping)
         }
         _ => expression(atom).map(YamlValue::String),
     }

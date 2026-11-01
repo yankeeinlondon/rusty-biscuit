@@ -106,14 +106,14 @@ fn semantic_defaults_use_the_passive_parser_authority() {
 
 #[test]
 fn semantic_type_descriptors_are_authoritative() {
-    for keyword in ["type-definition", "schema"] {
+    for (keyword, options) in [("type-definition", ["forms", "declared-required"]), ("schema", ["mapping", "property"])] {
         let descriptor = schema_type_descriptors()
             .iter()
             .find(|descriptor| descriptor.keyword == keyword)
             .unwrap_or_else(|| panic!("missing descriptor for {keyword}"));
         assert_eq!(
             descriptor.accepted_constraints,
-            ["default", "required", "generated", "deferred"]
+            [options[0], options[1], "default", "required", "non-null", "generated", "deferred"]
         );
         let description = descriptor.description.to_ascii_lowercase();
         for required in ["string", "mapping", "sequence", "parse-only", "dmls"] {

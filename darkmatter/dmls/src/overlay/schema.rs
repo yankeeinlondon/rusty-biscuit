@@ -283,16 +283,20 @@ pub fn frontmatter_authoring(
 /// YAML and raw JSON Schema, which carry a top-level key the informal
 /// envelope does not admit
 /// ([`StandaloneSchemaEnvelope::admits_top_level_key`]) and never carry
-/// `kind: schema`.
+/// `kind: schema` or `kind: yaml-schema`.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
     let top_level = match flow_mapping_start(text) {
         Some(start) => flow_top_level_entries(&text[start + 1..]),
         None => block_top_level_entries(text),
     };
-    if top_level.iter().any(|(key, value)| {
-        key == "kind" && lexical_scalar(value).as_deref() == Some("schema")
-    }) {
-        return Some(StandaloneSchemaEnvelope::Tagged);
+    let kind = top_level
+        .iter()
+        .find(|(key, _)| key == "kind")
+        .and_then(|(_, value)| lexical_scalar(value));
+    match kind.as_deref() {
+        Some("schema") => return Some(StandaloneSchemaEnvelope::Tagged),
+        Some("yaml-schema") => return Some(StandaloneSchemaEnvelope::YamlSchema),
+        _ => {}
     }
     (top_level.iter().any(|(key, _)| key == "$schema")
         && top_level
@@ -1338,6 +1342,19 @@ mod tests {
                 standalone_envelope_claim(tagged),
                 Some(StandaloneSchemaEnvelope::Tagged),
                 "{tagged:?}"
+            );
+        }
+
+        for yaml_schema in [
+            "kind: yaml-schema\n$schema:\n  kind: literal(roster; required)\n",
+            "{kind: yaml-schema, $schema: {kind: literal(roster; required)}}",
+            // Truncated mid-edit.
+            "kind: yaml-schema\n$schema:\n  kind: literal(ros",
+        ] {
+            assert_eq!(
+                standalone_envelope_claim(yaml_schema),
+                Some(StandaloneSchemaEnvelope::YamlSchema),
+                "{yaml_schema:?}"
             );
         }
 

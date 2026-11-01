@@ -294,3 +294,47 @@ fn consumer_sidecars_resolve_from_supplied_sources() {
         prepared(resolved.json_schema);
     }
 }
+
+/// The library's own envelope definitions pass the compiled definition set:
+/// each is a `yaml-schema` admitted against `yaml-schema.yaml`, the
+/// `yaml-schema` definition by itself.
+#[test]
+fn the_library_envelope_definitions_pass_the_compiled_definitions() {
+    use simplified_schema::envelope::{YAML_SCHEMA_DEFINITION_PATH, admit_envelope_text};
+    for (path, text) in [
+        ("simplified-schema/schemas/schema.yaml", include_str!("../../../schemas/schema.yaml")),
+        ("simplified-schema/schemas/yaml-schema.yaml", include_str!("../../../schemas/yaml-schema.yaml")),
+    ] {
+        let admission = admit_envelope_text(text, path)
+            .unwrap_or_else(|error| panic!("{path}: {error}"))
+            .unwrap_or_else(|| panic!("{path} is a recognized envelope"));
+        assert_eq!(admission.definition, YAML_SCHEMA_DEFINITION_PATH, "{path}");
+        assert!(admission.is_admitted(), "{path}: {:#?}", admission.problems);
+        let document = parse_standalone_schema_document(text, path).unwrap().unwrap();
+        assert!(document.exports_schema, "{path}");
+    }
+}
+
+/// Envelope structure has one authority, the compiled definitions: the
+/// standalone parser keeps no hand-written structural rejection. The
+/// behavior is pinned by `envelope_admission`; this guards the source
+/// against the deleted checks coming back beside the definitions.
+#[test]
+fn the_standalone_parser_carries_no_hand_written_structural_checks() {
+    let source = include_str!("../../src/simplified/standalone.rs");
+    for deleted in [
+        "tagged schema documents support only",
+        "needs a `$schema` or `types` property",
+        "`description` must be a string",
+        "`categories` must be a list",
+        "`types` must be a mapping",
+        "tagged schema document `types` must be a mapping",
+    ] {
+        assert!(!source.contains(deleted), "the deleted structural check `{deleted}` is back in standalone.rs");
+    }
+    // Recognition reads the key set only to decide whether an untagged
+    // mapping is the informal envelope; it never rejects a tagged one.
+    let recognition = &source[source.find("pub(crate) fn recognize_standalone").expect("recognition")..];
+    let recognition = &recognition[..recognition.find("\n}\n").expect("end of recognition")];
+    assert!(!recognition.contains("return Err("), "recognition must not reject an envelope:\n{recognition}");
+}

@@ -38,7 +38,7 @@ use darkmatter::markdown::schemas::{
 use simplified_schema::resolve::ResolvedSchema;
 use simplified_schema::{
     Constraint, NotSchemaReason, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError, SchemaShape, SimplifiedType,
-    StandaloneSchemaDocument, TypeExpr, locate_standalone_definition_failure, parse_property_definition,
+    StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, locate_standalone_definition_failure, parse_property_definition,
     parse_schema_declaration, parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
 use serde_yaml_ng::Value as YamlValue;
@@ -76,12 +76,11 @@ enum Class {
     /// ordinary tagged schema document, and its declarations parse and
     /// resolve inline from its own directory.
     GlobalCatalog,
-    /// A YAML document whose top-level `kind` no loader claims (the
-    /// `kind: yaml-schema` definitions): never a standalone schema or a
-    /// trigger, refused as a `$schema` target, and every definition it carries
-    /// parses passively. Its `$schema` may name its own `types`, so it is not
-    /// resolved inline.
-    UnclaimedKind,
+    /// A `kind: yaml-schema` definition: the library admits it as a
+    /// standalone envelope (against its own `yaml-schema.yaml`), it is never
+    /// a trigger, and it is refused as a `$schema` target because it is
+    /// selected by `kind`. Every definition it carries parses passively.
+    YamlSchemaDefinition,
     /// A function catalog (`kind: schema` with `categories:` and `function`
     /// types, and no `$schema`): it parses as a standalone schema, but as a
     /// `types`-only document it is never a `$schema` target; each of its
@@ -135,24 +134,13 @@ const EXCEPTIONS: &[Exception] = &[
         Class::GlobalCatalog,
         "Darkmatter's global catalog, registered explicitly",
     ),
-    // The `kind: yaml-schema` definitions: no loader claims that kind yet.
-    exception(
-        "darkmatter/schemas",
-        "schema.yaml",
-        Class::UnclaimedKind,
-        "a `kind: yaml-schema` definition, which no envelope parser claims yet",
-    ),
+    // Darkmatter's `kind: yaml-schema` definition; the library's two live in
+    // `simplified-schema/schemas/`, covered by that crate's corpus.
     exception(
         "darkmatter/schemas",
         "schema-trigger.yaml",
-        Class::UnclaimedKind,
-        "a `kind: yaml-schema` definition, which no envelope parser claims yet",
-    ),
-    exception(
-        "darkmatter/schemas",
-        "yaml-schema.yaml",
-        Class::Draft { error: "non-null" },
-        "a `kind: yaml-schema` definition using declaration options the language does not parse yet",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: schema-trigger` documents, applied by `kind`",
     ),
     exception(
         "darkmatter/schemas",
@@ -800,8 +788,12 @@ fn shipped_schema_artifacts_parse_passively() {
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
             }
-            Class::UnclaimedKind => {
-                assert_eq!(outcome, Ok(None), "{label} is now claimed as a schema; reclassify it");
+            Class::YamlSchemaDefinition => {
+                assert!(
+                    matches!(&outcome, Ok(Some(parsed))
+                        if parsed.exports_schema && parsed.envelope == StandaloneSchemaEnvelope::YamlSchema),
+                    "{label} must be admitted as a `yaml-schema` envelope: {outcome:?}",
+                );
                 assert!(
                     matches!(parse_trigger_envelope_from_str(&artifact.source), Ok(None)),
                     "{label} is now claimed as a trigger; reclassify it",
@@ -813,7 +805,7 @@ fn shipped_schema_artifacts_parse_passively() {
             Class::EnvelopeRejected => {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
-                assert!(message.contains("unsupported keys"), "{label}: {message}");
+                assert!(message.contains("was unexpected"), "{label}: {message}");
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
@@ -985,10 +977,13 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     inline_bodies += 1;
                 }
             }
-            Class::UnclaimedKind => {
+            Class::YamlSchemaDefinition => {
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)
-                    .expect_err(&format!("{label} now loads; reclassify it"));
-                assert!(matches!(error, SchemaError::SchemaDocument { .. }), "{label}: {error}");
+                    .expect_err(&format!("{label} is a `yaml-schema` and must never be a `$schema` target"));
+                assert!(
+                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::SelectedByKind, .. }),
+                    "{label}: {error}"
+                );
             }
             Class::FunctionCatalog => {
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)

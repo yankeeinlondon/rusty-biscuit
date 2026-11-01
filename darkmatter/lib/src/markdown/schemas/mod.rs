@@ -73,6 +73,7 @@ use crate::markdown::{Markdown, compose::ComposeSource};
 
 pub use about::{
     ALPHANUMERIC_OPTION_DESCRIPTORS, AlphanumericOptionDescriptor, alphanumeric_option_descriptors,
+    BlockConstraintDescriptor, block_constraint_descriptors,
     schema_type_descriptor, CoercionRuleDescriptor, InlineObjectRuleDescriptor, MatchSafeConstraintDescriptor,
     SchemaConstraintDescriptor, SchemaShapeDescriptor, SchemaTypeDescriptor,
     TriggerGrammarDescriptor, ValidationBehaviorDescriptor, coercion_rule_descriptors,

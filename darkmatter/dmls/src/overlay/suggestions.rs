@@ -149,8 +149,8 @@ fn collect_reference_candidates(schema: &SchemaRoot, out: &mut Vec<(SourceSpan, 
 ///
 /// Returns `None` for ordinary YAML documents, raw JSON Schema, and text that
 /// is not YAML. Once a
-/// recognized envelope claims the document (`$schema`-only pure or
-/// `kind: schema` tagged), malformed payload content is carried as a
+/// recognized envelope claims the document (`$schema`-only pure,
+/// `kind: schema` tagged, or `kind: yaml-schema`), malformed payload content is carried as a
 /// [`SuggestionState::Standalone`] error rather than falling back.
 pub fn standalone_lints(text: &str, path: &Path) -> Option<SuggestionState> {
     match parse_standalone_schema_document(text, path) {
@@ -191,10 +191,10 @@ fn infer_envelope(text: &str) -> StandaloneSchemaEnvelope {
         return StandaloneSchemaEnvelope::Pure;
     };
     let kind_key = serde_yaml_ng::Value::String("kind".into());
-    if map.get(&kind_key).and_then(serde_yaml_ng::Value::as_str) == Some("schema") {
-        StandaloneSchemaEnvelope::Tagged
-    } else {
-        StandaloneSchemaEnvelope::Pure
+    match map.get(&kind_key).and_then(serde_yaml_ng::Value::as_str) {
+        Some("schema") => StandaloneSchemaEnvelope::Tagged,
+        Some("yaml-schema") => StandaloneSchemaEnvelope::YamlSchema,
+        _ => StandaloneSchemaEnvelope::Pure,
     }
 }
 

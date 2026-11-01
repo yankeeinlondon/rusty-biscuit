@@ -436,10 +436,10 @@ fn types_catalog_declaration_column() {
     catalog(&mut matrix, Control, "control witness", shipped.to_string(), "agent: {name: x}\n", Expect::Invalid("agent"));
     catalog(&mut matrix, Absent, "absent", head.to_string(), "agent: claude\n", load(FILE));
     catalog(&mut matrix, ExplicitNull, "null", format!("{head}types: null\n"), "", load(FILE));
-    catalog(&mut matrix, ExplicitNull, "empty value", format!("{head}types:\n"), "", load("`types` must be a mapping"));
-    catalog(&mut matrix, WrongWhole, "number", format!("{head}types: 5\n"), "", load("`types` must be a mapping"));
-    catalog(&mut matrix, WrongOneElement, "sequence", format!("{head}types:\n  - AGENT: string\n"), "", load("`types` must be a mapping"));
-    catalog(&mut matrix, WrongEveryElement, "invalid sequence", format!("{head}types: [5, true]\n"), "", load("`types` must be a mapping"));
+    catalog(&mut matrix, ExplicitNull, "empty value", format!("{head}types:\n"), "", load("schema.yaml`: `/types`"));
+    catalog(&mut matrix, WrongWhole, "number", format!("{head}types: 5\n"), "", load("schema.yaml`: `/types`"));
+    catalog(&mut matrix, WrongOneElement, "sequence", format!("{head}types:\n  - AGENT: string\n"), "", load("schema.yaml`: `/types`"));
+    catalog(&mut matrix, WrongEveryElement, "invalid sequence", format!("{head}types: [5, true]\n"), "", load("schema.yaml`: `/types`"));
     // A declared empty catalog loads; the retained reference names a type it
     // does not hold.
     catalog(&mut matrix, Empty, "empty mapping", format!("{head}types: {{}}\n"), "", load("unknown named type `AGENT`"));

@@ -427,6 +427,19 @@ fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) ->
 fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>) {
     match c {
         Constraint::Required => out.push_str("required"),
+        Constraint::NonNull => out.push_str("non-null"),
+        Constraint::Closed => out.push_str("closed"),
+        Constraint::Mapping => out.push_str("mapping"),
+        Constraint::DeclaredRequired => out.push_str("declared-required"),
+        Constraint::Forms(forms) => {
+            out.push_str("forms(");
+            let keywords: Vec<&str> = forms.iter().map(|form| form.as_keyword()).collect();
+            out.push_str(&keywords.join(","));
+            out.push(')');
+        }
+        Constraint::Property { name, declaration } => {
+            let _ = write!(out, "property({name},{})", serialize_property_def(declaration));
+        }
         Constraint::Eager => out.push_str("eager"),
         Constraint::NotEmpty => out.push_str("not-empty"),
         Constraint::Integer => out.push_str("integer"),

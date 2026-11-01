@@ -191,8 +191,21 @@ impl Prepared {
         base_dir: Option<PathBuf>,
         context: biscuit_file::FileResolutionContext,
     ) -> Result<Self, SchemaError> {
-        let validators = CompiledValidators::build(&json_schema, &SHARED_VALIDATOR_CACHE, base_dir.as_deref(), &context)?;
-        let conversion = ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&json_schema));
+        Self::compiled_through(json_schema, base_dir, context, &SHARED_VALIDATOR_CACHE)
+    }
+
+    /// [`Self::new`], compiling through `cache` instead of the process-wide
+    /// shared cache. The library's compiled-in envelope definitions use a
+    /// private cache: they live for the process, so they must not occupy, or
+    /// be counted in, the cache a host resets and bounds.
+    pub(crate) fn compiled_through(
+        json_schema: Arc<Value>,
+        base_dir: Option<PathBuf>,
+        context: biscuit_file::FileResolutionContext,
+        cache: &ValidatorCache,
+    ) -> Result<Self, SchemaError> {
+        let validators = CompiledValidators::build(&json_schema, cache, base_dir.as_deref(), &context)?;
+        let conversion = ConversionPlan::for_hashed(cache.shared_schema_hash(&json_schema));
         Ok(Self {
             json_schema,
             validators,

@@ -68,7 +68,7 @@ use darkmatter::markdown::schemas::triggers::{
     parse_trigger_envelope_from_str, scan_with_source,
 };
 use darkmatter::markdown::schemas::{SchemaRootKind, SchemaRootState, SchemaRoots};
-use simplified_schema::{SchemaError, parse_standalone_schema_document};
+use simplified_schema::{SchemaError, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
 use super::TriggerDiagnosticTransition;
 use crate::work_counters;
@@ -97,7 +97,11 @@ fn classify(text: &str, path: &Path) -> RootFileClass {
         Ok(Some(_)) => RootFileClass::SchemaTrigger,
         Err(_) => RootFileClass::FailedTrigger,
         Ok(None) => match parse_standalone_schema_document(text, path) {
-            Ok(Some(_)) => RootFileClass::NamedSchema,
+            // A `yaml-schema` is applied by `kind`, never named.
+            Ok(Some(document)) if document.envelope != StandaloneSchemaEnvelope::YamlSchema => {
+                RootFileClass::NamedSchema
+            }
+            Ok(Some(_)) => RootFileClass::Unclassified,
             Ok(None) | Err(_) => RootFileClass::Unclassified,
         },
     }

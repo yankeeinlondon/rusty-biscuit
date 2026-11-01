@@ -18,7 +18,9 @@ use darkmatter::markdown::schemas::completion::{
 };
 use simplified_schema::resolve::SelectionOutcome;
 use simplified_schema::simplified::query::resolved_alternatives;
-use darkmatter::markdown::schemas::{schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors};
+use darkmatter::markdown::schemas::{
+    block_constraint_descriptors, schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
+};
 use simplified_schema::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
     SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
@@ -753,6 +755,9 @@ fn nested_key_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
+    if let Some(items) = block_constraint_key_completions(ctx, ast, offset, line_start, indent, &ancestors, partial) {
+        return items;
+    }
     let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let segments = key_segments(&ancestor_refs);
     let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
@@ -764,6 +769,71 @@ fn nested_key_completions(
         return style_key_completions(ctx, offset, partial);
     }
     Vec::new()
+}
+
+/// The not-yet-present keys of a schema declaration's `$constraints:` mapping,
+/// from the catalog's [`block_constraint_descriptors`], or `None` when the
+/// cursor's mapping is not one. A declaration's root (or root-union arm)
+/// accepts only the object constraints; a property's object also accepts the
+/// presence markers.
+fn block_constraint_key_completions(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    ancestors: &[String],
+    partial: &str,
+) -> Option<Vec<CompletionItem>> {
+    let overlay = ctx.overlay?;
+    let is_block = |path: &[String]| path.last().is_some_and(|key| key == "$constraints");
+    // An empty `$constraints:` holds null, so the tree places the line being
+    // authored in the enclosing mapping; the indentation still shows the
+    // block it opens.
+    let by_indent;
+    let ancestors = if is_block(ancestors) {
+        ancestors
+    } else {
+        by_indent = enclosing_path_by_indent(ctx.text, line_start, indent);
+        if !is_block(&by_indent) {
+            return None;
+        }
+        &by_indent
+    };
+    let (last, holder) = ancestors.split_last()?;
+    meta_schema_kinds_for_line(overlay, holder, last, false)?;
+    let on_root = match holder.split_last() {
+        Some((key, parent)) => meta_schema_kinds_for_line(overlay, parent, key, false)
+            .is_some_and(|kinds| kinds.contains(&MetaSchemaKind::Schema)),
+        None => false,
+    };
+    let present = present_child_keys(ast, ancestors);
+    let start = offset - partial.len();
+    Some(
+        block_constraint_descriptors()
+            .iter()
+            .filter(|descriptor| descriptor.on_root || !on_root)
+            .filter(|descriptor| descriptor.keyword.starts_with(partial) && !present.contains(&descriptor.keyword))
+            .filter_map(|descriptor| {
+                // A flag is only ever written `true`; a valued key leaves its
+                // value to the author.
+                let insert = if descriptor.form.ends_with(": true") {
+                    descriptor.form.to_string()
+                } else {
+                    format!("{}: ", descriptor.keyword)
+                };
+                item(
+                    ctx,
+                    start,
+                    offset,
+                    descriptor.keyword,
+                    &insert,
+                    CompletionItemKind::PROPERTY,
+                    Some(descriptor.description.to_string()),
+                )
+            })
+            .collect(),
+    )
 }
 
 /// A shape's not-yet-present property keys, filtered by `partial` and marked
@@ -4638,6 +4708,55 @@ mod tests {
                 assert_eq!(edit.range.end.character, end, "{value:?}");
             });
         }
+    }
+
+    #[test]
+    fn constraints_block_keys_come_from_the_catalog_by_placement() {
+        // A declaration root offers the object constraints not yet written.
+        let root = "---\n$schema:\n  title: string\n  $constraints:\n    min-keys: 1\n    \n---\n\nbody\n";
+        assert_eq!(top_level_labels_after(root, "min-keys: 1\n    "), ["max-keys", "uncounted-keys", "closed"]);
+        with_ctx(root, |ctx| {
+            let offset = root.find("min-keys: 1\n    ").unwrap() + "min-keys: 1\n    ".len();
+            let items = completion(ctx, offset);
+            let closed = items.iter().find(|item| item.label == "closed").expect("closed is offered");
+            let Some(CompletionTextEdit::Edit(edit)) = &closed.text_edit else {
+                panic!("a text edit: {closed:#?}")
+            };
+            assert_eq!(edit.new_text, "closed: true", "a flag is inserted with its only value");
+        });
+        let partial = "---\n$schema:\n  title: string\n  $constraints:\n    cl:\n---\n\nbody\n";
+        assert_eq!(top_level_labels_after(partial, "    cl"), ["closed"]);
+
+        // A property's object also takes the presence markers.
+        let nested = "---\n$schema:\n  addr:\n    street: string\n    $constraints:\n      \n---\n\nbody\n";
+        assert_eq!(
+            top_level_labels_after(nested, "$constraints:\n      "),
+            block_constraint_descriptors().iter().map(|descriptor| descriptor.keyword).collect::<Vec<_>>(),
+        );
+
+        // Data outside a schema declaration is not a constraints block.
+        let data = "---\ndata:\n  $constraints:\n    \n---\n\nbody\n";
+        let labels = top_level_labels_after(data, "$constraints:\n    ");
+        assert!(labels.iter().all(|label| label != "closed"), "{labels:?}");
+    }
+
+    #[test]
+    fn meta_type_constraint_lists_offer_their_declaration_options() {
+        for (declaration, offered, withheld) in [
+            ("type-definition(", ["forms", "declared-required", "non-null"], ["mapping", "property"]),
+            ("schema(", ["mapping", "property", "non-null"], ["forms", "declared-required"]),
+        ] {
+            let text = format!("---\n$schema:\n  p: {declaration}\n---\n\nbody\n");
+            let labels = top_level_labels_after(&text, declaration);
+            for keyword in offered {
+                assert!(labels.iter().any(|label| label == keyword), "{declaration} offers {keyword}: {labels:?}");
+            }
+            for keyword in withheld {
+                assert!(labels.iter().all(|label| label != keyword), "{declaration} withholds {keyword}: {labels:?}");
+            }
+        }
+        let labels = top_level_labels_after("---\n$schema:\n  p: unknown(\n---\n\nbody\n", "unknown(");
+        assert!(labels.iter().all(|label| label != "non-null"), "{labels:?}");
     }
 
     #[test]

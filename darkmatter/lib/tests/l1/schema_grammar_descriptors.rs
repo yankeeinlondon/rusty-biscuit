@@ -457,8 +457,8 @@ fn a_declared_categories_list_limits_category_names() {
         ("[]", "category `Text` is not declared"),
         ("[Text, ' Text ']", "`categories[1]`: duplicate category `Text`"),
         ("[Text, ' -> no name']", "`categories[1]`: a category name cannot be blank"),
-        ("null", "`categories` must be a list"),
-        ("[Text, 5]", "`categories[1]`: a category entry must be a string"),
+        ("null", "schema.yaml`: `/categories`"),
+        ("[Text, {a: b}]", "schema.yaml`: `/categories/1`"),
         ("[Text ->]", "`categories[0]`: `->` must be followed by a description"),
     ] {
         let source = format!("kind: schema\ncategories: {categories}\ntypes:\n  t: 'string(category(Text))'\n");

@@ -319,9 +319,12 @@ fn reference_constraint_error(name: &str, key: &DefKey, constraint: &Constraint)
 // ── Shape & root union ────────────────────────────────────────────────────
 
 fn shape_to_object_schema(shape: &SchemaShape, defs: Lowering<'_>) -> Result<Map<String, Value>, SchemaError> {
-    // Root shapes default to open (`additionalProperties: true`); a pattern-keyed
-    // root switches to closed-object semantics inside `object_body_from_shape`.
-    let mut obj = object_body_from_shape("<root>", shape, Value::Bool(true), defs)?;
+    // Root shapes default to open (`additionalProperties: true`) unless the
+    // shape is `closed`; a pattern-keyed root switches to closed-object
+    // semantics inside `object_body_from_shape`. The shape already carries any
+    // properties merged in before lowering, so closure is judged after them.
+    let closed = shape.constraints.iter().any(|c| matches!(c, Constraint::Closed));
+    let mut obj = object_body_from_shape("<root>", shape, Value::Bool(!closed), defs)?;
     reject_block_constraints("<root>", shape, ObjectScope::Root)?;
     apply_object_arity("<root>", &mut obj, shape.constraints.iter())?;
     Ok(obj)
@@ -825,11 +828,16 @@ fn union_property_to_schema(
     // The optional-`file` empty-string arm is allowed only when the union
     // itself is optional.
     let (mut any_of, hoisted_default) = union_arm_fragments(name, arms, !required, defs)?;
-    // A union with a `null` or `unknown` arm already accepts null, so it needs
-    // no extra `null` arm. Otherwise the null arm leads the one flat
+    // A union with a `null` or `unknown` arm already accepts null, and a
+    // `non-null` union must reject it while staying optional, so neither gets
+    // an extra `null` arm. Otherwise the null arm leads the one flat
     // `anyOf: [null, arm1, arm2, ...]` rather than nesting the whole union
     // under a second anyOf wrapper.
-    if !(required || admits_null) {
+    let non_null = container.map_or_else(
+        || arms.iter().any(PropertyAtom::marks_non_null),
+        PropertyAtom::marks_non_null,
+    );
+    if !(required || admits_null || non_null) {
         any_of.insert(0, json!({ "type": "null" }));
     }
 
@@ -944,6 +952,15 @@ fn atom_to_schema(
         // so a present, wrongly-typed host-supplied value still fails type
         // validation (point 3).
         return Ok((fragment, !generated));
+    }
+
+    // `non-null` leaves the property optional but omits the `null` arm, so an
+    // explicit `null` fails as a wrong type while an absent key passes. Every
+    // fragment that reaches here carries a type that excludes null: the
+    // null-admitting types (`null`, `unknown`, a union with such an arm) are
+    // declaration errors under `non-null`, and so is a reference to one.
+    if atom.marks_non_null() {
+        return Ok((fragment, false));
     }
 
     // Pull annotations off the fragment so they land on the outer wrapper,
@@ -1062,13 +1079,16 @@ fn atom_fragment_without_null_wrap(
         }
     }
 
-    // `category(...)`, `operands(...)`, and `deferred` are annotations, not
-    // constraints any type builder checks.
+    // `category(...)`, `operands(...)`, and `deferred` are annotations, and
+    // `non-null` is a presence marker, not constraints any type builder checks.
     let value_constraints: Vec<Constraint> = atom
         .constraints
         .iter()
         .filter(|constraint| {
-            !matches!(constraint, Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred)
+            !matches!(
+                constraint,
+                Constraint::Category(_) | Constraint::Operands(_) | Constraint::Deferred | Constraint::NonNull
+            )
         })
         .cloned()
         .collect();
@@ -1351,14 +1371,18 @@ enum ObjectScope {
 
 /// Rejects `$constraints` keys that have no meaning on the block's object.
 /// The block parser accepts every key the grammar knows; only `min-keys`,
-/// `max-keys`, and `uncounted-keys` lower here.
+/// `max-keys`, `uncounted-keys`, and `closed` lower here. `closed` is a no-op
+/// on an inline object, which is closed already.
 fn reject_block_constraints(
     name: &str,
     shape: &SchemaShape,
     scope: ObjectScope,
 ) -> Result<(), SchemaError> {
     for c in &shape.constraints {
-        if !matches!(c, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_)) {
+        if !matches!(
+            c,
+            Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_) | Constraint::Closed
+        ) {
             let place = match scope {
                 ObjectScope::Inline => "an inline object",
                 ObjectScope::Root => "the root object",
@@ -1782,6 +1806,7 @@ fn apply_array_constraints(
     for c in constraints {
         match c {
             Constraint::Required
+            | Constraint::NonNull
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_)
@@ -2242,11 +2267,95 @@ fn semantic_type_fragment(
     keyword: &str,
     constraints: &[Constraint],
 ) -> Result<Value, SchemaError> {
-    reject_unsupported(name, type_label, constraints, &[])?;
+    let (options, rest): (Vec<&Constraint>, Vec<&Constraint>) =
+        constraints.iter().partition(|constraint| is_declaration_option(constraint));
+    let rest: Vec<Constraint> = rest.into_iter().cloned().collect();
+    reject_unsupported(name, type_label, &rest, &[])?;
     let mut fragment = Map::new();
     fragment.insert("type".into(), json!(["string", "object", "array"]));
-    fragment.insert(keyword.into(), Value::Bool(true));
+    fragment.insert(keyword.into(), options_payload(name, &options)?);
     Ok(Value::Object(fragment))
+}
+
+/// Whether `constraint` is a `schema(...)` / `type-definition(...)`
+/// declaration option.
+fn is_declaration_option(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::Mapping | Constraint::Property { .. } | Constraint::Forms(_) | Constraint::DeclaredRequired
+    )
+}
+
+/// The `x-darkmatter-schema` / `x-darkmatter-type-definition` keyword payload
+/// a `schema` or `type-definition` atom with `constraints` lowers to: `true`
+/// without declaration options, else the options object
+/// [`crate::format::judge_schema`] and [`crate::format::judge_type_definition`]
+/// read back. Constraints that are not declaration options are ignored;
+/// `property` names the declaring property in errors.
+///
+/// ## Errors
+///
+/// [`SchemaError::Convert`] when a `property(name, …)` option's declaration
+/// is not one `type-definition(...)` carrying only `forms` and
+/// `declared-required`.
+pub fn declaration_options_payload(property: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
+    let options: Vec<&Constraint> = constraints.iter().filter(|constraint| is_declaration_option(constraint)).collect();
+    options_payload(property, &options)
+}
+
+/// [`declaration_options_payload`] over options already selected. The grammar
+/// has already placed each option on its own meta-type.
+fn options_payload(name: &str, options: &[&Constraint]) -> Result<Value, SchemaError> {
+    if options.is_empty() {
+        return Ok(Value::Bool(true));
+    }
+    let mut payload = Map::new();
+    let mut properties = Vec::new();
+    for option in options {
+        match option {
+            Constraint::Mapping => {
+                payload.insert("mapping".into(), Value::Bool(true));
+            }
+            Constraint::DeclaredRequired => {
+                payload.insert("declaredRequired".into(), Value::Bool(true));
+            }
+            Constraint::Forms(forms) => {
+                let forms = forms.iter().map(|form| Value::from(form.as_keyword())).collect();
+                payload.insert("forms".into(), Value::Array(forms));
+            }
+            Constraint::Property { name: property, declaration } => {
+                let PropertyDef::Single(atom) = declaration.as_ref() else {
+                    return Err(SchemaError::Convert {
+                        property: name.to_string(),
+                        message: format!("`property({property}, …)` takes one `type-definition(...)`"),
+                    });
+                };
+                let inner: Vec<&Constraint> = atom.property_constraints().collect();
+                if let Some(other) = inner
+                    .iter()
+                    .find(|constraint| !matches!(constraint, Constraint::Forms(_) | Constraint::DeclaredRequired))
+                {
+                    return Err(SchemaError::Convert {
+                        property: name.to_string(),
+                        message: format!(
+                            "constraint `{}` is not valid on the `type-definition` of `property({property}, …)`; \
+                             only `forms` and `declared-required` judge a declaration",
+                            other.keyword()
+                        ),
+                    });
+                }
+                properties.push(json!({
+                    "name": property,
+                    "declaration": options_payload(name, &inner)?,
+                }));
+            }
+            _ => {}
+        }
+    }
+    if !properties.is_empty() {
+        payload.insert("property".into(), Value::Array(properties));
+    }
+    Ok(Value::Object(payload))
 }
 
 /// Renders an expression `default(...)` value as the source text handed to the

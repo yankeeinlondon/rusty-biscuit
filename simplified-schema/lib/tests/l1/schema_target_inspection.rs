@@ -119,12 +119,15 @@ fn description_is_kept_only_when_it_is_a_nonblank_string() {
     );
     // A leading comment block is not a description.
     assert_eq!(inspect("s.yaml", "# Not this.\n$schema:\n  a: string\n").description, None);
-    // `null` and a number are not strings: the envelope rejects the file.
-    for line in ["description: null\n", "description: 3\n"] {
+    // `null` and a list are not strings: the envelope's definition rejects
+    // the file.
+    for line in ["description: null\n", "description: [a]\n"] {
         let inspection = inspect("s.yaml", &format!("{line}$schema:\n  a: string\n"));
         assert!(matches!(inspection.classification, Err(SchemaError::SchemaDocument { .. })), "{line}");
         assert_eq!(inspection.description, None);
     }
+    // A number converts softly, as frontmatter does, and is read as text.
+    assert_eq!(yaml_description("description: 3\n"), Some("3".into()));
 
     let json_description = |value: &str| {
         inspect(

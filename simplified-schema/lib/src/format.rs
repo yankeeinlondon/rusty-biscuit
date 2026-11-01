@@ -65,7 +65,9 @@ use url::Url;
 use crate::coercion::{ContentFormat, content_error};
 use crate::file_context::resolve_document_file_ref;
 use crate::simplified::{
-    parse_property_definition, parse_schema_declaration,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
+    TypeExpr, declaration_options_payload, parse_property_definition, parse_schema_declaration,
+    serialize_property_atom,
 };
 
 /// Format name registered for eager `file(eager)` SimplifiedSchema atoms and
@@ -556,71 +558,321 @@ impl<'i> Keyword<'i> for DarkmatterUrlSchemeKeyword {
 }
 
 /// Factory for the grammar-backed `x-darkmatter-type-definition` keyword.
+///
+/// The payload is `true` (any definition) or an options object
+/// `{"forms": ["literal", "enum"], "declaredRequired": true}`.
 pub fn type_definition_keyword_factory<'a>(
     _parent: &'a Map<String, Value>,
     schema: &'a Value,
     _schema_path: Location,
 ) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
-    require_enabled_semantic_keyword(schema, DARKMATTER_TYPE_DEFINITION_KEYWORD)?;
-    Ok(Box::new(DarkmatterTypeDefinitionKeyword))
+    let options = TypeDefinitionOptions::from_payload(schema, DARKMATTER_TYPE_DEFINITION_KEYWORD)
+        .map_err(ValidationError::schema)?;
+    Ok(Box::new(DarkmatterTypeDefinitionKeyword { options }))
 }
 
 /// Factory for the grammar-backed `x-darkmatter-schema` keyword.
+///
+/// The payload is `true` (any declaration) or an options object
+/// `{"mapping": true, "property": [{"name": "kind", "declaration": …}]}`,
+/// where each `declaration` is a `type-definition` payload.
 pub fn schema_keyword_factory<'a>(
     _parent: &'a Map<String, Value>,
     schema: &'a Value,
     _schema_path: Location,
 ) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
-    require_enabled_semantic_keyword(schema, DARKMATTER_SCHEMA_KEYWORD)?;
-    Ok(Box::new(DarkmatterSchemaKeyword))
+    let options = SchemaOptions::from_payload(schema).map_err(ValidationError::schema)?;
+    Ok(Box::new(DarkmatterSchemaKeyword { options }))
 }
 
-fn require_enabled_semantic_keyword<'a>(
-    schema: &'a Value,
+/// Judges `instance` as the value of a `type-definition` atom carrying
+/// `constraints`: it must parse as one property definition and satisfy the
+/// atom's declaration options (`forms`, `declared-required`). The same check
+/// the lowered `x-darkmatter-type-definition` keyword makes, for a caller
+/// holding the parsed atom instead of its JSON Schema.
+///
+/// ## Errors
+///
+/// The validation message when `instance` fails, or when the options cannot
+/// form a payload (see [`crate::simplified::declaration_options_payload`]).
+pub fn judge_type_definition(constraints: &[Constraint], instance: &Value) -> Result<(), String> {
+    let payload = declaration_options_payload("<atom>", constraints).map_err(|error| error.to_string())?;
+    let options = TypeDefinitionOptions::from_payload(&payload, DARKMATTER_TYPE_DEFINITION_KEYWORD)?;
+    DarkmatterTypeDefinitionKeyword { options }.check(instance)
+}
+
+/// Judges `instance` as the value of a `schema` atom carrying `constraints`:
+/// it must parse as one `$schema` declaration and satisfy the atom's
+/// declaration options (`mapping`, `property(...)`). The same check the
+/// lowered `x-darkmatter-schema` keyword makes.
+///
+/// ## Errors
+///
+/// As [`judge_type_definition`].
+pub fn judge_schema(constraints: &[Constraint], instance: &Value) -> Result<(), String> {
+    let payload = declaration_options_payload("<atom>", constraints).map_err(|error| error.to_string())?;
+    SchemaOptions::from_payload(&payload)?.judge(instance)
+}
+
+/// The `type-definition(...)` declaration options a keyword payload carries.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct TypeDefinitionOptions {
+    /// `forms(...)`: the constructors every top-level alternative may use.
+    forms: Option<Vec<SimplifiedType>>,
+    /// `declared-required`.
+    declared_required: bool,
+}
+
+/// The `schema(...)` declaration options a keyword payload carries.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct SchemaOptions {
+    mapping: bool,
+    properties: Vec<(String, TypeDefinitionOptions)>,
+}
+
+/// The options object of `payload`, or `None` for the bare `true` payload.
+fn options_object<'v>(
+    payload: &'v Value,
     keyword: &str,
-) -> Result<(), ValidationError<'a>> {
-    if schema.as_bool() == Some(true) {
-        Ok(())
-    } else {
-        Err(ValidationError::schema(format!("{keyword} must be true")))
+    keys: &[&str],
+) -> Result<Option<&'v Map<String, Value>>, String> {
+    match payload {
+        Value::Bool(true) => Ok(None),
+        Value::Object(map) => {
+            if let Some(unknown) = map.keys().find(|key| !keys.contains(&key.as_str())) {
+                return Err(format!(
+                    "{keyword} has no option `{unknown}`; expected {}",
+                    keys.iter().map(|key| format!("`{key}`")).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            Ok(Some(map))
+        }
+        _ => Err(format!("{keyword} must be true or an options object")),
     }
 }
 
-fn parse_type_definition_instance(instance: &Value) -> Result<(), String> {
-    let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
-    parse_property_definition("<instance>", &yaml)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+fn bool_option(map: &Map<String, Value>, keyword: &str, key: &str) -> Result<bool, String> {
+    match map.get(key) {
+        None => Ok(false),
+        Some(Value::Bool(flag)) => Ok(*flag),
+        Some(_) => Err(format!("{keyword} option `{key}` must be a boolean")),
+    }
 }
 
-fn parse_schema_instance(instance: &Value) -> Result<(), String> {
-    let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
-    parse_schema_declaration(&yaml)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+impl TypeDefinitionOptions {
+    fn from_payload(payload: &Value, keyword: &str) -> Result<Self, String> {
+        let Some(map) = options_object(payload, keyword, &["forms", "declaredRequired"])? else {
+            return Ok(Self::default());
+        };
+        let forms = match map.get("forms") {
+            None => None,
+            Some(Value::Array(items)) if !items.is_empty() => Some(
+                items
+                    .iter()
+                    .map(|item| {
+                        item.as_str().and_then(SimplifiedType::from_keyword).ok_or_else(|| {
+                            format!("{keyword} option `forms` lists type keywords; `{item}` is not one")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Some(_) => return Err(format!("{keyword} option `forms` must be a non-empty array of type keywords")),
+        };
+        Ok(Self { forms, declared_required: bool_option(map, keyword, "declaredRequired")? })
+    }
+
+    /// Judges a parsed declaration. `subject` names it in messages.
+    ///
+    /// Parse-only: a named-type reference alternative passes `forms`
+    /// provisionally, because what it denotes is known only once resolved
+    /// (`crate::claims` checks it then). A `literal` or `enum` alternative
+    /// passes only when it denotes non-empty strings: these constructors
+    /// declare names, and a numeric or boolean literal claims none.
+    fn judge(&self, def: &PropertyDef, subject: &str) -> Result<(), String> {
+        if let Some(forms) = &self.forms {
+            let alternatives = def.alternatives().unwrap_or(match def {
+                PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                PropertyDef::Union(atoms) => atoms,
+            });
+            let expected = forms
+                .iter()
+                .map(|form| format!("`{}(...)`", form.as_keyword()))
+                .collect::<Vec<_>>();
+            let expected = match expected.as_slice() {
+                [one] => one.clone(),
+                [first, second] => format!("{first} or {second}"),
+                [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+                [] => String::new(),
+            };
+            for alternative in alternatives {
+                match alternative_form(alternative, forms) {
+                    FormVerdict::Admitted => {}
+                    FormVerdict::OtherForm => return Err(format!("{subject} must be declared as {expected}")),
+                    FormVerdict::NotNonEmptyStrings => {
+                        return Err(format!(
+                            "{subject} must be declared as {expected}; `{}` does not denote non-empty strings",
+                            serialize_property_atom(alternative)
+                        ));
+                    }
+                }
+            }
+        }
+        if self.declared_required && !def.is_required() {
+            return Err(format!("{subject} must be declared `required`, with no alternative that admits null"));
+        }
+        Ok(())
+    }
 }
 
-struct DarkmatterTypeDefinitionKeyword;
+enum FormVerdict {
+    Admitted,
+    OtherForm,
+    NotNonEmptyStrings,
+}
+
+fn alternative_form(atom: &PropertyAtom, forms: &[SimplifiedType]) -> FormVerdict {
+    if atom.is_array {
+        return FormVerdict::OtherForm;
+    }
+    let ty = match &atom.ty {
+        TypeExpr::Imported { .. } => return FormVerdict::Admitted,
+        TypeExpr::Primitive(ty) if forms.contains(ty) => *ty,
+        _ => return FormVerdict::OtherForm,
+    };
+    let names_strings = match ty {
+        SimplifiedType::Literal => {
+            matches!(atom.literal_value(), Some(Value::String(text)) if !text.is_empty())
+        }
+        SimplifiedType::Enum => atom.property_constraints().any(|constraint| {
+            matches!(constraint, Constraint::Members(members)
+                if !members.is_empty() && members.iter().all(|member| !member.is_empty()))
+        }),
+        _ => true,
+    };
+    if names_strings { FormVerdict::Admitted } else { FormVerdict::NotNonEmptyStrings }
+}
+
+impl SchemaOptions {
+    fn from_payload(payload: &Value) -> Result<Self, String> {
+        let keyword = DARKMATTER_SCHEMA_KEYWORD;
+        let Some(map) = options_object(payload, keyword, &["mapping", "property"])? else {
+            return Ok(Self::default());
+        };
+        let properties = match map.get("property") {
+            None => Vec::new(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    let entry = item
+                        .as_object()
+                        .filter(|entry| entry.keys().all(|key| key == "name" || key == "declaration"))
+                        .ok_or_else(|| {
+                            format!("{keyword} option `property` entries are `{{\"name\", \"declaration\"}}` objects")
+                        })?;
+                    let name = entry
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|name| !name.is_empty())
+                        .ok_or_else(|| format!("{keyword} option `property` entries need a non-empty `name`"))?;
+                    let declaration = entry
+                        .get("declaration")
+                        .ok_or_else(|| format!("{keyword} option `property` entry `{name}` needs a `declaration`"))?;
+                    let declaration = TypeDefinitionOptions::from_payload(
+                        declaration,
+                        &format!("{keyword} option `property` entry `{name}` declaration"),
+                    )?;
+                    Ok((name.to_string(), declaration))
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+            Some(_) => return Err(format!("{keyword} option `property` must be an array")),
+        };
+        Ok(Self { mapping: bool_option(map, keyword, "mapping")?, properties })
+    }
+
+    /// Judges a declaration carrier. Parse-only: a reference carrier, or a
+    /// reference arm of a root union, is never followed, so `property(...)`
+    /// skips it (`crate::claims` checks the resolved declaration).
+    fn judge(&self, instance: &Value) -> Result<(), String> {
+        if self.mapping && !instance.is_object() {
+            let carrier = match instance {
+                Value::Array(_) => "a list",
+                Value::String(_) => "a reference",
+                Value::Null => "null",
+                Value::Bool(_) => "a boolean",
+                Value::Number(_) => "a number",
+                Value::Object(_) => "a mapping",
+            };
+            return Err(format!("the declaration must be a mapping, not {carrier}"));
+        }
+        let declaration = parse_schema_instance(instance)?;
+        if self.properties.is_empty() {
+            return Ok(());
+        }
+        match &declaration {
+            SchemaDeclaration::Reference(_) => Ok(()),
+            SchemaDeclaration::Schema(SchemaRoot::Single(shape)) => self.judge_shape(shape, ""),
+            SchemaDeclaration::Schema(SchemaRoot::Union(arms)) => {
+                arms.iter().enumerate().try_for_each(|(index, arm)| match arm {
+                    SchemaArm::Inline(shape) => self.judge_shape(shape, &format!("root-union arm {index}: ")),
+                    SchemaArm::FileRef(_) => Ok(()),
+                })
+            }
+        }
+    }
+
+    fn judge_shape(&self, shape: &SchemaShape, prefix: &str) -> Result<(), String> {
+        for (name, options) in &self.properties {
+            let Some(def) = shape.properties.get(name) else {
+                return Err(format!("{prefix}the schema must declare `{name}`"));
+            };
+            options.judge(def, &format!("{prefix}`{name}`"))?;
+        }
+        Ok(())
+    }
+}
+
+fn parse_type_definition_instance(instance: &Value) -> Result<PropertyDef, String> {
+    let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
+    parse_property_definition("<instance>", &yaml).map_err(|error| error.to_string())
+}
+
+fn parse_schema_instance(instance: &Value) -> Result<SchemaDeclaration, String> {
+    let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
+    parse_schema_declaration(&yaml).map_err(|error| error.to_string())
+}
+
+struct DarkmatterTypeDefinitionKeyword {
+    options: TypeDefinitionOptions,
+}
+
+impl DarkmatterTypeDefinitionKeyword {
+    fn check(&self, instance: &Value) -> Result<(), String> {
+        let def = parse_type_definition_instance(instance)?;
+        self.options.judge(&def, "the definition")
+    }
+}
 
 impl<'i> Keyword<'i> for DarkmatterTypeDefinitionKeyword {
     fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
-        parse_type_definition_instance(instance).map_err(ValidationError::custom)
+        self.check(instance).map_err(ValidationError::custom)
     }
 
     fn is_valid(&self, instance: &'i Value) -> bool {
-        parse_type_definition_instance(instance).is_ok()
+        self.check(instance).is_ok()
     }
 }
 
-struct DarkmatterSchemaKeyword;
+struct DarkmatterSchemaKeyword {
+    options: SchemaOptions,
+}
 
 impl<'i> Keyword<'i> for DarkmatterSchemaKeyword {
     fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
-        parse_schema_instance(instance).map_err(ValidationError::custom)
+        self.options.judge(instance).map_err(ValidationError::custom)
     }
 
     fn is_valid(&self, instance: &'i Value) -> bool {
-        parse_schema_instance(instance).is_ok()
+        self.options.judge(instance).is_ok()
     }
 }
 
