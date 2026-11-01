@@ -121,7 +121,7 @@ Every curated package area defines these recipes, delegating to the shared
 |----------------|-------------------------------------------------------------------------|
 | `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
 | `test`         | Full L1 suite.                                                          |
-| `slow-tests`   | Nextest's SLOW report over the `test` tier (local diagnostic).         |
+| `slow-tests`   | Reports the area's slow-test log (runs no tests); `import <run>` adds a CI run; `fresh` and `verify --baseline <state>` check `target/slow-tests/current.md`, the slow tests of every run in the current working-tree state. Every canonical recipe records automatically ([testing-strategy](../../../docs/testing-strategy.md#slow-test-log)). |
 | `test-l2`      | Real-terminal tests; parallel by default, serial with a shared pane for packages that declare `l2-serial` (`BISCUIT_L2_THREADS` overrides) — see [l2-tests.md](l2-tests.md). |
 | `test-l3`      | OS keyboard/mouse tests.                                                |
 | `test-browser` | Headless browser tests, one Chrome at a time (`-j 1`).                  |

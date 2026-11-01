@@ -21,8 +21,10 @@ publish = false
 #     cargo run -p repo-deps \
 #       --no-default-features --features build-tools --bin ci-build
 #
-# `local-tools` adds the workspace-inspecting crates only `repo-deps`,
-# `drift`, and `feature-attribution` need.
+# `local-tools` adds the workspace-inspecting crates `repo-deps`, `drift`,
+# `feature-attribution`, and `slow-tests` need. `slow-tests` runs after every
+# canonical test recipe, and it is here because it keys each run on sniff's
+# working-tree state; its first recording on a fresh tree pays for sniff.
 [features]
 default = ["local-tools"]
 build-tools = ["dep:biscuit-hash", "dep:biscuit-terminal", "dep:object", "dep:find-msvc-tools"]
@@ -59,6 +61,11 @@ path = "ci-build.rs"
 required-features = ["build-tools"]
 
 [[bin]]
+name = "slow-tests"
+path = "slow-tests.rs"
+required-features = ["local-tools"]
+
+[[bin]]
 name = "ci-rollup"
 path = "ci-rollup.rs"
 
@@ -85,7 +92,7 @@ find-msvc-tools = { version = "0.1.12", optional = true }
 [dev-dependencies]
 rstest = "0.23"
 
-# The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, `drift`, and
+# The L1 suite covers `ci-rollup`, `ci-plan`, `ci-build`, `drift`, `slow-tests`, and
 # `feature-attribution`, all of which need the default `local-tools` feature;
 # declaring no `features` here is what selects it.
 #

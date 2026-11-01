@@ -138,6 +138,10 @@ check-tier-coverage *args="":
 test-leaks *args="":
     @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
+# Show the workspace's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
+slow-tests *args:
+    @just _slow_tests {{ args }}
+
 # pre-push hook entry point: full local evidence for source-changed packages
 #
 # Runs lint and L1 plus hostable L2 for source packages. Direct reverse

@@ -240,6 +240,117 @@ that its Level 1 leg includes slow tests, which sets `BISCUIT_L1_INCLUDE_SLOW=1`
 for that leg; Darkmatter does this. When you write a `slow_` test, make sure
 the package's CI policy actually runs it.
 
+### Slow-test log
+
+Every test that takes at least the slow threshold is written to a log with its
+duration, so you can see which tests are slow, on which machine, and whether
+they are getting slower. You do not have to do anything to fill it: `sanity`,
+`test`, `test-l2`, `test-l3`, `test-browser`, `test-real`, the root `just test`,
+and the pre-push hook's runs all record into it after Nextest finishes, and
+each prints one line saying what it recorded:
+
+```text
+🐢 L1 run recorded: 90 test(s), none at or above 5.0s
+🐌 L1 run recorded: 3 of 812 test(s) at or above 5.0s, added to …/slow-tests.jsonl
+```
+
+`just slow-tests` runs no tests; it reads the log.
+
+```sh
+just slow-tests                      # this area's history (the whole workspace at the root)
+just slow-tests --env windows        # narrow with --env, --package, --limit
+just slow-tests import 41095206484   # add a GitHub Actions run's slow tests
+```
+
+The report ends with a line describing the runs recorded in this checkout for
+the current working-tree state (see below), so an empty history still tells
+you whether a run was recorded and how many tests it ran.
+
+```mermaid
+flowchart LR
+    R[test recipe] --> N[Nextest run] --> J[JUnit report]
+    J --> S[slow-tests record]
+    G[GitHub Actions run] -->|junit-* artifacts| I[slow-tests import]
+    S --> L[(slow-tests.jsonl)]
+    S --> C[(runs.jsonl → current.md)]
+    I --> L
+    L --> P[slow-tests report]
+```
+
+- **Threshold.** The `[profile.default]` `slow-timeout` period in
+  `.config/nextest.toml` (5s). It applies to every run, including CI runs, whose
+  own profile only marks a test SLOW at 30s, so local and hosted timings are
+  measured against the same number. A test with its own longer `slow-timeout`
+  is still logged once it passes 5s.
+- **Where it lives.** `~/.rusty-biscuit/test-timings/<host>/<owner>/<repo>/slow-tests.jsonl`,
+  named after the `origin` remote, so every clone and worktree of the
+  repository shares one log and `cargo clean` does not erase it. Set
+  `BISCUIT_SLOW_TESTS_LOG` to a file path to use a different log.
+- **One line per slow test per run.** For example:
+
+  ```json
+  {"recorded_at":1793558467,"source":"local","run":"65d401ed-…","environment":"windows","host":"BUILD-WIN","commit":"3c18e03…","tier":"L1","package":"sniff-cli","binary_id":"sniff-cli::l1","test":"t::slow","duration_s":7.25,"threshold_s":5.0,"outcome":"pass"}
+  ```
+
+  `environment` is the OS name for a local run and the runner environment
+  (`ubuntu-latest`, `macos-latest`, …) for an imported one. `outcome` is
+  `pass`, `fail`, `flaky`, or `skip`.
+- **What the report shows.** One row per test and environment, slowest first:
+  the latest duration, the previous one, the change between them, the worst
+  duration seen, and how many runs logged it. Only slow runs are logged, so
+  "previous" means the previous time the test was slow, and a test that has
+  become fast stops appearing in new runs; its last-seen date tells you that.
+- **Runs of the current working tree.** Recording also keeps a summary in the
+  checkout, written even when nothing was slow, of every run made while the
+  working tree has its present content. The tree's *state* is
+  `sniff repo state`: `HEAD` plus a hash of every changed, untracked, or
+  deleted file (ignored files such as `target/` do not count). Runs belong
+  together exactly when nothing in the tree changed between them, so
+  `just test` followed by `just sanity` reports both tiers' slow tests in one
+  place, and editing any file starts a fresh summary.
+
+  ```text
+  state A:  just test    (biscuit-hash)  ┐
+            just sanity  (biscuit-hash)  ┴→  current.md: L1 + sanity
+  edit a file → state B
+            just test    (biscuit-hash)   →  current.md: L1 only, state B
+  ```
+
+  - `target/slow-tests/runs.jsonl` gets one line per Nextest invocation: the
+    state, tier, recipe group, the directory the recipe ran in (relative to
+    the repository root), packages, test count, and slow tests.
+  - `target/slow-tests/current.md` is rebuilt from every line of the current
+    state, one section per *scope* (a tier in a directory) with its packages,
+    the command that re-runs it (`cd biscuit-hash && just sanity`), and its
+    slow tests. A recipe that runs Nextest once per package (`sanity`,
+    `test-l2`, …) is one scope, and running the same recipe again in the same
+    state replaces that scope instead of adding to it.
+
+  `prompts/slow.md` reads `current.md` to fix the slow tests, and two
+  subcommands answer its checks:
+
+  ```sh
+  just slow-tests fresh                       # exit 0: current.md describes the tree as it is now
+  just slow-tests verify --baseline <state>   # exit 0: proof that the slow tests are fixed
+  ```
+
+  `verify` passes only when the tree has changed since `<state>`, every scope
+  recorded in `<state>` was re-run in the present state over at least the same
+  packages, and no scope of the present state has a slow test. Otherwise it
+  lists what is missing, such as the scopes still to re-run.
+- **CI.** Hosted runners do not write the log; their machines are discarded.
+  `import` downloads a run's `junit-*` artifacts with the GitHub CLI and
+  records them under that run's commit and start time. Importing the same run
+  attempt twice does nothing.
+- **When it does not record.** For a run outside this checkout or inside a test
+  (tests drive these recipes against fixture workspaces, which must not write
+  your log), on GitHub Actions, where Cargo is unavailable, and when
+  `BISCUIT_SLOW_TESTS=off`. Recording never changes a test run's result; if it
+  fails, the recipe prints a warning and carries on.
+
+Every Nextest run also repeats its SLOW tests in its final summary, so they
+stay visible at the end of a long run.
+
 ## How a test decides to skip or fail
 
 Tests above Level 1 need a resource that may not exist on the current machine.
@@ -306,7 +417,7 @@ special cases.
 | --- | --- |
 | `sanity` | Fast Level 1 subset, library and binary crates only. About fifteen seconds. |
 | `test` | Full Level 1 suite for the area. Slow-tagged tests excluded locally. |
-| `slow-tests` | Runs `test`'s selection and lists every test Nextest marks `SLOW`. A local diagnostic; not part of `all`. |
+| `slow-tests` | Shows the area's [slow-test log](#slow-test-log), which every test recipe fills; runs no tests. `import <run>` adds a CI run. Not part of `all`. |
 | `test-l2` | Real-terminal tests. |
 | `test-l3` | OS keyboard and mouse tests. Needs `RUN_LEVEL3=1`. |
 | `test-browser` | Headless browser tests. |
