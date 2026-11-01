@@ -87,6 +87,15 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   file because it is being used by another process"; POSIX `>>` never does.
   Give each concurrent writer its own file and merge them in the assertion
   (claudine's `document_environment_routes::group_leg_shells_row`).
+- **`cmd.exe` keeps `''` as two characters.** Exact-approved lifecycle and
+  sequence shell bytes run under the host shell (`cmd /D /C` here), by the
+  documented rule that bytes keep the system shell's grammar (fixtures rely
+  on `echo` and on `&` chains). The exact key is spelled with POSIX quoting,
+  so `''` reads as `""` in the key but reaches the program as `''`. A
+  portable test or prompt writes the empty word as `""`. Moving Windows to
+  starting the split arguments directly was tried and reverted on
+  2026-11-01: it broke about 20 fixtures and a shipped example that use
+  `cmd.exe` built-ins.
 - **A Claudine lifecycle `stdout` prints `\\` as `\`.** A `{{ seq.outputs }}`
   holding a Windows path therefore reaches stdout as `["C:\Users\…"]`, which
   is not JSON. Redact path strings in the text before parsing
@@ -643,3 +652,24 @@ yourself and ask the kernel who holds it.
   `Get-Process cdb, <test exe> | Stop-Process`.
 - The four loopback-TLS tests in `schematic/runtime/tests/l1/builder.rs`
   carry `#[cfg_attr(windows, ignore = "…")]`; macOS, Linux, and WSL2 run them.
+
+## Clippy findings only Windows produces
+
+CI runs `lint` on Linux only, so a clippy failure that exists only on Windows
+reaches `main` unnoticed and accumulates. Before handing off a change, run
+`cargo clippy -p <pkg> --all-targets -- -D warnings` here for every package it
+touches. Three shapes recur:
+
+- **`result_large_err`.** `PathBuf`/`OsString` are 32 bytes on Windows and 24
+  elsewhere, so an error variant with a `PathBuf` that sits at exactly 128
+  bytes on Linux is 136 here. Box the heavy payload (a whole variant's data
+  when a downcast must keep working: `SpanParse(Box<SpanParseError>)` with
+  `#[error(transparent)]`), not every signature that returns the error.
+- **`permissions_set_readonly_false`** on `perms.set_readonly(false)` inside a
+  `#[cfg(windows)]`/`#[cfg(not(unix))]` block. It is the correct call there;
+  allow it with a reason at that statement.
+- **Dead code and unused bindings** in test helpers whose only callers are
+  `#[cfg(unix)]`. Gate a test that asserts nothing on Windows as a whole;
+  for a helper that already carries Windows branches, use
+  `#[cfg_attr(windows, allow(dead_code, reason = "…"))]` instead of deleting
+  them.
