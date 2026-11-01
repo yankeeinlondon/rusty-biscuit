@@ -128,6 +128,12 @@ A `$schema` string is looked up with schema-specific rules, not the ordinary
 the document link, go-to-definition, the value hover, and the validator
 always name the same file.
 
+The same rules apply to a whole YAML document's root `$schema` when its
+`kind` selects no definition (`$schema: ./contract.yaml` in a
+`service.yaml`): it gets the link, go-to-definition, and value hover a
+Markdown document's does. When the document's `kind` selected its schema,
+its `$schema` is ordinary data and is not looked up at all.
+
 | You write | DMLS searches |
 |---|---|
 | A bare name: `$schema: review.yaml` | The schema roots, in order, and nothing else: the folder `SCHEMAS_DIR` names, then `{package}/schemas/`, `{package-area}/schemas/`, `{file-tree-root}/schemas/`, and `~/schemas/`. The first root holding the file wins |

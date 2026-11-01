@@ -847,10 +847,10 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
 /// The diagnostics last published for `uri` once the server is idle.
 fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
     fixture.flush_server();
-    let mut latest = fixture.wait_for_diagnostics_params(uri);
-    while let Some(params) = fixture.take_buffered_diagnostics(uri) {
-        latest = params;
-    }
+    // The buffered take returns the latest publication first; the
+    // earlier ones still buffered are dropped.
+    let latest = fixture.wait_for_diagnostics_params(uri);
+    while fixture.take_buffered_diagnostics(uri).is_some() {}
     latest["diagnostics"].as_array().cloned().unwrap_or_default()
 }
 
@@ -5490,16 +5490,21 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
         }),
     );
 
-    // The unsupported `notes` key makes the envelope itself invalid, so
-    // the current buffer's diagnostic is the classifier's envelope error, not
-    // the definition inside it.
+    // The unsupported `notes` key makes the envelope itself invalid: the
+    // `schema` kind's definition rejects it, on the key, and the envelope's
+    // admission of the same text against the same definition is not repeated.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.document_malformed")
+            diagnostic["code"] == json!("dm.schema.unknown_key")
+                && diagnostic["severity"] == json!(1)
                 && diagnostic["message"].as_str().is_some_and(|message| message.contains("notes"))
         }),
         "the current malformed envelope owns diagnostics: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic["code"] != json!("dm.schema.document_malformed")),
+        "{diagnostics:?}"
     );
 
     let labels = completion_labels(&mut fixture, uri.as_str(), 3, 9);

@@ -173,10 +173,10 @@ fn agree(frontmatter: &str, corpus: &[(&str, &str, &str, bool)]) {
             json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
         );
         fixture.flush_server();
-        let mut latest = fixture.wait_for_diagnostics_params(&uri);
-        while let Some(params) = fixture.take_buffered_diagnostics(&uri) {
-            latest = params;
-        }
+        // The buffered take returns the latest publication first; the
+        // earlier ones still buffered are dropped.
+        let latest = fixture.wait_for_diagnostics_params(&uri);
+        while fixture.take_buffered_diagnostics(&uri).is_some() {}
         let edited = editor_rejects(latest["diagnostics"].as_array().map_or(&[][..], Vec::as_slice));
 
         if composed != *rejected || edited != *rejected {

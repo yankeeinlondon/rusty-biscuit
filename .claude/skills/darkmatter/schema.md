@@ -149,8 +149,38 @@ spawning `git`). It is `LoadedYamlDocument::load(text, path)` (the only
 load error) plus `validate_loaded_yaml_document(&loaded)` (selection and
 schema errors only): call the two steps when the caller must tell a document
 load error from a referenced schema's, which is also a `SchemaDocument`.
-`md schema validate` does (see [cli.md](cli.md)); DMLS does not call it yet:
-wire it to these entry points rather than adding a second YAML route.
+`md schema validate` and DMLS both call the two steps (see [cli.md](cli.md)
+and [dmls.md](dmls.md#whole-yaml-documents)); DMLS passes its worker-prepared
+registry with `with_kind_registry` and reads `YamlValidation::effective()` /
+`document_json()` for completion and hover. Never add a second YAML route.
+A host that must read a YAML file's values before validating (Messenger's
+research loader binds `$schema` first) reads `LoadedYamlDocument::json()`
+from the same load, never a second parser.
+
+Ownership and lifecycle:
+
+- **Who owns what.** `simplified-schema/schemas/{schema,yaml-schema}.yaml` are
+  the library's (envelope admission, see the `simplified-schema` skill);
+  `darkmatter/schemas/schema-trigger.yaml`, the registry, selection, and
+  `semantic.rs` are Darkmatter's. All three ship in `embedded.rs`.
+- **Registry lifecycle.** Without `with_kind_registry` every
+  `validate_loaded_yaml_document` builds a registry for the instance's
+  context (`RegistryScope::for_context`), which scans the schema roots. A
+  caller that validates many documents of one folder builds one registry
+  and reuses it (the corpus test, DMLS's worker); a registry built for one
+  context must not judge another's documents. DMLS rebuilds on a definition
+  edit, create, or delete (see [dmls.md](dmls.md#whole-yaml-documents)).
+- **Failure policy.** The registry is never a `Result`: a definition that
+  cannot be prepared is `incomplete()` (or `root_failures()` for an
+  unreadable root), and a kind claimed twice is `Claim::Duplicate`. Each
+  becomes `SchemaError::KindSelection` only for a document whose `kind` it
+  could affect; every other document still validates. Kind checks run only
+  after the definition passes, so a document reports definition problems
+  first, then kind checks, never both.
+- **Informal schema files.** A root-`$schema` file without `kind` is judged
+  as data against its own `$schema` by `md schema validate` (DMLS shows only
+  its envelope diagnostics); `$schema: {title: string(required)}` fails
+  "title is required". That is the selection rule, not a data defect.
 
 Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root

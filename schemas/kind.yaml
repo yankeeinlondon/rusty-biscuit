@@ -4,6 +4,7 @@ $schema:
         enum(
             schema,
             schema-trigger,
+            yaml-schema,
             sequence,
             task,
             index,

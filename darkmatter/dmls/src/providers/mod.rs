@@ -340,30 +340,51 @@ impl Provider for DslProvider {
     }
 
     fn definition(&self, ctx: &DocumentContext, offset: usize) -> Vec<Location> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::definition(ctx, offset)
     }
 
     fn document_links(&self, ctx: &DocumentContext) -> Vec<DocumentLink> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::document_links(ctx)
     }
 
     fn references(&self, ctx: &DocumentContext, offset: usize, include_declaration: bool) -> Vec<Location> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::references(ctx, offset, include_declaration)
     }
 
     fn folding_ranges(&self, ctx: &DocumentContext) -> Vec<FoldingRange> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::folding_ranges(ctx)
     }
 
     fn hover(&self, ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+        if is_yaml_document(ctx) {
+            return None;
+        }
         dsl::hover(ctx, offset)
     }
 
     fn completion(&self, ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::completion(ctx, offset)
     }
 
     fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::diagnostics(ctx)
     }
 
@@ -372,8 +393,17 @@ impl Provider for DslProvider {
     }
 
     fn diagnostics_with_host(&self, ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
+        if is_yaml_document(ctx) {
+            return Vec::new();
+        }
         dsl::diagnostics_with_host(ctx, host)
     }
+}
+
+/// Whether `ctx` is a whole YAML document, which has no Markdown body: the
+/// body's directives, interpolations, and shell spans are not its syntax.
+fn is_yaml_document(ctx: &DocumentContext) -> bool {
+    crate::overlay::is_yaml_path(ctx.path)
 }
 
 /// Result cap for workspace symbol queries (design "workspace symbols: …

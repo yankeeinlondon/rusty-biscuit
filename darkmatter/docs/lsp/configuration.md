@@ -288,9 +288,10 @@ include = ["docs/**/*.md", "*/README.md"]
 `include` does not touch DMLS's other watches and listings, which are
 always on:
 
-- YAML files (`*.yaml`, `*.yml`) are listed and watched (`**/*.yaml`,
-  `**/*.yml`) whatever `include` says, even when `include` is empty
-  (`include = []` lists no Markdown at all, but still lists YAML)
+- YAML files (`.yaml`, `.yml`, in any letter case) are listed and watched
+  (`**/*.[yY][aA][mM][lL]`, `**/*.[yY][mM][lL]`) whatever `include` says,
+  even when `include` is empty (`include = []` lists no Markdown at all, but
+  still lists YAML)
 - `.gitignore`, `.ignore`, and `.dmls.toml` are watched, because a change to
   one re-lists the workspace
 - package manifests and `.git/config` are watched, because they change how
@@ -393,7 +394,7 @@ globs = ["prompts/**", ".claude/**"]
 
 | Key | Default | Effect |
 |---|---|---|
-| `strict` | `false` | Off: a missing required key is not reported (a value may arrive at compose time), and an unknown key is a warning. On: missing required keys are errors, and unknown keys are errors. |
+| `strict` | `false` | Off: a missing required key is not reported (a value may arrive at compose time), and an unknown key is a warning. On: missing required keys are errors, and unknown keys are errors. A whole YAML document has no compose step, so both are errors there either way ([YAML Documents](../topics/schemas/dmls-schema-support.md#yaml-documents)). |
 | `extensions.<name>.path` | required | A SimplifiedSchema (or JSON Schema) file merged over the built-in baseline for matching documents. A relative path resolves against the first workspace folder. It names a document schema, never a trigger schema. |
 | `extensions.<name>.globs` | `[]` | Which documents the extension applies to, matched against the document's path relative to its workspace folder. An extension with no globs never applies. |
 | `slow_validation_ms` | `200` | The time, in whole milliseconds, at or above which a document's schema validation is logged at `warn` (`slow schema validation`) rather than `debug`. `0` logs every validation at `warn`. It changes only the log level, never a diagnostic. |
@@ -414,6 +415,10 @@ slow_validation_ms = 0   # log every validation's stage breakdown at warn
 
 Extensions are applied in name order, a later one winning over an earlier
 one. Trigger schemas need no entry here; DMLS finds them in the schema roots.
+Neither extensions nor triggers apply to a whole YAML document, which is
+judged by the schema its `kind` or root `$schema` selects; its
+`kind: yaml-schema` definitions are found in the same schema roots, with no
+configuration.
 How extensions, triggers, and a document's `$schema` combine is described in
 [DMLS Schema
 Support](../topics/schemas/dmls-schema-support.md#extensibility-through-configuration).
@@ -514,7 +519,7 @@ Every code-action category is enabled unless set to `false` here:
 | Category | The quick fix it controls |
 |---|---|
 | `create-missing-file` | Create the missing file behind a broken link or an unresolved wiki link. |
-| `add-missing-key` | Add every missing required frontmatter key (offered in strict mode, where missing keys are reported). |
+| `add-missing-key` | Add every missing required frontmatter key (offered in strict mode, where missing keys are reported) or root key of a YAML document (offered whenever one is missing). |
 | `migrate-deprecated-style` | Rewrite a deprecated `style:` key to its replacement. |
 | `close-directive-block` | Close an unclosed directive block with `::end-block`. |
 | `wrap-in-interpolation-literal` | Wrap a malformed expression in an interpolation literal. |

@@ -105,8 +105,9 @@ file's kind checks cover the trigger grammar: `$path` globs, an empty `match`
 list, a vacuous match, `min-match` count bounds, and match-safe conditions
 (see [Kind Checks](./definition.md#kind-checks)). Validate a trigger file
 with `md schema validate`, which exits `1` and reports the
-problem as `"kind": "kind_check"` in JSON. DMLS reporting these errors in the
-open trigger file is **planned**.
+problem as `"kind": "kind_check"` in JSON. DMLS publishes the same check on
+the open trigger file as a `dm.schema.kind_check` error on the quoted glob
+(see [DMLS Schema Support](./dmls-schema-support.md#yaml-documents)).
 
 ### Where a failure is positioned
 

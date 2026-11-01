@@ -45,6 +45,10 @@ baseline is loaded only when some input is not YAML. The YAML route
 exit 2; problems → 1; `NoSchema` → the Markdown no-schema record). A
 `KindCheck` problem's JSON `kind` is `kind_check`. Wiring tests:
 `cli/tests/l1/schema_validate_yaml.rs`; the matrices stay in-process in lib.
+A YAML file with Markdown `---` fences is two documents and exits 3; a
+leading `---` alone is a document marker. A root-`$schema` file with no
+`kind` (an informal schema file) is judged as data against its own
+`$schema`, so such a file can fail here while DMLS shows no problem.
 
 A custom baseline path (`schema validate --schema`, `BASELINE_SCHEMA`, and
 `compose --baseline-schema`) is a launch-context file argument too, resolved

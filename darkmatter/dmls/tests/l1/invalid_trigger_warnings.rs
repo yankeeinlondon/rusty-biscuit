@@ -65,10 +65,10 @@ fn changed(fixture: &LspFixture<'_>, events: &[(&Path, u8)]) {
 /// The diagnostics last published for `uri` once the server is idle.
 fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
     fixture.flush_server();
-    let mut latest = fixture.wait_for_diagnostics_params(uri);
-    while let Some(params) = fixture.take_buffered_diagnostics(uri) {
-        latest = params;
-    }
+    // The buffered take returns the latest publication first; the
+    // earlier ones still buffered are dropped.
+    let latest = fixture.wait_for_diagnostics_params(uri);
+    while fixture.take_buffered_diagnostics(uri).is_some() {}
     latest["diagnostics"].as_array().cloned().unwrap_or_default()
 }
 

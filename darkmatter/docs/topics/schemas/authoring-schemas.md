@@ -143,7 +143,7 @@ In the example above:
 
 In a moment of "recursive truth" the external schema definition is defined as a schema:
 
-::code ^darkmatter/docs/schemas/schema-definition.yaml
+::code ^simplified-schema/schemas/schema.yaml
 
 A schema file can export document properties and declare reusable types:
 

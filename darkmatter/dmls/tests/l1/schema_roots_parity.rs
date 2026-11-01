@@ -420,7 +420,8 @@ fn a_session_applies_schemas_dir_and_home_like_md() {
 }
 
 /// A forbidden `$path` prefix is a definition error naming the pattern,
-/// published on the trigger file with the message `md`'s scan reports.
+/// published on the trigger file (as its `schema-trigger` kind check, on the
+/// pattern's line) with the message `md`'s scan reports.
 #[test]
 fn a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls() {
     let workspace = LspWorkspace::new();
@@ -459,14 +460,25 @@ fn a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls() {
             break params["diagnostics"].as_array().cloned().unwrap_or_default();
         }
     };
+    // The trigger file is a `kind: schema-trigger` YAML document, so the
+    // refusal is its kind check, located on the pattern, and published once.
     let messages: Vec<&str> = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.kind_check"))
         .filter_map(|diagnostic| diagnostic["message"].as_str())
         .collect();
+    assert_eq!(messages.len(), 1, "{diagnostics:#?}");
     assert!(
         messages.iter().any(|message| message.contains(&definition_error)),
         "expected `{definition_error}` in {messages:?}"
+    );
+    let pattern = envelope.find("@prompts/**").expect("the pattern is authored");
+    let line = envelope[..pattern].matches('\n').count();
+    let kind_check = diagnostics.iter().find(|diagnostic| diagnostic["code"] == json!("dm.schema.kind_check")).unwrap();
+    assert_eq!(kind_check["range"]["start"]["line"], json!(line), "{kind_check:#?}");
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic["code"] != json!("dm.schema.prepare")),
+        "the envelope error is not repeated: {diagnostics:#?}"
     );
     session.shutdown();
 }

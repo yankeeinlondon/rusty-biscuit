@@ -78,7 +78,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
         ));
     }
 
+    // A whole YAML document is judged by its selected schema alone: the
+    // passes below assume Markdown (coercion, `style`, expressions,
+    // lifecycle stacks, deferred values).
+    if let Some(yaml) = &overlay.yaml_document {
+        crate::diagnostics::yaml_document::diagnostics(ctx, yaml, &mut out);
+    }
+
     match &overlay.schema {
+        _ if overlay.yaml_document.is_some() => {}
         SchemaOutcome::Failed(error) => {
             schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, &mut out);
         }
@@ -99,7 +107,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
                 // every Expression-typed value, and both passes read it.
                 let expression_values =
                     crate::providers::frontmatter::expression_values(ctx);
-                schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
+                schema_problem_diagnostics(
+                    ctx,
+                    ast,
+                    bundle,
+                    &report,
+                    &expression_values,
+                    ProblemGrading::Frontmatter,
+                    &mut out,
+                );
                 style_diagnostics(ctx, ast, &mut out);
                 // One lifecycle host and one library walk serve every
                 // expression inside a stack, schema-typed or not.
@@ -122,11 +138,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 
     // A stale last-good tree does not describe the current buffer, so its
     // ranges and rewrites would land on the wrong bytes.
-    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale) {
+    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale && overlay.yaml_document.is_none()) {
         crate::diagnostics::nested_span::whole_value_diagnostics(ctx, ast, &mut out);
     }
 
-    suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
+    // A claimed kind's definition problems are the report's: the envelope's
+    // admission error judges the same text against the same definition.
+    let definition_reported =
+        overlay.yaml_document.as_deref().is_some_and(crate::diagnostics::yaml_document::reports_definition_problems);
+    suggestion_diagnostics(ctx, &overlay.suggestions, definition_reported, &mut out);
 
     if let Some(error) = &overlay.standalone_resolution
         && let SchemaAuthoringState::Standalone { model: Some(model), stale: false, .. } =
@@ -142,7 +162,10 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
         out.push(invalid_trigger_diagnostic_at(finding, range));
     }
 
-    if let SuggestionState::TriggerError(error) = &overlay.suggestions {
+    if let SuggestionState::TriggerError(error) = &overlay.suggestions
+        && !definition_reported
+        && !overlay.yaml_document.as_deref().is_some_and(crate::diagnostics::yaml_document::reports_kind_check)
+    {
         let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
         out.push(diagnostic(
             ctx.source_map
@@ -158,7 +181,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     out
 }
 
-fn schema_advisory_diagnostics(
+pub(crate) fn schema_advisory_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
@@ -208,7 +231,7 @@ fn invalid_trigger_diagnostic_at(finding: &InvalidTriggerFinding, range: Range) 
 }
 
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
-fn schema_prepare_diagnostic(
+pub(crate) fn schema_prepare_diagnostic(
     ctx: &DocumentContext,
     ast: Option<&FrontmatterAst>,
     error: &SchemaError,
@@ -363,13 +386,27 @@ fn inline_definition_span(
     Some((span, Vec::new()))
 }
 
+/// How a schema problem's severity is decided, by what the instance is.
+#[derive(Clone, Copy)]
+pub(crate) enum ProblemGrading<'a> {
+    /// Markdown frontmatter: a missing required key is reported only in
+    /// strict mode, since composition can still supply it.
+    Frontmatter,
+    /// A whole YAML document, `validation` its library judgment: nothing
+    /// supplies or strips a value later, so a missing required key and an
+    /// undeclared key are errors (as `md schema validate` fails on them), and
+    /// a kind check is located where the library located it.
+    YamlDocument(&'a darkmatter::markdown::schemas::YamlValidation),
+}
+
 /// Instance-validation problems mapped onto concrete ranges.
-fn schema_problem_diagnostics(
+pub(crate) fn schema_problem_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
     report: &ValidationReport,
     expression_values: &[ExpressionValue<'_>],
+    grading: ProblemGrading<'_>,
     out: &mut Vec<Diagnostic>,
 ) {
     // Exactly projected Expression-typed scalar values are owned by the
@@ -416,7 +453,7 @@ fn schema_problem_diagnostics(
         if specialized_paths.contains(&problem.path) {
             continue;
         }
-        let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
+        let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict, grading) else {
             continue;
         };
         // Without a context no file value was resolved for this document; its
@@ -439,7 +476,13 @@ fn schema_problem_diagnostics(
         {
             continue;
         }
-        let Some(range) = problem_range(ctx.text, ast, ctx.source_map, problem) else {
+        let located = match grading {
+            ProblemGrading::YamlDocument(validation) if problem.code == ValidationProblemCode::KindCheck => {
+                validation.byte_range(problem).and_then(|span| ctx.source_map.byte_range_to_lsp(span))
+            }
+            _ => None,
+        };
+        let Some(range) = located.or_else(|| problem_range(ctx.text, ast, ctx.source_map, problem)) else {
             continue;
         };
         let mut diagnostic = diagnostic(
@@ -660,6 +703,12 @@ fn dedent_entry_yaml(source: &str, indent: usize) -> String {
 enum SemanticProblemKind {
     TypeDefinition,
     Schema,
+}
+
+/// Whether `problem` is a `type-definition` or `schema` meta-type rejecting
+/// the authored definition text, rather than the value's structure.
+pub(crate) fn is_meta_type_problem(problem: &ValidationProblem) -> bool {
+    semantic_problem_kind(problem).is_some()
 }
 
 fn semantic_problem_kind(problem: &ValidationProblem) -> Option<SemanticProblemKind> {
@@ -1246,6 +1295,7 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
 fn suggestion_diagnostics(
     ctx: &DocumentContext,
     suggestions: &SuggestionState,
+    definition_reported: bool,
     out: &mut Vec<Diagnostic>,
 ) {
     match suggestions {
@@ -1259,7 +1309,7 @@ fn suggestion_diagnostics(
             for problem in problems {
                 out.push(suggestion_warning(ctx, problem));
             }
-            if let Some(error) = error {
+            if let Some(error) = error.as_ref().filter(|_| !definition_reported) {
                 out.push(standalone_error_diagnostic(ctx, error));
             }
         }
@@ -1500,13 +1550,16 @@ fn arm_is_rejected(item: &serde_yaml_ng::Value) -> bool {
 /// the deferred `{{ }}` / `$(...)` values follow. `md compose` / `md schema
 /// validate` still catch genuine omissions with the injected values present. In
 /// strict mode it is an opt-in `ERROR`, mirroring how `UnknownKey` escalates.
+/// A whole YAML document ([`ProblemGrading::YamlDocument`]) has no compose
+/// step, so both are errors there in either mode.
 fn classify(
     code: ValidationProblemCode,
     strict: bool,
+    grading: ProblemGrading<'_>,
 ) -> Option<(&'static str, DiagnosticSeverity)> {
     Some(match code {
         ValidationProblemCode::MissingRequired => {
-            if !strict {
+            if !strict && matches!(grading, ProblemGrading::Frontmatter) {
                 return None;
             }
             (code::SCHEMA_MISSING_REQUIRED, DiagnosticSeverity::ERROR)
@@ -1519,7 +1572,7 @@ fn classify(
         }
         ValidationProblemCode::UnknownKey => (
             code::SCHEMA_UNKNOWN_KEY,
-            if strict {
+            if strict || matches!(grading, ProblemGrading::YamlDocument(_)) {
                 DiagnosticSeverity::ERROR
             } else {
                 DiagnosticSeverity::WARNING
@@ -1533,7 +1586,7 @@ fn classify(
 }
 
 /// Builds a diagnostic with a stable source + code.
-fn diagnostic(
+pub(crate) fn diagnostic(
     range: Range,
     severity: DiagnosticSeverity,
     source_value: &str,
@@ -2224,9 +2277,9 @@ mod tests {
     fn missing_required_is_off_by_default_and_error_in_strict() {
         // `required` is a compose-time contract: no edit-time diagnostic unless
         // the workspace opts into strict schema mode.
-        assert_eq!(classify(ValidationProblemCode::MissingRequired, false), None);
+        assert_eq!(classify(ValidationProblemCode::MissingRequired, false, ProblemGrading::Frontmatter), None);
         assert_eq!(
-            classify(ValidationProblemCode::MissingRequired, true),
+            classify(ValidationProblemCode::MissingRequired, true, ProblemGrading::Frontmatter),
             Some((code::SCHEMA_MISSING_REQUIRED, DiagnosticSeverity::ERROR)),
         );
     }
@@ -2234,11 +2287,11 @@ mod tests {
     #[test]
     fn unknown_key_warns_in_non_strict_and_errors_in_strict() {
         assert_eq!(
-            classify(ValidationProblemCode::UnknownKey, false),
+            classify(ValidationProblemCode::UnknownKey, false, ProblemGrading::Frontmatter),
             Some((code::SCHEMA_UNKNOWN_KEY, DiagnosticSeverity::WARNING)),
         );
         assert_eq!(
-            classify(ValidationProblemCode::UnknownKey, true),
+            classify(ValidationProblemCode::UnknownKey, true, ProblemGrading::Frontmatter),
             Some((code::SCHEMA_UNKNOWN_KEY, DiagnosticSeverity::ERROR)),
         );
     }
@@ -2250,8 +2303,8 @@ mod tests {
             ValidationProblemCode::ConstraintViolation,
             ValidationProblemCode::InvalidFileReference,
         ] {
-            assert_eq!(classify(code, false).unwrap().1, DiagnosticSeverity::ERROR);
-            assert_eq!(classify(code, true).unwrap().1, DiagnosticSeverity::ERROR);
+            assert_eq!(classify(code, false, ProblemGrading::Frontmatter).unwrap().1, DiagnosticSeverity::ERROR);
+            assert_eq!(classify(code, true, ProblemGrading::Frontmatter).unwrap().1, DiagnosticSeverity::ERROR);
         }
     }
 

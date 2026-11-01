@@ -242,10 +242,13 @@ pub fn frontmatter_authoring(
         // `build` → `target` path that does not exist, silently dropping the
         // property's declared semantic meta-type.
         let path = ast.key_path_at(index);
-        if path.len() > 1 && path[0] == "$schema" {
+        // A YAML document's `$schema` selected by its `kind` is data, typed
+        // by the definition like any other property.
+        let schema_reference = ast.schema_entry().is_some();
+        if schema_reference && path.len() > 1 && path[0] == "$schema" {
             continue;
         }
-        let kinds = if path == ["$schema"] {
+        let kinds = if schema_reference && path == ["$schema"] {
             vec![MetaSchemaKind::Schema]
         } else {
             def_at_path(&shape, &path, definitions)

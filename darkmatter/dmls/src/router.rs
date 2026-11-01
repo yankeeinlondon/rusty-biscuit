@@ -745,6 +745,16 @@ impl ServerState {
         self.snapshot.store(index.snapshot());
     }
 
+    /// Records an open YAML buffer's unsaved text (`None` once it closes)
+    /// for the kind registries, which read a definition's buffer in place of
+    /// its file; a registry that read other text goes stale and is prepared
+    /// again before the documents it serves are refreshed.
+    fn note_yaml_buffer(&self, uri: &Uri, text: Option<&str>) {
+        if let Some(path) = uri_to_file_path(uri) {
+            self.overlay.set_yaml_buffer(&path, text);
+        }
+    }
+
     /// Restores the disk view of a closed buffer in the workspace index,
     /// and hands the path to the index store, whose row the buffer had
     /// overridden until now.
@@ -2540,6 +2550,7 @@ impl Router {
                 self.state
                     .documents
                     .open(uri.clone(), document.version, text.clone());
+                self.state.note_yaml_buffer(&uri, Some(&text));
                 self.state.index_buffer(&uri, &text);
                 self.state.refresh_all_diagnostics();
             }
@@ -2563,6 +2574,7 @@ impl Router {
                     tracing::warn!("{error}");
                 }
                 self.state.close_buffer(&uri);
+                self.state.note_yaml_buffer(&uri, None);
                 self.state.overlay.forget(&uri);
                 // Replace the closed document's markers with what a closed file
                 // keeps (a skipped trigger's warning), then refresh the rest
@@ -2588,7 +2600,7 @@ impl Router {
                 // Trigger registries read schema files from disk, so saving one
                 // (open or not) is an input change; unsaved edits are not.
                 if let Some(path) = uri_to_file_path(&params.text_document.uri)
-                    && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
+                    && crate::overlay::is_yaml_path(&path)
                 {
                     self.state.overlay.invalidate_trigger_inputs(&[path]);
                     self.state.prepare_workspace_registries();
@@ -2691,6 +2703,7 @@ impl Router {
             }
         }
         if let Some(text) = applied_text {
+            self.state.note_yaml_buffer(&uri, Some(&text));
             self.state.index_buffer(&uri, &text);
             self.state.refresh_all_diagnostics();
         }

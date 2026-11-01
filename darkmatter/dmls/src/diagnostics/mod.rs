@@ -12,6 +12,7 @@ pub mod codes;
 pub mod frontmatter;
 pub(crate) mod named_types;
 pub(crate) mod nested_span;
+pub(crate) mod yaml_document;
 mod publisher;
 mod scheduler;
 

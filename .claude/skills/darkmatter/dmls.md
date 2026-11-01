@@ -9,6 +9,7 @@ workspace, completion, hover, and diagnostic work.
 - [Passive-analysis contract](#passive-analysis-contract)
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
+- [Whole YAML documents](#whole-yaml-documents)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
 - [Call diagnostics](#call-diagnostics)
 - [Rollout chronology](#rollout-chronology)
@@ -419,7 +420,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (warning, line of a YAML error, related information = `cause_path`); an
   open trigger whose buffer envelope parses gets
   `SuggestionState::TriggerWarning` from `finding_for`, while a malformed
-  buffer keeps the strict `TriggerError` (`dm.schema.prepare`) and wins;
+  buffer keeps the strict `TriggerError` (`dm.schema.prepare`) and wins,
+  unless its YAML document report already owns the problem (see
+  [Whole YAML documents](#whole-yaml-documents));
   `didClose` republishes the warning (`closed_file_diagnostics`). Triggered
   schemas only produce document diagnostics in `[schema] strict = true`, so
   a session test of trigger properties sets it. Tests:
@@ -657,6 +660,62 @@ Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
 `parse_frontmatter_shell_suffixes`, the grammar `md compose` parses with.
 `frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
 because the YAML span includes them.
+
+## Whole YAML documents
+
+User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
+`docs/lsp/indexing.md#yaml-document-kinds`.
+
+- Routing is `overlay::is_yaml_path` (ASCII case-insensitive `yaml`/`yml`),
+  the one test every YAML decision reads (overlay, `registry_demand`,
+  `workspace/discover.rs`, `registry.rs` invalidation, `didSave`); the watch
+  globs are `workspace::watch::{YAML_GLOB, YML_GLOB}` (bracketed, so a
+  `globset` guard test pins them to `is_yaml_path`). A YAML path never
+  enters the Markdown frontmatter path: a leading `---` is a YAML marker.
+- The `KindRegistry` lives in the YAML document's own trigger-registry
+  `Scope` (`Scope.kinds: Option<InstalledKinds>`; plan rule 26 called it
+  `OverlayCache.kind_registries`), built in `Preparation::run` on the
+  registry worker for `is_yaml_path` documents only, from the same
+  `RootContents` through `BufferedRoots` (open buffers win). Invalidation is
+  the trigger scope's, plus `TriggerRegistries::set_buffer` from
+  `didOpen`/`didChange`/`didClose` (`ServerState::note_yaml_buffer`), which
+  marks stale only scopes whose `deps.kind_sources` read that file with
+  other text. Outside a workspace folder: `KindRegistry::shipped()`.
+- `overlay/yaml_document.rs` is dispatch-thread only: `LoadedYamlDocument::load`
+  then `validate_loaded_yaml_document` with `with_kind_registry`, cached in
+  `OverlayCache.yaml_documents` by text, revision, context, and registry
+  version, plus `deps_unchanged`/`probes_unchanged` over the root-`$schema`
+  route's files. The `SchemaBundle` is the selected schema alone
+  (`YamlValidation::effective()`); `AnalysisIdentity.yaml_document` makes
+  `root()` the selected shape (empty without one, never `baseline_root`).
+  The tree is `FrontmatterAst::parse_yaml_document(text, kind_route)`:
+  on the kind route `schema_entry()` is `None` (data), and
+  `whole_document` makes `contains_offset(len)` true.
+- `for_document_timed` routes YAML first, then attaches the state to the
+  envelope overlay (`DocumentOverlay::with_yaml`) or builds `yaml_only`
+  (`frontmatter_authoring` from the definition). A standalone schema
+  envelope off the kind route keeps its envelope overlay untouched: its
+  root `$schema` is the definition it authors (the library would judge the
+  file as data; recorded for review).
+- Diagnostics (`diagnostics/yaml_document.rs`) replace every Markdown
+  frontmatter pass when `overlay.yaml_document` is set.
+  `ProblemGrading::YamlDocument` makes `missing_required` and `unknown_key`
+  errors in either mode and ranges `KindCheck` by `YamlValidation::byte_range`.
+  One publication per problem: `reports_definition_problems` (kind route,
+  any problem that is neither a kind check nor a meta-type problem)
+  suppresses the envelope's `Standalone { error }` / `TriggerError`; a
+  `TriggerError` also yields to a `KindCheck`; a standalone error or
+  `standalone_resolution` suppresses `KindCheck` (the envelope ranges it
+  with related info); an envelope error suppresses meta-type problems. A
+  load failure under a claiming envelope keeps the envelope's code.
+  `DslProvider` returns nothing for a YAML path.
+- Tests: `tests/l1/yaml_document_editor.rs` (in-process `Probe`, one
+  `OverlayState` so texts of one URI replace each other),
+  `tests/l1/yaml_document_session.rs` (`LspFixture`), and
+  `standalone_stdio.rs::yaml_document_diagnostics_reach_a_stdio_client`.
+  `LspFixture::take_buffered_diagnostics` takes the **latest** publication
+  first (`rposition`): drain with `while take(..).is_some() {}` after
+  `wait_for_diagnostics_params`, never `latest = params` in the loop.
 
 ## Undeclared properties and unknown functions
 

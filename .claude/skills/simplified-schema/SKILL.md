@@ -133,6 +133,16 @@ validator cache, never `SHARED_VALIDATOR_CACHE`. A host prepares a
 its kinds with `claimed_values`. Tests: `envelope_admission.rs`,
 `yaml_schema_envelope.rs`.
 
+Ownership boundary: this crate owns the `schema` and `yaml-schema`
+definitions and the envelope admission above, and nothing about which YAML
+document gets which schema. Darkmatter owns `schema-trigger.yaml`, the
+`KindRegistry` (discovery in schema roots, duplicate and broken claims),
+selection (`kind` before root `$schema`), and the kind checks a definition
+cannot state; see the `darkmatter` skill's
+[schema.md](../darkmatter/schema.md#whole-yaml-documents-schemasyaml_documents).
+An envelope that fails admission is a located `SchemaDocument` error; the
+library never falls back to treating it as an untagged payload.
+
 ## Features
 
 | Feature | Default | Adds |

@@ -35,6 +35,8 @@ last_updated: 2026-10-22
 
   Guards narrow what a region may hold: inside `::block when="is_number(count)"` or `count ? min(count, 5) : 0`, `count` is known to be a number, and the call check, shell pre-flight, and DMLS all read the same facts without evaluating anything; see [What a Guard Proves](./docs/topics/darkmatter-expressions.md#what-a-guard-proves). Hosts such as Claudine can add their own [expression functions](./docs/topics/host-functions.md), which get the same checks.
 
+- Validate whole `.yaml`/`.yml` documents too: a document is judged by the `kind: yaml-schema` definition that claims its `kind`, or else by its root `$schema`, with `md schema validate` and in the editor; see [YAML documents](./docs/topics/schemas/definition.md#yaml-documents)
+
 - One set of [policy verbs](./docs/cli/policy.md) on every command: `--allow <id|all>` to recover from a known problem, `--deny <id|all>` to make diagnostics blocking (for example `md compose doc.md --deny all` in CI), and `--disable <id>` to turn a feature off
 - `md compose --output report-json` prints one JSON object with the outcome, every diagnostic (with the same codes and positions the editor shows), and the composed document; see [`report-json` output](./docs/cli/report-json.md)
 

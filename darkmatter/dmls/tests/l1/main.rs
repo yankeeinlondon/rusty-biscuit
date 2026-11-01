@@ -78,4 +78,6 @@ mod wiki_universe_equivalence;
 mod workspace_file_list;
 mod workspace_formatting_settings;
 mod workspace_schema_scopes;
+mod yaml_document_editor;
+mod yaml_document_session;
 mod zed_extension_contract;

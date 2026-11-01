@@ -94,10 +94,10 @@ impl<'w> Session<'w> {
             json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
         );
         fixture.flush_server();
-        let mut latest = fixture.wait_for_diagnostics_params(&uri);
-        while let Some(params) = fixture.take_buffered_diagnostics(&uri) {
-            latest = params;
-        }
+        // The buffered take returns the latest publication first; the
+        // earlier ones still buffered are dropped.
+        let latest = fixture.wait_for_diagnostics_params(&uri);
+        while fixture.take_buffered_diagnostics(&uri).is_some() {}
         let diagnostics = latest["diagnostics"].as_array().cloned().unwrap_or_default();
         Self { fixture, uri, text: text.to_string(), diagnostics }
     }
@@ -504,10 +504,10 @@ fn published(workspace: &LspWorkspace, documents: &[(String, String)]) -> Vec<Ve
                 json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
             );
             fixture.flush_server();
-            let mut latest = fixture.wait_for_diagnostics_params(&uri);
-            while let Some(params) = fixture.take_buffered_diagnostics(&uri) {
-                latest = params;
-            }
+            // The buffered take returns the latest publication first; the
+            // earlier ones still buffered are dropped.
+            let latest = fixture.wait_for_diagnostics_params(&uri);
+            while fixture.take_buffered_diagnostics(&uri).is_some() {}
             latest["diagnostics"].as_array().cloned().unwrap_or_default()
         })
         .collect();

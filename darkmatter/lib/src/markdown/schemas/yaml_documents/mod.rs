@@ -50,7 +50,7 @@ pub enum YamlOutcome {
 }
 
 /// A YAML document judged against its selected schema.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct YamlValidation {
     /// How the schema was selected.
     pub route: Route,
@@ -59,7 +59,18 @@ pub struct YamlValidation {
     pub report: ValidationReport,
     /// What validated it: the definition's label, or the `$schema` it named.
     pub definition: String,
+    effective: Arc<EffectiveSchema>,
     loaded: Arc<load::LoadedYaml>,
+}
+
+impl std::fmt::Debug for YamlValidation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("YamlValidation")
+            .field("route", &self.route)
+            .field("report", &self.report)
+            .field("definition", &self.definition)
+            .finish_non_exhaustive()
+    }
 }
 
 impl YamlValidation {
@@ -68,6 +79,20 @@ impl YamlValidation {
     #[must_use]
     pub fn byte_range(&self, problem: &ValidationProblem) -> Option<Range<usize>> {
         self.loaded.byte_range(problem)
+    }
+
+    /// The selected schema the document was judged against: the definition
+    /// alone, or the root `$schema` alone, with no baseline or trigger layer.
+    #[must_use]
+    pub fn effective(&self) -> &Arc<EffectiveSchema> {
+        &self.effective
+    }
+
+    /// The whole document as JSON, as loaded (before soft conversion, and
+    /// with a fallback-route `$schema` still present).
+    #[must_use]
+    pub fn document_json(&self) -> &serde_json::Value {
+        &self.loaded.json
     }
 }
 
@@ -159,7 +184,13 @@ impl DarkmatterSchemas {
             report.problems = semantic::kind_checks(kind, text, path, loaded, &schema_roots, context);
             report.valid = report.problems.is_empty();
         }
-        Ok(YamlOutcome::Validated(YamlValidation { route, report, definition, loaded: Arc::clone(loaded) }))
+        Ok(YamlOutcome::Validated(YamlValidation {
+            route,
+            report,
+            definition,
+            effective: Arc::new(effective),
+            loaded: Arc::clone(loaded),
+        }))
     }
 }
 
@@ -188,6 +219,14 @@ impl LoadedYamlDocument {
     pub fn load(text: &str, path: &Path) -> Result<Self, SchemaError> {
         let loaded = Arc::new(load::load_yaml_document(text, path)?);
         Ok(Self { text: text.to_string(), path: path.to_path_buf(), loaded })
+    }
+
+    /// The whole document as JSON, exactly as loaded: no soft conversion,
+    /// and a root `$schema` still present. The same value
+    /// [`YamlValidation::document_json`] returns after validation.
+    #[must_use]
+    pub fn json(&self) -> &serde_json::Value {
+        &self.loaded.json
     }
 }
 

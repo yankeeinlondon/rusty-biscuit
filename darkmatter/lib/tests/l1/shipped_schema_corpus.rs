@@ -114,19 +114,6 @@ const fn exception(
 
 /// Every shipped schema artifact that does not load through `$schema: ./file`.
 const EXCEPTIONS: &[Exception] = &[
-    // darkmatter/docs/schemas
-    exception(
-        "darkmatter/docs/schemas",
-        "schema-definition.yaml",
-        Class::Placeholder,
-        "reserved meta-schema name that `err.yaml` declares as its `$schema`",
-    ),
-    exception(
-        "darkmatter/docs/schemas",
-        "err.yaml",
-        Class::EnvelopeRejected,
-        "tagged envelope carries `$schema`, `name`, and `description` header keys",
-    ),
     // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
@@ -1705,6 +1692,7 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
         ("content-policy/schemas", root.join("content-policy/schemas")),
         ("claudine/schemas", root.join("claudine/schemas")),
         ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
+        ("claudine/docs/research", root.join("claudine/docs/research")),
         (".claudine/schemas", root.join(".claudine/schemas")),
         ("schemas", root.join("schemas")),
     ];

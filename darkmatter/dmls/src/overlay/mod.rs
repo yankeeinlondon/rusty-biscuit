@@ -27,6 +27,7 @@ pub mod registry;
 pub mod schema;
 pub mod shell;
 pub mod suggestions;
+pub mod yaml_document;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -56,6 +57,7 @@ pub use frontmatter::{
     YamlParseError, format_dotted,
 };
 pub use analysis::FrontmatterAnalysis;
+pub use yaml_document::{YamlDocumentOutcome, YamlDocumentOverlay};
 pub use named_types::NamedTypeCatalog;
 pub use references::{
     PREVIEW_LINES, SchemaReferenceFact, SchemaReferenceFacts, SchemaTargetPreview, SchemaTargetVerdict,
@@ -197,6 +199,12 @@ pub struct DocumentOverlay {
     /// built while the document's buffer and prepared schema inputs are
     /// unchanged. Its tree is [`ast`](Self::ast).
     pub analysis: Arc<FrontmatterAnalysis>,
+    /// The judgment of a whole YAML document (`.yaml`, `.yml`) against the
+    /// schema it selects; `None` for every other document. When set,
+    /// [`ast`](Self::ast), [`schema`](Self::schema), and
+    /// [`analysis`](Self::analysis) describe the whole document against that
+    /// schema alone.
+    pub yaml_document: Option<Arc<YamlDocumentOverlay>>,
 }
 
 impl DocumentOverlay {
@@ -207,6 +215,51 @@ impl DocumentOverlay {
             SchemaOutcome::Ready(Some(bundle)) => Some(bundle),
             _ => None,
         }
+    }
+
+    /// This overlay, built by a schema-envelope path, serving the whole YAML
+    /// document `yaml` too: its tree, bundle, and analysis replace the
+    /// envelope path's, whose authoring state and envelope findings stay.
+    fn with_yaml(mut self, yaml: &yaml_document::YamlState) -> Self {
+        self.ast = yaml.ast.clone();
+        self.stale = yaml.stale;
+        self.schema = SchemaOutcome::Ready(yaml.bundle.clone());
+        self.analysis = Arc::clone(&yaml.analysis);
+        self.schema_references = Arc::clone(&yaml.schema_references);
+        if !yaml.file_failures.is_empty() {
+            self.file_failures = Arc::clone(&yaml.file_failures);
+        }
+        self.yaml_document = Some(Arc::clone(&yaml.overlay));
+        self
+    }
+
+    /// The overlay of a whole YAML document that no schema-envelope path
+    /// serves: definition-driven authoring of any schema-typed values.
+    fn yaml_only(yaml: &yaml_document::YamlState) -> Self {
+        let schema = SchemaOutcome::Ready(yaml.bundle.clone());
+        let schema_authoring = schema::frontmatter_authoring(yaml.ast.as_deref(), &schema);
+        DocumentOverlay {
+            ast: None,
+            stale: false,
+            parse_error: None,
+            schema: SchemaOutcome::Ready(None),
+            suggestions: SuggestionState::Inactive,
+            schema_authoring,
+            named_types: Arc::default(),
+            schema_references: Arc::default(),
+            standalone_resolution: None,
+            file_failures: FileFailures::default(),
+            analysis: Arc::new(FrontmatterAnalysis::detached()),
+            yaml_document: None,
+        }
+        .with_yaml(yaml)
+    }
+
+    /// Whether the root `$schema` names the document's schema (Markdown
+    /// frontmatter, or a YAML document on its root-`$schema` route) rather
+    /// than being data of a YAML document its `kind` selected.
+    pub fn schema_key_is_reference(&self) -> bool {
+        !self.yaml_document.as_ref().is_some_and(|yaml| yaml.kind_route())
     }
 
     /// Whether this overlay is a standalone schema authoring document.
@@ -250,6 +303,9 @@ struct OverlayCache {
     /// Schema work shared by every document's analysis and kept across
     /// edits (see [`analysis::CrossSnapshotSchema`]).
     shared_schema: Arc<analysis::CrossSnapshotSchema>,
+    /// The judgment of each open YAML document, rebuilt when its text, its
+    /// context, its kind registry, or a file its schema read changes.
+    yaml_documents: HashMap<String, yaml_document::CachedYaml>,
 }
 
 /// A document's trigger registry that is not fresh: what
@@ -399,6 +455,28 @@ impl OverlayState {
         resolution: &DocumentResolution,
         timings: &RequestTimings,
     ) -> Option<DocumentOverlay> {
+        // A whole YAML document: a leading `---` is its document marker,
+        // never a frontmatter fence.
+        if is_yaml_path(path) {
+            let yaml = {
+                let mut cache = self.inner.lock().expect("overlay lock poisoned");
+                let kinds = schema::trigger_boundary(path, workspace_roots)
+                    .and_then(|_| cache.triggers.lookup_kinds(path));
+                timings.time(Stage::SchemaAssembly, || {
+                    cache.yaml_document(uri.as_str(), revision, text, path, resolution, kinds)
+                })
+            };
+            return Some(match self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings) {
+                // A standalone schema document's root `$schema` is the
+                // definition it authors, which its envelope diagnostics
+                // judge (as they judge a buffer that does not load); only
+                // its `kind` route is the YAML document's to report.
+                Some(overlay) if overlay.is_standalone_schema() && !yaml.overlay.kind_route() => overlay,
+                Some(overlay) => overlay.with_yaml(&yaml),
+                None => DocumentOverlay::yaml_only(&yaml),
+            });
+        }
+
         // Markdown frontmatter path.
         if let Some(parse) = FrontmatterAst::parse(text) {
             let uri_key = uri.as_str().to_string();
@@ -453,6 +531,7 @@ impl OverlayState {
                     _ => None,
                 },
                 named_types: Arc::clone(&named_types),
+                yaml_document: false,
             };
             let analysis = match cache.analysis.get(&uri_key) {
                 Some(current) if current.matches(&identity) => Arc::clone(current),
@@ -490,9 +569,24 @@ impl OverlayState {
                 standalone_resolution: None,
                 file_failures,
                 analysis,
+                yaml_document: None,
             });
         }
 
+        self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings)
+    }
+
+    /// The overlay of a schema-trigger or standalone SimplifiedSchema
+    /// envelope document, or `None` for any other buffer.
+    fn envelope_overlay(
+        &self,
+        uri: &Uri,
+        text: &str,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
+        timings: &RequestTimings,
+    ) -> Option<DocumentOverlay> {
         // Trigger-schema authoring path. A claimed, malformed envelope is an
         // error and a trigger discovery skipped is a warning; ordinary
         // schema-root YAML remains silent.
@@ -500,7 +594,7 @@ impl OverlayState {
             .parent()
             .and_then(Path::file_name)
             .is_some_and(|name| name == "schemas")
-            && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
+            && is_yaml_path(path)
         {
             match darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text) {
                 Err(error) => {
@@ -516,6 +610,7 @@ impl OverlayState {
                         standalone_resolution: None,
                         file_failures: FileFailures::default(),
                         analysis: Arc::new(FrontmatterAnalysis::detached()),
+                        yaml_document: None,
                     });
                 }
                 Ok(Some(_)) => {
@@ -541,6 +636,7 @@ impl OverlayState {
                             standalone_resolution: None,
                             file_failures: FileFailures::default(),
                             analysis: Arc::new(FrontmatterAnalysis::detached()),
+                            yaml_document: None,
                         });
                     }
                 }
@@ -592,6 +688,7 @@ impl OverlayState {
                     standalone_resolution: resolved.error,
                     file_failures: resolved.file_failures,
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
+                    yaml_document: None,
                 });
             }
             Ok(None) if claim.is_none() => {}
@@ -645,6 +742,7 @@ impl OverlayState {
                     standalone_resolution: None,
                     file_failures: FileFailures::default(),
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
+                    yaml_document: None,
                 });
             }
         }
@@ -661,6 +759,19 @@ impl OverlayState {
         cache.schema.remove(uri.as_str());
         cache.standalone_resolution.remove(uri.as_str());
         cache.analysis.remove(uri.as_str());
+        cache.yaml_documents.remove(uri.as_str());
+    }
+
+    /// Records the unsaved text of the open YAML buffer at `path` (`None`
+    /// once it closes), which the kind registries read in place of the file;
+    /// a registry that read the file with other text goes stale. Does
+    /// nothing for any other path.
+    pub fn set_yaml_buffer(&self, path: &Path, text: Option<&str>) {
+        if !is_yaml_path(path) {
+            return;
+        }
+        let mut cache = self.inner.lock().expect("overlay lock poisoned");
+        cache.triggers.set_buffer(path, text.map(Arc::from));
     }
 
     /// The published warning for trigger file `path`, when a prepared
@@ -804,7 +915,7 @@ impl OverlayState {
     ) -> Option<RegistryNeed> {
         let has_frontmatter =
             matches!(darkmatter::markdown::extract_frontmatter_block(text), Ok(Some(_)));
-        if !has_frontmatter && !is_trigger_envelope(text, path) {
+        if !has_frontmatter && !is_yaml_path(path) {
             return None;
         }
         let context = resolution.context().ok()?;
@@ -1115,12 +1226,14 @@ impl OverlayCache {
     }
 }
 
-/// Whether `text` at `path` is a claimed trigger envelope in a `schemas`
-/// folder, the documents whose overlay reads the trigger-load error.
-fn is_trigger_envelope(text: &str, path: &Path) -> bool {
-    path.parent().and_then(Path::file_name).is_some_and(|name| name == "schemas")
-        && matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
-        && matches!(darkmatter::markdown::schemas::parse_trigger_envelope_from_str(text), Ok(Some(_)))
+/// Whether `path` names a whole YAML document: its extension is `yaml` or
+/// `yml`, in any ASCII letter case. Every YAML routing decision (overlay,
+/// registry demand, workspace listing, schema-root invalidation, save
+/// handling) reads this one test.
+pub fn is_yaml_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml"))
 }
 
 /// The document name a workspace scope's registry is prepared under (see
@@ -1396,6 +1509,16 @@ mod tests {
 
     fn uri(s: &str) -> Uri {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn a_yaml_path_is_recognized_in_any_ascii_letter_case_and_nothing_else_is() {
+        for path in ["a.yaml", "a.yml", "a.YAML", "a.Yml", "dir/b.yAmL"] {
+            assert!(is_yaml_path(Path::new(path)), "{path}");
+        }
+        for path in ["a.md", "a.yaml.md", "a.json", "yaml", "a.yamll", "a.ymlx", "a."] {
+            assert!(!is_yaml_path(Path::new(path)), "{path}");
+        }
     }
 
     #[test]
@@ -1944,16 +2067,14 @@ mod tests {
             ),
         ] {
             assert!(
-                state
-                    .for_document(
-                        &uri(uri_text),
-                        text,
-                        path,
-                        &DmlsConfig::default(),
-                        &roots,
-                        &crate::context::test_support::resolution_for(path),
-                    )
-                    .is_none(),
+                is_inert(state.for_document(
+                    &uri(uri_text),
+                    text,
+                    path,
+                    &DmlsConfig::default(),
+                    &roots,
+                    &crate::context::test_support::resolution_for(path),
+                )),
                 "path-only activation is forbidden for {path:?}"
             );
         }
@@ -1985,12 +2106,29 @@ mod tests {
             ),
         ] {
             assert!(
-                state
-                    .for_document(&uri(uri_text), text, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
-                    .is_none(),
+                is_inert(state.for_document(
+                    &uri(uri_text),
+                    text,
+                    path,
+                    &DmlsConfig::default(),
+                    &roots,
+                    &crate::context::test_support::resolution_for(path),
+                )),
                 "escape-bearing ordinary YAML must stay inert: {path:?}"
             );
         }
+    }
+
+    /// Whether `overlay` activates nothing: no overlay at all (a non-YAML
+    /// buffer), or a YAML document that is no schema envelope and selects no
+    /// schema.
+    fn is_inert(overlay: Option<DocumentOverlay>) -> bool {
+        overlay.is_none_or(|overlay| {
+            !overlay.is_standalone_schema()
+                && overlay.yaml_document.as_ref().is_some_and(|yaml| {
+                    matches!(yaml.outcome, YamlDocumentOutcome::NoSchema | YamlDocumentOutcome::Unvalidated)
+                })
+        })
     }
 
     #[test]
@@ -2124,8 +2262,7 @@ mod tests {
         let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
         let expected = std::collections::BTreeMap::from([
             ("env.yaml".to_string(), "ready"),
-            ("err.yaml".to_string(), "error"),
-            ("schema-definition.yaml".to_string(), "inactive"),
+            ("err.yaml".to_string(), "ready"),
         ]);
         let state = OverlayState::default();
         let roots = [root.clone()];
@@ -2158,6 +2295,7 @@ mod tests {
                     ..
                 }) => "error",
                 None => "inactive",
+                Some(overlay) if !overlay.is_standalone_schema() => "inactive",
                 Some(_) => "other",
             };
             observed.insert(name, classification);

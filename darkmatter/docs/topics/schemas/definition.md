@@ -614,7 +614,9 @@ Validate one from the command line with
 [`md schema validate`](#yaml-documents-on-the-command-line), or from the
 library with
 [`DarkmatterSchemas::validate_yaml_document`](#validating-from-the-library).
-DMLS diagnostics, completion, and hover inside YAML files are **planned**.
+In the editor, DMLS reports the same judgment as diagnostics, with
+completion and hover from the selected schema (see
+[DMLS Schema Support](./dmls-schema-support.md#yaml-documents)).
 
 For example, this definition in a repository's `schemas/roster.yaml` defines
 the kind `roster` (see

@@ -120,6 +120,10 @@ pub(crate) struct AnalysisIdentity {
     pub schema_key: Option<u64>,
     pub bundle: Option<Arc<SchemaBundle>>,
     pub named_types: Arc<NamedTypeCatalog>,
+    /// Whether the tree is a whole YAML document, whose root shape is its
+    /// selected schema alone, with no Darkmatter base properties (and empty
+    /// when no schema was selected).
+    pub yaml_document: bool,
 }
 
 impl AnalysisIdentity {
@@ -135,6 +139,7 @@ impl AnalysisIdentity {
                 _ => false,
             }
             && Arc::ptr_eq(&self.named_types, &other.named_types)
+            && self.yaml_document == other.yaml_document
     }
 }
 
@@ -327,14 +332,26 @@ impl FrontmatterAnalysis {
     /// properties, then each matched extension baseline, the matching trigger
     /// payloads, and the document's own `$schema`
     /// ([`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape)).
+    /// For a whole YAML document it is the selected schema's shape alone.
     pub(crate) fn root(&self) -> &SchemaShape {
+        let yaml_document = self.identity.as_ref().is_some_and(|identity| identity.yaml_document);
         match self.bundle() {
             Some(bundle) => self.root.get_or_init(|| {
                 work_counters::record_root_assembly();
+                if yaml_document {
+                    return simplified_schema::layered_property_shape(
+                        SchemaShape::default(),
+                        &[],
+                        &[],
+                        bundle.effective.simplified.as_ref(),
+                        &bundle.frontmatter_json,
+                    );
+                }
                 bundle
                     .effective
                     .property_shape(&bundle.extension_shapes, &bundle.frontmatter_json)
             }),
+            None if yaml_document => self.root.get_or_init(SchemaShape::default),
             None => baseline_root(),
         }
     }

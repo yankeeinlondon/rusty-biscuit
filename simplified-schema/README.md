@@ -25,6 +25,10 @@ that judges data with it:
 Darkmatter keeps its own policy (its baseline, schema roots, trigger
 discovery, and which values are still pending) and calls in here.
 
+The crate also owns the definitions of `kind: schema` and `kind: yaml-schema`
+documents (`schemas/`); see
+[Schema documents](./docs/topics/language/schema-documents.md).
+
 ## Install
 
 Inside this monorepo, add a path dependency:

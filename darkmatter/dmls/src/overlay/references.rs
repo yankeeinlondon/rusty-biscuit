@@ -1,4 +1,5 @@
-//! The file each `$schema` reference of a Markdown document selects.
+//! The file each `$schema` reference of a Markdown document, or of a YAML
+//! document on its root-`$schema` route, selects.
 //!
 //! Validation, document links, and go-to-definition must agree on the file a
 //! bare-name `$schema` names. The overlay therefore selects it once, beside
@@ -102,8 +103,21 @@ impl SchemaReferenceFacts {
         let Some(ast) = FrontmatterAst::parse(text).and_then(|parse| parse.ast) else {
             return Self::default();
         };
+        Self::select_in(&ast, text, path, schema_roots, context, assembled)
+    }
+
+    /// [`Self::select`] over `ast`, the tree of `text` (a whole YAML
+    /// document's, whose `$schema` names its schema on the fallback route).
+    pub(crate) fn select_in(
+        ast: &FrontmatterAst,
+        text: &str,
+        path: &Path,
+        schema_roots: Result<&[PathBuf], &Arc<SchemaError>>,
+        context: &FileResolutionContext,
+        assembled: bool,
+    ) -> Self {
         let base_dir = path.parent().unwrap_or(path);
-        let entries = references(&ast, text)
+        let entries = references(ast, text)
             .map(|(pointer, reference)| {
                 let (selection, target) = match schema_roots {
                     Ok(roots) => {
@@ -197,10 +211,11 @@ fn preview(file: &Path, assembled: bool, resolve: impl FnOnce() -> Result<(), Sc
     }
 }
 
-/// The `(pointer, decoded string)` of each `$schema` reference in `ast`.
+/// The `(pointer, decoded string)` of each `$schema` reference in `ast`
+/// (none when its `$schema` is data; see [`FrontmatterAst::schema_entry`]).
 pub(crate) fn references<'a>(ast: &'a FrontmatterAst, text: &'a str) -> impl Iterator<Item = (String, String)> + 'a {
     let entries = ast.entries();
-    let root = entries.iter().position(|entry| entry.pointer == "/$schema");
+    let root = ast.schema_entry().and_then(|entry| ast.index_of(entry));
     let candidates: Vec<&FmEntry> = match root.map(|index| (index, &entries[index])) {
         Some((_, entry)) if entry.kind == FmValueKind::Scalar => vec![entry],
         Some((index, entry)) if entry.kind == FmValueKind::Sequence => entries

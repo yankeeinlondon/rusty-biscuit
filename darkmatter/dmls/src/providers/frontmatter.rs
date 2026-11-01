@@ -368,10 +368,11 @@ fn meta_schema_kinds_for_line(
             }
         }
         SchemaAuthoringState::Frontmatter(values) => {
-            if key == "$schema" && ancestors.is_empty() {
+            let schema_reference = overlay.schema_key_is_reference();
+            if schema_reference && key == "$schema" && ancestors.is_empty() {
                 return Some(vec![MetaSchemaKind::Schema]);
             }
-            if ancestors.first().map(String::as_str) == Some("$schema") {
+            if schema_reference && ancestors.first().map(String::as_str) == Some("$schema") {
                 return if sequence_item && ancestors.len() == 1 {
                     Some(vec![MetaSchemaKind::Schema])
                 } else {

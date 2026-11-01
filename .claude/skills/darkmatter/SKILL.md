@@ -129,6 +129,14 @@ A whole `.yaml`/`.yml` document is validated by
 `DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
 none, no baseline or triggers) over a per-context `KindRegistry`; read
 [schema.md](schema.md#whole-yaml-documents-schemasyaml_documents) first.
+Ownership: the `simplified-schema` crate owns the `schema` and `yaml-schema`
+definitions (`simplified-schema/schemas/`) and envelope admission;
+Darkmatter owns `schema-trigger.yaml`, the `KindRegistry`, selection, and the
+kind checks. A registry is built per call (or once per folder/worker and
+passed with `with_kind_registry`); it never fails as a whole, and a
+duplicate, reserved, or broken claim is a `KindSelection` error only for a
+document whose `kind` it could affect. A YAML file is never Markdown: a
+fenced `---`…`---` file is two documents and fails to load.
 
 Important contracts:
 
