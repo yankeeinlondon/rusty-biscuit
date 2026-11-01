@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-31
-phase: 2
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -43,11 +43,109 @@ skills_files_updated_during_phase_1:
 - .claude/skills/darkmatter/SKILL.md
 - .claude/skills/darkmatter/cli.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/dmls/src/diagnostics/named_types.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/suggestions.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+- darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+- darkmatter/schemas/schema-trigger.yaml
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/envelope_admission.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_target_classification.rs
+- simplified-schema/lib/tests/l1/schema_target_inspection.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+- simplified-schema/schemas/schema.yaml
+- simplified-schema/schemas/yaml-schema.yaml
+docs_updated_during_phase_3:
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/local-type-references.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/schema-object.md
+- simplified-schema/docs/topics/selecting-schema-files.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/SKILL.md
 packages:
 - darkmatter
 - darkmatter-cli
 - dmls
 - simplified-schema
+source_files_during_phase_2:
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/schemas/about.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+- darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+- darkmatter/lib/tests/l1/function_call_binding.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/meta_schema_phase3.rs
+- darkmatter/lib/tests/l1/non_null_frontmatter.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- simplified-schema/lib/src/claims.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/tests/l1/claimed_values.rs
+- simplified-schema/lib/tests/l1/closed_roots.rs
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/declaration_narrowing.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/non_null_properties.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- simplified-schema/docs/topics/conversion.md
+- simplified-schema/docs/topics/custom-vocabulary.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/schema-types.md
+- simplified-schema/docs/topics/language/subtyping.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/language/unions.md
+- simplified-schema/docs/topics/schema-object.md
+- simplified-schema/docs/topics/validation.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/simplified-schema/declaration-narrowing.md
 ---
 
 # Plan: Schemas for YAML Documents
@@ -607,7 +705,7 @@ Prerequisite: Phase 1. Rules 5–12. Tests are public-API L1 in
 
 **Wave 1** (sequential — shared files `types.rs`, `grammar.rs`, `serialize.rs`, `mod.rs`)
 
-- [ ] **2.1 Constraint model and grammar**
+- [x] **2.1 Constraint model and grammar**
     - Add the variants of rule 5, their `keyword()` strings, parse arms and allow-lists (rule 6), `$constraints.closed` in `parse_dollar_constraint`, canonical serialization arms (`serialize.rs::write_constraint`), the "requires arguments"/"does not take arguments" arms.
     - Add the declaration errors of rule 9 for `non-null` (null-admitting alternatives) with a located `SchemaError::Grammar`.
     - Add a compile-time arm to every exhaustive `match` listed in rule 9 so the crate and `darkmatter` compile; wildcard-matching sites are updated per rule 9's list.
@@ -615,19 +713,19 @@ Prerequisite: Phase 1. Rules 5–12. Tests are public-API L1 in
 
 **Wave 2** (2.2, 2.3, 2.4 run in parallel; they share `convert.rs` but each edits only the functions it names: 2.2 `shape_to_object_schema`/`block_key`/`reject_block_constraints`, 2.3 `atom_to_schema`/`union_property_to_schema`, 2.4 `semantic_type_fragment`; 2.5 and 2.6 follow once all three land)
 
-- [ ] **2.2 Closed roots**
+- [x] **2.2 Closed roots**
     - Lowering (rule 8): `shape_to_object_schema`, `block_key`/`reject_block_constraints` in `convert.rs`; `merge_baseline` copy rule and `validate_simple_object_root` in `resolve.rs`; `write_object_constraints` in `schema/export.rs`; root-union arms each carry their own closure.
     - Tests (`closed_roots.rs`): control (open root accepts extras); closed root rejects undeclared key at the key; pattern key admitted; import-declared key admitted (closure after merge); closed arm of a root union; closure survives canonical serialization, JSON export (`additionalProperties:false`), and import/export round trip; a closed baseline layer does not close an open receiver; nested `closed: true` is a no-op.
-- [ ] **2.3 `non-null`**
+- [x] **2.3 `non-null`**
     - Lowering, soft-conversion pre-check (rule 9) in `convert.rs` (`atom_to_schema`, `union_property_to_schema`) and `coercion/shape.rs`; markers added to the resolver/narrowing lists of rule 9; `PropertyAtom::admits_null`-based declaration check for references in `resolve.rs`.
     - Tests (`non_null_properties.rs`): the field-shape rows of the matrix (absent valid; `null` rejected under `validate_soft` before conversion and under `validate_strict`; wrong type; empty values); array form `string[](non-null)`; `null | string(non-null)` declaration error; subtype/narrowing treats `non-null` as a marker (not an ordinary constraint).
-- [ ] **2.4 Declaration narrowing**
+- [x] **2.4 Declaration narrowing**
     - Implement rules 10–12: options-object payloads in `format.rs` keyword factories and `validate.rs` registration; parse-only declaration judging per rule 11 (reuse `parse_property_definition` / `parse_schema_declaration`); `claims.rs` per rule 12 and its re-export in `lib.rs`; `json_shape.rs` keeps treating these keywords as `Shape::Any`.
     - Tests (`declaration_narrowing.rs`, `claimed_values.rs`): every row of the "meta-type declaration options" matrix through `validate_*` on a schema using `schema(...)`/`type-definition(...)`; `mapping` rejects a list and a reference scalar for `types`, accepts a mapping, and — independently — a data-value schema still accepts lists; root unions with one bad arm; reference arms are skipped by the meta-check and verified by `claimed_values` (alias, import, local file arm, cycle diagnostic); repeated claims within one definition are harmless.
-- [ ] **2.5 Host consumers**
+- [x] **2.5 Host consumers**
     - `darkmatter/lib/src/markdown/schemas/about.rs`: add `non-null` to `SCHEMA_CONSTRAINT_DESCRIPTORS`, the new `type_options` for `schema`/`type-definition`, and update `constraint_set_matches_descriptor_set` (~1190); `closed` offered as a `$constraints` key in DMLS key completion; `translate.rs` (~1080) and `triggers/matcher.rs` (~383) rebuild the new payload; `lifecycle/schema_projection.rs` (~790) and `compose/context/catalog.rs` (~320) compile and ignore the markers.
     - Tests: update/extend `about.rs` parity test; one `darkmatter` L1 case that a document validates a `non-null` property through `md` frontmatter validation.
-- [ ] **2.6 Language docs**
+- [x] **2.6 Language docs**
     - `simplified-schema/docs/topics/language/{types,objects-and-named-types,schema-types,schema-documents}.md`, `validation.md`, `conversion.md`, `custom-vocabulary.md` (payload tables): each new constraint with a complete, parseable example; keep the audience a developer new to the repo; a Mermaid diagram for "when is `null` rejected".
 
 **Validation checkpoint 2:** `just test` + `just lint` in `simplified-schema` and `darkmatter` green; the draft `darkmatter/schemas/yaml-schema.yaml` (still at the old path) now **parses** as a standalone schema payload (test in `declaration_grammar.rs` with `include_str!`).
@@ -638,25 +736,25 @@ Prerequisite: Phase 2. Rules 13–16.
 
 **Wave 1** (sequential — one module graph)
 
-- [ ] **3.1 `yaml-schema` envelope**
+- [x] **3.1 `yaml-schema` envelope**
     - Rule 13: new envelope variant and `kind` model, `SchemaError::SelectedByKind`, every classification site listed. Reached only through `kind`.
     - Tests (`yaml_schema_envelope.rs`): a `kind: yaml-schema` file parses as a standalone document (`exports_schema == true`, `types` namespace usable); as `$schema` target, as `Name@file` import source, and as an embedded `$schema` target → `SelectedByKind` naming the file with a span; `types`-only `kind: schema` remains an import source and is an invalid `$schema` target; `kind: roster` data file and `kind: schema-trigger` stay non-targets; `inspect.rs` target inspection reports the new classification.
-- [ ] **3.2 Move and rewrite the definitions**
+- [x] **3.2 Move and rewrite the definitions**
     - `git mv` the two files (rule 16) and write the final text of all three; keep `description` bodies.
 
 **Wave 2** (parallel after 3.2)
 
-- [ ] **3.3 Admission module**
+- [x] **3.3 Admission module**
     - Implement `envelope.rs` (rule 14): `OnceLock` bootstrap of the two definitions through the unadmitted path, `admit_envelope_text`, wiring into `recognize_standalone` and the `Pure` path, the converted-copy read. Conversion never stringifies mapping/sequence carriers of `schema`/`type-definition`: add a carrier guard in the coercion engine (`coercion/shape.rs`) that passes those values through untouched, with a test that a `types:` mapping and a `$schema:` sequence survive soft conversion unchanged.
     - Delete the hand-written checks of rule 15.
-- [ ] **3.4 Existing-test reconciliation**
+- [x] **3.4 Existing-test reconciliation**
     - Update `schema_target_classification.rs`, `schema_files.rs`, `schema_object.rs`, `located_schema_errors.rs` fixtures whose expected messages came from the deleted checks; messages now come from definition problems, still located.
-- [ ] **3.5 Bootstrap + admission tests** (`envelope_admission.rs`)
+- [x] **3.5 Bootstrap + admission tests** (`envelope_admission.rs`)
     - Control: unedited `schema.yaml`, `yaml-schema.yaml`, `darkmatter/schemas/schema-trigger.yaml` each admitted (the yaml-schema validating itself); one edit per row: unknown top-level key; `description: null`; `categories: null`; `types: null`; `types: [a, b]`; `$schema: null`; neither `$schema` nor `types`; `types`-only with `$schema` absent; non-string description converts softly (`123` → accepted, text `"123"`), mapping carrier unchanged; Pure informal envelope covers the same rows; direct library loads (factories, `Name@file`) reject a malformed envelope with a located error and no structural check remains in Rust.
     - Add the grep guard to `shipped_corpus.rs`: no `"must be a mapping"`/`admits_top_level_key`-based rejection of those rows in `standalone.rs` outside admission (assert via behavior, not source text where possible; one source-text assertion that the deleted function names are gone).
-- [ ] **3.6 Corpus test**
+- [x] **3.6 Corpus test**
     - `shipped_corpus.rs`: add a test with its own `include_str!` of both library definitions asserting each passes the compiled definition set.
-- [ ] **3.7 Docs**
+- [x] **3.7 Docs**
     - `simplified-schema/docs/topics/language/schema-documents.md` (envelopes: `schema`, `yaml-schema`, informal; selected-by-kind rule; who owns the definitions), `selecting-schema-files.md`, `diagnostics.md`.
 
 **Validation checkpoint 3:** `just test`/`just lint` in `simplified-schema` and `darkmatter` green. `darkmatter` still compiles with the shipped files moved (its `embedded.rs` SHIPPED entries are added in Phase 4).
