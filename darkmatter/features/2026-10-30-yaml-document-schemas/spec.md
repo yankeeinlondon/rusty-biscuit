@@ -94,9 +94,9 @@ documents**, selected by their `kind`.
   exported schema is a root union.
 - Two `yaml-schema` documents that claim the same kind in one document context
   are an error, including a repository file that claims a shipped kind.
-  The checkout-copy exception still needs the author’s decision under
-  [Open Questions](#open-questions); identical filenames alone never establish
-  that two definitions are the same source.
+  The one exception is a checkout's own copy of a shipped definition
+  ([ruling 8](#8-shipped-definitions-in-a-source-checkout--closed)); identical
+  filenames alone never establish that two definitions are the same source.
 
 Three are shipped, compiled into the binary. The two envelopes that belong to
 the SimplifiedSchema language live with the library
@@ -164,8 +164,8 @@ captured document context. Validation over the prepared registry performs
 no discovery or reference loading. Neither phase executes expressions,
 runs commands, fetches remotes, or writes files. DMLS supplies cached source
 text, including open unsaved definitions, through the same discovery path.
-Failure handling and checkout copies are unresolved under
-[Open Questions](#open-questions).
+Checkout copies follow [ruling 8](#8-shipped-definitions-in-a-source-checkout--closed) and failures
+[ruling 9](#9-a-discovered-definition-that-cannot-be-prepared--closed).
 
 ### 3. How a YAML document selects its schema
 
@@ -307,9 +307,9 @@ three shipped `yaml-schema` files use.
 
 ## Design rulings
 
-The following decisions establish the intended behavior. The unresolved
-choices in [Open Questions](#open-questions) must be settled before the
-implementation plan is finalized; the grammar examples are illustrative.
+The following decisions establish the intended behavior. Every ruling is
+closed; the language spelling is fixed by
+[ruling 10](#10-syntax-of-the-new-language-constraints--closed).
 
 ### 1. Declaring the claimed `kind` (the "abstract" constraint) — closed
 
@@ -333,14 +333,14 @@ each arm, so it describes ①.
 
 **Ruling (2026-10-31): narrow the `type-definition` meta-type.** A
 declaration can be required to use given type constructors, so
-`yaml-schema.yaml` states the rule itself (syntax illustrative; the concrete
-spelling is settled in planning):
+`yaml-schema.yaml` states the rule itself (spelling from
+[ruling 10](#10-syntax-of-the-new-language-constraints--closed)):
 
 ```yaml
 # yaml-schema.yaml
 $schema:
     kind: literal(yaml-schema; required)
-    $schema: schema(required; property(kind, type-definition(literal | enum; required)))
+    $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required)))
 ```
 
 `schema.yaml`'s `kind: literal(schema; required)` passes; `kind: string` fails
@@ -526,21 +526,21 @@ description: |-
     claimed kind must meet.
 $schema:
     kind: literal(yaml-schema; required) -> the document kind that claims this definition
-    description: string -> what the kind is for
-    categories: string[] -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
-    $schema: schema(required; property(kind, type-definition(literal | enum; required))) -> the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed
-    types: schema -> reusable named types for `$schema`; these names are not document properties
+    description: string(non-null) -> what the kind is for
+    categories: string[](non-null) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+    $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required))) -> the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed
+    types: schema(mapping; non-null) -> reusable named types for `$schema`; these names are not document properties
+    $constraints: { closed: true }
 ```
 
 It has the shape of `schema-trigger.yaml` and passes its own definition
 ([ruling 2](#2-bootstrapping-yaml-schemayaml--closed)). The `$schema` line
 uses [ruling 1](#1-declaring-the-claimed-kind-the-abstract-constraint--closed)'s
-narrowing, and the closed-object and non-null markers of
-[ruling 4](#4-rules-the-definitions-cannot-express--closed) are added once
-their spelling is settled; until that grammar lands the file does not parse,
-so the plan lands the grammar before anything reads this file. The example is
-illustrative, not an accepted grammar fixture; the exact spelling remains
-an [Open Question](#open-questions).
+narrowing and [ruling 4](#4-rules-the-definitions-cannot-express--closed)'s
+closed-root and non-null constraints, spelled per
+[ruling 10](#10-syntax-of-the-new-language-constraints--closed). Until that
+grammar lands the file does not parse, so the plan lands the grammar before
+anything reads this file.
 
 ### 6. What of the earlier implementation is kept — closed
 
@@ -604,10 +604,11 @@ together; do not fix only the registry's private loader.
 
 The new constraints are opt-in and obey these compatibility rules:
 
-- Existing objects remain open. A closed object admits its explicitly
-  declared properties and existing pattern-dictionary matches; other keys
-  fail validation. Closure belongs to each object, including each root-union
-  arm, and does not close nested objects implicitly. Lower and merge closure
+- Existing roots remain open. (Nested inline objects are already closed, as
+  `additionalProperties: false`, so closure is new only at the root.) A
+  closed root admits its explicitly declared properties and existing
+  pattern-dictionary matches; other keys fail validation. Closure belongs to
+  each root, including each root-union arm. Lower and merge closure
   using the shared object/layering machinery so sibling declarations and
   resolved imports are visible before unknown keys are rejected.
 - Existing optional properties still accept null. The new absent-but-non-null
@@ -629,101 +630,137 @@ The new constraints are opt-in and obey these compatibility rules:
   Do not implement host-only validation rules with no library representation.
 
 These are intentional language additions in `simplified-schema`, not new
-Darkmatter-only spellings. Settle their exact authoring syntax under
-[Open Questions](#open-questions) before replacing the shipped artifacts.
+Darkmatter-only spellings; their syntax is
+[ruling 10](#10-syntax-of-the-new-language-constraints--closed).
 
-## Open Questions
+### 8. Shipped definitions in a source checkout — closed
 
-### How should a checkout's shipped definitions avoid conflicting with the binary?
+In this repository the shipped definitions also exist on disk, in
+`darkmatter/schemas/` and `simplified-schema/schemas/`, which are package-area
+schema roots for documents under those areas. Without a rule, each shipped
+kind is claimed twice there, and the project's own YAML files fail the
+duplicate-claim rule in every worktree.
 
-In this repository, the disk `darkmatter/schemas/` and
-`simplified-schema/schemas/` files are also compiled into the binary.
-Searching either package-area root therefore finds a second claim for each
-shipped kind. The current duplicate rule would make the
-project's own YAML files fail. Filename shadowing would hide genuine
-conflicts, so this needs an explicit source-identity policy.
+**Ruling (2026-10-31): identity by source path.** The compiled-in table keys
+each shipped definition by its repository-relative path. A discovered file at
+**that same repository-relative path** that claims **that same kind** is the
+source of the shipped definition: it **replaces** the compiled-in copy for
+documents in that context and is not a duplicate. Every other claim of a
+shipped kind (a `~/schemas/schema.yaml`, a repository's own file claiming
+`schema-trigger`) remains a duplicate-claim error. Filenames alone never
+establish identity.
 
-- **Explicit source-checkout registration (recommended).** Tests and a
-  deliberately configured source-development host register the exact shipped
-  source identities as replacements for the embedded versions. Pros: disk
-  edits can be tested, unrelated repositories cannot override built-ins by
-  filename, and normal consumers keep the duplicate rule. Cons: checkout
-  tooling and corpus fixtures must provide this registration; the ordinary
-  CLI needs a documented way to use it if live source editing is desired.
-- **Always reject disk claims of shipped kinds.** Pros: smallest runtime
-  policy and no override ambiguity. Cons: validation in this checkout fails
-  unless tools exclude its shipped directory, and source development needs
-  isolated contexts to test definitions.
-- **Collapse byte-identical copies automatically.** Pros: an unchanged
-  checkout works without configuration. Cons: editing a definition immediately
-  turns it into a conflict, and byte equality treats unrelated copies as the
-  same identity; it does not solve live definition authoring.
+```text
+darkmatter/schemas/schema-trigger.yaml   claims schema-trigger  → the source copy; replaces the built-in
+<repo>/schemas/my-trigger.yaml           claims schema-trigger  → duplicate claim: error
+~/schemas/schema.yaml                    claims schema          → duplicate claim: error
+```
 
-Recommend explicit registration because it keeps the rule against accidental
-built-in replacement while giving definition tests a controlled source path.
-The author must decide whether this is test-only or a supported development
-setting before implementation; no new command flag is prescribed here.
+It needs no configuration, works in every worktree, and an edited definition
+takes effect in that checkout immediately, in `md` and DMLS. Library envelope
+admission ([ruling 4](#4-rules-the-definitions-cannot-express--closed)) uses
+the compiled-in copy, so while `schema.yaml` or `yaml-schema.yaml` is being
+edited, whole-file reports follow the disk copy and direct library loads
+follow the binary until it is rebuilt.
 
-### What happens when a discovered definition cannot be prepared?
+Rejected: explicit registration by tests or a development setting (every
+worktree and test must opt in, or the repository's own files fail); always
+rejecting disk claims (the checkout fails, and definitions cannot be tried
+before a rebuild); collapsing byte-identical copies (an edit becomes a
+conflict exactly when it should apply).
 
-A malformed `yaml-schema` may reveal a kind claim before an import fails,
-or may be too broken to reveal any claim. Silently skipping it can make a
-previously checked document appear to have no schema. Failing all documents
-would let one broken file in `~/schemas` disrupt unrelated work. Existing
-trigger warning recovery alone does not settle this new kind-selection case.
+### 9. A discovered definition that cannot be prepared — closed
 
-- **Keep healthy definitions, reserve failed claims, and expose incomplete
-  discovery (recommended).** Pros: a document naming a failed or ambiguous
-  claim gets a schema-selection error, healthy kinds continue to work, and
-  unrelated Markdown keeps its current behavior. Cons: needs an explicit
-  incomplete-registry state; when a failed definition reveals no claim, an
-  otherwise unknown kind must report that selection is unavailable rather
-  than return unvalidated success. Report the discovery cause once, and
-  surface the definition's own defect as an error when it is opened.
-- **Fail registry preparation for the whole context.** Pros: simplest
-  correctness rule and no silent loss of validation. Cons: a broken unrelated
-  definition blocks every YAML selection that needs that registry, including
-  healthy kinds and fallback selection.
-- **Skip invalid definitions with a warning, as triggers do.** Pros: familiar
-  recovery and low disruption. Cons: a misspelled or unavailable claim can
-  lose validation while still exiting successfully; the warning must carry
-  that limitation and this weakens the feature's contract.
+A broken `yaml-schema` either reveals its claim and then fails (an import
+cannot be resolved) or is too broken to reveal one (malformed YAML). Silently
+skipping it would let a previously checked document pass as "no schema
+selected".
 
-Recommend the first option because it preserves useful validation while
-making uncertainty observable. Infrastructure failures such as unreadable
-roots remain preparation errors under every option, never empty registries.
-Duplicate claims remain errors naming both sources; never select the first
-claim by search order. DMLS must not publish a stale successful selection as
-current after any failure.
+**Ruling (2026-10-31): keep healthy definitions, reserve failed claims, and
+mark the registry incomplete.**
 
-### What is the concrete syntax for the new language constraints?
+- Healthy definitions in the same context keep working.
+- A claim revealed by a failed definition is **reserved**: a document whose
+  `kind` is that claim gets a schema-selection error (exit `2`) naming the
+  failed definition, never unvalidated success.
+- A failed definition that revealed no claim marks the registry
+  **incomplete**. A document whose `kind` no healthy definition claims then
+  gets "schema selection unavailable" naming the failed file, not "no schema
+  selected". A document with no `kind`, or a `kind` a healthy definition
+  claims, is unaffected.
+- The failed definition's own defect is an error when that file is validated
+  or opened ([ruling 4](#4-rules-the-definitions-cannot-express--closed),
+  point 5), reported once, not repeated on every document.
+- Markdown documents are unaffected.
 
-The spec needs closure at a schema root as well as nested objects,
-absent-but-non-null properties, and narrowing of schema/type declarations.
-The current `property(kind, type-definition(...))` examples do not define how
-to distinguish requiring the declaration from requiring the described `kind`,
-or how to carry a deferred check through a referenced root.
+Under every outcome: an unreadable root is a preparation error, never an
+empty registry; a duplicate claim is an error naming both files, never
+resolved by search order; DMLS never keeps an earlier successful selection
+after a failure.
 
-- **Extend existing constraint syntax and the shared declaration model
-  (recommended).** Pros: one grammar and familiar property syntax; the
-  generic library can validate and export the constraints. Cons: root objects
-  need an explicit, unambiguous carrier for constraints; the exact spelling,
-  deferred-reference behavior, and merge precedence must be written down.
-- **Add reserved metadata keys inside schema mappings.** Pros: root closure
-  is easy to express next to properties. Cons: reserves property names,
-  complicates literal-key escaping, and changes schema-map classification.
-- **Keep these checks only in Darkmatter Rust code.** Pros: no language
-  additions and a smaller first implementation. Cons: abandons the accepted
-  goal that definitions express their structural contract and prevents reuse
-  by standalone library consumers.
+```text
+schemas/roster.yaml fails to import    → data with kind: roster   → exit 2, names roster.yaml
+schemas/broken.yaml reveals no claim   → data with kind: inventory (unclaimed) → "selection unavailable"
+                                       → data with kind: schema    → validated as usual
+```
 
-Recommend extending constraints because it supports the intended reusable
-language without reserving ordinary data keys. Before planning, replace the
-illustrative examples with parseable root/nested/union examples and specify
-how closure layers with existing objects, how non-null presence serializes,
-and how unresolved references defer checks without making passive validation
-perform I/O. This is a design choice to review, not permission to invent a
-syntax during implementation.
+Rejected: failing the whole registry (one bad file in `~/schemas` blocks
+every claimed-kind document everywhere), and skipping with a warning as
+triggers do (a document of the failed kind passes unchecked with exit `0`).
+
+### 10. Syntax of the new language constraints — closed
+
+Two facts shape the syntax. Nested inline objects are already closed (they
+lower to `additionalProperties: false`); only a root is open, with no opt-in.
+And the language already reserves a carrier for object-level constraints,
+the `$constraints` block, recognized only inside authored schema objects and
+never in user data, with flags written `name: true`.
+
+**Ruling (2026-10-31): extend the existing surfaces.**
+
+| Need | Spelling | Follows |
+|---|---|---|
+| Close a root, or one root-union arm | `$constraints: { closed: true }` in that mapping | the existing `$constraints` flag form |
+| Optional, but not null | `string(non-null)` | hyphenated postfix constraints (`min-keys`) |
+| `types` must be a mapping | `schema(mapping)` | an option of the `schema` meta-type |
+| A declaration's type is a literal or an enum | `type-definition(forms(literal, enum))` | an option of the `type-definition` meta-type |
+| The declaration itself is `required` | `type-definition(declared-required)` | as above |
+| An exported schema declares property X that way | `schema(property(kind, <type-definition expr>))` | an option of the `schema` meta-type |
+
+Inside `schema(...)` and `type-definition(...)` every option judges the
+**declaration**, never a value: `declared-required` is about the declaration,
+while plain `required` keeps meaning "the property must be present".
+
+```yaml
+# simplified-schema/schemas/yaml-schema.yaml
+kind: yaml-schema
+$schema:
+    kind: literal(yaml-schema; required)
+    description: string(non-null)
+    categories: string[](non-null)
+    $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required)))
+    types: schema(mapping; non-null)
+    $constraints: { closed: true }
+```
+
+A `yaml-schema` whose exported schema declares `kind: string` fails at
+preparation, on the `kind` line: "`kind` must be declared as `literal(...)`
+or `enum(...)`".
+
+Rules that come with the spelling:
+
+- **closure is judged after merging**: imported and layered properties count
+  as declared before unknown keys are rejected;
+- **`non-null` with a null-admitting type** (`null | string(non-null)`) is a
+  declaration error;
+- **`property(...)` behind a reference** (`$schema: ./other.yaml`) is checked
+  at preparation against the resolved declaration; validation stays passive;
+- **JSON Schema export**: `closed` lowers to `additionalProperties: false` and
+  `non-null` to excluding `null`; the declaration options have no JSON Schema
+  equivalent and use the existing custom-vocabulary mechanism.
+
+Rejected: other spellings for the same structure (`strict`, `not-null`), new
+reserved keys beyond `$constraints`, and keeping the checks in Rust (ruling 4).
 
 ## Out of scope
 
@@ -752,8 +789,8 @@ syntax during implementation.
 - Editing a shipped `yaml-schema` file changes validation on the next build
   with no Rust change; an L1 test proves it against a modified copy.
 - Every shipped and repository schema, trigger, and `yaml-schema` document
-  passes its definition (the shipped-schema corpus test). Use the decided
-  checkout-source policy so the corpus does not manufacture duplicate claims.
+  passes its definition (the shipped-schema corpus test). Use ruling 8's
+  source-path identity so the corpus does not manufacture duplicate claims.
 - Constructor narrowing rejects optional/non-string kind declarations and
   accepts valid finite claims across root unions and imports.
 - Direct library loads (factories and `Name@file` imports) reject a malformed
@@ -765,7 +802,7 @@ syntax during implementation.
   from the schema of data values.
 - Shared library and normal `md schema validate` tests cover both selection
   routes, route precedence, unknown kinds, bad schema references, duplicate
-  claims, and the chosen incomplete-discovery policy. Cover parse/load errors,
+  claims, and ruling 9's incomplete-registry outcomes. Cover parse/load errors,
   null versus missing values, conversion failures, unvalidated outcomes,
   assignment rejection, baseline options, and mixed-batch exit precedence.
 - DMLS tests cover unsaved definition edits and dependency creation/deletion,
