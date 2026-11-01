@@ -116,8 +116,10 @@ Darkmatter uses the SimplifiedSchema language (the `simplified-schema` crate),
 compiled to Draft 2020-12 JSON Schema.
 `DarkmatterSchemas` owns baseline merging and validator caching. The standalone
 classifier is `parse_standalone_schema_document`; it recognizes an informal
-`$schema` document (optional `types`, `description`, `categories`) or a `kind: schema`
-document with `$schema` and/or `types`. A `$schema` target must export
+`$schema` document (optional `types`, `description`, `categories`), a `kind: schema`
+document with `$schema` and/or `types`, or a `kind: yaml-schema` (a YAML
+document kind, never a `$schema` target or import source: `SelectedByKind`),
+and admits each against the library's compiled envelope definitions. A `$schema` target must export
 `$schema` (YAML) or be a JSON object declaring Draft 2020-12; anything else is
 `NotASchemaDocument`/`UnsupportedJsonDialect`/`InvalidJsonSchema`, while a
 `types`-only file still serves `Name@file` imports. A loader refusal of a

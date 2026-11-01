@@ -26,7 +26,7 @@ assert!(!is_subtype(&atom("literal(4)"), &atom("enum('4')"))); // structure, not
 ```
 
 Only the type and its canonical options count. Ordinary constraints (`min`,
-`max`, `pattern`, …), presence, the optional `null` wrapper, and coercion are
+`max`, `pattern`, …), presence (`required`, `non-null`), the optional `null` wrapper, and coercion are
 outside the relation. Those exclusions apply inside structured types too:
 changing an inline object's child `min(...)` constraint does not change its
 type identity. Field names and child types, tuple positions and their optional

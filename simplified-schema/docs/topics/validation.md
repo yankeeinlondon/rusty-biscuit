@@ -94,11 +94,20 @@ never copies the input; it is owned only when soft validation converted it
 | `number` | `"4"` | rejected | accepted, owned `4` |
 | `number(integer)` | `"2.5"` | rejected | rejected: conversion never repairs a constraint |
 | `string \| number` | `"4"` | accepted as the string, borrowed | accepted as the string, borrowed |
+| `string(non-null)` | `null` | rejected at the property | rejected the same way: `null` is never converted or read as absent |
+| a [closed](./language/objects-and-named-types.md#closed-roots-closed) root declaring `name` | `{ "name": "Ada", "extra": 1 }` | rejected: unknown key `extra` | rejected the same way |
 
 Soft conversion is exactly the existing engine's: nested values in mappings
 and lists convert, a union keeps the first arm that accepts the value as
 written before converting, and number text the numeric model cannot hold
 exactly (`"9007199254740993"`) fails with that reason in its message.
+
+Both methods judge presence and nullness alike. An explicit `null` at a
+property that is `required` or [`non-null`](./language/types.md#non-null-properties)
+is reported at that property under either method, because soft validation
+never converts a `null`. See
+[Non-Null Properties](./language/types.md#non-null-properties) for when `null`
+is rejected.
 
 ## Failures
 

@@ -77,19 +77,61 @@ Byte offsets count line endings as written, so a CRLF document's offsets
 are larger than its LF twin's. A frontmatter that is not YAML at all is a
 `SchemaDocument` whose `span` is the empty range at the YAML parser's
 position in the whole document (its message's line and column still count
-from the frontmatter's first line). Other document failures, such as an
-envelope of the wrong shape or a suggestion list that cannot be linted, have
-no `span`; a lint failure keeps its typed cause in `source`.
+from the frontmatter's first line). An envelope its definition rejects is
+located too ([below](#an-envelope-its-definition-rejects)). Other document
+failures, such as a malformed `categories` entry or a suggestion list that
+cannot be linted, have no `span`; a lint failure keeps its typed cause in
+`source`.
 `locate_standalone_definition_failure` returns the same failure with its
 structural path and secondary locations (see
 [below](#source-aware-parsing-and-located-failures)).
+
+### An envelope its definition rejects
+
+Every recognized standalone envelope is
+[admitted](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition)
+against its definition (`schema.yaml` for `kind: schema` and the informal
+envelope, `yaml-schema.yaml` for `kind: yaml-schema`) before its payload is
+read. A rejected envelope is also `SchemaError::SchemaDocument`:
+
+| Field | Holds |
+| --- | --- |
+| `path` | the file that was read, or `content` |
+| `span` | the byte range of the offending token in the supplied text: the key itself for an unknown key, and only the first line of a block collection |
+| `message` | ``the {envelope} envelope does not satisfy its definition `{definition}`: `{location}`: {problem}``, where `{envelope}` is `` `kind: schema` ``, `` `kind: yaml-schema` ``, or `informal schema`, and `{location}` (with its colon) is omitted when the problem has no path |
+| `source` | `None` |
+
+```yaml
+kind: schema
+types:
+    - a
+    - b
+```
+
+```text
+the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/types`: the declaration must be a mapping, not a list
+```
+
+One defect is reported per document, in this order:
+
+1. a problem with the envelope itself (an unknown key, metadata of the wrong
+   shape, a missing payload), preferring one that is not a missing required
+   key, since a missing `types` is usually a misspelled `typed:`;
+2. otherwise a definition inside `$schema` or `types` that the parser
+   rejects, reported as [a rejected definition](#a-rejected-definition-in-a-schema-document)
+   with the parser's typed `source` and token `span`;
+3. otherwise the carrier's own shape (`types: null`, `types: [a, b]`).
+
+To see every problem rather than the reported one, call
+`simplified_schema::envelope::admit_envelope_text`, whose `EnvelopeAdmission`
+lists each located `ValidationProblem`.
 
 ### When a file is not a schema target
 
 A document's `$schema` may name only a
 [schema definition](./language/schema-documents.md#what-a-schema-reference-may-target):
-a YAML document with a top-level `$schema`, or a `.json` object declaring
-Draft 2020-12. Any other file fails with an error that names it, and where
+a YAML document with a top-level `$schema` that is not a `kind: yaml-schema`,
+or a `.json` object declaring Draft 2020-12. Any other file fails with an error that names it, and where
 the fix is mechanical the message says what to write instead. A
 `NotASchemaDocument` puts it on a closing `hint:` line:
 
@@ -101,20 +143,22 @@ hint: use a named-type import (`Name@file.yaml`) to reuse its types
 | The file | Error | What the message suggests |
 | --- | --- | --- |
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`) | use a named-type import (`Name@file.yaml`) to reuse its types |
+| `kind: yaml-schema`, well formed or not, named as a `$schema` target, a root-union file arm, a `Name@file` import source, or an embedded `$schema` target | `NotASchemaDocument` (`SelectedByKind`): "it is a `yaml-schema`; it is selected by `kind`, not referenced" | move shared types into a `kind: schema` file and import them from there |
 | a YAML mapping with no `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) | none |
 | YAML whose root is not a mapping | `NotASchemaDocument` (`NotAMapping`) | none |
 | `.json` whose root is not an object | `NotASchemaDocument` (`NotAMapping`) | declare `"$schema": "https://json-schema.org/draft/2020-12/schema"` |
 | a `.json` object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) | the same declaration |
 | a `.json` object declaring another dialect (Draft 7, `""`, a trailing `#`) | `UnsupportedJsonDialect`, naming the `declared` URI | only the 2020-12 URI is supported |
 | a `.json` object declaring 2020-12 that fails its meta-schema | `InvalidJsonSchema`, with the failing location | none |
-| untagged YAML with `$schema` and another top-level key | `SchemaDocument`, "unsupported top-level key(s): ..." | when `$schema` is a `json-schema.org` URI (raw JSON Schema written in YAML), to write it as a `.json` file declaring the 2020-12 URI |
+| YAML with `$schema`, no `kind: schema` or `kind: yaml-schema`, and another top-level key | `SchemaDocument`, "unsupported top-level key(s): ..." | when `$schema` is a `json-schema.org` URI (raw JSON Schema written in YAML), to write it as a `.json` file declaring the 2020-12 URI |
 
 `NotSchemaReason::hint(path)` returns the hint for a reason, so a host can
 show it without parsing the message; the `.json` hints depend on the path's
 extension. With the `terminal` feature each of these renders as a status
 block whose hint line carries the same text (a reason with no hint of its
 own gets a general one). A named-type import (`Name@file.yaml`) is not a
-`$schema` target and reads a `types`-only file without error.
+`$schema` target and reads a `types`-only file without error; a
+`kind: yaml-schema` file is refused there too, with `SelectedByKind`.
 
 ### Where a definition failure points
 
@@ -206,6 +250,11 @@ build_position_map(yaml).locate_all(&mut problems);
 assert_eq!(problems[0].line, Some(2));
 ```
 
+`PositionMap::byte_range(&problem)` returns the authored byte range a problem
+is reported at (the node at its instance path, or the offending key of an
+unknown-key problem), for a caller that underlines text rather than printing
+a line and column. It is `None` when the map holds no authored tree.
+
 ## Source-Aware Parsing and Located Failures
 
 An editor or linter that underlines a schema error needs to know *where* the
@@ -270,13 +319,15 @@ assert_eq!(&source[failure.authored_span.unwrap()], "nope");
   the projection error at the root path with no ranges.
 
 `locate_standalone_definition_failure` recognizes a file exactly as
-`parse_standalone_schema_document` does (a pure `$schema` envelope, or a
-`kind: schema` document with `$schema`, `types`, or both). It returns the
+`parse_standalone_schema_document` does (an informal `$schema` envelope, a
+`kind: schema` document with `$schema`, `types`, or both, or a
+`kind: yaml-schema` document). It returns the
 first definition failure in parser order, `$schema` before `types`,
-including one inside a pure root-union mapping arm (`$schema[1].b`). It
+including one inside a root-union mapping arm (`$schema[1].b`). It
 returns `None` for a valid file, ordinary YAML, invalid YAML, and every
-envelope or declaration-shape error, which `parse_standalone_schema_document`
-reports as before inside `SchemaError::SchemaDocument`.
+envelope or declaration-shape error, including an envelope its definition
+rejects, which `parse_standalone_schema_document` reports inside
+`SchemaError::SchemaDocument`.
 
 For partial input, where no document parses yet, two helpers read a plain
 scalar the way YAML folds it:
@@ -305,11 +356,11 @@ wraps it; see [above](#simplifiedschemaerror-wraps-schemaerror)):
 | `Grammar`               | A type-and-constraint string could not be parsed. Carries property name, message, and byte span.          |
 | `Unresolved`            | `$schema` reference is malformed or `FileReference` rejected it; carries the typed resolver error.        |
 | `NoMatch`               | `$schema` reference matched no file (a path, or a bare name no schema root holds); a text with `*`, `?`, or `[` adds the literal-glob hint. |
-| `NotASchemaDocument`    | A file a `$schema` names is not a schema definition ([hints](#when-a-file-is-not-a-schema-target)). Carries the `path` and a `NotSchemaReason`: `TypesOnly` (a `kind: schema` file with `types` and no `$schema`; hint: use a named-type import `Name@file.yaml`), `NoSchemaProperty` (a YAML mapping without `$schema`), `NotAMapping` (the root is not a mapping or, for `.json`, an object), or `JsonMissingDialect` (a JSON object without a string `$schema`). JSON reasons carry the hint to declare `"$schema": "https://json-schema.org/draft/2020-12/schema"`. |
+| `NotASchemaDocument`    | A file a `$schema` names is not a schema definition ([hints](#when-a-file-is-not-a-schema-target)). Carries the `path` and a `NotSchemaReason`: `TypesOnly` (a `kind: schema` file with `types` and no `$schema`; hint: use a named-type import `Name@file.yaml`), `NoSchemaProperty` (a YAML mapping without `$schema`), `NotAMapping` (the root is not a mapping or, for `.json`, an object), `JsonMissingDialect` (a JSON object without a string `$schema`), or `SelectedByKind` (a `kind: yaml-schema` file, which is applied by `kind` and is never a `$schema` target or `Name@file` import source; hint: move shared types into a `kind: schema` file and import them from there). JSON reasons carry the hint to declare `"$schema": "https://json-schema.org/draft/2020-12/schema"`. |
 | `UnsupportedJsonDialect` | A referenced `.json` file declares a `$schema` dialect other than exactly `https://json-schema.org/draft/2020-12/schema` (an empty string or a trailing `#` included). Carries the `path` and the `declared` text. |
 | `InvalidJsonSchema`     | A referenced `.json` file declares the Draft 2020-12 dialect but fails its meta-schema (checked offline). Distinct from a format rejection. Carries the `path` and the validator's message. |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
-| `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload, or a schema document's text is not a schema (not valid YAML or strict JSON, or an untagged `$schema` mapping with an unsupported top-level key, whose message adds the `.json` migration when `$schema` is a `json-schema.org` URI); carries the document `path`, and, for a rejected definition, the typed cause as `source` and its byte `span` in the supplied text ([details](#a-rejected-definition-in-a-schema-document)). |
+| `SchemaDocument`        | A recognized standalone schema document (informal, `kind: schema`, or `kind: yaml-schema` envelope) fails its envelope definition ([details](#an-envelope-its-definition-rejects)) or has a payload the parser rejects, or a schema document's text is not a schema (not valid YAML or strict JSON, or an untagged `$schema` mapping with an unsupported top-level key, whose message adds the `.json` migration when `$schema` is a `json-schema.org` URI); carries the document `path`, and, for a rejected definition, the typed cause as `source` and its byte `span` in the supplied text ([details](#a-rejected-definition-in-a-schema-document)); an envelope rejection carries a `span` and no `source`. |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
 | `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |

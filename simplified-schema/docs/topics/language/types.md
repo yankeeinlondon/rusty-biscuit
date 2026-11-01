@@ -29,7 +29,7 @@ Every property value follows one of four shapes:
 
 - **Whitespace** inside `(...)` and inside `{ ... }` is insignificant. Quote the whole scalar so YAML keeps it as a string when whitespace is present.
 - **Multiple constraints** are separated by `;`.
-- **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key. A property whose type itself admits `null` (`null`, `unknown`, or a union with one of those arms) is always optional, even when it is marked `required`; see [Null-Admitting Properties](#null-admitting-properties).
+- **Optional by default** — properties are optional unless `required` appears in the constraint list. An optional property also accepts `null` as a sentinel for absent, so a frontmatter value that resolves to `null` validates the same way as a missing key. A property whose type itself admits `null` (`null`, `unknown`, or a union with one of those arms) is always optional, even when it is marked `required`; see [Null-Admitting Properties](#null-admitting-properties). Add `non-null` to keep a property optional but refuse an explicit `null`; see [Non-Null Properties](#non-null-properties).
 - **Arrays** are written by appending `[]` to the type. Item constraints sit inside the parens that precede the brackets; constraints on the array itself sit in a second parens after the brackets.
 - **Unions** are written with `|` or as a YAML list; both mean the same thing. See [The `|` Operator and Grouping](unions.md#the--operator-and-grouping).
 - **Descriptions** (`-> ...`) populate the `description` annotation in the generated JSON Schema. Inside an inline object, a description terminates at the next top-level comma or closing brace (see [Inline Object Literals](objects-and-named-types.md#inline-object-literals)). When a property fails validation, its declared description surfaces at the point of failure — in `md schema validate` (pretty and JSON output) and in compose schema-failure blocks (see [Error Rendering](../../../../darkmatter/docs/topics/schemas/definition.md#error-rendering)).
@@ -65,8 +65,8 @@ For a practical introduction with worked examples, see
 | `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](objects-and-named-types.md#content-format-types-yaml--json).                              |
 | `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](objects-and-named-types.md#content-format-types-yaml--json).                                                  |
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
-| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. See [Semantic Meta-Types](#semantic-meta-types).              |
-| `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. See [Semantic Meta-Types](#semantic-meta-types).  |
+| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. Options: `forms(...)`, `declared-required`. See [Semantic Meta-Types](#semantic-meta-types).              |
+| `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. Options: `mapping`, `property(...)`. See [Semantic Meta-Types](#semantic-meta-types).  |
 | `unknown`    | Anything, including `null`, or omission. `any` is an equivalent alias.                                  | JSON Schema `{}`. `required` has no effect: `unknown(required)` still accepts `null` and omission. To require a value, use a concrete type, e.g. `unknown[](required)` for a required list. See [`unknown` and `null`](#unknown-and-null). |
 | `null`       | Only an explicit `null`, or omission.                                                                  | JSON Schema `{"type": "null"}`. `required` has no effect. Written unquoted (`review: null`, `review: ~`) or as `"null"`. See [`unknown` and `null`](#unknown-and-null). |
 | `alphanumeric` | A string of ASCII letters and digits (`[A-Za-z0-9]`), widened or narrowed by type options.          | Options before `;`, constraints after: `alphanumeric(allow-dashes; min(1))`. Lowers to a string `pattern`. Never coerces numbers or booleans. See [Alphanumeric Strings](#alphanumeric-strings). |
@@ -121,6 +121,13 @@ an import or example, evaluates an expression, runs composition, or accesses
 the network. It also preserves the authored YAML representation: mappings stay
 mappings and sequences stay sequences. Actual `$schema` preparation remains a
 separate operation that may resolve referenced schema files.
+
+Either meta-type can also narrow which declarations it accepts:
+`schema(mapping)` accepts only a mapping, and
+`schema(property(kind, type-definition(forms(literal, enum); declared-required)))`
+demands that every exported object declare a required `kind` as a literal or
+enum. These options judge the authored declaration, never a document's data;
+see [Narrowing a declaration](schema-types.md#narrowing-a-declaration).
 
 #### Source-Aware Presentation Boundary
 
@@ -235,8 +242,11 @@ definitions:
     - [number, { nested: boolean }]
 ```
 
-Only the universal `required`, `eager`, `default(...)`, and `generated`
-constraints apply to these nominal types.
+Only the universal `required`, `non-null`, `eager`, `default(...)`, and
+`generated` constraints, and each meta-type's own
+[declaration options](schema-types.md#narrowing-a-declaration), apply to these
+nominal types. The options judge one declaration, so they are rejected on the
+array forms (`schema[](mapping)` is a schema error).
 Semantic defaults must themselves parse as the declared artifact. Darkmatter
 does not infer either meta-type in `md schema detect`, because a carrier value
 does not establish the author's semantic intent. Terminal import syntax still
@@ -251,6 +261,10 @@ Every type accepts:
   stabilized launch so an actor inside the run can supply it; it is mandatory at
   completion. `required` has no effect on a property whose type admits `null`
   (see [Null-Admitting Properties](#null-admitting-properties)).
+- `non-null` — the property may be omitted, but a present value is never
+  `null`. It is not a presence rule: the property stays optional and out of the
+  JSON Schema `required` list. Every type keyword except `null` and `unknown`
+  (`any`) accepts it; see [Non-Null Properties](#non-null-properties).
 - `eager` — a supplied value is validated at stabilized launch. `eager` is
   timing metadata, not a presence rule: absence is allowed unless `required` is
   also declared. It is not encoded into authored JSON Schema. On a `file` item
@@ -441,6 +455,87 @@ A host may apply its own policy to an invalid optional value. Claudine, for
 example, drops an invalid optional value with a warning instead of failing, so
 `c: ab` against `c: [string(required; min(3)), null]` is dropped by Claudine
 while `md schema validate` reports it.
+
+### Non-Null Properties
+
+Use `non-null` when a property may be left out but must never be written as
+an explicit `null`. An ordinary optional property treats `null` as absent;
+`non-null` refuses it, while still allowing the key to be omitted:
+
+```yaml
+$schema:
+    name: string(non-null)           # omit it, or give text; never null
+    tags: string[](non-null)         # omit it, or give a list; never null
+    meta:                            # the block spelling on an object property
+        note: string
+        $constraints:
+            non-null: true
+    both: string(required; non-null) # accepted; `required` already refuses null
+```
+
+| Declaration | Key absent | `name: null` | `name: Ada` |
+| --- | --- | --- | --- |
+| `name: string` | accepted | accepted (null counts as absent) | accepted |
+| `name: string(required)` | rejected | rejected | accepted |
+| `name: string(non-null)` | accepted | rejected | accepted |
+| `name: string(required; non-null)` | rejected | rejected | accepted |
+| `name: string \| null`, `name: unknown` | accepted | accepted | accepted |
+| `name: null \| string(non-null)` | schema error | schema error | schema error |
+
+Whether an explicit `null` is accepted depends on the declaration, in this
+order:
+
+```mermaid
+flowchart TD
+    V{"What does the<br/>document hold?"} -->|"key absent"| A{"required, and the type<br/>does not admit null?"}
+    A -->|yes| AR["rejected: missing key"]
+    A -->|no| AOK["accepted"]
+    V -->|"an explicit null"| N{"Does the type admit null?<br/>null, unknown, or a union<br/>with such an arm"}
+    N -->|yes| NOK["accepted<br/>(non-null here is a schema error)"]
+    N -->|no| M{"required or non-null?"}
+    M -->|yes| NR["rejected at the property"]
+    M -->|no| NA["accepted: null counts as absent"]
+    V -->|"any other value"| T["judged by the type"]
+```
+
+- **Spellings.** `non-null` sits in either constraint list of a list type, and
+  both mark the list property: `string[](non-null)` and `string(non-null)[]`
+  mean the same thing. A `null` *item* is still judged by the item type, so
+  both reject `["a", null]` at `/tags/1`. On an object property the block flag
+  `$constraints: { non-null: true }` means the same as the postfix
+  `"{ note: string }(non-null)"`. It takes no arguments.
+- **Null-admitting types are schema errors.** `non-null` cannot mark a value
+  that admits null: `null | string(non-null)`, `[string(non-null), null]`,
+  `unknown(non-null)`, `any(non-null)`, and `null(non-null)` fail to load with
+  *`non-null` cannot mark a type that admits null*. A named type is checked
+  after it resolves, so `Opt(non-null)` fails when `Opt` is `string | null` or
+  `unknown`, and is accepted when `Opt` is `string | number`. A list of a
+  nullable type is never itself null, so `(null | string)[](non-null)` is
+  accepted.
+- **Empty values are values.** `""`, `[]`, and `{}` are judged by the type,
+  never read as `null` or as absent.
+- **Validation.** Strict and soft validation both reject the `null` at the
+  property's pointer (`/name`). For a type with a JSON Schema `type`, the
+  problem is a type mismatch; for an `enum` or a property-level union, which
+  lower without a top-level `type`, it is a constraint violation, exactly as
+  for the `required` spelling. Soft validation never converts the `null`: it
+  is not turned into the text `"null"`, nor read as a missing key (see
+  [Conversion Rules](../conversion.md#conversion-rules)).
+- **Lowering.** A non-null property lowers to its bare fragment, without the
+  optional-property `null` wrapper, and stays out of the parent's `required`
+  list:
+
+  ```json
+  { "properties": {
+      "name":  { "type": "string" },
+      "plain": { "anyOf": [{ "type": "null" }, { "type": "string" }] } } }
+  ```
+
+  Here `name` is `string(non-null)` and `plain` is an ordinary `string`. A
+  third-party validator therefore enforces `non-null` without any custom
+  vocabulary.
+- **Subtyping** treats `non-null` as it treats `required`: a presence marker
+  outside the type relation (see [Subtyping](subtyping.md)).
 
 ### Numeric Constraints (`number`)
 
@@ -719,6 +814,8 @@ that a key be present. Use a concrete type for that, such as
 `agent: string(required)` or `steps: unknown[](required)`. "Anything except
 `null`" is a union of the accepted types:
 `value: [string(required), number, boolean, object, "unknown[]"]`.
+`unknown(non-null)` is a schema error, because `unknown` admits `null` (see
+[Non-Null Properties](#non-null-properties)).
 
 An expression variable that no frontmatter key, caller input, or schema
 property declares is of type `unknown`. A function argument with this type
@@ -735,7 +832,8 @@ value. It lowers to `{"type": "null"}`.
   value (`review:`), an empty sequence item (`-`), and the string `"null"` all
   mean the `null` type. A quoted empty string `""` is a string, not a null
   spelling, so `d: ""` is still the grammar error *expected a type name*.
-- `null(required)` is legal and behaves exactly like `null`.
+- `null(required)` is legal and behaves exactly like `null`; `null(non-null)`
+  is a schema error.
 - A `default(...)` on `null` must itself be `null`. `null(default(1))` fails
   to load, with the error ranged on `1`.
 - `null` is a property type only. An empty root (`$schema:` with no value), a
@@ -1124,6 +1222,7 @@ $schema:
 | `max(n)`          | Maximum number of items.                     | `maxItems`       |
 | `unique`          | All items must be distinct.                  | `uniqueItems`    |
 | `required`        | Array property is required (not items).      | parent `required` |
+| `non-null`        | Array property may be omitted but is never `null` (not items). Also read from the item parens: `string(non-null)[]` is the same. | no `null` wrapper |
 | `default(value)`  | Default for the array property.              | `default`        |
 
 The `default(...)` argument is read as a scalar, like every other constraint

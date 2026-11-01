@@ -554,9 +554,11 @@ did before the built-in baseline was the default.
 
 When the baseline is a JSON Schema (rather than a SimplifiedSchema), it is restricted to **simple object schemas**. The merge algorithm operates on a property-name-keyed deep merge and cannot reason about arbitrary JSON Schema features.
 
-Allowed root keys: `$schema`, `type`, `properties`, `required`, `additionalProperties` (must be `true`), `description`, `title`, and `$defs`.
+Allowed root keys: `$schema`, `type`, `properties`, `required`, `additionalProperties` (`true` or `false`), `description`, `title`, and `$defs`.
 
-Any other root construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternProperties`, `additionalProperties: false`, etc. — produces `SchemaError::Baseline` at load time. `additionalProperties: false` is explicitly rejected so the baseline cannot lock out per-document extensions. The same contract applies to a trigger payload, reported as `SchemaError::TriggerPayloadNotMergeable`.
+Any other root construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternProperties`, a schema-valued `additionalProperties`, etc. — produces `SchemaError::Baseline` at load time. The same contract applies to a trigger payload, reported as `SchemaError::TriggerPayloadNotMergeable`.
+
+A baseline with `additionalProperties: false` (for example a SimplifiedSchema root marked [`closed`](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#closed-roots-closed)) is admitted, but its closure is never copied into the document: its properties are merged, and the document stays as open or closed as it declares itself. A baseline therefore cannot lock out per-document extensions. See [Layering](../../../../simplified-schema/docs/topics/schema-object.md#layering).
 
 A property may refer to a definition in the baseline's own root `$defs`, including a recursive one:
 

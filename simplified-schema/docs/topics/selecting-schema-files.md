@@ -153,7 +153,7 @@ match inspection.classification {
 | Field | Holds |
 | --- | --- |
 | `format` | `SchemaTargetFormat::Json` for a `.json` extension in any case, otherwise `Yaml`, decided exactly as the loader decides |
-| `classification` | `Ok(())` when the file is an accepted `$schema` target; otherwise the loader's own error for it, such as `NotASchemaDocument` or `UnsupportedJsonDialect` (see [what a reference may target](./language/schema-documents.md#what-a-schema-reference-may-target)), or `SchemaDocument` "not UTF-8 text" for undecodable bytes |
+| `classification` | `Ok(())` when the file is an accepted `$schema` target; otherwise the loader's own error for it, such as `NotASchemaDocument` (including `SelectedByKind` for a `kind: yaml-schema` file), an envelope that fails its definition, or `UnsupportedJsonDialect` (see [what a reference may target](./language/schema-documents.md#what-a-schema-reference-may-target)), or `SchemaDocument` "not UTF-8 text" for undecodable bytes |
 | `description` | the top-level string `description`, trimmed, when the file is accepted and it is not blank |
 | `lines` | the authored definition when the file is accepted, one entry per line: the YAML document's `$schema` value with its shared indentation removed, or the whole JSON document; line endings are normalized and a final newline is not a line |
 
@@ -172,3 +172,29 @@ $schema:
 An accepted classification proves the file's format only. A `$schema` that
 names a file which imports a missing type is still `Ok(())` here and fails
 when the schema is resolved.
+
+### A file that is selected but never a target
+
+Selection and classification are separate questions. A `kind: yaml-schema`
+file, which defines a YAML document kind, is `Found` like any other existing
+file, but it is never a `$schema` target, a root-union file arm, or a
+`Name@file` import source: a host applies it to documents by their `kind`.
+`inspect_schema_target`, and every loader that follows a reference, classify
+it as `NotASchemaDocument` with `NotSchemaReason::SelectedByKind`, even when
+its envelope is malformed:
+
+```text
+`kinds/roster.yaml` is not a valid schema definition: it is a `yaml-schema`; it is selected by `kind`, not referenced
+hint: move shared types into a `kind: schema` file and import them from there
+```
+
+Put types that a `yaml-schema` and a Markdown schema share in a
+`kind: schema` file and import them from both; see
+[`kind: yaml-schema`](./language/schema-documents.md#kind-yaml-schema). A
+`types`-only `kind: schema` file is the opposite case: a valid import source,
+but not a `$schema` target (`TypesOnly`).
+
+A host that reads a referenced file's text itself, such as an editor
+listing the types a `Name@file` import could name, parses it with
+`resolve::parse_referenced_schema_document(text, path)`, which applies the
+same refusal, so its catalog cannot offer a `yaml-schema`'s types.

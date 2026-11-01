@@ -47,7 +47,9 @@ it does not execute it.
 
 `function(...)`, `type-definition`, and `schema` serve schema authors and
 library integrations rather than ordinary text fields. See the
-[reference](types.md#types) for their placement and validation rules.
+[reference](types.md#types) for their placement and validation rules, and
+[Narrowing a declaration](#narrowing-a-declaration) for the options that
+restrict which declarations `schema` and `type-definition` accept.
 Named types reuse these shapes; a bare name selects a local definition unless
 it is a built-in keyword. Use `shell@this`, for example, to select a local
 type named `shell` rather than the built-in command type.
@@ -67,6 +69,11 @@ null as a whole value is always optional, even if it carries or inherits
 | `name: [string(required; min(3)), null]` | Accepted | Text of at least three characters |
 | `items: unknown[](required)` | Rejected | A list whose items may have any type, including null |
 | `items: null[](required)` | Rejected | A list containing only null items |
+
+`non-null` separates the two cases: `name: string(non-null)` accepts a missing
+key but rejects an explicit null, and stays optional. It cannot mark a type
+that admits null, so `unknown(non-null)` is a schema error. See
+[Non-Null Properties](types.md#non-null-properties).
 
 `any` and `unknown` mean the same thing. Serialization and editor hover use
 `unknown` as the canonical name. Neither spelling can enforce a property's
@@ -111,6 +118,79 @@ command text, and validation runs nothing. Native boolean and numeric values
 use the same text coercion as `expression`. Exported JSON Schema uses the
 custom format `darkmatter-shell`; external validators must enforce that
 format to reject blank strings. See [Shell Commands](types.md#shell-commands).
+
+## Narrowing a declaration
+
+A `schema` or `type-definition` value is a declaration that someone authored,
+such as the contract a document kind must meet. Options narrow which
+declarations are accepted, so a schema can demand, for example, that every
+contract it holds names its `kind` as a fixed set of strings:
+
+```yaml
+$schema:
+    contract: schema(required; property(kind, type-definition(forms(literal, enum); declared-required)))
+    catalog: schema(mapping; non-null)
+```
+
+| `contract` value | Verdict |
+| --- | --- |
+| `{ kind: literal(roster; required), name: string }` | accepted |
+| `{ kind: "enum(a, b; required)" }` | accepted |
+| `[{ kind: literal(a; required) }, ./other.yaml]` | accepted: the reference arm is skipped |
+| `{ name: string }` | rejected: the schema must declare `kind` |
+| `{ kind: string(required) }` | rejected: `` `kind` must be declared as `literal(...)` or `enum(...)` `` |
+| `{ kind: literal(1; required) }` | rejected: the same message, adding that `literal(1;required)` does not denote non-empty strings |
+| `{ kind: literal(a) }` | rejected: `` `kind` must be declared `required`, with no alternative that admits null `` |
+
+`catalog` must be written as a mapping (`[{ a: string }]` and `./types.yaml`
+are rejected), may be omitted, and may not be `null`.
+
+**An option judges the declaration, never a value.** It reads only what the
+author wrote: the YAML carrier and the declaration it parses to. It never
+follows a reference, expands an import, or looks at a document the
+declaration would later validate. Like the bare meta-types, the options are
+parse-only.
+
+| Option | On | The declaration must |
+| --- | --- | --- |
+| `mapping` | `schema` | be written as a mapping, not a list (a root union) or a reference string. |
+| `property(NAME, type-definition(...))` | `schema` | declare `NAME` in every inline mapping it exports, and that property's declaration must satisfy the inner `type-definition(...)` options. |
+| `forms(K, ...)` | `type-definition` | build every top-level alternative as a non-array atom with one of the listed type keywords. |
+| `declared-required` | `type-definition` | be marked `required`, with no alternative that admits null. |
+
+- **`property` reaches inline mappings only.** It judges a mapping carrier,
+  or each inline mapping arm of a root-union list; a failure names the arm
+  (`` root-union arm 1: the schema must declare `kind` ``). A reference carrier and
+  a reference arm are skipped. The option may repeat, and every repetition is
+  enforced:
+  `schema(property(kind, type-definition(declared-required)); property(name, type-definition(forms(string))))`.
+  Its inner `type-definition(...)` takes only `forms` and `declared-required`.
+- **`forms` lists type keywords as a set.** Order and repeats carry no
+  meaning, and any type keyword may be listed (`forms(string)`,
+  `forms(literal, null)`). A `literal` or `enum` alternative must also denote
+  non-empty strings, so `literal(1)` and `literal(true)` fail. A named-type
+  alternative (`Kind(required)`, `Kind(required)@./kinds.yaml`) passes
+  provisionally, because what it denotes is known only once resolved. A union
+  may be written with `|` or as a YAML list.
+- **`declared-required` follows the null-admission rule.** `literal(a)` fails
+  because it is optional; `null | literal(a; required)` fails because a
+  null-admitting union is never required (see
+  [Null-Admitting Properties](types.md#null-admitting-properties)).
+- **On a `type-definition` value itself**, the subject of a message is the
+  definition: `type-definition(forms(literal, enum); declared-required)`
+  rejects `string(required)` with *the definition must be declared as
+  `literal(...)` or `enum(...)`*.
+- **Each option belongs to one meta-type.** `string(mapping)`,
+  `schema(forms(literal))`, `schema[](mapping)`, and a named-type reference
+  carrying an option are schema errors. `mapping` and `declared-required`
+  take no arguments; `forms` needs at least one keyword.
+
+What a provisional pass skipped (a reference arm, a named-type alternative)
+is checked once the declaration is resolved: a library caller does that with
+[`claimed_values`](../language-core.md#claimed-values). The lowered JSON
+Schema carries the options in the `x-darkmatter-schema` and
+`x-darkmatter-type-definition` payloads; see
+[Custom Vocabulary](../custom-vocabulary.md#declaration-option-payloads).
 
 ## Inspect types from the CLI or editor
 

@@ -43,7 +43,12 @@ structure:
 - Markdown opening with a `---` frontmatter block: the frontmatter's `$schema`.
   The body is never read as schema.
 - A standalone schema document: root `$schema` (with optional `types`,
-  `description`, and `categories`), or `kind: schema` with `types`.
+  `description`, and `categories`), `kind: schema` with `$schema`, `types`,
+  or both, or `kind: yaml-schema`. Loading a `yaml-schema` here is a direct
+  load, not a reference, so it is accepted even though no `$schema` may name
+  one (see [Standalone Schema Documents](./language/schema-documents.md#standalone-schema-documents)).
+  Each envelope must first satisfy its
+  [definition](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition).
 - A raw JSON Schema: a mapping whose `$schema` is a `json-schema.org` dialect
   URI.
 
@@ -154,6 +159,13 @@ receiver.override_with(&overrides)?;   // layer_over with one schema
 - A declaration is replaced whole, never intersected: the existing resolver
   merge (`resolve::merge_baseline`) does the work, with its restrictions (a
   lower layer must be a plain object schema, not a root union).
+- [Closure](./language/objects-and-named-types.md#closed-roots-closed)
+  follows the winning layer and is never copied from a lower one. The merged
+  root is closed exactly when the higher-priority side is closed: the
+  receiver for `layer_under`, the incoming schemas for `layer_over`. A
+  closed lower layer is accepted, and its properties are merged, but it does
+  not close the result. On a closed result, every property merged in from
+  any layer counts as declared.
 
 | Receiver `s0` | `s0.layer_under(&[&s1, &s2])` `timeout` | `s0.layer_over(&[&s1, &s2])` `timeout` |
 | --- | --- | --- |
@@ -161,6 +173,11 @@ receiver.override_with(&overrides)?;   // layer_over with one schema
 | also declares `timeout: boolean` | `boolean` | `string` |
 
 (`s1` declares `timeout: number`, `s2` declares `timeout: string`.)
+
+| Receiver | Incoming | `layer_under` result | `layer_over` result |
+| --- | --- | --- | --- |
+| closed | open | closed | open |
+| open | closed | open | closed |
 
 Each call is atomic. It stages the merge in its own working data and commits
 with one assignment; on `Err` the receiver's definition, revision, and
@@ -209,7 +226,8 @@ table as authored.
   validation uses (shared, not copied). A function-typed property has no JSON
   Schema form; the export fails with the lowerer's located error.
 - `to_simplified_yaml()` writes the schema back as one SimplifiedSchema
-  document in its authored envelope. Named types are written by name, so a
+  document in its authored envelope (a `yaml-schema` keeps
+  `kind: yaml-schema`). Named types are written by name, so a
   recursive type stays a finite reference graph, and parsing the export gives
   the same schema. Nested objects are written as block mappings and property
   unions as YAML lists, so pattern keys, `$constraints`, and each arm's

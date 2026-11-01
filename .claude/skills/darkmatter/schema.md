@@ -40,6 +40,14 @@ Path shorthand in this file:
   standalone facade object is `simplified_schema::SimplifiedSchema`.
   `darkmatter::markdown::schemas::resolve` wraps the library resolver to pass
   Darkmatter's shipped sources (`embedded::SHIPPED_SOURCES`).
+- Darkmatter mirrors of the lowering (`call_binding/translate.rs`, the trigger
+  `matcher.rs`) must reuse the library's `simplified::declaration_options_payload`
+  and `format::{judge_schema, judge_type_definition}` for the `schema` /
+  `type-definition` declaration options, and treat `non-null` as a marker
+  (no null arm, never a presence requirement). `about.rs` catalogs constraints
+  per type (`SCHEMA_CONSTRAINT_DESCRIPTORS`, parity-tested against the grammar)
+  and `$constraints` keys per placement (`BLOCK_CONSTRAINT_DESCRIPTORS`, which
+  feeds DMLS key completion); a new constraint or `$constraints` key updates both.
 
 ## Contents
 
@@ -73,11 +81,21 @@ types:
 
 `parse_standalone_schema_document` is the passive authority. A pure schema has
 `$schema` and an optional sibling `types` mapping. A kinded schema declares
-`kind: schema` and a `types` mapping, with an optional `$schema` export.
-Both may carry `description` and `categories`; the key sets have one
-definition, `StandaloneSchemaEnvelope::admits_top_level_key`, which the
-recognizer, `classify_yaml_schema_text`, and DMLS's lexical
-`standalone_envelope_claim` all read. When both tables are present, `$schema` defines document properties and `types`
+`kind: schema` and a `types` mapping, with an optional `$schema` export. A
+`kind: yaml-schema` defines a YAML document kind (required `$schema`, same
+metadata and `types`) and is reached only through `kind`: as a `$schema`
+target or `Name@file` source it is `NotASchemaDocument { SelectedByKind }`
+(DMLS reads imported files through `resolve::parse_referenced_schema_document`
+and does not count a `yaml-schema` as a named root schema). Every envelope is
+admitted against the library's compiled `simplified-schema/schemas/schema.yaml`
+/ `yaml-schema.yaml` (see the `simplified-schema` skill), so structural
+messages read "the `kind: schema` envelope does not satisfy its definition
+`simplified-schema/schemas/schema.yaml`: `/types`: …"; assert on that
+pointer, not on the old hand-written wording. Darkmatter's own
+`darkmatter/schemas/schema-trigger.yaml` is a `yaml-schema` too (corpus class
+`YamlSchemaDefinition`). `admits_top_level_key` decides only whether an
+untagged mapping is the informal envelope; the recognizer and DMLS's lexical
+`standalone_envelope_claim` read it. When both tables are present, `$schema` defines document properties and `types`
 supplies local names and named imports; local definitions and cross-file imports
 can be mixed. Without a separate export, the mapping payload serves both roles.
 `StandaloneSchemaDocument.local_types` and its separate source map preserve

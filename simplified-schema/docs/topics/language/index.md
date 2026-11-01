@@ -75,6 +75,8 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
 | --- | --- | --- |
 | a typed value | `name: string`, `age: number` | [Types](./types.md#types) |
 | a constraint | `age: number(min(0); required)` | [Universal constraints](./types.md#universal-constraints) |
+| an optional value that may not be `null` | `note: string(non-null)` | [Non-null properties](./types.md#non-null-properties) |
+| a document with no undeclared keys | `$constraints: { closed: true }` in `$schema` | [Closed roots](./objects-and-named-types.md#closed-roots-closed) |
 | a list | `tags: string[]` | [Array constraints](./types.md#array-constraints) |
 | one of several values | `status: enum(draft, published)` | [Enumerations](./types.md#enumerations) |
 | a nested object | `author: "{ name: string(required), email: email }"` | [Inline object literals](./objects-and-named-types.md#inline-object-literals) |
@@ -100,8 +102,9 @@ assert!(page.validate_strict(&json!({ "tags": ["changelog"] })).is_err()); // `t
   the `|` operator, named union references, discriminated unions, and
   `function(...)` signatures.
 - [Schema Resolution and Standalone Documents](./schema-documents.md): how a
-  `$schema` reference finds its file, and the envelopes a standalone schema
-  file uses.
+  `$schema` reference finds its file, the envelopes a standalone schema
+  file uses (`kind: schema`, `kind: yaml-schema`, and the informal one), and
+  how each is checked against its definition.
 - [Subtyping](./subtyping.md): whether one type accepts only values another
   type also accepts.
 - [Conversion](../conversion.md): exactly which almost-right values soft
@@ -126,8 +129,9 @@ These are limits of the language itself; a host built on it may add its own.
 - **Inline objects always reject extra keys.** There is no lenient opt-out
   for an inline object's `additionalProperties: false`. For looser typing use
   the opaque `object` type.
-- **Root schemas always allow extra keys.** There is no opt-in to
-  `additionalProperties: false` at the root.
+- **Root schemas allow extra keys unless closed.** A root, or one root-union
+  arm, rejects undeclared keys only with
+  [`$constraints: { closed: true }`](./objects-and-named-types.md#closed-roots-closed).
 - **Inline objects nest at most 32 levels.** Deeper nesting is
   `SchemaError::Grammar`. Use a
   [recursive named type](./objects-and-named-types.md#recursive-named-types)

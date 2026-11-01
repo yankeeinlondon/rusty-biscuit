@@ -1,6 +1,6 @@
 # Schema Resolution and Standalone Documents
 
-How a schema reference finds its file, and how a standalone YAML file declares that it holds a SimplifiedSchema.
+How a schema reference finds its file, how a standalone YAML file declares that it holds a SimplifiedSchema (or defines a YAML document kind), and how the library checks that file before reading it.
 
 ## Schema Resolution
 
@@ -20,7 +20,9 @@ The resolution rules:
    - a `.json` file (any letter case) is a JSON Schema object that declares
      `"$schema": "https://json-schema.org/draft/2020-12/schema"`;
    - any other file is YAML in a [standalone envelope](#standalone-schema-documents)
-     that has a top-level `$schema`.
+     that has a top-level `$schema`, other than a
+     [`kind: yaml-schema`](#a-yaml-schema-is-selected-by-kind-never-referenced)
+     file.
    - Anything else is an error naming the file.
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
 4. **No `$schema`** — the baseline alone applies; `md schema validate` and `md compose` use the [built-in baseline](../../../../darkmatter/docs/topics/schemas/definition.md#the-built-in-baseline) unless told otherwise. With no baseline either, validation succeeds vacuously and `pretty` mode prints a note saying so (suppressed by `--quiet`).
@@ -79,7 +81,10 @@ flowchart TD
     D -->|yes| M{meta-schema valid?}
     M -->|no| IJ[InvalidJsonSchema]
     M -->|yes| OKJ[raw JSON Schema]
-    X -->|no| Y{YAML envelope with $schema?}
+    X -->|no| K{kind: yaml-schema?}
+    K -->|yes| SK[NotASchemaDocument: SelectedByKind]
+    K -->|no| Y{YAML envelope with $schema?}
+    Y -->|fails its definition| AD[SchemaDocument: does not satisfy its definition]
     Y -->|yes| OKY[SimplifiedSchema]
     Y -->|types only| TO[NotASchemaDocument: TypesOnly]
     Y -->|$schema plus other keys| UK[SchemaDocument: unsupported top-level keys]
@@ -88,11 +93,13 @@ flowchart TD
 
 | File content | Result |
 |---|---|
-| YAML with `$schema` (informal, or `kind: schema`) | accepted |
+| YAML with `$schema` (informal, or `kind: schema`) that [satisfies its definition](#admission-checking-an-envelope-against-its-definition) | accepted |
+| `kind: yaml-schema`, well formed or not | `NotASchemaDocument` (`SelectedByKind`); [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced), never referenced |
 | `kind: schema` with only `types` | `NotASchemaDocument` (`TypesOnly`); its types still import as `Name@file.yaml` |
+| a recognized envelope its definition rejects (`types: [a, b]`, `description: null`, a misspelled `typed:`) | `SchemaDocument` "the `kind: schema` envelope does not satisfy its definition ..." |
 | YAML mapping without `$schema` | `NotASchemaDocument` (`NoSchemaProperty`) |
 | YAML that is not a mapping, or a JSON value that is not an object | `NotASchemaDocument` (`NotAMapping`) |
-| YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
+| YAML with `$schema` and a key outside `$schema`, `types`, `description`, `categories` (no `kind: schema` or `kind: yaml-schema`) | `SchemaDocument` "unsupported top-level key(s): ..." |
 | YAML or JSON that does not parse (duplicate key, trailing content, a second YAML document, JSON5 comments or trailing commas) | `SchemaDocument` with the parser's location |
 | JSON object without a string `$schema` | `NotASchemaDocument` (`JsonMissingDialect`) |
 | JSON `$schema` other than exactly `https://json-schema.org/draft/2020-12/schema` (including `""` and a trailing `#`) | `UnsupportedJsonDialect` |
@@ -100,7 +107,11 @@ flowchart TD
 
 The meta-schema check runs offline; nothing is fetched. These rules apply only
 to a `$schema` target. A named-type import (`Name@file.yaml`) reads any
-standalone envelope, a `types`-only one included.
+`kind: schema` or informal envelope, a `types`-only one included, but never a
+`kind: yaml-schema` file. Other kinded YAML, such as ordinary data
+(`kind: roster`) or a host's own document kinds (Darkmatter's
+`kind: schema-trigger`), is never a target either: it fails with one of the
+rows above.
 
 ### Migrating Raw JSON Schema Written in YAML
 
@@ -131,9 +142,22 @@ A YAML map of SimplifiedSchema types written without the envelope
 
 ## Standalone Schema Documents
 
-A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes two envelopes:
+A standalone YAML file can be a SimplifiedSchema authoring document, recognized by **content** — not by filename, glob, or consumer discovery. The library classifier `parse_standalone_schema_document()` recognizes three envelopes:
 
-### Pure Envelope
+| Envelope | Recognized by | Carries | Its definition | A `$schema` target or `Name@file` source? |
+|---|---|---|---|---|
+| [informal](#informal-envelope) (`StandaloneSchemaEnvelope::Pure`) | a mapping with `$schema` and no key other than `$schema`, `types`, `description`, `categories` | `$schema`, and optionally `types`, `description`, `categories` | `schema.yaml`, judged as if it declared `kind: schema` | yes |
+| [`kind: schema`](#kind-schema) (`Tagged`) | `kind: schema` | `$schema`, `types`, or both, and optionally `description`, `categories` | `schema.yaml` | yes; a `types`-only file is an import source only |
+| [`kind: yaml-schema`](#kind-yaml-schema) (`YamlSchema`) | `kind: yaml-schema` | `$schema` (required), and optionally `types`, `description`, `categories` | `yaml-schema.yaml` | no: [selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced) |
+
+`StandaloneSchemaEnvelope::kind()` returns the `kind` that claims an
+envelope: `Some("schema")`, `Some("yaml-schema")`, or `None` for the informal
+one. Before its payload is read, every recognized envelope is
+[admitted](#admission-checking-an-envelope-against-its-definition) against its
+definition, so a misspelled key or a metadata value of the wrong shape is
+reported where it was written.
+
+### Informal Envelope
 
 A YAML mapping with `$schema`, an optional reusable `types` mapping, an
 optional `description` string, an optional [`categories`](#categories) list,
@@ -146,10 +170,12 @@ $schema:
     age: number(integer; min(0); suggest(21, 30, 40))
 ```
 
-`description` must be a string (`""` is allowed); `null`, a number, a list, or
-a mapping is a schema-document error. Editors show it when hovering a
-`$schema` value that names the file. A mapping with any other top-level key is
-not this envelope (see [Migrating Raw JSON Schema Written in YAML](#migrating-raw-json-schema-written-in-yaml)).
+`description` is text (`""` is allowed). Editors show it when hovering a
+`$schema` value that names the file. A number or boolean is read as its text
+(`description: 123` reads as `"123"`), the same
+[soft conversion](../conversion.md) frontmatter receives; `null`, a list, or a
+mapping is rejected. A mapping with any other top-level key is not this
+envelope (see [Migrating Raw JSON Schema Written in YAML](#migrating-raw-json-schema-written-in-yaml)).
 
 The `$schema` value is the SimplifiedSchema payload. A mapping payload is usable both as a whole-file schema and as the namespace for `Name@fileref` named imports. A sequence payload is a root-level schema union for whole-file use only (it supplies no named-import namespace).
 
@@ -170,7 +196,7 @@ types:
 Here `person` is defined in this file and `identifier` is imported. A document
 using this file has a `contacts` property; it does not gain a `person` property.
 
-### Tagged Envelope
+### `kind: schema`
 
 A YAML mapping containing `kind: schema` and at least one of an exported
 `$schema` and a `types` mapping, plus optionally `description` and
@@ -187,19 +213,125 @@ types:
 A `types`-only document is a library: its types import as `Name@file.yaml`,
 but a document's `$schema` cannot target it (`NotASchemaDocument`,
 `TypesOnly`). With `$schema`, that export supplies document properties and
-`types`, when present, supplies reusable definitions; a tagged document with
-only `$schema` behaves like the pure envelope. A tagged document with neither
-is a schema-document error. Category and overload checks apply to a `types`
-table only.
+`types`, when present, supplies reusable definitions; a `kind: schema`
+document with only `$schema` behaves like the informal envelope. A document
+with neither fails its definition. Category and overload checks apply to a
+`types` table only.
 
 A host's global catalog (such as Darkmatter's `darkmatter.yaml`) is an
-ordinary tagged envelope with `$schema` declarations. The host registers it
-through its own loader; named by a document's `$schema`, it is read like any
-other schema document.
+ordinary `kind: schema` envelope with `$schema` declarations. The host
+registers it through its own loader; named by a document's `$schema`, it is
+read like any other schema document.
+
+### `kind: yaml-schema`
+
+A `kind: yaml-schema` file defines a YAML document **kind**. Its `$schema` is
+the contract every document of that kind must meet, and the `kind` property
+of that `$schema` names the kinds the file claims. It carries the same
+`description`, `categories`, and `types` namespace as `kind: schema`:
+
+```yaml
+kind: yaml-schema
+description: A team roster
+types:
+    member:
+        name: string(required)
+        role: enum(lead, engineer, designer; required)
+$schema:
+    kind: literal(roster; required) -> the kind this file defines
+    team: string(required)
+    members: member[](required)
+```
+
+A document such as this one is then a `roster`, judged against that
+`$schema`:
+
+```yaml
+kind: roster
+team: Platform
+members:
+    - name: Ada
+      role: lead
+```
+
+`$schema` is required, and it must declare `kind` as a
+[`literal(...)` or `enum(...)`](./schema-types.md#narrowing-a-declaration)
+that is `required` and admits no `null`; `literal(roster)` without `required`
+is rejected. The `types` entries are local names for `$schema`, not
+properties of a `roster`.
+
+A `yaml-schema` is a definition for a host to apply by `kind`; the library
+does not discover documents or decide which kinds a host serves. To prepare
+one that a host compiles into its binary, call
+`resolve::prepare_embedded_yaml_schema(path, documents, shipped)`, which
+returns the resolved `$schema` and refuses any document that is not a
+`yaml-schema` (`NotASchemaDocument`). Read the kinds it claims with
+[`claimed_values`](../language-core.md#claimed-values):
+
+```rust
+use simplified_schema::claimed_values;
+use simplified_schema::embedded::{EmbeddedDocument, ShippedSources};
+use simplified_schema::resolve::prepare_embedded_yaml_schema;
+
+const KINDS: &[EmbeddedDocument<'static>] =
+    &[EmbeddedDocument { path: "host/kinds/roster.yaml", text: include_str!("roster.yaml") }];
+
+let resolved = prepare_embedded_yaml_schema("host/kinds/roster.yaml", KINDS, ShippedSources::NONE)?;
+assert_eq!(claimed_values(&resolved, "kind").unwrap(), ["roster"]);
+```
+
+The `SimplifiedSchema` [content and file factories](../schema-object.md) load
+a `yaml-schema` directly (loading a file is not referencing it), and
+`to_simplified_yaml()` writes it back with `kind: yaml-schema`.
+
+#### A `yaml-schema` Is Selected by `kind`, Never Referenced
+
+Naming a `yaml-schema` file anywhere a schema file is referenced is an error:
+
+- as a document's `$schema` target, or the target of a schema file that
+  delegates with `$schema: ./other.yaml`;
+- as a file arm of a root union;
+- as a `Name@file` import source;
+- as the `$schema` target of a document a host embeds.
+
+Each fails with `SchemaError::NotASchemaDocument` holding
+`NotSchemaReason::SelectedByKind`, even when the `yaml-schema` is itself
+malformed, because naming it is the mistake to fix first:
+
+```text
+`kinds/roster.yaml` is not a valid schema definition: it is a `yaml-schema`; it is selected by `kind`, not referenced
+hint: move shared types into a `kind: schema` file and import them from there
+```
+
+Types that a `yaml-schema` and a Markdown schema both need belong in a
+`kind: schema` file that each of them imports:
+
+```yaml
+# shared/people.yaml
+kind: schema
+types:
+    member:
+        name: string(required)
+        role: enum(lead, engineer, designer; required)
+```
+
+```yaml
+# kinds/roster.yaml
+kind: yaml-schema
+$schema:
+    kind: literal(roster; required)
+    members: member[]@../shared/people.yaml
+```
+
+A host that reads a referenced file itself, such as an editor building an
+import catalog, parses it with `resolve::parse_referenced_schema_document(text, path)`,
+which applies the same refusal, and
+[`inspect_schema_target`](../selecting-schema-files.md#inspecting-the-selected-file)
+classifies a `yaml-schema` the same way.
 
 ### Categories
 
-Either envelope may also declare a `categories:` list beside `types:`. Each
+Every envelope may also declare a `categories:` list beside `types:`. Each
 entry is a name, optionally followed by `-> description`; a description may
 span lines. Documentation shows categories in list order.
 
@@ -223,9 +355,10 @@ types:
 When a file declares `categories:`, every `category(X)` in its `types` must
 name a listed category, compared exactly (`math` is not `Math`). Without the
 list any name is accepted, and `categories: []` declares that no category is
-allowed. A blank name, a repeated name, a non-list `categories`, and an entry
-that is not a string are schema-load errors naming the entry, such as
-`categories[1]`.
+allowed. A blank name and a repeated name are schema-load errors naming the
+entry, such as `categories[1]`. `categories` must be a list (a single string
+is not wrapped into one, and `null` is rejected); a number entry is read as
+its text, so `- 5` is the category `5`, while a mapping entry is rejected.
 
 ### Whole-File References and Named Imports
 
@@ -239,7 +372,8 @@ age: 30
 ---
 ```
 
-Referencing a file whose `$schema` is a mapping, in either envelope, validates the document against that mapping's complete object shape. The `Name@fileref` named-import syntax extracts a single named type from the file's `types` table (or, without one, its `$schema` mapping) and inlines it:
+Referencing a file whose `$schema` is a mapping, in the informal or
+`kind: schema` envelope, validates the document against that mapping's complete object shape. The `Name@fileref` named-import syntax extracts a single named type from the file's `types` table (or, without one, its `$schema` mapping) and inlines it:
 
 ```yaml
 $schema:
@@ -247,9 +381,167 @@ $schema:
     ages: age[]@./schemas/person.yaml
 ```
 
-### Malformed Envelopes
+### Admission: Checking an Envelope Against Its Definition
 
-Once an envelope is recognized, a missing or malformed payload is a schema-document error (`SchemaError::SchemaDocument`). The library does not silently reinterpret the document as ordinary YAML or raw JSON Schema. For the tagged envelope, `kind: schema` claims the document even when both `$schema` and `types` are missing, `types` is malformed, or a top-level key other than `$schema`, `types`, `description`, and `categories` is present. A file that is not valid YAML at all (for example one with a duplicate key) is also a schema-document error, `not valid YAML: ...`, rather than an unrecognized file. A definition the grammar rejects keeps the grammar's typed error and its byte range in the document; see [A rejected definition in a schema document](../diagnostics.md#a-rejected-definition-in-a-schema-document).
+The envelopes are part of the SimplifiedSchema language, so the library
+defines them in SimplifiedSchema itself and checks every recognized envelope
+against its definition before reading its payload. This is called
+**admission**. It applies on every load path: the `SimplifiedSchema`
+factories, a `$schema` target, a `Name@file` import, a document a host
+embeds, and `parse_standalone_schema_document`.
+
+```mermaid
+flowchart LR
+    T[YAML text] --> R{recognize envelope}
+    R -->|none| N[not a schema document]
+    R -->|"kind: schema, informal"| S[admit against schema.yaml]
+    R -->|"kind: yaml-schema"| Y[admit against yaml-schema.yaml]
+    S --> A{admitted?}
+    Y --> A
+    A -->|no| E[SchemaDocument at the offending token]
+    A -->|yes| P[parse $schema and types]
+    P --> C[category, overload, and suggestion checks]
+    C --> D[StandaloneSchemaDocument]
+```
+
+A file *referenced* as a schema is refused as
+[selected by `kind`](#a-yaml-schema-is-selected-by-kind-never-referenced)
+before admission when it is a `yaml-schema`.
+
+#### Who Owns Each Definition
+
+| Definition | Defines documents of | Owner |
+|---|---|---|
+| `simplified-schema/schemas/schema.yaml` | `kind: schema` (and the informal envelope) | this library |
+| `simplified-schema/schemas/yaml-schema.yaml` | `kind: yaml-schema`, itself included | this library |
+| `darkmatter/schemas/schema-trigger.yaml` | `kind: schema-trigger` | Darkmatter |
+
+The two library definitions are compiled in as
+`simplified_schema::envelope::ENVELOPE_DEFINITIONS`, keyed by the virtual
+paths `SCHEMA_DEFINITION_PATH` and `YAML_SCHEMA_DEFINITION_PATH`; admission
+reads no file. Both are `kind: yaml-schema` documents. This is the definition
+of a `yaml-schema`:
+
+```yaml
+kind: yaml-schema
+description: |-
+    The definition of a `kind: yaml-schema` document: a YAML file that defines
+    a YAML document kind. Its `$schema` is the contract every document of the
+    claimed kind must meet.
+$schema:
+    kind: literal(yaml-schema; required) -> the document kind that claims this definition
+    description: string(non-null) -> what the kind is for
+    categories: string[](non-null) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+    $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required))) -> the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed
+    types: schema(mapping; non-null) -> reusable named types for `$schema`; these names are not document properties
+    $constraints: { closed: true }
+```
+
+`schema.yaml` has the same keys, with `kind: literal(schema; required)`, as
+a root union of two closed arms: the first requires `$schema`, the second
+requires `types`, which is how "at least one of `$schema` and `types`" is
+written. Each line is one structural rule:
+
+| Rule | Written as |
+|---|---|
+| no top-level key beyond those listed | `$constraints: { closed: true }` |
+| `types` is a mapping, not a list or a single reference | `schema(mapping; non-null)` |
+| `description` is text | `string(non-null)` |
+| `categories` is a list of text entries | `string[](non-null)` |
+| `$schema` and `types` are never an explicit `null` | `non-null`, or `required` |
+| a `yaml-schema`'s `$schema` declares a required, non-null `kind` of one or more literal choices | `property(kind, type-definition(forms(literal, enum); declared-required))` |
+
+The definitions are parsed once, without admission, the first time any
+envelope is admitted. That they satisfy themselves (`yaml-schema.yaml`
+against itself, `schema.yaml` against `yaml-schema.yaml`) is checked by the
+library's tests, not at run time. They are compiled into a private validator
+cache, never the process-wide one that `simplified_schema::reset_process_caches()`
+clears, so a reset does not discard them.
+
+#### Soft Conversion, Never for Declarations
+
+Admission uses [soft validation](../validation.md): a metadata value that
+converts without changing its meaning is accepted, exactly as in
+frontmatter. `description: 123` is admitted and read as `"123"`, and a
+category entry `5` as `"5"`. An explicit `null` is rejected wherever the
+definition says `non-null`. The schema declarations themselves, `$schema` and
+`types` (mappings, root-union sequences, and reference strings), are never
+converted; they reach the SimplifiedSchema parser exactly as authored.
+
+#### Which Defect Is Reported
+
+A rejected envelope is a `SchemaError::SchemaDocument` whose `span` is the
+byte range of the offending token: the key itself for an unknown key, and the
+first line of a block collection. When an envelope has several defects, one
+is reported, in this order:
+
+1. **A problem with the envelope itself**: an unknown key, metadata of the
+   wrong shape, or a missing payload. A problem other than a missing
+   required key comes first, because a missing `types` is often the result of
+   a misspelled `typed:`, and the misspelling is what to fix.
+2. **A definition inside `$schema` or `types` that the parser rejects**,
+   reported with the parser's own typed error and token span (message prefix
+   `invalid SimplifiedSchema payload` or `invalid named types`); see
+   [A rejected definition in a schema document](../diagnostics.md#a-rejected-definition-in-a-schema-document).
+3. **The carrier's own shape**: `types: null`, or `types: [a, b]`.
+
+```yaml
+kind: schema
+types:
+    - a
+    - b
+```
+
+```text
+the `kind: schema` envelope does not satisfy its definition `simplified-schema/schemas/schema.yaml`: `/types`: the declaration must be a mapping, not a list
+```
+
+The envelope is named `` `kind: schema` ``, `` `kind: yaml-schema` ``, or
+`informal schema`. See
+[An envelope its definition rejects](../diagnostics.md#an-envelope-its-definition-rejects)
+for the error's fields.
+
+Once an envelope is recognized, the library does not silently reinterpret a
+rejected document as ordinary YAML or raw JSON Schema: `kind: schema` claims
+the document even when both `$schema` and `types` are missing or an unknown
+key is present. A file that is not valid YAML at all (for example one with a
+duplicate key) is also a schema-document error, `not valid YAML: ...`, rather
+than an unrecognized file.
+
+#### Running Admission Yourself
+
+`simplified_schema::envelope::admit_envelope_text(text, path)` recognizes
+the envelope and judges it, without parsing the payload. It returns
+`Ok(None)` when no envelope claims the text, and `Err` when the text is not
+YAML:
+
+```rust
+use simplified_schema::envelope::admit_envelope_text;
+
+let admission = admit_envelope_text("kind: schema\ndescription: 123\ntypes:\n  age: number\n", "ages.yaml")?
+    .expect("a `kind: schema` envelope");
+assert!(admission.is_admitted());
+assert_eq!(admission.value["description"], "123");
+```
+
+`EnvelopeAdmission` holds the `envelope`, the `definition` path it was
+judged against, the admitted and converted `value` (an informal envelope's
+copy carries no `kind`), its `positions` in the text, and the located
+`problems` (each with `line` and `column`), empty when `is_admitted()`.
+`PositionMap::byte_range(&problem)` returns the byte range a problem is
+reported at.
+
+#### What Admission Does Not Check
+
+The definitions state every structural rule. These checks need the parsed
+document and stay in the library's code, after admission:
+
+- each `categories` entry's grammar (`Name` or `Name -> description`, no
+  blank name) and repeated categories;
+- a `category(...)` naming a category the file does not declare;
+- two overloads with one binding contract in `types`;
+- [suggestion lints](./types.md#advisory-suggestions-suggest), returned as
+  `StandaloneSchemaDocument::suggestion_lints` rather than as errors.
 
 ### Raw JSON Schema
 

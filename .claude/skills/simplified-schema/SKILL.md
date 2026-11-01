@@ -1,7 +1,7 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-10-30T00:00:00Z
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` declaration options, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+last_updated: 2026-10-31T00:00:00Z
 ---
 
 # simplified-schema
@@ -88,6 +88,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Lower-level compile once | `Prepared::new(Arc<Value>, base_dir, ctx)` then `validate_strict`/`validate_soft` |
 | Parse only | `parse_yaml_schema`, `parse_schema_declaration`, `parse_property_definition`, `parse_standalone_schema_document` |
 | Lower only | `to_json_schema`, `to_json_schema_with_definitions` (needed once a `TypeExpr::Ref` exists) |
+| Strings a schema claims for a property | `claimed_values(&resolved, "kind")` → `Vec<String>` / `ClaimProblem` |
 
 `ValidationFailure` is `#[non_exhaustive]`: `InvalidData { problems }`,
 `UnavailableCheck { problems }` (a check this build or an in-memory schema
@@ -104,13 +105,33 @@ text (whole Markdown file, CRLF counted). Never stringify a `SchemaError` into
 A referenced `$schema` file is classified by `classify_yaml_schema_text` /
 `classify_json_schema_text` (`resolve.rs`): YAML must be an envelope with a
 top-level `$schema` (`types`-only is `NotASchemaDocument { TypesOnly }`, a map
-without `$schema` is `NoSchemaProperty`); each envelope's admitted keys,
-`description` and `categories` included, come from
-`StandaloneSchemaEnvelope::admits_top_level_key`. JSON must be an object whose
+without `$schema` is `NoSchemaProperty`, a `kind: yaml-schema` is
+`SelectedByKind` even when malformed, and so is one named by `Name@file`;
+hosts reading a referenced file use `resolve::parse_referenced_schema_document`).
+JSON must be an object whose
 `$schema` is exactly `DRAFT_2020_12_DIALECT` (else `JsonMissingDialect` or
 `UnsupportedJsonDialect`) and pass the offline meta-schema (else
 `InvalidJsonSchema`). There is no raw-YAML JSON Schema fallback; see
 [What a schema reference may target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
+
+Envelopes (`kind: schema`, `kind: yaml-schema`, informal) are **admitted**
+before their payload is read: `envelope.rs` soft-validates each against the
+compiled `simplified-schema/schemas/schema.yaml` / `yaml-schema.yaml`
+(`envelope::ENVELOPE_DEFINITIONS`, `admit_envelope_text`). Those files are the
+only authority for envelope structure (closed keys, `$schema` or `types`,
+`types` a mapping, non-null metadata); never add a structural check to
+`standalone.rs` (`shipped_corpus.rs` guards it). Rust keeps only category
+grammar, duplicate/undeclared categories, and duplicate overloads. Metadata
+is read from the converted copy (`description: 123` → `"123"`); `$schema` /
+`types` carriers are never converted. Report order: envelope problem, then a
+parser-located definition failure inside a carrier, then the carrier shape
+(`standalone.rs::rejected_envelope`; `locate_standalone_definition_failure`
+returns `None` when the envelope itself is malformed). The definitions
+bootstrap unadmitted (`parse_standalone_unadmitted`) through a private
+validator cache, never `SHARED_VALIDATOR_CACHE`. A host prepares a
+`yaml-schema`'s export with `resolve::prepare_embedded_yaml_schema` and reads
+its kinds with `claimed_values`. Tests: `envelope_admission.rs`,
+`yaml_schema_envelope.rs`.
 
 ## Features
 
@@ -182,8 +203,8 @@ Language reference (`simplified-schema/docs/topics/language/`):
 - [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) — `|`, named union references, root unions, narrowing
 - [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) — resolution, standalone envelopes, raw JSON Schema
 - [Selecting a schema file](../../../simplified-schema/docs/topics/selecting-schema-files.md) — `select_schema_file` outcomes, probes, creation paths; `inspect_schema_target`
-- [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md)
-- [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md)
+- [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md) · [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md)
+- [declaration-narrowing.md](declaration-narrowing.md) — code map for `non-null`, root `closed`, `schema`/`type-definition` options, `claimed_values`
 
 Darkmatter integration: [definition.md](../../../darkmatter/docs/topics/schemas/definition.md).
 

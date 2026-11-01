@@ -90,6 +90,12 @@ These are **never** converted:
 - a number or boolean into `alphanumeric`, which must already be text;
 - anything into `unknown`, which keeps every value as written.
 
+Because `null` never converts, an explicit `null` at a
+[`non-null`](./language/types.md#non-null-properties) property is rejected at
+that property, with the same problem strict validation reports. It is not
+turned into the text `"null"`, nor dropped as if the key were missing, and a
+sibling that does convert (`count: "4"`) does not let it through.
+
 Whole numbers must be held exactly: `"9007199254740993"` and the native YAML
 `9007199254740993` are errors with the reason "cannot be represented
 exactly", `"1e400"` is "not finite", and `"1e-400"` would become `0`, which is

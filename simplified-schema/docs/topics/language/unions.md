@@ -572,7 +572,8 @@ The effective schema is `{ "anyOf": [arm0, arm1, ...] }`. **Baseline merging is 
 
 **Root unions are inclusive.** A document is valid when it matches **one or
 more** arms. A root mapping is open, so a property an arm does not declare is
-unconstrained in that arm. This schema accepts a `schema` file, a `review`
+unconstrained in that arm (unless the arm is
+[closed](objects-and-named-types.md#closed-roots-closed)). This schema accepts a `schema` file, a `review`
 file, or both, and rejects a document with neither:
 
 ```yaml

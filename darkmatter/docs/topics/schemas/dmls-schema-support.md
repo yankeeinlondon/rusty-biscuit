@@ -302,6 +302,15 @@ While *authoring a schema* — inside an inline `$schema` value, a `type-definit
 - `alphanumeric` options inside `alphanumeric(` before the first `;`, leaving out the options already written there; after the `;`, only constraints
 - definition scaffolds: `{}`, `[]`, and `Name@./types.yaml`
 - constraint keywords from the [`SimplifiedSchema` Constraints](./schema-constraints.md) catalog, **filtered by the subject type's accepted-constraint list** — `min(` is not offered under a `boolean`, and the postfix `[](...)` list offers only the array-level constraint surface
+- keys of a schema object's `$constraints:` mapping, leaving out the keys already written there: a declaration's root (or a root-union arm) is offered `min-keys`, `max-keys`, `uncounted-keys`, and `closed`, and a property's object is also offered `required`, `non-null`, and `generated`. A flag is inserted with its only value (`closed: true`); a counted key leaves its value to you (`min-keys: `)
+
+  ```yaml
+  $schema:
+    title: string
+    $constraints:
+      min-keys: 1
+      # completion here offers max-keys, uncounted-keys, closed
+  ```
 - `$schema` file references (`./schema.yaml` scaffolds plus workspace paths)
 
 A deliberate gap: a constraint's *arguments* (a regex body, a glob, an enum member) are author-supplied values — the catalog has nothing truthful to offer there, so completion is silent rather than guessing.
@@ -577,7 +586,7 @@ The programmatic seam is the **`darkmatter` library itself** (`darkmatter::markd
 - **`EffectiveSchema`** carries the assembled result: `validate_with_positions(...)` for source-spanned problems, `dependencies()` for the files the schema depends on (what DMLS content-hash watches), and `advisories()` for non-fatal findings.
 - **`resolve::expand_named_types`** expands the named-type references of a schema held in memory, using that schema (not the file on disk) as `this`, so an unsaved buffer resolves. **`resolve::named_type_reference_path`** returns the file an explicit `Name@target` selects, using the resolver's own lookup. DMLS uses both for standalone schema files.
 - **`parse_standalone_schema_document`** is the passive classifier for standalone schema files — the same authority that decides when your open buffer is a `kind: schema` document deserving authoring intelligence.
-- **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` with their decoded-scalar forms `locate_schema_declaration_cursor_in_scalar(...)` / `locate_type_definition_cursor_in_scalar(...)` (over `decode_plain_scalar_node(...)`), and the located-failure parsers described in [Source-Aware Parsing and Located Failures](../../../../simplified-schema/docs/topics/diagnostics.md#source-aware-parsing-and-located-failures) — are public. DMLS uses these authorities when constructing completion and hover responses, which keeps their schema vocabulary aligned with library validation. A documentation generator, linter, or custom editor can build on the same primitives, while still owning its presentation and request-specific behavior.
+- **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `block_constraint_descriptors()` (the `$constraints:` keys), `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` with their decoded-scalar forms `locate_schema_declaration_cursor_in_scalar(...)` / `locate_type_definition_cursor_in_scalar(...)` (over `decode_plain_scalar_node(...)`), and the located-failure parsers described in [Source-Aware Parsing and Located Failures](../../../../simplified-schema/docs/topics/diagnostics.md#source-aware-parsing-and-located-failures) — are public. DMLS uses these authorities when constructing completion and hover responses, which keeps their schema vocabulary aligned with library validation. A documentation generator, linter, or custom editor can build on the same primitives, while still owning its presentation and request-specific behavior.
 
 The pattern in practice: a host application (Claudine is the worked example) authors its vocabulary as schema *data* — trigger schemas plus the libraries they import — embeds the files in its binary as an `EmbeddedSchemaBundle` for its own runtime (`DarkmatterSchemas::with_embedded_trigger_bundle`, consulted only for trigger names no schema root holds), and ships the same files on disk where the editor discovers them in the schema roots. One schema artifact, zero server code, the same validation rules everywhere; see [Embedded trigger bundles](./definition.md#embedded-trigger-bundles).
 

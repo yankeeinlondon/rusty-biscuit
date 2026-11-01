@@ -39,7 +39,7 @@ the reference is written:
 |---|---|
 | a schema file with both `$schema` and `types` | the entries of `types`; the exported properties remain separate |
 | a `kind: schema` file | the entries of its `types` mapping |
-| a pure schema file (`$schema` as the only top-level key) | the top-level entries of its `$schema` mapping |
+| a schema file with `$schema` and no `types` | the top-level entries of its `$schema` mapping |
 | a document's inline `$schema` mapping | the top-level entries of that mapping |
 | one inline arm of a root union (`$schema` is a YAML sequence) | that arm's own top-level entries; names are never combined across arms |
 

@@ -92,7 +92,7 @@ The cap limits how deeply one type string is written, not how deeply a document 
 
 ### `additionalProperties: false`
 
-Every inline object compiles to a JSON Schema fragment that sets `additionalProperties: false`. This is the intended default — declaring an inline object is a signal that the author wants shape restriction. It differs from the root schema default (`additionalProperties: true`) and from the opaque `object` type, which still compiles to `{ "type": "object" }` with no `additionalProperties: false`. Authors used to the root default may be surprised; this is documented behavior. A future `lenient` constraint on the inline object body may opt back to `true`.
+Every inline object compiles to a JSON Schema fragment that sets `additionalProperties: false`. This is the intended default — declaring an inline object is a signal that the author wants shape restriction. It differs from the root schema default (`additionalProperties: true`, which a root opts out of with [`closed`](#closed-roots-closed)) and from the opaque `object` type, which still compiles to `{ "type": "object" }` with no `additionalProperties: false`. Authors used to the root default may be surprised; this is documented behavior. A future `lenient` constraint on the inline object body may opt back to `true`.
 
 ### YAML Mapping vs. Inline Object
 
@@ -906,10 +906,10 @@ What else a block may hold depends on where it sits:
 
 | Block on | Accepted keys | Anything else |
 |---|---|---|
-| an object-typed property | `min-keys`, `max-keys`, `uncounted-keys`, `required`, `generated` | schema error ("`$constraints` key `…` is not valid on an inline object") |
-| the root schema, or one arm of a root union | `min-keys`, `max-keys`, `uncounted-keys` | schema error ("… is not valid on the root object") |
+| an object-typed property | `min-keys`, `max-keys`, `uncounted-keys`, `required`, `non-null`, `generated`, `closed` (a no-op: the object is already closed) | schema error ("`$constraints` key `…` is not valid on an inline object") |
+| the root schema, or one arm of a root union | `min-keys`, `max-keys`, `uncounted-keys`, [`closed`](#closed-roots-closed) | schema error ("… is not valid on the root object") |
 
-On a property's object, `required: true` and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
+On a property's object, `required: true`, `non-null: true`, and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
 
 ```yaml
 $schema:
@@ -918,6 +918,55 @@ $schema:
         $constraints:
             required: true
 ```
+
+### Closed Roots (`closed`)
+
+A root schema is open: a document may carry keys the schema does not
+declare. Add `closed: true` to the root's `$constraints` block when every key
+must be one the schema knows:
+
+```yaml
+$schema:
+    name: string
+    "<starting::x->": number
+    $constraints: { closed: true }
+```
+
+| Document | Valid? | Why |
+|---|---|---|
+| `{ name: Ada }` | yes | a declared property |
+| `{ name: Ada, x-count: 3 }` | yes | matches the pattern key |
+| `{ name: Ada, extra: 1 }` | no | an unknown key, reported at `extra` |
+
+- **What counts as declared.** The root's literal properties, its pattern-key
+  matches, and properties merged in from another
+  [layer](../schema-object.md#layering). A
+  [`<string>` catch-all](#pattern--dictionary-keys) admits every key, so
+  closing a root that has one changes nothing.
+- **How it fails.** An undeclared key is the same unknown-key problem a nested
+  object raises (`dm.schema.unknown_key`, `ValidationProblemCode::UnknownKey`),
+  located at the key, under strict and soft validation alike.
+- **Root unions.** `closed` goes on one arm, and closes only that arm; an
+  open sibling arm still accepts extra keys:
+
+  ```yaml
+  $schema:
+      - kind: literal(a; required)
+        name: string
+        $constraints: { closed: true }
+      - kind: literal(b; required)
+        name: string
+  ```
+
+  `{ kind: b, name: Ada, extra: 1 }` is valid; `{ kind: a, name: Ada, extra: 1 }`
+  is not, and the problem carries arm index `0`.
+- **Nested objects** are always closed, so `closed` there is accepted and
+  changes nothing.
+- **Flag only.** `closed` must be `true`; `closed: false` is a schema error
+  (roots are open without it).
+- **JSON Schema.** A closed root lowers to `additionalProperties: false`, and a
+  raw JSON Schema root with `additionalProperties: false` is judged the same
+  way.
 
 ### Content-Format Types (`yaml` / `json`)
 
