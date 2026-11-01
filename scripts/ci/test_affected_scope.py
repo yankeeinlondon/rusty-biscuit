@@ -6219,52 +6219,28 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             self.assertIn(required, latest_stable)
 
     def test_sniff_change_selects_exact_direct_dependents(self) -> None:
-        # Deliberate friction: this exact list makes a human acknowledge a
-        # change to sniff's direct dependents. On mismatch, the message below
-        # hands back the computed list ready to paste into this fixture.
+        # Checked against what each manifest declares, not a hand-kept list:
+        # a list went stale every time a package started depending on sniff.
         scope = self.scope("sniff/lib/src/lib.rs")
         self.assertEqual(["sniff", "test-toolkit"], scope["packages"])
-        computed = scope["reverse_dependencies"]
-        paste_ready = "\n".join(f'                "{name}",' for name in computed)
-        hint = (
-            "\nsniff's direct dependents changed (a workspace dependency edge "
-            "was added or removed). If intentional, replace the expected list "
-            f"in {__file__} :: {self._testMethodName} with:\n{paste_ready}"
-        )
-        self.assertEqual(
-            [
-                "biscuit-speaks",
-                "biscuit-speaks-cli",
-                "biscuit-terminal-cli",
-                "claudine",
-                "claudine-cli",
-                "claudine-gen",
-                "darkmatter",
-                "darkmatter-cli",
-                "dmls",
-                "messenger",
-                "messenger-cli",
-                "model-citizen",
-                "playa",
-                "playa-cli",
-                "rendezvous-core",
-                "rendezvous-daemon",
-                # `repo-deps` joined the root workspace when `scripts/` was
-                # promoted to a gating package; `drift` links sniff.
-                "repo-deps",
-                "research",
-                "sniff-cli",
-                # `hug --changed` asks sniff which paths Git reports changed.
-                "tree-hugger-cli",
-                "unchained-ai",
-                "worktree",
-                "worktree-cli",
-                "zed-dmls-cli",
-            ],
-            computed,
-            hint,
-        )
+        computed = set(scope["reverse_dependencies"])
 
+        declared: dict[str, list[bool]] = {}
+        for package in self.metadata["packages"]:
+            if package["name"] == "sniff":
+                continue
+            for dependency in package["dependencies"]:
+                if dependency["name"] == "sniff" and dependency.get("path"):
+                    declared.setdefault(package["name"], []).append(dependency["optional"])
+        required = {name for name, optional in declared.items() if not all(optional)}
+
+        self.assertTrue(required, "the workspace should have packages that depend on sniff")
+        # Direct only: a package reaching sniff through another package is not
+        # selected (decided 2026-08-13; see `direct_dependents`).
+        self.assertEqual(set(), computed - declared.keys(), "selected without declaring sniff")
+        # An optional dependency counts only when a feature enables it, which
+        # is the planner's call; a non-optional one must always be selected.
+        self.assertEqual(set(), required - computed, "declares sniff but was not selected")
 
 class WorkflowContractTests(unittest.TestCase):
     """Contracts in workflow YAML that are not represented by scope data."""
