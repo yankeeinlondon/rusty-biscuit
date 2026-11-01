@@ -1445,13 +1445,16 @@ def validate_package_ci(
                 f"{label} sets 'gates = false' and must give an 'exclusion-class' "
                 f"from {sorted(EXCLUSION_CLASSES)}"
             )
-        # A capability exclusion (physical hardware, say) is permanent by
-        # nature; everything else is backlog and must be time-bounded.
-        if exclusion_class == "capability":
+        # Only a `time-bounded` exclusion is about a date. A capability
+        # exclusion (physical hardware, say) is permanent, and a
+        # promotion-pending one lasts until someone works on the package: a
+        # deadline on a package nobody is touching only breaks every
+        # package's plan when it lapses.
+        if exclusion_class in ("capability", "promotion-pending"):
             if "expiry" in ci:
                 raise RuntimeError(
-                    f"{label} is excluded on capability grounds, which is permanent; "
-                    "drop 'expiry' or choose another exclusion-class"
+                    f"{label} is excluded as '{exclusion_class}', which has no end date; "
+                    "drop 'expiry' or choose exclusion-class 'time-bounded'"
                 )
         elif "expiry" not in ci:
             raise RuntimeError(

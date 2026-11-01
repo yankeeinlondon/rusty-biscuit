@@ -1024,14 +1024,14 @@ class PackagePolicyTests(unittest.TestCase):
             )
         self.assertIn("unknown field", str(raised.exception))
 
-    def test_exclusion_requires_owner_reason_class_and_expiry(self) -> None:
+    def test_exclusion_requires_owner_reason_and_class(self) -> None:
         for missing in ("reason", "owner", "exclusion-class"):
             with self.subTest(missing=missing):
                 ci = ci_policy(
                     gates=False,
                     reason="x",
                     owner="@o",
-                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    **{"exclusion-class": "promotion-pending"},
                 )
                 ci.pop(missing.replace("_", "-"))
                 with self.assertRaises(RuntimeError):
@@ -1058,7 +1058,7 @@ class PackagePolicyTests(unittest.TestCase):
             gates=False,
             reason="x",
             owner="@o",
-            **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+            **{"exclusion-class": "promotion-pending"},
         )
         validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
         resolved = package_ci_policy(
@@ -1078,11 +1078,30 @@ class PackagePolicyTests(unittest.TestCase):
             gates=False,
             reason="x",
             owner="@o",
-            **{"exclusion-class": "promotion-pending", "expiry": "2026-01-01"},
+            **{"exclusion-class": "time-bounded", "expiry": "2026-01-01"},
         )
         with self.assertRaises(RuntimeError) as raised:
             validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
         self.assertIn("expired", str(raised.exception))
+
+    def test_a_time_bounded_exclusion_requires_expiry(self) -> None:
+        ci = ci_policy(gates=False, reason="x", owner="@o", **{"exclusion-class": "time-bounded"})
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("must give an 'expiry'", str(raised.exception))
+
+    def test_a_promotion_pending_exclusion_must_not_carry_expiry(self) -> None:
+        # It lasts until someone works on the package; a date on a package
+        # nobody touches only fails every package's plan when it lapses.
+        ci = ci_policy(
+            gates=False,
+            reason="x",
+            owner="@o",
+            **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("no end date", str(raised.exception))
 
     def test_a_capability_exclusion_must_not_carry_expiry(self) -> None:
         ci = ci_policy(
@@ -1093,7 +1112,7 @@ class PackagePolicyTests(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError) as raised:
             validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
-        self.assertIn("permanent", str(raised.exception))
+        self.assertIn("no end date", str(raised.exception))
 
     def test_exclusion_governance_only_applies_to_non_gating(self) -> None:
         ci = ci_policy(gates=True, owner="@o", reason="x")
@@ -2117,7 +2136,7 @@ class GatesFalseScopeTests(unittest.TestCase):
                         gates=False,
                         reason="blocked on identified work",
                         owner="@o",
-                        **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                        **{"exclusion-class": "promotion-pending"},
                     ),
                 )
             },
@@ -3286,7 +3305,7 @@ class DependentSeamTests(unittest.TestCase):
                     gates=False,
                     reason="blocked on identified work",
                     owner="@o",
-                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    **{"exclusion-class": "promotion-pending"},
                 ),
             ),
         ]
@@ -3627,7 +3646,7 @@ class ApplyFixture(unittest.TestCase):
                     gates=False,
                     reason="promotion pending",
                     owner="@o",
-                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    **{"exclusion-class": "promotion-pending"},
                 ),
             ),
         ]
