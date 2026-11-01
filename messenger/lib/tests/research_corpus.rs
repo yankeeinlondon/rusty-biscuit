@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, LoadedYamlDocument, ValidationReport, YamlOutcome};
 use messenger::ProviderKind;
 use serde_json::Value;
 
@@ -52,6 +52,29 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
 
 fn load(path: &Path) -> Markdown {
     Markdown::try_from(path).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+}
+
+/// Whether `path` is a whole YAML document (the roster, overrides, and
+/// mappings) rather than Markdown with frontmatter.
+fn is_yaml(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "yaml")
+}
+
+fn load_yaml(path: &Path) -> LoadedYamlDocument {
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    LoadedYamlDocument::load(&text, path).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+}
+
+/// The file's top-level mapping: a Markdown file's frontmatter, or a whole
+/// YAML document.
+fn top_level(path: &Path) -> serde_json::Map<String, Value> {
+    if is_yaml(path) {
+        let Value::Object(top) = load_yaml(path).json().clone() else {
+            panic!("{} is not a YAML mapping", path.display());
+        };
+        return top;
+    }
+    load(path).frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
 /// One validator cache per test process, so each schema compiles once.
@@ -89,21 +112,41 @@ fn effective(markdown: &Markdown, schema: &Path) -> Arc<EffectiveSchema> {
     resolved
 }
 
+/// A whole YAML document's selected schema by canonical `$schema` path. The
+/// first document of each schema is judged by the `md schema validate` entry
+/// point itself; later ones reuse the schema it selected (see [`effective`]).
+fn yaml_effective(document: &LoadedYamlDocument, path: &Path, schema: &Path) -> (Arc<EffectiveSchema>, Option<ValidationReport>) {
+    static CACHE: OnceLock<Mutex<BTreeMap<PathBuf, Arc<EffectiveSchema>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Mutex::default);
+    let key = schema.canonicalize().unwrap_or_else(|e| panic!("resolve {}: {e}", schema.display()));
+    if let Some(found) = cache.lock().expect("cache").get(&key) {
+        return (Arc::clone(found), None);
+    }
+    let outcome = schemas()
+        .validate_loaded_yaml_document(document)
+        .unwrap_or_else(|e| panic!("schema error for {}: {e}", path.display()));
+    let YamlOutcome::Validated(validation) = outcome else {
+        panic!("{} selected no schema", path.display());
+    };
+    let found = Arc::clone(validation.effective());
+    cache.lock().expect("cache").insert(key, Arc::clone(&found));
+    (found, Some(validation.report))
+}
+
 /// Validates one file; a schema that fails to load is a test failure, not a
 /// validation problem.
 fn validate(path: &Path) -> ValidationReport {
-    let markdown = load(path);
-    let declared = markdown
-        .frontmatter()
-        .get::<String>("$schema")
-        .ok()
-        .flatten()
+    let mut top = top_level(path);
+    let declared = top
+        .remove("$schema")
+        .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_else(|| panic!("{} declares no $schema, so validation would be vacuous", path.display()));
     let schema = path.parent().expect("parent").join(declared);
-    let mut frontmatter: serde_json::Map<String, Value> =
-        markdown.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    frontmatter.remove("$schema");
-    effective(&markdown, &schema).validate(&Value::Object(frontmatter))
+    if is_yaml(path) {
+        let (effective, first) = yaml_effective(&load_yaml(path), path, &schema);
+        return first.unwrap_or_else(|| effective.validate(&Value::Object(top)));
+    }
+    effective(&load(path), &schema).validate(&Value::Object(top))
 }
 
 fn describe(report: &ValidationReport) -> String {
@@ -123,10 +166,8 @@ fn header_value(path: &Path, key: &str) -> Option<String> {
 }
 
 fn frontmatter_value(path: &Path, key: &str) -> Value {
-    load(path)
-        .frontmatter()
-        .get::<Value>(key)
-        .unwrap_or_else(|e| panic!("{key} in {}: {e}", path.display()))
+    top_level(path)
+        .remove(key)
         .unwrap_or_else(|| panic!("{} has no {key}", path.display()))
 }
 

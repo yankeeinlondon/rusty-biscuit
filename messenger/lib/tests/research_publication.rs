@@ -328,7 +328,7 @@ fn invalid_inputs_are_refused_and_leave_the_snapshot_untouched() {
     repo.write(
         "messenger/docs/research/platforms/_overrides.yaml",
         &format!(
-            "---\n$schema: ./_overrides.schema.yaml\nschema_version: 1\noverrides:\n- id: ovr.discord.unit\n  platform_id: discord\n  fact: c.discord.embed.description\n  field: unit\n  effective_value: unicode_scalars\n  target_hash: {fact}\n  schema_hash: {schema}\n  evidence:\n  - src.discord.docs\n  reason: Fixture correction.\n  author: maintainer\n  review_by: 2026-09-16\n---\n"
+            "$schema: ./_overrides.schema.yaml\nschema_version: 1\noverrides:\n- id: ovr.discord.unit\n  platform_id: discord\n  fact: c.discord.embed.description\n  field: unit\n  effective_value: unicode_scalars\n  target_hash: {fact}\n  schema_hash: {schema}\n  evidence:\n  - src.discord.docs\n  reason: Fixture correction.\n  author: maintainer\n  review_by: 2026-09-16\n"
         ),
     );
     let before_with_overrides = repo.tree();

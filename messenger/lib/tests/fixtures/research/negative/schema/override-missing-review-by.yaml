@@ -1,4 +1,3 @@
----
 # An override must carry an expiration/review date.
 # expect-problem: /overrides/0
 $schema: ../../../../../../docs/research/platforms/_overrides.schema.yaml
@@ -15,4 +14,3 @@ overrides:
   - src.fx.docs
   reason: r
   author: a
----

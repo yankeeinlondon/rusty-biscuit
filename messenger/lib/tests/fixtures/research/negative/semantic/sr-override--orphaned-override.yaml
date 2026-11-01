@@ -1,4 +1,3 @@
----
 # An override for a fact that no longer exists.
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-OVERRIDE
@@ -17,4 +16,3 @@ overrides:
   reason: r
   author: a
   review_by: 2027-09-17
----

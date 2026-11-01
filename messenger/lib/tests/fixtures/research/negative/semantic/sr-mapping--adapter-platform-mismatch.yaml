@@ -1,4 +1,3 @@
----
 # A slack adapter assessed against the discord platform document.
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-MAPPING
@@ -27,4 +26,3 @@ assessments:
     status: proposed
     proposed_by: agent
   requires_messenger_update: false
----

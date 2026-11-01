@@ -1,4 +1,3 @@
----
 # A reviewed override keyed to a fact and field, with evidence, reason,
 # author, review date, and the target/schema hashes it was reviewed against.
 # Expect: valid.
@@ -17,4 +16,3 @@ overrides:
   reason: SDK evidence resolves the unit.
   author: maintainer
   review_by: 2027-09-17
----

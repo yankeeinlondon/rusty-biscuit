@@ -1,4 +1,3 @@
----
 # Exactly ten curated sources for one platform, each with an explained
 # contribution and a recorded approval. Criterion 27 (cap reached, not
 # exceeded). Expect: valid.
@@ -91,4 +90,3 @@ platforms:
     approved_by: maintainer
     approved_on: *id001
 excluded: []
----

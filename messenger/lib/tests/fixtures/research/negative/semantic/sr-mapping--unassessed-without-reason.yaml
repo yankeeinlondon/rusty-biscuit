@@ -1,4 +1,3 @@
----
 # An unassessed mapping without a stale reason.
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-MAPPING
@@ -29,4 +28,3 @@ assessments:
     reviewed_by: m
     reviewed_on: 2026-09-17
   requires_messenger_update: false
----
