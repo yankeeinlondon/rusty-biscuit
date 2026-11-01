@@ -25,7 +25,7 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-31
 review_iterations: 0
-implemented: false
+implemented: true
 created: 2026-10-30
 owner: Ken Snyder <ken@ken.net>
 packages:
@@ -36,6 +36,7 @@ related:
     - 2026-10-30-reference-navigation-and-hover
     - 2026-10-28-schema-enhancements
     - 2026-10-28-extract-simplified-schema
+implemented_by: "claude/opus"
 ---
 
 # Schemas for YAML Documents

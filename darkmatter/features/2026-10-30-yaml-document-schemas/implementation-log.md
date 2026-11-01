@@ -94,6 +94,7 @@ packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+    - messenger
     - simplified-schema
 decisions_for_review:
     - |-
@@ -349,22 +350,128 @@ decisions_for_review:
         the span (JSON `error: "yaml_parse"` plus `line`/`column`), and a file
         that cannot be read is the same outcome (exit 3) without a location.
         Redo cost: wording in `emit_pretty`/`emit_json`.
-message_to_agent: |-
-    Phase 5 is complete: `md schema validate` routes `.yaml`/`.yml` (resolved path,
-    ASCII case-insensitive) through the library. The library entry point now has a
-    two-step form: `LoadedYamlDocument::load(text, path)` (the ONLY place a document's
-    own load error comes from) and `DarkmatterSchemas::validate_loaded_yaml_document(&loaded)`
-    (selection/schema errors only); `validate_yaml_document` is both in one and is
-    unchanged. Use the two steps in DMLS when you must tell "the open YAML file is not
-    valid YAML" (publish the loader error once, skip validation) from "its `$schema`
-    names a file that fails to load" (both are `SchemaError::SchemaDocument`). All
-    four `docs/topics/schemas/*.md` pages now describe the CLI as shipped; the only
-    remaining **planned** markers for this feature are DMLS ones: definition.md
-    ("YAML Documents" intro: "DMLS diagnostics, completion, and hover inside YAML files
-    are **planned**") and schema-triggers.md ("DMLS reporting these errors in the open
-    trigger file is **planned**"). Remove them when DMLS lands. The skill
-    `.claude/skills/darkmatter/schema.md` ("Whole YAML documents") still says DMLS
-    does not call the entry point yet; update it.
+    - |-
+        Phase 6: each YAML document's kind registry is stored inside that
+        document's existing trigger-registry entry (built in the same
+        background preparation, from the same schema-root reads), not in a
+        separate `OverlayCache.kind_registries` map as the plan named it. It
+        therefore shares the trigger registry's invalidation (watched
+        events, saves, rescans, configuration and manifest changes) and its
+        per-context identity for free. Alternative: a parallel cache with
+        its own invalidation, which would duplicate that logic. Redo cost:
+        move `Scope.kinds` and `set_buffer` into a new map in
+        `overlay/registry.rs`.
+    - |-
+        Phase 6: a kind registry reads an open, unsaved definition buffer in
+        place of its file (the spec requires unsaved definition edits to
+        refresh open YAML documents), while trigger registries still read
+        only saved files, as before. Only a registry that actually read that
+        file with different text is prepared again. Alternative: also make
+        triggers honor unsaved buffers, a wider behavior change outside this
+        feature. Redo cost: none for this feature.
+    - |-
+        Phase 6: an informal standalone schema file (a YAML file with a root
+        `$schema` and no `kind`, the editor's existing schema-authoring
+        documents) keeps only its envelope diagnostics in DMLS; the YAML
+        document judgment is shown only when its `kind` selects a
+        definition. The library (and so `md schema validate`, since Phase 5)
+        takes the root-`$schema` route for such a file and judges the file as
+        data against its own definition, e.g. "title is required" for
+        `$schema: {title: string(required)}`. So DMLS and `md` disagree for
+        these files. Alternatives: (a) publish the library judgment in DMLS
+        too, which flags every informal schema file in a workspace with
+        nonsense errors and broke about ten existing editor tests; (b) change
+        the library selection so a recognized informal envelope is "no
+        schema", fixing `md` too, but contradicting the spec's literal rule
+        ("a root `$schema` selects"). Recommendation: (b), decided by the
+        reviewer. Redo cost: (b) is one rule in `yaml_documents/select.rs`
+        plus its tests; the DMLS guard in `overlay/mod.rs` can then go.
+    - |-
+        Phase 6: in a claimed `kind: schema` / `kind: schema-trigger` file
+        each problem is published once, by these rules: a definition problem
+        (anything but a kind check or a meta-type problem) belongs to the
+        YAML report, so the envelope's whole-document error
+        (`dm.schema.document_malformed` / `dm.schema.prepare`) is not shown
+        beside it; a trigger grammar failure is the report's
+        `dm.schema.kind_check` on the offending node, not the envelope's
+        whole-file `dm.schema.prepare`; a standalone schema's own named-type
+        failure keeps its envelope diagnostic (with related locations) and
+        the duplicate kind check is dropped; a meta-type problem keeps the
+        envelope's token-located error. Three existing tests changed
+        expectations accordingly (`schema_roots_parity` forbidden prefix,
+        `lsp_session` block-plain-flow-indicator, `suggest_constraint_phase1`
+        malformed tagged envelope). Alternative: keep the envelope codes
+        everywhere and drop the report's problems, losing precise ranges.
+        Redo cost: the filters in `diagnostics/yaml_document.rs` and the two
+        guards in `diagnostics/frontmatter.rs`.
+    - |-
+        Phase 6: a YAML file that does not load gets one parse diagnostic:
+        the loader's `dm.frontmatter.yaml_parse` (source
+        `darkmatter.frontmatter`) for ordinary YAML, but the envelope's own
+        established code (`dm.schema.prepare` for a trigger,
+        `dm.schema.document_malformed` for a standalone schema) when a schema
+        envelope claims the text, since those codes are documented as stable
+        for clients. Alternative: always the loader's code, which changes two
+        established codes. Redo cost: one guard in
+        `diagnostics/yaml_document.rs` and two existing tests.
+    - |-
+        Phase 6: in a whole YAML document an undeclared key
+        (`dm.schema.unknown_key`) is an error even without `[schema] strict`,
+        like a missing required key (the plan named only the latter). Both
+        make `md schema validate` exit 1 and nothing later supplies or
+        strips a key. Alternative: keep the frontmatter rule (warning unless
+        strict). Redo cost: one arm in `classify`.
+    - |-
+        Phase 6: the editor test helper pattern `latest = wait(); while let
+        Some(p) = take_buffered() { latest = p }` returned the OLDEST
+        buffered publication, because `take_buffered_diagnostics` takes the
+        newest first. It was copied in seven places in six DMLS test files;
+        all seven now keep the first (newest) and drop the rest. All 147
+        affected tests still pass, so none depended on the old result.
+        Redo cost: none.
+    - |-
+        Phase 6: `docs/lsp/features.md` and `docs/lsp/frontmatter.md`, which
+        the plan listed for 6.6, were not changed: the first is a proposed
+        feature inventory and the second describes Markdown frontmatter keys;
+        the YAML behavior is documented in `dmls-schema-support.md` (new
+        "YAML Documents" section), `lsp/indexing.md` ("YAML document kinds"),
+        `lsp/configuration.md`, and the two `dmls/docs` pages.
+    - |-
+        Phase 7: Messenger's research loader now reads the roster, overrides,
+        and mappings files as whole YAML documents (the same library call
+        `md schema validate` makes), not as Markdown frontmatter, and all 26
+        YAML test fixtures lost their `---` fences. The plan asked only that
+        consumers of platforms.yaml be updated. Because one loader serves all
+        three YAML contract files, switching it moved all three. Alternative:
+        accept both the fenced and the unfenced form. That keeps two formats
+        alive, and the fenced form already fails `md schema validate`. Redo
+        cost: one branch in `load.rs` and restoring the fixture fences.
+    - |-
+        Phase 7: the repository YAML corpus does not pass for 11 files, and
+        I left them unedited. They are Claudine design sketches in
+        `claudine/docs/schemas/` (action, flow-control, lifecycle, loop,
+        stack), which the existing corpus and golden manifest already pin as
+        drafts that do not parse; four drafts inside a closed Claudine
+        feature directory; the frozen golden-test copy of `err.yaml`; and
+        `docs/drafts/memory.yaml`. The plan said to fix documents until all
+        pass. Fixing the sketches means designing Claudine's lifecycle
+        schemas, and editing snapshots rewrites history. Alternative: delete
+        them or rewrite them into valid grammar. Redo cost: per file, plus
+        updating the corpus exception table and golden manifest.
+    - |-
+        Phase 7: `darkmatter/docs/schemas/err.yaml` lost `name: err` (the
+        closed schema envelope has no `name`) and its `$schema:
+        ./schema-definition.yaml` line (under `kind: schema` that line
+        exported an empty schema). I deleted the empty placeholder
+        `schema-definition.yaml`, and `authoring-schemas.md` now transcludes
+        the real definition, `simplified-schema/schemas/schema.yaml`. Four
+        tests that pinned the old state were updated. One of them
+        (`meta_schema_phase4`) also now reads `$schema` declarations from
+        `darkmatter/schemas/`, because `docs/schemas` no longer has one. The
+        plan's rule 4 had restored the placeholder as the pre-feature state
+        and left 7.3 to reconcile it. Alternative: keep the placeholder and
+        the `$schema` line, and only drop `name`. Redo cost: restore one
+        file and four test expectations.
 source_files_during_phase_4:
     - darkmatter/dmls/src/diagnostics/codes.rs
     - darkmatter/dmls/src/diagnostics/frontmatter.rs
@@ -425,6 +532,289 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/cli.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/yaml_document.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/frontmatter.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/references.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/yaml_document.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/discover.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/l1/call_check_agreement.rs
+    - darkmatter/dmls/tests/l1/collection_editor.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/recursive_call_check.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - darkmatter/dmls/tests/l1/standalone_stdio.rs
+    - darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/tests/l1/yaml_document_editor.rs
+    - darkmatter/dmls/tests/l1/yaml_document_session.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+docs_updated_during_phase_6:
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+    - claudine/docs/research/provider-schema.yaml
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/docs/schemas/err.yaml
+    - darkmatter/docs/schemas/schema-definition.yaml
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - messenger/docs/platforms.yaml
+    - messenger/lib/src/research/error.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/tests/fixtures/research/contract/mappings-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/roster-cap-10.yaml
+    - messenger/lib/tests/fixtures/research/contract/roster-refresh-interval-max.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/mapping-missing-fingerprints.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/mapping-sha256.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/override-missing-review-by.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-cap-11.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-cap-above-ceiling.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-platform-refresh-interval-above-max.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-refresh-interval-above-max.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-retained-without-contribution.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-approved-without-approver.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-duplicate-source.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-over-configured-cap.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-source-foreign-interface.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--orphaned-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-companion-as-adapter.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-email-active.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-missing-adapter.yaml
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_publication.rs
+    - messenger/lib/tests/research_validation.rs
+    - schemas/kind.yaml
+docs_updated_during_phase_7:
+    - darkmatter/README.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - docs/kind-documents.md
+    - simplified-schema/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/testing.md
+    - .claude/skills/simplified-schema/SKILL.md
+source_code:
+    - claudine/docs/research/provider-schema.yaml
+    - darkmatter/cli/src/args/target.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/cli/tests/l1/schema_validate_kind_documents.rs
+    - darkmatter/cli/tests/l1/schema_validate_yaml.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/kind_document.rs
+    - darkmatter/dmls/src/diagnostics/mod.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/diagnostics/yaml_document.rs
+    - darkmatter/dmls/src/overlay/analysis.rs
+    - darkmatter/dmls/src/overlay/frontmatter.rs
+    - darkmatter/dmls/src/overlay/kind_document.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/src/overlay/references.rs
+    - darkmatter/dmls/src/overlay/registry.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/overlay/suggestions.rs
+    - darkmatter/dmls/src/overlay/yaml_document.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/workspace/discover.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/l1/call_check_agreement.rs
+    - darkmatter/dmls/tests/l1/collection_editor.rs
+    - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+    - darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+    - darkmatter/dmls/tests/l1/kind_document_editor.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/recursive_call_check.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - darkmatter/dmls/tests/l1/standalone_stdio.rs
+    - darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/dmls/tests/l1/workspace_file_list.rs
+    - darkmatter/dmls/tests/l1/yaml_document_editor.rs
+    - darkmatter/dmls/tests/l1/yaml_document_session.rs
+    - darkmatter/docs/schemas/err.yaml
+    - darkmatter/docs/schemas/schema-definition.yaml
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/embedded.rs
+    - darkmatter/lib/src/markdown/schemas/kind_documents.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+    - darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+    - darkmatter/lib/tests/l1/function_call_binding.rs
+    - darkmatter/lib/tests/l1/kind_documents.rs
+    - darkmatter/lib/tests/l1/kind_semantic_checks.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/non_null_frontmatter.rs
+    - darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+    - darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+    - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+    - darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+    - darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+    - darkmatter/lib/tests/l1/yaml_document_loading.rs
+    - darkmatter/lib/tests/l1/yaml_document_selection.rs
+    - darkmatter/lib/tests/l1/yaml_kind_registry.rs
+    - darkmatter/schemas/schema-trigger.yaml
+    - messenger/docs/platforms.yaml
+    - messenger/lib/src/research/error.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/tests/fixtures/research/contract/mappings-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+    - messenger/lib/tests/fixtures/research/contract/roster-cap-10.yaml
+    - messenger/lib/tests/fixtures/research/contract/roster-refresh-interval-max.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/mapping-missing-fingerprints.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/mapping-sha256.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/override-missing-review-by.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-cap-11.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-cap-above-ceiling.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-platform-refresh-interval-above-max.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-refresh-interval-above-max.yaml
+    - messenger/lib/tests/fixtures/research/negative/schema/roster-retained-without-contribution.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-approved-without-approver.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-duplicate-source.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-over-configured-cap.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-source-foreign-interface.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--orphaned-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-companion-as-adapter.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-email-active.yaml
+    - messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-missing-adapter.yaml
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_publication.rs
+    - messenger/lib/tests/research_validation.rs
+    - schemas/kind.yaml
+    - simplified-schema/lib/src/claims.rs
+    - simplified-schema/lib/src/envelope.rs
+    - simplified-schema/lib/src/errors.rs
+    - simplified-schema/lib/src/format.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/positions.rs
+    - simplified-schema/lib/src/prepared.rs
+    - simplified-schema/lib/src/resolve.rs
+    - simplified-schema/lib/src/resolve/recursive.rs
+    - simplified-schema/lib/src/schema/export.rs
+    - simplified-schema/lib/src/schema/layer.rs
+    - simplified-schema/lib/src/schema/mod.rs
+    - simplified-schema/lib/src/simplified/convert.rs
+    - simplified-schema/lib/src/simplified/grammar.rs
+    - simplified-schema/lib/src/simplified/mod.rs
+    - simplified-schema/lib/src/simplified/narrowing.rs
+    - simplified-schema/lib/src/simplified/serialize.rs
+    - simplified-schema/lib/src/simplified/source.rs
+    - simplified-schema/lib/src/simplified/standalone.rs
+    - simplified-schema/lib/src/simplified/types.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/tests/l1/claimed_values.rs
+    - simplified-schema/lib/tests/l1/closed_roots.rs
+    - simplified-schema/lib/tests/l1/declaration_grammar.rs
+    - simplified-schema/lib/tests/l1/declaration_narrowing.rs
+    - simplified-schema/lib/tests/l1/envelope_admission.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/non_null_properties.rs
+    - simplified-schema/lib/tests/l1/schema_target_classification.rs
+    - simplified-schema/lib/tests/l1/schema_target_inspection.rs
+    - simplified-schema/lib/tests/l1/shipped_corpus.rs
+    - simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+    - simplified-schema/schemas/schema.yaml
+    - simplified-schema/schemas/yaml-schema.yaml
+documentation:
+    - darkmatter/README.md
+    - darkmatter/cli/README.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/cli/policy.md
+    - darkmatter/docs/cli/report-json.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/lsp/configuration.md
+    - darkmatter/docs/lsp/indexing.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/index.md
+    - darkmatter/docs/topics/schemas/schema-discovery.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - docs/kind-documents.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/conversion.md
+    - simplified-schema/docs/topics/custom-vocabulary.md
+    - simplified-schema/docs/topics/diagnostics.md
+    - simplified-schema/docs/topics/language-core.md
+    - simplified-schema/docs/topics/language/index.md
+    - simplified-schema/docs/topics/language/local-type-references.md
+    - simplified-schema/docs/topics/language/objects-and-named-types.md
+    - simplified-schema/docs/topics/language/schema-documents.md
+    - simplified-schema/docs/topics/language/schema-types.md
+    - simplified-schema/docs/topics/language/subtyping.md
+    - simplified-schema/docs/topics/language/types.md
+    - simplified-schema/docs/topics/language/unions.md
+    - simplified-schema/docs/topics/schema-object.md
+    - simplified-schema/docs/topics/selecting-schema-files.md
+    - simplified-schema/docs/topics/validation.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-30-yaml-document-schemas (7 phases)
@@ -1132,3 +1522,349 @@ Code-smell grep (`serde(default)`, `unwrap_or_default()`, `.ok()`,
   comparison and the `canonicalize_simplified` call the Markdown route
   already uses; no new path comparison.
 - No load-sensitive or pre-existing failures observed.
+
+## Phase 6
+
+### 6.1 Routing and registry worker integration
+
+- One routing test, `dmls::overlay::is_yaml_path` (ASCII case-insensitive
+  `yaml`/`yml`), replaces the copies in `overlay/mod.rs`, `router.rs`
+  (`didSave`), `overlay/registry.rs` (invalidation), and
+  `workspace/discover.rs` (listing). The workspace watch globs are now
+  `**/*.[yY][aA][mM][lL]` and `**/*.[yY][mM][lL]`
+  (`workspace::watch::{YAML_GLOB, YML_GLOB}`).
+- A YAML path is routed before the Markdown frontmatter path, so a leading
+  `---` is a YAML document marker, never a fence.
+- `registry_demand` now asks for a registry for every YAML document inside a
+  workspace folder. Its preparation (`Preparation::run`, on the registry
+  worker) also builds the document's `KindRegistry` from the same root
+  contents, through `BufferedRoots` (an open buffer's text in place of its
+  file). The registry is stored on the document's `Scope` (`InstalledKinds`,
+  versioned), records what it read (`Dependencies.kind_sources`, imports as
+  file dependencies, searched locations), and shares the scope's
+  invalidation. **Departure from the plan:** the plan named a separate
+  `OverlayCache.kind_registries`; see `decisions_for_review`.
+- Unsaved definition edits: `didOpen`/`didChange`/`didClose` of a YAML file
+  call `OverlayState::set_yaml_buffer` → `TriggerRegistries::set_buffer`,
+  which marks stale only scopes whose kind registry read that file with
+  other text. Outside a workspace folder the shipped registry is used.
+
+### 6.2 YAML document overlay
+
+- `overlay/yaml_document.rs`: dispatch-thread only. `LoadedYamlDocument::load`
+  (a load failure keeps the last loaded tree for completion, stale), then
+  `validate_loaded_yaml_document` with the installed registry; cached per URI
+  by text, revision, context identity, and registry version, plus
+  content-hash dependencies and probes of the root-`$schema` route (the same
+  `deps_unchanged`/`probes_unchanged` the Markdown cache uses).
+- `DocumentOverlay.yaml_document` carries the outcome (`LoadFailed`,
+  `Unvalidated`, `NoSchema`, `Failed`, `Validated`); the bundle is the
+  selected schema alone; `AnalysisIdentity.yaml_document` makes the root
+  shape the selected schema's (never the Markdown baseline).
+  `FrontmatterAst::parse_yaml_document` restores the reverted recovery tree
+  (`$schema` is data on the kind route) and treats the buffer end as inside
+  the document.
+- Library: `YamlValidation` gained `effective()` and `document_json()`
+  (additive; its `Debug` is now hand-written because `EffectiveSchema` has
+  none).
+- The envelope paths (trigger, standalone) still run for YAML; the YAML state
+  is attached to their overlay (`with_yaml`) or a YAML-only overlay is built
+  with definition-driven `frontmatter_authoring`. A standalone schema
+  envelope off the kind route keeps its own overlay (decision recorded).
+
+### 6.3 Diagnostics
+
+- `diagnostics/yaml_document.rs` replaces every Markdown frontmatter pass for
+  a YAML document. `ProblemGrading::{Frontmatter, YamlDocument}` threads into
+  `classify`: in a YAML document `missing_required` and `unknown_key` are
+  errors in either mode; `KindCheck` is ranged by `YamlValidation::byte_range`.
+- Selection failures are one `dm.schema.prepare` on the `kind` value with the
+  definition files as related information; a root `$schema` failure goes
+  through the existing `schema_prepare_diagnostic` (failure site = the
+  reference, related information into the referenced file).
+- One publication per problem: see the dedup rules in `decisions_for_review`.
+- `DslProvider` (Markdown body directives, interpolation, shell) returns
+  nothing for a YAML path.
+
+### 6.4 Completion and hover
+
+- Definition-driven on both routes via the shared analysis; schema authoring
+  inside `$schema`/`types` of claimed `schema`/`yaml-schema` documents (the
+  standalone authoring state, or `frontmatter_authoring` from the
+  definition); `$schema` on the root route keeps reference hover/links
+  (`SchemaReferenceFacts::select_in` over the YAML tree); on the kind route
+  `$schema` is data (`schema_key_is_reference`). The add-missing-required-keys
+  code action works unchanged on the YAML tree.
+
+### 6.5 Tests
+
+Requirement → test (all L1, declared in `dmls/tests/l1/main.rs`):
+
+| Requirement | Test |
+|---|---|
+| kind route control + value / unknown key ranges | `yaml_document_editor::a_claimed_repository_kind_is_validated_by_its_definition_alone` |
+| shipped kind outside any root, one publication | `…::a_shipped_kind_is_claimed_without_any_schema_root` |
+| missing required = error non-strict, add-keys action | `…::a_missing_required_key_is_an_error_without_strict_mode_and_offers_the_add_keys_action` |
+| unknown key = error non-strict | `…::an_undeclared_key_of_a_closed_definition_is_an_error_without_strict_mode` |
+| trigger definition problem once; kind check once on the glob line | `…::a_kind_check_is_published_once_on_the_node_it_judges` |
+| duplicate claim on `kind`, related to both files | `…::a_kind_claimed_twice_is_one_error_on_the_kind_naming_both_definitions` |
+| completion/hover from the definition only (no `title`) | `…::completion_and_hover_describe_the_selected_definition_alone` |
+| schema authoring inside exports | `…::a_claimed_schema_document_keeps_schema_authoring_inside_its_exports` |
+| user kind's `$schema` is data | `…::a_user_kinds_schema_key_is_data_not_a_reference` |
+| root route soft (`"8080"`), nothing written, `$schema` not unknown, `"2.5"` fails | `…::a_root_schema_validates_softly_and_is_not_an_unknown_key` |
+| `{{ 1 }}` fails a number, `{{ name }}` passes a string, no body providers | `…::an_interpolation_string_is_ordinary_data_in_a_yaml_document` |
+| unresolvable root `$schema` on its value | `…::an_unresolvable_root_schema_is_a_prepare_error_on_its_value` |
+| referenced definition failure related into its file | `…::a_root_schema_naming_a_bad_definition_relates_the_failure_into_that_file` |
+| root route completion/hover + `$schema` reference hover | `…::the_root_schema_route_completes_its_contract_and_assists_the_reference` |
+| NoSchema shapes (mapping without kind/`$schema`, unclaimed kind, sequence, scalar, empty) | `…::a_document_with_neither_kind_nor_schema_is_not_validated` |
+| load failures (malformed, duplicate key, second document) → one parse error | `…::a_document_that_does_not_load_gets_one_parse_error_and_no_schema_problems` |
+| `---`/`...` markers, `.YAML`/`.Yml` | `…::document_markers_are_yaml_not_frontmatter_fences` |
+| Unicode (UTF-16), CRLF, BOM ranges | `…::ranges_count_utf16_after_unicode_and_survive_crlf_line_endings` |
+| route change clears stale diagnostics/completion | `…::changing_or_removing_the_kind_or_schema_clears_the_earlier_results` |
+| unsaved definition edit refreshes; close restores | `yaml_document_session::an_unsaved_definition_edit_refreshes_an_open_document_until_the_definition_closes` |
+| created definition claims (type 1); deleted clears (type 3), no stale hover | `…::a_definition_created_on_disk_starts_claiming_and_deleting_it_clears_the_results` |
+| root `$schema` file edit (type 2) / deletion (type 3) refreshes | `…::an_edited_root_schema_file_refreshes_the_document_that_names_it` |
+| scope isolation between two workspace folders | `…::each_workspace_folder_selects_from_its_own_definitions` |
+| preparation off the dispatch thread | `…::a_yaml_documents_kinds_are_prepared_off_the_dispatch_thread` |
+| stdio smoke (built binary) | `standalone_stdio::yaml_document_diagnostics_reach_a_stdio_client` |
+| `is_yaml_path` cases; watch globs agree with it | `overlay::tests::a_yaml_path_is_recognized_in_any_ascii_letter_case_and_nothing_else_is`, `workspace::watch::tests::yaml_watch_globs_match_every_letter_case_the_router_accepts` |
+
+Existing tests whose expectations changed with the new contract:
+`overlay::tests::{escaped_quotes_stay_inert_without_panicking,
+standalone_activation_is_content_based_not_path_based,
+shipped_schema_corpus_uses_content_classification}` (an ordinary YAML file now
+has an overlay that selects no schema, still inert),
+`schema_roots_parity::a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls`
+(now `dm.schema.kind_check`, once, on the pattern's line),
+`lsp_session::meta_schema_standalone_block_plain_flow_indicator_retains_last_good`
+(the `notes` key is `unknown_key` on the key, no `document_malformed`),
+`suggest_constraint_phase1::suggest_phase5_malformed_tagged_envelope_error`
+(one located `dm.schema.*` error). The drain-loop helper was corrected in
+seven places (decision recorded); `workspace_file_list.rs` reads the new glob
+constants.
+
+Input robustness matrix: the loader and selection matrices live in the
+library suites (Phases 4–5); DMLS spawns nothing per cell and wires one
+loader (control + three invalid shapes), the `kind` field (claimed, unclaimed
+string, absent), and the fallback `$schema` (valid, unresolvable, bad
+definition). Code-smell grep over `overlay/yaml_document.rs`,
+`diagnostics/yaml_document.rs`, and the `registry.rs` additions: only an LSP
+range default (`unwrap_or_default` on a `Range`) and the existing
+"unreadable dependency hashes to `None`" `.ok()`, neither a load-bearing parse.
+
+### 6.6 Docs and skills
+
+- `docs/topics/schemas/dmls-schema-support.md`: new "YAML Documents" section
+  (routes, what is reported, completion/hover, refresh with a Mermaid flow),
+  the coverage-matrix row, the unsaved-edit bullet.
+- `docs/lsp/indexing.md` ("YAML document kinds", refresh table row, listing
+  case), `docs/lsp/configuration.md` (globs, strict note, extensions note,
+  add-missing-key), `dmls/docs/diagnostics.md` (codes, "Whole YAML
+  documents", open-envelope behavior, severity), `dmls/docs/file-references.md`.
+- The last two **planned** markers are removed (`definition.md`,
+  `schema-triggers.md`).
+- Skills: `.claude/skills/darkmatter/dmls.md` ("Whole YAML documents"),
+  `.claude/skills/darkmatter/schema.md` (DMLS now calls the entry point).
+
+### Gates (run once each, after all edits, with no subagent running)
+
+- Targeted while building: `cargo nextest run -p dmls -E 'test(yaml_document_editor::)'` 19/19,
+  `-E 'test(yaml_document_session::)'` 5/5, the stdio smoke 1/1.
+- `darkmatter`: `just lint` clean (exit 0, including the zed-dmls wasm check);
+  `just test` 13000 passed, 10 skipped, 0 failed, in one run;
+  `just check-tier-coverage darkmatter`: 0 stranded.
+- Affected scope (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages: [darkmatter, dmls, test-toolkit, darkmatter-cli]`, `change_class: package`;
+  gates required and run.
+- Dependents: the library change is additive (`YamlValidation::effective`,
+  `document_json`); `cargo check --all-targets -p claudine -p claudine-cli -p messenger -p research`
+  is clean. No dependent test uses the new API.
+- Cross-OS: `just cross-check dmls --os windows` (the buffer map and kind
+  sources are keyed by normalized paths): 1691 passed, 9 skipped.
+- No load-sensitive or pre-existing failures observed.
+
+## Phase 7
+
+Note on the starting tree: Phase 6's changes were still uncommitted when this
+phase began (`git status` listed them), so the working tree holds Phases 6
+and 7 together. The `source_files_during_phase_7` list names only this
+phase's files.
+
+### 7.1 `messenger/docs/platforms.yaml`
+
+- Before the change, the fenced roster already failed `md schema validate`
+  (exit 3, "more than one document"): the trailing `---` is a second YAML
+  document under the whole-file route.
+- Removed both fences and the obsolete fence-workaround comment, keeping
+  `$schema: ./platforms.schema.yaml`. `md schema validate
+  messenger/docs/platforms.yaml` exits 0. A deliberate break
+  (`roster_version: 2`) exits 1 with "roster_version 1 was expected (at line
+  19, column 17)". The file was then restored.
+- Consumer: Messenger's research `Loader` (`messenger/lib/src/research/load.rs`)
+  read the roster, overrides, and mappings as Markdown frontmatter. YAML
+  contract kinds (`ContractKind::is_yaml_document`) now load with
+  `LoadedYamlDocument::load` and validate with
+  `DarkmatterSchemas::validate_loaded_yaml_document` in the file's own
+  context (the `md schema validate` route: root `$schema`, no Markdown
+  baseline). Research documents (Markdown) are unchanged. A YAML load failure
+  or non-mapping root is the new `ResearchError::Document`. `$schema` binding
+  is still checked first, on the loaded JSON.
+- Library (additive): `LoadedYamlDocument::json()`, so a host reads the
+  values from the same load and never needs a second YAML parser.
+- All 26 YAML fixtures under `messenger/lib/tests/fixtures/research/` lost
+  their fences; `research_publication.rs`'s written `_overrides.yaml` too.
+  `research_corpus.rs` reads `.yaml` files through `LoadedYamlDocument` and
+  validates the first document of each schema through
+  `validate_loaded_yaml_document`, reusing that call's `effective()` for later
+  documents of the same schema (the file already cached Markdown schemas
+  the same way for the same reason).
+- New test `research_validation::yaml_contract_files_load_as_one_whole_yaml_document`:
+  control (shipped roster, clean, `$schema` not data, `roster_version` 1),
+  leading `---` marker accepted, a schema break as a `/roster_version`
+  `Schema` finding, then three load errors (old fenced form → "more than one
+  document", duplicate key, sequence root → "not a mapping"), each a
+  `Document` error naming the repository path without the host root. The
+  overrides loader gets one fenced case, which proves it is wired to the
+  same branch.
+
+### 7.2 Skills
+
+- `.claude/skills/darkmatter/SKILL.md`: ownership, registry lifecycle and
+  failure policy in brief, and the "a fenced YAML file is two documents"
+  rule.
+- `schema.md`: an "Ownership and lifecycle" list (who owns which definition,
+  when a registry is built and reused, the failure policy, informal schema
+  files judged as data) and the `LoadedYamlDocument::json()` rule.
+- `cli.md`: fenced YAML exits 3; informal schema files can fail through `md`
+  while DMLS shows nothing.
+- `testing.md`: the YAML document corpus test, how its exceptions retire,
+  the rule that snapshots are never edited to make a corpus pass, and
+  unfenced YAML fixtures.
+- `.claude/skills/simplified-schema/SKILL.md`: the ownership boundary.
+- `dmls.md` was already updated in Phase 6.
+
+### 7.3 Corpus over repository YAML
+
+One-off run: `md schema validate` on every tracked `.yaml`/`.yml` file with a
+top-level `kind` (142 files: 100 `schema`, 16 `schema-trigger`, 3
+`yaml-schema`, and 23 unclaimed kinds such as `example`, `sequence`, and
+`trigger-schema`, which correctly select nothing). The first run had 13
+failures. Fixed:
+
+- `darkmatter/docs/schemas/err.yaml`: removed `name: err` (the closed
+  `kind: schema` envelope has no `name`) and the `$schema:
+  ./schema-definition.yaml` line. Under `kind: schema`, `$schema` is the
+  exported document schema, so that line exported an empty placeholder.
+  The file is now a types-only schema document. The empty placeholder
+  `darkmatter/docs/schemas/schema-definition.yaml` was deleted, and
+  `authoring-schemas.md`'s "recursive truth" transclusion now shows the
+  real definition, `simplified-schema/schemas/schema.yaml`. Tests that
+  pinned the old state: `shipped_schema_corpus` (two `EXCEPTIONS` removed,
+  so the registry corpus now checks `err.yaml`), and
+  `meta_schema_phase1::shipped_schema_corpus_is_passively_classified_without_resolution`
+  (`err.yaml` is now a schema). The DMLS unit test
+  `overlay::tests::shipped_schema_corpus_uses_content_classification`
+  (`err.yaml` is now "ready") and
+  `meta_schema_phase4::shipped_schema_artifacts_validate_through_semantic_keywords`
+  were also updated. The last one lost its only `$schema` declaration, so
+  it now also reads the `$schema` declarations of `darkmatter/schemas/`
+  (the `schema-trigger` definition and the global catalog), which keeps the
+  assertion meaningful rather than weakening it.
+- `claudine/docs/research/provider-schema.yaml`: removed a stray empty
+  `type:` key. `claudine/docs/research` is now one of the registry corpus
+  areas. Checked as load-bearing: putting the key back fails the test,
+  naming the file.
+
+Left failing, by decision (see `decisions_for_review`): the Claudine design
+sketches `claudine/docs/schemas/{action,partials/flow-control,partials/lifecycle,partials/loop,partials/stack}.yaml`
+(already pinned as drafts by `shipped_schema_corpus` and the golden
+manifest), four drafts in a closed Claudine feature directory, the frozen
+golden input copy of `err.yaml`, and `docs/drafts/memory.yaml`. Final
+tally: 131 pass, 11 fail, all 11 in those groups.
+
+Phase 6's open item (informal root-`$schema` files judged as data by `md`)
+did not arise: the corpus selects files by `kind`. It is recorded in the
+skills.
+
+### 7.4 Kind catalog docs
+
+- `docs/kind-documents.md`: its `::code` pointed at a draft path that no
+  longer exists and now shows `^schemas/kind.yaml`. The schema-roots note
+  is taken from the preserved patch's hunk. A new "YAML Document Kinds
+  (`yaml-schema`)" section has an example and
+  `::doc-list kind=yaml-schema group-by=package-area` (the planned
+  directive's documented syntax). `md compose docs/kind-documents.md` exits 0.
+- `schemas/kind.yaml`: `yaml-schema` added to the `kind` enum.
+- READMEs: one overview line in `darkmatter/README.md` (whole YAML documents)
+  and one in `simplified-schema/README.md` (owns the `schema`/`yaml-schema`
+  definitions), each linking to its topic page.
+
+### 7.5 Gates and the final re-read
+
+Run once each, after every edit, with nothing else running:
+
+- `darkmatter`: `just test`. The first run had one failure,
+  `meta_schema_phase4::shipped_schema_artifacts_validate_through_semantic_keywords`
+  (fixed as described in 7.3; it passed alone, then in the full rerun).
+  Rerun: 13000 passed, 10 skipped, 0 failed. `just lint` exit 0 (including
+  the zed-dmls wasm check). `just check-tier-coverage darkmatter`: 0
+  stranded.
+- `simplified-schema`: `just test` 1396 + 1209 passed; `just lint` exit 0.
+- `messenger`: `just test` 783 passed, 2 skipped (lib with
+  `desktop,research`, plus messenger-cli); `just lint` clean.
+- Dependents: `cargo check --all-targets -p claudine -p claudine-cli -p
+  research` is clean (the library change is one additive accessor). The
+  Claudine tests that read `claudine/docs/research/` also pass:
+  `claudine_schema_shipped_corpus::*` and `agent_errors_fleet::*` (69) and
+  claudine-cli `research_sequence_artifacts::*` (7).
+- Affected scope over the uncommitted tree (Phases 6 and 7):
+  `packages: [darkmatter, dmls, messenger, test-toolkit, claudine,
+  claudine-cli, darkmatter-cli, messenger-cli]`, `change_class: package`.
+  `claudine`/`claudine-cli` come only from the narrowed test-input cells for
+  `provider-schema.yaml`; `schemas/kind.yaml` schedules nothing. Gates
+  required and run.
+- `just ci-local --plan` was reviewed. This phase adds the messenger
+  L1/lint cells, the messenger-cli narrowed cell for `platforms.yaml`, and the
+  Claudine narrowed cells. The other cells (sniff, test-toolkit, repo-deps)
+  come from the branch's earlier commits.
+- Cross-OS check skipped: no path, process, or OS-specific code changed. The
+  Messenger loader passes the same absolute path to the existing
+  library loader, which already handles CRLF and a BOM.
+
+Definition of Done:
+
+- `md schema validate messenger/docs/platforms.yaml` → 0. A roster break → 1
+  with line and column (above).
+- `md schema validate darkmatter/schemas/schema-trigger.yaml
+  simplified-schema/schemas/schema.yaml simplified-schema/schemas/yaml-schema.yaml`
+  → 0 in this checkout.
+- Spec Acceptance → tests (detailed tables in the Phase 2–6 sections):
+
+| Acceptance bullet | Tests |
+|---|---|
+| three definitions are `kind: yaml-schema`, shipped, pass `yaml-schema.yaml` | `envelope_admission::the_library_definitions_are_admitted_…`, `…each_shipped_definition_claims_its_kind`, `shipped_schema_corpus::every_shipped_yaml_schema_definition_is_in_the_shipped_table`, the DoD command above |
+| root claims; duplicate names both files | `yaml_kind_registry::…two_definitions_claiming_one_kind_are_a_duplicate…`, CLI `a_repository_kind_claim_selects_its_definition_and_a_duplicate_claim_exits_2`, DMLS `a_kind_claimed_twice_is_one_error_on_the_kind_naming_both_definitions` |
+| route selection; roster without fences | `yaml_document_selection::*`, messenger `yaml_contract_files_load_as_one_whole_yaml_document`, `research_corpus::shipped_roster_validates_against_its_schema` |
+| ranged diagnostics, completion, hover on both routes | CLI `schema_validate_yaml::*`, DMLS `yaml_document_editor::*` |
+| edited shipped definition changes validation, no Rust change | `yaml_kind_registry::…a_modified_copy_at_the_shipped_path_replaces_the_built_in_definition` |
+| corpus passes with source-path identity | `shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry` (now including `err.yaml` and `claudine/docs/research`) |
+| constructor narrowing | `declaration_narrowing::*` |
+| direct loads admit envelopes | `envelope_admission::*` |
+| closure and `non-null` | `closed_roots::*`, `non_null_properties::*` |
+| shared library and `md` matrices | `yaml_document_loading::*`, `yaml_document_selection::*`, `schema_validate_yaml::*` |
+| DMLS refresh, isolation, route changes, Unicode/CRLF | `yaml_document_session::*`, `yaml_document_editor::*` |
+
+- Code-smell grep over this phase's added lines in `messenger/lib/src`:
+  no `unwrap_or_default`, `.ok()`, `filter_map`, or `serde(default)`. The
+  one added library accessor has none.
+- No doc under `docs/` names this feature (`grep -rn yaml-document-schemas`
+  over `darkmatter/docs`, `simplified-schema/docs`, `messenger/docs`,
+  `docs/` finds nothing).
+
+Items for the human review, as the plan asked: the registry's
+`Unavailable` wording, the two-arm union error messages of `schema.yaml`,
+the naming of the `dm.schema.kind_check` code, and the decision on the
+`required; non-null` redundancy (Phase 2 decisions), plus this phase's
+three decisions.
+
+Implementation complete, ready for review.

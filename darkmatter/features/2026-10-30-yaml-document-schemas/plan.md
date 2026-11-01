@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-31
-phase: 6
+phase: 8
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -95,6 +95,7 @@ packages:
 - darkmatter
 - darkmatter-cli
 - dmls
+- messenger
 - simplified-schema
 source_files_during_phase_2:
 - darkmatter/dmls/src/providers/frontmatter.rs
@@ -206,6 +207,289 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/cli.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_6:
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/yaml_document.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/frontmatter.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/workspace/discover.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/l1/call_check_agreement.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+- darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/recursive_call_check.rs
+- darkmatter/dmls/tests/l1/schema_roots_parity.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+- darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs
+- darkmatter/dmls/tests/l1/workspace_file_list.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/dmls/tests/l1/yaml_document_session.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+docs_updated_during_phase_6:
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/file-references.md
+- darkmatter/docs/lsp/configuration.md
+- darkmatter/docs/lsp/indexing.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/dmls.md
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+- claudine/docs/research/provider-schema.yaml
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/docs/schemas/err.yaml
+- darkmatter/docs/schemas/schema-definition.yaml
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- messenger/docs/platforms.yaml
+- messenger/lib/src/research/error.rs
+- messenger/lib/src/research/load.rs
+- messenger/lib/tests/fixtures/research/contract/mappings-valid.yaml
+- messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+- messenger/lib/tests/fixtures/research/contract/roster-cap-10.yaml
+- messenger/lib/tests/fixtures/research/contract/roster-refresh-interval-max.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/mapping-missing-fingerprints.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/mapping-sha256.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/override-missing-review-by.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-cap-11.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-cap-above-ceiling.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-platform-refresh-interval-above-max.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-refresh-interval-above-max.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-retained-without-contribution.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-approved-without-approver.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-duplicate-source.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-over-configured-cap.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-source-foreign-interface.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-override--orphaned-override.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-companion-as-adapter.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-email-active.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-missing-adapter.yaml
+- messenger/lib/tests/research_corpus.rs
+- messenger/lib/tests/research_publication.rs
+- messenger/lib/tests/research_validation.rs
+- schemas/kind.yaml
+docs_updated_during_phase_7:
+- darkmatter/README.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- docs/kind-documents.md
+- simplified-schema/README.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/simplified-schema/SKILL.md
+source_code:
+- claudine/docs/research/provider-schema.yaml
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/cli/tests/l1/schema_validate_kind_documents.rs
+- darkmatter/cli/tests/l1/schema_validate_yaml.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/diagnostics/kind_document.rs
+- darkmatter/dmls/src/diagnostics/mod.rs
+- darkmatter/dmls/src/diagnostics/named_types.rs
+- darkmatter/dmls/src/diagnostics/yaml_document.rs
+- darkmatter/dmls/src/overlay/analysis.rs
+- darkmatter/dmls/src/overlay/frontmatter.rs
+- darkmatter/dmls/src/overlay/kind_document.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/overlay/named_types.rs
+- darkmatter/dmls/src/overlay/references.rs
+- darkmatter/dmls/src/overlay/registry.rs
+- darkmatter/dmls/src/overlay/schema.rs
+- darkmatter/dmls/src/overlay/suggestions.rs
+- darkmatter/dmls/src/overlay/yaml_document.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/router.rs
+- darkmatter/dmls/src/workspace/discover.rs
+- darkmatter/dmls/src/workspace/watch.rs
+- darkmatter/dmls/tests/l1/call_check_agreement.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+- darkmatter/dmls/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/dmls/tests/l1/kind_document_editor.rs
+- darkmatter/dmls/tests/l1/lsp_session.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/recursive_call_check.rs
+- darkmatter/dmls/tests/l1/schema_roots_parity.rs
+- darkmatter/dmls/tests/l1/standalone_stdio.rs
+- darkmatter/dmls/tests/l1/suggest_constraint_phase1.rs
+- darkmatter/dmls/tests/l1/workspace_file_list.rs
+- darkmatter/dmls/tests/l1/yaml_document_editor.rs
+- darkmatter/dmls/tests/l1/yaml_document_session.rs
+- darkmatter/docs/schemas/err.yaml
+- darkmatter/docs/schemas/schema-definition.yaml
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/schemas/about.rs
+- darkmatter/lib/src/markdown/schemas/embedded.rs
+- darkmatter/lib/src/markdown/schemas/kind_documents.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+- darkmatter/lib/src/markdown/schemas/triggers/envelope.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/registry.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/select.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/semantic.rs
+- darkmatter/lib/tests/l1/coercion_translator_conformance.rs
+- darkmatter/lib/tests/l1/function_call_binding.rs
+- darkmatter/lib/tests/l1/kind_documents.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/lib/tests/l1/meta_schema_phase3.rs
+- darkmatter/lib/tests/l1/meta_schema_phase4.rs
+- darkmatter/lib/tests/l1/non_null_frontmatter.rs
+- darkmatter/lib/tests/l1/schema_enhancements_matrix/envelope.rs
+- darkmatter/lib/tests/l1/schema_extraction_characterization.rs
+- darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+- darkmatter/lib/tests/l1/schema_roots.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+- darkmatter/lib/tests/l1/trigger_discovery_recovery.rs
+- darkmatter/lib/tests/l1/trigger_envelope_claim.rs
+- darkmatter/lib/tests/l1/trigger_spelling_guard.rs
+- darkmatter/lib/tests/l1/yaml_document_loading.rs
+- darkmatter/lib/tests/l1/yaml_document_selection.rs
+- darkmatter/lib/tests/l1/yaml_kind_registry.rs
+- darkmatter/schemas/schema-trigger.yaml
+- messenger/docs/platforms.yaml
+- messenger/lib/src/research/error.rs
+- messenger/lib/src/research/load.rs
+- messenger/lib/tests/fixtures/research/contract/mappings-valid.yaml
+- messenger/lib/tests/fixtures/research/contract/overrides-valid.yaml
+- messenger/lib/tests/fixtures/research/contract/roster-cap-10.yaml
+- messenger/lib/tests/fixtures/research/contract/roster-refresh-interval-max.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/mapping-missing-fingerprints.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/mapping-sha256.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/override-missing-review-by.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-cap-11.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-cap-above-ceiling.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-platform-refresh-interval-above-max.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-refresh-interval-above-max.yaml
+- messenger/lib/tests/fixtures/research/negative/schema/roster-retained-without-contribution.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-approved-without-approver.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-duplicate-source.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-over-configured-cap.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-curated--roster-source-foreign-interface.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--adapter-platform-mismatch.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--proposed-as-implemented.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-mapping--unassessed-without-reason.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-override--expired-override.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-override--orphaned-override.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-override--stale-override.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-adapter-mapped-twice.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-companion-as-adapter.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-email-active.yaml
+- messenger/lib/tests/fixtures/research/negative/semantic/sr-roster--roster-missing-adapter.yaml
+- messenger/lib/tests/research_corpus.rs
+- messenger/lib/tests/research_publication.rs
+- messenger/lib/tests/research_validation.rs
+- schemas/kind.yaml
+- simplified-schema/lib/src/claims.rs
+- simplified-schema/lib/src/envelope.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/src/prepared.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/standalone.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/tests/l1/claimed_values.rs
+- simplified-schema/lib/tests/l1/closed_roots.rs
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/declaration_narrowing.rs
+- simplified-schema/lib/tests/l1/envelope_admission.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/non_null_properties.rs
+- simplified-schema/lib/tests/l1/schema_target_classification.rs
+- simplified-schema/lib/tests/l1/schema_target_inspection.rs
+- simplified-schema/lib/tests/l1/shipped_corpus.rs
+- simplified-schema/lib/tests/l1/yaml_schema_envelope.rs
+- simplified-schema/schemas/schema.yaml
+- simplified-schema/schemas/yaml-schema.yaml
+documentation:
+- darkmatter/README.md
+- darkmatter/cli/README.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/file-references.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/report-json.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/lsp/configuration.md
+- darkmatter/docs/lsp/indexing.md
+- darkmatter/docs/topics/schemas/authoring-schemas.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/index.md
+- darkmatter/docs/topics/schemas/schema-discovery.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- docs/kind-documents.md
+- simplified-schema/README.md
+- simplified-schema/docs/topics/conversion.md
+- simplified-schema/docs/topics/custom-vocabulary.md
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/language/local-type-references.md
+- simplified-schema/docs/topics/language/objects-and-named-types.md
+- simplified-schema/docs/topics/language/schema-documents.md
+- simplified-schema/docs/topics/language/schema-types.md
+- simplified-schema/docs/topics/language/subtyping.md
+- simplified-schema/docs/topics/language/types.md
+- simplified-schema/docs/topics/language/unions.md
+- simplified-schema/docs/topics/schema-object.md
+- simplified-schema/docs/topics/selecting-schema-files.md
+- simplified-schema/docs/topics/validation.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: Schemas for YAML Documents
@@ -875,21 +1159,21 @@ Prerequisite: Phase 4. Rule 26. Parallel with Phase 5.
 
 **Wave 1** (sequential)
 
-- [ ] **6.1 Routing + registry worker integration**
+- [x] **6.1 Routing + registry worker integration**
     - Shared case-insensitive `is_yaml_path`; case-insensitive watch globs; registry preparation inside `RegistryWorker::run_document`; `OverlayCache.kind_registries`; invalidation wiring; scope isolation (key by context identity; never reuse across workspace/package scope).
-- [ ] **6.2 YAML document overlay**
+- [x] **6.2 YAML document overlay**
     - `overlay/yaml_document.rs`; remove the reverted kind overlay references; `DocumentOverlay` carries the YAML analysis; `lexical` claim fallback not needed (a parse failure publishes the loader error once).
 
 **Wave 2** (parallel, different files)
 
-- [ ] **6.3 Diagnostics**
+- [x] **6.3 Diagnostics**
     - `diagnostics/frontmatter.rs` + `diagnostics/yaml_document.rs`: `ProblemGrading::YamlDocument`, code `dm.schema.kind_check`, related-information for failures in referenced definitions with the reference marked as failure site, unknown-property exclusion of `$schema` on the fallback route.
-- [ ] **6.4 Completion and hover**
+- [x] **6.4 Completion and hover**
     - `providers/frontmatter.rs`: definition-driven completion/hover for both routes; schema-authoring providers inside `$schema`/`types` of claimed `schema`/`yaml-schema`; schema-reference assistance on the fallback `$schema`; Markdown body providers off for YAML; code action `add-missing-required-keys` retained for root keys.
-- [ ] **6.5 Tests**
+- [x] **6.5 Tests**
     - `yaml_document_editor.rs` (in-process `Probe`): both routes, diagnostics ranged on key/value, completion, hover, Unicode and CRLF ranges, route change (edit `kind`/`$schema`) clears stale results, schema authoring inside exports.
     - `yaml_document_session.rs` (`LspFixture`, protocol requests, headless): unsaved definition edit (`didChange`) refreshes an open document; dependency creation/deletion via `didChangeWatchedFiles` types 1/3; a created `schemas/roster.yaml` starts claiming; deleting it clears; scope isolation between two workspaces/packages; registry preparation runs off the dispatch thread (compare `server_thread_id`, as `registry_preparation.rs` does); a stdio smoke test extending `standalone_stdio.rs`.
-- [ ] **6.6 DMLS docs**
+- [x] **6.6 DMLS docs**
     - `darkmatter/docs/topics/schemas/dmls-schema-support.md`, `docs/lsp/{indexing,configuration,features,frontmatter}.md`, `darkmatter/dmls/docs/{diagnostics,file-references}.md`, `.claude/skills/darkmatter/dmls.md`.
 
 **Validation checkpoint 6:** `just test`/`just lint` in `darkmatter` (dmls crate) green.
@@ -900,19 +1184,19 @@ Prerequisite: Phases 5 and 6.
 
 **Wave 1** (parallel)
 
-- [ ] **7.1 `messenger/docs/platforms.yaml`**
+- [x] **7.1 `messenger/docs/platforms.yaml`**
     - Remove the `---` fences and the obsolete fence-workaround comment paragraph; keep the `$schema: ./platforms.schema.yaml` line (no `kind`, so it is the contract). Verify `md schema validate messenger/docs/platforms.yaml` exits 0 and that a deliberate roster break exits 1 (restore after).
     - Any consumer of the file reading frontmatter fences (grep `platforms.yaml` in `messenger/`) is updated to read the whole file; run `just test messenger` and `just lint messenger`.
-- [ ] **7.2 Skills**
+- [x] **7.2 Skills**
     - `.claude/skills/darkmatter/{SKILL,schema,cli,dmls,testing}.md` and `.claude/skills/simplified-schema/SKILL.md`: envelope recognition, ownership boundary (library owns `schema`/`yaml-schema` definitions; Darkmatter owns `schema-trigger` and the registry), registry lifecycle, failure policy.
-- [ ] **7.3 Corpus + repo documents**
+- [x] **7.3 Corpus + repo documents**
     - Run the corpus over every repository YAML document that carries a recognized `kind`; fix definitions or documents (not the engine) so all pass; reconcile `darkmatter/docs/schemas/err.yaml`/`schema-definition.yaml` pre-feature state.
-- [ ] **7.4 Kind catalog docs**
+- [x] **7.4 Kind catalog docs**
     - `docs/kind-documents.md`: `yaml-schema` as the way to formalize a YAML kind, the roots note (prose, taken from `preserved-docs-escape-fix.patch`'s `docs/kind-documents.md` hunk), and `schemas/kind.yaml` gains `yaml-schema` in its `kind` enum; keep `::doc-list` usage valid. Remaining READMEs get an overview link only.
 
 **Wave 2** (sequential, final)
 
-- [ ] **7.5 Full gate**
+- [x] **7.5 Full gate**
     - From the repo root: `just test simplified-schema`, `just test darkmatter`, `just test messenger`, `just lint` for each area; `just ci-local --plan` reviewed for scope (no cell added by this work beyond the touched packages).
     - Re-read this plan against the diff: every spec Acceptance bullet maps to a named test; grep the new modules for the code smells in the matrix section; update comments/docs for every changed behavior; confirm no doc under `docs/` names this feature.
     - Complete `implementation-log.md` and mark the spec `implemented` fields untouched (author moves the spec). Report "implementation complete, ready for review" listing the items a human will want to judge: the registry's `Unavailable` wording, the `schema.yaml` two-arm union error messages, `dm.schema.kind_check` code naming, and the `required; non-null` redundancy decision.
