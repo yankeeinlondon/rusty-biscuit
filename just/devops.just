@@ -1,4 +1,5 @@
 import 'notify.just'
+import 'shell.just'
 mod util
 
 bold := '\033[1m'

@@ -48,10 +48,10 @@
 #                     `config-source`) say whether kache in this environment
 #                     and the running daemon load that user config at all.
 #                     Exit 0 = report produced, 2 = cannot report.
-#   config-path       The user kache config file `_ensure-kache` writes and
-#                     `report` reads: `%APPDATA%\kache\config.toml` on
-#                     Windows, else `$XDG_CONFIG_HOME/kache/config.toml`
-#                     (default `~/.config`).
+#   config-path       The user kache config file `_ensure-kache` and
+#                     `install-kache` write and `report` reads:
+#                     `$XDG_CONFIG_HOME/kache/config.toml`, defaulting to
+#                     `~/.config` (the Windows profile's `.config` on Windows).
 #   config-source     Whether the store pin in that file reaches kache:
 #                       kache-host: config-source scope=cli state=managed|override selector=KACHE_CONFIG|- path=P
 #                       kache-host: config-source scope=daemon state=managed|override|unknown selector=daemon_config_path|- path=P|-
@@ -170,9 +170,20 @@ published_path() {
     fi
 }
 
+# kache (1.2.2, verified 2026-11-01) reads `<profile>\.config\kache\config.toml`
+# on Windows too, not `%APPDATA%`, honoring XDG_CONFIG_HOME first. It takes the
+# profile from Windows itself and ignores HOME and USERPROFILE, so the profile
+# comes from `cygpath -F 40` (CSIDL_PROFILE), never from $HOME, which under
+# Cygwin is `/home/<user>`.
 user_config_path() {
     case "$(os_name)" in
-        windows) printf '%s/kache/config.toml' "$(cygpath "${APPDATA:?}")" ;;
+        windows)
+            if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
+                printf '%s/kache/config.toml' "$(cygpath -u "$XDG_CONFIG_HOME")"
+            else
+                printf '%s/.config/kache/config.toml' "$(cygpath -u -F 40)"
+            fi
+            ;;
         *) printf '%s/kache/config.toml' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
     esac
 }

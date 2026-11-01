@@ -38,7 +38,7 @@ Sources: [0.19 config](https://github.com/kunobi-ninja/kache/blob/v0.19.0/src/co
 | Item | Path |
 | --- | --- |
 | Config file (macOS/Linux) | `~/.config/kache/config.toml` |
-| Config file (Windows) | `%APPDATA%\kache\config.toml` |
+| Config file (Windows) | `%USERPROFILE%\.config\kache\config.toml` (kache 1.2.2, verified 2026-11-01; `XDG_CONFIG_HOME` wins; `HOME`/`USERPROFILE` overrides are ignored, it asks Windows for the profile) |
 | Store | wherever `kache doctor` says it is — the authority, never a reconstruction from defaults |
 | Cargo wiring | `~/.cargo/config.toml` → `[build] rustc-wrapper = "kache"` |
 | Daemon service | launchd agent (macOS) / systemd user unit (Linux) |

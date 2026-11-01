@@ -89,7 +89,7 @@ Note that APFS `clonefile` **does** succeed between separate volumes in the same
   alone.
 - `[cache] storage_layout_advice = false` only silences the layout warning. It does not change
   restore mode or disk usage.
-- Config defaults under `%APPDATA%\kache\config.toml`; the store defaults under
+- Config lives at `%USERPROFILE%\.config\kache\config.toml` (kache 1.2.2; not `%APPDATA%`); the store defaults under
   `%LOCALAPPDATA%\kache`. Confirm the resolved store with `kache doctor`.
 - `kache daemon` with no subcommand reports daemon status in 0.12.0. The service is optional for a
   local-only cache.

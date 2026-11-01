@@ -6,8 +6,14 @@ set positional-arguments
 # The `env CYG_SYS_BASHRC=1` prefix is load-bearing. Cygwin's /etc/bash.bashrc
 # opens with `[[ -z ${CYG_SYS_BASHRC} ]]`, an unguarded expansion that the `-u`
 # below turns into a fatal "unbound variable" wherever bash sources that file
-# non-interactively (a shell exporting BASH_ENV is the usual cause). Pre-setting
-# the variable sends that guard down its already-initialized early-return path.
+# non-interactively. The usual cause is SSH: Cygwin's bash sources it for any
+# top-level `bash -c` that sees SSH_CLIENT, which is every recipe on a remote
+# rig. Pre-setting the variable sends that guard down its already-initialized
+# early-return path.
+#
+# On native Windows the bare `env` below may be a foreign `env.exe` (uutils
+# from WinGet); `just` resolves it from the PATH it inherited. That is
+# harmless, and `just/shell.just` fixes the PATH recipes run with.
 #
 # It must reach bash through the environment rather than just's `export`, which
 # covers recipe shells but NOT the shells just spawns to evaluate backtick
@@ -458,6 +464,14 @@ check-canonical *args="":
             fi
         done < <(grep -E '^[A-Za-z_]+ *:?=.*`' "$area/justfile" || true)
 
+        # A bash recipe shell without just/shell.just keeps the Windows PATH
+        # order, where WinGet/uutils coreutils shadow the shell's own.
+        if grep -Eq '^set shell .*"bash"' "$area/justfile" \
+            && ! grep -Eq "^import ['\"](\.\./)+just/(devops|shell)\.just['\"]" "$area/justfile"; then
+            echo -e "  {{ RED }}❌ Runs recipes through bash without importing just/shell.just{{ RESET }} (directly or via devops.just)"
+            missing+=("<shell.just>")
+        fi
+
         if (( ${#missing[@]} > 0 )); then
             echo -e "  {{ RED }}❌ Missing canonical recipes:{{ RESET }} ${missing[*]}"
             failed_areas+=("$area")
@@ -683,6 +697,12 @@ _ensure-build-deps:
                 -property installationPath | tr -d '\r' | head -n1)"
             exit 0
             ;;
+        Linux|Darwin) ;;
+        *)
+            echo "_ensure-build-deps: unrecognized host OS '$(uname -s)'." >&2
+            echo "On Windows this means a non-POSIX uname is answering; see just/shell.just." >&2
+            exit 1
+            ;;
     esac
 
     # --- Linux / macOS ------------------------------------------------------
@@ -727,7 +747,12 @@ _ensure-native-libs *packages="":
     case "$(uname -s)" in
         Linux)  runner_key="ubuntu-latest" ;;
         Darwin) runner_key="macos-latest" ;;
-        *)      runner_key="windows-latest" ;;
+        MINGW*|MSYS*|CYGWIN*) runner_key="windows-latest" ;;
+        *)
+            echo "_ensure-native-libs: unrecognized host OS '$(uname -s)'." >&2
+            echo "On Windows this means a non-POSIX uname is answering; see just/shell.just." >&2
+            exit 1
+            ;;
     esac
 
     sudo_cmd=""
@@ -1395,10 +1420,7 @@ install-kache binary_only="false":
         # existing config — hosts size against their own volume. A read-only
         # config directory (build-linux mounts ~/.config over CIFS) is reported,
         # not fatal, so `just init` still completes there.
-        case "$(uname -s)" in
-            MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
-            *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
-        esac
+        kache_config_dir="$(dirname "$(./scripts/kache-host.sh config-path)")"
         if [[ ! -f "$kache_config_dir/config.toml" ]]; then
             if mkdir -p "$kache_config_dir" 2> /dev/null \
                 && printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml" 2> /dev/null; then

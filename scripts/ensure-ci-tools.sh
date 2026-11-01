@@ -6,8 +6,10 @@ source scripts/cargo-path.sh
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
         winget_links="$(cygpath -u "${LOCALAPPDATA:?}")/Microsoft/WinGet/Links"
+        # Appended: WinGet links can hold uutils coreutils, which must never
+        # sort ahead of the shell's own /usr/bin (just/shell.just).
         if [[ -d "$winget_links" ]]; then
-            export PATH="$winget_links:$PATH"
+            export PATH="$PATH:$winget_links"
         fi
         ;;
 esac

@@ -242,6 +242,74 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   passed in-process with `pre_approved_commands`. Use the recorder for a CLI
   sentinel command too. Do not add an interpreter fallback.
 
+## POSIX tools shadowed on PATH inside recipes
+
+**Symptom.** `just init` on native Windows prints `Missing build dependencies
+(cc linker not found)` and `Could not detect package manager`, or a recipe
+reports `unrecognized host OS 'Windows_NT'`. Seen on `build-win-native`
+2026-11-01 after `uutils.coreutils` 0.12.0 was installed through WinGet.
+
+**Cause.** WinGet puts uutils' `uname.exe`, `env.exe`, `sort.exe`, `cat.exe`,
+... in `%LOCALAPPDATA%\Microsoft\WinGet\Links`, which there sorted ahead of
+`C:\cygwin64\bin`. A non-login Cygwin or Git Bash keeps the Windows PATH
+order, so `uname -s` printed `Windows_NT`, every `MINGW*|MSYS*|CYGWIN*` case
+missed, and recipes fell into their Linux branch. uutils `cat` also cannot read
+`/proc`. The same trap applies to scoop shims, a `cargo install`ed coreutils,
+and `System32`'s `find.exe`/`sort.exe`.
+
+**Rule now in place.** `just/shell.just` (imported by `just/devops.just`, so
+by every area justfile; `just check-canonical` fails an area that runs bash
+without it) exports, on Windows only, a PATH with the recipe bash's own bin
+directory first. The directory comes from `/proc/$$/winexename` in a
+Windows-only load-time backtick. Scripts that add a tool-manager directory
+(WinGet `Links`, Cargo's `bin`) **append** it; `ensure-ci-tools.sh` and
+`ensure-host-tools.sh` used to prepend `WinGet\Links` and reintroduced the
+problem even after the recipe PATH was fixed. On Linux, macOS, and WSL the
+exported PATH is identical to the inherited one.
+
+**Facts that shaped it (all verified on `build-win-native`):**
+
+- **BASH_ENV does not work for linewise recipes over SSH.** Cygwin's bash is
+  built with `SSH_SOURCE_BASHRC`: a `bash -c` with `SSH_CLIENT` set and
+  `SHLVL` < 2 sources `/etc/bash.bashrc` and `~/.bashrc` and returns without
+  reading `BASH_ENV`. Every linewise recipe on a rig is that shell. Shebang
+  recipes run a script, not `-c`, and do read `BASH_ENV`. This SSH bashrc path
+  is also why the `env CYG_SYS_BASHRC=1` prefix in `set shell` is needed.
+- **`just` resolves the `set shell` program from its own inherited PATH,** not
+  from an exported PATH, so the bare `env` can still be uutils' `env.exe`
+  (confirmed through the Windows parent process of the recipe's `bash.exe`). It
+  is harmless as a launcher: it sets one variable and finds `bash` through the
+  exported PATH.
+- **`just` 1.59's `which()` needs the unstable `set lists`,** so it cannot
+  locate bash. An `if os_family() == "windows"` branch's backtick is not
+  evaluated on other OSes, so a Windows-only backtick costs Unix nothing.
+- **`/proc/$$/winexename` has no trailing newline:** `read` assigns it but
+  returns 1, so a `set -e` shell needs `|| true`. Under Git Bash's
+  `bin\bash.exe` launcher it reads `...\Git\bin\..\usr\bin\bash.exe`.
+- **Cygwin collapses `\\` in a command line from a native parent.** `just` is
+  native, so a recipe line or backtick holding `\\` reaches bash with `\`.
+  Write Windows-path manipulation without backslashes (`${exe%?bash.exe}`).
+- **`/etc/bash.bashrc`'s `CYG_SYS_BASHRC` crash** appears for any `bash -eu -c`
+  started over SSH without that variable, so ad hoc probes on the rig need it
+  too.
+- **Fixing detection exposed a kache path that a shadowed `uname` had hidden.**
+  With a real `uname`, the ReFS `B:` drive qualifies for kache. `_ensure-kache`
+  then warned that the store differed from the pin, and kache stayed off
+  (init still succeeded). The cause: kache 1.2.2 on Windows reads
+  `~/.config\kache\config.toml` (`%USERPROFILE%\.config\kache\config.toml`),
+  while the recipe wrote the pin to `%APPDATA%\kache\config.toml`. Confirmed
+  on `build-win-native` 2026-11-01 with a clean install: one `kache.exe`
+  (1.2.2) and no daemon running. kache honors `XDG_CONFIG_HOME` there, but
+  ignores `HOME` and `USERPROFILE` overrides because it asks Windows for the
+  profile. `scripts/kache-host.sh config-path` now uses
+  `$XDG_CONFIG_HOME`, else `$(cygpath -u -F 40)/.config`, and is the only
+  place that path is computed.
+
+**Reproducing.** `build-win-native`'s own PATH already puts `WinGet\Links`
+first. Build a scratch shared clone as [build-hosts.md](build-hosts.md)
+describes, then run `just _ensure-build-deps` from PowerShell. To check which
+`uname` a recipe gets, run a recipe line `echo "$(command -v uname) $(uname -s)"`.
+
 ## Current-directory locks
 
 - **A process's current directory cannot be deleted, moved, or renamed**
