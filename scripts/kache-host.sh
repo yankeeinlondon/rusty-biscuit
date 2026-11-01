@@ -52,6 +52,8 @@
 #                     `install-kache` write and `report` reads:
 #                     `$XDG_CONFIG_HOME/kache/config.toml`, defaulting to
 #                     `~/.config` (the Windows profile's `.config` on Windows).
+#   cargo-home        Cargo's home as Cargo resolves it: `$CARGO_HOME`, else
+#                     `~/.cargo`, in a spelling native programs accept.
 #   config-source     Whether the store pin in that file reaches kache:
 #                       kache-host: config-source scope=cli state=managed|override selector=KACHE_CONFIG|- path=P
 #                       kache-host: config-source scope=daemon state=managed|override|unknown selector=daemon_config_path|- path=P|-
@@ -118,7 +120,7 @@ set -euo pipefail
 PROBE_PREFIX=".kache-host-probe"
 
 usage() {
-    echo "usage: $0 {qualify|report|probe-passthrough|wrapper|config-path|config-source}" >&2
+    echo "usage: $0 {qualify|report|probe-passthrough|wrapper|config-path|cargo-home|config-source}" >&2
     exit 2
 }
 
@@ -131,10 +133,40 @@ os_name() {
     esac
 }
 
+# Native Windows programs (python3, kache.exe, cargo) cannot open a
+# `/cygdrive/c/...` or `/home/...` path, and a Windows python3 writes "\r\n".
+# So on Windows, paths this script hands to them use the `C:/...` spelling
+# (`cygpath -m`, which every shell tool here accepts too), the user's home is
+# the profile folder Windows reports (`cygpath -F 40`; Cygwin's $HOME is
+# often `/home/<user>`), and python3's output loses its "\r" for every caller.
+if [[ "$(os_name)" == "windows" ]]; then
+    python3() { command python3 "$@" | tr -d '\r'; }
+fi
+
+user_home() {
+    if [[ "$(os_name)" == "windows" ]]; then
+        cygpath -m -F 40
+    else
+        printf '%s' "$HOME"
+    fi
+}
+
+# Cargo's home, as Cargo itself resolves it.
+cargo_home() {
+    if [[ -n "${CARGO_HOME:-}" ]]; then
+        published_path "$CARGO_HOME"
+    else
+        printf '%s/.cargo' "$(user_home)"
+    fi
+}
+
+# `-L`: the device of what a path names, not of a symlink to it. A worktree
+# base that is a link (`C:\Users\<user>\wt` -> `B:\coding\wt`) lives where it
+# points.
 device_id() {
     case "$(uname -s)" in
-        Darwin) stat -f %d "$1" ;;
-        *) stat -c %d "$1" ;;
+        Darwin) stat -L -f %d "$1" ;;
+        *) stat -L -c %d "$1" ;;
     esac
 }
 
@@ -149,8 +181,12 @@ mount_point_of() {
     df -P "$1" 2> /dev/null | awk 'NR == 2 { $1 = $2 = $3 = $4 = $5 = ""; sub(/^ +/, ""); print }'
 }
 
+# The drive a path lives on, after following symlinks and junctions: a
+# `C:\Users\<user>\wt` that links to `B:\coding\wt` is on `B:`.
 windows_drive() {
-    cygpath -w "$1" 2> /dev/null | cut -c1
+    local resolved
+    resolved="$(readlink -f "$1" 2> /dev/null)" || resolved="$1"
+    cygpath -w "${resolved:-$1}" 2> /dev/null | cut -c1
 }
 
 # The filesystem type of the Windows volume holding $1, as Get-Volume names it
@@ -173,15 +209,18 @@ published_path() {
 # kache (1.2.2, verified 2026-11-01) reads `<profile>\.config\kache\config.toml`
 # on Windows too, not `%APPDATA%`, honoring XDG_CONFIG_HOME first. It takes the
 # profile from Windows itself and ignores HOME and USERPROFILE, so the profile
-# comes from `cygpath -F 40` (CSIDL_PROFILE), never from $HOME, which under
-# Cygwin is `/home/<user>`.
+# comes from `user_home`, never from $HOME. The path is published in the
+# `C:/...` spelling because native programs read it too: given
+# `/cygdrive/c/...`, the Windows python3 behind `kache-config-merge.py` writes
+# to `C:\cygdrive\c\...` instead (Git Bash would convert the argument; Cygwin
+# does not).
 user_config_path() {
     case "$(os_name)" in
         windows)
             if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
-                printf '%s/kache/config.toml' "$(cygpath -u "$XDG_CONFIG_HOME")"
+                printf '%s/kache/config.toml' "$(published_path "$XDG_CONFIG_HOME")"
             else
-                printf '%s/.config/kache/config.toml' "$(cygpath -u -F 40)"
+                printf '%s/.config/kache/config.toml' "$(user_home)"
             fi
             ;;
         *) printf '%s/kache/config.toml' "${XDG_CONFIG_HOME:-$HOME/.config}" ;;
@@ -209,7 +248,8 @@ worktree_base() {
     BASE_PATH="-"
     BASE_STATE="unconfigured"
     BASE_REASON=""
-    local config="$HOME/.worktree.json" base rc=0 prefix
+    local config base rc=0 prefix
+    config="$(user_home)/.worktree.json"
     if [[ -n "${WT:-}" ]]; then
         base="$WT" prefix="wt"
         if [[ ! -e "$base" ]]; then
@@ -820,7 +860,7 @@ do_probe_passthrough() {
 }
 
 do_wrapper() {
-    python3 - "${CARGO_HOME:-$HOME/.cargo}" <<'PY'
+    python3 - "$(cargo_home)" <<'PY'
 import os, shutil, sys
 
 try:
@@ -935,6 +975,7 @@ case "${1:-}" in
     probe-passthrough) do_probe_passthrough ;;
     wrapper) do_wrapper ;;
     config-path) user_config_path ;;
+    cargo-home) cargo_home ;;
     config-source) do_config_source ;;
     *) usage ;;
 esac

@@ -302,8 +302,31 @@ exported PATH is identical to the inherited one.
   (1.2.2) and no daemon running. kache honors `XDG_CONFIG_HOME` there, but
   ignores `HOME` and `USERPROFILE` overrides because it asks Windows for the
   profile. `scripts/kache-host.sh config-path` now uses
-  `$XDG_CONFIG_HOME`, else `$(cygpath -u -F 40)/.config`, and is the only
+  `$XDG_CONFIG_HOME`, else `$(cygpath -m -F 40)/.config`, and is the only
   place that path is computed.
+- **Activation then failed four more times on Cygwin, each a native-program
+  boundary** (all fixed in `scripts/kache-host.sh` and `_ensure-kache`):
+  - A `/cygdrive/c/...` path given to the Windows `python3` (which
+    `ensure-ci-tools.sh` puts behind `/usr/bin/python3`) is read as
+    `C:\cygdrive\c\...`: the store pin landed in a stray
+    `C:\cygdrive\c\Users\ken\.config\kache\config.toml`, and
+    `~/.worktree.json` read as unreadable. Git Bash converts such arguments for
+    native programs; Cygwin does not. Paths handed to native programs use
+    `cygpath -m` (`C:/...`), which Cygwin and MSYS shell tools accept too.
+  - Cygwin's `$HOME` is not the Windows profile (often `/home/<user>`), so
+    `${CARGO_HOME:-$HOME/.cargo}` can name a Cargo home Cargo never reads.
+    `kache-host.sh cargo-home` and `user_home` (`cygpath -m -F 40`) replace it.
+  - A Windows `python3` writes `\r\n`; the `\r` survives `$(...)`, so
+    `'B:/kache'` compared unequal to `'B:/kache'` and the daemon read as not
+    running (`yes\r`). `kache-host.sh` wraps `python3` to strip it on Windows.
+  - `stat -c %d` and the drive-letter filesystem check described a symlink,
+    not its target: `C:\Users\ken\wt -> B:\coding\wt` read as another
+    device and as NTFS. `stat -L` and `readlink -f` fix both, on every OS.
+- **kache does block-clone on ReFS** even though `kache doctor` reports
+  "reflinks unsupported on this filesystem" from its staging check: a
+  clean-and-rebuild probe on `B:` restored 74% of bytes without copying, and
+  the restored `.rlib` was writable with no hard link into the store, so
+  rebuilding over it worked.
 
 **Reproducing.** `build-win-native`'s own PATH already puts `WinGet\Links`
 first. Build a scratch shared clone as [build-hosts.md](build-hosts.md)

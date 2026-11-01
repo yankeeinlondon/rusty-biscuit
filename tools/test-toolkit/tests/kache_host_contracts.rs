@@ -354,11 +354,12 @@ impl CheckoutVolumeHost {
         host.write_tool(
             "stat",
             &format!(
-                r#"[[ ( "${{1:-}}" == -c || "${{1:-}}" == -f ) && "${{2:-}}" == %d && $# -eq 3 ]] || exec /usr/bin/stat "$@"
+                r#"[[ "${{1:-}}" == -L ]] && shift
+[[ ( "${{1:-}}" == -c || "${{1:-}}" == -f ) && "${{2:-}}" == %d && $# -eq 3 ]] || exec /usr/bin/stat "$@"
 while IFS= read -r prefix; do
     [[ -n "$prefix" && ( "$3" == "$prefix" || "$3" == "$prefix"/* ) ]] && {{ echo 999999; exit 0; }}
 done < '{off_device}'
-/usr/bin/stat -c %d "$3" 2> /dev/null || /usr/bin/stat -f %d "$3"
+/usr/bin/stat -L -c %d "$3" 2> /dev/null || /usr/bin/stat -L -f %d "$3"
 "#,
                 off_device = off_device.display()
             ),

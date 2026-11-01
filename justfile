@@ -954,11 +954,13 @@ _ensure-kache:
     warn() { echo -e "{{ YELLOW }}WARNING{{ RESET }}: $*"; }
     dev_id() {
         case "$(uname -s)" in
-            Darwin) stat -f %d "$1" ;;
-            *)      stat -c %d "$1" ;;
+            Darwin) stat -L -f %d "$1" ;;
+            *)      stat -L -c %d "$1" ;;
         esac
     }
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    # Not ${CARGO_HOME:-$HOME/.cargo}: under Cygwin $HOME is often /home/<user>,
+    # and native python3 cannot open a /cygdrive path (see kache-host.sh).
+    cargo_home="$(./scripts/kache-host.sh cargo-home)"
     # The one host file Cargo reads: a legacy extensionless `config` hides a
     # `config.toml` beside it, so activation and its undo go where Cargo looks.
     host_config="$cargo_home/config.toml"
@@ -1178,7 +1180,7 @@ _ensure-kache:
     print("installed=" + ("yes" if d.get("service_installed") else "no"))
     print("version=" + field("daemon_version"))
     print("socket=" + field("socket"))
-    ' <<<"$json")" || return 1
+    ' <<<"$json" | tr -d '\r')" || return 1
         while IFS='=' read -r key value; do
             case "$key" in
                 running)   daemon_running="$value" ;;
@@ -1480,7 +1482,9 @@ kache-status:
     # shadowed activation takes over once the one above it is undone. A
     # kache-named winner is healthy only when it resolves to the kache on
     # PATH, the binary whose version and passthrough are checked below.
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    # Not ${CARGO_HOME:-$HOME/.cargo}: under Cygwin $HOME is often /home/<user>,
+    # and native python3 cannot open a /cygdrive path (see kache-host.sh).
+    cargo_home="$(./scripts/kache-host.sh cargo-home)"
     active="" wrapper_error="" wrapper_problem=""
     if wrapper_out="$(./scripts/kache-host.sh wrapper 2>&1)"; then
         winner="$(sed -n 's/^kache-host: wrapper=//p' <<<"$wrapper_out" | head -1)"

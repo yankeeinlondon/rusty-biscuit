@@ -684,8 +684,8 @@ exec /bin/cp "${{args[@]}}"
     /// otherwise), by putting fakes of the host tools `scripts/kache-host.sh`
     /// and the recipes ask on `PATH`: `uname -s` answers `MINGW64_NT`,
     /// `powershell.exe` answers `Get-Volume`'s filesystem type, `cygpath`
-    /// maps `B:/` to [`Self::windows_volume_root`] and every other path to
-    /// itself, and `stat -c %d` answers the host's device id except for the
+    /// maps `B:/` to [`Self::windows_volume_root`], `-F 40` (the profile
+    /// folder) to `HOME`, and every other path to itself, and `stat [-L] -c %d` answers the host's device id except for the
     /// paths [`Self::place_off_device`] moved to a second drive `C:`. `cargo`
     /// and `cargo-binstall` succeed without doing anything, so `install-kache`
     /// leaves the fake `kache` in place. The fixture's `XDG_CONFIG_HOME`
@@ -730,6 +730,8 @@ STATE='{state}'
 {off_device}
 mode=identity
 case "${{1:-}}" in -u | -w | -m) mode="$1"; shift ;; esac
+# `-F 40` is the profile folder Windows reports; the fixture's is its HOME.
+if [[ "${{1:-}}" == -F ]]; then printf '%s\n' "$HOME"; exit 0; fi
 path="$1"
 if [[ "$mode" == -w ]]; then
     if off_device "$path"; then echo "C:$path"; else echo "B:$path"; fi
@@ -749,10 +751,11 @@ esac
                 r#"#!/usr/bin/env bash
 STATE='{state}'
 {off_device}
+[[ "${{1:-}}" == -L ]] && shift
 [[ "${{1:-}}" == -c && "${{2:-}}" == %d && $# -eq 3 ]] || exec /usr/bin/stat "$@"
 [[ -e "$3" ]] || exec /usr/bin/stat "$@"
 if off_device "$3"; then echo 999999; exit 0; fi
-/usr/bin/stat -c %d "$3" 2> /dev/null || /usr/bin/stat -f %d "$3"
+/usr/bin/stat -L -c %d "$3" 2> /dev/null || /usr/bin/stat -L -f %d "$3"
 "#
             ),
         );
@@ -798,11 +801,13 @@ if off_device "$3"; then echo 999999; exit 0; fi
                     r#"#!/usr/bin/env bash
 STATE='{state}'
 {OFF_DEVICE_SH}
+args=("$@")
+[[ "${{1:-}}" == -L ]] && shift
 if [[ ( "${{1:-}}" == -c || "${{1:-}}" == -f ) && "${{2:-}}" == %d && $# -eq 3 && -e "$3" ]] && off_device "$3"; then
     echo 999999
     exit 0
 fi
-exec /usr/bin/stat "$@"
+exec /usr/bin/stat "${{args[@]}}"
 "#,
                     state = state.display(),
                 ),
