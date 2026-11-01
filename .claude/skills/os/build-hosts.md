@@ -240,12 +240,25 @@ Disk-space crises are handled by the `storage-strategy` skill. What
 
 ## Compiler cache on the hosts
 
-Standing clones must never build through kache, matching CI. The Unix remote
-prelude exports `RUSTC_WRAPPER=""` and `RUSTC_WORKSPACE_WRAPPER=""`. Exporting
-them as empty is required, because unsetting is not enough: host config or a
-`cargo` shim (for example one in `/usr/local/bin` that turns kache on) can
-bring a wrapper back. The same applies to private scratch checkouts on hosts
-that don't qualify for kache.
+Never build through kache where the filesystem doesn't qualify (see
+`docs/kache-strategy.md`). Where it does qualify (APFS on macOS, ReFS on the
+Windows rig), standing clones and scratch checkouts may build through kache,
+and their results are valid evidence, exactly as macOS host runs have always
+been. The rule exists because of `build-linux` (2026-10-06): ext4 cannot
+clone, so a kache that a `/usr/local/bin/cargo` shim had switched on restored
+cached outputs as read-only hard links into `target/`, and the next rebuild
+failed with "is not writeable". On a filesystem that clones, cached outputs are
+ordinary writable copies.
+
+The Unix remote prelude of `cross-check` therefore exports `RUSTC_WRAPPER=""`
+and `RUSTC_WORKSPACE_WRAPPER=""` for the Linux, WSL, and macOS legs. That is
+what the Linux and WSL hosts need, and stricter than necessary for a
+qualifying macOS host (`BUILD_MACOS` is reserved and no recipe uses it yet).
+The Windows leg sets no override, so on the ReFS rig it builds through kache
+whenever the rig has it switched on. Exporting the variables as empty is
+required, because unsetting is not enough: host config or a `cargo` shim can
+bring a wrapper back. Do the same in a private
+scratch checkout on a host that doesn't qualify.
 
 - **"Output not writeable" in a Linux archive build** means the target holds
   read-only, cache-linked artifacts: they share device/inode with kache store
