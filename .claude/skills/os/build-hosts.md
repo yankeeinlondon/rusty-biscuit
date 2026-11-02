@@ -141,12 +141,37 @@ clone that is either:
 - **expired**: any clone last used `CROSS_CHECK_MAX_AGE_DAYS` (default 3) or
   more days ago, judged by its `.git/FETCH_HEAD` time.
 
+A third rule covers **standalone clones**: a Git clone of this repository
+(`origin` ends in `rusty-biscuit`) directly in the coding dir, outside the
+`<host>--<worktree>` layout, like a second checkout made by hand. It is
+**abandoned**, and retired together with its linked worktrees (wherever they
+live, plus a parent folder they leave empty), when both hold:
+
+- nothing in it has been used for `CROSS_CHECK_ABANDONED_DAYS` (default 7)
+  days: the newest of `.git/HEAD`, `.git/FETCH_HEAD`, and the HEAD reflog of
+  the clone and each linked worktree (the `.git` folder's own date moves on
+  every tool's read, so it is not used); and
+- nothing in it exists only there: no stash, no branch or worktree HEAD with
+  commits missing from every remote-tracking ref, and no uncommitted or
+  untracked file in the clone or any linked worktree.
+
+An idle clone that fails a check is kept and listed with the reason (`kept
+<name>: unused, but a branch has commits on no remote`); a check that cannot
+run keeps it too. Clones of other projects are never considered. "Pushed"
+means reachable from a remote-tracking ref as of the clone's last fetch; the
+rule does not fetch.
+
 Retiring renames the clone to trash and deletes it in the background. On
 Windows the delete starts through WMI, because OpenSSH kills session
 children, and uses a `\\?\` path for deep trees. `just cross-check-refresh
 [--os …] [--dry-run]` (`scripts/cross-check-hosts.sh`) applies the same rules
-to every declared host, deletes synchronously, and reports sizes and the
-space reclaimed. `just cross-check-test` runs the rules' tests.
+to every declared host and then to this machine's own `CODING_DIR`, deletes
+synchronously, and reports sizes and the space reclaimed. The local pass never
+considers the checkout the command was started from, and runs alone when no
+build host is declared (a build host refreshing itself). `just
+cross-check-test` runs the rules' tests on Unix; the PowerShell twin is
+checked on a Windows host with `just cross-check-refresh --os windows
+--dry-run` there.
 
 **Never run `cross-check` from a scratch clone that is not a worktree of the
 real repository.** The stale rule keeps only clones that this checkout's
@@ -229,8 +254,12 @@ Disk-space crises are handled by the `storage-strategy` skill. What
   which sits on the `CODING_DIR` volume because the clone does. An override
   pointing anywhere else can fill the small system drive and freeze the host.
 - No scheduled sweep covers standing clones or scratch checkouts.
-  `cross-check-refresh` is how clones get retired. Delete your own scratch
-  targets, on Windows and inside the WSL guest, before you report.
+  `cross-check-refresh` is how clones get retired, including standalone
+  clones of this repository left in `CODING_DIR` (2026-11-01: a three-week-old
+  second checkout and its worktree held about 100 GiB of `B:` on `build-win`
+  and pushed it under the 50 GiB build floor). Scratch checkouts outside
+  `CODING_DIR` are not covered: delete your own scratch targets, on Windows
+  and inside the WSL guest, before you report.
 - **A full volume looks like a different bug.** On Windows it can show up as
   `scp … Failure`, `unable to write file`, `Could not reset index file`, or
   `os error 112`. The WSL guest's VHDX lives on the large volume, so SSH to

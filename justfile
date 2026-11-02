@@ -165,8 +165,11 @@ cross-check *args:
 
 # Retire build-host clones that `cross-check` no longer needs (this host's
 # clones whose worktree is gone, and any clone with no run in
-# CROSS_CHECK_MAX_AGE_DAYS, default 3) on every declared host, and report each
-# host's free space and clone sizes before and the space reclaimed after.
+# CROSS_CHECK_MAX_AGE_DAYS, default 3) and abandoned standalone clones of this
+# repository (idle CROSS_CHECK_ABANDONED_DAYS, default 7, with nothing
+# unpushed, stashed, or uncommitted) on every declared host and in this
+# machine's own CODING_DIR, and report each host's free space and clone sizes
+# before and the space reclaimed after.
 # Usage: just cross-check-refresh [--os linux|windows|wsl|macos|all] [--dry-run]
 cross-check-refresh *args:
     @./scripts/cross-check-refresh.sh {{ args }}
