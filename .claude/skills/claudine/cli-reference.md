@@ -567,7 +567,17 @@ claudine completions zsh > ~/.zfunc/_claudine
 
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
+
+# PowerShell (line in $PROFILE); shortcut functions opt in separately
+claudine completions powershell | Out-String | Invoke-Expression
+Register-ClaudineShortcutCompletion -Name compose -Prefix compose
+
+# Elvish (module; then `use claudine-completion` in rc.elv)
+claudine completions elvish > ~/.config/elvish/lib/claudine-completion.elv
 ```
+
+Every shell's script calls the `claudine __complete` engine. The old
+`COMPLETE=<shell>` one-liners still reach clap's names-only completion.
 
 **Related runtime behavior.** The `completions` command only installs the
 static shell script. Runtime file selection also happens through the

@@ -13,23 +13,25 @@ use color_eyre::eyre::Result;
     # Fish: Redirect into the fish completion directory
     claudine completions fish > ~/.config/fish/completions/claudine.fish
 
-    # PowerShell (legacy bootstrap): Add to your profile
-    claudine completions powershell >> $PROFILE
+    # PowerShell: Add this line to $PROFILE
+    claudine completions powershell | Out-String | Invoke-Expression
 
-    # Elvish (legacy bootstrap): Add to ~/.elvish/rc.elv
-    claudine completions elvish >> ~/.elvish/rc.elv
+    # PowerShell shortcut functions complete like the subcommand they wrap
+    function compose { claudine compose @args }
+    Register-ClaudineShortcutCompletion -Name compose -Prefix compose
 
-    For bash, zsh, and fish, the emitted script registers a completion
-    callback that shells out to `claudine __complete` on every <TAB>.
-    The hidden engine tracks the running binary, so regenerating the
-    script is only required after a Claudine upgrade that changes the
-    callback contract — the completion output itself always reflects
-    the currently installed binary.
+    # Elvish: Install as a module, then add `use claudine-completion` to rc.elv
+    claudine completions elvish > ~/.config/elvish/lib/claudine-completion.elv
 
-    PowerShell and Elvish retain the legacy one-line `COMPLETE=<shell>`
-    bootstrap. Those shells fall back to whatever `clap_complete`
-    derives from the command tree — subcommand names and flag names —
-    with no composition-specific completion behavior.
+    # Elvish shortcut functions complete like the subcommand they wrap
+    fn compose {|@a| claudine compose $@a }
+    claudine-completion:shortcut compose compose
+
+    Every emitted script registers a completion callback that shells out
+    to `claudine __complete` on every <TAB>. The hidden engine tracks the
+    running binary, so regenerating the script is only required after a
+    Claudine upgrade that changes the callback contract — the completion
+    output itself always reflects the currently installed binary.
 "#)]
 pub struct CompletionsArgs {
     /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
@@ -39,15 +41,10 @@ pub struct CompletionsArgs {
 
 /// Emit the shell completion script for the requested shell.
 ///
-/// For `bash`, `zsh`, and `fish` this is a full completion script that
-/// registers a callback shelling out to `claudine __complete` at every
-/// `<TAB>`. The callback routes through [`crate::completion::engine::run`]
-/// against the full argv the shell passes in.
-///
-/// For `powershell` and `elvish` this remains a one-line `COMPLETE=<shell>`
-/// bootstrap that activates the legacy `CompleteEnv` runtime path in
-/// [`crate::completion::maybe_complete`]. Those two shells defer to
-/// clap-derived completion only (subcommand and flag names).
+/// Every supported shell gets a full completion script that registers a
+/// callback shelling out to `claudine __complete` at every `<TAB>`. The
+/// callback routes through [`crate::completion::engine::run`] against the
+/// full argv the shell passes in.
 pub fn run(args: CompletionsArgs) -> Result<()> {
     use std::io::Write;
 
@@ -60,7 +57,7 @@ pub fn run(args: CompletionsArgs) -> Result<()> {
 
 /// Arguments for the hidden `__complete` subcommand.
 ///
-/// Invoked by generated bash/zsh/fish completion scripts on every `<TAB>`.
+/// Invoked by every generated completion script on every `<TAB>`.
 /// The engine classifies which slot the cursor is in (root menu,
 /// composition positional, `@`-gated setter value, or "other") and emits
 /// one candidate per line on stdout. Any slot the engine does not

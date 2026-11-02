@@ -142,26 +142,93 @@ fn fish_script_computes_argv_from_commandline() {
 }
 
 #[test]
-fn powershell_script_retains_legacy_bootstrap() {
+fn powershell_script_registers_native_completer_for_claudine() {
     let out = render(Shell::PowerShell);
-    // The new engine targets bash/zsh/fish only, so powershell keeps
-    // the legacy one-liner that activates the `CompleteEnv` runtime
-    // path. Its completion surface is whatever `clap_complete`
-    // derives from the command tree.
-    assert!(out.contains("Invoke-Expression"));
-    assert!(out.contains("claudine"));
-    assert!(out.contains("$env:COMPLETE"));
-    assert!(out.ends_with('\n'));
+    assert!(
+        out.contains("Register-ArgumentCompleter -Native -CommandName 'claudine', 'claudine.exe'"),
+        "powershell script must register for both spellings of the binary: {out}"
+    );
+    assert!(
+        !out.contains("COMPLETE"),
+        "powershell script must not route through the legacy CompleteEnv bootstrap: {out}"
+    );
 }
 
 #[test]
-fn elvish_script_retains_legacy_bootstrap() {
-    let out = render(Shell::Elvish);
-    assert_eq!(
-        out, "eval (E:COMPLETE=elvish claudine | slurp)\n",
-        "elvish must retain the legacy COMPLETE bootstrap — the new \
-         engine targets bash/zsh/fish only"
+fn powershell_script_passes_engine_args_in_one_splatted_array() {
+    let out = render(Shell::PowerShell);
+    // A bare `--` written on the command line would be PowerShell's
+    // end-of-parameters token; inside a splatted array it reaches the
+    // engine verbatim.
+    assert!(
+        out.contains("@('__complete', '--current', ($argv.Count - 1), '--') + $argv.ToArray()"),
+        "powershell script must build the engine argv as one array: {out}"
     );
+    assert!(out.contains("& $claudine.Source @engineArgs"));
+}
+
+#[test]
+fn powershell_script_swallows_stderr_unless_debugging() {
+    let out = render(Shell::PowerShell);
+    assert!(out.contains("if ($env:CLAUDINE_COMPLETION_DEBUG)"));
+    assert!(out.contains("& $claudine.Source @engineArgs 2>$null"));
+}
+
+#[test]
+fn powershell_script_offers_shortcut_registration() {
+    let out = render(Shell::PowerShell);
+    // Shortcut functions like `compose` complete as if the user typed
+    // `claudine compose`, so the prefix must be spliced in after argv[0].
+    assert!(out.contains("function Register-ClaudineShortcutCompletion"));
+    assert!(out.contains("foreach ($word in $Prefix) { $argv.Add($word) }"));
+    assert!(out.contains(".GetNewClosure()"));
+}
+
+#[test]
+fn elvish_script_registers_arg_completer_for_claudine() {
+    let out = render(Shell::Elvish);
+    assert!(out.contains("set edit:completion:arg-completer[claudine] = {|@words| complete [] $words }"));
+    assert!(out.contains("e:claudine __complete --current $current -- $@argv"));
+    assert!(
+        !out.contains("COMPLETE="),
+        "elvish script must not route through the legacy CompleteEnv bootstrap: {out}"
+    );
+}
+
+#[test]
+fn elvish_script_explodes_the_sliced_word_list() {
+    let out = render(Shell::Elvish);
+    // `$@words[1..]` slices every word instead of the list, turning
+    // `compose` into `ompose` before the engine sees it.
+    assert!(!out.contains("$@prefix $@words[1..]"));
+    assert!(out.contains("var typed = $words[1..]"));
+}
+
+#[test]
+fn elvish_script_bypasses_prefix_matcher_only_for_engine_candidates() {
+    let out = render(Shell::Elvish);
+    // Elvish's default prefix matcher would drop fuzzy candidates such
+    // as `slow` -> `prompts/slow.md`; every other completion must keep
+    // the matcher that was installed before the script loaded.
+    assert!(out.contains("set edit:completion:matcher[argument] = {|seed|"));
+    assert!(out.contains("var fallback-matcher = $edit:match-prefix~"));
+    assert!(out.contains("$fallback-matcher $seed"));
+    assert!(out.contains("set engine-matched = $true"));
+}
+
+#[test]
+fn elvish_script_falls_back_to_filename_completion() {
+    let out = render(Shell::Elvish);
+    assert!(out.contains("edit:complete-filename $words[-1]"));
+    assert!(out.contains("2>$os:dev-null"));
+    assert!(out.contains("has-env CLAUDINE_COMPLETION_DEBUG"));
+}
+
+#[test]
+fn elvish_script_offers_shortcut_registration() {
+    let out = render(Shell::Elvish);
+    assert!(out.contains("fn shortcut {|name @prefix|"));
+    assert!(out.contains("var argv = [claudine $@prefix $@typed]"));
 }
 
 #[test]
