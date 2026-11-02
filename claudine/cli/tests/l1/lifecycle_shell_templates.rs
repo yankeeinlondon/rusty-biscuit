@@ -379,25 +379,34 @@ fn an_inline_proxy_target_audits_its_shape_and_reads_the_overlay() {
     assert!(std::fs::read_to_string(target).unwrap().contains("Agent-written body."));
 }
 
-#[test]
-fn a_persisted_broad_shape_keeps_the_current_owner_constraints() {
-    let source = |minimum| format!(
+const BROAD_SHAPE_WHITELIST: &str = "template argv-recorder {{ string }}\n";
+
+fn broad_shape_source(minimum: u32) -> String {
+    format!(
         "---\n$schema:\n    word: 'string(min({minimum}))'\nword: long-enough\nstart:\n    - set: {{ word: four }}\n    - shell: {{ command: \"argv-recorder {{{{ word }}}}\", no_error: true }}\n---\nBody.\n"
-    );
-    let document = Document::new(&source(3));
-    document.whitelist("template argv-recorder {{ string }}\n");
+    )
+}
+
+#[test]
+fn a_persisted_broad_shape_runs_while_the_owner_constraints_hold() {
+    let document = Document::new(&broad_shape_source(3));
+    document.whitelist(BROAD_SHAPE_WHITELIST);
     let first = document.run(&[]);
     assert!(first.success, "{}", first.stderr);
     assert_eq!(document.runs(), vec![argv(&["four"])]);
+}
 
-    std::fs::write(document.fixture.cwd().join("doc.md"), source(5)).unwrap();
+#[test]
+fn a_persisted_broad_shape_keeps_the_current_owner_constraints() {
+    let document = Document::new(&broad_shape_source(5));
+    document.whitelist(BROAD_SHAPE_WHITELIST);
     let second = document.run(&[]);
     assert!(!second.success, "{}", second.stderr);
     assert!(second.stderr.contains("refused before it ran"), "{}", second.stderr);
-    assert_eq!(document.runs(), vec![argv(&["four"])], "the changed constraint blocks a second spawn");
+    assert!(document.runs().is_empty(), "the changed constraint blocks the spawn");
     assert_eq!(
         std::fs::read_to_string(document.fixture.cwd().join(".darkmatter-shell-whitelist")).unwrap(),
-        "template argv-recorder {{ string }}\n"
+        BROAD_SHAPE_WHITELIST
     );
 }
 
