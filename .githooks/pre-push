@@ -18,11 +18,19 @@
 # cleanliness or on the gates.
 #
 # Behavior is controlled by the RUSTY_BISCUIT_PRE_PUSH environment variable:
+#   auto       - strict when the push itself starts a CI run (an update of
+#                main, or of a branch with an open pull request), otherwise
+#                scope-only (default)
 #   scope-only - calculate and publish scope, run no gate, publish no
 #                validation evidence
 #   off        - deprecated alias of scope-only
 #   warn       - run the gates, print failures in red, but allow the push
-#   strict     - run the gates, block the push on failure (default)
+#   strict     - run the gates, block the push on failure
+#
+# `auto` exists because a push that starts no run only moves a branch, for
+# example to another host; its evidence would serve only a pull request opened
+# later. A push made to open a pull request asks for `strict` explicitly, as
+# `just pr` does, because the pull request does not exist when the hook runs.
 #
 # RUSTY_BISCUIT_PRE_PUSH_AREAS (space-separated package or area names) replaces
 # the computed scope with a fixed selection for the local gates only.
@@ -103,7 +111,7 @@
 #   just init
 
 # Mode selection — resolved first so the no-gate modes short-circuit early.
-MODE="${RUSTY_BISCUIT_PRE_PUSH:-strict}"
+MODE="${RUSTY_BISCUIT_PRE_PUSH:-auto}"
 
 case "$MODE" in
     off)
@@ -113,11 +121,11 @@ case "$MODE" in
         printf "RUSTY_BISCUIT_PRE_PUSH=off is deprecated; it now means scope-only.\n" >&2
         MODE="scope-only"
         ;;
-    scope-only|warn|strict)
+    auto|scope-only|warn|strict)
         ;;
     *)
         printf "\033[31mUnknown RUSTY_BISCUIT_PRE_PUSH value: %s\033[0m\n" "$MODE" >&2
-        printf "Expected: scope-only, warn, or strict\n" >&2
+        printf "Expected: auto, scope-only, warn, or strict\n" >&2
         printf "(off is a deprecated alias of scope-only)\n" >&2
         exit 1
         ;;
@@ -149,6 +157,7 @@ REMOTE_NAME="${1:-origin}"
 REMOTE_URL="${2:-$(git remote get-url "$REMOTE_NAME" 2>/dev/null)}"
 CHECKOUT_DIRTY="$(git status --porcelain)"
 PUSHES_HEAD=0
+STARTS_RUN=0
 REVIEWED=0
 SCOPE_RECORDED=0
 HEAD_SCOPE_BASE=""
@@ -304,6 +313,7 @@ resolve_target_states() {
 resolve_trigger_contexts() {
     : >"$CONTEXTS_FILE"
     if [ "$REMOTE_REF" = "refs/heads/main" ]; then
+        STARTS_RUN=1
         if is_zero_oid "$REMOTE_SHA"; then
             echo "$ZERO_OID the push event's before is all zeros for a branch-creating push of main, so CI plans full scope" >>"$CONTEXTS_FILE"
             return 0
@@ -352,6 +362,7 @@ resolve_trigger_contexts() {
             done <"$TARGET_STATES_FILE"
         done <"$PR_ERROR_FILE"
         if [ -s "$CONTEXTS_FILE" ]; then
+            STARTS_RUN=1
             return 0
         fi
         PROVISIONAL_WHY="no open pull request from $REMOTE_BRANCH on $GITHUB_REPO"
@@ -604,6 +615,16 @@ if [ "$REVIEWED" -eq 0 ]; then
 fi
 if [ "$SCOPE_RECORDED" -eq 1 ]; then
     publish_scope_evidence
+fi
+if [ "$MODE" = "auto" ]; then
+    if [ "$STARTS_RUN" -eq 1 ]; then
+        MODE="strict"
+    else
+        echo ""
+        echo "No gate runs: this push starts no CI run (it updates neither main nor a branch with an open pull request)."
+        echo "To test before opening a pull request, use 'just pr' or set RUSTY_BISCUIT_PRE_PUSH=strict."
+        exit 0
+    fi
 fi
 if [ "$MODE" = "scope-only" ]; then
     exit 0

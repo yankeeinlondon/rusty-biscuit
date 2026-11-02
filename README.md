@@ -134,15 +134,18 @@ The hook's behavior is controlled by the `RUSTY_BISCUIT_PRE_PUSH` environment va
 
 | Value | Behavior |
 | --- | --- |
+| `auto` | `strict` when the push starts a CI run (an update of `main`, or of a branch with an open pull request), otherwise `scope-only` (default) |
 | `scope-only` | Review constraints and publish scope; run no local gates |
 | `off` | Deprecated alias of `scope-only` |
 | `warn` | Publish complete passing or failing outcomes and allow the push |
-| `strict` | Publish complete outcomes, then block the push on failure (default) |
+| `strict` | Publish complete outcomes, then block the push on failure |
 
-For example, to enable strict mode in your shell:
+A pull request does not exist yet when the push that opens it runs, so open
+one with `just pr`, which pushes in `strict` mode and then opens the pull
+request:
 
 ```sh
-export RUSTY_BISCUIT_PRE_PUSH=strict
+just pr
 ```
 
 `RUSTY_BISCUIT_PRE_PUSH_AREAS` (space-separated package names or area directories) replaces the computed scope with a fixed selection:

@@ -60,6 +60,7 @@ failure:
     - summarize the changes grouped by theme, not commit by commit
     - point to any `spec.md` files under `features/` or `fixes/` that the commits implement or close
     - list every commit above, so a reviewer can see work that is unrelated to the main theme
+    - carry no agent attribution: no `Generated with …` line, no `Co-authored-by` or similar trailer, in the description or the title, whatever your harness suggests
 4. Open it with `gh pr create --base {{base}} --head {{branch}} --title <title> --body-file {{body_file}}`.
 ::block when="title"
     - Use this title: **{{title}}**

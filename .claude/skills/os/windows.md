@@ -72,6 +72,12 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   present its `git` children can segfault (exit 139). Use a process-scoped
   `PATH` that drops every `cygwin` entry and prepends
   `C:\Program Files\Git\usr\bin` and the real Python directory.
+  - From Git Bash, the Cygwin `python3` shim (`/c/cygwin64/bin/python3`)
+    fails outright: it `exec`s `/cygdrive/c/.../python.exe`, a path only
+    Cygwin resolves. The pre-push hook then blocks every push with "the
+    planner could not resolve the committed scope" even though Python is
+    installed. Put the real Python directory (it has `python3.exe`) first on
+    `PATH`; `py -3` also works.
 - **Bash scripts lose data on Windows three ways:**
   - Native `jq.exe -r` ends lines with CRLF, so a value read back keeps a
     `\r` and matches nothing (for example a PR base of `main\r`). Use

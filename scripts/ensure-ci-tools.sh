@@ -47,7 +47,9 @@ activate_windows_python() {
     fi
     export PATH="$python_dir:$PATH"
     if [[ -d /usr/bin && -w /usr/bin ]]; then
-        printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$python_exe" > /usr/bin/python3
+        # A mixed path (`C:/...`): this shim is also found on PATH from Git
+        # Bash, which cannot resolve the `/cygdrive/...` form Cygwin produces.
+        printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$(cygpath -m "$python_exe")" > /usr/bin/python3
         chmod +x /usr/bin/python3
     fi
 }

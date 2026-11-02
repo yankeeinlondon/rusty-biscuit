@@ -9,11 +9,12 @@
 # content for every documented behavior in R3 of
 # features/2026-05-19-ci-cd/spec.md:
 #
-#   - scope-only / warn / strict modes, and `off` as a deprecated alias
+#   - auto / scope-only / warn / strict modes, and `off` as a deprecated alias
 #   - invalid mode rejection
 #   - warn-mode failure exits 0 and mentions --no-verify
 #   - strict-mode failure exits non-zero and mentions --no-verify
-#   - the unset default is strict
+#   - the unset default is auto: strict when the push starts a CI run (main,
+#     or a branch with an open pull request), otherwise no gate
 #   - the default path delegates to `just pre-push` with no selection
 #   - RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim
 #
@@ -486,12 +487,53 @@ test_strict_failing_tests_exits_nonzero_with_no_verify_hint() {
     assert_contains "strict no-verify hint" "$tmpdir/err" "--no-verify" || return 1
 }
 
-test_unset_default_is_strict() {
+# The default is `auto`: a push that starts no CI run only moves a branch, so
+# it resolves and publishes scope but runs no gate. The failing fake `just`
+# proves no gate ran.
+test_unset_default_runs_no_gate_for_a_push_that_starts_no_run() {
     local tmpdir="$1"
     make_fake_just "$tmpdir" 7
-    run_hook_in_repo "$tmpdir" "__UNSET__" refs/heads/feature \
-        "0000000000000000000000000000000000000000"
-    assert_exit "default strict" "$tmpdir" 7 || return 1
+    run_hook_in_repo "$tmpdir" "__UNSET__" refs/heads/feature "$ZERO_SHA"
+    assert_exit "default, no run started" "$tmpdir" 0 || return 1
+    assert_planner_ran "plan resolved" "$tmpdir" || return 1
+    assert_log_lacks "no gate" "$tmpdir" "pre-push" || return 1
+    assert_contains "why no gate ran" "$tmpdir/out" "this push starts no CI run" || return 1
+    assert_contains "how to test anyway" "$tmpdir/out" "RUSTY_BISCUIT_PRE_PUSH=strict" || return 1
+}
+
+test_explicit_auto_is_the_default() {
+    local tmpdir="$1"
+    make_fake_just "$tmpdir" 7
+    run_hook_in_repo "$tmpdir" "auto" refs/heads/feature "$ZERO_SHA"
+    assert_exit "auto, no run started" "$tmpdir" 0 || return 1
+    assert_log_lacks "no gate" "$tmpdir" "pre-push" || return 1
+}
+
+test_unset_default_is_strict_for_a_push_to_main() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 7
+    local main_sha
+    main_sha="$(git -C "$tmpdir/repo" rev-parse origin/main)"
+    run_hook_in_repo "$tmpdir" "__UNSET__" refs/heads/main "$main_sha"
+    assert_exit "default strict on main" "$tmpdir" 7 || return 1
+    assert_log_has "gates ran" "$tmpdir" "pre-push" || return 1
+}
+
+test_unset_default_is_strict_for_a_branch_with_an_open_pull_request() {
+    local tmpdir="$1"
+    make_publishing_repo "$tmpdir"
+    stage_fixture_tools "$tmpdir"
+    make_fake_just "$tmpdir" 7
+    stage_fake_gh "$tmpdir" "12 main"
+    local head
+    head="$(git -C "$tmpdir/repo" rev-parse HEAD)"
+    run_hook_as_remote "$tmpdir" "__UNSET__" origin "$GITHUB_URL" \
+        "refs/heads/feature $head refs/heads/feature $ZERO_SHA"
+    assert_exit "default strict with an open pull request" "$tmpdir" 7 || return 1
+    assert_contains "trigger named" "$tmpdir/out" "pull request #12 into main" || return 1
+    assert_log_has "gates ran" "$tmpdir" "pre-push" || return 1
 }
 
 test_default_delegates_scope_to_pre_push() {
@@ -2540,7 +2582,10 @@ run_test "warn + passing → exit 0"                                    test_war
 run_test "warn + failing → exit 0 and mentions --no-verify"           test_warn_failing_tests_exits_zero_with_no_verify_hint
 run_test "strict + passing → exit 0"                                  test_strict_passing_tests_exits_zero
 run_test "strict + failing → propagate exit and mention --no-verify"  test_strict_failing_tests_exits_nonzero_with_no_verify_hint
-run_test "unset default is strict"                                    test_unset_default_is_strict
+run_test "unset default runs no gate when no CI run starts"           test_unset_default_runs_no_gate_for_a_push_that_starts_no_run
+run_test "explicit auto behaves as the default"                       test_explicit_auto_is_the_default
+run_test "unset default is strict for a push to main"                 test_unset_default_is_strict_for_a_push_to_main
+run_test "unset default is strict with an open pull request"          test_unset_default_is_strict_for_a_branch_with_an_open_pull_request
 run_test "default path calls 'just pre-push' with no selection"       test_default_delegates_scope_to_pre_push
 run_test "run_hook forwards no selection without an override"        test_run_hook_forwards_no_selection_without_an_override
 run_test "RUSTY_BISCUIT_PRE_PUSH_AREAS override is forwarded verbatim" test_areas_override_is_passed_through
