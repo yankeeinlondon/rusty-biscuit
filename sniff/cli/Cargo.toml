@@ -1,9 +1,15 @@
 [package]
-name = "sniff-cli"
+name = "sniff-detection-cli"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 autotests = false
+
+# The package was renamed from `sniff-cli`; the library keeps its crate name so
+# no `use sniff_cli::…` path changes.
+[lib]
+name = "sniff_cli"
+path = "src/lib.rs"
 
 [[bin]]
 name = "sniff"
@@ -76,7 +82,7 @@ name = "level2"
 path = "tests/level2/main.rs"
 required-features = ["test-fixtures"]
 
-# CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-cli
+# CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-detection-cli
 # owns the area's tmux-driven L2 tests (the `level2` target above).
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]

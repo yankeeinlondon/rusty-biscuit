@@ -37,7 +37,7 @@
   the wrong directory when a `cargo nextest archive` is executed elsewhere.
 - `claudine-cli` takes `xpty` 0.3.6 as a Windows-only dev dependency. It opens
   a ConPTY pseudoconsole with no window, so a test can type Ctrl+C into a real
-  console during the exit drain. `unchained-ai` and `worktree-cli` already
+  console during the exit drain. `unchained-ai` and `git-wt-cli` already
   build it, so it adds no crate to `Cargo.lock`.
 
 ## Audio Handoff

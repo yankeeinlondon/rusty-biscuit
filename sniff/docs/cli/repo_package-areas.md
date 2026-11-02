@@ -55,7 +55,7 @@ Multiple filters apply OR logic (an area is included if any filter matches).
 `-p/--package <PKG>` restricts output to the area that contains the named package:
 
 ```bash
-sniff repo package-areas -p sniff-cli
+sniff repo package-areas -p sniff-detection-cli
 # sniff
 ```
 

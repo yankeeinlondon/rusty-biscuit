@@ -1033,7 +1033,7 @@ mod area_membership {
     const PACKAGE: &str = "[package]\nversion = \"0.1.0\"\nedition = \"2024\"\nname = ";
     const SHARED_DOC: &str = "# Shared\n\nline one\nline two\nline three\nline four\nline five\n";
 
-    /// `worktree/lib` (`worktree`), `worktree/cli` (`worktree-cli`), and
+    /// `worktree/lib` (`worktree`), `worktree/cli` (`git-wt-cli`), and
     /// `other/lib` (`other`), with commits `C0`..=`C13` returned oldest first.
     fn area_workspace() -> (Fixture, Vec<Oid>) {
         let fixture = Fixture::new();
@@ -1043,7 +1043,7 @@ mod area_membership {
                 .write("Cargo.toml", "[workspace]\nmembers = [\"worktree/lib\", \"worktree/cli\", \"other/lib\"]\n")
                 .write("worktree/lib/Cargo.toml", format!("{PACKAGE}\"worktree\"\n"))
                 .write("worktree/lib/src/lib.rs", "pub fn worktree() {}\n")
-                .write("worktree/cli/Cargo.toml", format!("{PACKAGE}\"worktree-cli\"\n"))
+                .write("worktree/cli/Cargo.toml", format!("{PACKAGE}\"git-wt-cli\"\n"))
                 .write("worktree/cli/src/main.rs", "fn main() {}\n")
                 .write("other/lib/Cargo.toml", format!("{PACKAGE}\"other\"\n"))
                 .write("other/lib/src/lib.rs", "pub fn other() {}\n")
@@ -1101,7 +1101,7 @@ mod area_membership {
         assert!(!package.contains(&planning), "{package:?}");
         assert_eq!(package, expected(&ids, &[1, 0]));
         assert_eq!(
-            select(&fixture, RecentCommitsOptions::new().count(50).package("worktree-cli")),
+            select(&fixture, RecentCommitsOptions::new().count(50).package("git-wt-cli")),
             expected(&ids, &[8, 0])
         );
     }
@@ -1177,7 +1177,7 @@ mod area_membership {
             assert_eq!(attribution(outside), (json!([]), json!([])), "C{outside}");
         }
         assert_eq!(attribution(1), (json!(["worktree"]), json!(["worktree"])));
-        assert_eq!(attribution(8), (json!(["worktree-cli"]), json!(["worktree"])));
+        assert_eq!(attribution(8), (json!(["git-wt-cli"]), json!(["worktree"])));
         assert_eq!(attribution(10), (json!(["other"]), json!(["other", "worktree"])));
         let mixed_paths: Vec<&str> = by_hash[&ids[10].to_string()]["files"]
             .as_array()

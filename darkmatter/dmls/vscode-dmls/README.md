@@ -15,7 +15,7 @@ directory.
 Install `dmls` so it is on your `PATH`:
 
 ```bash
-cargo install --path .. --force   # from this directory; installs ../ (the dmls crate)
+cargo install --path .. --force   # from this directory; installs ../ (the darkmatter-lsp package)
 dmls --version
 ```
 

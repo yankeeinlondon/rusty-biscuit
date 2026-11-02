@@ -1,4 +1,4 @@
-//! Level 1 integration tests for `sniff-cli`, one test binary per
+//! Level 1 integration tests for `sniff-detection-cli`, one test binary per
 //! execution contract (`2026-09-21-consolidated-test-binaries`).
 //!
 //! Each module was its own test target before the consolidation and keeps

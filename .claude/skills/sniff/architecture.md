@@ -113,8 +113,8 @@ Committed-tree diffs have two paths:
   a path no area directory contains falls back to its owner's area. Package
   and area boundaries are independent: a shared file under `worktree/fixes/`
   has area `worktree` and no package, and a file in `darkmatter/dmls/` (both
-  the `dmls` package and a nested area) has package `dmls` and area
-  `darkmatter/dmls`. The root area `""` is never a directory fallback. The work counters prove this: `git.file_diffs` covers only
+  the `darkmatter-lsp` package directory and a nested area) has package
+  `darkmatter-lsp` and area `darkmatter/dmls`. The root area `""` is never a directory fallback. The work counters prove this: `git.file_diffs` covers only
   survivors, with zero inventory, doc, or enrichment counters.
 - `--branch` resolves in order: local branch, `refs/remotes/<name>`, then
   `<remote>/<name>` over *configured* remotes. Nothing is fetched.
@@ -278,7 +278,7 @@ pipe draining, process-tree termination, and reaping on macOS, Linux, and
 Windows. Preserve caller cwd and environment when using the builder form.
 
 `process` is public only for `configure_detached_child`, which other packages
-(`playa`, `biscuit-speaks`, `worktree-cli`) use to set up an intentionally
+(`playa`, `biscuit-speaks`, `git-wt-cli`) use to set up an intentionally
 detached, unbounded child. It sets a new process group on Unix and, on Windows,
 clears `HANDLE_FLAG_INHERIT` on this process's stdio before setting the
 detached creation flags. The caller still sets null stdio. Sniff's own spawns

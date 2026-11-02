@@ -135,7 +135,7 @@ Always returns the `{ "versions": [...] }` shape:
   "versions": [
     {
       "version": "0.1.0",
-      "packages": ["sniff-lib", "sniff-cli"],
+      "packages": ["sniff-lib", "sniff-detection-cli"],
       "sources": [
         {
           "manifest": "Cargo.toml",

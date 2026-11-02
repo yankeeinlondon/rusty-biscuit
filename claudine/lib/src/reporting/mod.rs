@@ -197,7 +197,7 @@ mod tests {
             extra: Default::default(),
             env: EnvironmentContext {
                 package_area: Some("sniff".to_string()),
-                package: Some("sniff-cli".to_string()),
+                package: Some("sniff-detection-cli".to_string()),
                 claudine_pid: None,
                 ..EnvironmentContext::default()
             },

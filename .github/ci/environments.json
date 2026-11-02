@@ -63,7 +63,7 @@
           "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm/Kitty/Apple Terminal need a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31",
-          "closes": "features/_unscheduled/windows-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "headless_browser": {
           "available": false,
@@ -79,21 +79,21 @@
           "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31",
-          "closes": "features/_unscheduled/windows-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "kitty": {
           "available": false,
           "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31",
-          "closes": "features/_unscheduled/windows-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "apple-terminal": {
           "available": false,
           "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
           "owner": "@yankeeinlondon",
           "expiry": "2027-01-31",
-          "closes": "features/_unscheduled/windows-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         }
       },
       "build": {
@@ -182,7 +182,7 @@
           "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests \u2014 the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
-          "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "headless_browser": {
           "available": false,
@@ -196,7 +196,7 @@
           "reason": "the WSL2 leg runs a prebuilt nextest archive: the guest has no cargo or rustc, and its /bin/sh is dash. A suite that shells out to `cargo` or a `just` recipe therefore cannot run here, however its binaries got into the archive. Installing a toolchain in the guest would defeat the archive design the leg exists to exercise.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
-          "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "archive_only": true,
         "wezterm": {
@@ -204,21 +204,21 @@
           "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
-          "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "kitty": {
           "available": false,
           "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
-          "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         },
         "apple-terminal": {
           "available": false,
           "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
           "owner": "@yankeeinlondon",
           "expiry": "2026-12-31",
-          "closes": "features/_unscheduled/wsl2-l2-ci-leg"
+          "closes": "features/2026-10-26-next-gen-pipeline"
         }
       },
       "build": {

@@ -857,7 +857,7 @@ jobs:
   # for it, because asking the other tool is the whole point.
   #
   # It is a job of its own rather than a companion suite of `repo-deps` for two
-  # reasons. A release `sniff-cli` costs 1m39s warm and 4m25s cold (measured on
+  # reasons. A release `sniff-detection-cli` costs 1m39s warm and 4m25s cold (measured on
   # a 16-core M4 at four Cargo jobs; `reviews/2026-09-15-python-test-code/
   # spike-4-results.md`), and `repo-deps`' own cell is an archive consumer that
   # compiles nothing; and building a workspace package inside that cell would
@@ -885,7 +885,7 @@ jobs:
           ref: ${{ needs.scope.outputs.head }}
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      # No native-prerequisites step: nothing in sniff-cli's build closure
+      # No native-prerequisites step: nothing in sniff-detection-cli's build closure
       # declares `[package.metadata.ci.native]`, and this workflow's build
       # owner compiles every package on this runner from that same union.
       - uses: Swatinem/rust-cache@v2
@@ -893,7 +893,7 @@ jobs:
           workspaces: ". -> target"
           shared-key: area-drift
       - name: Build the area authority
-        run: cargo build -p sniff-cli --release
+        run: cargo build -p sniff-detection-cli --release
       # The class holds the three sniff contracts plus the four pure-planner
       # area fixtures; running the class rather than the file keeps this job's
       # red confined to area derivation. `BISCUIT_REQUIRE_SNIFF` is what makes

@@ -15,7 +15,7 @@ Outputs the package name of the current directory. Useful for scripts that need 
 Outputs a single package name:
 
 ```
-sniff-cli
+sniff-detection-cli
 ```
 
 Exits with code 1 if the current directory is not inside a recognized package.
@@ -34,7 +34,7 @@ Exits with code 1 if the current directory is not inside a recognized package.
 With `-v`, the output includes the relative path:
 
 ```
-sniff-cli (located in sniff/cli)
+sniff-detection-cli (located in sniff/cli)
 ```
 
 ## Exit Codes
@@ -49,7 +49,7 @@ sniff-cli (located in sniff/cli)
 ```bash
 # From inside sniff/cli/
 sniff repo package
-# → sniff-cli
+# → sniff-detection-cli
 
 # From inside sniff/lib/
 sniff repo package
@@ -83,7 +83,7 @@ PKG=$(sniff repo package)
 cargo build -p "$PKG"
 
 # Conditional logic based on package
-if [ "$(sniff repo package)" = "sniff-cli" ]; then
+if [ "$(sniff repo package)" = "sniff-detection-cli" ]; then
     echo "In the sniff CLI package"
 fi
 
@@ -104,5 +104,5 @@ Returns a `{ name: "<pkg>" }` object. Exit code semantics still
 honour `--no-error` / `--on-error`.
 
 ```json
-{ "name": "sniff-cli" }
+{ "name": "sniff-detection-cli" }
 ```
