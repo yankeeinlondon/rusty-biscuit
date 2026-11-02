@@ -37,9 +37,14 @@ fn files_association_is_stable_inside_a_large_monorepo() {
     }
     std::fs::write(area.join("README.md"), "# Area\n").unwrap();
     std::fs::write(area.join("justfile"), "default:\n    echo sample\n").unwrap();
+    // A sibling outside every `--base`: a walk that strays into it visits at
+    // least this many entries, which the `entries_visited` bound below catches
+    // directly. It need not exceed the 10,000-file inventory cap, which would
+    // cost seconds of fixture writes on Windows.
+    const UNRELATED: u64 = 64;
     let unrelated = root.join("unrelated");
     std::fs::create_dir(&unrelated).unwrap();
-    for index in 0..10_050 {
+    for index in 0..UNRELATED {
         std::fs::write(unrelated.join(format!("file-{index}.txt")), "text\n").unwrap();
     }
 
@@ -57,6 +62,8 @@ fn files_association_is_stable_inside_a_large_monorepo() {
         let json: Value = serde_json::from_slice(&output).unwrap();
         let counters = &json["performance"]["counters"];
         assert_eq!(counters["filesystem.file_inventory.files_accepted"], total, "{json}");
+        let visited = counters["filesystem.walk.entries_visited"].as_u64().unwrap();
+        assert!(visited < UNRELATED, "the walk left `--base`: {json}");
         for counter in [
             "git.status_walks",
             "filesystem.docs.documents_parsed",

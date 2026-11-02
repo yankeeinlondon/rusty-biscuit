@@ -20,6 +20,15 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   the exit status is success. Use `sniff::process::configure_detached_child`,
   which clears `HANDLE_FLAG_INHERIT` on the current stdio before setting the
   detached creation flags. Unix fds are close-on-exec and never show this.
+- **Read OS facts in-process, not through a command, on a hot path.** A spawn
+  costs 30–50 ms here. Sniff's timezone name came from `tzutil /g`, and
+  Darkmatter captures the datetime context for every loop and lifecycle
+  expression, so a 100-container sequence test took 12 s instead of 0.6 s.
+  `GetDynamicTimeZoneInformation().TimeZoneKeyName` is the same ID, except
+  that `tzutil` appends `_dstoff` when automatic DST is off
+  (`sniff/lib/src/os/time.rs`). Removing such a delay can expose a race it
+  was hiding: parallel group legs then collided on `tempfile::persist` (see
+  the open-readers item below).
 - **`std::env::temp_dir()` ignores `TMPDIR`.** It reads `TMP`, then `TEMP`,
   then `USERPROFILE`. A fixture that redirects only `TMPDIR` writes into the
   host's real temp directory, and a later run trips over the leftovers. Set
@@ -652,6 +661,13 @@ yourself and ask the kernel who holds it.
   `Get-Process cdb, <test exe> | Stop-Process`.
 - The four loopback-TLS tests in `schematic/runtime/tests/l1/builder.rs`
   carry `#[cfg_attr(windows, ignore = "…")]`; macOS, Linux, and WSL2 run them.
+  So does sniff's `network::tests::test_detect_network_returns_info` (gated
+  on `all(windows, feature = "network")`). Its live WAN-IP HTTPS lookup
+  aborted 2 times in 240 runs when 12 copies ran in parallel, with the same
+  captured stack.
+- Ordinary parallel test runs on a 12-thread host are enough load to
+  reproduce this. Burner threads are not needed. Match only `Security check
+  failure` in cdb logs: `c0000409` also appears in the echoed `sxe` line.
 
 ## Clippy findings only Windows produces
 

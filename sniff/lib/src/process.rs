@@ -82,10 +82,6 @@ pub(crate) mod timeouts {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) const WINDOWS_DEFAULT_ROUTE: Duration = Duration::from_secs(3);
 
-    /// Windows timezone probe.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub(crate) const WINDOWS_TIMEZONE: Duration = Duration::from_secs(3);
-
     /// Windows BurntToast PowerShell module probe.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) const WINDOWS_BURNTTOAST: Duration = Duration::from_secs(3);

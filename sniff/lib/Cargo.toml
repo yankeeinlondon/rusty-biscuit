@@ -85,6 +85,8 @@ windows = { version = "0.62", features = [
     "Win32_System_Environment",
     "Win32_System_IO",
     "Win32_System_JobObjects",
+    # `GetDynamicTimeZoneInformation` for the timezone name, in place of `tzutil`.
+    "Win32_System_Time",
     "Win32_Security_Authorization",
     # File identity (`FILE_ID_INFO`) for `filesystem::query` root and tree matching.
     "Win32_Storage_FileSystem",

@@ -9,6 +9,7 @@ human_review: true
 area: schematic
 packages:
     - schematic-runtime
+    - sniff
 related:
     - 2026-10-12-schematic-runtime-envelope
 human_review_items:
@@ -134,10 +135,20 @@ saturated machine can abort on its first HTTPS request. It has been observed
 only under test-suite load; no production report exists. Upgrading
 `aws-lc-sys` does not help: 0.45.0 has the same seeding code.
 
-Possibly the same defect, not verified: `sniff`'s library tests aborted with
-`0xc0000409` under load on the same host in September 2026, in a varying test
-each run (recorded in `2026-09-07-faster-sniff-tests`). `sniff` links aws-lc
-through reqwest. A captured stack there would confirm it.
+Confirmed in `sniff` on 2026-11-01. `sniff`'s library test
+`network::tests::test_detect_network_returns_info` makes a live HTTPS request
+to look up the WAN IP (`detect_network()` → `NetworkRequest::full()`). On this
+host (12 logical processors), with the `remote` feature, it aborted 2 times in
+240 runs (12 parallel loops); the local-interfaces-only test aborted 0 times in
+240. Two `cdbX64.exe` captures show the same frames as above, from `abort` up
+to `RAND_bytes` → `rustls::msgs::handshake::SessionId::random`, reached through
+`reqwest::connect::ConnectorService::connect_with_maybe_proxy`. The test is
+ignored on native Windows when the `network` feature is on, with the same
+reason as the four tests above. The production `sniff` WAN-IP lookup
+(`sniff network`, full host detection) runs the same code and is exposed the
+same way. The September 2026 `sniff` aborts on this host, which hit a
+different test each run (recorded in `2026-09-07-faster-sniff-tests`), are
+probably the same defect, but no stack was captured for them.
 
 ## Repair options
 
@@ -158,8 +169,8 @@ through reqwest. A captured stack there would confirm it.
 
 ## Acceptance
 
-- The four tests above run on native Windows with their `ignore` attributes
-  removed.
+- The four tests above and sniff's `test_detect_network_returns_info` run on
+  native Windows with their `ignore` attributes removed.
 - A parallel run of the runtime suite on native Windows with on the order of
   1,000 executions of those four tests has no abort, recorded with the exact
   command, run count, and abort count.
