@@ -7,12 +7,16 @@ description: |-
 
     - no recorded run: the prompt stops and says to run tests first
     - no slow tests: the prompt reports that and launches no agent
-    - a summary of an earlier state (the tree changed after the tests ran): the prompt stops and says to re-run them
+    - a summary of an earlier state (the tree changed after the tests ran): the prompt stops, says which files and commits changed and whether they touch the directories the tests covered, and gives the commands that re-run them; `force=true` proceeds with the earlier summary instead
     - otherwise an agent fixes each slow test's cause and re-runs every recorded scope
 
     The `success` hook does not trust the agent's word. It runs `just slow-tests verify`, which passes only when the working tree has changed since the baseline, every baseline scope (tier, directory, packages) was re-run in the tree's current state, and none of those runs has a slow test; the agent's report must also say `fixed`. It asks once more when that proof is missing, then fails.
+# The agent must build, time, and re-run tests and write its report; without
+# the provider's bypass a non-interactive session is denied all of it.
+yolo: true
 $schema:
     report: string -> the outcome file this run's hooks read; created fresh for each run
+    force: boolean -> fix the slow tests of the last recorded run even when the working tree changed after it; the proof still re-runs every scope in the current tree
 summary: "{{ ctx.repo_root + '/target/slow-tests/current.md' }}"
 report: "{{ ctx.repo_root + '/.claudine/tmp/slow/' + ctx.timestamp + '.md' }}"
 has_summary: "{{ file_exists(summary) }}"
@@ -33,11 +37,19 @@ initialize:
     - set_frontmatter: ["{{ report }}", "baseline_state", "{{ baseline_state }}"]
     - set_frontmatter: ["{{ report }}", "tiers", "{{ frontmatter(summary, 'tiers') }}"]
 start:
-    - set: { freshness: "$(just slow-tests fresh)::result::timeout:900" }
-    - when: "!freshness.ok"
+    # A `resume` re-enters at `start`, after the agent has changed the tree on
+    # purpose; the freshness gate applies only to the first entry.
+    - when: "!frontmatter(report, 'nudged')"
       then:
-          - warn: "{{ freshness.stdout }}"
-          - error: "the slow-test summary does not describe the working tree; re-run the tests, then run this prompt again"
+          - set: { freshness: "$(just slow-tests fresh)::result::timeout:900" }
+          - when: "!freshness.ok && force"
+            then:
+                - warn: "{{ freshness.stdout }}"
+                - warn: "force=true: fixing the slow tests of that earlier run anyway"
+          - when: "!freshness.ok && !force"
+            then:
+                - warn: "{{ freshness.stdout }}"
+                - error: "the recorded test run is older than the working tree; re-run the tests, or run this prompt with force=true to fix the slow tests it recorded"
     - info: "🐌 fixing {{ frontmatter(summary, 'slow') }} slow test(s) from the {{ frontmatter(summary, 'tiers') }} runs of this working tree; report: {{ report }}"
     - message: "🐌 fixing {{ frontmatter(summary, 'slow') }} slow test(s) in {{ ctx.area_description || ctx.repo }} ({{ ctx.agent }}/{{ ctx.model }})"
     - say: "Fixing slow tests."

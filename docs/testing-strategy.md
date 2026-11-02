@@ -334,6 +334,24 @@ flowchart LR
   just slow-tests verify --baseline <state>   # exit 0: proof that the slow tests are fixed
   ```
 
+  When `fresh` fails it says why in terms a person can act on: when the
+  recorded runs happened, which files changed since (and how many commits
+  were added), whether any of those files is inside a directory the runs
+  covered, and the commands that re-run them. It reads the changes from
+  `target/slow-tests/current-state.json`, which recording writes beside
+  `current.md`.
+
+  ```text
+  The recorded slow tests are out of date: files changed after the tests ran (L1 in `claudine`, recorded 2026-11-02T00:31:41Z).
+  - 1 changed file(s): `prompts/slow.md`
+  - none of the changes is inside a directory those tests cover, so the recorded timings may still hold
+  Re-run the tests to refresh it: `cd claudine && just test`
+  ```
+
+  `prompts/slow.md` stops on a stale summary unless it is run with
+  `force=true`, which fixes the slow tests the earlier run recorded. The proof
+  is unchanged: every recorded scope must still be re-run in the final tree.
+
   `verify` passes only when the tree has changed since `<state>`, every scope
   recorded in `<state>` was re-run in the present state over at least the same
   packages, and no scope of the present state has a slow test. Otherwise it

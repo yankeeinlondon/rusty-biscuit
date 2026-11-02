@@ -14,7 +14,9 @@
 //! - `report` prints the log grouped by test, slowest first, with each test's
 //!   previous duration and the change between them.
 //! - `fresh` and `verify` are the checks `prompts/slow.md` runs from its
-//!   hooks: whether `current.md` still describes the working tree, and whether
+//!   hooks: whether `current.md` still describes the working tree (and, when
+//!   not, which files and commits changed since, read against the
+//!   `current-state.json` snapshot `record` keeps beside it), and whether
 //!   every scope of a baseline state was re-run in a later state with no slow
 //!   test left.
 //!
@@ -52,6 +54,9 @@ const RUNS: &str = "target/slow-tests/runs.jsonl";
 
 /// Every run of the current working-tree state, merged (see `current_document`).
 const CURRENT: &str = "target/slow-tests/current.md";
+
+/// The `StateSnapshot` of the state `CURRENT` describes.
+const SNAPSHOT: &str = "target/slow-tests/current-state.json";
 
 /// Groups every Nextest invocation one recipe makes into one run of a scope.
 const GROUP_ENV: &str = "BISCUIT_SLOW_TESTS_GROUP";
@@ -235,6 +240,9 @@ fn record(options: &Options) -> Result<()> {
             let current = root.join(CURRENT);
             fs::write(&current, current_document(&state.id, &scopes(&runs, &state.id)))
                 .with_context(|| format!("writing {}", current.display()))?;
+            let snapshot = root.join(SNAPSHOT);
+            fs::write(&snapshot, serde_json::to_string_pretty(&StateSnapshot::of(&state))?)
+                .with_context(|| format!("writing {}", snapshot.display()))?;
         }
         // The log keeps the timings; only the per-state summary needs the state.
         Err(err) => eprintln!("⚠️  this run is not in {CURRENT}: the working-tree state is unknown ({err:#})"),
@@ -475,30 +483,152 @@ fn relative_directory(root: &Path, directory: &Path) -> String {
 // ---------------------------------------------------------------------------
 // fresh / verify: the checks `prompts/slow.md` runs from its hooks
 
-/// Exit 0 when `CURRENT` describes the working tree as it is now.
+/// What the working tree held when `CURRENT` was written, kept beside it so
+/// `fresh` can say what changed since; it describes `CURRENT` only while the
+/// two `state` ids match.
+#[derive(Debug, Default, Deserialize, PartialEq, Serialize)]
+struct StateSnapshot {
+    id: String,
+    head: Option<String>,
+    /// Changed path, `/`-separated, to its `PathContent::token`.
+    changed: BTreeMap<String, String>,
+}
+
+impl StateSnapshot {
+    fn of(state: &WorkingState) -> Self {
+        Self {
+            id: state.id.clone(),
+            head: state.head.clone(),
+            changed: state
+                .changed
+                .iter()
+                .map(|change| (change.path.to_string_lossy().replace('\\', "/"), change.content.token()))
+                .collect(),
+        }
+    }
+}
+
+/// How `HEAD` moved between the recorded state and now.
+#[derive(Debug, PartialEq)]
+enum HeadChange {
+    Same,
+    /// The recorded `HEAD` is an ancestor of the current one.
+    Ahead(usize),
+    /// A checkout, rebase, or reset moved `HEAD` off the recorded line.
+    Moved,
+}
+
+/// How the working tree moved away from the state `CURRENT` describes.
+#[derive(Debug, PartialEq)]
+struct Drift {
+    /// Sorted. A file committed with the content it had when the tests ran
+    /// still appears, because only its change against `HEAD` was recorded.
+    files: Vec<String>,
+    head: HeadChange,
+}
+
+/// Paths whose content differs between `baseline` and `live`, given the
+/// paths `committed` between their two `HEAD`s.
+fn drift(baseline: &StateSnapshot, live: &StateSnapshot, committed: &[String], head: HeadChange) -> Drift {
+    let mut files: BTreeSet<String> = committed.iter().cloned().collect();
+    for path in baseline.changed.keys().chain(live.changed.keys()) {
+        if baseline.changed.get(path) != live.changed.get(path) {
+            files.insert(path.clone());
+        }
+    }
+    Drift { files: files.into_iter().collect(), head }
+}
+
+/// `git`'s view of how `HEAD` moved from `baseline` to `live`.
+fn drift_in(root: &Path, baseline: &StateSnapshot, live: &StateSnapshot) -> Drift {
+    let (head, committed) = match (baseline.head.as_deref(), live.head.as_deref()) {
+        (Some(from), Some(to)) if from != to => {
+            let range = format!("{from}..{to}");
+            let ahead = git(root, &["merge-base", "--is-ancestor", from, to])
+                .and_then(|_| git(root, &["rev-list", "--count", &range]))
+                .and_then(|count| count.parse().ok());
+            let committed = git(root, &["diff", "--name-only", from, to]).unwrap_or_default();
+            (
+                ahead.map_or(HeadChange::Moved, HeadChange::Ahead),
+                committed.lines().map(str::to_owned).collect::<Vec<_>>(),
+            )
+        }
+        _ => (HeadChange::Same, Vec::new()),
+    };
+    drift(baseline, live, &committed, head)
+}
+
+/// Explains a stale `CURRENT` to a person: when its runs were recorded, what
+/// changed since, whether the changes touch what those runs covered, and how
+/// to refresh it. `drift` is `None` when no snapshot of the recorded state
+/// exists.
+fn stale_message(recorded: Option<&str>, scopes: &[Run], drift: Option<&Drift>) -> String {
+    const LISTED: usize = 5;
+    let covered: Vec<String> = scopes.iter().map(|scope| format!("{} in `{}`", scope.tier, scope.directory)).collect();
+    let mut out = format!(
+        "The recorded slow tests are out of date: files changed after the tests ran ({}, recorded {}).",
+        if covered.is_empty() { "no scope".to_owned() } else { covered.join(", ") },
+        recorded.unwrap_or("at an unknown time"),
+    );
+    if let Some(drift) = drift {
+        if !drift.files.is_empty() {
+            let mut shown: Vec<String> = drift.files.iter().take(LISTED).map(|file| format!("`{file}`")).collect();
+            if drift.files.len() > LISTED {
+                shown.push(format!("and {} more", drift.files.len() - LISTED));
+            }
+            out.push_str(&format!("\n- {} changed file(s): {}", drift.files.len(), shown.join(", ")));
+        }
+        match drift.head {
+            HeadChange::Same => {}
+            HeadChange::Ahead(count) => out.push_str(&format!("\n- {count} new commit(s)")),
+            HeadChange::Moved => out.push_str("\n- `HEAD` moved to a commit that does not contain the recorded one"),
+        }
+        let inside = |file: &str| {
+            scopes
+                .iter()
+                .any(|scope| scope.directory == "." || file.starts_with(&format!("{}/", scope.directory)))
+        };
+        let touched = drift.files.iter().filter(|file| inside(file)).count();
+        if touched == 0 {
+            out.push_str(
+                "\n- none of the changes is inside a directory those tests cover, so the recorded timings may still hold",
+            );
+        } else {
+            out.push_str(&format!("\n- {touched} of the changed files are inside a directory those tests cover"));
+        }
+    }
+    let commands: Vec<String> = scopes.iter().map(|scope| format!("`{}`", rerun_command(scope))).collect();
+    if !commands.is_empty() {
+        out.push_str(&format!("\nRe-run the tests to refresh it: {}", commands.join(", ")));
+    }
+    out
+}
+
+/// Exit 0 when `CURRENT` describes the working tree as it is now; otherwise
+/// say why not.
 fn fresh() -> Result<ExitCode> {
     let root = workspace_root()?;
     let live = working_state(&root)?;
-    let recorded = frontmatter_fields(&root.join(CURRENT)).and_then(|fields| fields.get("state").cloned());
-    let (verdict, code) = freshness(recorded.as_deref(), &live.id);
-    println!("{verdict}");
-    Ok(code)
-}
-
-fn freshness(recorded: Option<&str>, live: &str) -> (String, ExitCode) {
-    match recorded {
-        None => (format!("no test run is recorded in {CURRENT}; run a test recipe first"), ExitCode::FAILURE),
-        Some(recorded) if recorded == live => (
-            format!("fresh: {CURRENT} describes the working tree (state {live})"),
-            ExitCode::SUCCESS,
-        ),
-        Some(recorded) => (
-            format!(
-                "stale: {CURRENT} describes state {recorded}, but the working tree has changed since (now {live}); re-run the tests"
-            ),
-            ExitCode::FAILURE,
-        ),
+    let fields = frontmatter_fields(&root.join(CURRENT)).unwrap_or_default();
+    let Some(recorded) = fields.get("state") else {
+        println!("no test run is recorded in {CURRENT}; run a test recipe first");
+        return Ok(ExitCode::FAILURE);
+    };
+    if *recorded == live.id {
+        println!("fresh: {CURRENT} describes the working tree as it is now");
+        return Ok(ExitCode::SUCCESS);
     }
+    let runs: Vec<Run> = read_jsonl(&root.join(RUNS))?;
+    let baseline = fs::read_to_string(root.join(SNAPSHOT))
+        .ok()
+        .and_then(|text| serde_json::from_str::<StateSnapshot>(&text).ok())
+        .filter(|snapshot| snapshot.id == *recorded);
+    let drift = baseline.map(|baseline| drift_in(&root, &baseline, &StateSnapshot::of(&live)));
+    println!(
+        "{}",
+        stale_message(fields.get("recorded").map(String::as_str), &scopes(&runs, recorded), drift.as_ref())
+    );
+    Ok(ExitCode::FAILURE)
 }
 
 /// Exit 0 when every scope recorded in the baseline state was re-run, over

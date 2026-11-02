@@ -157,13 +157,37 @@ fn the_current_summary_lists_each_scope_with_its_rerun_command() {
     );
 }
 
+fn snapshot(id: &str, head: &str, changed: &[(&str, &str)]) -> StateSnapshot {
+    StateSnapshot {
+        id: id.into(),
+        head: Some(head.into()),
+        changed: changed.iter().map(|(path, token)| ((*path).into(), (*token).into())).collect(),
+    }
+}
+
 #[test]
-fn freshness_compares_the_summary_state_with_the_working_tree() {
-    assert_eq!(freshness(Some("s1"), "s1").1, ExitCode::SUCCESS);
-    let (stale, code) = freshness(Some("s1"), "s2");
-    assert_eq!(code, ExitCode::FAILURE);
-    assert!(stale.starts_with("stale:"), "{stale}");
-    assert_eq!(freshness(None, "s2").1, ExitCode::FAILURE);
+fn drift_lists_paths_whose_content_differs_plus_committed_paths() {
+    let baseline = snapshot("s1", "h1", &[("a.rs", "file:1"), ("b.rs", "file:2"), ("gone.rs", "file:3")]);
+    let live = snapshot("s2", "h1", &[("a.rs", "file:1"), ("b.rs", "file:9"), ("new.rs", "file:4")]);
+    let drift = drift(&baseline, &live, &["c.rs".into()], HeadChange::Same);
+    assert_eq!(drift.files, ["b.rs", "c.rs", "gone.rs", "new.rs"]);
+}
+
+#[test]
+fn a_stale_message_names_the_changes_and_whether_they_touch_the_covered_scopes() {
+    let scopes = vec![run_of("s1", "g1", 100, "L1", "claudine", PLAYA_SLOW)];
+    let outside = Drift { files: vec!["sniff/lib/src/a.rs".into()], head: HeadChange::Ahead(2) };
+    let message = stale_message(Some("2026-11-02T00:08:53Z"), &scopes, Some(&outside));
+    assert!(message.contains("L1 in `claudine`, recorded 2026-11-02T00:08:53Z"), "{message}");
+    assert!(message.contains("1 changed file(s): `sniff/lib/src/a.rs`"), "{message}");
+    assert!(message.contains("2 new commit(s)"), "{message}");
+    assert!(message.contains("may still hold"), "{message}");
+    assert!(message.contains("`cd claudine && just test`"), "{message}");
+
+    let inside = Drift { files: (0..7).map(|n| format!("claudine/{n}.rs")).collect(), head: HeadChange::Same };
+    let message = stale_message(None, &scopes, Some(&inside));
+    assert!(message.contains("7 changed file(s)") && message.contains("and 2 more"), "{message}");
+    assert!(message.contains("7 of the changed files are inside"), "{message}");
 }
 
 #[test]
