@@ -507,7 +507,8 @@ foreach ($entry in $entries) {
         $parent = Split-Path -Parent $tree
         try {
             Move-Item -LiteralPath $tree -Destination (Join-Path $coding ".cross-check-trash--$name-worktree$i-$stamp") -ErrorAction Stop
-            if (-not (Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $parent -ErrorAction SilentlyContinue }
+            # Non-recursive: deletes the parent only when the move left it empty.
+            try { [System.IO.Directory]::Delete($parent) } catch {}
         } catch { $failed = $tree; break }
     }
     if ($failed) { Write-Output "abandoned-failed: $failed"; continue }
