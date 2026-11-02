@@ -1,4 +1,3 @@
----
 # An assessment without fingerprints cannot be reused or invalidated (criterion 32).
 # expect-problem: /assessments/0/fingerprints
 $schema: ../../../../../../docs/research/implementation/_schema.yaml
@@ -23,4 +22,3 @@ assessments:
     status: proposed
     proposed_by: agent
   requires_messenger_update: false
----

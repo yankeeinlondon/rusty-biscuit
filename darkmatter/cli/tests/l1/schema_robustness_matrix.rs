@@ -53,8 +53,6 @@ const SHAPES: [Shape; 9] = [
 #[derive(Clone, Debug, PartialEq)]
 enum Expect {
     Valid,
-    /// Valid, and the record carries a warning with this code.
-    ValidWarning(&'static str),
     /// Validation fails with a problem located at this property (a root
     /// `required` problem names it; a value problem's path starts with it).
     Invalid(&'static str),
@@ -69,7 +67,7 @@ enum Expect {
 impl Expect {
     fn exit_class(&self) -> i32 {
         match self {
-            Self::Valid | Self::ValidWarning(_) => 0,
+            Self::Valid => 0,
             Self::Invalid(_) => 1,
             Self::SchemaLoad(_) => 2,
             Self::Parse(_) => 3,
@@ -251,7 +249,6 @@ fn check(record: &Value, expect: &Expect) -> Result<(), String> {
         .collect();
     let ok = match expect {
         Expect::Valid => error.is_none() && valid == Some(true) && warnings.is_empty(),
-        Expect::ValidWarning(code) => error.is_none() && valid == Some(true) && warnings.contains(code),
         Expect::Invalid(property) => {
             let pointer = format!("/{property}");
             error.is_none()
@@ -379,10 +376,8 @@ fn root_schema_declaration_column() {
     // Removing the declaration leaves nothing to classify.
     matrix.file("sequence_absent.yaml", "");
     matrix.cell(pure, Absent, "absent", "$schema: ./sequence_absent.yaml\n", load("sequence_absent.yaml"));
-    // Plan-table imprecision: removing only the `$schema:` key line leaves a
-    // mapping that the established raw-JSON-Schema fallback reads as a schema
-    // that constrains nothing. It is not a load error; it is reported with
-    // the missing-envelope warning instead of passing silently.
+    // Removing only the `$schema:` key line leaves a bare mapping with no
+    // `$schema` property, which a document's `$schema` may not target.
     let dedented = shipped.replacen("$schema:\n", "", 1);
     assert_ne!(dedented, shipped, "the shipped artifact declares a root `$schema:` mapping");
     matrix.file("sequence_key_removed.yaml", dedented);
@@ -391,7 +386,7 @@ fn root_schema_declaration_column() {
         Absent,
         "root key removed",
         "$schema: ./sequence_key_removed.yaml\n",
-        Expect::ValidWarning("dm.schema.missing_simplified_envelope"),
+        load("sequence_key_removed.yaml` is not a valid schema definition: it has no `$schema` property"),
     );
     for (shape, label, content) in [
         (ExplicitNull, "null", "$schema: null\n".to_string()),
@@ -441,10 +436,10 @@ fn types_catalog_declaration_column() {
     catalog(&mut matrix, Control, "control witness", shipped.to_string(), "agent: {name: x}\n", Expect::Invalid("agent"));
     catalog(&mut matrix, Absent, "absent", head.to_string(), "agent: claude\n", load(FILE));
     catalog(&mut matrix, ExplicitNull, "null", format!("{head}types: null\n"), "", load(FILE));
-    catalog(&mut matrix, ExplicitNull, "empty value", format!("{head}types:\n"), "", load("`types` must be a mapping"));
-    catalog(&mut matrix, WrongWhole, "number", format!("{head}types: 5\n"), "", load("`types` must be a mapping"));
-    catalog(&mut matrix, WrongOneElement, "sequence", format!("{head}types:\n  - AGENT: string\n"), "", load("`types` must be a mapping"));
-    catalog(&mut matrix, WrongEveryElement, "invalid sequence", format!("{head}types: [5, true]\n"), "", load("`types` must be a mapping"));
+    catalog(&mut matrix, ExplicitNull, "empty value", format!("{head}types:\n"), "", load("schema.yaml`: `/types`"));
+    catalog(&mut matrix, WrongWhole, "number", format!("{head}types: 5\n"), "", load("schema.yaml`: `/types`"));
+    catalog(&mut matrix, WrongOneElement, "sequence", format!("{head}types:\n  - AGENT: string\n"), "", load("schema.yaml`: `/types`"));
+    catalog(&mut matrix, WrongEveryElement, "invalid sequence", format!("{head}types: [5, true]\n"), "", load("schema.yaml`: `/types`"));
     // A declared empty catalog loads; the retained reference names a type it
     // does not hold.
     catalog(&mut matrix, Empty, "empty mapping", format!("{head}types: {{}}\n"), "", load("unknown named type `AGENT`"));
@@ -1018,7 +1013,7 @@ fn instance_side_matrix() {
     // properties.
     matrix.file(
         "raw.json",
-        r#"{"type":"object","required":["p","q"],"properties":{"p":{"type":"null"},"q":{}}}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["p","q"],"properties":{"p":{"type":"null"},"q":{}}}"#,
     );
     for (label, values, expect) in [
         ("absent", "", Invalid("p")),

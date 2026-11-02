@@ -159,14 +159,14 @@ impl EvalValue {
     /// Converts the value to its string representation.
     ///
     /// - `String` -> the string itself
-    /// - `Number` -> [`crate::markdown::numeric::format_number`] (`4.0` is
+    /// - `Number` -> [`simplified_schema::numeric::format_number`] (`4.0` is
     ///   `"4"`, never narrowed through an integer)
     /// - `Null` -> empty string
     /// - `Bool` -> `"true"` or `"false"`
     pub fn as_string(&self) -> String {
         match self {
             EvalValue::String(s) => s.clone(),
-            EvalValue::Number(n) => crate::markdown::numeric::format_number(*n),
+            EvalValue::Number(n) => simplified_schema::numeric::format_number(*n),
             EvalValue::Null => String::new(),
             EvalValue::Bool(b) => b.to_string(),
         }
@@ -193,7 +193,7 @@ impl EvalValue {
     pub fn as_number(&self) -> Option<f64> {
         match self {
             EvalValue::Number(n) => Some(*n),
-            EvalValue::String(s) => crate::markdown::numeric::admit_number_text(s).ok(),
+            EvalValue::String(s) => simplified_schema::numeric::admit_number_text(s).ok(),
             EvalValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
             EvalValue::Null => None,
         }
@@ -458,7 +458,7 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
             | Expr::UnaryMinus(inner) => self.walk_context_variables(inner, visitor),
             Expr::Binary { left, right, .. }
             | Expr::Comparison { left, right, .. }
-            | Expr::Fallback { primary: left, fallback: right } => {
+            | Expr::LogicalOr { left, right } => {
                 self.walk_context_variables(left, visitor);
                 self.walk_context_variables(right, visitor);
             }

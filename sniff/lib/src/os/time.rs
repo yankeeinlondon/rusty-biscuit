@@ -35,7 +35,7 @@ pub enum NtpStatus {
 ///
 /// - **Linux / macOS**: `timezone` is an IANA name (e.g. `America/Los_Angeles`).
 /// - **Windows**: `timezone` is a mapped IANA name when the Windows zone is
-///   recognised, otherwise the raw Windows timezone ID from `tzutil`.
+///   recognised, otherwise the raw Windows timezone ID (its registry key name).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TimeInfo {
     /// Best-effort timezone identifier.
@@ -186,8 +186,9 @@ pub(crate) fn extract_timezone_from_path(path: &str) -> Option<String> {
 ///
 /// - **Linux**: Reads `/etc/timezone` or parses `/etc/localtime` symlink target
 /// - **macOS**: Parses `/etc/localtime` symlink target
-/// - **Windows**: Probes `tzutil /g` and maps the result to an IANA name
-///   (falls back to the raw Windows timezone ID when unmapped)
+/// - **Windows**: Reads the zone's key name with `GetDynamicTimeZoneInformation`
+///   and maps it to an IANA name (falls back to the raw Windows timezone ID
+///   when unmapped)
 ///
 /// ## Returns
 ///
@@ -226,23 +227,19 @@ fn detect_timezone_name() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn detect_timezone_name() -> Option<String> {
-    let (program, args) = windows_timezone_command();
-    detect_windows_timezone_name_with_timeout(program, &args, timeouts::WINDOWS_TIMEZONE)
-}
+    use windows::Win32::System::Time::{
+        DYNAMIC_TIME_ZONE_INFORMATION, GetDynamicTimeZoneInformation, TIME_ZONE_ID_INVALID,
+    };
 
-#[cfg(any(target_os = "windows", test))]
-fn windows_timezone_command() -> (&'static str, [&'static str; 1]) {
-    ("tzutil", ["/g"])
-}
-
-#[cfg(target_os = "windows")]
-fn detect_windows_timezone_name_with_timeout(
-    program: &str,
-    args: &[&str],
-    timeout: std::time::Duration,
-) -> Option<String> {
-    let raw_output = process::run_for_stdout(program, args, timeout)?;
-    let windows_id = parse_windows_timezone_id_output(raw_output.as_bytes())?;
+    // In-process rather than `tzutil /g`: the key name is the Windows timezone
+    // ID that command prints, and a spawn cost 30-50 ms on every datetime
+    // capture (Darkmatter captures one per loop or lifecycle expression).
+    let mut info = DYNAMIC_TIME_ZONE_INFORMATION::default();
+    // SAFETY: `info` is a valid, writable structure for the whole call.
+    if unsafe { GetDynamicTimeZoneInformation(&mut info) } == TIME_ZONE_ID_INVALID {
+        return None;
+    }
+    let windows_id = windows_timezone_key_name(&info.TimeZoneKeyName)?;
     Some(
         crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
             .map(|s| s.to_string())
@@ -250,14 +247,15 @@ fn detect_windows_timezone_name_with_timeout(
     )
 }
 
-/// Parse raw `tzutil /g` stdout into a clean Windows timezone ID.
+/// Decode a NUL-terminated UTF-16 `TimeZoneKeyName` into a Windows timezone ID.
 ///
-/// Strips trailing CR/LF and whitespace, returning `None` for empty output.
-/// This is a pure function so it can be unit-tested on any platform.
+/// Returns `None` for a blank key or invalid UTF-16. A pure function so it can
+/// be unit-tested on any platform.
 #[cfg(any(target_os = "windows", test))]
-fn parse_windows_timezone_id_output(stdout: &[u8]) -> Option<String> {
-    let id = std::str::from_utf8(stdout).ok()?;
-    let trimmed = id.trim_end().trim_end_matches('\r').trim_end_matches('\n');
+fn windows_timezone_key_name(key: &[u16]) -> Option<String> {
+    let len = key.iter().position(|&unit| unit == 0).unwrap_or(key.len());
+    let id = String::from_utf16(&key[..len]).ok()?;
+    let trimmed = id.trim_end();
     if trimmed.is_empty() {
         return None;
     }
@@ -652,22 +650,32 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_windows_timezone_id_trims_output() {
-        let raw = b"Pacific Standard Time\r\n";
-        let result = parse_windows_timezone_id_output(raw);
-        assert_eq!(result, Some("Pacific Standard Time".to_string()));
-
-        let trailing_only = b"  Eastern Standard Time  \r\n";
-        let result2 = parse_windows_timezone_id_output(trailing_only);
-        assert_eq!(result2, Some("  Eastern Standard Time".to_string()));
+    /// A `TimeZoneKeyName`-shaped buffer: `text`, then NUL padding to 128 units.
+    fn key_name(text: &str) -> Vec<u16> {
+        let mut key: Vec<u16> = text.encode_utf16().collect();
+        key.resize(128, 0);
+        key
     }
 
     #[test]
-    fn test_parse_windows_timezone_id_rejects_empty() {
-        assert_eq!(parse_windows_timezone_id_output(b""), None);
-        assert_eq!(parse_windows_timezone_id_output(b"\r\n"), None);
-        assert_eq!(parse_windows_timezone_id_output(b"   \r\n"), None);
+    fn test_windows_timezone_key_name_stops_at_nul_and_trims_the_end() {
+        assert_eq!(
+            windows_timezone_key_name(&key_name("Pacific Standard Time")),
+            Some("Pacific Standard Time".to_string())
+        );
+        assert_eq!(
+            windows_timezone_key_name(&key_name("  Eastern Standard Time  ")),
+            Some("  Eastern Standard Time".to_string())
+        );
+        let unterminated: Vec<u16> = "UTC".encode_utf16().collect();
+        assert_eq!(windows_timezone_key_name(&unterminated), Some("UTC".to_string()));
+    }
+
+    #[test]
+    fn test_windows_timezone_key_name_rejects_blank_and_invalid() {
+        assert_eq!(windows_timezone_key_name(&key_name("")), None);
+        assert_eq!(windows_timezone_key_name(&key_name("   ")), None);
+        assert_eq!(windows_timezone_key_name(&[0xD800, 0]), None);
     }
 
     #[test]
@@ -693,46 +701,22 @@ mod tests {
         assert_eq!(map_windows_timezone_to_iana(""), None);
     }
 
-    #[test]
-    fn test_windows_timezone_command_and_deadline_policy() {
-        assert_eq!(windows_timezone_command(), ("tzutil", ["/g"]));
-        assert_eq!(
-            timeouts::WINDOWS_TIMEZONE,
-            std::time::Duration::from_secs(3)
-        );
-    }
-
+    /// The in-process read names the zone `tzutil /g`, the command it replaced,
+    /// prints. `tzutil` appends `_dstoff` when automatic DST is disabled; the
+    /// key name never carries it.
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_timezone_probe_drains_large_output() {
-        let command = "[Console]::Out.Write(('x' * 1048576 -join ''))";
-        let timezone = detect_windows_timezone_name_with_timeout(
-            "powershell",
-            &["-NoProfile", "-NonInteractive", "-Command", command],
-            std::time::Duration::from_secs(30),
-        )
-        .expect("verbose timezone probe should complete");
+    fn windows_timezone_name_matches_tzutil() {
+        let output = std::process::Command::new("tzutil")
+            .arg("/g")
+            .output()
+            .expect("tzutil runs");
+        let tzutil_id = String::from_utf8(output.stdout).expect("tzutil prints UTF-8");
+        let tzutil_id = tzutil_id.trim_end().trim_end_matches("_dstoff");
+        let expected = crate::os::windows_timezone_map::map_windows_timezone_to_iana(tzutil_id)
+            .map_or_else(|| tzutil_id.to_string(), str::to_string);
 
-        assert_eq!(timezone.len(), 1_048_576);
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_timezone_probe_honors_injected_deadline() {
-        let started = std::time::Instant::now();
-        let timezone = detect_windows_timezone_name_with_timeout(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Start-Sleep -Seconds 30",
-            ],
-            std::time::Duration::from_millis(100),
-        );
-
-        assert!(timezone.is_none());
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(detect_timezone_name(), Some(expected));
     }
 
     // ============================================================================

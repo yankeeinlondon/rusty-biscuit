@@ -632,3 +632,109 @@ fn nested_no_error_does_not_suppress_an_evaluation_error() {
     assert!(events.is_empty(), "{events:?}");
     assert!(commands.is_empty(), "{commands:?}");
 }
+
+/// Runs a `success` stack guarded by `length(frontmatter(plan,
+/// 'open_questions') || []) > 0` against a plan file holding `plan_frontmatter`
+/// in the document's directory, returning the event outcome and emissions.
+fn run_open_questions_guard(plan_frontmatter: &str) -> (LifecycleEventOutcome, Vec<Emitted>) {
+    let config = parse_lifecycle_config(
+        &json!({
+            "success": [{
+                "when": "length(frontmatter(plan, 'open_questions') || []) > 0",
+                "then": [{ "message": "open questions remain" }],
+            }],
+        }),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let document_dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        document_dir.path().join("plan.md"),
+        format!("---\n{plan_frontmatter}---\n# plan\n"),
+    )
+    .unwrap();
+    let source_path = document_dir.path().join("t.md");
+    let fm = map(json!({ "plan": "plan.md" }));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = StackExecutionContext {
+        base_dir: Some(document_dir.path()),
+        ..ctx(
+            LifecycleSignal::Success,
+            &fm,
+            None,
+            &engine,
+            &shell,
+            &recorder,
+            &harness,
+            &source_path,
+        )
+    };
+    let outcome = context.execute_event(&config);
+    (outcome, recorder.events())
+}
+
+/// `||` returns its deciding operand in a lifecycle `when:` too: a listed open
+/// question yields the list, so the guard fires.
+#[test]
+fn when_logical_or_defaulted_open_questions_fires_when_listed() {
+    let (outcome, events) = run_open_questions_guard("title: Plan\nopen_questions:\n  - Which host?\n");
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(events, vec![Emitted::Message("open questions remain".to_string())]);
+}
+
+/// An absent `open_questions` yields the `[]` default, whose length is zero:
+/// the guard is false and the item is skipped with no error.
+#[test]
+fn when_logical_or_defaulted_open_questions_skips_when_absent() {
+    let (outcome, events) = run_open_questions_guard("title: Plan\n");
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert!(events.is_empty(), "{events:?}");
+}
+
+/// The `||` value table as lifecycle `when:` truth values: each guard takes
+/// the truth of the operand that decided it, and a short-circuited
+/// `unknown_fn()` is never called (calling it would fail the event).
+#[test]
+fn when_logical_or_takes_the_truth_of_the_deciding_operand() {
+    let config = parse_lifecycle_config(
+        &json!({
+            "success": [
+                { "when": "items || []", "then": [{ "message": "items present" }] },
+                { "when": "missing || []", "then": [{ "message": "never: empty default" }] },
+                { "when": "length(items || []) > 0", "then": [{ "message": "items counted" }] },
+                { "when": "length(missing || []) > 0", "then": [{ "message": "never: no items" }] },
+                { "when": "text || flag", "then": [{ "message": "text decided" }] },
+                { "when": "off || zero", "then": [{ "message": "never: zero decided" }] },
+                { "when": "true || unknown_fn()", "then": [{ "message": "short-circuited" }] },
+            ],
+        }),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({ "items": [1, 2], "text": "x", "flag": true, "off": false, "zero": 0 }));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(
+        recorder.events(),
+        ["items present", "items counted", "text decided", "short-circuited"]
+            .map(|text| Emitted::Message(text.to_string()))
+            .to_vec()
+    );
+}

@@ -1,0 +1,336 @@
+diff --git a/darkmatter/docs/inline/schema-validation.md b/darkmatter/docs/inline/schema-validation.md
+index 67f53ef73..323bf336e 100644
+--- a/darkmatter/docs/inline/schema-validation.md
++++ b/darkmatter/docs/inline/schema-validation.md
+@@ -537,7 +537,7 @@ A property whose value a later stage will compute has not been computed yet at v
+ | `content_policy: ["$(echo X)", TimeSensitive]` — `$(...)` inside a list is never run | judged as written, so rejected |
+ | `title: "see $(date)"` — `$(...)` after other text is never run | judged as written |
+ 
+-Deferral is decided per problem, at the problem's own path. A wholly later-resolved key — a whole-value command, or a value read from one — defers every problem beneath it. Otherwise a problem waits only when the value at its path (or, for a missing node, its nearest existing parent) still holds a `{{ … }}` template: rendering a template changes only its own value, so it can fix a problem there or on a parent that contains it, never one on a literal sibling. Two problems never wait: an unknown or missing key on a mapping (rendering changes values, not keys), and a problem beside a template the schema already accepted at a place marked `deferred` (that template's value was already allowed for, so what remains is a real mistake).
++Deferral is decided per problem, at the problem's own path. A wholly later-resolved key — a whole-value command, or a value read from one — defers every problem beneath it. Otherwise a problem waits only when the value at its path (or, for a missing node, its nearest existing parent) still holds a `{{{ … }}}` template: rendering a template changes only its own value, so it can fix a problem there or on a parent that contains it, never one on a literal sibling. Two problems never wait: an unknown or missing key on a mapping (rendering changes values, not keys), and a problem beside a template the schema already accepted at a place marked `deferred` (that template's value was already allowed for, so what remains is a real mistake).
+ 
+ ```yaml
+ $schema:
+@@ -546,7 +546,7 @@ cfg:
+   counts: [three, "{{ x }}"]   # fails fast at /cfg/counts/0; /cfg/counts/1 waits
+ ```
+ 
+-Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../../../simplified-schema/docs/topics/language/types.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
++Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{{ … }}}` text there is judged as that text. The one exception is a `{{{ … }}}` template nested below a top-level key at a place the schema marks [`deferred`](../../../simplified-schema/docs/topics/language/types.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
+ 
+ The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--disable schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
+ 
+@@ -556,7 +556,7 @@ content_policy: "$(cat policy.txt)"   # policy.txt holds ["Duration(3mo)"]
+ 
+ fails `md compose` and `md compose --disable schema-triggers` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--disable baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
+ 
+-A library caller that validates the composed frontmatter itself can take this verdict over with `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (Claudine does, so it can drop an optional value that shell output made invalid). Compose then still judges what that caller does not: values a result suffix (`::ok`, `::exit-code`, `::result`) typed, and, when trigger schemas are enabled, the full post-shell pass. A `{{ … }}` template that does not depend on a shell value has resolved by the time the first pass runs, so its value is checked like any authored value.
++A library caller that validates the composed frontmatter itself can take this verdict over with `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (Claudine does, so it can drop an optional value that shell output made invalid). Compose then still judges what that caller does not: values a result suffix (`::ok`, `::exit-code`, `::result`) typed, and, when trigger schemas are enabled, the full post-shell pass. A `{{{ … }}}` template that does not depend on a shell value has resolved by the time the first pass runs, so its value is checked like any authored value.
+ 
+ ### Error rendering
+ 
+@@ -651,7 +651,7 @@ absolute value is a fixpoint, so compose → re-compose never drifts.
+ - a lazy `file` arm under `eager` written on the union or its array
+   (`lazy_asset[](eager)`): that `eager` is property timing and does not make
+   the arm eager.
+-- a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
++- a value still holding a `$(...)` shell expression or unresolved `{{{ ... }}}` template — the post-shell re-validation handles it once it expands.
+ 
+ **Read-only validation contract.** Library callers that use `validate` / `validate_with_positions` keep their current contract: validation coerces on a working copy and **does not mutate** the caller's `serde_json::Value`. The eager-`file` rewrite is opt-in via the explicit [`EffectiveSchema::normalize_frontmatter`](../../lib/src/markdown/schemas/mod.rs) API; compose calls it on its accepted effective schema so the normalized values are what downstream interpolation, lifecycle events, and `inline-compose` see.
+ 
+diff --git a/darkmatter/docs/topics/schemas/definition.md b/darkmatter/docs/topics/schemas/definition.md
+index 8edb63efb..a02bd55db 100644
+--- a/darkmatter/docs/topics/schemas/definition.md
++++ b/darkmatter/docs/topics/schemas/definition.md
+@@ -505,7 +505,7 @@ signatures: `partials/functions.yaml` for expression functions and
+ single value (for an overload with one argument) or a positional list; the
+ long form is a closed mapping keyed by parameter name, plus an optional
+ `no_error: boolean`; each overload is a separate alternative. Every operand is
+-marked `deferred`, so a whole-value `{{ … }}` template is accepted in its
++marked `deferred`, so a whole-value `{{{ … }}}` template is accepted in its
+ place and checked when the event runs:
+ 
+ ```yaml
+@@ -920,7 +920,7 @@ problem at the start of that flow mapping. A newly added top-level property
+ has no authored node or non-root ancestor, so JSON reports `null` for both
+ `line` and `column`.
+ 
+-**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation includes aliases (`*a`), merge keys (`<<`), unquoted `{{ … }}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
++**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation includes aliases (`*a`), merge keys (`<<`), unquoted `{{{ … }}}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
+ 
+ ```mermaid
+ flowchart TD
+@@ -1223,7 +1223,7 @@ match api.validate_kind_document(&text, Path::new("schemas/post.yaml"))? {
+ 
+ ### Span-Aware Validation and Normalization
+ 
+-`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A malformed template (`n: "{{ 1 + }}"`) is never dropped: no rendering can settle it, so its problem is reported as written. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. That text is never deferred as a template, at a place marked `deferred` or in a lifecycle verb's operand. `EffectiveSchema::validate_stored(stored, positions, phase)` judges a stored instance the same way, unphased or at a `SchemaPhase`, for a caller that does not want the pending rules. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](../../../../simplified-schema/docs/topics/language/types.md#files); the validation-only APIs stay read-only.
++`EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A malformed template (`n: "{{{ 1 + }}}"`) is never dropped: no rendering can settle it, so its problem is reported as written. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{{!data:v1:…}}}`) is data: it is never pending, and it is validated as the text it holds. That text is never deferred as a template, at a place marked `deferred` or in a lifecycle verb's operand. `EffectiveSchema::validate_stored(stored, positions, phase)` judges a stored instance the same way, unphased or at a `SchemaPhase`, for a caller that does not want the pending rules. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](../../../../simplified-schema/docs/topics/language/types.md#files); the validation-only APIs stay read-only.
+ 
+ ### Schema Descriptor Catalog
+ 
+@@ -1381,7 +1381,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
+ - `--set` and `--state` overrides are applied **before** validation, so they can fulfill required properties. A document with `spec: ""` plus `--set spec=design.md` validates successfully.
+ - The stage **mutates** the document: it converts values to their declared types, at every declared depth (see [Type Coercion](../../../../simplified-schema/docs/topics/conversion.md#type-coercion)), and **writes the converted values back** into the frontmatter, so the real types flow to every later stage (shell expansion, page blocks, body interpolation, init-stack conditions) and into the composed output. For example, a `has_spec: "{{spec ? true : false}}"` ternary resolves to the string `"true"` during interpolation and is stored as a real JSON boolean `true` after this stage.
+ - A top-level value still holding a `$(...)` shell expression is **skipped** by the write-back — its literal form must survive into shell expansion. Its real type is resolved later at the post-shell re-validation point, which coerces via the same helper.
+-- Problems on a whole-value frontmatter shell expression (`$(...)`), or at a path whose `{{ }}` template reads one (a problem on a literal sibling of that template is not deferred), are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--disable schema-triggers`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing except a `{{ … }}` template nested at a place the schema marks [`deferred`](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints), so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
++- Problems on a whole-value frontmatter shell expression (`$(...)`), or at a path whose `{{ }}` template reads one (a problem on a literal sibling of that template is not deferred), are **deferred** *only when frontmatter shell expansion is enabled* — that value has not been computed at validation time, so compose re-validates the post-shell frontmatter against the same effective schema after shell expansion and the second interpolation pass. A `$(...)` that prints an invalid value (for any baseline property, `content_policy` included) therefore fails compose, with or without `--disable schema-triggers`, which removes trigger schemas but not the post-shell check. (A library caller that re-validates the composed frontmatter itself can take over that verdict with `ComposeOptions::with_caller_owned_post_shell_verdict(true)`; compose still judges result-suffix values and trigger schemas.) Any composition-independent problem fails fast, before a command runs. `$(...)` text compose never expands (`content_policy: ["$(echo X)", TimeSensitive]`, `title: "see $(date)"`) is not deferred, and the post-shell check defers nothing except a `{{{ … }}}` template nested at a place the schema marks [`deferred`](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints), so such a value is judged as written. When frontmatter shell expansion is **disabled** (e.g. `ComposeOptions::only(&[ComposeOperation::Interpolation])`), no later stage re-resolves those values, so the `$(...)` deferral does not apply and every problem fails fast.
+ - Only **authored** text is ever pending. A data value (a data override layer, an expression's result, a decoded literal token) is final, so a problem on it is reported even when its text contains `$(` or `{{`: with `OverrideLayer::data(json!({"count": "$(echo 2)"}))` against `count: number`, validation fails, while the same value as an authored override is deferred and run. A stored literal token is judged by the text it holds.
+ - Recursive compose runs validate every child document after its parent `set=` overlay is applied. A child schema failure aborts the parent compose under `fail_fast` (or when the error is structural); otherwise it surfaces as a transclusion warning.
+ - The baseline schema participates in transclusion cache keys and the run-local options hash, so cached results are not reused across different baselines.
+@@ -1440,7 +1440,7 @@ the same invalid Darkmatter-owned value. Each opts out with
+ `--disable baseline-schema` or `DARKMATTER_NO_BASELINE_SCHEMA`. They differ in how
+ a custom baseline is named (`md compose --baseline-schema <path>`;
+ `md schema validate --schema <path>` or `BASELINE_SCHEMA`) and in what they
+-check: compose validates after interpolation, so a `{{ … }}` value is checked
++check: compose validates after interpolation, so a `{{{ … }}}` value is checked
+ once it resolves, while `md schema validate` checks the frontmatter as
+ written. See [Selecting the Baseline](#selecting-the-baseline).
+ 
+diff --git a/darkmatter/docs/topics/schemas/dmls-schema-support.md b/darkmatter/docs/topics/schemas/dmls-schema-support.md
+index e58e75a99..246a0183b 100644
+--- a/darkmatter/docs/topics/schemas/dmls-schema-support.md
++++ b/darkmatter/docs/topics/schemas/dmls-schema-support.md
+@@ -75,7 +75,7 @@ A few details worth knowing:
+ - the base baseline is the [built-in baseline](./definition.md#the-built-in-baseline) compiled into the server, including the Content Policy schema it imports to type `content_policy`. Those compiled-in documents are never read from disk and never become watched dependencies, so the server needs no schema files to type a document. An extension, trigger, or document schema that declares `content_policy` replaces the built-in typing, as for any other baseline property
+ - extension baselines whose activation globs match the document contribute their shapes even when the document declares no `$schema`, so their keys are completed and hovered "for free"
+ - **matching trigger payloads feed completion and hover as well as diagnostics.** The property shape the editor completes and hovers from layers the base baseline, the matched extension baselines, each matching trigger payload in registry order, and then the document's own `$schema`. A later layer replaces an earlier layer's whole definition of a top-level property, exactly as validation merges them, so a document typed only by a trigger gets key, value, and nested completion and hover from it, and a property the document's `$schema` redeclares is completed and hovered from the author's declaration. For example, with a trigger that declares `mode: "enum(append, replace)"`, an empty `mode:` value offers `append` and `replace`; add `$schema: { mode: "enum(fast, slow)" }` to the document and it offers `fast` and `slow` instead. A trigger payload written as raw JSON Schema has no SimplifiedSchema shape: it still validates, but contributes no completion or hover
+-- trigger-declared properties count as declared for the undeclared-property advisory on `{{ … }}` expressions, as they do in `md compose`. Completion of property names *inside* an expression still offers only the document's keys and the parameters its own `$schema` declares; baseline, extension, and trigger properties are host controls, not parameters
++- trigger-declared properties count as declared for the undeclared-property advisory on `{{{ … }}}` expressions, as they do in `md compose`. Completion of property names *inside* an expression still offers only the document's keys and the parameters its own `$schema` declares; baseline, extension, and trigger properties are host controls, not parameters
+ - the effective schema (and every file it depends on — the referenced `$schema` file, its imports, its examples, and each matched extension baseline) is content-hash cached per document; editing any dependency invalidates the bundle immediately
+ - the cache is also keyed on the document's file-resolution context: its repository, its folder, its tree root and how that was chosen, the home folder, the environment (so `SCHEMAS_DIR`), and the extra `@` roots. A `$schema: ^shape.yaml` that resolves to a package's `shape.yaml` is never served to the same text once the package root changes; the schema is assembled again for the new context
+ - a failed assembly is cached together with the files its error names, so fixing an imported schema file clears the error without reopening the document
+@@ -144,7 +144,7 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
+ | `dm.schema.prepare`                                            | the schema could not be resolved, merged, or compiled; in a standalone schema file, an explicit `Name@file` target that cannot be found or read |
+ | `dm.schema.type_mismatch`                                      | a value did not match its declared type                                                               |
+ | `dm.schema.constraint`                                         | a non-type constraint failed (range, length, pattern, enum, …)                                        |
+-| `dm.schema.missing_required`                                   | a required key is absent — **strict mode only**                                                       |
++| `dm.schema.missing_required`                                   | a required key is absent — in Markdown frontmatter **strict mode only**; in a [YAML kind document](#yaml-kind-documents) always |
+ | `dm.schema.unknown_key`                                        | a key the schema does not declare is present                                                          |
+ | `dm.schema.deprecated_key`                                     | a deprecated key is present                                                                           |
+ | `dm.schema.invalid_file_reference`                             | a `file(...)`-typed value failed to parse or resolve (a well-formed reference to a file that does not exist is not reported in the editor; `md` still rejects a missing `file(eager)` target) |
+@@ -157,8 +157,8 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
+ 
+ The severity policy follows one guiding principle: *diagnose edit-time problems, not compose-time ones*. A document is a template; values arrive at compose time via CLI `--set`, seeds, `$(...)` expansion, or an interactive prompt. So:
+ 
+-- a `required` key that is absent is **not** flagged by default — it is expected to be injected at launch (`schema.strict` re-enables it)
+-- a value holding a deferred `{{ … }}` or `$(...)` construct is not type-checked; its type is unknowable until the value is real
++- a `required` key that is absent from Markdown frontmatter is **not** flagged by default — it is expected to be injected at launch (`schema.strict` re-enables it). A [YAML kind document](#yaml-kind-documents) has no launch stage, so there it is always an error
++- a value holding a deferred `{{{ … }}}` or `$(...)` construct is not type-checked; its type is unknowable until the value is real
+ - `unknown_key` is a warning by default and an error in strict mode
+ 
+ Standalone schema documents **own their problems**: when a `kind: schema` file is open in the editor, its `invalid_suggestion` warnings and `document_malformed` errors are published on that file, never duplicated onto the Markdown documents consuming it.
+@@ -320,7 +320,7 @@ Hover also understands schema *authoring*:
+ 
+ - hovering a property definition inside a `$schema` value or a standalone schema file renders a `type-definition` block — what the definition declares, whether it is required, its eager timing, and each built-in type's catalog description (`any` shows as `unknown` with its alias); an `alphanumeric` definition adds its canonical options and the characters it allows overall and first
+ - hovering an `expression`-typed value gets the shared expression hover (parsed form plus the `ctx.*`/function catalog)
+-- hovering a declared-but-unset key inside a body `{{ … }}` interpolation falls back to the schema property's description — a set frontmatter value always wins
++- hovering a declared-but-unset key inside a body `{{{ … }}}` interpolation falls back to the schema property's description — a set frontmatter value always wins
+ 
+ A property typed by a postfixed union reference (`U[]`, `U(required)`) has no single type, so its hover lists every alternative with its own description. Hovering one item of a `U[]` list names an alternative only when exactly one alternative accepts the item; a missing, invalid, or multiply-matching item shows every alternative instead. Acceptance is decided by the Darkmatter library, never by a closest-match guess (see [Union-typed properties and list items](../../../dmls/docs/hover.md#union-typed-properties-and-list-items)).
+ 
+@@ -331,7 +331,10 @@ against the definition that ships with Darkmatter for that kind (see
+ [How a YAML document is validated by its `kind`](./definition.md#how-a-yaml-document-is-validated-by-its-kind)).
+ DMLS decides this from the buffer's content, not its name or folder: a
+ trigger outside any schema root is checked too. Markdown frontmatter is never
+-a kind document, even when it sets `kind: schema-trigger`.
++a kind document, even when it sets `kind: schema-trigger`. In a `.yaml` or
++`.yml` file that names a shipped kind, a `---` line is a YAML document marker,
++never a Markdown frontmatter fence: wrapping the document in `---` lines makes
++a second YAML document, which fails to load (below).
+ 
+ **Diagnostics.** The definition's problems are published with the same
+ `dm.schema.*` codes, severities, and ranges as frontmatter problems:
+@@ -348,16 +351,50 @@ types:
+     title: string
+ ```
+ 
+-The definitions' problems are graded like frontmatter: a missing required key
+-(`dm.schema.missing_required`) is reported only with `schema.strict` on. The
+-envelope diagnostics described above (`dm.schema.document_malformed`,
+-`dm.schema.invalid_type_definition`, and the rest) still run beside them,
+-and a definition the envelope already reports precisely (a bad type in
+-`types:`) is reported once, by the envelope, on the offending token.
++The definitions' problems are graded like frontmatter, with one difference:
++nothing assigns a value to a whole YAML document later, so a missing required
++key (`dm.schema.missing_required`) is always an error, with or without
++`schema.strict`, at every depth of a match expression. Opened as
++`shape.yaml`, this trigger gets one error on the `{count: 1}` mapping
++(line 2, column 20), naming `of`:
+ 
+-There are no kind diagnostics while the buffer is not valid YAML (the parse
+-diagnostic stands alone), for a `kind` that is missing, null, or any other
+-string, or when DMLS has no workspace context for the file.
++```yaml
++kind: schema-trigger
++match: {min-match: {count: 1}}
++```
++
++The envelope diagnostics described above (`dm.schema.document_malformed`,
++`dm.schema.invalid_type_definition`, and the rest) still run beside them.
++Inside a `schemas/` folder the trigger envelope's own error for the same
++omission (`dm.schema.prepare`, over the whole file) is published as well;
++the kind diagnostic is the one that marks the mapping. Two problems are
++reported once, by the envelope: a definition it reports precisely (a bad type
++in `types:`, on the offending token), and a `kind: schema` file with neither
++`$schema` nor `types`, which the envelope names as needing one of the two.
++The **add a missing required key** quick fix is offered for a missing
++top-level key such as `match`, not for a nested one such as `of`.
++
++**Loading errors.** A file whose top-level `kind:` line names `schema` or
++`schema-trigger` but which does not load (invalid YAML, a duplicate key, a
++second document, a non-string key such as `1: one`) gets exactly one error,
++inside or outside a schema root. Where an envelope diagnostic already reports
++the failure (`dm.schema.document_malformed` for a `kind: schema` file, the
++trigger envelope's `dm.schema.prepare` error inside a `schemas/` folder), that
++is the one; otherwise DMLS publishes the loader's error as
++`dm.frontmatter.yaml_parse`, at the parser's position, or at the start of the
++file when the loader reports none. Opened as `trigger.yaml` outside
++`schemas/`, this file gets one `dm.frontmatter.yaml_parse` error at line 3,
++column 1, where the parser finds the flow sequence unclosed:
++
++```yaml
++kind: schema-trigger
++match: [
++```
++
++A file that does not load has no other kind diagnostics until it loads
++again. There are no kind diagnostics either for a `kind` that is
++missing, null, or any other string, or when DMLS has no workspace context for
++the file; a YAML file that names no shipped kind gets no loading error.
+ 
+ **Completion.** At an empty top-level line, completion offers the definition's
+ keys that are not yet present, each with its `->` description; the Markdown
+@@ -470,7 +507,7 @@ Document highlights currently cover headings and wiki links; schema keys are not
+ 
+ ### Quick Fixes and Formatting
+ 
+-One schema-specific code action ships today: **add a missing required key**, offered directly on a `dm.schema.missing_required` diagnostic (and therefore only in strict mode). Other code actions — create the missing file, migrate a deprecated `style:` key, close an unclosed `::block`, wrap a malformed interpolation in a literal — are schema-adjacent rather than schema-driven. Whole-document **formatting** is byte-equivalent to the `md clean` cleanup sequence; it is a document-level operation, not a schema one.
++One schema-specific code action ships today: **add a missing required key**, offered directly on a `dm.schema.missing_required` diagnostic for a top-level key (so in Markdown frontmatter only in strict mode; in a YAML kind document by default). Other code actions — create the missing file, migrate a deprecated `style:` key, close an unclosed `::block`, wrap a malformed interpolation in a literal — are schema-adjacent rather than schema-driven. Whole-document **formatting** is byte-equivalent to the `md clean` cleanup sequence; it is a document-level operation, not a schema one.
+ 
+ ### Content policies
+ 
+@@ -519,7 +556,7 @@ reads no other file and adds no dependency.
+ - When a named type and its use site both declare `suggest(...)`, the "at
+   most one `suggest`" error is ranged on the whole `$schema`, because the
+   inherited candidate's span belongs to another file.
+-- A frontmatter value holding a `{{ … }}` template is not diagnosed, because
++- A frontmatter value holding a `{{{ … }}}` template is not diagnosed, because
+   its value is known only after interpolation. `md compose` checks it then;
+   DMLS reports nothing for it, including an invalid `content_policy` entry such
+   as `FileChanged({{HOME}}/x, @fp)`.
+@@ -534,7 +571,7 @@ The honest list. None of these are advertised to the editor, so no client will e
+ | **Code lenses** (`textDocument/codeLens`)                  | not implemented — no compose-preview or reference-count lenses                                                                                                                                                |
+ | **Signature help** (`textDocument/signatureHelp`)          | not implemented — function signatures surface through completion `detail` and hover instead                                                                                                                   |
+ | **Semantic tokens for frontmatter and schemas**            | the frozen V1 legend covers body constructs only (interpolations, directives, wiki links); expression tokens are reserved in the legend for a future phase, and no frontmatter/schema token family exists yet |
+-| **Rename of schema keys**                                  | rename today covers headings and files only; renaming a frontmatter key (and its `{{ … }}` usages) is not offered                                                                                             |
++| **Rename of schema keys**                                  | rename today covers headings and files only; renaming a frontmatter key (and its `{{{ … }}}` usages) is not offered                                                                                             |
+ | **References / highlights on schema keys**                 | references answer transclusion questions; there is no "every usage of this frontmatter key" query yet                                                                                                         |
+ | **Pull diagnostics** (`textDocument/diagnostic`)           | push-only; editors that prefer pull get the same diagnostics via `publishDiagnostics`                                                                                                                         |
+ | **Commands** (`workspace/executeCommand`)                  | no server commands (compose preview, cache invalidation, …) yet                                                                                                                                               |
+@@ -566,7 +603,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter
+ 
+ 1. Required keys marked; nested keys offered per the enclosing inline-object shape.
+ 2. Nested-mapping folding ships; frontmatter document symbols are config-gated (`[symbols] frontmatter = true`).
+-3. Add-missing-key, on the `missing_required` diagnostic (strict mode only).
++3. Add-missing-key, on a top-level `missing_required` diagnostic (strict mode only; by default in a YAML kind document).
+ 4. Constraint violations for enums; `invalid_suggestion` linting for advisory candidates.
+ 5. Enum choices rigid; `suggest(...)` candidates advisory — they never validate.
+ 6. Alternatives combine; an authored `literal(...)` discriminant that selects one union arm narrows key completion to it, per item in a `U[]` list.
+diff --git a/docs/kind-documents.md b/docs/kind-documents.md
+index d0e9ed204..4fa909814 100644
+--- a/docs/kind-documents.md
++++ b/docs/kind-documents.md
+@@ -18,10 +18,8 @@ Two of these values are formal YAML document kinds that Darkmatter validates by
+ **Schemas** use [SimplifiedSchema](^darkmatter/docs/topics/schemas/index.md) grammar to define enforceable schemas.
+ 
+ > Note:
+-> 
+-> In order to have a schema used by Darkmatter, DMLS, and Claudine by extension, it must be in one the following directories:
+ >
+-::file ^darkmatter/docs/topics/schemas/
++> Darkmatter, DMLS, and (through them) Claudine find a schema by bare name or apply a schema trigger only when the file is in one of the document's five schema roots: the `SCHEMAS_DIR` folder, the document's package `schemas/`, its package area's `schemas/`, the repository's `schemas/`, and `~/schemas`. See [Schema roots](^darkmatter/docs/topics/schemas/definition.md#schema-roots) for the search order and scope rules.
+ 
+ ::doc-list kind=schema group-by=package-area
+ 
+diff --git a/darkmatter/lib/tests/l1/schema_documentation_pages_compose.rs b/darkmatter/lib/tests/l1/schema_documentation_pages_compose.rs
+new file mode 100644
+index 000000000..dafa286f7
+--- /dev/null
++++ b/darkmatter/lib/tests/l1/schema_documentation_pages_compose.rs
+@@ -0,0 +1,75 @@
++//! The schema documentation pages compose unchanged.
++//!
++//! These pages show expression syntax as examples. An inline code span does
++//! not stop document interpolation, so an example written as a bare
++//! `{{ … }}` or `{{!data:…}}` fails `md compose`; examples use the inert
++//! `{{{ … }}}` interpolation literal instead. Each test reads its page with
++//! `include_str!` so a change to that page runs it.
++
++use std::path::Path;
++
++use darkmatter::markdown::Markdown;
++use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, ComposeSource};
++
++/// Composes `relative` (from the checkout root) and returns the composed text.
++///
++/// The context is captured for the page's own text only, so no repository
++/// scan runs beyond what the page reads.
++fn compose_page(relative: &str, text: &str) -> String {
++    let root = biscuit_file::canonicalize_simplified(&biscuit_test_harness::manifest_dir!().join("../..")).expect("checkout root");
++    let page = root.join(relative);
++    let directory = page.parent().map(Path::to_path_buf).expect("page directory");
++    let document = Markdown::try_from(page.as_path()).expect("page loads").with_source(ComposeSource::File(page.clone()));
++    let request = ComposeRequest::with_context(
++        ComposeOptions::new_with_context(ComposeContext::capture_for_content(&directory, text)).with_source_file(&page),
++        crate::request_support::context_at(&root),
++    )
++    .expect("request");
++    let (composed, _report) = document
++        .compose_with(&request)
++        .unwrap_or_else(|error| panic!("{relative} must compose: {error}"));
++    composed.content().to_string()
++}
++
++#[test]
++fn the_schema_definition_page_composes_with_its_examples_as_text() {
++    let text = include_str!("../../../docs/topics/schemas/definition.md");
++    let composed = compose_page("darkmatter/docs/topics/schemas/definition.md", text);
++    assert!(composed.contains("(`{{!data:v1:…}}`)"), "the literal-token example renders as text");
++    assert!(composed.contains("(`n: \"{{ 1 + }}\"`)"), "the malformed-template example renders as text");
++    assert!(composed.contains("whole-value `{{ … }}` template"), "the deferred-constraint example renders as text");
++}
++
++#[test]
++fn the_dmls_schema_support_page_composes_with_its_examples_as_text() {
++    let text = include_str!("../../../docs/topics/schemas/dmls-schema-support.md");
++    let composed = compose_page("darkmatter/docs/topics/schemas/dmls-schema-support.md", text);
++    assert!(composed.contains("`{{ … }}`"), "the template placeholder renders as text");
++    assert!(!composed.contains("{{{"), "no interpolation literal survives composition");
++}
++
++#[test]
++fn the_schema_validation_page_composes_with_its_examples_as_text() {
++    let text = include_str!("../../../docs/inline/schema-validation.md");
++    let composed = compose_page("darkmatter/docs/inline/schema-validation.md", text);
++    assert!(composed.contains("`{{ … }}`"), "the template placeholder renders as text");
++    assert!(!composed.contains("{{{"), "no interpolation literal survives composition");
++}
++
++#[test]
++fn the_schema_authoring_page_composes() {
++    let text = include_str!("../../../docs/topics/schemas/authoring-schemas.md");
++    compose_page("darkmatter/docs/topics/schemas/authoring-schemas.md", text);
++}
++
++#[test]
++fn the_lsp_configuration_page_composes() {
++    let text = include_str!("../../../docs/lsp/configuration.md");
++    compose_page("darkmatter/docs/lsp/configuration.md", text);
++}
++
++#[test]
++fn the_repository_kind_catalog_page_composes() {
++    let text = include_str!("../../../../docs/kind-documents.md");
++    compose_page("docs/kind-documents.md", text);
++}

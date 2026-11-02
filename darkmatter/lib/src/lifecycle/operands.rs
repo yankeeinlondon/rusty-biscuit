@@ -44,13 +44,13 @@ use super::actions::{
     CommunicationChannel, expression_function_signature, is_lifecycle_control_verb, side_effect_signature,
 };
 use crate::effects::effect_registration;
-use crate::markdown::coercion::{BindOptions, Defer};
+use simplified_schema::coercion::{BindOptions, Defer};
 use crate::markdown::compose::expression::call_binding::{
     BoundCall, CallBindingError, FunctionRegistration, OverloadSelection,
 };
 use crate::markdown::compose::expression::functions::{function_registration, inspect_registration};
 use crate::markdown::compose::expression::defer_templates;
-use crate::markdown::schemas::simplified::OperandForm;
+use simplified_schema::simplified::OperandForm;
 
 /// What passive validation concluded about a call's operands.
 #[derive(Debug, Clone, PartialEq)]

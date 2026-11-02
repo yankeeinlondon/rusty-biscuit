@@ -13,7 +13,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::compose::conditions::evaluate_condition;
-use darkmatter::markdown::compose::expression::{ExpressionError, evaluate, parse_condition};
+use darkmatter::markdown::compose::expression::{ExpressionError, evaluate, parse};
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionOptions;
 use darkmatter::markdown::compose::subtree::compose_subtree;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOperation, ComposeOptions, EffectiveStateBuilder};
@@ -504,8 +504,8 @@ fn the_public_condition_api_still_returns_failures_as_results() {
     assert!(evaluate_condition("min(1)", &state, 1, context.clone()).is_err());
     assert_eq!(evaluate_condition("missing", &state, 1, context).ok(), Some(false));
 
-    assert!(parse_condition("1 +").is_err());
-    let expression = parse_condition("min(1)").unwrap();
+    assert!(parse("1 +").is_err());
+    let expression = parse("min(1)").unwrap();
     assert!(evaluate(&expression, &state).is_err());
 }
 

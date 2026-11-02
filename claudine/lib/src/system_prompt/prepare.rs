@@ -1,7 +1,7 @@
 use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource, RequestSnapshot};
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use tracing::{info_span, warn};
 
 use crate::system_prompt::types::*;
@@ -47,7 +47,7 @@ impl ResolvedPromptInput {
     }
 }
 
-/// Baseline [`SimplifiedSchema`] claudine attaches to discovered
+/// Baseline [`SchemaRoot`] claudine attaches to discovered
 /// `system-prompt.md` files so the `mode` frontmatter key is validated
 /// during Darkmatter compose.
 ///
@@ -63,7 +63,7 @@ impl ResolvedPromptInput {
 /// compile-controlled literal; a parse failure here is a programmer
 /// error, not a runtime condition, hence the panic over the grammar
 /// constant.
-fn discovered_baseline_schema() -> SimplifiedSchema {
+fn discovered_baseline_schema() -> SchemaRoot {
     const MODE_GRAMMAR: &str = "enum(append, replace; default(append))";
     let mut mapping = serde_yaml_ng::Mapping::new();
     mapping.insert(

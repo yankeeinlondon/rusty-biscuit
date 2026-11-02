@@ -39,12 +39,12 @@ use std::sync::OnceLock;
 use serde_json::Value;
 
 use super::absence::static_variable_reads_in_scope;
-use super::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::binding::{
     Availability, BindingError, BindingView, EvaluationSession, RootClass, UnavailableBinding,
 };
-use super::lexer::{ExpressionFinder, ExpressionLocation, ParseMode};
-use super::parser::{parse_condition_spanned, parse_spanned};
+use super::{ExpressionFinder, ExpressionLocation};
+use simplified_schema::expression::parser::parse_spanned;
 use super::{ExpressionError, evaluate, functions, unknown_function_error};
 use crate::markdown::compose::interpolation::{Evaluator, ExpressionFailurePolicy, interpolate_value};
 use crate::markdown::span::SourceSpan;
@@ -53,9 +53,9 @@ use crate::markdown::types::{MarkdownError, SourceRef};
 /// How an authored value holds its expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoredMode {
-    /// A string that is one bare expression (a `when:` condition), parsed in
-    /// the given mode. A non-string value is a constant.
-    Expression(ParseMode),
+    /// A string that is one bare expression (a `when:` condition). A
+    /// non-string value is a constant.
+    Expression,
     /// A string interpolated as a whole value: one `{{ … }}` span keeps its
     /// typed result, anything else renders to a string. A non-string value is
     /// a constant.
@@ -162,12 +162,12 @@ pub struct ValidationDiagnostic {
 pub fn prepare_value(input: &Value, mode: AuthoredMode) -> Result<PreparedValue, PreparationError> {
     let mut expressions = Vec::new();
     match (mode, input) {
-        (AuthoredMode::Expression(parse_mode), Value::String(text)) => {
-            let expr = parse_in_mode(text, parse_mode).map_err(|cause| PreparationError {
+        (AuthoredMode::Expression, Value::String(text)) => {
+            let expr = parse_spanned(text).map_err(|cause| PreparationError {
                 pointer: String::new(),
                 span: 0..text.len(),
                 text: text.clone(),
-                cause: Box::new(cause),
+                cause: Box::new(cause.into()),
             })?;
             expressions.push(PreparedExpression {
                 pointer: String::new(),
@@ -176,7 +176,7 @@ pub fn prepare_value(input: &Value, mode: AuthoredMode) -> Result<PreparedValue,
                 expr,
             });
         }
-        (AuthoredMode::Expression(_), _) => {}
+        (AuthoredMode::Expression, _) => {}
         (AuthoredMode::InterpolatedValue, Value::String(text)) => {
             scan_leaf(text, "", &mut expressions)?;
         }
@@ -188,14 +188,6 @@ pub fn prepare_value(input: &Value, mode: AuthoredMode) -> Result<PreparedValue,
         input: input.clone(),
         expressions,
     })
-}
-
-fn parse_in_mode(text: &str, mode: ParseMode) -> Result<SpannedExpr, ExpressionError> {
-    match mode {
-        ParseMode::Interpolation => parse_spanned(text),
-        ParseMode::Condition => parse_condition_spanned(text),
-    }
-    .map_err(ExpressionError::from)
 }
 
 fn scan_tree(
@@ -249,7 +241,7 @@ fn parse_occurrences<'t>(
     locations.into_iter().map(move |location| {
         let inner = &text[location.start + 2..location.end - 2];
         let offset = location.start + 2 + (inner.len() - inner.trim_start().len());
-        let parsed = parse_in_mode(&location.expression, ParseMode::Interpolation);
+        let parsed = parse_spanned(&location.expression).map_err(ExpressionError::from);
         ScannedOccurrence {
             span: location.start..location.end,
             offset,
@@ -578,7 +570,7 @@ pub fn validate_expression_in_scope(
     super::call_check::visit_call_nodes(expr, &mut |call| {
         let SpannedExprKind::CallbackCall { args, .. } = &call.kind else { return; };
         for argument in args {
-            let super::ast::SpannedCallArgument::Callback(callback) = argument else { continue; };
+            let simplified_schema::expression::ast::SpannedCallArgument::Callback(callback) = argument else { continue; };
             if let Err(error) = super::check_local_names(callback.pattern.erase().names(), Some(view)) {
                 diagnostics.push((callback.pattern_span.clone(), ExpressionError::InvalidCallback {
                     span: callback.pattern_span.clone(),
@@ -648,9 +640,9 @@ fn visit_calls<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e str, &'e So
             visit_calls(base, visit);
             visit_calls(index, visit);
         }
-        SpannedExprKind::Fallback { primary, fallback } => {
-            visit_calls(primary, visit);
-            visit_calls(fallback, visit);
+        SpannedExprKind::LogicalOr { left, right } => {
+            visit_calls(left, visit);
+            visit_calls(right, visit);
         }
         SpannedExprKind::Ternary {
             condition,
@@ -688,7 +680,7 @@ pub fn evaluate_prepared(
     session: &EvaluationSession<'_>,
 ) -> Result<Value, MarkdownError> {
     match (prepared.mode, &prepared.input) {
-        (AuthoredMode::Expression(_), Value::String(_)) => {
+        (AuthoredMode::Expression, Value::String(_)) => {
             let expression = &prepared.expressions[0];
             evaluate(&expression.expr.erase(), session).map_err(|cause| MarkdownError::Interpolation {
                 key: None,
@@ -978,7 +970,7 @@ mod lexical_tests {
     fn inline_callback_validation_checks_nested_calls_and_protected_names_passively() {
         for arrow in ["=>", "->"] {
             let text = format!("map([], gone {arrow} gone.value)");
-            let prepared = prepare_value(&serde_json::json!(text), AuthoredMode::Expression(ParseMode::Interpolation)).unwrap();
+            let prepared = prepare_value(&serde_json::json!(text), AuthoredMode::Expression).unwrap();
             let diagnostics = validate_prepared(&prepared, &view());
             assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
             assert!(matches!(&diagnostics[0].error, ExpressionError::InvalidCallback { message, .. } if message.contains("gone")));

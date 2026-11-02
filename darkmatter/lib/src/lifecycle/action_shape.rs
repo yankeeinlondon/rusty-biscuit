@@ -372,7 +372,7 @@ pub fn closest_spelling(
 ///   passed through a whole-value interpolation span such as `{{ payload }}`.
 ///
 /// The `when`/`until`/`while` keys are **not** action parameters — they remain
-/// boolean expressions parsed by [`parse_condition`].
+/// expressions parsed by [`parse`] and judged by truthiness.
 pub fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExprError> {
     match value {
         serde_json::Value::String(s) => {
@@ -392,9 +392,11 @@ pub fn action_value_to_expr(value: &serde_json::Value) -> Result<Expr, ActionExp
                 Ok(parse(&span.expression).map_err(|e| ActionExprError::Parse(Box::new(e)))?)
             } else {
                 for span in spans {
-                    parse(&span.expression).map_err(|source| ActionExprError::SpanParse {
-                        expression: span.expression.trim().to_string(),
-                        source: Box::new(source),
+                    parse(&span.expression).map_err(|source| {
+                        ActionExprError::SpanParse(Box::new(SpanParseError {
+                            expression: span.expression.trim().to_string(),
+                            source,
+                        }))
                     })?;
                 }
                 Ok(Expr::StringLiteral(s.clone()))

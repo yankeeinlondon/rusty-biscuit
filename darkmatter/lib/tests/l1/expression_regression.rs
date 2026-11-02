@@ -873,3 +873,111 @@ flag: true
 Result: {{ flag % 2 }}"#;
     assert_fatal_without_fail_fast(content, "Remainder requires numeric operands");
 }
+
+// ── Logical OR returns the deciding operand on every surface ───────
+
+/// The spec's value table for `||`, evaluated through the public
+/// `parse` + `evaluate` API against a fixture state. Each row is the value an
+/// interpolation renders and a condition takes the truth of.
+mod logical_or_value_parity {
+    use std::collections::HashMap;
+
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, ExpressionError, evaluate, parse};
+    use serde_json::{Value, json};
+
+    struct State(HashMap<&'static str, Value>);
+
+    impl EvaluationLookup for State {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.0.get(path).cloned()
+        }
+    }
+
+    fn eval(expression: &str, state: &[(&'static str, Value)]) -> Result<Value, ExpressionError> {
+        let state = State(state.iter().cloned().collect());
+        evaluate(&parse(expression).unwrap_or_else(|error| panic!("{expression}: {error}")), &state)
+    }
+
+    #[test]
+    fn a_present_left_operand_is_the_value() {
+        assert_eq!(eval("items || []", &[("items", json!([1, 2]))]).unwrap(), json!([1, 2]));
+    }
+
+    #[test]
+    fn an_absent_left_operand_yields_the_right_operand() {
+        assert_eq!(eval("items || []", &[]).unwrap(), json!([]));
+    }
+
+    #[test]
+    fn a_defaulted_collection_feeds_length_in_a_condition() {
+        assert_eq!(eval("length(items || []) > 0", &[("items", json!(["q"]))]).unwrap(), json!(true));
+        assert_eq!(eval("length(items || []) > 0", &[]).unwrap(), json!(false));
+    }
+
+    #[test]
+    fn a_truthy_left_operand_is_returned_not_coerced_to_a_boolean() {
+        assert_eq!(eval("a || b", &[("a", json!("x")), ("b", json!(true))]).unwrap(), json!("x"));
+    }
+
+    #[test]
+    fn two_falsy_operands_yield_the_last_operand() {
+        assert_eq!(eval("a || b", &[("a", json!(false)), ("b", json!(0))]).unwrap(), json!(0));
+    }
+
+    /// `unknown_fn` is not a registered function, so evaluating it is an
+    /// `UnknownFunction` error; the control row proves that, so `Ok(true)`
+    /// proves the right operand was never called.
+    #[test]
+    fn a_truthy_left_operand_short_circuits_the_right_operand() {
+        assert_eq!(eval("true || unknown_fn()", &[]).unwrap(), json!(true));
+        let control = eval("false || unknown_fn()", &[]).expect_err("an evaluated unknown function fails");
+        assert!(matches!(control, ExpressionError::UnknownFunction { .. }), "{control:?}");
+    }
+}
+
+fn compose_content(content: &str) -> String {
+    let md: Markdown = content.into();
+    let (composed, _) = md
+        .compose_with(&crate::request_support::request(ComposeOptions::new()))
+        .unwrap_or_else(|error| panic!("composes: {error}"));
+    composed.content().to_string()
+}
+
+#[test]
+fn regression_logical_or_defaults_a_collection_in_a_page_block_gate() {
+    let present = compose_content(
+        "---\nitems:\n  - q\n---\n::block when=\"length(items || []) > 0\"\nHas items\n::end-block\n",
+    );
+    assert!(present.contains("Has items"), "{present}");
+
+    let absent = compose_content(
+        "---\ntitle: T\n---\n::block when=\"length(items || []) > 0\"\nHas items\n::end-block\n",
+    );
+    assert!(!absent.contains("Has items"), "{absent}");
+}
+
+#[test]
+fn regression_logical_or_gate_takes_the_truth_of_the_deciding_operand() {
+    // `a || b` decides on `b`, `0`, which is falsy: the block is dropped.
+    let falsy = compose_content(
+        "---\na: false\nb: 0\n---\n::block when=\"a || b\"\nShown\n::end-block\n",
+    );
+    assert!(!falsy.contains("Shown"), "{falsy}");
+
+    let truthy = compose_content(
+        "---\na: \"x\"\nb: true\n---\n::block when=\"a || b\"\nShown\n::end-block\n",
+    );
+    assert!(truthy.contains("Shown"), "{truthy}");
+}
+
+#[test]
+fn regression_logical_or_interpolates_the_deciding_operand() {
+    let composed = compose_content(
+        "---\na: \"x\"\nb: true\nc: false\nd: 0\nitems:\n  - q\n---\nFirst: [{{ a || b }}]\nLast: [{{ c || d }}]\nCount: [{{ length(items || []) > 0 }}]\nNone: [{{ length(missing || []) > 0 }}]\nShort: [{{ true || unknown_fn() }}]\n",
+    );
+    assert!(composed.contains("First: [x]"), "{composed}");
+    assert!(composed.contains("Last: [0]"), "{composed}");
+    assert!(composed.contains("Count: [true]"), "{composed}");
+    assert!(composed.contains("None: [false]"), "{composed}");
+    assert!(composed.contains("Short: [true]"), "{composed}");
+}

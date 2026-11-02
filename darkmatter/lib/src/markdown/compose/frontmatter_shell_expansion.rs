@@ -28,7 +28,7 @@
 
 use super::expression::absence::MissingRoot;
 use super::expression::{
-    ExpressionError, fm_namespace, evaluate_observed, is_truthy, parse, parse_condition,
+    ExpressionError, fm_namespace, evaluate_observed, is_truthy, parse,
     scalar_string,
 };
 use super::frontmatter_interpolation::FrontmatterSeedState;
@@ -1758,18 +1758,17 @@ pub(crate) fn directive_reachable_pipelines(
 ///
 /// The condition source is the original pre-interpolation slice. It is
 /// first run through the shared interpolation engine against the seed
-/// state, then the resulting text is parsed as a *condition-mode*
-/// template expression (the same grammar used by `::block when="..."`
+/// state, then the resulting text is parsed as a template expression
+/// (the same grammar used by `{{ }}`, `::block when="..."`
 /// and `::file when="..."`) and evaluated. The two-step shape matters
 /// when a frontmatter value itself was rendered from a template — e.g.
 /// `has_spec: "{{ false }}"` resolves to the string `"false"`, which a
 /// direct variable lookup would treat as a truthy non-empty string.
 /// Parsing the interpolated text as an expression recovers the literal
-/// boolean (`false`) before the truthy check runs. Condition-mode
-/// parsing additionally enables infix `&&` / `||` / `!` and comparisons
-/// in the condition, matching the spec's "single boolean expression"
-/// contract. Parse failures surface as [`ShellExpansionError::ParseDirective`]
-/// and interpolation or evaluation failures as
+/// boolean (`false`) before the truthy check runs. Infix `&&` / `||` /
+/// `!` and comparisons are available in the condition. Parse failures
+/// surface as [`ShellExpansionError::ParseDirective`] and interpolation or
+/// evaluation failures as
 /// [`ShellExpansionError::ExpressionEvaluation`], both tagged with the
 /// frontmatter key.
 ///
@@ -1809,7 +1808,7 @@ fn evaluate_ternary_condition(
         ));
     }
 
-    let parsed = parse_condition(&expression_text).map_err(|err| {
+    let parsed = parse(&expression_text).map_err(|err| {
         frontmatter_parse_error(
             key,
             ctx,

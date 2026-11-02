@@ -1118,7 +1118,13 @@ mod tests {
         retain_up_non_loopback(local_network())
     }
 
+    // The live WAN lookup is this test's first TLS handshake. Without the
+    // `network` feature there is no handshake, so it still runs on Windows.
     #[test]
+    #[cfg_attr(
+        all(windows, feature = "network"),
+        ignore = "native Windows: aws-lc's CPU-jitter entropy setup aborts the process (0xc0000409) under parallel load; tracked by fix 2026-10-12-windows-aws-lc-entropy-abort"
+    )]
     fn test_detect_network_returns_info() {
         let info = detect_network().unwrap();
         // Should have at least loopback, unless permission denied

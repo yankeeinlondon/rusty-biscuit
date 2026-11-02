@@ -142,9 +142,9 @@ Also write `head` (the full SHA of `HEAD`), `base`, and `commits` (one `<short s
 
 ### 2. Local testing: push the branch
 
-Run `git push -u origin HEAD`.
+Run `RUSTY_BISCUIT_PRE_PUSH=strict git push -u origin HEAD`.
 
-The repository's pre-push hook runs the local test gates for every affected package on this host and blocks the push when any of them fails. **That hook _is_ the local testing step**; do not run the gates separately first, because only the hook publishes the evidence CI reuses. Never bypass it: no `--no-verify`, and do not set `RUSTY_BISCUIT_PRE_PUSH`.
+The repository's pre-push hook runs the local test gates for every affected package on this host and blocks the push when any of them fails. **That hook _is_ the local testing step**; do not run the gates separately first, because only the hook publishes the evidence CI reuses. `strict` is required: the pull request does not exist yet, and without it the hook would treat this as a push that starts no CI run and skip the gates. Never bypass the hook: no `--no-verify`, and no other `RUSTY_BISCUIT_PRE_PUSH` value.
 
 - The hook routinely takes 15–30 minutes. If your shell tool enforces a shorter time limit, run the push in the background and poll until the process exits.
 - Either way, capture the push's complete output (stdout and stderr) to `{{log}}`. The next stage reads that file instead of re-running anything.

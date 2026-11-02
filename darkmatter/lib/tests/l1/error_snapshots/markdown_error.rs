@@ -5,9 +5,8 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::TransclusionError;
-use darkmatter::markdown::schemas::{
-    FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode,
-    ValidationProblemKind,
+use simplified_schema::{
+    FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode, ValidationProblemKind,
 };
 
 use super::helpers::{assert_contains_all, render};

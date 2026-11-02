@@ -32,7 +32,7 @@ use super::types::{CollectionHeader, CollectionKind, CollectionRegion, QuotedExp
 use crate::markdown::compose::expression::{
     BindingPattern, Callback, Expr, GuardOrigin, ItemFrame, LexicalTypes, PatternMismatch, Polarity, Shape,
     SortKeySupport, SourceProjection, SpannedCallback, SpannedExpr, TypeScope, TypedLocal, expression_type,
-    parse_callback_spanned, parse_condition_spanned,
+    parse_callback_spanned, parse_spanned,
 };
 use crate::markdown::compose::page_blocks::{BodyGuard, BodyGuards};
 use crate::markdown::compose::pipeline::operations::{ComposeOperation, ComposeOperationSet};
@@ -195,7 +195,7 @@ impl RegionPlan {
         let header = &region.header;
         let gate = match &header.when {
             Some(quoted) => {
-                let spanned = parse_condition_spanned(&quoted.text).ok()?;
+                let spanned = parse_spanned(&quoted.text).ok()?;
                 Some(ParsedGate { quoted: quoted.clone(), expr: spanned.erase(), spanned })
             }
             None => None,

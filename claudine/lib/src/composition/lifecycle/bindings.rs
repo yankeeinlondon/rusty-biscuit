@@ -37,7 +37,7 @@ use darkmatter::markdown::compose::expression::{
     Availability, BindingView, Expr, ExpressionError, ExpressionFinder,
     ExpressionLocation, HostGlobals, PreparationError, RuntimeBinding, ScopeId,
     UnavailabilityReason,
-    PreparedInterpolation, ValidationDiagnostic, parse, parse_condition, static_access_reads, static_variable_reads,
+    PreparedInterpolation, ValidationDiagnostic, parse, static_access_reads, static_variable_reads,
     validate_interpolation,
 };
 use serde_json::{Map, Value};
@@ -664,7 +664,7 @@ fn removed_loop_read_in_frontmatter(frontmatter: &Value) -> Option<(String, Reti
                 let read = loop_block
                     .get(condition)
                     .and_then(Value::as_str)
-                    .and_then(|text| parse_condition(text).ok())
+                    .and_then(|text| parse(text).ok())
                     .and_then(|expr| removed_loop_read(&expr));
                 if let Some(retired) = read {
                     return Some((format!("{LOOP_ROOT}.{condition}"), retired));

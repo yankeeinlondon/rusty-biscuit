@@ -5,7 +5,7 @@ use jsonschema::{Draft, Validator};
 use serde_json::{Value, json};
 
 use super::core::{parse_boolean_text, parse_number_text};
-use crate::markdown::schemas::format::register_darkmatter_formats_in_context;
+use simplified_schema::format::register_darkmatter_formats_in_context;
 
 pub const NUMBERLIKE_FORMAT: &str = "darkmatter-numberlike";
 pub const BOOLISH_FORMAT: &str = "darkmatter-boolish";

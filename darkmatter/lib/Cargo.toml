@@ -36,8 +36,9 @@ effects-instrumentation = []
 # module, and `markdown::schemas::catalog::discovery_probe` (thread-local
 # observation of lifecycle discovery's reads and builds, and injected read
 # errors). Off by default; without it the counters and their accessors are
-# not compiled.
-work-counters = []
+# not compiled. Enables simplified-schema's counters, which `work_counters`
+# folds into its snapshot.
+work-counters = ["simplified-schema/work-counters"]
 # Test-only seam. Exposes `markdown::cleanup::test_hooks`, which corrupts the
 # body-cleanup candidate before the fidelity check so consumer suites (the CLI,
 # DMLS) can prove a broken pass is refused. Off by default; production builds
@@ -63,6 +64,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order", "raw_value", "float_roundtrip"] }
 indexmap = { version = "2", features = ["serde"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5", "file-reference", "fetch"] }
+# The SimplifiedSchema language and its shared foundations (numeric model,
+# spans, `{{ }}` scan, literal-token codec); Darkmatter re-exports them.
+simplified-schema = { path = "../../simplified-schema/lib", features = ["terminal"] }
 # `EDITOR_SCHEMA`, which the embedded runtime baseline imports for its
 # `content_policy` typing. `file-adapter` stays off; Content Policy never
 # depends on Darkmatter.
@@ -333,7 +337,8 @@ required-features = ["work-counters"]
 # The serialized-code-neighbors suite includes renderable's neighboring-code
 # fixture matrix by `#[path]` and spells it with `include_str!`.
 # The frozen recursive-schema fixture suite embeds the lifecycle-grammar spike's
-# generator with `include_str!` and runs it.
+# generator with `include_str!` and runs it. The schema-language ownership
+# guard spells each `simplified-schema` file that defines an owned item.
 source-inputs = [
     "biscuit-file/lib/src/file_reference/glob/parse.rs",
     "biscuit-file/lib/src/file_reference/glob/roots.rs",
@@ -344,6 +349,21 @@ source-inputs = [
     "darkmatter/dmls/src/overlay/schema.rs",
     "darkmatter/dmls/src/workspace/discover.rs",
     "renderable/tests/support/adjacent_code_matrix.rs",
+    "simplified-schema/lib/src/coercion/error.rs",
+    "simplified-schema/lib/src/coercion/mod.rs",
+    "simplified-schema/lib/src/expression/ast.rs",
+    "simplified-schema/lib/src/expression/lexer.rs",
+    "simplified-schema/lib/src/expression/parser.rs",
+    "simplified-schema/lib/src/json_shape.rs",
+    "simplified-schema/lib/src/numeric.rs",
+    "simplified-schema/lib/src/simplified/convert.rs",
+    "simplified-schema/lib/src/simplified/definitions.rs",
+    "simplified-schema/lib/src/simplified/grammar.rs",
+    "simplified-schema/lib/src/simplified/mod.rs",
+    "simplified-schema/lib/src/simplified/serialize.rs",
+    "simplified-schema/lib/src/simplified/standalone.rs",
+    "simplified-schema/lib/src/simplified/subtype.rs",
+    "simplified-schema/lib/src/simplified/types.rs",
 ]
 tiers = ["L1", "L2", "browser"]
 # The named-type memo and validator-cache regressions count work through

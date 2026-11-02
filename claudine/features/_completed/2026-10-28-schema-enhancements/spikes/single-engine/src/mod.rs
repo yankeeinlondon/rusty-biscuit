@@ -20,7 +20,7 @@ use std::sync::Arc;
 use jsonschema::Validator;
 use serde_json::json;
 
-use crate::markdown::schemas::validate::build_validator;
+use simplified_schema::validate::build_validator;
 
 /// Format checks delegated to the existing format registry, one cached
 /// single-keyword validator per format name (not per union arm).

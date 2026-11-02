@@ -19,7 +19,7 @@ use super::body::Fallback;
 pub enum CleanStage {
     /// Schema-free YAML analysis from `biscuit-file`.
     Syntax,
-    /// Schema-aware analysis from Darkmatter's `SimplifiedSchema` engine.
+    /// Schema-aware analysis from Darkmatter's `SchemaRoot` engine.
     Schema,
     /// Validation of the document's `style.markdown` formatting rules.
     Rules,

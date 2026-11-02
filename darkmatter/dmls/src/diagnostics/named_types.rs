@@ -17,11 +17,10 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use darkmatter::markdown::schemas::{
-    Constraint, SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaError,
-    SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
-    SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, StandaloneSchemaDocument,
-    parse_standalone_schema_document,
+use simplified_schema::{
+    Constraint, SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaError, SchemaReferenceSite,
+    SchemaSourceId, SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind,
+    StandaloneSchemaDocument,
 };
 use lsp_types::{Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range as LspRange, Uri};
 
@@ -418,7 +417,7 @@ impl<'a> NamedTypeScope<'a> {
             .entry(path.to_path_buf())
             .or_insert_with(|| {
                 let text = crate::work_counters::read_to_string(path).ok()?;
-                let (document, error) = match parse_standalone_schema_document(&text, path) {
+                let (document, error) = match simplified_schema::resolve::parse_referenced_schema_document(&text, path) {
                     Ok(document) => (document, None),
                     Err(error) => (None, Some(error)),
                 };

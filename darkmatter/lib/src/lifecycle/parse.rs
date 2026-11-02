@@ -868,10 +868,10 @@ impl StackParser<'_> {
     }
 
     fn parse_when(&self, value: &serde_json::Value, path: &LifecyclePath) -> Result<Expr, LifecycleError> {
-        // `when` is always a boolean expression, never routed through the
+        // `when` is always an expression judged by truthiness, never routed through the
         // literal-default action-value rule.
         match value {
-            serde_json::Value::String(text) => parse_condition(text).map_err(|source| {
+            serde_json::Value::String(text) => parse(text).map_err(|source| {
                 LifecycleError::LifecycleWhenExpressionInvalid {
                     source_path: self.source_file.to_path_buf(),
                     property: path.to_string(),

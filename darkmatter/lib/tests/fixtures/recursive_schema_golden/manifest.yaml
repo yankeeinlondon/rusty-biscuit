@@ -3,7 +3,8 @@
 # its lowered JSON Schema. Read by `darkmatter/lib/tests/l1/recursive_schema_golden.rs`.
 #
 # kind:
-#   schema-file           `$schema: ./<file>` from the file's own directory (a `kind: schema` document)
+#   schema-file           a `kind: schema` document with only `types`: its `types` table as an inline
+#                         root from the file's own directory (such a file is not a `$schema` target)
 #   pure-schema-document  the same, for a non-kinded `$schema` envelope or a raw JSON Schema file
 #   inline-root           the `key` (default `$schema`) mapping of a YAML file or Markdown frontmatter
 #   root-union            the `key` (default `$schema`) sequence of a YAML file or Markdown frontmatter
@@ -162,18 +163,11 @@ entries:
       kind: pure-schema-document
       input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json"
       source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.json"
-    - id: schema-enhancements-matrix-detected-schema
-      kind: pure-schema-document
-      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml"
-      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml"
     - id: schema-enhancements-matrix-keywords-schema-json
       kind: pure-schema-document
       input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json"
       source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.json"
-    - id: schema-enhancements-matrix-keywords-schema
-      kind: pure-schema-document
-      input: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml"
-      source: "darkmatter/lib/tests/fixtures/schema_enhancements_matrix/keywords.schema.yaml"
+      note: "the copy adds the 2020-12 `$schema` dialect declaration, which a referenced JSON Schema file must carry"
     - id: schema-yaml-spellings-blank-line-continued
       kind: pure-schema-document
       input: "darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml"
@@ -508,6 +502,8 @@ imports_only:
 
 # Shipped or fixture inputs deliberately left out, with the reason.
 skipped:
+    - source: darkmatter/lib/tests/fixtures/schema_enhancements_matrix/detected.schema.yaml, keywords.schema.yaml
+      reason: raw JSON Schema written in YAML is not a `$schema` target; each `.json` twin is an entry
     - source: darkmatter/schemas/partials/functions.yaml
       reason: function catalog; a document schema can never hold a function type
     - source: darkmatter/schemas/partials/mutations.yaml

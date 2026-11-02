@@ -1,10 +1,7 @@
 use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DarkmatterSchemas, SchemaPhase, ValidationProblemCode, schema_constraint_descriptors,
-        schema_type_descriptors,
-    },
+    Markdown, schemas::{DarkmatterSchemas, schema_constraint_descriptors, schema_type_descriptors},
 };
+use simplified_schema::{SchemaPhase, ValidationProblemCode};
 use serde_json::{Value, json};
 use std::fs;
 use tempfile::tempdir;
@@ -262,7 +259,7 @@ fn raw_json_schema_keeps_required_at_launch() {
 
 #[test]
 fn phase_projection_preserves_merged_baseline_properties() {
-    use darkmatter::markdown::schemas::parse_yaml_schema;
+    use simplified_schema::parse_yaml_schema;
 
     let baseline_yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(
         "baseline: string(required)\noutput: string(required)\n",
@@ -294,7 +291,7 @@ fn phase_projection_preserves_merged_baseline_properties() {
 
 #[test]
 fn independent_conversion_failures_are_aggregated_by_property() {
-    use darkmatter::markdown::schemas::{SchemaError, parse_yaml_schema, to_json_schema};
+    use simplified_schema::{SchemaError, parse_yaml_schema, to_json_schema};
 
     let yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(
         "first: string(integer)\nsecond: boolean(pattern(x))\nvalid: number\n",
@@ -318,7 +315,7 @@ fn independent_conversion_failures_are_aggregated_by_property() {
 
 #[test]
 fn nested_conversion_failure_uses_a_dotted_property_path() {
-    use darkmatter::markdown::schemas::{SchemaError, parse_yaml_schema, to_json_schema};
+    use simplified_schema::{SchemaError, parse_yaml_schema, to_json_schema};
 
     let yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(
         "meta:\n  prompt: string(integer)\n",
@@ -391,7 +388,8 @@ fn eager_is_universal_in_catalog_and_round_trips() {
 
 #[test]
 fn passive_trigger_schemas_reject_eager_on_every_shape_and_placement() {
-    use darkmatter::markdown::schemas::{SchemaError, parse_trigger_envelope_from_str};
+    use darkmatter::markdown::schemas::parse_trigger_envelope_from_str;
+use simplified_schema::SchemaError;
 
     for definition in [
         "string(eager)",
@@ -445,7 +443,7 @@ fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
     let root = repo_root();
     let surfaces = [
         (
-            "darkmatter/docs/topics/schemas/definition.md",
+            "simplified-schema/docs/topics/language/types.md",
             vec![
                 "`required` and `eager` are independent axes",
                 "| `required; eager` | Required, and the value is validated eagerly | Required |",
@@ -555,7 +553,7 @@ fn yaml_files_in(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 fn shipped_schema_and_trigger_corpus_parses_passively() {
     use darkmatter::markdown::schemas::parse_trigger_envelope_from_str;
 
-    use darkmatter::markdown::schemas::parse_property_definition;
+    use simplified_schema::parse_property_definition;
 
     let root = repo_root();
     let schema_dirs = [

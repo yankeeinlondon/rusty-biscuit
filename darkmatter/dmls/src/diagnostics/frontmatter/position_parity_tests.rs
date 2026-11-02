@@ -8,7 +8,8 @@
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationProblem, ValidationProblemKind};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{ValidationProblem, ValidationProblemKind};
 use lsp_types::{Diagnostic, NumberOrString, Position};
 
 use super::tests::diagnostics_with;

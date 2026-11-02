@@ -254,7 +254,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             FRONTMATTER_PARSE_CODE,
             Some(DiagnosticSource { file: named(&ctx.display), line: *line, column: 1 }),
         ),
-        MarkdownError::SchemaValidationFailed { .. } => (crate::markdown::schemas::SCHEMA_PREPARE_CODE, None),
+        MarkdownError::SchemaValidationFailed { .. } => (simplified_schema::SCHEMA_PREPARE_CODE, None),
         MarkdownError::FileLoad(_) | MarkdownError::UrlFetch(_) => (INPUT_READ_CODE, None),
         MarkdownError::Interpolation { source, cause, .. } => (expression_code(cause), proven(Some(source.as_ref()))),
         MarkdownError::Transclusion(inner) => (
@@ -310,7 +310,7 @@ fn expression_code(cause: &ExpressionError) -> &'static str {
             ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE
         }
         ExpressionError::UnknownFunction { .. } => UNKNOWN_FUNCTION_CODE,
-        ExpressionError::InvalidCallback { .. } => super::expression::parser::INVALID_CALLBACK_CODE,
+        ExpressionError::InvalidCallback { .. } => simplified_schema::expression::parser::INVALID_CALLBACK_CODE,
         _ => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
     }
 }

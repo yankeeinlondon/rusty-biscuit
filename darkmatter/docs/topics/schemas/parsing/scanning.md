@@ -4,8 +4,10 @@ Scanning finds the `{{ … }}` regions inside a body of text and hands their inn
 content to [lexing](./lexing.md). It is the only stage that knows about markdown
 structure or document byte offsets.
 
-Implemented by `ExpressionFinder` in
-[`expression/lexer.rs`](../../../lib/src/markdown/compose/expression/lexer.rs).
+Implemented by `ExpressionFinder` in Darkmatter's
+[`expression/lexer.rs`](../../../../lib/src/markdown/compose/expression/lexer.rs), which finds the Markdown code
+blocks to skip and passes them to the Markdown-free scan in the
+`simplified-schema` library's [`expression/scan.rs`](../../../../../simplified-schema/lib/src/expression/scan.rs).
 
 ## Two entry points
 

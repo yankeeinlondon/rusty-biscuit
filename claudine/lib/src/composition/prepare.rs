@@ -653,7 +653,7 @@ use super::types::{
     CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     LaunchSchema, PreparedComposition, ResolvedCompositionSource,
 };
-use darkmatter::markdown::schemas::SchemaPhase;
+use simplified_schema::SchemaPhase;
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the

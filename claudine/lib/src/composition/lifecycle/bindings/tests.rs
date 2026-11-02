@@ -390,7 +390,7 @@ fn a_retired_loop_read_is_found_only_in_parsed_reads() {
         ("fm[name]", None),
         ("loop.count", None),
     ] {
-        let expr = darkmatter::markdown::compose::expression::parse_condition(text).unwrap();
+        let expr = darkmatter::markdown::compose::expression::parse(text).unwrap();
         assert_eq!(
             removed_loop_read(&expr).map(|(removed, _)| removed),
             found,
@@ -427,7 +427,7 @@ fn a_retired_loop_read_is_found_in_every_read_position() {
         ("fm[0]", None),
         ("f(fm)['_loop_count']", None),
     ] {
-        let expr = darkmatter::markdown::compose::expression::parse_condition(text).unwrap();
+        let expr = darkmatter::markdown::compose::expression::parse(text).unwrap();
         assert_eq!(
             removed_loop_read(&expr).map(|(removed, _)| removed),
             found,

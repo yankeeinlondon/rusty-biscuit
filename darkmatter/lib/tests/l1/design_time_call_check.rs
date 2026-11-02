@@ -11,7 +11,7 @@ use darkmatter::markdown::compose::expression::{
     ArgumentCategory, ArgumentType, AuthoredMode, CallCheck, CallProblem, DeclaredTypes, Shape, TypeScope,
     check_expression_calls, check_prepared_calls, parse_spanned, prepare_value,
 };
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 
 use ArgumentCategory::{Compatible, Incompatible, NullableMatch, Uncertain, Unknown};
@@ -27,12 +27,12 @@ foo:
     - number(required)
 ";
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 
 /// Every call check in `expression` under `schema`.
-fn checks(schema: Option<&SimplifiedSchema>, expression: &str) -> Vec<CallCheck> {
+fn checks(schema: Option<&SchemaRoot>, expression: &str) -> Vec<CallCheck> {
     let declared = DeclaredTypes::new(schema);
     let expr = parse_spanned(expression).expect("the expression parses");
     check_expression_calls(&expr, &TypeScope::unguarded(&declared))
@@ -401,10 +401,10 @@ mod walk {
 mod preserved_text {
     use super::*;
 
-    use darkmatter::markdown::coercion::bind;
+    use simplified_schema::coercion::bind;
     use darkmatter::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
     use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
-    use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
+    use simplified_schema::simplified::grammar::parse_type_definition;
     use serde_json::Value;
 
     /// One test per `(source, parameter)` cell; the expected categories are

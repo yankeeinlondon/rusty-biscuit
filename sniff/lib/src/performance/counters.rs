@@ -181,6 +181,10 @@ pub const GIT_COMMIT_VISITS: &str = "git.commit_visits";
 /// their administrative metadata or the current repository handle.
 pub const GIT_WORKTREE_OPENS: &str = "git.worktree_opens";
 
+/// Changed paths read from disk to fingerprint a working tree
+/// (`GitRepo::working_state`), one per path whatever its kind.
+pub const GIT_WORKING_STATE_PATHS_HASHED: &str = "git.working_state.paths_hashed";
+
 // ---------------------------------------------------------------------------
 // Subprocesses
 // ---------------------------------------------------------------------------

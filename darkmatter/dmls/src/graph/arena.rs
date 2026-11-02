@@ -64,6 +64,9 @@ pub struct DocumentRecord<'a> {
     /// candidate, path completion, workspace symbol, or transclusion
     /// reference, so answers drawn from the file list are unchanged by it.
     pub dependency: bool,
+    /// The parsed document's frontmatter summary
+    /// ([`DocumentIndex::summary`]); `None` when unparsed or absent.
+    pub summary: Option<&'a str>,
 }
 
 /// Whether `path` names a Markdown file (`.md` or `.markdown`, any case): the
@@ -123,10 +126,14 @@ struct DocumentPathRecord {
 }
 
 /// One document's content state in one snapshot.
-#[derive(Debug, Clone, Copy, Default)]
+///
+/// The summary is content-derived, so it lives here and never in the shared
+/// [`DocumentTable`].
+#[derive(Debug, Clone, Default)]
 struct DocumentState {
     content_hash: u64,
     parsed: bool,
+    summary: Option<Arc<str>>,
 }
 
 /// The path-derived part of a snapshot: documents in path order, their
@@ -430,6 +437,7 @@ impl WorkspaceGraph {
             states[doc_id.0 as usize] = DocumentState {
                 content_hash: index.content_hash,
                 parsed: true,
+                summary: index.summary.as_deref().map(Arc::from),
             };
 
             let mut doc_headings: Vec<(NodeId, String, String)> = Vec::new();
@@ -742,7 +750,7 @@ impl WorkspaceGraph {
 
     fn record_at(&self, position: usize) -> DocumentRecord<'_> {
         let record = &self.table.records[position];
-        let state = self.states[position];
+        let state = &self.states[position];
         DocumentRecord {
             path: &record.path,
             content_hash: state.content_hash,
@@ -751,6 +759,7 @@ impl WorkspaceGraph {
             workspace_id: record.workspace_id,
             parsed: state.parsed,
             dependency: record.dependency,
+            summary: state.summary.as_deref(),
         }
     }
 

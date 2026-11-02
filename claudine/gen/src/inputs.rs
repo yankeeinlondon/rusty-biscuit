@@ -20,9 +20,9 @@ use std::sync::{Arc, LazyLock};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PropertyDef, SimplifiedSchema, coerce,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::coerce;
+use simplified_schema::{PropertyDef, SchemaRoot};
 use serde_json::Value;
 
 use crate::errors::GenError;
@@ -416,7 +416,7 @@ fn frozen_contract_override(path: &Path, frontmatter: &Value) -> Result<Option<V
 fn contract_revision(sidecar: &Path) -> Result<Option<u64>, GenError> {
     static REVISIONS: LazyLock<FileMemo<Option<u64>>> = LazyLock::new(FileMemo::new);
     REVISIONS.get_or_try_insert(format!("{sidecar:?}"), || {
-        let SimplifiedSchema::Single(shape) = crate::schema_compat::parse_sidecar_schema(sidecar)? else {
+        let SchemaRoot::Single(shape) = crate::schema_compat::parse_sidecar_schema(sidecar)? else {
             return Ok((None, vec![sidecar.to_path_buf()]));
         };
         let revision = match shape.properties.get("schema_revision") {

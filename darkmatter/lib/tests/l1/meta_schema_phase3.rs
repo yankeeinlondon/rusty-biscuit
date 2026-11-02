@@ -1,15 +1,11 @@
 //! Phase 3 contracts for the SimplifiedSchema semantic meta-type vocabulary.
 
-use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DetectOptions, PropertyDef, SimplifiedSchema, SimplifiedType, TypeExpr,
-        detect_schema, schema_to_yaml, schema_type_descriptors,
-        simplified::{grammar::parse_type_expr, serialize_property_atom},
-    },
-};
+use darkmatter::markdown::{Markdown, schemas::{DetectOptions, detect_schema, schema_to_yaml, schema_type_descriptors}};
+use simplified_schema::{PropertyDef, SchemaRoot, SimplifiedType, TypeExpr};
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::serialize_property_atom;
 
-fn parse(input: &str) -> darkmatter::markdown::schemas::PropertyAtom {
+fn parse(input: &str) -> simplified_schema::PropertyAtom {
     parse_type_expr("candidate", input).unwrap_or_else(|error| {
         panic!("expected {input:?} to parse, got {error}")
     })
@@ -110,14 +106,14 @@ fn semantic_defaults_use_the_passive_parser_authority() {
 
 #[test]
 fn semantic_type_descriptors_are_authoritative() {
-    for keyword in ["type-definition", "schema"] {
+    for (keyword, options) in [("type-definition", ["forms", "declared-required"]), ("schema", ["mapping", "property"])] {
         let descriptor = schema_type_descriptors()
             .iter()
             .find(|descriptor| descriptor.keyword == keyword)
             .unwrap_or_else(|| panic!("missing descriptor for {keyword}"));
         assert_eq!(
             descriptor.accepted_constraints,
-            ["default", "required", "generated", "deferred"]
+            [options[0], options[1], "default", "required", "non-null", "generated", "deferred"]
         );
         let description = descriptor.description.to_ascii_lowercase();
         for required in ["string", "mapping", "sequence", "parse-only", "dmls"] {
@@ -141,7 +137,7 @@ fn schema_detection_preserves_carrier_only_inference() {
         "---\nBody\n",
     ));
     let detected = detect_schema(&[&markdown], DetectOptions::default(), &crate::request_support::cwd_context());
-    let SimplifiedSchema::Single(shape) = &detected else {
+    let SchemaRoot::Single(shape) = &detected else {
         panic!("one document must detect as one schema shape")
     };
 

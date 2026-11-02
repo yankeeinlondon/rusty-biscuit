@@ -7,11 +7,11 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::is_malformed_template;
-use darkmatter::markdown::schemas::validate::build_position_map;
+use simplified_schema::validate::build_position_map;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PendingPolicy, PendingValueReason, SchemaPhase, ValidationOptions,
-    ValidationReport,
+    DarkmatterSchemas, EffectiveSchema, PendingPolicy, PendingValueReason, ValidationOptions, ValidationReport,
 };
+use simplified_schema::SchemaPhase;
 use serde_json::Value;
 
 /// `success` is a list of closed action objects: `pr_list` takes an integer

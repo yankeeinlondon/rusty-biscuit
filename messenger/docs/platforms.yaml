@@ -1,13 +1,11 @@
----
 # Messenger research roster: identity and coverage for the research fleet.
 #
 # The roster owns platform, interface, and adapter identity; research
 # documents own external facts; adapter code plus reviewed mappings own
 # implementation status. Nothing here is a platform fact.
 #
-# The `---` fences are required: `md schema validate` reads only frontmatter,
-# and an unfenced file is reported "valid by default" without validation.
-# Validate with `md schema validate messenger/docs/platforms.yaml`.
+# The root `$schema` is this document's contract. Validate with
+# `md schema validate messenger/docs/platforms.yaml`.
 #
 # Interface IDs are stable and never reused. Sending interfaces map the
 # adapter IDs persisted by `ProviderKind::as_str()`; research-only companions
@@ -270,4 +268,3 @@ excluded:
       kind: provider
       status: excluded
       reason: Mobile push is outside the initial contract; adding it needs a roster entry and any schema changes.
----

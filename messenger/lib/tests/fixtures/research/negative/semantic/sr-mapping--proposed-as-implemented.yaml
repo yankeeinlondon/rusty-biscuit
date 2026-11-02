@@ -1,4 +1,3 @@
----
 # A proposed (unreviewed) assessment reported as an implementation claim (criterion 32).
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-MAPPING
@@ -27,4 +26,3 @@ assessments:
     status: proposed
     proposed_by: agent
   requires_messenger_update: false
----

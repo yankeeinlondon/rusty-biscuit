@@ -19,9 +19,8 @@ use darkmatter::markdown::compose::{
     ComposeContext, ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot, ShellExpansionError,
     build_resolution_context,
 };
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, PropertyDef, SimplifiedType, TypeExpr, ValidatorCache, detect_from_document,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, detect_from_document};
+use simplified_schema::{PropertyDef, SimplifiedType, TypeExpr, ValidatorCache};
 use serde_json::json;
 use tempfile::TempDir;
 

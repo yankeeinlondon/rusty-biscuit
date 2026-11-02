@@ -10,16 +10,19 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use darkmatter::lifecycle::{DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticSnapshot, LifecycleErrorInfo, LifecycleTiming};
+use darkmatter::lifecycle::{
+    DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION, DiagnosticSnapshot, LifecycleErrorInfo, LifecycleTiming,
+};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::context::context_variable_descriptors;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::schemas::catalog::{
     CatalogError, CatalogErrorReason, DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog,
 };
-use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaError, SchemaOriginKind, SimplifiedSchema, SimplifiedType,
-    TypeExpr, darkmatter_base_json_schema, darkmatter_base_schema, to_json_schema, to_json_schema_with_definitions,
+use darkmatter::markdown::schemas::{DarkmatterSchemas, darkmatter_base_json_schema, darkmatter_base_schema};
+use simplified_schema::{
+    Constraint, PropertyDef, SchemaError, SchemaOriginKind, SchemaRoot, SimplifiedType, TypeExpr, to_json_schema,
+    to_json_schema_with_definitions,
 };
 
 use crate::request_support::context_at;
@@ -82,7 +85,7 @@ fn shape_keys(catalog: &GlobalCatalog, global: &str) -> Vec<String> {
         .collect()
 }
 
-fn single(def: &PropertyDef) -> &darkmatter::markdown::schemas::PropertyAtom {
+fn single(def: &PropertyDef) -> &simplified_schema::PropertyAtom {
     match def {
         PropertyDef::Single(atom) => atom,
         PropertyDef::Union(_) => panic!("expected a single atom: {def:?}"),
@@ -145,7 +148,7 @@ fn the_runtime_baseline_is_the_catalogs_fm_definition() {
     assert_eq!(to_json_schema_with_definitions(&baseline, &definitions).expect("lowers"), darkmatter_base_json_schema());
     // The definition-free form declares the same members, every acyclic use
     // expanded.
-    let (SimplifiedSchema::Single(shared), SimplifiedSchema::Single(inline)) = (&baseline, &darkmatter_base_schema())
+    let (SchemaRoot::Single(shared), SchemaRoot::Single(inline)) = (&baseline, &darkmatter_base_schema())
     else {
         panic!("the baseline is an object shape");
     };
@@ -230,14 +233,17 @@ fn an_authored_fm_ctx_stays_independent_of_the_ctx_global() {
     assert!(!shape_keys(GlobalCatalog::darkmatter(), "ctx").contains(&"note".to_string()));
 }
 
-// ── never a document schema ────────────────────────────────────────────────
+// ── never the baseline unless registered ───────────────────────────────────
 
 /// Copies the catalog and partials into a repository's `schemas/` root, then
-/// reaches the catalog through every discovery path a document has: a bare
-/// name, a relative path, a trigger walk of the root, and a `$schema` naming a
-/// partial's directory. None applies the catalog's globals as properties.
+/// reaches the catalog through the discovery paths a document has. A trigger
+/// walk of the root applies nothing, and a `$schema` naming a directory is no
+/// schema file. A `$schema` naming the catalog reads it as the ordinary
+/// tagged schema document its envelope is: its globals become document
+/// properties, never the registered baseline. Explicit registration is the
+/// one way its `fm` becomes the baseline.
 #[test]
-fn the_catalog_never_applies_as_a_document_schema_when_rediscovered() {
+fn a_rediscovered_catalog_is_an_ordinary_schema_document_never_the_baseline() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical");
     std::fs::create_dir_all(root.join(".git")).expect("repository marker");
@@ -272,12 +278,17 @@ fn the_catalog_never_applies_as_a_document_schema_when_rediscovered() {
     assert!(effective.origins.values().all(|origin| origin.kind == SchemaOriginKind::Baseline));
     assert!(!effective.declares_top_level_property("fm") && !effective.declares_top_level_property("timing"));
 
-    for reference in ["darkmatter.yaml", "./schemas/darkmatter.yaml", "./darkmatter/schemas/darkmatter.yaml"] {
-        let Err(error) = check(&format!("$schema: {reference}\n")) else {
-            panic!("`{reference}` applied the catalog as a document schema");
-        };
-        assert!(format!("{error:?}").contains("global catalog"), "{reference}: {error:?}");
-    }
+    // The faithful copy keeps the catalog's relative imports intact. Named by
+    // `$schema`, its globals are document properties of document origin.
+    let effective = check("$schema: ./darkmatter/schemas/darkmatter.yaml\n")
+        .expect("the catalog reads as a tagged schema document")
+        .expect("a document schema");
+    assert!(effective.declares_top_level_property("fm") && effective.declares_top_level_property("timing"));
+    assert!(
+        effective.origins.values().any(|origin| origin.kind != SchemaOriginKind::Baseline),
+        "the catalog's entries are document properties: {:?}",
+        effective.origins
+    );
     // A catalog directory is not a schema file.
     assert!(check("$schema: ./schemas/\n").is_err());
     // Explicit registration is the one way in.

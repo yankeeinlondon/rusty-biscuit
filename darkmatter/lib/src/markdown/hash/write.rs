@@ -553,9 +553,9 @@ pub fn locate_frontmatter_leaves(
     document: &str,
     paths: &[Vec<FrontmatterPathSegment>],
 ) -> Result<Vec<LeafSpan>, LeafLocateError> {
-    use crate::markdown::schemas::SchemaValueKind;
-    use crate::markdown::schemas::decode_scalar_node;
-    use crate::markdown::schemas::simplified::locate_frontmatter_value;
+    use simplified_schema::SchemaValueKind;
+    use simplified_schema::decode_scalar_node;
+    use simplified_schema::simplified::locate_frontmatter_value;
 
     if paths.is_empty() {
         return Ok(Vec::new());
@@ -934,7 +934,7 @@ fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
 /// The key/value separator of a top-level key line. A colon inside a plain
 /// key (`a:b: c`) or a quoted one is content, not the separator.
 fn mapping_colon(line: &str) -> Option<usize> {
-    crate::markdown::schemas::simplified::mapping_separator(line, false)
+    simplified_schema::simplified::mapping_separator(line, false)
 }
 
 /// Where the quoted scalar opening `text` ends: just past its closing quote,

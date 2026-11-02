@@ -22,7 +22,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -94,7 +94,7 @@ fn anchored(dir: &Path) -> ResolutionContext {
     ResolutionContext::new(FileResolutionContext::from_snapshot(dir, Some(dir.join("home")), HashMap::new()))
 }
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 

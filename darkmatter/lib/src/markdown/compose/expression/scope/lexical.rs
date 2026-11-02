@@ -22,7 +22,7 @@ use super::Shape;
 use crate::markdown::span::SourceSpan;
 use super::projection::{Member, Subject};
 use crate::markdown::compose::expression::binding::{LocalId, next_frame_id};
-use crate::markdown::schemas::DefinitionTable;
+use simplified_schema::DefinitionTable;
 
 /// One local a layer declares.
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ impl TypedLocal {
     }
 
     /// A new-subject local declared by `definition`.
-    pub fn declared(name: impl Into<String>, definition: &crate::markdown::schemas::PropertyDef) -> Self {
+    pub fn declared(name: impl Into<String>, definition: &simplified_schema::PropertyDef) -> Self {
         Self::new(name, Shape::of_type(definition))
     }
 

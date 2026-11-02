@@ -439,12 +439,12 @@ fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
 
     fs::write(
         launch_dir.join("schema.yaml"),
-        "launch_only: string(required)\n",
+        "$schema:\n  launch_only: string(required)\n",
     )
     .unwrap();
     fs::write(
         source_dir.join("schema.yaml"),
-        "source_marker: string(required)\nspec: 'file(eager; required)'\n",
+        "$schema:\n  source_marker: string(required)\n  spec: 'file(eager; required)'\n",
     )
     .unwrap();
     fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
@@ -520,7 +520,9 @@ fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
                 .effective_frontmatter
                 .get("spec")
                 .and_then(serde_json::Value::as_str),
-            Some("spec.md"),
+            // The eager-`file` rewrite projects the value repository-relative;
+            // `beta/` (not `alpha/`) proves it resolved from the source document.
+            Some("beta/lib/spec.md"),
             "entry {entry:?} must preserve the source-owned file reference"
         );
         assert!(source_dir.join("spec.md").is_file());

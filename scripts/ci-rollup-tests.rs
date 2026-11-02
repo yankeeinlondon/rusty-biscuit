@@ -133,8 +133,19 @@ fn exclusion() -> Exclusion {
         exclusion_class: "promotion-pending".to_owned(),
         owner: "@yankeeinlondon".to_owned(),
         reason: "blocked on the canonical recipe set".to_owned(),
-        expiry: Some("2026-10-31".to_owned()),
+        expiry: None,
     }
+}
+
+#[test]
+fn an_exclusion_renders_its_expiry_only_when_it_has_one() {
+    let time_bounded = Exclusion {
+        exclusion_class: "time-bounded".to_owned(),
+        expiry: Some("2026-10-31".to_owned()),
+        ..exclusion()
+    };
+    assert!(time_bounded.describe().contains("expires 2026-10-31"));
+    assert!(!exclusion().describe().contains("expires"));
 }
 
 /// The four standard environments, shaped like the checked-in
@@ -512,8 +523,7 @@ fn state_not_scheduled_for_an_excluded_package_carries_governance() {
         assert!(!cell.scheduled);
         assert!(
             cell.reasons.iter().any(|r| r.contains("promotion-pending")
-                && r.contains("@yankeeinlondon")
-                && r.contains("2026-10-31")),
+                && r.contains("@yankeeinlondon")),
             "the exclusion's governance must reach the rendered cell: {:?}",
             cell.reasons
         );
@@ -5277,7 +5287,6 @@ fn a_non_gating_packages_governed_cells_survive_the_plan_path() {
                     "exclusion_class": "promotion-pending",
                     "owner": "@yankeeinlondon",
                     "reason": "blocked on the canonical recipe set",
-                    "expiry": "2026-10-31",
                 },
             }],
         })

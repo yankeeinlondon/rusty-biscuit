@@ -923,9 +923,10 @@ fn context_default_report_never_drops_type_column_at_any_width() {
     );
 }
 
-/// The "Interpolation vs. Condition Mode" introduction uses corrected wording.
+/// `||` has one meaning on every surface, so the report describes no parse
+/// modes: the precedence table still lists `||`, and no mode section remains.
 #[test]
-fn context_expressions_corrected_interpolation_wording() {
+fn context_expressions_reports_no_parse_modes() {
     let assert = repository_fixture()
         .command()
         .args(["context", "--expressions"])
@@ -933,11 +934,10 @@ fn context_expressions_corrected_interpolation_wording() {
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let intro = "The parser supports two modes with different operator behavior:";
-    assert!(
-        stdout.contains(intro),
-        "expression report must use corrected interpolation intro:\n  {intro}\ngot:\n{stdout}"
-    );
+    for removed in ["Interpolation vs. Condition Mode", "two modes", "fallback sugar"] {
+        assert!(!stdout.contains(removed), "expression report must not describe parse modes ({removed:?}):\n{stdout}");
+    }
+    assert!(stdout.contains("Operator Precedence") && stdout.contains("||"), "precedence table must still list `||`:\n{stdout}");
 
     // Ensure there are no consecutive colon-terminated intro lines
     let lines: Vec<&str> = stdout.lines().collect();

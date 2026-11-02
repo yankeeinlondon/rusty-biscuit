@@ -1,0 +1,12 @@
+kind: yaml-schema
+description: |-
+    The definition of a `kind: yaml-schema` document: a YAML file that defines
+    a YAML document kind. Its `$schema` is the contract every document of the
+    claimed kind must meet.
+$schema:
+    kind: literal(yaml-schema; required) -> the document kind that claims this definition
+    description: string(non-null) -> what the kind is for
+    categories: string[](non-null) -> the category names `category(...)` constraints in `types` may use, each `Name` or `Name -> description`
+    $schema: schema(required; property(kind, type-definition(forms(literal, enum); declared-required))) -> the contract for documents of the claimed kind; its `kind` declaration names the kinds claimed
+    types: schema(mapping; non-null) -> reusable named types for `$schema`; these names are not document properties
+    $constraints: { closed: true }

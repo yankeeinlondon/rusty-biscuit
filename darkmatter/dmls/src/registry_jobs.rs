@@ -480,6 +480,7 @@ mod tests {
         RegistryNeed {
             path: folder.join(name),
             context: FileResolutionContext::from_snapshot(&folder, None, HashMap::new()),
+            yaml: None,
         }
     }
 

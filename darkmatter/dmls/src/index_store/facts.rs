@@ -17,7 +17,8 @@ use super::keys::candidate_keys;
 ///
 /// [`FileFacts::from_index`] and [`FileFacts::into_index`] are inverse on the
 /// stored fields: `into_index` leaves the unstored ones (`schema_uses`,
-/// `file_uses`, `variable_uses`, `frontmatter_keys`) empty.
+/// `file_uses`, `variable_uses`, `frontmatter_keys`) empty and `summary`
+/// `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileFacts {
     /// The file's path as the file list gives it (absolute, canonical).
@@ -63,6 +64,7 @@ impl FileFacts {
             file_uses: Vec::new(),
             variable_uses: Vec::new(),
             frontmatter_keys: Vec::new(),
+            summary: None,
         }
     }
 }

@@ -29,7 +29,7 @@ use crate::markdown::compose::transclusion::DeferredSetError;
 use crate::markdown::normalize::NormalizationError;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::file_tree::FileTreeError;
-use crate::markdown::schemas::SchemaError;
+use simplified_schema::SchemaError;
 use crate::mermaid::MermaidThemeError;
 use crate::render::image_ref::ImageRefError;
 use crate::render::link::LinkError;
@@ -165,45 +165,7 @@ pub fn resolution_failure_row(
     ))
 }
 
-/// `message` followed by biscuit-file's literal-glob hint
-/// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint))
-/// on its own `hint:` line, when `failure` is a no-match of a `reference`
-/// whose text looks like a glob; otherwise `message` unchanged.
-///
-/// Every Darkmatter message that reports a single-file failure passes through
-/// this, so a literal-glob miss is explained in the same words on every
-/// surface and no message tests for wildcards itself.
-///
-/// ## Examples
-///
-/// ```
-/// use biscuit_file::ResolutionFailure;
-/// use darkmatter::markdown::errors::with_glob_hint;
-///
-/// let glob = with_glob_hint("File not found: docs/*.md", ResolutionFailure::NoMatch, "docs/*.md");
-/// assert!(glob.contains("::file-links"));
-/// let plain = with_glob_hint("File not found: a.md", ResolutionFailure::NoMatch, "a.md");
-/// assert_eq!(plain, "File not found: a.md");
-/// ```
-pub fn with_glob_hint(
-    message: impl Into<String>,
-    failure: biscuit_file::ResolutionFailure,
-    reference: &str,
-) -> String {
-    with_hint_line(message, failure.glob_hint(reference))
-}
-
-/// `message` followed by `hint` on its own `hint:` line, when there is one:
-/// the line [`with_glob_hint`] writes, for a caller that computed the hint
-/// when the failure was raised.
-pub fn with_hint_line(message: impl Into<String>, hint: Option<&str>) -> String {
-    let mut message = message.into();
-    if let Some(hint) = hint {
-        message.push_str("\nhint: ");
-        message.push_str(hint);
-    }
-    message
-}
+pub use simplified_schema::errors::{with_glob_hint, with_hint_line};
 
 /// Prose markup for a [`StatusBlock::hint`] whose text spans rows, such as a
 /// message carrying the `hint:` line [`with_hint_line`] writes: each newline

@@ -199,15 +199,34 @@ fn compose_report_merge_keeps_duplicate_non_schema_warnings() {
     assert_eq!(root.warnings.len(), 2);
 }
 
+/// Asserts that compose refused `document` because its `$schema` names
+/// `schema`, a bare SimplifiedSchema map with no `$schema` envelope.
+fn assert_bare_sidecar_rejected(err: MarkdownError, document: &std::path::Path, schema: &std::path::Path) {
+    match err {
+        MarkdownError::SchemaValidationFailed { path, problems, source, .. } => {
+            assert_eq!(path, document);
+            assert!(problems.is_empty(), "got: {problems:?}");
+            let source = source.expect("schema preparation error");
+            match source.downcast_ref::<simplified_schema::SchemaError>() {
+                Some(simplified_schema::SchemaError::NotASchemaDocument { path, reason }) => {
+                    assert_eq!(path, schema);
+                    assert_eq!(*reason, simplified_schema::NotSchemaReason::NoSchemaProperty);
+                }
+                other => panic!("expected NotASchemaDocument, got {other:?}"),
+            }
+        }
+        other => panic!("expected SchemaValidationFailed, got {other:?}"),
+    }
+}
+
+const BARE_SIDECAR: &str =
+    "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
+
 #[test]
-fn bare_sidecar_composes_with_one_typed_warning_in_one_validation_pass() {
+fn bare_sidecar_is_rejected_as_not_a_schema_document() {
     let dir = tempfile::tempdir().unwrap();
     let schema_path = dir.path().join("schema.yaml");
-    std::fs::write(
-        &schema_path,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .unwrap();
+    std::fs::write(&schema_path, BARE_SIDECAR).unwrap();
     let document_path = dir.path().join("prompt.md");
     std::fs::write(
         &document_path,
@@ -216,29 +235,19 @@ fn bare_sidecar_composes_with_one_typed_warning_in_one_validation_pass() {
     .unwrap();
     let md = Markdown::try_from(document_path.as_path()).unwrap();
 
-    let (composed, report) = md
+    let err = md
         .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&document_path)))
-        .unwrap();
+        .expect_err("a bare sidecar is not a schema document");
 
-    // The body is returned without its final newline; cleanup no longer adds one.
-    assert_eq!(composed.content(), "Body unchanged.");
-    assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
-    assert_eq!(
-        report.warnings[0].code.as_deref(),
-        Some("dm.schema.missing_simplified_envelope")
-    );
+    assert_bare_sidecar_rejected(err, &document_path, &schema_path);
 }
 
 #[test]
-fn bare_sidecar_composes_unchanged_with_one_typed_warning_across_two_passes() {
+fn bare_sidecar_is_rejected_as_not_a_schema_document_with_trigger_schemas() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join(".git")).unwrap();
     let schema_path = repo.path().join("schema.yaml");
-    std::fs::write(
-        &schema_path,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .unwrap();
+    std::fs::write(&schema_path, BARE_SIDECAR).unwrap();
     let document_path = repo.path().join("prompt.md");
     std::fs::write(
         &document_path,
@@ -247,36 +256,27 @@ fn bare_sidecar_composes_unchanged_with_one_typed_warning_across_two_passes() {
     .unwrap();
     let md = Markdown::try_from(document_path.as_path()).unwrap();
 
-    let (composed, report) = md
+    let err = md
         .compose_with(
             &crate::markdown::compose::test_request(ComposeOptions::new()
                 .with_source_file(&document_path)
                 .with_trigger_schemas(true)),
         )
-        .unwrap();
+        .expect_err("a bare sidecar is not a schema document");
 
-    // The body is returned without its final newline; cleanup no longer adds one.
-    assert_eq!(composed.content(), "Body unchanged.");
-    assert_eq!(composed.frontmatter().as_map().get("title"), Some(&serde_json::json!("unchanged")));
-    assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
-    let warning = &report.warnings[0];
-    assert_eq!(warning.stage, "schema_validation");
-    assert_eq!(warning.source.as_deref(), Some("darkmatter.schema"));
-    assert_eq!(warning.code.as_deref(), Some("dm.schema.missing_simplified_envelope"));
-    assert_eq!(warning.path.as_deref(), Some(biscuit_file::canonicalize_simplified(&schema_path).unwrap().as_path()));
-    assert_eq!(warning.consumer.as_deref(), Some(document_path.as_path()));
+    assert_bare_sidecar_rejected(err, &document_path, &schema_path);
 }
 
+// The loader no longer emits the `dm.schema.missing_simplified_envelope`
+// advisory, so the transclusion-merge de-duplication this test once covered
+// cannot be reached from a file. It now pins that the root document, whose own
+// `$schema` names the bare sidecar, fails before its child is transcluded.
 #[test]
-fn schema_advisory_is_not_duplicated_when_transclusion_reports_merge() {
+fn bare_sidecar_shared_by_root_and_transcluded_child_rejects_the_root() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join(".git")).unwrap();
     let schema_path = repo.path().join("schema.yaml");
-    std::fs::write(
-        &schema_path,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .unwrap();
+    std::fs::write(&schema_path, BARE_SIDECAR).unwrap();
     let child_path = repo.path().join("child.md");
     std::fs::write(
         &child_path,
@@ -291,34 +291,19 @@ fn schema_advisory_is_not_duplicated_when_transclusion_reports_merge() {
     .unwrap();
     let md = Markdown::try_from(root_path.as_path()).unwrap();
 
-    let (composed, report) = md
+    let err = md
         .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
-        .unwrap();
+        .expect_err("a bare sidecar is not a schema document");
 
-    // Cleanup no longer collapses the transclusion's trailing blank line.
-    assert_eq!(composed.content(), "Child body.\n\n");
-    let warnings: Vec<_> = report
-        .warnings
-        .iter()
-        .filter(|warning| {
-            warning.code.as_deref() == Some("dm.schema.missing_simplified_envelope")
-        })
-        .collect();
-    assert_eq!(warnings.len(), 1, "got: {:?}", report.warnings);
-    assert_eq!(warnings[0].path.as_deref(), Some(biscuit_file::canonicalize_simplified(&schema_path).unwrap().as_path()));
-    assert_eq!(warnings[0].consumer.as_deref(), Some(root_path.as_path()));
+    assert_bare_sidecar_rejected(err, &root_path, &schema_path);
 }
 
 #[test]
-fn transcluded_schema_advisory_uses_root_document_as_consumer() {
+fn transcluded_bare_sidecar_rejection_is_a_transclusion_warning() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join(".git")).unwrap();
     let schema_path = repo.path().join("schema.yaml");
-    std::fs::write(
-        &schema_path,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .unwrap();
+    std::fs::write(&schema_path, BARE_SIDECAR).unwrap();
     let child_path = repo.path().join("child.md");
     std::fs::write(
         &child_path,
@@ -333,14 +318,19 @@ fn transcluded_schema_advisory_uses_root_document_as_consumer() {
         .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
         .unwrap();
 
-    let warning = report
-        .warnings
-        .iter()
-        .find(|warning| {
-            warning.code.as_deref() == Some("dm.schema.missing_simplified_envelope")
-        })
-        .expect("schema advisory warning");
-    assert_eq!(warning.consumer.as_deref(), Some(root_path.as_path()));
+    assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
+    let warning = &report.warnings[0];
+    assert_eq!(warning.stage, "transclusion");
+    assert_eq!(warning.code, None);
+    let schema_name = biscuit_file::canonicalize_simplified(&schema_path).unwrap();
+    assert!(
+        warning.message.contains(&format!(
+            "`{}` is not a valid schema definition: it has no `$schema` property",
+            schema_name.display()
+        )),
+        "got: {}",
+        warning.message
+    );
 }
 
 // ── DM1: exclude-keys integration tests ───────────────────────────

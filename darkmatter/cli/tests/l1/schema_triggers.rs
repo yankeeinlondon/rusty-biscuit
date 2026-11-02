@@ -306,10 +306,10 @@ fn triggers_command_prints_the_five_schema_roots_in_search_order() {
     let stdout = stdout_of(&output);
     assert!(!stdout.contains("Boundary"), "{stdout}");
     let offsets = [
+        root_line(&stdout, "SCHEMAS_DIR", "dm-defs"),
         root_line(&stdout, "package root", &format!("area{}pkg{}schemas", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR)),
         root_line(&stdout, "package-area root", &format!("area{}schemas", std::path::MAIN_SEPARATOR)),
         root_line(&stdout, "file tree root", "schemas"),
-        root_line(&stdout, "SCHEMAS_DIR", "dm-defs"),
         root_line(&stdout, "home", "(absent)"),
     ];
     assert!(offsets.windows(2).all(|pair| pair[0] < pair[1]), "roots out of order:\n{stdout}");

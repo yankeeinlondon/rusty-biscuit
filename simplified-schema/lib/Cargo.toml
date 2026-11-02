@@ -1,0 +1,89 @@
+[package]
+name = "simplified-schema"
+description = "The SimplifiedSchema language: parsing, validation, conversion, and JSON Schema lowering, independent of any Markdown host."
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+readme = "../README.md"
+autotests = false
+
+[lib]
+name = "simplified_schema"
+path = "src/lib.rs"
+# No `#[bench]` functions; keeps `cargo bench` from running the unit-test harness.
+bench = false
+
+[features]
+default = ["file"]
+# Raw-path schema factories: full file-reference resolution plus repository
+# discovery through `sniff`. Without it the crate parses and validates
+# supplied text only, and its graph holds no `gix` or `walkdir`.
+file = ["biscuit-file/file-reference", "dep:sniff"]
+# Test-only instrumentation: the process-wide `work_counters` module that
+# complexity regressions read. Darkmatter's `work-counters` enables it.
+work-counters = []
+# Terminal presentation of `SchemaError` (its `biscuit-terminal` `BlockError`
+# implementation). Off by default; a host that renders schema errors in a
+# terminal (Darkmatter) enables it.
+terminal = ["dep:biscuit-terminal"]
+
+[dependencies]
+tracing = "0.1"
+# `preserve_order`, `raw_value`, and `float_roundtrip` match Darkmatter: the
+# moved code relies on key order, raw number spellings, and exact floats.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order", "raw_value", "float_roundtrip"] }
+thiserror = "2.0"
+# The `{{!data:v1:…}}` pending-token payload codec.
+base64 = "0.22"
+# `yaml` for YAML number admission, `json5` for non-finite JSON5 rejection,
+# `file-reference-syntax` for passive reference and glob grammar.
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["yaml", "json5", "file-reference-syntax"] }
+sniff = { path = "../../sniff/lib", optional = true }
+biscuit-terminal = { path = "../../biscuit-terminal/lib", optional = true }
+# Schema-content hashes (validator cache keys, example artifacts).
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["json"] }
+indexmap = { version = "2", features = ["serde"] }
+serde_yaml_ng = "0.10"
+# JSON Schema validation, with Darkmatter's default-features choice.
+jsonschema = { version = "0.55", default-features = false }
+# Backtracking engine for pattern-key literal precedence (negative lookahead
+# the linear `regex` engine rejects); already compiled through `jsonschema`.
+fancy-regex = "0.19"
+regex = "1.11"
+# Date/time format checks only; no clock.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+url = "2.5"
+# Markdown code spans in `SchemaError` messages.
+renderable = { path = "../../renderable" }
+
+[dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+proptest = "1.6"
+tempfile = "3"
+serial_test = "3.0"
+# `gix::init` for repository fixtures in resolution tests.
+gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
+# `test_toolkit::test_layout`, for the layout gate in the `l1` binary.
+test-toolkit = { path = "../../tools/test-toolkit" }
+# Manifest parsing for the dependency-direction guard.
+toml = "1.0"
+
+# `autotests = false` above, so a `tests/` file reaches a binary only through
+# this root.
+[[test]]
+name = "l1"
+path = "tests/l1/main.rs"
+
+[package.metadata.ci.tests]
+# The work-counter regressions (`work_counters`, the parser's parse count)
+# compile only with `work-counters`.
+features = ["work-counters", "terminal"]
+# The source guards load Darkmatter's shared engines by `#[path]` and spell
+# them with `include_str!` in their tests.
+source-inputs = [
+  "darkmatter/cli/tests/common/context_guard.rs",
+  "darkmatter/cli/tests/common/path_lookup_guard.rs",
+  "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/tests/common/dependency_graph.rs",
+]

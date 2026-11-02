@@ -4,14 +4,10 @@
 
 use std::str::FromStr;
 
-use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DarkmatterSchemas, SchemaError, parse_yaml_schema,
-        resolve::resolve_schema,
-        simplified::{grammar::parse_type_expr, to_json_schema},
-    },
-};
+use darkmatter::markdown::{Markdown, schemas::{DarkmatterSchemas, resolve::resolve_schema}};
+use simplified_schema::{SchemaError, parse_yaml_schema};
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::to_json_schema;
 use serde_json::{Number, Value, json};
 
 fn schema_json(yaml: &str) -> Result<Value, SchemaError> {
@@ -252,7 +248,7 @@ fn suggest_phase1_standalone_envelopes_resolve_consistently() {
     std::fs::write(&pure, "$schema:\n  name: string(suggest(Bob, Mary))\n").unwrap();
     std::fs::write(
         &tagged,
-        "kind: schema\ntypes:\n  name: string(suggest(Bob, Mary))\n",
+        "kind: schema\n$schema:\n  name: string(suggest(Bob, Mary))\n",
     )
     .unwrap();
     std::fs::write(

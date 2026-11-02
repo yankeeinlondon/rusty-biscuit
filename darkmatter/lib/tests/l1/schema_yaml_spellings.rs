@@ -6,7 +6,11 @@
 //! result: classification by [`parse_standalone_schema_document`], loading
 //! through [`resolve_schema_with_roots`], and — for accepted cells —
 //! validation through [`DarkmatterSchemas::effective_for`] of a document that
-//! references the edited schema file. A control row per seed proves each
+//! references the edited schema file. A `types`-only tagged document is not a
+//! `$schema` target, so its accepted cells load as
+//! `NotASchemaDocument { TypesOnly }` and validate through a document whose
+//! inline `$schema` imports each named type as the property of the same
+//! name (`title: title@./file.yaml`). A control row per seed proves each
 //! declaration under test changes validation, so every edit is load-bearing.
 //!
 //! The seeds are the conventional (indented, single-line) presentations. Each
@@ -19,14 +23,13 @@ use std::path::Path;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::{
-    Markdown,
-    compose::ComposeSource,
-    schemas::{
-        DarkmatterSchemas, SchemaError, SchemaSourcePath, SchemaSpanKind, StandaloneSchemaEnvelope,
-        parse_standalone_schema_document,
-        parse_yaml_schema, resolve::resolve_schema_with_roots, simplified::to_json_schema,
-    },
+    Markdown, compose::ComposeSource, schemas::{DarkmatterSchemas, resolve::resolve_schema_with_roots},
 };
+use simplified_schema::{
+    NotSchemaReason, SchemaDeclaration, SchemaError, SchemaRoot, SchemaSourcePath, SchemaSpanKind, StandaloneSchemaEnvelope,
+    parse_standalone_schema_document, parse_yaml_schema,
+};
+use simplified_schema::simplified::to_json_schema;
 use serde_json::json;
 
 /// One edit applied to a seed. Keys are matched at the start of a line after
@@ -56,8 +59,8 @@ pub(crate) enum Edit {
 #[derive(Clone, Copy)]
 enum Outcome {
     /// No SimplifiedSchema is applied. Valid YAML is declined (`Ok(None)`)
-    /// and loads as raw JSON Schema; invalid YAML is a `SchemaDocument` error
-    /// naming the YAML problem, from the classifier and from loading.
+    /// and is never a `$schema` target; invalid YAML is a `SchemaDocument`
+    /// error naming the YAML problem, from the classifier and from loading.
     Declines,
     /// A recognized envelope with a malformed payload: `SchemaDocument`, and
     /// normal loading fails.
@@ -448,20 +451,18 @@ fn check_cell(
                     )),
                 };
             }
-            // Only a YAML mapping has a raw JSON Schema reading; anything else
-            // (an empty document, a scalar) is rejected by normal loading.
-            let valid_yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source)
-                .is_ok_and(|value| value.is_mapping());
-            match (&loaded, valid_yaml) {
-                (Ok(resolved), true) if resolved.simplified.is_none() => Ok(()),
-                (Ok(resolved), true) => Err(format!(
-                    "valid unrecognized YAML must load as raw JSON Schema, got a SimplifiedSchema: {:?}",
-                    resolved.simplified
-                )),
-                (Err(SchemaError::AmbiguousReferenced { .. }), false) => Ok(()),
+            // A declined document is never a `$schema` target: a mapping is
+            // rejected as having no `$schema` (or, with `$schema`, for its
+            // extra top-level keys), and anything else as not a mapping.
+            let mapping = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).is_ok_and(|value| value.is_mapping());
+            match (&loaded, mapping) {
+                (Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::NoSchemaProperty, .. }), true) => Ok(()),
+                (Err(SchemaError::SchemaDocument { message, .. }), true)
+                    if message.starts_with("unsupported top-level key(s)") => Ok(()),
+                (Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::NotAMapping, .. }), false) => Ok(()),
                 (result, _) => Err(format!(
                     "unexpected load result for {} YAML: {:?}",
-                    if valid_yaml { "mapping" } else { "non-mapping or invalid" },
+                    if mapping { "mapping" } else { "non-mapping" },
                     result.as_ref().map(|resolved| &resolved.json_schema)
                 )),
             }
@@ -487,18 +488,42 @@ fn check_cell(
             if document.envelope != envelope {
                 return Err(format!("expected {envelope:?}, got {:?}", document.envelope));
             }
-            match &loaded {
-                Ok(resolved) if resolved.simplified.is_some() => {}
-                other => {
-                    return Err(format!(
-                        "normal loading must apply a SimplifiedSchema, got {:?}",
-                        other.as_ref().map(|resolved| &resolved.json_schema)
-                    ));
+            let declaration = if document.exports_schema {
+                match &loaded {
+                    Ok(resolved) if resolved.simplified.is_some() => {}
+                    other => {
+                        return Err(format!(
+                            "normal loading must apply a SimplifiedSchema, got {:?}",
+                            other.as_ref().map(|resolved| &resolved.json_schema)
+                        ));
+                    }
                 }
-            }
+                format!("$schema: ./{file_name}")
+            } else {
+                match &loaded {
+                    Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }) => {}
+                    other => {
+                        return Err(format!(
+                            "a types-only document must load as NotASchemaDocument {{ TypesOnly }}, got {:?}",
+                            other.as_ref().map(|resolved| &resolved.json_schema)
+                        ));
+                    }
+                }
+                let SchemaDeclaration::Schema(SchemaRoot::Single(types)) = &document.declaration else {
+                    return Err(format!("a types-only document must declare a `types` mapping, got {:?}", document.declaration));
+                };
+                if types.properties.is_empty() {
+                    "$schema: {}".to_string()
+                } else {
+                    types
+                        .properties
+                        .keys()
+                        .fold("$schema:".to_string(), |text, name| format!("{text}\n  {name}: {name}@./{file_name}"))
+                }
+            };
             let mut wrong = Vec::new();
             for (instance, expected) in instances {
-                let markdown = Markdown::from(format!("---\n$schema: ./{file_name}\n{instance}\n---\nBody\n"))
+                let markdown = Markdown::from(format!("---\n{declaration}\n{instance}\n---\nBody\n"))
                     .with_source(ComposeSource::File(dir.join("document.md")));
                 let effective = api
                     .effective_for(&markdown)
@@ -677,7 +702,7 @@ fn presentation_pairs_load_with_equal_semantics_and_keep_their_siblings() {
 /// The authored text of every span recorded for `path` and `kind`.
 fn span_texts<'a>(
     source: &'a str,
-    document: &darkmatter::markdown::schemas::StandaloneSchemaDocument,
+    document: &simplified_schema::StandaloneSchemaDocument,
     path: &SchemaSourcePath,
     kind: SchemaSpanKind,
 ) -> Vec<&'a str> {
@@ -692,7 +717,7 @@ fn span_texts<'a>(
 /// The union-arm span text of each of `count` arms under `path`.
 fn arm_texts<'a>(
     source: &'a str,
-    document: &darkmatter::markdown::schemas::StandaloneSchemaDocument,
+    document: &simplified_schema::StandaloneSchemaDocument,
     path: &SchemaSourcePath,
     count: usize,
 ) -> Vec<&'a str> {
@@ -701,7 +726,7 @@ fn arm_texts<'a>(
         .collect()
 }
 
-fn load(source: &str) -> darkmatter::markdown::schemas::StandaloneSchemaDocument {
+fn load(source: &str) -> simplified_schema::StandaloneSchemaDocument {
     parse_standalone_schema_document(source, "/w/schema.yaml")
         .unwrap_or_else(|error| panic!("{source:?} must load: {error}"))
         .unwrap_or_else(|| panic!("{source:?} must be recognized"))
@@ -863,7 +888,7 @@ fn continued_scalars_project_byte_ranges_through_non_ascii_text() {
 /// once, after projecting through the fold.
 #[test]
 fn a_continued_definition_projects_through_a_caller_offset() {
-    use darkmatter::markdown::schemas::parse_property_definition_with_source;
+    use simplified_schema::parse_property_definition_with_source;
 
     for newline in ["\n", "\r\n"] {
         let yaml = format!("string(min(1);{newline}  max(5)) -> é{newline}");
@@ -946,11 +971,11 @@ fn strict_source_aware_parsing_keeps_every_other_presentation_closed() {
 /// The authored spans of each `suggest(...)` candidate of the single-atom
 /// top-level property `name`.
 fn suggestion_spans(
-    schema: &darkmatter::markdown::schemas::SimplifiedSchema,
+    schema: &simplified_schema::SchemaRoot,
     name: &str,
 ) -> Vec<std::ops::Range<usize>> {
-    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
-    let SimplifiedSchema::Single(shape) = schema else {
+    use simplified_schema::{Constraint, PropertyDef, SchemaRoot};
+    let SchemaRoot::Single(shape) = schema else {
         panic!("expected a single root shape");
     };
     let PropertyDef::Single(atom) = &shape.properties[name] else {
@@ -1020,8 +1045,8 @@ fn a_suggestion_candidate_crossing_a_fold_projects_one_authored_range() {
         let candidate = start..end;
         assert_eq!(suggestion_spans(schema, "mode"), [candidate], "{newline:?}");
 
-        use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
-        let SimplifiedSchema::Single(shape) = schema else { panic!("single root shape") };
+        use simplified_schema::{Constraint, PropertyDef, SchemaRoot};
+        let SchemaRoot::Single(shape) = schema else { panic!("single root shape") };
         let PropertyDef::Single(atom) = &shape.properties["mode"] else { panic!("single atom") };
         let decoded: Vec<&str> = atom
             .constraints
@@ -1058,7 +1083,7 @@ fn a_suggestion_candidate_crossing_a_fold_projects_one_authored_range() {
 /// offset applied exactly once.
 #[test]
 fn a_folded_suggestion_candidate_projects_through_a_caller_offset() {
-    use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+    use simplified_schema::simplified::parse_yaml_schema_with_source;
 
     const OFFSET: usize = 100;
     for newline in ["\n", "\r\n"] {
@@ -1094,7 +1119,7 @@ fn repeated_identical_definitions_keep_their_own_suggestion_spans() {
 /// with non-ASCII text before the candidate.
 #[test]
 fn folded_suggestions_project_through_a_caller_offset_and_non_ascii_text() {
-    use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+    use simplified_schema::simplified::parse_yaml_schema_with_source;
 
     for newline in ["\n", "\r\n"] {
         let yaml = format!("café: string -> naïve{newline}  text{newline}value: string(suggest(ünï,{newline}    beta)){newline}");
@@ -1144,9 +1169,7 @@ fn folded_values_decode_like_the_yaml_parser_and_match_single_line_semantics() {
 /// no scalar meaning the atom.
 #[test]
 fn a_source_that_disagrees_with_the_value_is_a_projection_error() {
-    use darkmatter::markdown::schemas::{
-        parse_property_definition_with_source, simplified::parse_yaml_schema_with_source,
-    };
+    use simplified_schema::{parse_property_definition_with_source, simplified::parse_yaml_schema_with_source};
 
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str("string(min(1)) -> one two").expect("YAML");
@@ -1167,7 +1190,7 @@ fn a_source_that_disagrees_with_the_value_is_a_projection_error() {
 /// single-line spelling, with a range on its authored line.
 #[test]
 fn a_cursor_on_a_continuation_line_reads_the_authored_token() {
-    use darkmatter::markdown::schemas::{SchemaCursorRole, locate_type_definition_cursor};
+    use simplified_schema::{SchemaCursorRole, locate_type_definition_cursor};
 
     for newline in ["\n", "\r\n"] {
         let value = format!("string(min(1);{newline}    ma");
@@ -1195,14 +1218,14 @@ fn a_cursor_on_a_continuation_line_reads_the_authored_token() {
 /// (not source order) can tell the two occurrences apart.
 #[test]
 fn a_pattern_key_before_an_identical_property_keeps_its_own_suggestion_spans() {
-    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
+    use simplified_schema::{Constraint, PropertyDef, SchemaRoot};
 
     for newline in ["\n", "\r\n"] {
         let source = format!(
             "$schema:{newline}  \"<starting::x>\": string(suggest(a,{newline}    b)){newline}  k: string(suggest(a,{newline}    b)){newline}"
         );
         let document = load(&source);
-        let SimplifiedSchema::Single(shape) = document.schema().expect("schema") else {
+        let SchemaRoot::Single(shape) = document.schema().expect("schema") else {
             panic!("expected a single root shape");
         };
         let pattern_line = source.find("<starting").expect("pattern key");

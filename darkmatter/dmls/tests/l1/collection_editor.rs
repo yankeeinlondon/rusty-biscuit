@@ -13,7 +13,7 @@ use crate::common::{LspFixture, LspWorkspace};
 use darkmatter::markdown::compose::collection_blocks::BodyScopes;
 use darkmatter::markdown::compose::expression::{DeclaredTypes, Expr, SourceProjection, TypeScope};
 use darkmatter::markdown::compose::ComposeOperationSet;
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use dmls::overlay::expressions::{shape_text, type_text};
 use serde_json::{Value, json};
 
@@ -26,7 +26,7 @@ const SCHEMA: &str = concat!(
     "  note: string\n",
 );
 
-fn schema() -> SimplifiedSchema {
+fn schema() -> SchemaRoot {
     let yaml: String = SCHEMA.lines().map(|line| format!("{}\n", line.trim_start())).collect();
     parse_yaml_schema(&serde_yaml_ng::from_str(&yaml).unwrap()).unwrap()
 }
@@ -94,10 +94,10 @@ impl<'w> Session<'w> {
             json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
         );
         fixture.flush_server();
-        let mut latest = fixture.wait_for_diagnostics_params(&uri);
-        while let Some(params) = fixture.take_buffered_diagnostics(&uri) {
-            latest = params;
-        }
+        // The buffered take returns the latest publication first; the
+        // earlier ones still buffered are dropped.
+        let latest = fixture.wait_for_diagnostics_params(&uri);
+        while fixture.take_buffered_diagnostics(&uri).is_some() {}
         let diagnostics = latest["diagnostics"].as_array().cloned().unwrap_or_default();
         Self { fixture, uri, text: text.to_string(), diagnostics }
     }
@@ -504,10 +504,10 @@ fn published(workspace: &LspWorkspace, documents: &[(String, String)]) -> Vec<Ve
                 json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
             );
             fixture.flush_server();
-            let mut latest = fixture.wait_for_diagnostics_params(&uri);
-            while let Some(params) = fixture.take_buffered_diagnostics(&uri) {
-                latest = params;
-            }
+            // The buffered take returns the latest publication first; the
+            // earlier ones still buffered are dropped.
+            let latest = fixture.wait_for_diagnostics_params(&uri);
+            while fixture.take_buffered_diagnostics(&uri).is_some() {}
             latest["diagnostics"].as_array().cloned().unwrap_or_default()
         })
         .collect();

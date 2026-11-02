@@ -4,7 +4,7 @@ area: schema
 ---
 # Simplified Schemas with `SimplifiedSchema`
 
-Darkmatter introduces an exciting new grammar called `SimplifiedSchema` which provides an ergonomic yet powerful way to provide schema support to your Markdown and YAML files. Now if you're not the type to get excited by a new standard let me tell you where you're wrong:
+Darkmatter supports a grammar called `SimplifiedSchema` (defined by the `simplified-schema` library) which provides an ergonomic yet powerful way to provide schema support to your Markdown and YAML files. Now if you're not the type to get excited by a new standard let me tell you where you're wrong:
 
 - `SimplifiedSchema` provides a superset of JSON Schema functionality (and be easily converted to it when you need)
 - but unlike JSON Schema, `SimplifiedSchema` is ergonomic and easy to write and use
@@ -32,8 +32,11 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
         - describes the grammar primitives (types, constraints, )
         - shows how to _define_ useful schemas in your project in Markdown and YAML
         - describes what a `schema-trigger` is and how to leverage them to activate schemas dynamically
-    - [Schema Definition](./definition.md)
+    - [The SimplifiedSchema language](../../../../simplified-schema/docs/topics/language/index.md)
         - the complete grammar reference: every type, every constraint, and the full JSON Schema mapping
+        - owned by the `simplified-schema` library, which Darkmatter builds on
+    - [Schema Definition](./definition.md)
+        - how Darkmatter applies schemas: the `$schema` property, the baseline, trigger schemas, and the `md schema` commands
         - also covers the `DarkmatterSchemas` library API and its entry points
     - [Schema Validation](./schema-validation.md)
         - shows how Darkmatter provides _schema validation_
@@ -41,7 +44,7 @@ I'm sure you're ready to dig into the magic we call `SimplifiedSchema` so choose
             - from the terminal using the CLI 
             - as a library author calling into the Darkmatter library
     - [Schema Discovery](./schema-discovery.md)
-        - extract _observed_ schema structure from a schemaless file
+        - how the definitions of YAML document kinds (`kind: yaml-schema`) are found in the schema roots, and what happens when two claim one kind or one fails
     - [Visual Support of Schemas from DMLS](dmls-schema-support.md)
         - DMLS provides a full Markdown/CommonMark language server that extends Markdown's grammar to support schemas
     - [Understanding the Schema's Role in Composition](./schema-in-composition.md)

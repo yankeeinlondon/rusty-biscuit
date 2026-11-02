@@ -94,8 +94,8 @@ fn reject_nested_span(
     text: &str,
     predicate: bool,
 ) -> Result<(), LifecycleError> {
-    let (source, mode) = if predicate {
-        (text.to_string(), ParseMode::Condition)
+    let source = if predicate {
+        text.to_string()
     } else {
         if !is_whole_value_span(text) {
             return Ok(());
@@ -103,9 +103,9 @@ fn reject_nested_span(
         let Some(span) = ExpressionFinder::find_all_plain(text).into_iter().next() else {
             return Ok(());
         };
-        (span.expression, ParseMode::Interpolation)
+        span.expression
     };
-    let Some(lint) = lint_expression(&source, mode).into_iter().next() else {
+    let Some(lint) = lint_expression(&source).into_iter().next() else {
         return Ok(());
     };
     let ExpressionLintKind::NestedSpanInStringLiteral { literal, .. } = &lint.kind;
@@ -177,7 +177,7 @@ pub fn lifecycle_call_checks(
                 return;
             };
             let mode = if surface.predicate {
-                AuthoredMode::Expression(ParseMode::Condition)
+                AuthoredMode::Expression
             } else {
                 AuthoredMode::InterpolatedValue
             };
@@ -613,6 +613,6 @@ use super::actions::{WithValue, branch_scopes, for_each_action, scope_after_acti
 use super::source_map::{AuthoredSegment, AuthoredValue, LifecycleSourceMap};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::expression::{
-    AuthoredMode, ExpressionError, ExpressionLintKind, ParseMode, PreparedCallCheck, TypeScope, check_prepared_calls,
+    AuthoredMode, ExpressionError, ExpressionLintKind, PreparedCallCheck, TypeScope, check_prepared_calls,
     is_whole_value_span, lint_expression, prepare_value,
 };

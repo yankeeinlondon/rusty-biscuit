@@ -28,7 +28,7 @@ clap_complete = { version = "4", features = ["unstable-dynamic"] }
 ctrlc = { version = "3.4", features = ["termination"] }
 dirs = "6"
 inquire = "0.9"
-sniff = { path = "../../sniff/lib" }
+sniff = { path = "../../sniff/lib", features = ["remote"] }
 worktree = { path = "../lib" }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 

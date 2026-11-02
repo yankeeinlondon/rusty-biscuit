@@ -29,6 +29,24 @@
 # directories that look like clones (a `rusty-biscuit` child) are candidates,
 # so unrelated folders in the coding dir are left alone.
 #
+# A third rule covers standalone clones: a Git clone of this repository (its
+# `origin` URL ends in `rusty-biscuit`) sitting directly in the coding dir,
+# outside the `<host>--<worktree>` layout, such as a second checkout made by
+# hand. Such a clone is
+#
+#   abandoned  when nothing in it has been used for CROSS_CHECK_ABANDONED_DAYS
+#              (default 7) days, judged by the newest of `.git/HEAD`,
+#              `.git/FETCH_HEAD`, and the HEAD reflog of the clone and each of
+#              its linked worktrees; and nothing in it exists only here: no
+#              stash, no branch or worktree HEAD with commits missing from
+#              every remote-tracking ref, and no uncommitted or untracked
+#              file in the clone or any linked worktree.
+#
+# An abandoned clone is retired together with its linked worktrees. One that
+# is idle but fails a check is kept and reported with the reason; a check that
+# cannot run keeps the clone too. A local run (`cross-check-refresh` on this
+# machine's own coding dir) never considers the checkout it was started from.
+#
 # Retiring is a rename to `.cross-check-trash--…` (instant, and the clone's
 # name is free at once) followed by a detached delete, because a Rust clone's
 # `target/` takes minutes to delete. Nothing reports whether that delete
@@ -50,6 +68,11 @@ fi
 PRUNE_MAX_AGE_DAYS="${CROSS_CHECK_MAX_AGE_DAYS:-3}"
 if [[ ! "${PRUNE_MAX_AGE_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
     echo "CROSS_CHECK_MAX_AGE_DAYS must be a positive whole number of days, got: ${PRUNE_MAX_AGE_DAYS}" >&2
+    exit 2
+fi
+ABANDONED_MAX_DAYS="${CROSS_CHECK_ABANDONED_DAYS:-7}"
+if [[ ! "${ABANDONED_MAX_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "CROSS_CHECK_ABANDONED_DAYS must be a positive whole number of days, got: ${ABANDONED_MAX_DAYS}" >&2
     exit 2
 fi
 
@@ -74,9 +97,11 @@ offset_part() {
     printf '%s' "${value}" | tr '[:upper:]' '[:lower:]'
 }
 
-# Sets `short_host`, `origin_host`, `worktree` and `live_worktrees` for the
-# checkout the caller is in.
+# Sets `short_host`, `origin_host`, `worktree`, `live_worktrees` and
+# `protected_checkout` (the main checkout of the caller's repository, which a
+# local prune never retires) for the checkout the caller is in.
 calling_host_identity() {
+    protected_checkout="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
     short_host="$(hostname)"
     short_host="${short_host%%.*}"
     # The id also names a Git ref, and a host whose name carries `~`, `:`, or
@@ -112,11 +137,12 @@ calling_host_identity() {
     done < <(git worktree list --porcelain; echo)
 }
 
-# select_hosts <program> <linux|windows|wsl|macos|all>: fills `want`.
+# select_hosts <program> <linux|windows|wsl|macos|all> [optional]: fills `want`.
 # An explicit OS for an undeclared host is an error; `all` narrows to the
-# declared set minus the local OS and only errors when that set is empty.
+# declared set minus the local OS and errors when that set is empty, unless
+# `optional` is given (a caller that also works on this machine).
 select_hosts() {
-    local program="$1" os_sel="$2" here os
+    local program="$1" os_sel="$2" optional="${3:-}" here os
     here="$(local_os)"
     want=("" "" "" "")
     skipped_local=""
@@ -134,7 +160,7 @@ select_hosts() {
         # Joined first: `${want[*]// /}` strips each element before joining,
         # so empty elements still join to spaces and the check never fired.
         local joined="${want[*]}"
-        if [[ -z "${joined// /}" ]]; then
+        if [[ -z "${joined// /}" && -z "${optional}" ]]; then
             echo "${program}: no build host for an OS other than this one (${here}) is declared (set BUILD_LINUX, BUILD_WIN, BUILD_WSL, and/or BUILD_MACOS)" >&2
             exit 2
         fi
@@ -161,10 +187,15 @@ select_hosts() {
 #   volume-before: <free> <total>         refresh only
 #   clone: <bytes> <days unused> <dir>    refresh only, one per clone
 #   <stale|expired>-<removed|would|locked|failed>: <dir>[ (N days unused)]
+#   abandoned-<removed|would|failed>: <dir>[ (N days unused)]
+#   abandoned-kept: <dir> (<why it was kept>)
 #   volume-after: <free>                  refresh only
 #   clone-dir: <dir>                      prepare only
+#
+# `protect` is the checkout a local run was started from; it is empty on a
+# build host, where the caller's checkout does not live.
 unix_prune_script() {
-    local mode="$1" own="$2" dry_run="$3" live="" name
+    local mode="$1" own="$2" dry_run="$3" protect="${4:-}" live="" name
     for name in ${live_worktrees[@]+"${live_worktrees[@]}"}; do live+=" ${name}"; done
     cat <<EOF
 set -u
@@ -175,6 +206,8 @@ mode='${mode}'
 own='${own}'
 dry=${dry_run}
 max_age=$((PRUNE_MAX_AGE_DAYS * 86400))
+abandoned_max=$((ABANDONED_MAX_DAYS * 86400))
+protect=$(printf '%q' "${protect}")
 now=\$(date +%s)
 live='${live} '
 mtime() { stat -c %Y "\$1" 2> /dev/null || stat -f %m "\$1"; }
@@ -212,6 +245,7 @@ for dir in "\$coding"/*--*/; do
         echo "\$reason-failed: \$dir"
     fi
 done
+$(unix_abandoned_block)
 if [ "\$dry" != 1 ]; then
     for trash in "\$coding"/.cross-check-trash--*/; do
         [ -d "\$trash" ] || continue
@@ -233,11 +267,92 @@ exit 0
 EOF
 }
 
+# The abandoned-clone rule as host-script text, spliced into
+# `unix_prune_script` (quoted, so nothing in it expands here). It reads the
+# script's `coding`, `mode`, `dry`, `now`, `abandoned_max`, `protect`, and
+# `mtime`.
+unix_abandoned_block() {
+    cat << 'EOF'
+# Prints why the clone whose worktrees (clone first) are listed in $trees must
+# be kept, or nothing when every check passed. A check that cannot run keeps it.
+abandoned_reason() {
+    out="$(git -C "$1" stash list 2>&1)" || { echo "could not read its stashes"; return; }
+    [ -z "$out" ] || { echo "it has stashed changes"; return; }
+    out="$(git -C "$1" rev-list -n 1 --branches --not --remotes 2>&1)" || { echo "could not read its branches"; return; }
+    [ -z "$out" ] || { echo "a branch has commits on no remote"; return; }
+    while IFS= read -r tree; do
+        [ -n "$tree" ] || continue
+        out="$(git -C "$tree" --no-optional-locks status --porcelain 2>&1)" || { echo "could not read the status of $tree"; return; }
+        [ -z "$out" ] || { echo "$tree has uncommitted changes"; return; }
+        out="$(git -C "$tree" rev-list -n 1 HEAD --not --remotes 2>&1)" || { echo "could not read the history of $tree"; return; }
+        [ -z "$out" ] || { echo "$tree has commits on no remote"; return; }
+    done << TREES
+$trees
+TREES
+}
+for dir in "$coding"/*/; do
+    [ -d "$dir" ] || continue
+    dir="${dir%/}"
+    name="${dir##*/}"
+    case "$name" in *--*) continue ;; esac
+    [ -d "$dir/.git" ] || continue
+    if [ -n "$protect" ] && [ "$dir" -ef "$protect" ]; then continue; fi
+    origin="$(git -C "$dir" config --get remote.origin.url 2> /dev/null)"
+    case "${origin%/}" in */rusty-biscuit | */rusty-biscuit.git | *:rusty-biscuit | *:rusty-biscuit.git) ;; *) continue ;; esac
+    last=0
+    for used in "$dir/.git/HEAD" "$dir/.git/FETCH_HEAD" "$dir/.git/logs/HEAD" "$dir"/.git/worktrees/*/HEAD "$dir"/.git/worktrees/*/logs/HEAD; do
+        [ -f "$used" ] || continue
+        t=$(mtime "$used")
+        [ "$t" -gt "$last" ] && last=$t
+    done
+    age=$((now - last))
+    if [ "$mode" = refresh ]; then
+        echo "clone: $(( $(du -sk "$dir" | cut -f1) * 1024 )) $((age / 86400)) $dir"
+    fi
+    [ "$age" -ge "$abandoned_max" ] || continue
+    detail=" ($((age / 86400)) days unused)"
+    # Every worktree git still knows, the clone itself first; one marked
+    # prunable has lost its directory and holds nothing.
+    if ! listing="$(git -C "$dir" worktree list --porcelain 2>&1)"; then
+        echo "abandoned-kept: $dir (could not list its worktrees)"
+        continue
+    fi
+    trees="$(printf '%s\n\n' "$listing" | awk '/^worktree /{p=substr($0,10)} /^prunable/{p=""} /^$/{if(p!="")print p; p=""}')"
+    why="$(abandoned_reason "$dir")"
+    if [ -n "$why" ]; then echo "abandoned-kept: $dir ($why)"; continue; fi
+    if [ "$dry" = 1 ]; then echo "abandoned-would: $dir$detail"; continue; fi
+    stamp="$$-$(date +%s)"
+    failed=""
+    i=0
+    while IFS= read -r tree; do
+        i=$((i + 1))
+        # The first entry is the clone itself, moved last.
+        [ "$i" -gt 1 ] && [ -n "$tree" ] || continue
+        parent="$(dirname "$tree")"
+        if mv "$tree" "$coding/.cross-check-trash--$name-worktree$i-$stamp"; then
+            rmdir "$parent" 2> /dev/null
+        else
+            failed="$tree"
+            break
+        fi
+    done << TREES
+$trees
+TREES
+    if [ -n "$failed" ]; then echo "abandoned-failed: $failed"; continue; fi
+    if mv "$dir" "$coding/.cross-check-trash--$name-$stamp"; then
+        echo "abandoned-removed: $dir$detail"
+    else
+        echo "abandoned-failed: $dir"
+    fi
+done
+EOF
+}
+
 # The same rules in PowerShell 5. The trash delete is started through WMI
 # rather than as a child: Windows OpenSSH ends a session's child processes
 # with it. `\\?\` lifts the 260-character path limit a deep `target\` exceeds.
 windows_prune_script() {
-    local mode="$1" own="$2" dry_run="$3" live="" name dry='$false'
+    local mode="$1" own="$2" dry_run="$3" protect="${4:-}" live="" name dry='$false'
     for name in ${live_worktrees[@]+"${live_worktrees[@]}"}; do live+="'${name}',"; done
     [[ "${dry_run}" == 1 ]] && dry='$true'
     cat <<EOF
@@ -249,7 +364,21 @@ New-Item -ItemType Directory -Force -Path \$coding -ErrorAction Stop | Out-Null
 \$own = $(powershell_quote "${own}")
 \$dry = ${dry}
 \$maxAge = [TimeSpan]::FromDays(${PRUNE_MAX_AGE_DAYS})
+\$abandonedMax = [TimeSpan]::FromDays(${ABANDONED_MAX_DAYS})
+\$protect = $(powershell_quote "${protect}")
 \$now = [DateTime]::UtcNow
+# .NET enumeration reads sizes from the directory listing; Get-ChildItem
+# builds an object per file and is several times slower on a target tree. It
+# is the fallback when an unreadable entry stops enumeration.
+function Get-TreeBytes(\$dir) {
+    \$bytes = [long]0
+    try {
+        foreach (\$file in (New-Object System.IO.DirectoryInfo \$dir).EnumerateFiles('*', [System.IO.SearchOption]::AllDirectories)) { \$bytes += \$file.Length }
+    } catch {
+        \$bytes = [long](Get-ChildItem -LiteralPath \$dir -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+    }
+    return [long]\$bytes
+}
 \$live = @(${live%,})
 \$prefix = '${origin_host}--'
 \$drive = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot(\$coding))
@@ -264,18 +393,7 @@ foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory -Force) {
     \$touched = if (Test-Path -LiteralPath \$used) { (Get-Item -LiteralPath \$used -Force).LastWriteTimeUtc } else { \$entry.LastWriteTimeUtc }
     \$age = \$now - \$touched
     \$days = [int][math]::Floor(\$age.TotalDays)
-    if (\$mode -eq 'refresh') {
-        # .NET enumeration reads sizes from the directory listing; Get-ChildItem
-        # builds an object per file and is several times slower on a target
-        # tree. It is the fallback when an unreadable entry stops enumeration.
-        \$bytes = [long]0
-        try {
-            foreach (\$file in (New-Object System.IO.DirectoryInfo \$dir).EnumerateFiles('*', [System.IO.SearchOption]::AllDirectories)) { \$bytes += \$file.Length }
-        } catch {
-            \$bytes = [long](Get-ChildItem -LiteralPath \$dir -Recurse -File -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
-        }
-        Write-Output "clone: \$([long]\$bytes) \$days \$dir"
-    }
+    if (\$mode -eq 'refresh') { Write-Output "clone: \$(Get-TreeBytes \$dir) \$days \$dir" }
     \$reason = ''
     \$detail = ''
     if (\$name.StartsWith(\$prefix, [StringComparison]::OrdinalIgnoreCase) -and -not (\$live -contains \$name.Substring(\$prefix.Length))) {
@@ -291,6 +409,7 @@ foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory -Force) {
     try { Rename-Item -LiteralPath \$dir -NewName \$trash -ErrorAction Stop; Write-Output "\$reason-removed: \$dir\$detail" }
     catch { Write-Output "\$reason-failed: \$dir" }
 }
+$(windows_abandoned_block)
 if (-not \$dry) {
     foreach (\$entry in Get-ChildItem -LiteralPath \$coding -Directory -Force) {
         if (-not \$entry.Name.StartsWith('.cross-check-trash--', [StringComparison]::OrdinalIgnoreCase)) { continue }
@@ -312,22 +431,126 @@ if (\$own) {
 EOF
 }
 
+# The abandoned-clone rule in PowerShell 5, spliced into
+# `windows_prune_script` (quoted, so nothing in it expands here). It reads the
+# script's `$coding`, `$mode`, `$dry`, `$now`, `$abandonedMax`, `$protect`, and
+# `Get-TreeBytes`. Without `git` on the host the rule is skipped, never guessed.
+windows_abandoned_block() {
+    cat << 'EOF'
+# Why the clone (first of $trees) must be kept, or '' when every check passed.
+# A check that cannot run keeps it.
+function Get-AbandonedReason($trees) {
+    $clone = $trees[0]
+    $out = & git -C $clone stash list 2>&1
+    if ($LASTEXITCODE -ne 0) { return 'could not read its stashes' }
+    if ($out) { return 'it has stashed changes' }
+    $out = & git -C $clone rev-list -n 1 --branches --not --remotes 2>&1
+    if ($LASTEXITCODE -ne 0) { return 'could not read its branches' }
+    if ($out) { return 'a branch has commits on no remote' }
+    foreach ($tree in $trees) {
+        $out = & git -C $tree --no-optional-locks status --porcelain 2>&1
+        if ($LASTEXITCODE -ne 0) { return "could not read the status of $tree" }
+        if ($out) { return "$tree has uncommitted changes" }
+        $out = & git -C $tree rev-list -n 1 HEAD --not --remotes 2>&1
+        if ($LASTEXITCODE -ne 0) { return "could not read the history of $tree" }
+        if ($out) { return "$tree has commits on no remote" }
+    }
+    return ''
+}
+$protectFull = if ($protect) { [System.IO.Path]::GetFullPath($protect).TrimEnd('\') } else { '' }
+$entries = if (Get-Command git -CommandType Application -ErrorAction SilentlyContinue) { @(Get-ChildItem -LiteralPath $coding -Directory -Force) } else { @() }
+foreach ($entry in $entries) {
+    $name = $entry.Name
+    if ($name.StartsWith('.') -or $name.Contains('--')) { continue }
+    $dir = $entry.FullName
+    if (-not (Test-Path -LiteralPath (Join-Path $dir '.git') -PathType Container)) { continue }
+    if ($protectFull -and ($dir.TrimEnd('\') -ieq $protectFull)) { continue }
+    $origin = (& git -C $dir config --get remote.origin.url 2>$null | Select-Object -First 1)
+    if (-not ($origin -match '[/\\:]rusty-biscuit(\.git)?[/\\]?$')) { continue }
+    $last = [DateTime]::MinValue
+    $used = @('HEAD', 'FETCH_HEAD', 'logs\HEAD') | ForEach-Object { Join-Path $dir ".git\$_" }
+    $linked = Join-Path $dir '.git\worktrees'
+    if (Test-Path -LiteralPath $linked) {
+        foreach ($admin in Get-ChildItem -LiteralPath $linked -Directory -Force) { $used += (Join-Path $admin.FullName 'HEAD'); $used += (Join-Path $admin.FullName 'logs\HEAD') }
+    }
+    foreach ($file in $used) {
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            $t = (Get-Item -LiteralPath $file -Force).LastWriteTimeUtc
+            if ($t -gt $last) { $last = $t }
+        }
+    }
+    $age = $now - $last
+    $days = [int][math]::Floor($age.TotalDays)
+    if ($mode -eq 'refresh') { Write-Output "clone: $(Get-TreeBytes $dir) $days $dir" }
+    if ($age -lt $abandonedMax) { continue }
+    $detail = " ($days days unused)"
+    # Every worktree git still knows, the clone itself first; one marked
+    # prunable has lost its directory and holds nothing.
+    $listing = & git -C $dir worktree list --porcelain 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Output "abandoned-kept: $dir (could not list its worktrees)"; continue }
+    $trees = @()
+    $pending = $null
+    foreach ($line in @($listing) + '') {
+        if ($line.StartsWith('worktree ')) { $pending = $line.Substring(9) }
+        elseif ($line.StartsWith('prunable')) { $pending = $null }
+        elseif ($line -eq '') { if ($pending) { $trees += $pending }; $pending = $null }
+    }
+    if ($trees.Count -eq 0) { Write-Output "abandoned-kept: $dir (could not list its worktrees)"; continue }
+    $why = Get-AbandonedReason $trees
+    if ($why) { Write-Output "abandoned-kept: $dir ($why)"; continue }
+    if ($dry) { Write-Output "abandoned-would: $dir$detail"; continue }
+    $stamp = "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+    $failed = ''
+    # The first entry is the clone itself, moved last.
+    for ($i = 1; $i -lt $trees.Count; $i++) {
+        $tree = [System.IO.Path]::GetFullPath($trees[$i])
+        $parent = Split-Path -Parent $tree
+        try {
+            Move-Item -LiteralPath $tree -Destination (Join-Path $coding ".cross-check-trash--$name-worktree$i-$stamp") -ErrorAction Stop
+            # Non-recursive: deletes the parent only when the move left it empty.
+            try { [System.IO.Directory]::Delete($parent) } catch {}
+        } catch { $failed = $tree; break }
+    }
+    if ($failed) { Write-Output "abandoned-failed: $failed"; continue }
+    try { Rename-Item -LiteralPath $dir -NewName ".cross-check-trash--$name-$stamp" -ErrorAction Stop; Write-Output "abandoned-removed: $dir$detail" }
+    catch { Write-Output "abandoned-failed: $dir" }
+}
+EOF
+}
+
 # Bytes as a short human figure (GiB with one decimal, or MiB below 1 GiB).
 human_bytes() {
     awk -v b="$1" 'BEGIN { if (b >= 1073741824) printf "%.1f GiB", b / 1073741824; else printf "%.0f MiB", b / 1048576 }'
 }
 
-# prune_host <program> <os> <prepare|refresh> <own clone or ""> <dry_run 0|1>
+# prune_host <program> <os|local> <prepare|refresh> <own clone or ""> <dry_run 0|1>
 # Runs the rules on one host and reports each outcome; a refresh also reports
-# the before and after state of the volume. Sets PRUNED_CLONE_DIR to the
-# `clone-dir:` line (empty for a refresh). Fails only when the host could not
-# be reached or the script could not run.
+# the before and after state of the volume. `local` runs them on this machine's
+# own coding dir instead, without SSH, protecting the caller's checkout. Sets
+# PRUNED_CLONE_DIR to the `clone-dir:` line (empty for a refresh). Fails only
+# when the host could not be reached or the script could not run.
 prune_host() {
-    local program="$1" os="$2" mode="$3" own="$4" dry_run="$5" host="${HOST[$2]}" output
+    local program="$1" os="$2" mode="$3" own="$4" dry_run="$5" host output
     PRUNED_CLONE_DIR=""
+    if [[ "${os}" == "local" ]]; then
+        host="local"
+        if [[ "$(local_os)" == "windows" ]]; then
+            local encoded
+            encoded="$(windows_prune_script "${mode}" "${own}" "${dry_run}" "${protected_checkout}" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
+            output="$(powershell.exe -NoProfile -EncodedCommand "${encoded}")" || return 1
+        else
+            output="$(unix_prune_script "${mode}" "${own}" "${dry_run}" "${protected_checkout}" | bash -s)" || return 1
+        fi
+        report_prune "${program}" "${host}" "${mode}" "${dry_run}" "${output}"
+        return 0
+    fi
+    # Indexed only after the `local` case: `local` would read as arithmetic.
+    host="${HOST[$2]}"
     if [[ "${os}" == "windows" ]]; then
         # Encoded rather than inline: the command crosses the remote shell once
-        # more, and `$` does not reliably survive that on this host.
+        # more, and `$` does not reliably survive that on this host. Windows
+        # caps a command line at 32,767 characters; the encoded script was
+        # about 22,000 when the abandoned-clone rule was added.
         local encoded
         encoded="$(windows_prune_script "${mode}" "${own}" "${dry_run}" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
         output="$("${SSH[@]}" "${host}" "powershell -NoProfile -EncodedCommand ${encoded}")" || return 1
@@ -348,7 +571,7 @@ report_prune() {
     local program="$1" host="$2" mode="$3" dry_run="$4" output line rest bytes days dir i
     local coding="" free_before=0 total=0 free_after=0 removed_bytes=0 all_bytes=0
     local -a clone_bytes=() clone_days=() clone_dirs=()
-    local -a removed_dirs=() removed_sizes=() removed_why=() kept_locked=() failed=()
+    local -a removed_dirs=() removed_sizes=() removed_why=() kept_locked=() kept_idle=() failed=()
     output="$(printf '%s\n' "$5" | tr -d '\r')"
 
     while IFS= read -r line; do
@@ -373,12 +596,15 @@ report_prune() {
                 removed_dirs+=("${dir}")
                 removed_sizes+=("${bytes}")
                 removed_bytes=$((removed_bytes + bytes))
+                days="${rest##* (}"
                 case "${line}" in
                     stale-*) removed_why+=("worktree no longer exists") ;;
-                    *) days="${rest##* (}"; removed_why+=("unused ${days% days unused)} days") ;;
+                    abandoned-*) removed_why+=("standalone clone unused ${days% days unused)} days, nothing unpushed") ;;
+                    *) removed_why+=("unused ${days% days unused)} days") ;;
                 esac
                 ;;
             *"-locked: "*) kept_locked+=("${rest}") ;;
+            "abandoned-kept: "*) kept_idle+=("${rest}") ;;
             *"-failed: "*) failed+=("${rest}") ;;
         esac
     done <<< "${output}"
@@ -388,6 +614,9 @@ report_prune() {
             echo "${program}: removing clone ${host}:${removed_dirs[i]} in the background (${removed_why[i]})"
         done
         for dir in ${kept_locked[@]+"${kept_locked[@]}"}; do echo "${program}: kept clone ${host}:${dir}; its lock is held"; done
+        for line in ${kept_idle[@]+"${kept_idle[@]}"}; do
+            echo "${program}: kept idle clone ${host}:${line% (*}; $(kept_reason "${line}")"
+        done
         for dir in ${failed[@]+"${failed[@]}"}; do echo "${program}: could not remove clone ${host}:${dir}; remove it by hand" >&2; done
         return 0
     fi
@@ -412,9 +641,7 @@ report_prune() {
     echo
     if ((${#removed_dirs[@]} == 0)); then
         echo "  nothing to remove; $(human_bytes "${free_before}") free ($(percent_used "${free_before}" "${total}") used)"
-        for dir in ${kept_locked[@]+"${kept_locked[@]}"}; do
-            printf '  kept %s: in use (its lock is held)\n' "$(clone_name "${dir}" "${coding}")"
-        done
+        print_kept
         return 0
     else
         local heading="REMOVED" width name
@@ -431,10 +658,8 @@ report_prune() {
         printf '  %10s\n' "----------"
         printf '  %10s  %s\n' "$(human_bytes "${removed_bytes}")" "$(plural ${#removed_dirs[@]} clone)"
     fi
-    ((${#kept_locked[@]} > 0)) && echo
-    for dir in ${kept_locked[@]+"${kept_locked[@]}"}; do
-        printf '  kept %s: in use (its lock is held)\n' "$(clone_name "${dir}" "${coding}")"
-    done
+    ((${#kept_locked[@]} + ${#kept_idle[@]} > 0)) && echo
+    print_kept
     for dir in ${failed[@]+"${failed[@]}"}; do
         printf '  could not remove %s; remove it by hand\n' "${dir}" >&2
     done
@@ -452,6 +677,24 @@ report_prune() {
             printf '  reclaimed   none measurable (other writes on the volume offset it)\n'
         fi
     fi
+}
+
+# The kept clones of the report being built (reads report_prune's locals).
+print_kept() {
+    local dir line
+    for dir in ${kept_locked[@]+"${kept_locked[@]}"}; do
+        printf '  kept %s: in use (its lock is held)\n' "$(clone_name "${dir}" "${coding}")"
+    done
+    for line in ${kept_idle[@]+"${kept_idle[@]}"}; do
+        printf '  kept %s: %s\n' "$(clone_name "${line% (*}" "${coding}")" "$(kept_reason "${line}")"
+    done
+}
+
+# kept_reason "<dir> (<why>)": the why of an `abandoned-kept:` line, as a
+# phrase that follows the clone's name.
+kept_reason() {
+    local why="${1##* (}"
+    printf 'unused, but %s' "${why%)}"
 }
 
 # A clone's directory name, without the coding dir it lives in.

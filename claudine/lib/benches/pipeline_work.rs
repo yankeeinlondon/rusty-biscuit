@@ -27,7 +27,7 @@ use claudine::invocation_context::{DocumentEnvironment, InvocationContext};
 use claudine::provider::Provider;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse_condition};
+use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
@@ -176,7 +176,7 @@ fn loop_condition(c: &mut Criterion) {
     });
     group.bench_function("parse_only", |b| {
         b.iter(|| {
-            parse_condition(black_box(
+            parse(black_box(
                 "loop.count >= 1000000 || loop.last_exit_code != 0",
             ))
             .expect("parses")
@@ -314,7 +314,7 @@ fn a5_dispatch(c: &mut Criterion) {
                     let rendered = interpolate(A5_TEMPLATE, meta);
                     let lookup =
                         LoopExpressionLookup::new(&frontmatter, &ambient, &context, &source);
-                    let condition = parse_condition(A5_CONDITION).expect("parses");
+                    let condition = parse(A5_CONDITION).expect("parses");
                     rendered.len()
                         + usize::from(
                             evaluate(&condition, &lookup).expect("evaluates") == Value::Bool(true),

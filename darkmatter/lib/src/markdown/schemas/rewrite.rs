@@ -41,7 +41,7 @@ use biscuit_file::FileReference;
 use jsonschema::Validator;
 use serde_json::{Map, Value};
 
-use super::format::DARKMATTER_FILE_FORMAT;
+use simplified_schema::format::DARKMATTER_FILE_FORMAT;
 use super::scope::SchemaScope;
 use super::validate::{self, CallerOrigins, ValidatorCache, error_top_level_key};
 use crate::markdown::compose::expression::path_projection::make_portable_relative_in_context;
@@ -51,7 +51,7 @@ use crate::markdown::compose::expression::resolve_ctx::{
 
 /// Outcome of normalizing a frontmatter instance against a schema.
 ///
-/// Mirrors [`super::coerce::CoercionOutcome`]'s shape: the (possibly
+/// Mirrors [`simplified_schema::coerce::CoercionOutcome`]'s shape: the (possibly
 /// rewritten) instance plus a flag telling the caller whether anything
 /// actually changed. Pure — the caller's input is never mutated.
 #[derive(Debug, Clone)]
@@ -252,7 +252,7 @@ impl<'a> ArmValidators<'a> {
         validator
     }
 
-    fn note(looked_up: Result<(Arc<Validator>, bool), super::errors::SchemaError>) -> Option<Arc<Validator>> {
+    fn note(looked_up: Result<(Arc<Validator>, bool), simplified_schema::errors::SchemaError>) -> Option<Arc<Validator>> {
         let (validator, compiled) = looked_up.ok()?;
         if compiled {
             crate::note_work!(RewriteArmCompile);
@@ -268,6 +268,11 @@ impl<'a> ArmValidators<'a> {
 ///
 /// Rewriting against an arm the validator never accepted would normalize a
 /// value under the wrong declaration, so only accepting arms take part.
+///
+/// A raw schema's root may declare `properties` beside its `anyOf`; those
+/// apply whichever arm accepts, so they are rewritten first and each
+/// accepting arm then rewrites that result. A generated SimplifiedSchema
+/// union declares no root `properties`, so that first pass changes nothing.
 fn rewrite_root_union(
     root_arms: &[Value],
     root: &Value,
@@ -278,6 +283,7 @@ fn rewrite_root_union(
     request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
     let mut agreed: Option<NormalizationOutcome> = None;
+    let mut beside_arms: Option<NormalizationOutcome> = None;
     for (index, arm) in root_arms.iter().enumerate() {
         // A schema that fails to build cannot be a valid arm; skip it. The
         // surrounding validator already surfaces build failures elsewhere.
@@ -287,15 +293,19 @@ fn rewrite_root_union(
         if !arm_accepts(&validator, instance, composition_pending) {
             continue;
         }
-        let outcome = rewrite_object(
+        let beside_arms = beside_arms.get_or_insert_with(|| {
+            rewrite_object(root, instance, base_dir, arms, composition_pending, request_context, root)
+        });
+        let mut outcome = rewrite_object(
             arm,
-            instance,
+            &beside_arms.value,
             base_dir,
             arms,
             composition_pending,
             request_context,
             root,
         );
+        outcome.changed |= beside_arms.changed;
         match &agreed {
             None => agreed = Some(outcome),
             Some(previous) if previous.value == outcome.value => {}
@@ -320,7 +330,7 @@ fn rewrite_root_union(
 /// residual validation problem points at a pending `$(...)` top-level key.
 /// Those keys are re-validated and converted after shell expansion, so
 /// deferring them here is sound; a problem on any non-pending key rejects the
-/// arm. The same allowance [`super::coerce::coerce_frontmatter_with_pending`]
+/// arm. The same allowance [`simplified_schema::coerce::coerce_frontmatter_with_pending`]
 /// applies.
 fn arm_accepts(
     validator: &Validator,

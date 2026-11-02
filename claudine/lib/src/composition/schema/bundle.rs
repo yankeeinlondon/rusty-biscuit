@@ -7,8 +7,10 @@
 //! its controls without a checkout. A disk file of the same name in any root
 //! always wins; see `claudine/docs/topics/schemas.md`.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use darkmatter::markdown::schemas::triggers::TriggerSource;
-use darkmatter::markdown::schemas::{EffectiveSchema, EmbeddedSchemaBundle, SchemaOriginKind};
+use darkmatter::markdown::schemas::{EffectiveSchema, EmbeddedSchemaBundle};
+use simplified_schema::SchemaOriginKind;
 
 /// The bundle's name in origins, traces, and errors (`embedded:claudine/…`).
 pub const CLAUDINE_SCHEMA_BUNDLE_NAME: &str = "claudine";

@@ -27,7 +27,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::time::Duration;
 
-use darkmatter::markdown::schemas::{CompileCache, ValidationStage, ValidationTimings};
+use simplified_schema::{CompileCache, ValidationStage, ValidationTimings};
 
 /// One document's recorded schema validation.
 #[derive(Debug, Clone, Default)]

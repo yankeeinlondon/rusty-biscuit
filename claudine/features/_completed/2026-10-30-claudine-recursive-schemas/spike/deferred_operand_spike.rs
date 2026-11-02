@@ -24,14 +24,15 @@ use std::rc::Rc;
 use serde_json::{Value, json};
 
 use crate::markdown::Markdown;
-use crate::markdown::coercion::{BindOptions, Bound, PathSegment, Shape, bind_with, render_path};
+use simplified_schema::coercion::{BindOptions, Bound, PathSegment, Shape, bind_with, render_path};
 use crate::markdown::compose::expression::call_binding::{
     ArgumentProblem, CallBindingError, CompiledSignature, FunctionRegistration, SignatureProblem,
 };
 use crate::markdown::compose::expression::catalog::{expression_function_catalog, function_descriptors};
 use crate::markdown::compose::expression::functions::inspect_registration;
 use crate::markdown::compose::expression::{ExpressionFinder, parse};
-use crate::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, PositionMap, ValidationOptions};
+use crate::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationOptions};
+use simplified_schema::PositionMap;
 
 // ── Template classification through the existing scanner + parser ────────
 
@@ -175,7 +176,7 @@ fn bind_signature_deferred(signature: &CompiledSignature, args: &[Value]) -> Res
     let mut errors = Vec::new();
     for (index, value) in args.iter().enumerate() {
         let parameter = signature.parameter_for(index).expect("arity admits every argument");
-        if parameter.excluded_sources().contains(&crate::markdown::coercion::ValueKind::of(value)) {
+        if parameter.excluded_sources().contains(&simplified_schema::coercion::ValueKind::of(value)) {
             errors.push(format!("arg[{index}] {} SourceExcluded", parameter.name()));
         } else if value.is_null() && !parameter.admits_null() {
             errors.push(format!("arg[{index}] {} NullNotAdmitted", parameter.name()));

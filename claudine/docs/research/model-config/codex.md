@@ -11,26 +11,31 @@ model_config_paths:
   - scope: user
     path: ~/.codex/config.toml
     format: toml
-    notes: Global user defaults. Shared by the CLI and IDE extension. Observed on this host with model = "gpt-5.5", model_reasoning_effort = "medium", personality = "pragmatic", and per-project trust tables.
+    notes:
+      - Global user defaults. Shared by the CLI and IDE extension. Observed on this host with model = "gpt-5.5", model_reasoning_effort = "medium", personality = "pragmatic", and per-project trust tables.
   - scope: repo
     path: .codex/config.toml
     format: toml
-    notes: Project-scoped overrides. Loaded only when the project is trusted. Cannot override provider, auth, telemetry, profile, notification, or host-owned app request metadata keys.
+    notes:
+      - Project-scoped overrides. Loaded only when the project is trusted. Cannot override provider, auth, telemetry, profile, notification, or host-owned app request metadata keys.
   - scope: env
     path: $CODEX_HOME/profile-name.config.toml
     format: toml
-    notes: Profile files selected with --profile profile-name. Overlay between user config and project/CLI overrides. Can also set model_catalog_json per profile.
+    notes:
+      - Profile files selected with --profile profile-name. Overlay between user config and project/CLI overrides. Can also set model_catalog_json per profile.
   - scope: env
     path: /etc/codex/config.toml
     format: toml
-    notes: System-wide defaults on Unix. Lowest precedence after built-in defaults.
+    notes:
+      - System-wide defaults on Unix. Lowest precedence after built-in defaults.
 
 api_standards:
   - standard: openai_compatible
     base_url_site: openai_base_url (built-in) or [model_providers.<id>.base_url]
     auth_site: OPENAI_API_KEY (built-in) or [model_providers.<id>.env_key]
     adapter: none
-    notes: Codex speaks the OpenAI Responses API only. wire_api = "chat" was removed; wire_api = "responses" is the only supported value. Custom providers and all local runners must expose an OpenAI-compatible /v1/responses endpoint.
+    notes:
+      - Codex speaks the OpenAI Responses API only. wire_api = "chat" was removed; wire_api = "responses" is the only supported value. Custom providers and all local runners must expose an OpenAI-compatible /v1/responses endpoint.
 
 metadata_overrides:
   - slug
@@ -89,7 +94,8 @@ local_runners:
 
       # Or via Ollama's native hook (v0.15+)
       ollama launch codex
-    notes: Built-in ollama provider uses http://localhost:11434/v1 by default. Port is overridable via the experimental CODEX_OSS_PORT or CODEX_OSS_BASE_URL env vars. Model tags (e.g., :1.7b) are passed through unchanged.
+    notes:
+      - Built-in ollama provider uses http://localhost:11434/v1 by default. Port is overridable via the experimental CODEX_OSS_PORT or CODEX_OSS_BASE_URL env vars. Model tags (e.g., :1.7b) are passed through unchanged.
   - runner: lmstudio
     integration: first_class
     standard: openai_compatible
@@ -101,7 +107,8 @@ local_runners:
 
       # Or interactively
       codex --oss --local-provider lmstudio -m openai/gpt-oss-20b
-    notes: Built-in lmstudio provider uses http://localhost:1234/v1 by default. The lms CLI must be installed and LM Studio must have been run at least once.
+    notes:
+      - Built-in lmstudio provider uses http://localhost:1234/v1 by default. The lms CLI must be installed and LM Studio must have been run at least once.
   - runner: omlx
     integration: base_url_override
     standard: openai_compatible
@@ -114,7 +121,8 @@ local_runners:
       name = "oMLX"
       base_url = "http://localhost:8000/v1"
       # oMLX auth is optional; set env_key if you configured an API key.
-    notes: No native Codex provider. oMLX exposes an OpenAI-compatible endpoint at /v1/* on port 8000. oMLX also ships omlx launch codex, which sets OPENAI_BASE_URL/OPENAI_API_KEY and execs Codex.
+    notes:
+      - No native Codex provider. oMLX exposes an OpenAI-compatible endpoint at /v1/* on port 8000. oMLX also ships omlx launch codex, which sets OPENAI_BASE_URL/OPENAI_API_KEY and execs Codex.
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
@@ -126,7 +134,8 @@ local_runners:
       [model_providers.local_llamacpp]
       name = "llama.cpp"
       base_url = "http://localhost:8080/v1"
-    notes: llama-server exposes an OpenAI-compatible endpoint at /v1/* on port 8080 (build b7187+). The request model field is ignored in single-model mode; the server uses whatever model it was started with.
+    notes:
+      - llama-server exposes an OpenAI-compatible endpoint at /v1/* on port 8080 (build b7187+). The request model field is ignored in single-model mode; the server uses whatever model it was started with.
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
@@ -138,11 +147,13 @@ local_runners:
       [model_providers.local_vllm]
       name = "vLLM"
       base_url = "http://localhost:8000/v1"
-    notes: vLLM exposes an OpenAI-compatible endpoint at /v1/* on port 8000. Each vLLM process hosts exactly one model; use --served-model-name aliases if needed.
+    notes:
+      - vLLM exposes an OpenAI-compatible endpoint at /v1/* on port 8000. Each vLLM process hosts exactly one model; use --served-model-name aliases if needed.
   - runner: other
     integration: base_url_override
     standard: openai_compatible
-    notes: Any local runner that exposes an OpenAI Responses API-compatible /v1/responses endpoint can be wired in as a custom provider. Runners that speak only the Anthropic Messages API require a translating gateway.
+    notes:
+      - Any local runner that exposes an OpenAI Responses API-compatible /v1/responses endpoint can be wired in as a custom provider. Runners that speak only the Anthropic Messages API require a translating gateway.
 
 cloud_bridge:
   supported: true

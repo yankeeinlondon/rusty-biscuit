@@ -1088,6 +1088,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "toml")]
     fn test_max_depth_exceeded_toml() {
         // Create deeply nested YAML
         let mut nested = "value: test".to_string();

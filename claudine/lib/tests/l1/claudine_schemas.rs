@@ -24,8 +24,9 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::expression_function_descriptors;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
-use darkmatter::markdown::schemas::validate::build_position_map;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, SchemaError, ValidationReport};
+use simplified_schema::validate::build_position_map;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, ValidationReport};
+use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 
 /// One bundle file: its name in `schemas/` and its text.
@@ -253,6 +254,22 @@ pub(crate) fn problems(report: &ValidationReport) -> Vec<(String, String)> {
 /// inline document schema, so the result is exactly what a reference to it
 /// lowers to.
 fn resolved_exports(repo: &SchemaRepo, file: &str, exports: &[&str]) -> BTreeMap<String, Value> {
+    let (fragments, defs) = export_fragments(repo, file, exports);
+    fragments
+        .into_iter()
+        .map(|(export, fragment)| {
+            let mut fragment = dereferenced(&fragment, &defs, &mut Vec::new());
+            strip_optional_null(&mut fragment);
+            (export, fragment)
+        })
+        .collect()
+}
+
+/// [`resolved_exports`] as the resolver stored it: each export's fragment with
+/// its `$ref`s intact, and the `$defs` they name. Dereferencing unrolls the
+/// recursive lifecycle families, which costs seconds, so a test that only
+/// asks whether exports resolve reads these instead.
+fn export_fragments(repo: &SchemaRepo, file: &str, exports: &[&str]) -> (BTreeMap<String, Value>, Value) {
     let mut frontmatter = String::from("---\n$schema:\n");
     for export in exports {
         frontmatter.push_str(&format!("    t_{export}: \"{export}@../schemas/{file}\"\n"));
@@ -266,16 +283,38 @@ fn resolved_exports(repo: &SchemaRepo, file: &str, exports: &[&str]) -> BTreeMap
         .effective_for(&markdown)
         .unwrap_or_else(|error| panic!("the exports of {file} resolve: {error}"))
         .expect("an inline schema is effective");
-    exports
+    let fragments = exports
         .iter()
         .map(|export| {
             let fragment = &effective.json_schema["properties"][format!("t_{export}")];
             assert!(!fragment.is_null(), "{file} exports `{export}`");
-            let mut fragment = dereferenced(fragment, &effective.json_schema["$defs"], &mut Vec::new());
-            strip_optional_null(&mut fragment);
-            (export.to_string(), fragment)
+            (export.to_string(), fragment.clone())
         })
-        .collect()
+        .collect();
+    (fragments, effective.json_schema["$defs"].clone())
+}
+
+/// Assert every local `$ref` reachable from `fragment`, through the
+/// definitions it names, resolves to an entry of `defs`. Each definition is
+/// visited once, so recursive families cost their size, not their unrolling.
+fn assert_references_resolve(file: &str, export: &str, fragment: &Value, defs: &Value) {
+    let mut pending = vec![fragment.clone()];
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some(next) = pending.pop() {
+        let mut references = Vec::new();
+        collect_references(&next, &mut references);
+        for reference in references {
+            let key = reference
+                .strip_prefix("#/$defs/")
+                .unwrap_or_else(|| panic!("{file} `{export}` holds a non-local reference {reference}"));
+            let body = defs
+                .get(key)
+                .unwrap_or_else(|| panic!("{file} `{export}` references a missing definition {reference}"));
+            if visited.insert(key.to_string()) {
+                pending.push(body.clone());
+            }
+        }
+    }
 }
 
 /// `fragment` with every acyclic local `$ref` replaced by the definition it
@@ -779,23 +818,27 @@ fn required_long_form_fields_survive_every_reference() {
 #[test]
 fn every_file_loads_and_every_export_resolves() {
     let repo = SchemaRepo::new(&shipped_bundle!());
-    let action = resolved_exports(&repo, "action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"]);
-    assert_eq!(action.len(), 8);
     let lifecycle_exports = [
         "bare-verb", "stack", "item", "conditional", "initialize-stack", "initialize-item", "initialize-conditional",
         "cancelled-stack", "cancelled-item", "cancelled-conditional", "loop-action", "loop-action-entry", "loop",
     ];
-    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
-    assert_eq!(lifecycle.len(), lifecycle_exports.len());
     let linking_exports = [
         "name", "allowed-tools", "tools", "skills", "license", "compatibility", "metadata",
         "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
     ];
-    assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
-    let document_exports = ["prompt", "hash", "last_updated"];
-    assert_eq!(resolved_exports(&repo, "document.yaml", &document_exports).len(), document_exports.len());
-    let sequence_exports = ["steps", "step", "task", "group"];
-    assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
+    for (file, exports) in [
+        ("action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"][..]),
+        ("lifecycle.yaml", &lifecycle_exports[..]),
+        ("linking.yaml", &linking_exports[..]),
+        ("document.yaml", &["prompt", "hash", "last_updated"][..]),
+        ("sequence-types.yaml", &["steps", "step", "task", "group"][..]),
+    ] {
+        let (fragments, defs) = export_fragments(&repo, file, exports);
+        assert_eq!(fragments.len(), exports.len(), "{file}");
+        for (export, fragment) in &fragments {
+            assert_references_resolve(file, export, fragment, &defs);
+        }
+    }
 
     // The three triggers load, and each payload resolves: a document
     // selecting claudine.yaml and inline-compose.yaml gets every payload

@@ -130,13 +130,26 @@ features their tier requires.
 
 ## Literal Tokens
 
-- `base64` encodes the payload of the `{{!data:v1:…}}` literal token in
-  `markdown/literal_token.rs`. The token stores one frontmatter string as data,
-  so a later compose never scans it. The unpadded URL-safe alphabet holds no
-  brace, quote, `$`, `:`, or whitespace, so the token cannot close early, open
-  `$(`, or need YAML escaping. Canonical decoding rejects padding and stray
-  trailing bits, so each string has exactly one token. Already in the tree
-  through several workspace crates.
+- The `{{!data:v1:…}}` literal-token codec lives in `simplified-schema`
+  (`simplified_schema::pending`, which uses `base64` for the payload);
+  Darkmatter re-exports it as `markdown::literal_token`. The token stores one
+  frontmatter string as data, so a later compose never scans it. The unpadded
+  URL-safe alphabet holds no brace, quote, `$`, `:`, or whitespace, so the
+  token cannot close early, open `$(`, or need YAML escaping. Canonical
+  decoding rejects padding and stray trailing bits, so each string has exactly
+  one token. Darkmatter keeps its own `base64` dependency for SVG sanitizing.
+
+## SimplifiedSchema
+
+- `simplified-schema` (path dependency, `terminal` feature) owns the
+  SimplifiedSchema language: parsing, named-type resolution, conversion,
+  JSON Schema lowering, validation, the numeric model, and the passive
+  expression syntax. Darkmatter builds on it for document-, trigger-, and
+  composition-aware schema work, and callers import the language's types
+  from `simplified_schema` directly. Darkmatter re-exports only the span
+  vocabulary (`markdown::span`), the literal-token codec
+  (`markdown::literal_token`), and the expression syntax items its
+  composition API names (`compose::expression::{Expr, Lexer, parse, …}`).
 
 ## Expression List Serialization
 

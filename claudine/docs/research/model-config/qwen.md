@@ -10,68 +10,77 @@ model_config_paths:
   - scope: user
     path: ~/.qwen/settings.json
     format: json
-    notes: >-
-      User-global settings. Holds `model.name`, `model.baseUrl`, `modelProviders`,
-      `security.auth.selectedType`, and an `env` block for API keys. On this host
-      observed as `$version: 3` with `modelProviders.openai` stored as a legacy
-      array of model objects; current docs describe a newer object shape
-      `{ "protocol": "openai", "models": [...] }`.
+    notes:
+      - >-
+        User-global settings. Holds `model.name`, `model.baseUrl`, `modelProviders`,
+        `security.auth.selectedType`, and an `env` block for API keys. On this host
+        observed as `$version: 3` with `modelProviders.openai` stored as a legacy
+        array of model objects; current docs describe a newer object shape
+        `{ "protocol": "openai", "models": [...] }`.
   - scope: repo
     path: .qwen/settings.json
     format: json
-    notes: >-
-      Project-specific settings. The entire `modelProviders` object from project
-      settings replaces the corresponding section in user settings, rather than
-      merging.
+    notes:
+      - >-
+        Project-specific settings. The entire `modelProviders` object from project
+        settings replaces the corresponding section in user settings, rather than
+        merging.
   - scope: env
     path: .qwen/.env / .env / ~/.qwen/.env / ~/.env
     format: other
-    notes: >-
-      Dotenv files loaded into the Qwen Code process. Search order is `.qwen/.env`
-      (walked upward from the current directory), `.env`, `~/.qwen/.env`, then
-      `~/.env`. Only the first file found is loaded, and only variables not already
-      present in the environment are set.
+    notes:
+      - >-
+        Dotenv files loaded into the Qwen Code process. Search order is `.qwen/.env`
+        (walked upward from the current directory), `.env`, `~/.qwen/.env`, then
+        `~/.env`. Only the first file found is loaded, and only variables not already
+        present in the environment are set.
   - scope: env
     path: /etc/qwen-code/system-defaults.json (Linux), C:\ProgramData\qwen-code\system-defaults.json (Windows), /Library/Application Support/QwenCode/system-defaults.json (macOS)
     format: json
-    notes: >-
-      System-wide defaults. Lowest-precedence settings file; path overridable via
-      `QWEN_CODE_SYSTEM_DEFAULTS_PATH`.
+    notes:
+      - >-
+        System-wide defaults. Lowest-precedence settings file; path overridable via
+        `QWEN_CODE_SYSTEM_DEFAULTS_PATH`.
   - scope: env
     path: /etc/qwen-code/settings.json (Linux), C:\ProgramData\qwen-code\settings.json (Windows), /Library/Application Support/QwenCode/settings.json (macOS)
     format: json
-    notes: >-
-      System-wide override settings. Highest-precedence settings file; path
-      overridable via `QWEN_CODE_SYSTEM_SETTINGS_PATH`.
+    notes:
+      - >-
+        System-wide override settings. Highest-precedence settings file; path
+        overridable via `QWEN_CODE_SYSTEM_SETTINGS_PATH`.
 
 api_standards:
   - standard: openai_compatible
     base_url_site: per-model `baseUrl` in `modelProviders.openai`; env var `OPENAI_BASE_URL`
     auth_site: per-model `envKey` (defaults to `OPENAI_API_KEY`)
-    notes: >-
-      Uses the official `openai` Node.js SDK. Supports OpenAI, Azure OpenAI,
-      OpenRouter, Requesty, ModelScope, DeepSeek, Alibaba Cloud/DashScope, Coding
-      Plan, and any local OpenAI-compatible server. `extra_body` is supported only
-      for OpenAI-compatible providers.
+    notes:
+      - >-
+        Uses the official `openai` Node.js SDK. Supports OpenAI, Azure OpenAI,
+        OpenRouter, Requesty, ModelScope, DeepSeek, Alibaba Cloud/DashScope, Coding
+        Plan, and any local OpenAI-compatible server. `extra_body` is supported only
+        for OpenAI-compatible providers.
   - standard: anthropic_compatible
     base_url_site: per-model `baseUrl` in `modelProviders.anthropic`; env var `ANTHROPIC_BASE_URL`
     auth_site: per-model `envKey` (defaults to `ANTHROPIC_API_KEY`)
-    notes: >-
-      Uses the official `@anthropic-ai/sdk`. Supports Anthropic Claude and any
-      Anthropic-compatible endpoint.
+    notes:
+      - >-
+        Uses the official `@anthropic-ai/sdk`. Supports Anthropic Claude and any
+        Anthropic-compatible endpoint.
   - standard: bespoke
     base_url_site: per-model `baseUrl` in `modelProviders.gemini`; default Gemini endpoint if omitted
     auth_site: per-model `envKey` (defaults to `GEMINI_API_KEY`)
-    notes: >-
-      Google Gemini protocol via the `@google/genai` SDK. Model selection env var
-      is `GEMINI_MODEL`.
+    notes:
+      - >-
+        Google Gemini protocol via the `@google/genai` SDK. Model selection env var
+        is `GEMINI_MODEL`.
   - standard: bespoke
     base_url_site: per-model `baseUrl` in `modelProviders.vertex-ai`; default Vertex endpoint if omitted
     auth_site: per-model `envKey` (defaults to `GOOGLE_API_KEY`)
-    notes: >-
-      Google Vertex AI. Selecting this auth type sets `GOOGLE_GENAI_USE_VERTEXAI=true`
-      internally and routes through the Gemini protocol in Vertex mode. Model
-      selection env var is `GOOGLE_MODEL`.
+    notes:
+      - >-
+        Google Vertex AI. Selecting this auth type sets `GOOGLE_GENAI_USE_VERTEXAI=true`
+        internally and routes through the Gemini protocol in Vertex mode. Model
+        selection env var is `GOOGLE_MODEL`.
 
 metadata_overrides:
   - id
@@ -103,54 +112,60 @@ local_runners:
     example: >-
       `{ "id": "gemma3:27b", "name": "Gemma 3 27B (Ollama)", "envKey": "OLLAMA_API_KEY",
       "baseUrl": "http://localhost:11434/v1" }` under `modelProviders.openai.models`.
-    notes: >-
-      Ollama serves an OpenAI-compatible API at `/v1`. Use any placeholder for the
-      API key if Ollama requires none.
+    notes:
+      - >-
+        Ollama serves an OpenAI-compatible API at `/v1`. Use any placeholder for the
+        API key if Ollama requires none.
   - runner: omlx
     integration: base_url_override
     standard: openai_compatible
     example: >-
       `{ "id": "Qwen3.6-35B-A3B-oQ6", "name": "Qwen3.6 35B (oMLX)", "envKey": "OMLX_API_KEY",
       "baseUrl": "http://localhost:8000/v1" }` under `modelProviders.openai.models`.
-    notes: >-
-      oMLX serves an OpenAI-compatible API at `/v1`. Auth is optional unless
-      configured; use a placeholder if none is required.
+    notes:
+      - >-
+        oMLX serves an OpenAI-compatible API at `/v1`. Auth is optional unless
+        configured; use a placeholder if none is required.
   - runner: lmstudio
     integration: base_url_override
     standard: openai_compatible
     example: >-
       `{ "id": "local-model", "name": "Local Model (LM Studio)", "envKey": "LMSTUDIO_API_KEY",
       "baseUrl": "http://localhost:1234/v1" }` under `modelProviders.openai.models`.
-    notes: >-
-      LM Studio's local server is OpenAI-compatible. Auth is optional; set
-      `LMSTUDIO_API_KEY` to the configured token when required.
+    notes:
+      - >-
+        LM Studio's local server is OpenAI-compatible. Auth is optional; set
+        `LMSTUDIO_API_KEY` to the configured token when required.
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
     example: >-
       `{ "id": "my-alias", "name": "Local Model (llama.cpp)", "envKey": "LLAMA_API_KEY",
       "baseUrl": "http://localhost:8080/v1" }` under `modelProviders.openai.models`.
-    notes: >-
-      llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint.
-      Model ID is the `--alias` value or the GGUF filename.
+    notes:
+      - >-
+        llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint.
+        Model ID is the `--alias` value or the GGUF filename.
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
     example: >-
       `{ "id": "llama-3.1-8b", "name": "Llama 3.1 8B (vLLM)", "envKey": "VLLM_API_KEY",
       "baseUrl": "http://localhost:8000/v1" }` under `modelProviders.openai.models`.
-    notes: >-
-      vLLM exposes an OpenAI-compatible server by default. Each vLLM process hosts
-      one model.
+    notes:
+      - >-
+        vLLM exposes an OpenAI-compatible server by default. Each vLLM process hosts
+        one model.
   - runner: other
     integration: base_url_override
     standard: openai_compatible
     example: >-
       `{ "id": "<runner-model-id>", "name": "Local Model", "envKey": "LOCAL_API_KEY",
       "baseUrl": "http://localhost:<port>/v1" }` under `modelProviders.openai.models`.
-    notes: >-
-      Any self-hosted server with an OpenAI-compatible API can be added under
-      `modelProviders.openai`.
+    notes:
+      - >-
+        Any self-hosted server with an OpenAI-compatible API can be added under
+        `modelProviders.openai`.
 
 cloud_bridge:
   supported: true

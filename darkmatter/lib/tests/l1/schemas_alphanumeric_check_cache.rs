@@ -12,8 +12,9 @@
 use std::path::Path;
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::SchemaError;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
+use simplified_schema::SchemaError;
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
 use serde_yaml_ng::Value as YamlValue;
 
 /// Writes `types.yaml` declaring `types` and resolves a schema importing the
@@ -76,6 +77,8 @@ fn rejected_in_types_file(dir: &Path, keyword: &str, value: &str) -> String {
     let lint = SchemaError::SchemaDocument {
         path: dir.join("types.yaml"),
         message: format!("could not lint SimplifiedSchema payload: {}", rejected("slug", keyword, value)),
+        source: Some(Box::new(rejected("slug", keyword, value))),
+        span: None,
     };
     format!("{lint:?}")
 }

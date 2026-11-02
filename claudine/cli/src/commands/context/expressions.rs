@@ -6,14 +6,14 @@ use biscuit_terminal::components::table::table::{Table, TableCellContent};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::catalog::Described;
 use darkmatter::markdown::compose::expression::semantics::{
-    arithmetic_operator_descriptors, comparison_operator_descriptors, mode_descriptors,
+    arithmetic_operator_descriptors, comparison_operator_descriptors,
     null_propagation_descriptors, operator_descriptors, truthiness_descriptors,
     unary_operator_descriptors, variable_access_descriptors,
 };
 
 use crate::commands::context_render::{
     configure_shared_table, example_column_floor, function_first_column_width, inline_code_text,
-    render_table_resilient, render_unordered_list, report_column, TableLayout,
+    render_table_resilient, report_column, TableLayout,
     EXAMPLE_COLUMN_MIN_WIDTH,
 };
 use crate::log;
@@ -228,56 +228,6 @@ pub(super) fn render_expressions_variable_access(term: &Terminal) {
 
     log::data(&rendered);
     log::data("");
-}
-
-pub(super) fn render_expressions_modes(term: &Terminal) {
-    let heading = Prose::new("<blue><b>Interpolation vs. Condition Mode</b></blue>");
-    log::data(&heading.render(term));
-    log::data("");
-
-    let intro = Prose::new(
-        "The parser supports two modes with different operator behavior:",
-    );
-    log::data(&intro.render(term));
-    log::data("");
-
-    let items = mode_descriptors();
-    let first_width = function_first_column_width("Surface", items.iter().map(|d| d.surface));
-
-    let rows = items
-        .iter()
-        .map(|desc| {
-            (
-                inline_code_text(desc.surface, term).into(),
-                desc.pipe_meaning.into(),
-                format_example(desc.example(), term).into(),
-            )
-        })
-        .collect();
-    let rendered = render_expression_table(
-        term,
-        "Surface",
-        first_width,
-        inline_code_text("`||` meaning", term),
-        rows,
-    );
-
-    log::data(&rendered);
-
-    let consequence_items = [
-        "`when=\"a || b\"` is logical OR and evaluates to a boolean",
-        "`{{ a || \"default\" }}` is fallback sugar and expands to the first truthy value",
-        "`{{ a && b }}` is logical AND — `&&` is identical in both modes",
-        "`when=\"a && b\"` is logical AND",
-        "the function-call forms `and(...)` and `or(...)` are valid in both modes",
-    ];
-    log::data(&render_unordered_list(
-        &consequence_items
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-        term,
-    ));
 }
 
 pub(super) fn render_expressions_null_propagation(term: &Terminal) {

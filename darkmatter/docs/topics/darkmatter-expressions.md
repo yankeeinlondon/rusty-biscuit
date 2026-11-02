@@ -60,7 +60,7 @@ The parser, AST, and evaluator live in the [`expression`](../../lib/src/markdown
 - **`expression::Lexer`** — tokenizes expression strings
 - **`expression::Parser`** — builds an `Expr` from tokens
 - **`expression::evaluate`** — evaluates an `Expr` against any [`EvaluationLookup`](#evaluationlookup-trait)
-- **`expression::parse_condition`** — parses a string in condition mode (`||` is logical OR, `&&` is logical AND)
+- **`expression::parse`** — parses a string into an `Expr`; the same grammar serves every surface
 
 ## How Parsing Works
 
@@ -93,9 +93,9 @@ The principles worth carrying around:
   comparison, `+ -`, `* / %`, unary, then primary and postfix access. Binary
   operators are left-associative; the ternary is right-associative. Comparisons
   do **not** chain — `a < b < c` is a parse error, not `(a < b) < c`.
-- **Mode changes exactly one thing.** `||` is fallback when interpolating and
-  logical OR in a condition. `&&` is logical AND in both, and both are lowered
-  into `and(…)` / `or(…)` calls in the AST.
+- **One grammar, one meaning.** Every surface parses with the same grammar.
+  Infix `||` builds a `LogicalOr` node that returns the deciding operand;
+  infix `&&` is lowered into an `and(…)` call, which returns a boolean.
 - **Failure is fatal.** An expression that cannot be parsed or evaluated aborts
   composition with an error naming the source line, on every surface.
 - **An absent property is `null`, not a failure.** A bare name that is not a
@@ -216,7 +216,7 @@ From highest to lowest:
 4. **Additive** — `+`, `-`
 5. **Comparison** — `==`, `!=`, `>`, `>=`, `<`, `<=`
 6. **Logical AND** — `&&`
-7. **Logical OR / Fallback** — `||` (mode-dependent)
+7. **Logical OR** — `||`
 8. **Ternary** — `? :`
 
 ## Operator Associativity
@@ -245,8 +245,8 @@ The following values are **falsy**:
 | `{}` (empty object) | yes |
 | any other value | no |
 
-This makes `||` a true fallback operator: `a || b` evaluates to `a` when `a`
-is truthy, and `b` otherwise.
+This is what makes the `x || default` idiom work: `a || b` evaluates to `a`
+when `a` is truthy, and `b` otherwise (see [Logical OR](#logical-or)).
 
 Note that the string `"false"` is still truthy — it is a non-empty string.
 Equality is strict, so a boolean flag compares with `flag == true`; a
@@ -402,7 +402,7 @@ file that exists is a valid file reference, but a valid file reference may name
 a file that is missing, so a false result removes nothing. The fact is declared
 by the function's `narrows(...)` clause in its signature, which is the
 authority for the grammar and its rules; see
-[Function Signatures](./schemas/definition.md#narrowing-facts). A host's facts
+[Function Signatures](../../../simplified-schema/docs/topics/language/unions.md#narrowing-facts). A host's facts
 reach the editor through the function catalog and a generated facts artifact;
 see [Host Expression Functions](./host-functions.md).
 
@@ -821,24 +821,40 @@ identifies their owner and projected type on hover, and highlights both arrows
 and every pattern binding. Iterable arguments retain the enclosing scope; locals
 disappear after callback exit. These editor operations remain passive.
 
-## Interpolation vs. Condition Mode
+## Logical OR
 
-The parser supports two modes. Only `||` differs between them; `&&` is logical
-AND in both:
+`||` is logical OR on every surface — `{{ … }}`, `when="…"`, a loop's
+`while`/`until`, a Claudine lifecycle `when:`. It returns **the operand that
+decided the result**: the first truthy operand, otherwise the last operand,
+evaluating left to right and stopping at the first truthy one. As a truth value
+it agrees with boolean OR on every input; returning the operand is what lets
+`x || default` supply a default.
 
-| Surface | `||` meaning |
-| --- | --- |
-| `{{ ... }}` (interpolation) | fallback, first truthy value wins |
-| `when="..."` (condition) | logical OR, returns a boolean |
+| Expression | Value on every surface | As a condition |
+| --- | --- | --- |
+| `"foo" \|\| "bar"` | `"foo"` | true |
+| `"" \|\| "bar"` | `"bar"` | true |
+| `false \|\| 0` | `0` | false |
 
-Consequences:
+Because the value is the same everywhere, a defaulted collection works inside a
+condition exactly as it does inside `{{ … }}`:
 
-- `when="a || b"` is logical OR and evaluates to a boolean
-- `{{ a || "default" }}` is fallback sugar and expands to the first truthy value
-- `{{ a && b }}` is logical AND (lowered to `and(a, b)`)
-- `when="a && b"` is logical AND
+```md
+::block when="length(items || []) > 0"
+There are open items.
+::end-block
+```
 
-The function-call forms `and(...)` and `or(...)` are valid in both modes.
+With `items: [q]` the block renders; with `items` absent, `items || []` is `[]`,
+its length is `0`, and the block is dropped. The left operand of `||` is an
+absence check, so a missing `items` here raises no undeclared-property advisory;
+the right operand is an ordinary read.
+
+`&&` and the function forms `and(…)` and `or(…)` return booleans on every
+surface. `or(…)` is how to ask for a boolean OR explicitly. `&&` is not
+value-returning because that would change interpolated output — `{{ x && 'yes' }}`
+renders `true`, and an operand-returning `&&` would render `yes` — while giving
+conditions nothing they lack: a condition only asks whether `a && b` is truthy.
 
 ## Comparison Operators
 
@@ -1001,7 +1017,7 @@ repository root to refresh it after changing the catalog.
 The catalog's other `types:` entries are named helper types that signatures
 use: `agentic-cli`, `ip-address`, and `recent-commits`. A schema imports one as
 `Name@darkmatter:functions` (see
-[Reserved Darkmatter References](schemas/definition.md#reserved-darkmatter-references-namedarkmatterstem)).
+[Reserved Darkmatter References](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem)).
 `ctx.recent_commits` is declared that way, so it and the return of
 `recent_commits(count)` are the one `recent-commits` type, a `string[]`:
 

@@ -19,7 +19,7 @@
 //! regex; if both fail it is dropped with a warning so the binding fires
 //! unconditionally rather than silently disappearing.
 
-use darkmatter::markdown::compose::expression::{Expr, ParseMode, Parser, evaluate, is_truthy};
+use darkmatter::markdown::compose::expression::{Expr, Parser, evaluate, is_truthy};
 use regex::Regex;
 use tracing::warn;
 
@@ -64,7 +64,7 @@ impl RuntimeMatcher {
             return None;
         }
 
-        if let Ok(mut parser) = Parser::with_mode(trimmed, ParseMode::Condition)
+        if let Ok(mut parser) = Parser::new(trimmed)
             && let Ok(expr) = parser.parse()
             && expression_uses_known_features(&expr)
         {
@@ -134,7 +134,7 @@ fn expression_uses_known_features(expr: &Expr) -> bool {
         | Expr::Binary { .. }
         | Expr::Index { .. }
         | Expr::MemberAccess { .. }
-        | Expr::Fallback { .. }
+        | Expr::LogicalOr { .. }
         | Expr::Ternary { .. }
         | Expr::Comparison { .. }
         | Expr::FunctionCall { .. }

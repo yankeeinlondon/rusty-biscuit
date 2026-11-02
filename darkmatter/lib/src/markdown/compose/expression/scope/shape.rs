@@ -6,12 +6,12 @@ use super::GuardOrigin;
 use super::projection::DeclaredType;
 use crate::markdown::compose::expression::equality::values_equal;
 use crate::markdown::schemas::completion::alternative_accepts;
-use crate::markdown::schemas::simplified::narrowing::{
+use simplified_schema::simplified::narrowing::{
     ALL_FAMILIES, families, has_ordinary_constraints, is_null_type, type_identity,
 };
-pub(super) use crate::markdown::schemas::simplified::narrowing::{Family, exact_family};
-use crate::markdown::schemas::simplified::query::reachable_definitions;
-use crate::markdown::schemas::{
+pub(super) use simplified_schema::simplified::narrowing::{Family, exact_family};
+use simplified_schema::simplified::query::reachable_definitions;
+use simplified_schema::{
     Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, flattened_alternatives,
 };
 
@@ -240,7 +240,7 @@ impl Shape {
         if orderable {
             return SortKeySupport::Undecided;
         }
-        let mut parts: Vec<String> = arms.iter().map(crate::markdown::schemas::simplified::serialize_property_atom).collect();
+        let mut parts: Vec<String> = arms.iter().map(simplified_schema::simplified::serialize_property_atom).collect();
         if *nullable {
             parts.push("null".to_string());
         }
@@ -341,7 +341,7 @@ impl Shape {
             .into_iter()
             .map(|atom| {
                 let atom = type_identity(atom);
-                (crate::markdown::schemas::simplified::serialize_property_atom(&atom), atom)
+                (simplified_schema::simplified::serialize_property_atom(&atom), atom)
             })
             .collect();
         keyed.sort_by(|left, right| left.0.cmp(&right.0));
@@ -453,7 +453,7 @@ impl Shape {
             Self::Arms { arms, .. } => {
                 let reach = families(&target);
                 let kept = arms.iter().filter_map(|arm| {
-                    if crate::markdown::schemas::is_subtype_with_definitions(arm, &target, definitions)
+                    if simplified_schema::is_subtype_with_definitions(arm, &target, definitions)
                     {
                         Some(arm.clone())
                     } else if arm_families(arm, definitions).iter().any(|family| reach.contains(family)) {
@@ -597,17 +597,15 @@ fn with_members(atom: &PropertyAtom, members: Vec<String>) -> PropertyAtom {
     atom
 }
 
-impl Family {
-    /// The family of a non-null value.
-    fn of(value: &Value) -> Option<Self> {
-        match value {
-            Value::String(_) => Some(Self::String),
-            Value::Number(_) => Some(Self::Number),
-            Value::Bool(_) => Some(Self::Boolean),
-            Value::Array(_) => Some(Self::Array),
-            Value::Object(_) => Some(Self::Object),
-            Value::Null => None,
-        }
+/// The family of a non-null value.
+fn family_of(value: &Value) -> Option<Family> {
+    match value {
+        Value::String(_) => Some(Family::String),
+        Value::Number(_) => Some(Family::Number),
+        Value::Bool(_) => Some(Family::Boolean),
+        Value::Array(_) => Some(Family::Array),
+        Value::Object(_) => Some(Family::Object),
+        Value::Null => None,
     }
 }
 
@@ -618,7 +616,7 @@ fn pinned_atom(value: &Value) -> PropertyAtom {
     match value {
         Value::String(_) | Value::Bool(_) => literal_atom(value.clone()),
         Value::Number(_) => pinned_number(value).unwrap_or_else(|| PropertyAtom::bare(SimplifiedType::Number)),
-        _ => Family::of(value).unwrap_or(Family::Object).bare_atom(),
+        _ => family_of(value).unwrap_or(Family::Object).bare_atom(),
     }
 }
 
@@ -656,7 +654,7 @@ fn arm_equal(arm: &PropertyAtom, value: &Value) -> Option<PropertyAtom> {
     if let Some(literal) = arm.literal_value() {
         return values_equal(literal, value).then(|| arm.clone());
     }
-    if !families(arm).contains(&Family::of(value)?) {
+    if !families(arm).contains(&family_of(value)?) {
         return None;
     }
     let plain = !has_ordinary_constraints(arm);

@@ -14,9 +14,11 @@ pub(crate) struct GlobPattern {
     pub negated: bool,
     /// The reference grammar's reading of the pattern after any `!`: its
     /// prefix kind and its payload template.
+    #[cfg_attr(not(feature = "file-reference"), allow(dead_code))]
     pub parsed: ParsedReference,
     /// Whether the glob text after the prefix names no directory (`*.md`,
     /// `^*.md`), so the file-name view applies when it is enabled.
+    #[cfg_attr(not(feature = "file-reference"), allow(dead_code))]
     pub name_only: bool,
 }
 

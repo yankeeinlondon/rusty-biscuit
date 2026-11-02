@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
-    Expr, ExpressionFinder, parse, parse_condition, static_access_reads,
+    Expr, ExpressionFinder, parse, static_access_reads,
 };
 use serde_json::Value;
 
@@ -135,7 +135,7 @@ pub fn reject_removed_sequence_reads(
     strings(source, document.frontmatter, "frontmatter".into(), &text_read)?;
     for condition in ["while", "until"] {
         if let Some(text) = document.frontmatter.get("loop").and_then(|v| v.get(condition)).and_then(Value::as_str) {
-            reject(source, format!("loop.{condition}"), parse_condition(text).ok().and_then(|expr| read(&expr, &declared)))?;
+            reject(source, format!("loop.{condition}"), parse(text).ok().and_then(|expr| read(&expr, &declared)))?;
         }
     }
     if let Some(lifecycle) = lifecycle {
@@ -144,7 +144,7 @@ pub fn reject_removed_sequence_reads(
     if document.body.contains("::") {
         let context = biscuit_terminal::errors::SourceContext::new(
             source.to_path_buf(), source.to_path_buf(), document.body.to_string());
-        let condition_read = |text: &str| parse_condition(text).ok().and_then(|expr| read(&expr, &declared));
+        let condition_read = |text: &str| parse(text).ok().and_then(|expr| read(&expr, &declared));
         if let Ok(directives) = darkmatter::markdown::compose::transclusion::parse_directives(document.body, context.clone()) {
             for directive in directives {
                 if let Some(condition) = directive.options.when_expr {

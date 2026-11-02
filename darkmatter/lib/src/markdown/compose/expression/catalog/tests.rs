@@ -357,7 +357,7 @@ fn the_embedded_catalog_loads_with_unique_display_keys() {
 #[test]
 fn every_embedded_example_file_is_a_valid_example() {
     for (path, text) in EXAMPLE_FILES {
-        crate::markdown::schemas::example::validate_example_bytes(path, text.as_bytes())
+        simplified_schema::example::validate_example_bytes(path, text.as_bytes())
             .unwrap_or_else(|error| panic!("{path}: {error}"));
     }
 }
@@ -366,7 +366,7 @@ fn every_embedded_example_file_is_a_valid_example() {
 #[test]
 fn agentic_cli_named_type_is_the_generated_table() {
     use super::super::functions::agentic_cli_generated::AGENTIC_CLI_NAMES;
-    use crate::markdown::schemas::simplified::SimplifiedType;
+    use simplified_schema::simplified::SimplifiedType;
 
     let def = expression_function_catalog().named_type("agentic-cli").expect("`agentic-cli` is a named type");
     let PropertyDef::Single(atom) = def else {

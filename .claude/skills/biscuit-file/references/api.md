@@ -113,6 +113,34 @@ let pretty: String = to_json5_pretty(&serde_json_value);
 let compact: String = to_json5_compact(&serde_json_value);
 ```
 
+## Frontmatter Envelope
+
+Feature `yaml`. Locates a Markdown document's leading `---` block and reports
+byte spans into the exact source (CRLF and a leading BOM preserved) without
+parsing the YAML. Source: `biscuit-file/lib/src/frontmatter.rs`.
+
+```rust
+use biscuit_file::frontmatter::{extract_frontmatter_block, FrontmatterEnvelopeError};
+
+let source = "---\ntitle: Hello\n---\n\n# Body\n";
+let extraction = extract_frontmatter_block(source)?.expect("has frontmatter");
+assert_eq!(extraction.yaml, "title: Hello\n");
+assert_eq!(extraction.yaml_base_line, 2); // project YAML-relative lines back into the document
+assert_eq!(&source[extraction.body_span.clone()], "\n# Body\n");
+# Ok::<(), FrontmatterEnvelopeError>(())
+```
+
+| Item | Purpose |
+|---|---|
+| `extract_frontmatter_block(&str)` | `Ok(Some(FrontmatterExtraction))`, `Ok(None)` (no opening `---` or no closing fence), or `Err(FenceMismatch)` |
+| `FrontmatterExtraction<'a>` | `yaml`, `yaml_span`, `block_span`, `body_span`, `opening_line`, `closing_line`, `yaml_base_line` |
+| `FrontmatterEnvelopeError::FenceMismatch { found, line }` | A dash-only fence longer than `---` that encloses a YAML mapping |
+| `line_spans(&str)` / `LineSpan { start, content_end, end }` | LF/CRLF/CR-aware line splitting without losing offsets |
+| `detect_near_miss_fence(&[&str])` | The near-miss check `extract_frontmatter_block` applies |
+
+Darkmatter and `simplified-schema` share this reader; do not add a second
+fence scanner.
+
 ## PDF
 Source: `biscuit-file/lib/src/pdf/types.rs`
 
@@ -183,9 +211,9 @@ A short root can simplify while its long descendant cannot.
 ```rust
 // Unfeatured. `dunce::canonicalize`: std's result, minus a reducible `\\?\`.
 let real: std::io::Result<PathBuf> = biscuit_file::canonicalize_simplified(path);
-// Feature `file-reference`. HOME (POSIX) / USERPROFILE (Windows), relative → None.
+// Feature `file-reference-syntax`. HOME (POSIX) / USERPROFILE (Windows), relative → None.
 let home: Option<PathBuf> = biscuit_file::home_dir();
-// Feature `file-reference`. Per-user cache root; None when it cannot be named.
+// Feature `file-reference-syntax`. Per-user cache root; None when it cannot be named.
 let cache: Option<PathBuf> = biscuit_file::user_cache_dir();
 // The same rules over an injected env lookup and home (a request snapshot's).
 let cache: Option<PathBuf> = biscuit_file::user_cache_dir_from(|name| env.get(name).map(Into::into), home.as_deref());
@@ -207,7 +235,7 @@ let cache: Option<PathBuf> = biscuit_file::user_cache_dir_from(|name| env.get(na
   uses it instead of reading the process.
 
 ## Path Identity
-Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference`)
+Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference-syntax`)
 
 ```rust
 use std::path::Path;
@@ -246,7 +274,7 @@ re-parses and rejects `Unrenderable` (non-Unicode), `ChangesComponents` (Unix
 `NoPortableSpelling`.
 
 ## Portable References: `PortablePath`
-Source: `biscuit-file/lib/src/file_reference/portable/{evaluate,strategy,env_anchor,diagnostics}.rs` (feature `file-reference`)
+Source: `biscuit-file/lib/src/file_reference/portable/{evaluate,strategy,env_anchor,diagnostics}.rs` (feature `file-reference`; `PortabilityPreference` and `IntentForms` need only `file-reference-syntax`)
 
 ```rust
 use biscuit_file::{FileReference, PortabilityPreference as P, PortablePath, PortablePathError};

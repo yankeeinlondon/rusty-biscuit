@@ -27,15 +27,19 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::completion::{PathStep, def_at_path, for_path};
-use darkmatter::markdown::schemas::file_match::{file_alternatives, root_union_match_groups};
-use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::validate::build_position_map;
+use simplified_schema::file_match::{file_alternatives, root_union_match_groups};
+use simplified_schema::simplified::query::resolved_alternatives;
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::validate::build_position_map;
 use darkmatter::markdown::schemas::catalog::{DARKMATTER_GLOBALS, GlobalCatalog};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, PropertyAtom, PropertyDef, SchemaArm, SchemaPhase,
-    SimplifiedSchema, TypeExpr, ValidationOptions, ValidationProblemCode, ValidationReport, darkmatter_base_json_schema,
-    darkmatter_base_schema, is_definition_subtype_with_definitions, to_json_schema, to_json_schema_with_definitions,
+    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, ValidationOptions, ValidationReport,
+    darkmatter_base_json_schema, darkmatter_base_schema,
+};
+use simplified_schema::{
+    PropertyAtom, PropertyDef, SchemaArm, SchemaPhase, SchemaRoot, TypeExpr, ValidationProblemCode,
+    is_definition_subtype_with_definitions, to_json_schema, to_json_schema_with_definitions,
 };
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
@@ -458,7 +462,7 @@ fn subtyping_compares_a_shared_type_as_its_inlined_copy() {
         resolve_yaml_schema(&value, dir.path(), &context).expect("fixture resolves")
     };
     let relations = |resolved: &ResolvedSchema, left: &str, right: &str| {
-        let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+        let Some(SchemaRoot::Single(shape)) = &resolved.simplified else {
             panic!("a single shape");
         };
         let (left, right) = (&shape.properties[left], &shape.properties[right]);
@@ -593,7 +597,7 @@ fn a_shared_type_offers_the_file_alternatives_of_its_inlined_value() {
         resolve_yaml_schema(&value, dir.path(), &context).expect("fixture resolves")
     };
     let offered = |resolved: &ResolvedSchema| {
-        let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+        let Some(SchemaRoot::Single(shape)) = &resolved.simplified else {
             panic!("a single shape");
         };
         let arm = SchemaArm::Inline(shape.clone());

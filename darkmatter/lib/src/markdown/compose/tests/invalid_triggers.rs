@@ -163,7 +163,7 @@ fn a_payload_failure_names_the_payload_but_never_places_it_on_the_trigger() {
 fn an_embedded_trigger_record_has_no_source_even_with_a_position() {
     let finding = crate::markdown::schemas::InvalidTriggerFinding::new(
         crate::markdown::schemas::TriggerSource::Embedded { bundle: "host".into(), name: "broken.yaml".into() },
-        crate::markdown::schemas::errors::SchemaError::TriggerEnvelopeYaml {
+        simplified_schema::errors::SchemaError::TriggerEnvelopeYaml {
             message: "did not find expected ',' or ']'".into(),
             line: Some(3),
             column: Some(1),

@@ -18,7 +18,7 @@ use biscuit_test_harness::manifest_dir;
 const ALLOWED: &[&str] = &[
     // The rejecting code and its diagnostics.
     "darkmatter/lib/src/markdown/schemas/triggers/envelope.rs",
-    "darkmatter/lib/src/markdown/schemas/errors.rs",
+    "simplified-schema/lib/src/errors.rs",
     "darkmatter/cli/src/main.rs",
     // Negative fixtures and the tests that prove the rejection.
     "darkmatter/lib/tests/l1/trigger_envelope_claim.rs",
@@ -116,6 +116,9 @@ fn no_active_file_spells_a_renamed_trigger_form() {
         manifest_dir!().join("../example-docs"),
         manifest_dir!().join("../examples"),
         manifest_dir!().join("../schemas"),
+        manifest_dir!().join("../../simplified-schema/lib/src"),
+        manifest_dir!().join("../../simplified-schema/lib/tests"),
+        manifest_dir!().join("../../simplified-schema/docs"),
         manifest_dir!().join("../../claudine/schemas"),
         manifest_dir!().join("../../claudine/docs/topics"),
         manifest_dir!().join("../../claudine/lib/src"),

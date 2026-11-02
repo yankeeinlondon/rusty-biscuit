@@ -1269,6 +1269,11 @@ whether a package must support the environment.
 
 ## Intentional bypass modes
 
+The default mode, `auto`, already runs no gate for a push that starts no CI
+run (neither `main` nor a branch with an open pull request); `just pr` forces
+`strict` for the push that precedes opening a pull request, because the hook
+cannot see a pull request that does not exist yet.
+
 Prefer a repository-provided **scope-only** mode over `git push --no-verify`
 when the goal is to skip local tests and let CI exercise every supported
 environment. Scope-only resolves and prints the plan of every pushed branch's
@@ -1297,7 +1302,8 @@ receipt already covers the head, so the hook reuses every cell and finishes in
 minutes, and the transfer completes. Confirm with `git ls-remote --heads
 origin <branch>` after every push rather than trusting the exit code.
 
-Mode intent is:
+Mode intent is as follows; the default `auto` resolves to `strict` or
+`scope-only` per push, as described above:
 
 | Mode | Push after local failure | Scope evidence | Complete host outcomes | CI host cells |
 |---|---:|---:|---:|---|

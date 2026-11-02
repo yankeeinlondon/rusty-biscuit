@@ -1,4 +1,4 @@
 kind: schema
-types:
+$schema:
   color: string(suggest(red, green, blue))
   count: number(min(0); suggest(1, many, 2))

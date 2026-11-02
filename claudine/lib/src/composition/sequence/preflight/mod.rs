@@ -2640,7 +2640,7 @@ impl TaskGuard {
         if when.is_empty() {
             return None;
         }
-        let when = darkmatter::markdown::compose::expression::parse_condition(when).ok()?;
+        let when = darkmatter::markdown::compose::expression::parse(when).ok()?;
         Some(Self { when, origin: GuardOrigin::new(property) })
     }
 }

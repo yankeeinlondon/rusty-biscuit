@@ -3,6 +3,52 @@
 Use this reference for SimplifiedSchema parsing, validation, triggers, imports,
 and DMLS schema behavior.
 
+## Where the code lives
+
+The SimplifiedSchema language was extracted into the `simplified-schema` crate
+(`simplified-schema/lib/src/`, imported as `simplified_schema`); Darkmatter
+depends on it and keeps only its policy. For the language itself (grammar,
+named types, conversion, `SimplifiedSchema`/`Prepared` validation, layering,
+features, boundary guards) load the **`simplified-schema`** skill
+([SKILL.md](../simplified-schema/SKILL.md)); its user docs are
+`simplified-schema/docs/topics/` and the language reference
+`simplified-schema/docs/topics/language/`.
+`darkmatter/docs/topics/schemas/definition.md` now covers only Darkmatter
+integration (baseline, `md schema`, compose, library API).
+
+Path shorthand in this file:
+
+- **Darkmatter** (`darkmatter/lib/src/markdown/schemas/`): `schemas/…`,
+  `triggers/…`, `roots.rs`, `catalog.rs`, `embedded.rs`, `rewrite.rs`,
+  `bound_operands.rs`, `schemas/positions.rs` (`ProblemPositions`),
+  `discovery.rs`, `assemble.rs`,
+  `finding.rs`, and `mod.rs` (`DarkmatterSchemas`, `EffectiveSchema`,
+  `ValidationOptions`, `PendingPolicy`, `merged_trigger_schema`,
+  `phase_json_schema`, `validate_timed`).
+- **Library** (`simplified-schema/lib/src/`): `simplified/…` (`convert.rs`,
+  `subtype.rs`, `source.rs`, `cursor.rs`, `serialize.rs`, `yaml_scalar.rs`,
+  `signature.rs`, `narrowing.rs`, `standalone.rs`, `grammar.rs`), `resolve.rs`
+  and `resolve/…`, `scope.rs`, `validate.rs`, `prepared.rs`, `coerce.rs`,
+  `coercion/`, `phase.rs`, `file_match.rs`, `json_shape.rs`, `completion.rs`
+  (the passive helpers; Darkmatter's `schemas/completion.rs` re-exports them
+  and adds `for_list_item`/`for_property_value`/`for_path` over an
+  `EffectiveSchema`), `positions.rs` (`PositionMap`, `build_position_map`),
+  `timings.rs`, `errors.rs`
+  (`SchemaError`), `pending.rs` (re-exported as
+  `darkmatter::markdown::literal_token`).
+- The parsed `$schema` AST enum is `simplified_schema::SchemaRoot`; the
+  standalone facade object is `simplified_schema::SimplifiedSchema`.
+  `darkmatter::markdown::schemas::resolve` wraps the library resolver to pass
+  Darkmatter's shipped sources (`embedded::SHIPPED_SOURCES`).
+- Darkmatter mirrors of the lowering (`call_binding/translate.rs`, the trigger
+  `matcher.rs`) must reuse the library's `simplified::declaration_options_payload`
+  and `format::{judge_schema, judge_type_definition}` for the `schema` /
+  `type-definition` declaration options, and treat `non-null` as a marker
+  (no null arm, never a presence requirement). `about.rs` catalogs constraints
+  per type (`SCHEMA_CONSTRAINT_DESCRIPTORS`, parity-tested against the grammar)
+  and `$constraints` keys per placement (`BLOCK_CONSTRAINT_DESCRIPTORS`, which
+  feeds DMLS key completion); a new constraint or `$constraints` key updates both.
+
 ## Contents
 
 - [Document kinds](#document-kinds)
@@ -35,8 +81,21 @@ types:
 
 `parse_standalone_schema_document` is the passive authority. A pure schema has
 `$schema` and an optional sibling `types` mapping. A kinded schema declares
-`kind: schema` and a `types` mapping, with an optional `$schema` export.
-When both tables are present, `$schema` defines document properties and `types`
+`kind: schema` and a `types` mapping, with an optional `$schema` export. A
+`kind: yaml-schema` defines a YAML document kind (required `$schema`, same
+metadata and `types`) and is reached only through `kind`: as a `$schema`
+target or `Name@file` source it is `NotASchemaDocument { SelectedByKind }`
+(DMLS reads imported files through `resolve::parse_referenced_schema_document`
+and does not count a `yaml-schema` as a named root schema). Every envelope is
+admitted against the library's compiled `simplified-schema/schemas/schema.yaml`
+/ `yaml-schema.yaml` (see the `simplified-schema` skill), so structural
+messages read "the `kind: schema` envelope does not satisfy its definition
+`simplified-schema/schemas/schema.yaml`: `/types`: …"; assert on that
+pointer, not on the old hand-written wording. Darkmatter's own
+`darkmatter/schemas/schema-trigger.yaml` is a `yaml-schema` too (corpus class
+`YamlSchemaDefinition`). `admits_top_level_key` decides only whether an
+untagged mapping is the informal envelope; the recognizer and DMLS's lexical
+`standalone_envelope_claim` read it. When both tables are present, `$schema` defines document properties and `types`
 supplies local names and named imports; local definitions and cross-file imports
 can be mixed. Without a separate export, the mapping payload serves both roles.
 `StandaloneSchemaDocument.local_types` and its separate source map preserve
@@ -50,14 +109,106 @@ edits through the LSP handlers, not just successful standalone parsing.
 Standalone editor checks use `check_standalone_named_types` to check the
 export and every helper, including unused definitions, with each table's
 own source paths. Runtime expansion keeps helpers out of document properties.
-Referenced YAML without either envelope remains
-raw JSON Schema. When a non-empty bare map consists entirely of valid
-SimplifiedSchema property strings and has no recognized or reserved JSON
-Schema/custom-vocabulary keys, resolution emits the conservative
-`dm.schema.missing_simplified_envelope` advisory without changing validity or
-interpretation. Remedy it by wrapping the properties under the sole root
-`$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
-it uses the already-parsed YAML value and performs no additional I/O.
+A `$schema` target must export `$schema`: referenced YAML
+without one is `NotASchemaDocument` (`NoSchemaProperty`, or `TypesOnly` for a
+`types`-only library, which still serves `Name@file` imports), and there is no
+raw-YAML JSON Schema fallback (raw JSON Schema lives in a `.json` file declaring
+Draft 2020-12). The `dm.schema.missing_simplified_envelope` code remains public
+but the loader no longer emits it. Classification is passive: it uses the
+already-parsed YAML value and performs no additional I/O. User docs:
+`darkmatter/docs/topics/schemas/definition.md#what-a-schema-reference-may-point-at`.
+
+### Whole YAML documents (`schemas/yaml_documents/`)
+
+`DarkmatterSchemas::validate_yaml_document(text, path)` is the one entry point
+for a `.yaml`/`.yml` file (`YamlOutcome::{NoSchema, Validated}`; the instance's
+context must be the document's). Selection (`select.rs`): non-mapping root →
+`NoSchema`; an authored string `kind` claimed in the `KindRegistry` → that
+definition only (root `$schema` is ordinary data); else root `$schema` (via
+`resolve_schema_with_roots`, stripped from the copy); else `NoSchema`. No
+baseline, no trigger layer, `EffectiveSchema::validate_data` (soft, no template
+deferral). `load.rs` is the only loader (BOM offset, one document, non-string
+keys). `KindRegistry` (`registry.rs`) = shipped definitions
+(`embedded::shipped_kind_definitions()`; guard
+`every_shipped_yaml_schema_definition_is_in_the_shipped_table`) + `kind:
+yaml-schema` files in the five roots for `RegistryScope::WithRoots` (an
+`Absent` root whose folder does not exist adds the source's
+`absent_root_files`, an editor's unsaved definitions there); never
+`Result`: `Claim::{Healthy, Duplicate, Reserved}`, `incomplete()`,
+`root_failures()` become `SchemaError::KindSelection` only for documents they
+can affect. Source-path identity: a root file at a shipped definition's
+repo-relative path claiming its kind replaces the built-in (so this checkout's
+own definition files never duplicate); the path is compared through
+`SourceBuffers::key`, so an editor-only copy matches too. A private `Builder` keeps the context
+required (the context-construction guard rejects `Option<&FileResolutionContext>`).
+Kind checks (`semantic.rs`, `ValidationProblemCode::KindCheck`,
+`dm.schema.kind_check`) run for `schema`/`schema-trigger`/`yaml-schema` only
+after the definition passes, over the copy it accepted
+(`EffectiveSchema::data_copy`). They never re-judge shape: `schema` and
+`yaml-schema` parse with `simplified_schema::parse_selected_standalone_schema_document`
+(no compiled-envelope admission; metadata from the accepted copy) and
+`yaml-schema` prepares with `resolve::prepare_standalone_yaml_schema`;
+`schema-trigger` runs `triggers::envelope::check_trigger_semantics` (the
+`match` grammar and lint only, no `KNOWN_KEYS`). A checkout copy with its
+root closure removed therefore admits an added key
+(`kind_semantic_checks.rs::an_opened_*`). Strict loads keep their own
+authority: trigger discovery uses `parse_trigger_envelope*`, and imports,
+factories, and the registry's `prepare_candidate` admit against the compiled
+definitions. `TriggerMatch` carries `span`; it is filled by
+`triggers::envelope::locate_trigger_error` from the message's leading field, and
+discovery findings get a `position()` from it. Tests:
+`lib/tests/l1/{yaml_kind_registry,yaml_document_loading,yaml_document_selection,kind_semantic_checks}.rs`
+(the `Fixture` in `yaml_kind_registry.rs` writes a bare `.git/` instead of
+spawning `git`). It is `LoadedYamlDocument::load(text, path)` (the only
+load error) plus `validate_loaded_yaml_document(&loaded)` (selection and
+schema errors only): call the two steps when the caller must tell a document
+load error from a referenced schema's, which is also a `SchemaDocument`.
+`validate_loaded_yaml_document` is itself `prepare_yaml_contract(&loaded)`
+(selection, resolution, compiled validators: `YamlContract`, `None` for no
+schema) then the passive `YamlContract::validate(&loaded)` (passive unless
+`checks_read_files()`: the `schema`/`yaml-schema` kind checks resolve the
+document's imports). A contract judges any text with the same
+`LoadedYamlDocument::declaration_key()` (`kind` + root `$schema`) in the same
+context and registry. `md schema validate` calls load + validate (see
+[cli.md](cli.md)); DMLS prepares the contract on its registry worker with
+`with_kind_registry` and validates data against it on the request thread (see
+[dmls.md](dmls.md#whole-yaml-documents)), reading
+`YamlValidation::effective()` / `document_json()` for completion and hover. Never add a second YAML route.
+A host that must read a YAML file's values before validating (Messenger's
+research loader binds `$schema` first) reads `LoadedYamlDocument::json()`
+from the same load, never a second parser.
+
+Ownership and lifecycle:
+
+- **Who owns what.** `simplified-schema/schemas/{schema,yaml-schema}.yaml` are
+  the library's (envelope admission, see the `simplified-schema` skill);
+  `darkmatter/schemas/schema-trigger.yaml`, the registry, selection, and
+  `semantic.rs` are Darkmatter's. All three ship in `embedded.rs`.
+- **Registry lifecycle.** Without `with_kind_registry` every
+  `validate_loaded_yaml_document` builds a registry for the instance's
+  context (`RegistryScope::for_context`), which scans the schema roots. A
+  caller that validates many documents of one folder builds one registry
+  and reuses it (the corpus test, DMLS's worker); a registry built for one
+  context must not judge another's documents. DMLS rebuilds on a definition
+  edit, create, or delete (see [dmls.md](dmls.md#whole-yaml-documents)).
+- **Failure policy.** The registry is never a `Result`: a definition that
+  cannot be prepared is `incomplete()` (or `root_failures()` for an
+  unreadable root), and a kind claimed twice is `Claim::Duplicate`. Each
+  becomes `SchemaError::KindSelection` only for a document whose `kind` it
+  could affect; every other document still validates. Kind checks run only
+  after the definition passes, so a document reports definition problems
+  first, then kind checks, never both.
+- **Informal schema files.** A root-`$schema` file without `kind` is judged
+  as data against its own `$schema` by `md schema validate` and DMLS;
+  `$schema: {title: string(required)}` fails "title is required". That is the
+  selection rule, not a data defect. As an opened document it is never an
+  envelope: its `description`/`categories`/`types` are data, and a sibling
+  `types` is no type library (a `$schema` naming an entry is an unknown named
+  type, exit `2`). The informal envelope applies only where a file is loaded
+  as a schema (a `$schema` target, a `Name@file` import, a root-file
+  classification). DMLS reads an opened `kind: schema`/`yaml-schema` with
+  `parse_selected_standalone_schema_document` over
+  `EffectiveSchema::data_copy`, like the kind checks.
 
 Schema-trigger documents use `kind: schema-trigger` (the envelope kind the
 parser accepts, `triggers/envelope.rs::ENVELOPE_KIND`). Preserve the kinded root
@@ -172,7 +323,7 @@ validation report, shared by every problem and root-union arm):
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
   a constructed `Markdown` is located in its serialized YAML view.
   `PositionMap::new()` (and `EffectiveSchema::validate`) is source-free: no
-  positions. `validate::build_position_map(yaml)` is slice-relative (line 1
+  positions. `simplified_schema::positions::build_position_map(yaml)` is slice-relative (line 1
   = first YAML line). `PositionMap` is opaque, not an `IndexMap`.
 - `md schema validate` prints `(at line L, column C)`; the compose block
   prints ` at L:C`; DMLS ranges start at the same nodes.
@@ -188,7 +339,7 @@ validation report, shared by every problem and root-union arm):
   pointer segment for display.
 
 **Stage timings.** `DarkmatterSchemas::validate_timed` returns `validate`'s
-result unchanged plus a `ValidationTimings` (`schemas/timings.rs`):
+result unchanged plus a `ValidationTimings` (library `timings.rs`):
 non-overlapping `ValidationStage`s `discover`/`match`/`resolve`/`compile`/
 `validate`, `total()`, `unassigned()`, `compile_cache()` (`Hit`, `Miss`,
 `NotRequested`), and `matched_triggers()` (file names). A thread-local stack
@@ -205,7 +356,7 @@ nest (the innermost wins) and never carry values or schema bodies. A new
 validator build path must go through `build_validator_with` or open
 `timings::compiling()` itself. `md schema validate -vv` renders it; a
 host's request is every schema call it makes for the document, so record each
-one (`validate.rs::validate_one` records discovery, the pre-assignment
+one (`cli/src/commands/schema/validate.rs::validate_one` records discovery, the pre-assignment
 `effective_for`, and validation plus its presence lookup) or the first build
 lands outside the report and a cold request reads as a `hit`.
 
@@ -325,11 +476,11 @@ holds the parity table, whose `short`/`arm-<i>` probes strip the marker to
 judge the projected structure alone. `lib/tests/l1/lifecycle_schema_parity.rs`
 derives events, action types, the open arm's exclusions, and the bare-verb
 `suggest` list from the md registry and parser. The inlined stacks cost about
-70–90 ms per debug validation; the regex memo in `convert.rs` and the import
+70–90 ms per debug validation; the regex memo in `simplified/convert.rs` and the import
 engine's `expanded_cache` keep it there.
 
 User docs: `darkmatter/docs/topics/schemas/definition.md` (The Built-in
-Baseline, Selecting the Baseline); Content Policy's typing limits are in the
+Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typing limits are in the
 `content-policy` skill.
 
 ## Imports and dictionaries
@@ -433,7 +584,8 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `to_json_schema` errors on a `Ref`. Every typed and JSON walker follows a
   `Ref` (see the reference-aware entry points under "Named union
   references" and "Conversion engine"); none treats it as opaque. User docs:
-  `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
+  `simplified-schema/docs/topics/language/objects-and-named-types.md`
+  "Recursive Named Types" (child-value rule,
   definition vs use site, errors, reach) and "Shared Named Types"
   (eligibility, counting, per-use fallback, output) are the one description;
   other pages link there. A stored union hovers in DMLS as its alternatives
@@ -469,7 +621,7 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   property-keyed map or with no origins
   (`schemas_rewrite_arm_validators::caller_origin_*`). Compatibility tests:
   `schema_cache_validity::acyclic_match_*` (six shapes, five routes, phases).
-- **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
+- **`$defs` across merges** (library `scope.rs`). `$defs` live only at a
   schema's root. A sub-schema compiled alone (a root-union arm, a
   discriminated arm, a property union arm, an example target) goes through
   `with_root_definitions` / `wrap_arm_as_root_schema(arm, root)`; never
@@ -553,7 +705,7 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 
 ## Named union references
 
-User docs: `darkmatter/docs/topics/schemas/definition.md` (Named Union
+User docs: `simplified-schema/docs/topics/language/unions.md` (Named Union
 References; Choosing an Arm: Reporting versus Changing Data).
 
 - A reference to a union-typed named type (bare, `@this`, `@file`, all
@@ -599,7 +751,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   use-site description) goes on the property only. A nested postfixed arm
   flattens into the one `anyOf`, its markers hoisted to the property.
 - Consumers must not read `properties` off an `anyOf` wrapper. Use
-  `schemas::flattened_alternatives(def)` (`Alternative { atom, arm,
+  `simplified_schema::flattened_alternatives(def)` (`Alternative { atom, arm,
   is_array }`) for typed-tree walks and `completion::alternative_accepts(atom,
   value)` to judge a present value (so `null` matches only a null-accepting
   arm). Editors use `completion::{for_list_item, for_property_value,
@@ -619,9 +771,9 @@ References; Choosing an Arm: Reporting versus Changing Data).
 
 ## Conversion engine
 
-- One rule core, `markdown::coercion` (`Shape`, `bind`, `bind_with`,
+- One rule core, `simplified_schema::coercion` (`Shape`, `bind`, `bind_with`,
   `check_exact`, `accepts_exactly`, `content_error`), serves frontmatter and
-  function calls. Translators only map syntax: `schemas::shape_from_json_schema`
+  function calls. Translators only map syntax: `simplified_schema::shape_from_json_schema`
   (compiled/raw JSON Schema; unmodeled keywords become `Assert`s) and
   `compose::expression::call_binding::shape_from_property_def` (grammar).
   `tests/l1/coercion_translator_conformance.rs` requires identical outcomes;
@@ -636,7 +788,7 @@ References; Choosing an Arm: Reporting versus Changing Data).
   acceptance. A raw cycle that never descends stays validation-only; grammar
   `TooDeep` (32) remains only for over-deep acyclic chains and loops that
   never descend.
-- `schemas/coerce.rs` decides only what is committed: an instance the complete
+- The library's `coerce.rs` decides only what is committed: an instance the complete
   schema accepts is kept; else the whole converted document if the complete
   schema accepts it; else each top-level property that converts cleanly
   (root unions keep the whole-document rule). Never reintroduce per-surface
@@ -650,15 +802,16 @@ References; Choosing an Arm: Reporting versus Changing Data).
   2^64, a custom keyword in `validate.rs`); raw `integer` has no ceiling.
   `numberlike`/`boolish` lower to the `darkmatter-numberlike`/`-boolish`
   formats and are kept as written.
-- User docs: the one rule list is `topics/schemas/definition.md` "Type
-  Coercion" (interfaces, actions, conversions, unions, containers, function
+- User docs: the one rule list is `simplified-schema/docs/topics/conversion.md`
+  "Type Coercion" (interfaces, actions, conversions, unions, containers, function
   binding, type errors, changes for existing documents); other pages link
   there. Change it there, not in a second copy.
 
 ## Tuples, functions, `|`, and categories
 
-User docs: `darkmatter/docs/topics/schemas/definition.md` (Tuples; The `|`
-Operator and Grouping; Function Signatures; Categories).
+User docs: `simplified-schema/docs/topics/language/types.md` (Tuples),
+`language/unions.md` (The `|` Operator and Grouping; Function Signatures), and
+`language/schema-documents.md` (Categories).
 
 - `grammar::parse_type_definition` reads a `|` union into the same
   `PropertyDef::Union` the YAML list produces; `parse_type_expr` is the
@@ -668,11 +821,11 @@ Operator and Grouping; Function Signatures; Categories).
   description-only: `to_json_schema` fails on it with the property path, which
   is the one choke point keeping functions out of document schemas (the
   resolver inlines references first). Never emit JSON for a function.
-- `Constraint::Category` lowers to `x-darkmatter-category`; the tagged
-  envelope's `categories:` list (`StandaloneSchemaDocument::categories`)
+- `Constraint::Category` lowers to `x-darkmatter-category`; the envelope's
+  (informal or tagged) `categories:` list (`StandaloneSchemaDocument::categories`)
   limits names. Duplicate overloads are judged by
   `signature::duplicate_overload` over canonical binding contracts.
-- Numbers in schema metadata go through `markdown::numeric` admission; an
+- Numbers in schema metadata go through `simplified_schema::numeric` admission; an
   inexact whole number, infinity, or underflow is a grammar error.
 
 ## Special types
@@ -699,9 +852,9 @@ They do not perform imports, I/O, matching side effects, or rewrites.
 
 ## Core types (`unknown`, `null`, `alphanumeric`, `shell`)
 
-User docs: `darkmatter/docs/topics/schemas/definition.md` (`unknown` and
-`null`; Null-Admitting Properties; Alphanumeric Strings; Shell Commands;
-Subtype Relation). All four are built-in keywords, so a same-named local type
+User docs: `simplified-schema/docs/topics/language/types.md` (`unknown` and
+`null`; Null-Admitting Properties; Alphanumeric Strings; Shell Commands) and
+`language/subtyping.md` (Subtype Relation). All four are built-in keywords, so a same-named local type
 needs `@this`.
 
 - `SimplifiedType::Unknown` is canonical; `any` parses to it
@@ -794,12 +947,12 @@ source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
 mid-line value spans with `overlay::frontmatter::line_aligned_span`. Never add
 a third locator. The authored boundary is documented in
-`darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
+`simplified-schema/docs/topics/language/types.md` (Source-Aware Presentation
 Boundary).
 
 Definition failures are located, never guessed (user-facing reference:
-`darkmatter/docs/topics/schemas/definition.md` § Source-Aware Parsing and
-Located Failures, and `dmls/docs/diagnostics.md` § Ranging). The shared parser
+`simplified-schema/docs/topics/diagnostics.md` § Source-Aware Parsing and
+Located Failures, and `darkmatter/dmls/docs/diagnostics.md` § Ranging). The shared parser
 (`simplified/mod.rs`, crate-private `DefinitionFailure`) records the
 `SchemaSourcePath` of the node it rejected: property keys literally, sequence
 members and root-union arms by index, `$constraints` entries by key, and
@@ -829,9 +982,10 @@ grammar fills from `Parser::arm_spans` and the YAML-list parser from the
 option's scalar). Registration's text path keeps them on
 `RegistrationError::Grammar`; the programmatic path has no text and gives
 `InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
-located in the catalog source. A standalone file's payload failure is folded
-into `SchemaError::SchemaDocument`'s message, so DMLS locates it when the
-overlay is assembled (`overlay::file_failures`, keyed by the path the error
+located in the catalog source. A standalone file's payload failure is a
+`SchemaError::SchemaDocument` whose message repeats the cause and which keeps
+the typed cause (`source`) and its byte `span` in that file; DMLS locates it
+with secondary locations when the overlay is assembled (`overlay::file_failures`, keyed by the path the error
 names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
 request must never read or parse a file.
 
@@ -882,10 +1036,19 @@ For grammar or schema changes, cover:
 - Imported dependency/cycle errors and source spans.
 - Read/write/read repetition when composition persists normalized values.
 
+A change to the language itself is tested in the library first (`just test` and
+`just doctest` in `simplified-schema/`; see the `simplified-schema` skill),
+then through Darkmatter's consumers. A Darkmatter item named like a
+library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
+
 ## Schema roots and `$path` triggers
 
 - `SchemaRoots::for_document(&ctx)` (`schemas/roots.rs`) is the one root list:
-  package, package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`, each with a
+  `SCHEMAS_DIR`, package, package area, `base_dir()`, `~/schemas` (reorder
+  only the `candidates` array; `SchemaRootKind` variants follow it). When
+  `SCHEMAS_DIR` aliases a repository `schemas/` folder, the `SchemasDir` root
+  searches it (tree-root pattern base) and the later kind is
+  `Duplicate { of: SchemasDir }`. Each root has a
   `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
   `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
   states; DMLS and `md` share them through `triggers::scan(&ctx)` (DMLS
@@ -1024,7 +1187,10 @@ For grammar or schema changes, cover:
   context (structural slot), and conversion reuses that validator
   (`ConversionPlan::validator`); a root union compiles only its arms
   (`CompiledValidators::RootUnion`, so `EffectiveSchema::validator()` is
-  `None` for it). Coercion skips validating union arms when no arm changes
+  `None` for it). A raw root with `unevaluatedProperties`/`unevaluatedItems`
+  keeps its `anyOf` (plus a trailing `true`) in every wrapped arm
+  (`validate::wrap_arm_as_root_schema`), so those keywords see every
+  accepting arm's evaluations; never drop the alternatives there. Coercion skips validating union arms when no arm changes
   the value. Lowering builds nested fragments by moving them
   (`convert.rs::any_of_value`), never `json!` with an interpolated `Value`,
   which re-serializes the subtree. Every trigger payload is still resolved
@@ -1050,9 +1216,10 @@ shape: `kind: schema`, `description`, and a `$schema` mapping of `fm`, `ctx`,
 required, null/empty/wrong kinds rejected, `current` must equal `ctx`,
 duplicate keys and trailing YAML are errors. The `ctx.*` descriptors project
 its `ctx`; `err` and `timing` members equal the runtime
-`LifecycleErrorInfo`/`LifecycleTiming` values. A catalog (`kind: schema` with
-a `$schema` mapping and no `types`) is never a document schema: the
-standalone loader refuses it by content, wherever a `$schema` reaches it.
+`LifecycleErrorInfo`/`LifecycleTiming` values. Only explicit registration
+(`GlobalCatalog`) makes a catalog the baseline or a host's globals; a
+document `$schema` naming one is an ordinary tagged schema whose globals
+become optional document properties (no catalog-specific refusal).
 Hosts declare their own globals in a catalog of the same format
 (`claudine/schemas/globals.yaml`, loaded with `GlobalCatalog::from_documents`
 and the host's requirements). DMLS hovers and completes host globals from the
@@ -1071,4 +1238,4 @@ md event's stack DMLS uses that event's registry `BindingView`
   (`simplified/signature.rs`): boolean returns, a declared non-rest parameter,
   a self-contained single-type target (no union or named reference), `true-iff`
   only for `null` and bare families, and all overloads agreeing. Docs:
-  `docs/topics/schemas/definition.md#narrowing-facts`.
+  `simplified-schema/docs/topics/language/unions.md#narrowing-facts`.

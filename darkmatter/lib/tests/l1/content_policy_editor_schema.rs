@@ -12,9 +12,8 @@ use std::path::Path;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, SchemaOriginKind, ValidationProblemKind, ValidationReport,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{SchemaOriginKind, ValidationProblemKind};
 
 use crate::content_policy_fixtures::{DECLARATIONS, Verdict, render};
 use crate::request_support::context_at;

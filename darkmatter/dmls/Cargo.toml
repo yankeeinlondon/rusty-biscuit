@@ -67,6 +67,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Semantic authorities
 darkmatter = { path = "../lib" }
+simplified-schema = { path = "../../simplified-schema/lib" }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 # xxHash content-hash identity for invalidation (design "Invalidation").
 biscuit-hash = { path = "../../biscuit-hash/lib" }

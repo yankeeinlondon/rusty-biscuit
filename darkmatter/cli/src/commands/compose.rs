@@ -74,7 +74,7 @@ fn parse_shorthand_value(raw: &str) -> serde_json::Value {
         return serde_json::Value::String(String::new());
     }
     match biscuit_file::Json5::from_str(raw) {
-        Ok(parsed) if darkmatter::markdown::numeric::reject_non_finite_json5(&parsed).is_ok() => {
+        Ok(parsed) if simplified_schema::numeric::reject_non_finite_json5(&parsed).is_ok() => {
             parsed.value().clone()
         }
         _ => serde_json::Value::String(raw.to_string()),
@@ -297,7 +297,7 @@ pub fn run_compose(
     if let Some(json_str) = state_json {
         let parsed = biscuit_file::Json5::from_str(json_str)
             .wrap_err("Invalid JSON/JSON5 in --state argument")?;
-        darkmatter::markdown::numeric::reject_non_finite_json5(&parsed)
+        simplified_schema::numeric::reject_non_finite_json5(&parsed)
             .map_err(|reason| eyre!("Invalid --state argument: a number is {reason}"))?;
         let state = parsed.value().clone();
         if !state.is_object() {
@@ -313,7 +313,7 @@ pub fn run_compose(
         if let Some(json_str) = set_json {
             let parsed = biscuit_file::Json5::from_str(json_str)
                 .wrap_err("Invalid JSON/JSON5 in --set argument")?;
-            darkmatter::markdown::numeric::reject_non_finite_json5(&parsed)
+            simplified_schema::numeric::reject_non_finite_json5(&parsed)
                 .map_err(|reason| eyre!("Invalid --set argument: a number is {reason}"))?;
             let set = parsed.value().clone();
             if let serde_json::Value::Object(map) = set {
@@ -1076,7 +1076,7 @@ fn apply_compose_baseline_schema(
             )
         })?;
         let schema_value = yaml.get("$schema").unwrap_or(&yaml);
-        let schema = darkmatter::markdown::schemas::parse_yaml_schema(schema_value)
+        let schema = simplified_schema::parse_yaml_schema(schema_value)
             .wrap_err_with(|| format!("Invalid baseline schema: {}", resolved.display()))?;
         return Ok(options.with_baseline_schema(schema));
     }

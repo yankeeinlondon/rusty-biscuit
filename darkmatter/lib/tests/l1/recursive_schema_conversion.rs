@@ -12,16 +12,17 @@ use std::path::Path;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::MarkdownError;
-use darkmatter::markdown::coercion::{FailureReason, MAX_DEPTH, PathSegment, ValueFailure, bind};
+use simplified_schema::coercion::{FailureReason, MAX_DEPTH, PathSegment, ValueFailure, bind};
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::compose::expression::call_binding::{
     FunctionRegistration, NoNamedTypes, TranslateError, shape_from_property_def, shape_from_simplified_schema_with_definitions,
 };
-use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::shape_from_json_schema;
-use darkmatter::markdown::schemas::simplified::PropertyDef;
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
+use simplified_schema::coerce::coerce_frontmatter;
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::shape_from_json_schema;
+use simplified_schema::simplified::PropertyDef;
+use simplified_schema::simplified::grammar::parse_type_definition;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
 use serde_json::{Value, json};
 use tempfile::TempDir;

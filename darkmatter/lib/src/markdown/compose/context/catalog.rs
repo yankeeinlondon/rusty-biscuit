@@ -20,7 +20,7 @@ use std::sync::LazyLock;
 
 use crate::catalog::{Described, Example};
 use crate::markdown::schemas::catalog::GlobalCatalog;
-use crate::markdown::schemas::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr};
+use simplified_schema::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr};
 
 /// SimplifiedSchema type of a context variable, projected from the base schema.
 ///
@@ -440,10 +440,11 @@ mod tests {
     /// helpers, so a projection bug (reading the wrong field) fails here.
     #[test]
     fn projected_descriptors_match_base_schema() {
-        use crate::markdown::schemas::{SimplifiedSchema, darkmatter_base_schema};
+        use crate::markdown::schemas::darkmatter_base_schema;
+use simplified_schema::SchemaRoot;
 
         let schema = darkmatter_base_schema();
-        let SimplifiedSchema::Single(root) = &schema else {
+        let SchemaRoot::Single(root) = &schema else {
             panic!("base schema must be a single object shape");
         };
         let PropertyDef::Single(ctx_atom) =
@@ -523,7 +524,7 @@ mod tests {
     /// through [`project_one`] to prove the constraint reaches the descriptor.
     #[test]
     fn project_one_carries_default_constraint() {
-        use crate::markdown::schemas::PropertyAtom;
+        use simplified_schema::PropertyAtom;
 
         let value = serde_json::json!("fallback");
         let def = PropertyDef::Single(PropertyAtom {
@@ -543,7 +544,7 @@ mod tests {
     /// here) and keeps the use site's `required`, rather than a bare object.
     #[test]
     fn project_one_follows_a_recursive_reference_to_its_definition() {
-        use crate::markdown::schemas::{
+        use simplified_schema::{
             DefKey, DefNamespace, PropertyAtom, SchemaReferenceSite, SchemaSourceId, SchemaSourcePath,
         };
 

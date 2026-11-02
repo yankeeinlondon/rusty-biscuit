@@ -52,13 +52,6 @@ const ALLOWLIST: &[Allowance] = &[
     allow(Gate::AmbientState, "render/metadata_codec.rs", "std::env::var", 1, "image metadata policy variable (rendering)"),
     allow(
         Gate::AmbientState,
-        "markdown/schemas/validate.rs",
-        "std::env::var",
-        1,
-        "`DARKMATTER_SCHEMA_CACHE_SIZE` validator cache capacity (tuning)",
-    ),
-    allow(
-        Gate::AmbientState,
         "markdown/output/terminal.rs",
         "std::env::current_dir",
         1,

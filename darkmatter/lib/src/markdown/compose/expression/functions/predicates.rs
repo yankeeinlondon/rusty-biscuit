@@ -104,7 +104,7 @@ fn round(call: &BoundCall<'_>) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use crate::markdown::compose::expression::{DeclaredTypes, Polarity, Shape, TypeScope, parse};
-    use crate::markdown::schemas::{PropertyAtom, SimplifiedType};
+    use simplified_schema::{PropertyAtom, SimplifiedType};
 
     fn shape_of_x_after(guard: &str, polarity: Polarity) -> Shape {
         let declared = DeclaredTypes::new(None);

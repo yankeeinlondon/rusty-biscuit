@@ -10,7 +10,7 @@
 //! discovery and DMLS share.
 
 use darkmatter::markdown::schemas::triggers::{MatchConditions, PathSubject, parse_trigger_envelope_from_str};
-use darkmatter::markdown::schemas::SchemaError;
+use simplified_schema::SchemaError;
 use serde_json::{Value, json};
 
 fn load(match_body: &str) -> Result<MatchConditions, SchemaError> {

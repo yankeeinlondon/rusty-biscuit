@@ -29,13 +29,13 @@ fn inventory(text: &str) -> Vec<(String, String, bool)> {
 
 /// Applies the single rewrite each nested-span interpolation offers and
 /// returns the edited document.
-fn apply_rewrites(text: &str, mode: ParseMode) -> String {
+fn apply_rewrites(text: &str) -> String {
     let ast = ast(text);
     let mut edits: Vec<(SourceSpan, String)> = frontmatter_interpolations(text, &ast)
         .iter()
         .filter_map(|span| {
             // Every lint of one expression carries the same rewrite: apply once.
-            span.nested_span_lints(text, mode).into_iter().find_map(|lint| lint.replacement)
+            span.nested_span_lints(text).into_iter().find_map(|lint| lint.replacement)
         })
         .collect();
     edits.sort_by_key(|(span, _)| std::cmp::Reverse(span.start));
@@ -50,7 +50,7 @@ fn nested_lint_count(text: &str) -> usize {
     let ast = ast(text);
     frontmatter_interpolations(text, &ast)
         .iter()
-        .map(|span| span.nested_span_lints(text, ParseMode::Interpolation).len())
+        .map(|span| span.nested_span_lints(text).len())
         .sum()
 }
 
@@ -104,11 +104,11 @@ fn incident_literal_blocks_range_each_nested_span_in_authored_coordinates() {
         assert!(say.projection().is_exact());
         assert!(INCIDENT[say.outer_span()].starts_with("{{\n"));
     }
-    let success = says[0].nested_span_lints(INCIDENT, ParseMode::Interpolation);
+    let success = says[0].nested_span_lints(INCIDENT);
     let ranged: Vec<&str> = success.iter().map(|lint| &INCIDENT[lint.range.clone()]).collect();
     assert_eq!(ranged, vec!["{{ctx.area}}", "{{ctx.repo_name}}"]);
     assert_eq!(success[1].nested, "ctx.repo_name");
-    let failure = says[1].nested_span_lints(INCIDENT, ParseMode::Interpolation);
+    let failure = says[1].nested_span_lints(INCIDENT);
     let ranged: Vec<&str> = failure.iter().map(|lint| &INCIDENT[lint.range.clone()]).collect();
     assert_eq!(
         ranged,
@@ -127,7 +127,7 @@ fn incident_literal_blocks_range_each_nested_span_in_authored_coordinates() {
 
 #[test]
 fn incident_rewrite_preserves_block_indicator_indentation_and_untouched_bytes() {
-    let edited = apply_rewrites(INCIDENT, ParseMode::Interpolation);
+    let edited = apply_rewrites(INCIDENT);
     assert_ne!(edited, INCIDENT);
     assert_eq!(nested_lint_count(INCIDENT), 6);
     assert_eq!(nested_lint_count(&edited), 0, "{edited}");
@@ -144,7 +144,7 @@ fn incident_rewrite_preserves_block_indicator_indentation_and_untouched_bytes() 
     assert_eq!(&edited[..prefix_end], &INCIDENT[..prefix_end]);
     assert!(edited.ends_with(&INCIDENT[INCIDENT.find("    message: \"💥").unwrap()..]));
     // Idempotent: a second pass offers nothing further.
-    assert_eq!(apply_rewrites(&edited, ParseMode::Interpolation), edited);
+    assert_eq!(apply_rewrites(&edited), edited);
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn commit_fixture_literal_with_escaped_newline_is_single_line_and_rewritable() {
     let ast = ast(COMMIT);
     let spans = frontmatter_interpolations(COMMIT, &ast);
     let resides = spans.iter().find(|span| span.entry.key == "resides_in").unwrap();
-    let lints = resides.nested_span_lints(COMMIT, ParseMode::Interpolation);
+    let lints = resides.nested_span_lints(COMMIT);
     let ranged: Vec<&str> = lints.iter().map(|lint| &COMMIT[lint.range.clone()]).collect();
     assert_eq!(
         ranged,
@@ -164,7 +164,7 @@ fn commit_fixture_literal_with_escaped_newline_is_single_line_and_rewritable() {
     );
     // The authored `\n` is two characters, not a line break.
     assert!(lints.iter().all(|lint| lint.replacement.is_some()));
-    let edited = apply_rewrites(COMMIT, ParseMode::Interpolation);
+    let edited = apply_rewrites(COMMIT);
     assert_eq!(nested_lint_count(&edited), 0);
     assert!(edited.contains(r"' package area'"), "{edited}");
     assert!(edited.contains(r":\n '"), "{edited}");
@@ -175,19 +175,19 @@ fn commit_fixture_literal_with_escaped_newline_is_single_line_and_rewritable() {
 #[test]
 fn quoted_rewrites_are_encoded_for_their_scalar_style() {
     let single = "---\nsay: '{{ ok ? \"a {{ x }}\" : ''b'' }}'\n---\n\nbody\n";
-    let edited = apply_rewrites(single, ParseMode::Interpolation);
+    let edited = apply_rewrites(single);
     assert_eq!(edited, "---\nsay: '{{ ok ? \"a \" + x : ''b'' }}'\n---\n\nbody\n");
     assert_eq!(ast(&edited).entry_by_dotted("say").unwrap().scalar.as_deref(), Some("{{ ok ? \"a \" + x : 'b' }}"));
     assert_eq!(nested_lint_count(&edited), 0);
 
     let double = "---\nsay: \"{{ ok ? 'a {{ x }}' : \\\"b\\\" }}\"\n---\n\nbody\n";
-    let edited = apply_rewrites(double, ParseMode::Interpolation);
+    let edited = apply_rewrites(double);
     assert_eq!(edited, "---\nsay: \"{{ ok ? 'a ' + x : \\\"b\\\" }}\"\n---\n\nbody\n");
     assert_eq!(ast(&edited).entry_by_dotted("say").unwrap().scalar.as_deref(), Some("{{ ok ? 'a ' + x : \"b\" }}"));
     assert_eq!(nested_lint_count(&edited), 0);
 
     let plain = "---\nsay: note {{ 'a {{ y }}' }}\n---\n\nbody\n";
-    let edited = apply_rewrites(plain, ParseMode::Interpolation);
+    let edited = apply_rewrites(plain);
     assert_eq!(edited, "---\nsay: note {{ 'a ' + y }}\n---\n\nbody\n");
     assert_eq!(nested_lint_count(&edited), 0);
 }
@@ -208,7 +208,7 @@ fn folded_tagged_and_multiline_scalars_range_whole_and_offer_no_rewrite() {
         assert!(!span.projection().is_exact(), "{}", span.entry.dotted);
         assert_eq!(span.outer_span(), span.entry.value_span, "{}", span.entry.dotted);
         assert_eq!(span.inner_span(), None);
-        let lints = span.nested_span_lints(text, ParseMode::Interpolation);
+        let lints = span.nested_span_lints(text);
         assert_eq!(lints.len(), 1, "{}", span.entry.dotted);
         assert_eq!(lints[0].range, span.entry.value_span);
         assert_eq!(lints[0].replacement, None);
@@ -220,7 +220,7 @@ fn literal_spanning_a_line_break_keeps_its_range_but_offers_no_rewrite() {
     let text = "---\nsay: |-\n  {{ ok ? \"done {{ x }}\n    later\" : \"b\" }}\n---\n\nbody\n";
     let ast = ast(text);
     let spans = frontmatter_interpolations(text, &ast);
-    let lints = spans[0].nested_span_lints(text, ParseMode::Interpolation);
+    let lints = spans[0].nested_span_lints(text);
     assert_eq!(lints.len(), 1);
     assert_eq!(&text[lints[0].range.clone()], "{{ x }}");
     assert_eq!(lints[0].replacement, None);

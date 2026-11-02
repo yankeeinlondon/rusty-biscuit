@@ -14,12 +14,12 @@ use serde_json::{Map, Value};
 use super::core::{
     Additional, NumberShape, ObjectShape, Pattern, Residual, Shape, TextKind, TextShape,
 };
-use crate::markdown::schemas::format::{
+use simplified_schema::format::{
     DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD, DARKMATTER_TYPE_DEFINITION_KEYWORD,
     DARKMATTER_URL_SCHEME_KEYWORD, DARKMATTER_YAML_FORMAT,
 };
-use crate::markdown::schemas::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
-use crate::markdown::schemas::validate::build_validator;
+use simplified_schema::simplified::convert::{BOOLISH_VALUES, NUMBERLIKE_PATTERN};
+use simplified_schema::validate::build_validator;
 
 const ANNOTATIONS: &[&str] = &[
     "$schema",

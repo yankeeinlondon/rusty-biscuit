@@ -54,7 +54,7 @@ $schema:
 ---
 ```
 
-All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../topics/schemas/definition.md#types).
+All properties are **optional** unless marked `required`, and a property whose type admits `null` (`null`, `unknown`, or a union with such an arm) stays optional even then. Any type gains an array form with a `[]` suffix (`string[]`), and item constraints versus array-level constraints are written in separate parenthesised lists (`"string(min(1))[](max(5); unique)"`). The full type vocabulary — `string`, `date`, `datetime`, `time`, `number`, `numberlike`, `boolean`, `boolish`, `object`, `file`, `enum`, `literal`, `url`, `email`, `yaml`, `json`, `expression`, `shell`, `alphanumeric`, `unknown` (alias `any`), `null` — and every constraint is tabulated in [the topic reference](../../../simplified-schema/docs/topics/language/types.md#types).
 
 ### 2. File reference
 
@@ -68,29 +68,27 @@ $schema: ./schemas/post.yaml
 
 The referenced file may be:
 
-- a YAML file whose root uses one of the two SimplifiedSchema envelopes, or
-- a `.json` / `.yaml` file that is already a valid Draft 2020-12 JSON Schema.
+- a YAML file whose root uses a SimplifiedSchema envelope with a top-level
+  `$schema`, or
+- a `.json` file that is a JSON Schema object declaring
+  `"$schema": "https://json-schema.org/draft/2020-12/schema"`.
 
-The SimplifiedSchema envelopes are either `$schema:` as the sole root key, or
-`kind: schema` together with a `types:` mapping:
+The YAML envelope is a root `$schema:` mapping, optionally beside a `types:`
+mapping of reusable definitions and a `description:` string, or the same keys
+under `kind: schema`:
 
 ```yaml
+description: A blog post
 $schema:
     title: string(required)
 ```
 
-```yaml
-kind: schema
-types:
-    title: string(required)
-```
-
-Anything else is treated as raw JSON Schema, including a `$schema` string URI.
-A non-empty bare map whose string values all parse as SimplifiedSchema property
-definitions still remains raw JSON Schema and therefore constrains nothing. If
-its keys do not identify JSON Schema or a custom vocabulary, Darkmatter emits
-the `dm.schema.missing_simplified_envelope` warning without changing validity
-or exit status. Add either envelope above to make the file a SimplifiedSchema.
+Every other file is an error naming it: a YAML map without `$schema` (wrap its
+properties under `$schema:`), a `kind: schema` file with only `types:` (import
+its types with `Name@file.yaml` instead), raw JSON Schema written as YAML
+(write it as a `.json` file declaring the 2020-12 dialect), or a `.json` file
+without that exact dialect. See
+[What a Schema Reference May Target](../../../simplified-schema/docs/topics/language/schema-documents.md#what-a-schema-reference-may-target).
 Remote (`http(s)://`) references are **not** supported — download the schema
 locally first.
 
@@ -152,7 +150,7 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
   `null` is tolerated at launch and fails at completion. A null-admitting
   property (`null`, `unknown`, or a union with such an arm) is the exception:
   it is optional at both phases, whatever `required`, `eager`, or `generated`
-  says (see [Null-Admitting Properties](../topics/schemas/definition.md#null-admitting-properties)).
+  says (see [Null-Admitting Properties](../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties)).
 - Both phases are **passive**: no mutation, no coercion, no expression or shell
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
@@ -492,7 +490,7 @@ cfg:
   counts: [three, "{{ x }}"]   # fails fast at /cfg/counts/0; /cfg/counts/1 waits
 ```
 
-Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../topics/schemas/definition.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
+Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../../../simplified-schema/docs/topics/language/types.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
 
 The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--disable schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
 
@@ -525,7 +523,7 @@ and `"pear"` against `number` is an error. Conversion is always on, and
 function arguments use the same engine. The rules (what converts, what never
 converts, unions, nested values, raw JSON Schema, and the changes from
 earlier releases) are described once, in
-[Type Coercion](../topics/schemas/definition.md#type-coercion).
+[Type Coercion](../../../simplified-schema/docs/topics/conversion.md#type-coercion).
 
 Two consequences matter:
 
@@ -636,6 +634,32 @@ the file mode (`spec: string` in one, `spec: file` in the other) or one omits
 the property, the caller value stays raw, and the eager-`file` rewrite leaves
 it raw too rather than re-anchor it as though the document had authored it.
 
+A raw JSON Schema root may declare `properties` beside its `anyOf`. They
+apply whichever arm is chosen, exactly as they do without the union:
+
+```json
+{
+  "type": "object",
+  "properties": { "count": { "type": "integer" }, "notes": { "type": "string", "format": "darkmatter-file" } },
+  "anyOf": [
+    { "properties": { "kind": { "const": "a" } }, "required": ["kind"] },
+    { "properties": { "kind": { "const": "b" } }, "required": ["kind"] }
+  ]
+}
+```
+
+A caller's `--set count=3` converts to the integer before an arm is judged,
+so the arm that applies is still found and a caller file it declares
+resolves from the caller's origin; an
+eager `notes` is normalized like one an arm declares; and `md clean` quotes
+and suggests keys against `count` and `notes` too.
+
+A root `unevaluatedProperties: false` beside the `anyOf` reads every
+accepting arm. With arms requiring `name` and `age` respectively,
+frontmatter declaring both is valid, its eager files are normalized, and a
+caller's values compose; a key no arm and no root `properties` declares is
+still rejected.
+
 ### Root unions and file `match`
 
 Each simplified arm's declared glob is compiled into that arm as
@@ -687,7 +711,7 @@ of the arm the path selected. Identical globs and globs declared in just one
 arm are enforced too, including beside a raw JSON Schema arm. A missing file
 and template or shell syntax are never judged; the comparison uses `/`
 spelling relative to the launch directory, where completion walks the glob.
-The full rule is in [Defining Schemas — Files](../topics/schemas/definition.md#files).
+The full rule is in [Defining Schemas — Files](../../../simplified-schema/docs/topics/language/types.md#files).
 
 ## Interaction With `--set` and `--state`
 

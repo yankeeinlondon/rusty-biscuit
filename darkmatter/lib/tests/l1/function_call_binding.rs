@@ -6,13 +6,13 @@
 
 use std::cell::Cell;
 
-use darkmatter::markdown::coercion::{FailureReason, ValueKind, bind};
+use simplified_schema::coercion::{FailureReason, ValueKind, bind};
 use darkmatter::markdown::compose::expression::call_binding::{
     ArgumentProblem, BoundCall, CallBindingError, CallErrorKind, EvaluationMode, FunctionRegistration, NoNamedTypes,
     RegistrationError, SignatureProblem, TranslateError, property_shape_from_def, shape_from_property_def,
 };
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_definition;
-use darkmatter::markdown::schemas::simplified::{FunctionType, PropertyDef, TypeExpr};
+use simplified_schema::simplified::grammar::parse_type_definition;
+use simplified_schema::simplified::{FunctionType, PropertyDef, TypeExpr};
 use serde_json::{Value, json};
 
 /// A registered function whose handler only counts its invocations.
@@ -519,6 +519,34 @@ fn omission_and_null_stay_distinct() {
 }
 
 #[test]
+fn a_non_null_property_of_an_object_parameter_may_be_omitted_but_never_null() {
+    let f = Function::new("f", "function(parameters(opts: { label: string(non-null), note: string }); returns(string))");
+    assert_eq!(f.received(&[json!({})]), [json!({})]);
+    assert_eq!(f.received(&[json!({ "label": "a" })]), [json!({ "label": "a" })]);
+    assert_eq!(f.received(&[json!({ "note": null })]), [json!({ "note": null })], "the control admits null");
+    let error = f.rejected(&[json!({ "label": null })]);
+    assert_eq!(error.argument_errors().count(), 1, "{error}");
+    let optional = Function::new("g", "function(parameters(x?: string(non-null)); returns(string))");
+    assert!(optional.call(&[]).expect("omission binds").args().is_omitted(0));
+    optional.rejected(&[Value::Null]);
+}
+
+#[test]
+fn meta_type_parameters_judge_their_declaration_options() {
+    let forms = Function::new("f", "function(parameters(d: type-definition(forms(literal))); returns(string))");
+    assert_eq!(forms.received(&[json!("literal(a)")]), [json!("literal(a)")]);
+    forms.rejected(&[json!("enum(a, b)")]);
+    let claim = Function::new(
+        "g",
+        "function(parameters(s: schema(mapping; property(kind, type-definition(declared-required)))); returns(string))",
+    );
+    let declared = json!({ "kind": "literal(a; required)" });
+    assert_eq!(claim.received(std::slice::from_ref(&declared)), [declared]);
+    claim.rejected(&[json!({ "kind": "literal(a)" })]);
+    claim.rejected(&[json!("./a.yaml")]);
+}
+
+#[test]
 fn any_without_null_rejects_null_at_a_parameter() {
     let f = Function::new("f", "function(parameters(x: any); returns(boolean))");
     f.rejected(&[Value::Null]);
@@ -722,7 +750,7 @@ fn def(text: &str) -> PropertyDef {
     parse_type_definition("p", text).expect("parses")
 }
 
-fn bare(text: &str) -> darkmatter::markdown::coercion::Shape {
+fn bare(text: &str) -> simplified_schema::coercion::Shape {
     shape_from_property_def(&def(text), &NoNamedTypes).expect("translates")
 }
 

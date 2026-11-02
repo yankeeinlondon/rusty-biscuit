@@ -65,7 +65,8 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use darkmatter::markdown::schemas::completion::{
     AlternativeMatcher, DefinitionLookup, alternative_fingerprint,
 };
-use darkmatter::markdown::schemas::{PropertyAtom, PropertyDef, SchemaShape, effective_property_shape};
+use darkmatter::markdown::schemas::effective_property_shape;
+use simplified_schema::{PropertyAtom, PropertyDef, SchemaShape};
 use std::fmt::Write as _;
 use std::hash::Hasher as _;
 use serde_json::Value;
@@ -119,6 +120,10 @@ pub(crate) struct AnalysisIdentity {
     pub schema_key: Option<u64>,
     pub bundle: Option<Arc<SchemaBundle>>,
     pub named_types: Arc<NamedTypeCatalog>,
+    /// Whether the tree is a whole YAML document, whose root shape is its
+    /// selected schema alone, with no Darkmatter base properties (and empty
+    /// when no schema was selected).
+    pub yaml_document: bool,
 }
 
 impl AnalysisIdentity {
@@ -134,6 +139,7 @@ impl AnalysisIdentity {
                 _ => false,
             }
             && Arc::ptr_eq(&self.named_types, &other.named_types)
+            && self.yaml_document == other.yaml_document
     }
 }
 
@@ -144,6 +150,12 @@ impl AnalysisIdentity {
 pub(crate) struct ScalarTyping {
     /// Whether any arm of the definition is a `file` type.
     pub(crate) file: bool,
+    /// Whether the definition, or for a sequence item the array property
+    /// holding it, declares `eager`.
+    pub(crate) eager: bool,
+    /// Whether an arm of the definition is not a `file` type, so the value
+    /// may be read as something other than a file reference.
+    pub(crate) mixed_arms: bool,
     pub(crate) expression: ExpressionTyping,
 }
 
@@ -161,7 +173,8 @@ pub(crate) enum ExpressionTyping {
 
 impl ScalarTyping {
     /// The outcome for an entry no definition reaches.
-    pub(crate) const UNRESOLVED: Self = Self { file: false, expression: ExpressionTyping::No };
+    pub(crate) const UNRESOLVED: Self =
+        Self { file: false, eager: false, mixed_arms: false, expression: ExpressionTyping::No };
 }
 
 /// Schema work shared by every snapshot of one overlay state and keyed by
@@ -319,14 +332,26 @@ impl FrontmatterAnalysis {
     /// properties, then each matched extension baseline, the matching trigger
     /// payloads, and the document's own `$schema`
     /// ([`EffectiveSchema::property_shape`](darkmatter::markdown::schemas::EffectiveSchema::property_shape)).
+    /// For a whole YAML document it is the selected schema's shape alone.
     pub(crate) fn root(&self) -> &SchemaShape {
+        let yaml_document = self.identity.as_ref().is_some_and(|identity| identity.yaml_document);
         match self.bundle() {
             Some(bundle) => self.root.get_or_init(|| {
                 work_counters::record_root_assembly();
+                if yaml_document {
+                    return simplified_schema::layered_property_shape(
+                        SchemaShape::default(),
+                        &[],
+                        &[],
+                        bundle.effective.simplified.as_ref(),
+                        &bundle.frontmatter_json,
+                    );
+                }
                 bundle
                     .effective
                     .property_shape(&bundle.extension_shapes, &bundle.frontmatter_json)
             }),
+            None if yaml_document => self.root.get_or_init(SchemaShape::default),
             None => baseline_root(),
         }
     }

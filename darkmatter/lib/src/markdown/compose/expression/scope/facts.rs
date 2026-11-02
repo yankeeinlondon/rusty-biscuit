@@ -25,9 +25,9 @@ pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity
     match guard {
         Expr::Paren(inner) => assume(scope, inner, polarity, origin),
         Expr::UnaryNot(inner) => assume(scope, inner, polarity.negate(), origin),
-        Expr::Fallback { primary, fallback } => {
+        Expr::LogicalOr { left, right } => {
             // As a condition, `a || b` is truthy exactly when `or(a, b)` is.
-            disjunction(scope, &[primary.as_ref(), fallback.as_ref()], polarity, origin)
+            disjunction(scope, &[left.as_ref(), right.as_ref()], polarity, origin)
         }
         Expr::Ternary {
             condition,

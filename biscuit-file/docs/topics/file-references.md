@@ -262,7 +262,7 @@ Note the difference from magic references: `@` *includes* HOME in its search
 list, but `~` is home-*pinned* with no other candidate.
 
 **User cache directory.** `biscuit_file::user_cache_dir()` (feature
-`file-reference`) returns the per-user cache directory, built on the same
+`file-reference-syntax`) returns the per-user cache directory, built on the same
 `home_dir()`. It is not part of reference resolution; it is the one place
 programs in this workspace ask where a persistent cache belongs.
 
@@ -1813,13 +1813,32 @@ match PortablePath::from_path("/Users/me/notes/x.md").with_ctx(&ctx).file_refere
 }
 ```
 
-## Feature Flag
+## Feature Flags
 
-File-reference support is gated behind the default `file-reference` feature,
-which enables repository discovery, recursive traversal,
-cross-platform home discovery, and URL classification.
+File-reference support comes in two layers. The default `file-reference`
+feature is everything on this page. A crate that only needs to *read* the
+grammar, without looking at the filesystem, can enable the smaller
+`file-reference-syntax` instead and skip `gix` and `walkdir`.
+
+| Feature | Adds | Dependencies |
+| ------- | ---- | ------------ |
+| `file-reference-syntax` | Parsing and classifying references (`FileReference::new`, `raw`, `class`, `payload`, `add_magic_path`, `add_vault`), `FileReferenceKind`/`Class`, `FileReferenceError` and `resolution_failure`, `ResolutionFailure`, `ResolutionCandidate`, `RootProvenance`, `PathPosition`, `MagicPathTier`, glob pattern parsing (`GlobReference::new`, `patterns`, `with_file_name_view`, `escape`, `GlobReferenceError`), `FileResolutionContext` and its builders and `validate`, `PathIdentity`, `RelativeRoute`, `PortabilityPreference`, `IntentForms`, `home_dir`, `user_cache_dir`, `capture_env` | `globset`, `url` |
+| `file-reference` | Everything above, plus every `resolve*`, `candidate_plan*`, `complete_partial*`, and `validate_*_candidate` method, `DetailedResolution` and its probe types, `PartialCompletion`, `Resolved`, `FileResolutionContext::magic_search_roots`, glob listing and matching (`list_files`, `take_first`, `matches`, `lists_file`, `matches_without_context`, `roots`, `prepare`, `GlobListing`, `SkippedEntry`), `PortablePath` and its diagnostics, `find_git_root`, and `FileReferenceError::Git` | `gix`, `walkdir` |
 
 ```toml
 [dependencies]
+# Full resolution
 biscuit-file = { version = "0.1", default-features = false, features = ["file-reference"] }
+
+# Grammar only: parse and classify references and glob patterns
+biscuit-file = { version = "0.1", default-features = false, features = ["file-reference-syntax"] }
+```
+
+```rust
+use biscuit_file::{FileReference, FileReferenceKind, GlobReference};
+
+// Both compile with only `file-reference-syntax`.
+let reference = FileReference::new("@docs/spec.md").unwrap();
+assert_eq!(reference.class().kind, FileReferenceKind::Magic);
+assert!(GlobReference::new(["src/[*.rs"]).is_err());
 ```

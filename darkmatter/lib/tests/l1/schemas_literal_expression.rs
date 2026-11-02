@@ -3,20 +3,18 @@
 //! read-only document validation across the two type keywords.
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::{parse, parse_condition};
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, ValidationReport,
-    coerce::coerce_frontmatter,
-    parse_yaml_schema,
-    simplified::{grammar::parse_type_expr, serialize_property_atom},
-    to_json_schema,
+use darkmatter::markdown::compose::expression::parse;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::coerce::coerce_frontmatter;
+use simplified_schema::{
+    parse_yaml_schema, simplified::{grammar::parse_type_expr, serialize_property_atom}, to_json_schema,
 };
 use serde_json::Value;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /// Parse a single type-expression string as the value of property `prop`.
-fn atom(input: &str) -> Result<darkmatter::markdown::schemas::PropertyAtom, String> {
+fn atom(input: &str) -> Result<simplified_schema::PropertyAtom, String> {
     parse_type_expr("prop", input).map_err(|e| e.to_string())
 }
 
@@ -471,14 +469,14 @@ fn expression_compiles_to_string_with_format() {
 }
 
 #[test]
-fn expression_accepts_either_dialect() {
-    // Condition-dialect `&&` must be accepted by bare `expression` (Q2).
+fn expression_accepts_logical_operators() {
+    // `&&` and `||` are accepted by bare `expression` (Q2).
     let report = validate(
         "---\n$schema:\n  when: expression\nwhen: 'is_agent() && os == \"macos\"'\n---\nbody\n",
     );
     assert!(
         report.valid,
-        "either-dialect expression must validate: {:?}",
+        "an expression with logical operators must validate: {:?}",
         report.problems
     );
 }
@@ -578,15 +576,13 @@ fn expression_pending_shell_value_deferred() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Feature B — condition-mode parse superset (Phase 3)  [AC 5]
+// Feature B — one grammar for every expression surface  [AC 5]
 // ══════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn value_dialect_is_condition_parse_superset() {
-    // The `expression` format is implemented as a single condition-mode parse.
-    // For "either dialect" to be sound, every value-dialect-valid string must
-    // also condition-parse (the condition dialect adds `&&` and re-lowers `||`,
-    // so it is a parse superset). This regression pins that property.
+fn expression_format_accepts_every_value_expression() {
+    // `||` and `&&` mean the same thing on every surface, so the `expression`
+    // format accepts each value expression exactly as `{{ }}` parses it.
     const CORPUS: &[&str] = &[
         "name",
         "ctx.os",
@@ -597,20 +593,11 @@ fn value_dialect_is_condition_parse_superset() {
         "file_exists(\"README.md\")",
         "length(tags)",
     ];
-    let mut value_dialect_valid = 0usize;
     for &expr in CORPUS {
-        if parse(expr).is_ok() {
-            value_dialect_valid += 1;
-            assert!(
-                parse_condition(expr).is_ok(),
-                "value-dialect-valid `{expr}` must also parse in condition mode",
-            );
-        }
+        assert!(parse(expr).is_ok(), "`{expr}` must parse");
+        let report = validate(&format!("---\n$schema:\n  when: expression\nwhen: '{expr}'\n---\nbody\n"));
+        assert!(report.valid, "`{expr}` must validate as `expression`: {:?}", report.problems);
     }
-    assert!(
-        value_dialect_valid >= 4,
-        "corpus should exercise several value-dialect expressions, got {value_dialect_valid}",
-    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -725,7 +712,7 @@ fn literal_large_integer_frontmatter_value_must_be_exact() {
     for value in LARGE_INT_CASES
         .iter()
         .flat_map(|(lit, neighbor)| [*lit, *neighbor])
-        .filter(|value| darkmatter::markdown::numeric::admit_number_spelling(value).is_err())
+        .filter(|value| simplified_schema::numeric::admit_number_spelling(value).is_err())
     {
         let error = Markdown::try_from_content(format!("---\nversion: {value}\n---\nbody\n"))
             .expect_err("an inexact native integer must not load");
@@ -775,9 +762,8 @@ fn trigger_matcher_large_integer_literal_is_exact() {
     // schemas. A required literal gate must accept the exact large integer and
     // reject its f64-colliding off-by-one neighbor.
     use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
-    use darkmatter::markdown::schemas::{
-        Constraint, MatchExpr, PropertyAtom, SimplifiedType, TypeExpr,
-    };
+    use darkmatter::markdown::schemas::MatchExpr;
+use simplified_schema::{Constraint, PropertyAtom, SimplifiedType, TypeExpr};
 
     fn version_frontmatter(value: &Value) -> Value {
         let mut map = serde_json::Map::new();

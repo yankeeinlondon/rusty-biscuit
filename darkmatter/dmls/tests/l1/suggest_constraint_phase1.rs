@@ -523,11 +523,13 @@ fn suggest_phase5_malformed_tagged_envelope_error() {
     fixture.initialize(suggestions_initialize_params(workspace.path()));
     open(&fixture, uri.as_str(), "yaml", "kind: schema\n");
 
+    // A `kind: schema` document with neither `$schema` nor `types` fails the
+    // `schema` kind's definition; that one located error is the envelope's.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
-    let malformed = diagnostics
-        .iter()
-        .find(|d| d["code"] == json!("dm.schema.document_malformed"))
-        .expect("malformed envelope diagnostic");
+    let [malformed] = diagnostics.as_slice() else {
+        panic!("one malformed envelope diagnostic: {diagnostics:#?}");
+    };
+    assert!(malformed["code"].as_str().is_some_and(|code| code.starts_with("dm.schema.")), "{malformed:#?}");
     assert_eq!(malformed["severity"], json!(1), "must be ERROR severity");
     assert_eq!(malformed["source"], json!("darkmatter.schema"));
 

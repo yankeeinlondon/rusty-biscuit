@@ -31,7 +31,7 @@ use claudine::events::{AgenticEvent, EventMeta};
 use claudine::invocation_context::{DocumentEnvironment, InvocationContext};
 use claudine::provider::Provider;
 use darkmatter::markdown::compose::RequestSnapshot;
-use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse_condition};
+use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
@@ -262,7 +262,7 @@ fn c5_loop_condition_passes(sandbox: &Sandbox) {
     }
     // The parse alone, which is the part a retained tree removes.
     let parse = measure(101, || {
-        parse_condition("loop.count >= 1000000 || loop.last_exit_code != 0").expect("parses")
+        parse("loop.count >= 1000000 || loop.last_exit_code != 0").expect("parses")
     });
     report("C5", "one-parse", &parse);
     // The anchor: one pass of a trivial shell task is at least one process
@@ -382,7 +382,7 @@ fn a5_event_dispatch(sandbox: &Sandbox) {
             .map(|meta| {
                 let rendered = interpolate(A5_TEMPLATE, meta);
                 let lookup = LoopExpressionLookup::new(&frontmatter, &ambient, &context, &source);
-                let condition = parse_condition(A5_CONDITION).expect("parses");
+                let condition = parse(A5_CONDITION).expect("parses");
                 let value = evaluate(&condition, &lookup).expect("evaluates");
                 rendered.len() + usize::from(value == Value::Bool(true))
             })

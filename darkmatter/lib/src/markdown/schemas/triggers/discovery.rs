@@ -2,9 +2,9 @@
 //! registry.
 //!
 //! Trigger schemas live in the [schema roots](crate::markdown::schemas::roots):
-//! the document's package, package-area, and tree root `schemas/` folders,
-//! the `SCHEMAS_DIR` folder, and `~/schemas`, most local first. Folders
-//! between the document and those roots are not searched.
+//! the `SCHEMAS_DIR` folder, the document's package, package-area, and tree
+//! root `schemas/` folders, and `~/schemas`, in that order. Folders between
+//! the document and those roots are not searched.
 //!
 //! ## Discovery contract
 //!
@@ -44,15 +44,16 @@
 //! The user-facing contract is the "Repository Trigger Schemas" section of
 //! `darkmatter/docs/topics/schemas/definition.md`.
 
+use simplified_schema::{SchemaOrigin, SchemaOriginKind};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 
 use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
-use crate::markdown::schemas::errors::SchemaError;
+use simplified_schema::errors::SchemaError;
 use crate::markdown::schemas::roots::SchemaRoots;
-use crate::markdown::schemas::simplified::SchemaSourceId;
+use simplified_schema::simplified::SchemaSourceId;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
 use super::finding::InvalidTriggerFinding;
@@ -104,6 +105,50 @@ impl TriggerSource {
         match self {
             Self::File(path) => SchemaSourceId::File(path.clone()),
             Self::Embedded { bundle, name } => SchemaSourceId::Embedded(format!("{bundle}/{name}")),
+        }
+    }
+}
+
+/// The trigger side of a [`SchemaOrigin`]: building the origin of a
+/// trigger payload's property and recovering the declaring trigger from one.
+/// [`SchemaOrigin`] is the library's; these read Darkmatter's
+/// [`TriggerSource`], so they live here as an extension trait.
+pub trait TriggerOrigin: Sized {
+    /// A schema-trigger-payload origin carrying the envelope file path.
+    fn trigger(path: impl Into<PathBuf>) -> Self;
+
+    /// A schema-trigger-payload origin for the envelope at `source`.
+    fn for_trigger(source: &TriggerSource) -> Self;
+
+    /// The declaring trigger of a [`SchemaOriginKind::Trigger`] origin.
+    fn trigger_source(&self) -> Option<TriggerSource>;
+}
+
+impl TriggerOrigin for SchemaOrigin {
+    fn trigger(path: impl Into<PathBuf>) -> Self {
+        Self::for_trigger(&TriggerSource::File(path.into()))
+    }
+
+    fn for_trigger(source: &TriggerSource) -> Self {
+        Self::trigger_layer(source.source_id())
+    }
+
+    fn trigger_source(&self) -> Option<TriggerSource> {
+        if self.kind != SchemaOriginKind::Trigger {
+            return None;
+        }
+        match self.source.as_ref()? {
+            SchemaSourceId::File(path) => Some(TriggerSource::File(path.clone())),
+            // Bundle names are one path segment, so the first `/` splits
+            // `{bundle}/{name}` unambiguously.
+            SchemaSourceId::Embedded(virtual_path) => {
+                let (bundle, name) = virtual_path.split_once('/')?;
+                Some(TriggerSource::Embedded {
+                    bundle: bundle.to_string(),
+                    name: name.to_string(),
+                })
+            }
+            SchemaSourceId::InlineDocument => None,
         }
     }
 }
@@ -449,10 +494,21 @@ pub trait SchemaRootSource {
     ///
     /// [`SchemaError::Io`] naming `path` when it cannot be read as UTF-8 text.
     fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError>;
+
+    /// Files the source holds directly inside `root`, a schema root whose
+    /// folder does not exist on disk (an editor's unsaved definitions there),
+    /// in [`enumerate_root_files`] order. [`KindRegistry`] discovery reads
+    /// them as it reads a searched root's files; trigger discovery does not.
+    /// None by default.
+    ///
+    /// [`KindRegistry`]: crate::markdown::schemas::KindRegistry
+    fn absent_root_files(&mut self, _root: &Path) -> Vec<PathBuf> {
+        Vec::new()
+    }
 }
 
 /// The filesystem [`SchemaRootSource`] that [`scan`] uses.
-struct FilesystemRoots;
+pub(crate) struct FilesystemRoots;
 
 impl SchemaRootSource for FilesystemRoots {
     fn root_files(&mut self, root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
@@ -623,7 +679,7 @@ pub fn scan_with_source(
     bundles: &[EmbeddedSchemaBundle],
     source: &mut dyn SchemaRootSource,
 ) -> Result<TriggerRegistry, SchemaError> {
-    let _discover = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Discover);
+    let _discover = simplified_schema::timings::stage(simplified_schema::ValidationStage::Discover);
     crate::note_work!(TriggerDiscovery);
     let roots = SchemaRoots::for_document(context)?;
 
@@ -664,7 +720,8 @@ pub fn scan_with_source(
             Ok(None) => continue,
             Ok(Some(envelope)) => envelope,
             Err(cause) => {
-                findings.push(InvalidTriggerFinding::new(trigger_source, cause));
+                let cause = super::envelope::locate_trigger_error(cause, &content);
+                findings.push(InvalidTriggerFinding::new(trigger_source, cause).located_in(&content));
                 continue;
             }
         };
@@ -674,7 +731,7 @@ pub fn scan_with_source(
             pattern_cwd: pattern_cwd.to_path_buf(),
             bundle: None,
         };
-        let (payload, observed) = crate::markdown::schemas::resolve::observed::collect(|| {
+        let (payload, observed) = simplified_schema::resolve::observed::collect(|| {
             super::assemble::resolve_trigger_payload(&trigger, roots.search_paths(), context)
         });
         match payload {
@@ -709,7 +766,7 @@ pub fn scan_with_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::errors::SchemaError;
+    use simplified_schema::errors::SchemaError;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1341,6 +1398,7 @@ mod tests {
             path: PathBuf::from("/repo/schemas/bad.trigger.yaml"),
             source: Box::new(SchemaError::TriggerMatch {
                 message: "missing match key".into(),
+                span: None,
             }),
         };
         let msg = err.to_string();

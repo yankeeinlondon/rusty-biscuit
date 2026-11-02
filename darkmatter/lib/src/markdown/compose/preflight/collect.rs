@@ -2000,9 +2000,9 @@ fn visit_calls_in_scope(expression: &Expr, locals: &[&str], visit: &mut impl FnM
         | Expr::UnaryMinus(inner)
         | Expr::Paren(inner)
         | Expr::MemberAccess { base: inner, .. } => visit_calls_in_scope(inner, locals, visit),
-        Expr::Fallback { primary, fallback } => {
-            visit_calls_in_scope(primary, locals, visit);
-            visit_calls_in_scope(fallback, locals, visit);
+        Expr::LogicalOr { left, right } => {
+            visit_calls_in_scope(left, locals, visit);
+            visit_calls_in_scope(right, locals, visit);
         }
         Expr::Ternary {
             condition,

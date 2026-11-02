@@ -41,7 +41,7 @@ metrics = { version = "0.24", optional = true }
 rayon = "1.11.0"
 regex = "1.11"
 reqwest = { version = "0.13", features = ["json", "blocking"], default-features = false, optional = true }
-schematic-schema = { path = "../../schematic/schema" }
+schematic-schema = { path = "../../schematic/schema", optional = true }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
@@ -59,7 +59,7 @@ default = []
 bench-internals = []
 metrics = ["dep:metrics"]
 network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls", "biscuit-file/fetch"]
-remote = ["network"]
+remote = ["network", "dep:schematic-schema"]
 
 [target.'cfg(unix)'.dependencies]
 # Datagram ICMP sockets for `network::icmp`.
@@ -85,6 +85,8 @@ windows = { version = "0.62", features = [
     "Win32_System_Environment",
     "Win32_System_IO",
     "Win32_System_JobObjects",
+    # `GetDynamicTimeZoneInformation` for the timezone name, in place of `tzutil`.
+    "Win32_System_Time",
     "Win32_Security_Authorization",
     # File identity (`FILE_ID_INFO`) for `filesystem::query` root and tree matching.
     "Win32_Storage_FileSystem",

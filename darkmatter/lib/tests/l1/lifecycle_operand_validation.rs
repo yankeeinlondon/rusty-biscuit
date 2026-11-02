@@ -6,8 +6,10 @@
 use std::cell::Cell;
 
 use darkmatter::lifecycle::executor::is_template_operand;
-use darkmatter::lifecycle::{OperandVerdict, validate_expression_function_operands, validate_operands, validate_operands_with};
-use darkmatter::markdown::coercion::PathSegment;
+use darkmatter::lifecycle::{
+    OperandVerdict, validate_expression_function_operands, validate_operands, validate_operands_with,
+};
+use simplified_schema::coercion::PathSegment;
 use darkmatter::markdown::compose::expression::call_binding::{
     ArgumentProblem, CallBindingError, CallErrorKind, FunctionRegistration, OverloadSelection,
 };
@@ -215,7 +217,7 @@ fn validation_consults_only_the_deferral_predicate() {
 fn select_overload_reports_open_overloads_while_bind_call_with_stays_ambiguous() {
     let pr_list = function_registration("pr_list").unwrap();
     let args = [json!("{{ fm.count }}")];
-    let options = darkmatter::markdown::coercion::BindOptions {
+    let options = simplified_schema::coercion::BindOptions {
         defer: Some(&defer_templates),
         ..Default::default()
     };

@@ -5,9 +5,11 @@ use tracing::{debug, trace};
 use crate::file_reference::context::{
     FileResolutionContext, ResolutionContext, find_git_root, home_dir,
 };
-use crate::file_reference::error::FileReferenceError;
+use crate::file_reference::error::{FileReferenceError, classify_error};
+pub(crate) use crate::file_reference::lexical::normalize_components;
+use crate::file_reference::lexical::simplify_root;
 use crate::file_reference::parse;
-use crate::file_reference::portable::{PathIdentity, first_seen_by_identity, normalize_native};
+use crate::file_reference::portable::{PathIdentity, first_seen_by_identity};
 use crate::file_reference::{
     CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
     PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
@@ -291,51 +293,6 @@ fn kind_uses_repository_root(kind: &ReferenceKind) -> bool {
             | ReferenceKind::RepositoryRoot(_)
             | ReferenceKind::RepositoryScoped(_)
     )
-}
-
-impl FileReferenceError {
-    /// The [`ResolutionFailure`] class of this error.
-    ///
-    /// This is the same classification
-    /// [`DetailedResolution`](crate::file_reference::DetailedResolution) reports for a
-    /// failed outcome. It is never [`ResolutionFailure::NoMatch`], which is an
-    /// outcome without an error.
-    #[must_use]
-    pub fn resolution_failure(&self) -> ResolutionFailure {
-        classify_error(self)
-    }
-}
-
-/// Map a typed [`FileReferenceError`] onto its resolution-failure class.
-///
-/// The class must not be re-derived from the reference kind downstream (D8);
-/// permission/I/O failures in particular must stay distinct from `no_match`.
-fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
-    use FileReferenceError as E;
-    match error {
-        E::RemoteNotLocal(_) => ResolutionFailure::UnsupportedRemote,
-        #[cfg(feature = "url")]
-        E::InvalidUrl(_) => ResolutionFailure::UnsupportedRemote,
-        E::InvalidSyntax(_)
-        | E::ForeignAbsolutePath { .. }
-        | E::UnsupportedScheme { .. }
-        | E::RepositoryEscape { .. }
-        | E::BoundaryEscape { .. }
-        | E::RelativeTreeEscape { .. }
-        | E::RelativePath { .. } => ResolutionFailure::InvalidReference,
-        E::MissingEnvironmentVariable { .. }
-        | E::VaultNotConfigured
-        | E::MissingHomeContext
-        | E::OutsideRepository { .. }
-        | E::UnsupportedUserHome(_)
-        | E::RepositoryRootNotContainingSource { .. }
-        | E::CwdOutsideBaseDir { .. }
-        | E::RelativeContextDirectory { .. }
-        | E::BaseDirNotRepositoryRoot { .. }
-        | E::BareRepository
-        | E::Git(_) => ResolutionFailure::MissingContext,
-        E::Io { .. } | E::CurrentDirectory(_) => ResolutionFailure::Io,
-    }
 }
 
 /// The outcome of probing a single candidate path with a fallible metadata
@@ -831,24 +788,6 @@ fn magic_chain_inputs<'a>(
     }
 }
 
-/// Strip a Windows `\\?\` verbatim prefix from a search root. No-op elsewhere.
-///
-/// Roots arrive in whichever spelling the caller produced: `std::fs::canonicalize`
-/// yields a verbatim path, while `gix` worktree discovery and a home read from
-/// the environment usually yield the legacy form. Both spellings must be collapsed *before* anything is joined
-/// onto a root, because Win32 performs no path normalization under a verbatim
-/// prefix -- a reference's own `/` separators would stay literal filename
-/// characters and every probe would miss. Collapsing here also makes two
-/// spellings of one directory compare equal, which is what lets candidate
-/// dedupe fold them into a single entry.
-///
-/// [`dunce::simplified`] declines to strip when the legacy form would not be
-/// equivalent (reserved DOS names, over-long paths), so a genuinely
-/// verbatim-only path survives intact.
-fn simplify_root(root: &Path) -> &Path {
-    dunce::simplified(root)
-}
-
 /// Collect the ordered search roots for a reference kind, each tagged with its
 /// provenance. `repository_root` is the pre-resolved root (supplied or
 /// discovered once); kinds that do not anchor on it ignore it.
@@ -1305,22 +1244,6 @@ pub(crate) fn normalize_absolute(path: &Path, cwd: &Path) -> PathBuf {
     } else {
         normalize_components(&cwd.join(path))
     }
-}
-
-/// Collapse `.` and `..` by the shared [`PathIdentity`] rules without touching
-/// the filesystem, then reduce a Windows `\\?\` verbatim path to its legacy
-/// spelling.
-///
-/// Every lexical path comparison in resolution and context selection funnels
-/// through here, so an excess `..` at a root is dropped exactly as identity
-/// comparison drops it, and dot segments under `\\?\` stay literal names.
-/// Stripping the prefix is what lets a verbatim and a legacy spelling of one
-/// directory compare equal -- required for candidate dedupe, repository
-/// containment, and [`diff_paths`]' common-prefix walk. [`dunce::simplified`]
-/// keeps the prefix on a verbatim path that carries literal dot segments,
-/// because no legacy spelling names the same directory.
-pub(crate) fn normalize_components(path: &Path) -> PathBuf {
-    simplify_root(&normalize_native(path)).to_path_buf()
 }
 
 /// The containment rule a candidate is checked against.

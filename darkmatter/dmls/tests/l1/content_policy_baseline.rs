@@ -14,7 +14,7 @@ use crate::union_item_editor::{
 use std::path::{Path, PathBuf};
 
 use common::{LspFixture, LspWorkspace};
-use darkmatter::markdown::schemas::format::is_pending_expression_value;
+use simplified_schema::format::is_pending_expression_value;
 use dmls::context::RepositoryContexts;
 use dmls::overlay::SchemaOutcome;
 use dmls::{DmlsConfig, OverlayState};

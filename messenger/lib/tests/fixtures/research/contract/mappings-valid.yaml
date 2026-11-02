@@ -1,4 +1,3 @@
----
 # Reviewed implementation mappings: an accepted partial assessment and a
 # proposed, stale (`unassessed`) one, each scoped to an adapter and category
 # with xxh64 fingerprints. Criterion 32. Expect: valid.
@@ -58,4 +57,3 @@ assessments:
     status: proposed
     proposed_by: agent
   requires_messenger_update: false
----

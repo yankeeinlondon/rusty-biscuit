@@ -377,7 +377,7 @@ fn a_rejected_watcher_registration_falls_back_to_rescanning_on_save() {
         .iter()
         .filter_map(|watcher| watcher["globPattern"].as_str())
         .collect();
-    for glob in ["**/*.yaml", "**/*.yml", "**/.gitignore"] {
+    for glob in [dmls::workspace::watch::YAML_GLOB, dmls::workspace::watch::YML_GLOB, "**/.gitignore"] {
         assert!(globs.contains(&glob), "{glob} watched: {globs:?}");
     }
     fixture.respond(Response::new_err(registration.id, -32601, "watching is disabled".to_string()));

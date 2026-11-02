@@ -25,8 +25,8 @@ use super::resolve_ctx::{
     resolve_document_file_ref_shape, resolve_document_file_ref_target,
 };
 use crate::markdown::Markdown;
-use crate::markdown::coercion::ValueKind;
-use crate::markdown::numeric::{self, NumberTextError};
+use simplified_schema::coercion::ValueKind;
+use simplified_schema::numeric::{self, NumberTextError};
 use crate::markdown::schemas::DarkmatterSchemas;
 
 mod agentic_cli;
@@ -280,7 +280,7 @@ fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> 
 /// naming a parameter the catalog does not declare fails the registry.
 fn compile_binding(
     binding: &FunctionBinding,
-    overloads: Vec<crate::markdown::schemas::simplified::FunctionType>,
+    overloads: Vec<simplified_schema::simplified::FunctionType>,
     resolver: &dyn call_binding::TypeResolver,
 ) -> Result<FunctionRegistration, RegistryError> {
     let mut builder = FunctionRegistration::builder_from_types(binding.canonical, overloads);

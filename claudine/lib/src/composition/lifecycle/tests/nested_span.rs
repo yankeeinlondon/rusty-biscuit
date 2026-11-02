@@ -2,7 +2,7 @@
 
 use super::*;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::{ParseMode, lint_expression};
+use darkmatter::markdown::compose::expression::lint_expression;
 
 const REVIEW_SPEC_INLINE: &str = include_str!(
     "../../../../../cli/tests/fixtures/nested_span_regression/review-spec-inline.md"
@@ -61,7 +61,7 @@ fn incident_is_rejected_at_success_say_with_the_shared_rewrite() {
     assert_eq!(nested, "{{ctx.area}}");
 
     let say = frontmatter["success"]["say"].as_str().unwrap();
-    let expected = lint_expression(&inner_expression(say), ParseMode::Interpolation)[0]
+    let expected = lint_expression(&inner_expression(say))[0]
         .suggestion
         .clone();
     assert_eq!(suggestion, expected, "Claudine must carry Darkmatter's rewrite bytes");

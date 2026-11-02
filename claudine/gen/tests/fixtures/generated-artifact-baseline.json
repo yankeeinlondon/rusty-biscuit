@@ -2,7 +2,7 @@
   "algorithm": "xxh64",
   "seed": 0,
   "artifacts": [
-    { "path": "docs/providers/catalog.json", "hash": "15692712898038523258" },
+    { "path": "docs/providers/catalog.json", "hash": "13094780114341851802" },
     { "path": "lib/src/signals/generated.rs", "hash": "6641532667373100434" },
     { "path": "lib/src/model_catalog/families_generated.rs", "hash": "11704988274204864472" },
     { "path": "lib/src/stream/providers/vocabulary.rs", "hash": "537241315263662569" },

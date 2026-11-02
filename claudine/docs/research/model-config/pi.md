@@ -10,33 +10,40 @@ model_config_paths:
   - scope: user
     path: ~/.pi/agent/models.json
     format: json
-    notes: 'Primary file for adding custom cloud and local providers/models. Reloaded each time /model is opened; no restart needed. Observed on this host with an omlx provider entry using api: openai-completions.'
+    notes:
+      - 'Primary file for adding custom cloud and local providers/models. Reloaded each time /model is opened; no restart needed. Observed on this host with an omlx provider entry using api: openai-completions.'
   - scope: user
     path: ~/.pi/agent/settings.json
     format: json
-    notes: 'Global user settings. Pins defaultProvider and defaultModel. Observed on this host with defaultProvider: omlx and defaultModel: Qwen3.6-35B-A3B-oQ6.'
+    notes:
+      - 'Global user settings. Pins defaultProvider and defaultModel. Observed on this host with defaultProvider: omlx and defaultModel: Qwen3.6-35B-A3B-oQ6.'
   - scope: repo
     path: .pi/settings.json
     format: json
-    notes: 'Project-local settings that override global settings. Nested objects are merged. Subject to project trust flow on interactive startup.'
+    notes:
+      - 'Project-local settings that override global settings. Nested objects are merged. Subject to project trust flow on interactive startup.'
   - scope: user
     path: ~/.pi/agent/auth.json
     format: json
-    notes: 'Credential store for API keys and OAuth tokens. Created with 0600 permissions. Not a model-config file per se, but credentials stored here unlock models declared in models.json.'
+    notes:
+      - 'Credential store for API keys and OAuth tokens. Created with 0600 permissions. Not a model-config file per se, but credentials stored here unlock models declared in models.json.'
 
 api_standards:
   - standard: openai_compatible
     base_url_site: baseUrl in ~/.pi/agent/models.json (provider or model level)
     auth_site: apiKey in models.json, or /login/auth.json, or provider-specific env var such as OPENAI_API_KEY
-    notes: 'Covers api values openai-completions, openai-responses, azure-openai-responses, and openai-codex-responses. Most common path for local runners and proxies.'
+    notes:
+      - 'Covers api values openai-completions, openai-responses, azure-openai-responses, and openai-codex-responses. Most common path for local runners and proxies.'
   - standard: anthropic_compatible
     base_url_site: baseUrl in ~/.pi/agent/models.json
     auth_site: apiKey in models.json, or /login/auth.json, or ANTHROPIC_API_KEY
-    notes: 'Use api: anthropic-messages for Anthropic-compatible proxies or custom endpoints. Compat flags control eager tool streaming, cache retention, adaptive thinking, and empty signatures.'
+    notes:
+      - 'Use api: anthropic-messages for Anthropic-compatible proxies or custom endpoints. Compat flags control eager tool streaming, cache retention, adaptive thinking, and empty signatures.'
   - standard: bespoke
     base_url_site: baseUrl in ~/.pi/agent/models.json
     auth_site: apiKey in models.json, or /login/auth.json, or GEMINI_API_KEY
-    notes: 'Covers google-generative-ai, google-vertex, mistral-conversations, bedrock-converse-stream, and fully custom APIs implemented via an extension streamSimple function.'
+    notes:
+      - 'Covers google-generative-ai, google-vertex, mistral-conversations, bedrock-converse-stream, and fully custom APIs implemented via an extension streamSimple function.'
 
 metadata_overrides:
   - id
@@ -60,31 +67,37 @@ local_runners:
     integration: base_url_override
     standard: openai_compatible
     example: '{ "providers": { "ollama": { "baseUrl": "http://localhost:11434/v1", "api": "openai-completions", "apiKey": "ollama", "compat": { "supportsDeveloperRole": false, "supportsReasoningEffort": false }, "models": [{ "id": "llama3.1:8b" }] } } }'
-    notes: 'Ollama exposes both OpenAI- and Anthropic-compatible endpoints; Pi documentation examples use openai-completions. Use a dummy apiKey because Ollama ignores it.'
+    notes:
+      - 'Ollama exposes both OpenAI- and Anthropic-compatible endpoints; Pi documentation examples use openai-completions. Use a dummy apiKey because Ollama ignores it.'
   - runner: omlx
     integration: first_class
     standard: openai_compatible
     example: '{ "providers": { "omlx": { "baseUrl": "http://127.0.0.1:8000/v1", "api": "openai-completions", "apiKey": "VPZ-77XNJozqp4o", "authHeader": true, "models": [{ "id": "Qwen3.6-35B-A3B-oQ6", "name": "Qwen3.6-35B-A3B-oQ6", "reasoning": false, "input": ["text", "image"], "cost": {"input":0,"output":0,"cacheRead":0,"cacheWrite":0}, "contextWindow": 98304, "maxTokens": 98304 }] } } }'
-    notes: 'First-class `omlx launch pi` hook launches Pi configured against the running oMLX server; the example shows the manual equivalent observed in the host ~/.pi/agent/models.json. oMLX also exposes an Anthropic-compatible endpoint.'
+    notes:
+      - 'First-class `omlx launch pi` hook launches Pi configured against the running oMLX server; the example shows the manual equivalent observed in the host ~/.pi/agent/models.json. oMLX also exposes an Anthropic-compatible endpoint.'
   - runner: lmstudio
     integration: base_url_override
     standard: openai_compatible
     example: '{ "providers": { "lmstudio": { "baseUrl": "http://localhost:1234/v1", "api": "openai-completions", "apiKey": "lmstudio", "models": [{ "id": "qwen2.5-coder-32b-instruct" }] } } }'
-    notes: 'Routes through LM Studio OpenAI-compatible local server. LM Studio also exposes an Anthropic-compatible endpoint, so api: anthropic-messages with baseUrl http://localhost:1234 is also valid.'
+    notes:
+      - 'Routes through LM Studio OpenAI-compatible local server. LM Studio also exposes an Anthropic-compatible endpoint, so api: anthropic-messages with baseUrl http://localhost:1234 is also valid.'
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
     example: '{ "providers": { "llamacpp": { "baseUrl": "http://localhost:8080/v1", "api": "openai-completions", "apiKey": "llamacpp", "models": [{ "id": "llama-3-70b" }] } } }'
-    notes: 'Works via llama.cpp OpenAI-compatible HTTP server. Size/quantization tags are part of the model id string. Anthropic-compatible endpoint is also available since build b7187.'
+    notes:
+      - 'Works via llama.cpp OpenAI-compatible HTTP server. Size/quantization tags are part of the model id string. Anthropic-compatible endpoint is also available since build b7187.'
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
     example: '{ "providers": { "vllm": { "baseUrl": "http://localhost:8000/v1", "api": "openai-completions", "apiKey": "vllm", "compat": { "supportsDeveloperRole": false, "supportsReasoningEffort": false }, "models": [{ "id": "qwen2.5-72b" }] } } }'
-    notes: 'Use the /v1 OpenAI-compatible endpoint. vLLM also exposes an Anthropic-compatible endpoint. Compat flags are commonly required because vLLM does not support the developer role or reasoning_effort natively.'
+    notes:
+      - 'Use the /v1 OpenAI-compatible endpoint. vLLM also exposes an Anthropic-compatible endpoint. Compat flags are commonly required because vLLM does not support the developer role or reasoning_effort natively.'
   - runner: other
     integration: base_url_override
     standard: openai_compatible
-    notes: 'Any runner exposing an OpenAI-compatible, Anthropic-compatible, or other supported endpoint can be registered in models.json. For unsupported APIs, use a custom extension with streamSimple.'
+    notes:
+      - 'Any runner exposing an OpenAI-compatible, Anthropic-compatible, or other supported endpoint can be registered in models.json. For unsupported APIs, use a custom extension with streamSimple.'
 
 cloud_bridge:
   supported: true

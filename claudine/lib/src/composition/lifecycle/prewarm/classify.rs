@@ -249,7 +249,7 @@ fn contains_call(expr: &SpannedExpr) -> bool {
         SpannedExprKind::Binary { left, right, .. }
         | SpannedExprKind::Comparison { left, right, .. } => contains_call(left) || contains_call(right),
         SpannedExprKind::Index { base, index } => contains_call(base) || contains_call(index),
-        SpannedExprKind::Fallback { primary, fallback } => contains_call(primary) || contains_call(fallback),
+        SpannedExprKind::LogicalOr { left, right } => contains_call(left) || contains_call(right),
         SpannedExprKind::Ternary {
             condition,
             then_branch,
@@ -335,10 +335,7 @@ fn frontmatter_reads(expr: &SpannedExpr, view: &BindingView, reads: &mut Vec<Fro
         SpannedExprKind::Binary { left, right, .. }
         | SpannedExprKind::Comparison { left, right, .. }
         | SpannedExprKind::Index { base: left, index: right }
-        | SpannedExprKind::Fallback {
-            primary: left,
-            fallback: right,
-        } => {
+        | SpannedExprKind::LogicalOr { left, right } => {
             frontmatter_reads(left, view, reads);
             frontmatter_reads(right, view, reads);
         }

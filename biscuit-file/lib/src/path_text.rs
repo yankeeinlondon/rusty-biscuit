@@ -310,7 +310,7 @@ mod tests {
     /// handed back to the reference grammar, it is the grammar's explicit
     /// device-prefix error, never a panic or an accepted path.
     #[test]
-    #[cfg(feature = "file-reference")]
+    #[cfg(feature = "file-reference-syntax")]
     fn an_unsimplifiable_result_fed_back_as_a_reference_is_an_explicit_error() {
         let long_tail = "a".repeat(300);
         let over_max_path = format!(r"\\?\C:\repo\{long_tail}");

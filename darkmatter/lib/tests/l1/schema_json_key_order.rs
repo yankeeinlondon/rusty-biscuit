@@ -5,7 +5,8 @@
 //! annotation or `$schema` off a fragment must not reorder what remains.
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{parse_yaml_schema, resolve::resolve_yaml_schema, to_json_schema};
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::{parse_yaml_schema, to_json_schema};
 use serde_json::Value;
 
 fn keys(value: &Value) -> Vec<&str> {

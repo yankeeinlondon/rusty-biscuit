@@ -1887,6 +1887,7 @@ mod tests {
             perms.set_mode(0o644);
         }
         #[cfg(windows)]
+        #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
         {
             perms.set_readonly(false);
         }
@@ -1950,6 +1951,7 @@ mod tests {
             perms.set_mode(0o644);
         }
         #[cfg(windows)]
+        #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
         {
             perms.set_readonly(false);
         }
@@ -1999,6 +2001,7 @@ mod tests {
             perms.set_mode(0o644);
         }
         #[cfg(windows)]
+        #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
         {
             perms.set_readonly(false);
         }

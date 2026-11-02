@@ -160,6 +160,7 @@ pub enum RepoAction {
     UnstagedSourceCode(FileListArgs),
     DirtyFiles(FileListArgs),
     HasMergeConflict,
+    State,
     RecentCommits(RecentCommitsArgs),
     SourceCodeChanges(RecentCommitsArgs),
     DocumentationChanges(RecentCommitsArgs),
@@ -564,6 +565,9 @@ pub enum RepoSubcommand {
     /// Exit 0 if merge conflicts are detected, exit 1 otherwise
     #[command(name = "has-merge-conflict")]
     HasMergeConflict,
+    /// Content identity of the working tree: HEAD plus a hash of every changed
+    /// path. The same commit with the same uncommitted content has the same id.
+    State,
     /// Show recent commits (default: the last 10)
     #[command(name = "recent-commits")]
     RecentCommits(RecentCommitsArgs),

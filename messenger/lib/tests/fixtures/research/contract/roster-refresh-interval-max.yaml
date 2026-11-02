@@ -1,4 +1,3 @@
----
 # The largest accepted refresh intervals: 3660 days (ten 366-day years) for
 # the roster default and for a platform. Expect: valid.
 $schema: ../../../../../docs/platforms.schema.yaml
@@ -28,4 +27,3 @@ platforms:
     approved_by: maintainer
     approved_on: 2026-09-17
 excluded: []
----

@@ -252,7 +252,9 @@ stale, so the next need prepares it again.
 
 The schema registry is DMLS's in-memory copy of the schema files in every
 schema root it has searched. It answers "which trigger schemas apply to this
-document?" without touching disk. The code is in
+document?" without touching disk, and, for a YAML document, "which
+`kind: yaml-schema` definition does its `kind` select?" (see
+[YAML document kinds](#yaml-document-kinds)). The code is in
 [`overlay/registry.rs`](../../dmls/src/overlay/registry.rs) and
 [`overlay/mod.rs`](../../dmls/src/overlay/mod.rs). For what trigger schemas
 are and how they match, see
@@ -262,13 +264,13 @@ and [DMLS Schema Support](../topics/schemas/dmls-schema-support.md).
 ### Where schema files are found
 
 Each document has the five schema roots described in
-[Schema roots](../topics/schemas/definition.md#schema-roots), most local
-first:
+[Schema roots](../topics/schemas/definition.md#schema-roots), `SCHEMAS_DIR`
+first and then most local first:
 
-1. `{package}/schemas/`
-2. `{package area}/schemas/`
-3. `{file tree root}/schemas/` (the repository root in a repository)
-4. the folder `SCHEMAS_DIR` names
+1. the folder `SCHEMAS_DIR` names
+2. `{package}/schemas/`
+3. `{package area}/schemas/`
+4. `{file tree root}/schemas/` (the repository root in a repository)
 5. `~/schemas/`
 
 Only the **immediate** `.yaml` and `.yml` children of a root are read;
@@ -355,9 +357,11 @@ The [workspace pass line](#the-workspace-pass-line) counts reuses as
 
 Once a document's registry is ready, looking it up again lists no folder,
 reads no file, hashes nothing, and resolves no payload. DMLS prepares it
-again only when one of its inputs changes. Other parts of schema assembly,
-such as the document's own `$schema` file and its imports, are still checked
-for changes on each lookup.
+again only when one of its inputs changes. For a Markdown document, other
+parts of schema assembly, such as its own `$schema` file and its imports, are
+still checked for changes on each lookup; a YAML document's contract is
+prepared and invalidated like the registry (see
+[YAML document contracts](#yaml-document-contracts)).
 
 ### When the registry changes
 
@@ -366,7 +370,9 @@ for changes on each lookup.
 | `workspace/didChangeWatchedFiles` for a known file | re-read; its xxHash is compared with the recorded one, and only a changed file is reclassified and its scopes prepared again |
 | a file created or deleted in a searched root, or in a folder holding a payload, import, or example | the affected registries are prepared again (no hash to compare) |
 | a file or folder created, deleted, or replaced at a location payload resolution searched, or a folder created or deleted above one | the affected registries are prepared again, so a nearer file now wins (see the example below) |
-| `textDocument/didSave` of any `.yaml` or `.yml` file, open in the editor or not | the same as a watched change for that path |
+| `textDocument/didSave` of any `.yaml` or `.yml` file (any letter case), open in the editor or not | the same as a watched change for that path |
+| `textDocument/didOpen`, `didChange`, or `didClose` of a YAML file a [kind registry](#yaml-document-kinds) read (a definition or an import), or of a new file inside one of its roots or at a location its imports searched | that kind registry is prepared again, reading the open buffer (or, once it closes, the file); trigger registries ignore unsaved text |
+| `textDocument/didOpen`, `didChange`, or `didClose` of a YAML or JSON file a [YAML document contract](#yaml-document-contracts) read, or at a location it probed | that contract is prepared again, reading the open buffer (or, once it closes, the file) |
 | a server rescan (see below) | every registry is marked stale; each file is re-hashed on next use and keeps its class if unchanged |
 | a configuration change, or a watched `.dmls.toml`, that changes the effective configuration | every registry is marked stale |
 | a configuration notification that leaves the effective configuration as it was | no registry is marked stale and no workspace pass runs; an open document whose file-resolution context rebuilds differently (a package declared with no manifest event) is prepared again when it next needs its registry |
@@ -431,6 +437,75 @@ flowchart TD
 
 Unsaved edits to a schema file do not affect other documents. The registry
 reads disk, so a change applies after you save.
+
+### YAML document kinds
+
+A YAML document's registry also holds its **kind registry**: the shipped
+`kind: yaml-schema` definitions and every one directly inside the document's
+five schema roots, keyed by the kinds they claim. It is built in the same
+preparation, on the registry worker, from the same root contents, so a YAML
+document's first request waits for it like a Markdown document's waits for
+its triggers, and every later request reads it from memory. A Markdown
+document's registry, and a workspace scope's, prepare no kinds.
+
+Two things differ from the trigger registry:
+
+- **Open buffers count.** The kind registry reads every open YAML buffer
+  instead of its file: a definition, a file a definition imports (inside or
+  outside the schema roots), and a file that exists only in the editor. An
+  unsaved edit to `schemas/roster.yaml` or to the `schemas/types.yaml` it
+  imports changes how every open `kind: roster` document is judged at once,
+  and an unsaved new `schemas/roster.yaml` claims `roster` before it is
+  saved, even when the `schemas/` folder itself does not exist yet. Closing
+  a buffer unsaved goes back to the file, or, for a file never saved,
+  removes what it claimed. Each preparation records the hash of
+  the text it read for every root file and import; a buffer whose text
+  differs from that, or a new buffer directly inside one of the roots
+  (searched or not there yet) or at a location the definitions' imports
+  searched, marks the registry stale.
+- **Failures are recorded, never served stale.** A definition that fails,
+  two definitions claiming one kind, and an unreadable root are part of the
+  registry the preparation installs; a document whose `kind` they affect
+  gets the selection error, never the selection an earlier registry made.
+
+Definitions' imports are dependencies like a payload's, so editing one on
+disk prepares the registry again. A YAML document outside every workspace
+folder has no kind registry and selects from the shipped definitions only.
+
+### YAML document contracts
+
+The same worker job then prepares the document's **contract**: the schema
+its `kind` or root `$schema` selects, resolved (a referenced `$schema` file
+and its imports read) and compiled into validators. A request, or a
+diagnostics refresh, for the document waits for it the first time, as for the
+registry; building the document's results afterwards only checks the
+current data against the prepared contract, reading no file.
+
+The contract is reused while the document's **declaration** (its top-level
+`kind` and root `$schema`), its context, and its kind registry are
+unchanged. Editing only data reuses it:
+
+```yaml
+$schema: ./contract.yaml
+owner: ops        # editing this to `owner: [ops]` reads nothing and
+                  # compiles nothing; the type error appears at once
+```
+
+Changing `$schema` (or `kind`) prepares a new contract, and the old one is
+never used for the new declaration, even while the new one is being
+prepared. A `kind: schema` or `kind: yaml-schema` document depends on its
+whole text instead, so every edit of it is prepared on the worker: its checks
+resolve its own `Name@file` imports, which also serve its authoring state. A
+root `$schema` contract's `Name@file` imports are read with the contract, so
+hover and go-to-definition on them read no file either.
+
+A contract is prepared again when a file it read changes (a watched event, a
+save, or an open buffer's edit, compared by content hash), when a file
+appears or disappears at a location its `$schema` lookup or imports probed,
+on any change while it failed, and on a rescan, configuration, or manifest
+change. The folders it read from or probed are watched like a registry's.
+See [DMLS Schema Support](../topics/schemas/dmls-schema-support.md#yaml-documents)
+for what the document then reports.
 
 ### Watching schema folders
 
@@ -514,9 +589,11 @@ that root.
 
 - **Markdown**: files that match `workspace.include` (default `**/*.md` and
   `**/*.markdown`) and do not match `workspace.exclude`.
-- **YAML**: every `*.yaml` and `*.yml` file that does not match
-  `workspace.exclude`. `include` does not apply to YAML, so an empty
-  `include` lists no Markdown but still lists YAML.
+- **YAML**: every `.yaml` and `.yml` file, in any letter case (`ROSTER.YAML`
+  counts), that does not match `workspace.exclude`. `include` does not apply
+  to YAML, so an empty `include` lists no Markdown but still lists YAML. The
+  watched-file globs are case-insensitive to match: `**/*.[yY][aA][mM][lL]`
+  and `**/*.[yY][mM][lL]`.
 
 YAML entries never become documents in the link graph. See
 [DMLS Configuration](./configuration.md) for the `[workspace]` keys.

@@ -1,4 +1,3 @@
----
 # Eleven curated sources exceed the initial per-platform cap of 10 (criterion 27).
 # expect-problem: /platforms/0/curated_sources
 $schema: ../../../../../../docs/platforms.schema.yaml
@@ -97,4 +96,3 @@ platforms:
     approved_by: maintainer
     approved_on: *id001
 excluded: []
----

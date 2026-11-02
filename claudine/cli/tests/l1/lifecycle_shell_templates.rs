@@ -379,25 +379,34 @@ fn an_inline_proxy_target_audits_its_shape_and_reads_the_overlay() {
     assert!(std::fs::read_to_string(target).unwrap().contains("Agent-written body."));
 }
 
-#[test]
-fn a_persisted_broad_shape_keeps_the_current_owner_constraints() {
-    let source = |minimum| format!(
+const BROAD_SHAPE_WHITELIST: &str = "template argv-recorder {{ string }}\n";
+
+fn broad_shape_source(minimum: u32) -> String {
+    format!(
         "---\n$schema:\n    word: 'string(min({minimum}))'\nword: long-enough\nstart:\n    - set: {{ word: four }}\n    - shell: {{ command: \"argv-recorder {{{{ word }}}}\", no_error: true }}\n---\nBody.\n"
-    );
-    let document = Document::new(&source(3));
-    document.whitelist("template argv-recorder {{ string }}\n");
+    )
+}
+
+#[test]
+fn a_persisted_broad_shape_runs_while_the_owner_constraints_hold() {
+    let document = Document::new(&broad_shape_source(3));
+    document.whitelist(BROAD_SHAPE_WHITELIST);
     let first = document.run(&[]);
     assert!(first.success, "{}", first.stderr);
     assert_eq!(document.runs(), vec![argv(&["four"])]);
+}
 
-    std::fs::write(document.fixture.cwd().join("doc.md"), source(5)).unwrap();
+#[test]
+fn a_persisted_broad_shape_keeps_the_current_owner_constraints() {
+    let document = Document::new(&broad_shape_source(5));
+    document.whitelist(BROAD_SHAPE_WHITELIST);
     let second = document.run(&[]);
     assert!(!second.success, "{}", second.stderr);
     assert!(second.stderr.contains("refused before it ran"), "{}", second.stderr);
-    assert_eq!(document.runs(), vec![argv(&["four"])], "the changed constraint blocks a second spawn");
+    assert!(document.runs().is_empty(), "the changed constraint blocks the spawn");
     assert_eq!(
         std::fs::read_to_string(document.fixture.cwd().join(".darkmatter-shell-whitelist")).unwrap(),
-        "template argv-recorder {{ string }}\n"
+        BROAD_SHAPE_WHITELIST
     );
 }
 
@@ -466,20 +475,29 @@ macro_rules! native_lifecycle_redirect_case {
 native_lifecycle_redirect_case!(native_lifecycle_merge_then_null_keeps_the_original_stdout_destination, "2>&1 > /dev/null", true, false);
 native_lifecycle_redirect_case!(native_lifecycle_route_then_null_keeps_the_original_stderr_destination, ">&2 2> /dev/null", false, true);
 
-const QUOTED_EMPTY_LIFECYCLE: &str = r#"---
+/// The document both quoted-empty tests run. Its authored empty word is the
+/// host shell's: exact bytes run through `sh -c` on Unix but `cmd.exe` on
+/// native Windows, which has no single quotes and would pass `''` through
+/// as two characters. Both spellings share the exact key `""`.
+fn quoted_empty_lifecycle() -> String {
+    // YAML double-quoted: `\"\"` is the command text `""`.
+    let empty = if cfg!(windows) { r#"\"\""# } else { "''" };
+    r#"---
 commit_message: ""
 start:
-    - shell: "argv-recorder -m \"{{ commit_message }}\" -s ''"
+    - shell: "argv-recorder -m \"{{ commit_message }}\" -s EMPTY"
 ---
 Body.
-"#;
+"#
+    .replace("EMPTY", empty)
+}
 
-/// A lifecycle `shell` with a quoted empty word, authored (`''`) or a quoted
-/// hole filled with an empty string, runs as resolved bytes with each one an
+/// A lifecycle `shell` with a quoted empty word, authored or a quoted hole
+/// filled with an empty string, runs as resolved bytes with each one an
 /// empty argument, approved by the key that spells them `""`.
 #[test]
 fn a_lifecycle_exact_key_keeps_a_quoted_empty_argument() {
-    let document = Document::new(QUOTED_EMPTY_LIFECYCLE);
+    let document = Document::new(&quoted_empty_lifecycle());
     document.whitelist("exact argv-recorder -m \"\" -s \"\"\n");
 
     let outcome = document.run(&[]);
@@ -492,7 +510,7 @@ fn a_lifecycle_exact_key_keeps_a_quoted_empty_argument() {
 /// showing the exact command with its empty arguments, and nothing runs.
 #[test]
 fn a_lifecycle_exact_key_without_the_empty_argument_approves_nothing() {
-    let document = Document::new(QUOTED_EMPTY_LIFECYCLE);
+    let document = Document::new(&quoted_empty_lifecycle());
     document.whitelist("exact argv-recorder -m -s\n");
 
     let outcome = document.run(&[]);

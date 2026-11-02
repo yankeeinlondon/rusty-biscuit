@@ -3,12 +3,9 @@
 use std::fs;
 
 use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DarkmatterSchemas, ValidationProblemCode, darkmatter_base_json_schema,
-        resolve::resolve_schema_with_roots,
-    },
+    Markdown, schemas::{DarkmatterSchemas, darkmatter_base_json_schema, resolve::resolve_schema_with_roots},
 };
+use simplified_schema::ValidationProblemCode;
 use serde_json::{Value, json};
 
 fn property_contains(value: &Value, property: &str, key: &str) -> bool {
@@ -70,7 +67,7 @@ fn shipped_base_schema_preserves_all_resolver_accepted_declaration_forms() {
     .expect("write SimplifiedSchema fixture");
     fs::write(
         dir.path().join("raw.json"),
-        r#"{"type":"object","properties":{"title":{"type":"string"}}}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"string"}}}"#,
     )
     .expect("write raw JSON Schema fixture");
 
@@ -81,7 +78,7 @@ fn shipped_base_schema_preserves_all_resolver_accepted_declaration_forms() {
             "root union",
             json!(["./simplified.yaml", { "kind": "literal(review)" }]),
         ),
-        ("referenced raw JSON Schema", json!("./raw.json")),
+        ("referenced raw JSON Schema declaring its dialect", json!("./raw.json")),
     ] {
         let resolved = resolve_schema_with_roots(&declaration, dir.path(), &[], &biscuit_file::FileResolutionContext::new(dir.path()))
             .unwrap_or_else(|error| panic!("{form} must remain accepted: {error}"));

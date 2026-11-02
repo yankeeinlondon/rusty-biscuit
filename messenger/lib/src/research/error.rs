@@ -26,6 +26,10 @@ pub enum ResearchError {
     #[error("cannot parse the frontmatter of {path}: {message}")]
     Frontmatter { path: RepoPath, message: String },
 
+    /// A YAML contract file that is not one YAML mapping.
+    #[error("cannot parse {path}: {message}")]
+    Document { path: RepoPath, message: String },
+
     #[error("cannot resolve the schema of {path}: {message}")]
     SchemaResolution { path: RepoPath, message: String },
 }

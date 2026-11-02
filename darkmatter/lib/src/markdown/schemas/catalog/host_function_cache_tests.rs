@@ -16,14 +16,14 @@ use crate::markdown::compose::expression::{
     incomplete_host_calls, parse_spanned,
 };
 
-/// A repository whose tree root (`repo/schemas`) is searched before the
-/// `SCHEMAS_DIR` root (`external`).
+/// A repository whose `SCHEMAS_DIR` root (`external`, `earlier`) is searched
+/// before its tree root (`repo/schemas`, `later`).
 struct Roots {
     _dir: tempfile::TempDir,
     /// The canonical temp dir every path below is in.
     base: PathBuf,
-    tree: PathBuf,
-    external: PathBuf,
+    earlier: PathBuf,
+    later: PathBuf,
     context: biscuit_file::FileResolutionContext,
 }
 
@@ -38,7 +38,7 @@ fn roots() -> Roots {
     std::fs::create_dir_all(&external).expect("SCHEMAS_DIR root");
     let env = HashMap::from([("SCHEMAS_DIR".to_string(), external.to_string_lossy().into_owned())]);
     let context = biscuit_file::FileResolutionContext::from_snapshot(&repo, None, env).with_repository_root(&repo);
-    Roots { _dir: dir, base, tree, external, context }
+    Roots { _dir: dir, base, earlier: external, later: tree, context }
 }
 
 impl Roots {
@@ -126,7 +126,7 @@ fn greet_signatures() -> Vec<String> {
 #[test]
 fn a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog() {
     let roots = roots();
-    let path = roots.tree.join("greet.yaml");
+    let path = roots.earlier.join("greet.yaml");
     let first_text = host_catalog("greet", "name", "Greets.");
     write_with_facts(&path, &first_text);
     let facts = std::fs::read_to_string(facts_artifact_path(&path)).expect("the facts");
@@ -172,7 +172,7 @@ fn a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog() {
 #[test]
 fn an_artifact_only_change_replaces_the_entry_and_frees_the_old_catalog() {
     let roots = roots();
-    let path = roots.tree.join("greet.yaml");
+    let path = roots.earlier.join("greet.yaml");
     let text = host_catalog("greet", "name", "Greets.");
     write_with_facts(&path, &text);
     let probe = DiscoveryProbe::install();
@@ -201,7 +201,7 @@ fn an_artifact_only_change_replaces_the_entry_and_frees_the_old_catalog() {
 #[test]
 fn a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers() {
     let roots = roots();
-    let path = roots.tree.join("greet.yaml");
+    let path = roots.earlier.join("greet.yaml");
     write_with_facts(&path, &host_catalog("greet", "name", "Greets."));
     let probe = DiscoveryProbe::install();
 
@@ -245,7 +245,7 @@ fn a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers() {
 #[test]
 fn facts_transitions_classify_each_artifact_state_and_recover() {
     let roots = roots();
-    let path = roots.tree.join("greet.yaml");
+    let path = roots.earlier.join("greet.yaml");
     let text = host_catalog("greet", "name", "Greets.");
     write_with_facts(&path, &text);
     let facts_path = facts_artifact_path(&path);
@@ -299,7 +299,7 @@ fn facts_transitions_classify_each_artifact_state_and_recover() {
 #[test]
 fn a_held_set_and_guard_survive_replacement_with_their_own_analysis() {
     let roots = roots();
-    let path = roots.tree.join("greet.yaml");
+    let path = roots.earlier.join("greet.yaml");
     write_with_facts(&path, &host_catalog("greet", "name", "Greets."));
 
     let old = roots.only_set();
@@ -339,9 +339,9 @@ fn a_held_set_and_guard_survive_replacement_with_their_own_analysis() {
 #[test]
 fn distinct_paths_keep_independent_entries_in_discovery_order() {
     let roots = roots();
-    let alpha = roots.tree.join("alpha.yaml");
-    let beta = roots.tree.join("beta.yaml");
-    let shadowed = roots.external.join("alpha.yaml");
+    let alpha = roots.earlier.join("alpha.yaml");
+    let beta = roots.earlier.join("beta.yaml");
+    let shadowed = roots.later.join("alpha.yaml");
     write_with_facts(&alpha, &host_catalog("greet_alpha", "name", "Alpha."));
     write_with_facts(&beta, &host_catalog("greet_beta", "name", "Beta."));
     write_with_facts(&shadowed, &host_catalog("greet_shadowed", "name", "Shadowed."));

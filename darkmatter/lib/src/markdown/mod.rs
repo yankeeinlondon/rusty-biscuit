@@ -30,7 +30,6 @@
 pub mod block;
 pub mod cleanup;
 pub mod code_block;
-pub mod coercion;
 pub mod compose;
 pub mod delta;
 pub mod dsl;
@@ -43,9 +42,7 @@ pub mod inline;
 mod inline_html;
 pub mod language_grammar;
 pub mod literal_token;
-mod mapping_orders;
 pub mod normalize;
-pub mod numeric;
 pub mod output;
 pub mod reference;
 pub mod render_tree;
@@ -68,7 +65,7 @@ pub use hash::{
     SectionTuple,
 };
 pub use language_grammar::{LanguageGrammar, LanguageGrammarError};
-pub use mapping_orders::MappingOrders;
+pub use simplified_schema::MappingOrders;
 pub use normalize::{
     HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
     StructureIssueKind, StructureValidation, ViolationCorrection,

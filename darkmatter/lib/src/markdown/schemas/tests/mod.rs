@@ -7,16 +7,19 @@
 //! remaining tests exercise [`super`] validation, resolution, and
 //! effective-schema assembly.
 
+mod baseline_grammar;
 mod clean_quoting;
 mod clean_suggestions;
 #[path = "../../../../tests/content_policy_fixtures/mod.rs"]
 mod content_policy_fixtures;
 mod embedded_sources;
+mod host_file_formats;
 mod lazy_positions;
 mod positions;
 mod reset_process_caches;
 
 use super::*;
+use simplified_schema::{Constraint, SchemaOriginKind, to_json_schema};
 use crate::markdown::Markdown;
 
 fn md_with_schema(yaml_body: &str) -> Markdown {
@@ -52,55 +55,55 @@ fn no_schema_no_baseline_is_vacuously_valid() {
     assert!(report.advisories.is_empty());
 }
 
-#[test]
-fn bare_sidecar_advisory_reaches_every_validation_entry_point() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let schema_path = dir.path().join("schema.yaml");
-    std::fs::write(
-        &schema_path,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .expect("write schema");
-    let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\n");
-    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()));
-    let effective = api.effective_for(&md).unwrap().unwrap();
-    let input = serde_json::json!({});
-    let options = ValidationOptions::default();
-
-    let reports = [
-        api.validate(&md).unwrap(),
-        effective.validate(&input),
-        effective.validate_with_positions(&input, &PositionMap::new()),
-        effective.validate_raw(&input),
-        effective.validate_raw_with_positions(&input, &PositionMap::new()),
-        effective.validate_with_options(&input, &PositionMap::new(), &options),
-    ];
-
-    for report in reports {
-        assert!(report.valid, "raw JSON Schema fallback must remain valid");
-        assert!(report.problems.is_empty());
-        assert!(report.pending.is_empty());
-        assert_eq!(report.advisories.len(), 1);
-        let advisory = &report.advisories[0];
-        assert_eq!(advisory.source(), "darkmatter.schema");
-        assert_eq!(advisory.code(), "dm.schema.missing_simplified_envelope");
-        assert_eq!(advisory.path(), schema_path.as_path());
-        assert!(advisory.message().contains("root `$schema:` key"));
-        assert!(advisory.message().contains("`kind: schema` + `types:`"));
+/// Asserts `result` is the loader's refusal of `schema_path` for `reason`.
+fn assert_not_a_schema_document<T>(
+    result: Result<T, SchemaError>,
+    schema_path: &std::path::Path,
+    reason: simplified_schema::NotSchemaReason,
+) {
+    match result {
+        Err(SchemaError::NotASchemaDocument { path, reason: actual }) => {
+            assert_eq!(path, schema_path);
+            assert_eq!(actual, reason);
+        }
+        Err(other) => panic!("expected NotASchemaDocument({reason:?}), got {other:?}"),
+        Ok(_) => panic!("expected NotASchemaDocument({reason:?}), got Ok"),
     }
 }
 
+const BARE_SIDECAR: &str =
+    "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
+
 #[test]
-fn bare_sidecar_advisory_survives_baseline_and_reference_assembly() {
+fn bare_sidecar_is_rejected_by_validate_and_effective_for() {
     let dir = tempfile::tempdir().expect("tempdir");
     let schema_path = dir.path().join("schema.yaml");
-    std::fs::write(
+    std::fs::write(&schema_path, BARE_SIDECAR).expect("write schema");
+    let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\n");
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()));
+
+    assert_not_a_schema_document(
+        api.validate(&md),
         &schema_path,
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
-    )
-    .expect("write schema");
+        simplified_schema::NotSchemaReason::NoSchemaProperty,
+    );
+    assert_not_a_schema_document(
+        api.effective_for(&md),
+        &schema_path,
+        simplified_schema::NotSchemaReason::NoSchemaProperty,
+    );
+}
+
+// The loader no longer emits the `dm.schema.missing_simplified_envelope`
+// advisory, so carrying it through baseline assembly cannot be reached from a
+// file. This pins that a baseline does not mask the bare sidecar's rejection.
+#[test]
+fn bare_sidecar_is_rejected_under_a_baseline() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schema_path = dir.path().join("schema.yaml");
+    std::fs::write(&schema_path, BARE_SIDECAR).expect("write schema");
     let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: unchanged\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut properties = indexmap::IndexMap::new();
             properties.insert(
@@ -118,33 +121,34 @@ fn bare_sidecar_advisory_survives_baseline_and_reference_assembly() {
         ..Default::default()
     });
 
-    let report = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
+    let result = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .with_baseline(baseline)
         .unwrap()
-        .validate(&md)
-        .unwrap();
+        .validate(&md);
 
-    assert!(report.valid);
-    assert!(report.problems.is_empty());
-    assert_eq!(report.advisories.len(), 1);
-    assert_eq!(report.advisories[0].path(), schema_path.as_path());
+    assert_not_a_schema_document(
+        result,
+        &schema_path,
+        simplified_schema::NotSchemaReason::NoSchemaProperty,
+    );
 }
 
 #[test]
-fn excluded_bare_sidecar_shapes_remain_advisory_free_through_validation() {
+fn sidecar_shapes_without_a_schema_property_are_rejected_and_envelopes_load_advisory_free() {
+    use simplified_schema::NotSchemaReason::{NoSchemaProperty, TypesOnly};
     let fixtures = [
-        ("object schema", "type: object\nproperties:\n  title:\n    type: string\n"),
-        ("format keyword", "format: string\n"),
-        ("title keyword", "title: string(required)\n"),
-        ("comment keyword", "$comment: string\n"),
-        ("custom dollar vocabulary", "$custom: string\n"),
-        ("extension vocabulary", "x-custom: string\n"),
-        ("pure envelope", "$schema:\n  title: string(required)\n"),
-        ("kinded envelope", "kind: schema\ntypes:\n  title: string(required)\n"),
-        ("mixed native scalar", "title: string\ncount: 2\n"),
+        ("object schema", "type: object\nproperties:\n  title:\n    type: string\n", Some(NoSchemaProperty)),
+        ("format keyword", "format: string\n", Some(NoSchemaProperty)),
+        ("title keyword", "title: string(required)\n", Some(NoSchemaProperty)),
+        ("comment keyword", "$comment: string\n", Some(NoSchemaProperty)),
+        ("custom dollar vocabulary", "$custom: string\n", Some(NoSchemaProperty)),
+        ("extension vocabulary", "x-custom: string\n", Some(NoSchemaProperty)),
+        ("pure envelope", "$schema:\n  title: string(required)\n", None),
+        ("kinded envelope", "kind: schema\ntypes:\n  title: string(required)\n", Some(TypesOnly)),
+        ("mixed native scalar", "title: string\ncount: 2\n", Some(NoSchemaProperty)),
     ];
 
-    for (index, (label, body)) in fixtures.into_iter().enumerate() {
+    for (index, (label, body, rejection)) in fixtures.into_iter().enumerate() {
         let dir = tempfile::tempdir().expect("tempdir");
         let schema_path = dir.path().join(format!("schema-{index}.yaml"));
         std::fs::write(&schema_path, body).expect("write schema");
@@ -153,19 +157,31 @@ fn excluded_bare_sidecar_shapes_remain_advisory_free_through_validation() {
             &format!("$schema: ./schema-{index}.yaml\ntitle: hello\ncount: 2\n"),
         );
 
-        let report = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path())).validate(&md).unwrap();
-        assert!(
-            report.advisories.is_empty(),
-            "{label} unexpectedly produced {:?}",
-            report.advisories
-        );
+        let result = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path())).validate(&md);
+        match rejection {
+            Some(reason) => match result {
+                Err(SchemaError::NotASchemaDocument { path, reason: actual }) => {
+                    assert_eq!(path, schema_path, "{label}");
+                    assert_eq!(actual, reason, "{label}");
+                }
+                other => panic!("{label}: expected NotASchemaDocument({reason:?}), got {other:?}"),
+            },
+            None => {
+                let report = result.unwrap_or_else(|error| panic!("{label}: {error:?}"));
+                assert!(
+                    report.advisories.is_empty(),
+                    "{label} unexpectedly produced {:?}",
+                    report.advisories
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn baseline_applies_when_document_has_no_schema() {
     let md = md_with_schema("title: hi\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut m = indexmap::IndexMap::new();
             m.insert(
@@ -196,7 +212,7 @@ fn baseline_applies_when_document_has_no_schema() {
 #[test]
 fn baseline_merges_with_document_schema() {
     let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut m = indexmap::IndexMap::new();
             m.insert(
@@ -277,7 +293,7 @@ fn coerces_baseline_merged_field_without_document_schema() {
     // baseline. Coercion reads the post-merge json_schema, so it fires even
     // though the document's `simplified` AST never declares `enabled`.
     let md = md_with_schema("enabled: \"false\"\n");
-    let baseline = SimplifiedSchema::Single(SchemaShape {
+    let baseline = SchemaRoot::Single(SchemaShape {
         properties: {
             let mut m = indexmap::IndexMap::new();
             m.insert(
@@ -455,7 +471,7 @@ fn schema_reference_stays_document_relative_with_fallback() {
     // schema.yaml lives ONLY in the document dir.
     std::fs::write(
         doc_dir.path().join("schema.yaml"),
-        "title: string(required)\n",
+        "$schema:\n  title: string(required)\n",
     )
     .expect("write schema");
     let doc_path = doc_dir.path().join("doc.md");
@@ -487,7 +503,7 @@ fn root_union_schema_string_arm_stays_document_relative_with_fallback() {
     let fallback_dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(
         doc_dir.path().join("arm-a.yaml"),
-        "kind: string(required)\n",
+        "$schema:\n  kind: string(required)\n",
     )
     .expect("write arm-a");
     let doc_path = doc_dir.path().join("doc.md");
@@ -804,8 +820,8 @@ fn validate_root_union_eager_file_arm_does_not_mutate_input() {
 // cleanly (spec semantics point 1), while a wrongly-typed `ctx.today`
 // value fails type validation (point 3).
 
-/// Builds a baseline `SimplifiedSchema` from a YAML body.
-fn baseline_from_yaml(yaml_body: &str) -> SimplifiedSchema {
+/// Builds a baseline `SchemaRoot` from a YAML body.
+fn baseline_from_yaml(yaml_body: &str) -> SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_body).expect("yaml parse");
     super::simplified::parse_yaml_schema(&value).expect("baseline schema parse")
 }
@@ -887,7 +903,7 @@ fn baseline_generated_ctx_accepts_correctly_typed_value() {
 fn darkmatter_base_schema_returns_expected_properties() {
     let schema = super::darkmatter_base_schema();
     let shape = match schema {
-        super::SimplifiedSchema::Single(s) => s,
+        super::SchemaRoot::Single(s) => s,
         other => panic!("expected Single, got {other:?}"),
     };
     assert!(

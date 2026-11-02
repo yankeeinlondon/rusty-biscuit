@@ -16,15 +16,17 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::schemas::completion::{
     AlternativeKey, AlternativeSite, DefinitionLookup, alternatives_for_def_in,
 };
-use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
+use simplified_schema::resolve::SelectionOutcome;
+use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
-    SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    DecodedScalar, decode_plain_scalar_node, decode_scalar, locate_schema_declaration_cursor,
-    locate_schema_declaration_cursor_in_scalar, mapping_separator, locate_type_definition_cursor,
-    locate_type_definition_cursor_in_scalar, parse_property_definition, parse_schema_declaration,
-    schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
-    flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
+    block_constraint_descriptors, schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
+};
+use simplified_schema::{
+    Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
+    SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
+    locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar, mapping_separator,
+    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_property_definition,
+    parse_schema_declaration, flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
 use darkmatter::markdown::span::SourceSpan;
@@ -42,7 +44,9 @@ use crate::overlay::{
 use crate::overlay::FrontmatterAnalysis;
 use crate::overlay::analysis::{ArmAdmission, ExpressionTyping, ScalarTyping, baseline_root};
 use crate::overlay::named_types::AuthoredDeclaration;
-use crate::overlay::schema::{FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions, standalone_type_regions};
+use crate::overlay::schema::{
+    FrontmatterSchemaValue, MetaSchemaKind, NoDefinitions, semantic_type_regions, standalone_type_regions,
+};
 use crate::workspace::file_path_to_uri;
 
 /// Frontmatter/schema diagnostics (delegated to the diagnostics module).
@@ -364,10 +368,11 @@ fn meta_schema_kinds_for_line(
             }
         }
         SchemaAuthoringState::Frontmatter(values) => {
-            if key == "$schema" && ancestors.is_empty() {
+            let schema_reference = overlay.schema_key_is_reference();
+            if schema_reference && key == "$schema" && ancestors.is_empty() {
                 return Some(vec![MetaSchemaKind::Schema]);
             }
-            if ancestors.first().map(String::as_str) == Some("$schema") {
+            if schema_reference && ancestors.first().map(String::as_str) == Some("$schema") {
                 return if sequence_item && ancestors.len() == 1 {
                     Some(vec![MetaSchemaKind::Schema])
                 } else {
@@ -688,10 +693,10 @@ fn passive_namespace_names(ctx: &DocumentContext) -> BTreeSet<String> {
     names
 }
 
-fn collect_schema_property_names(schema: &SimplifiedSchema, names: &mut BTreeSet<String>) {
+fn collect_schema_property_names(schema: &SchemaRoot, names: &mut BTreeSet<String>) {
     match schema {
-        SimplifiedSchema::Single(shape) => names.extend(shape.properties.keys().cloned()),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => names.extend(shape.properties.keys().cloned()),
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(shape) = arm {
                     names.extend(shape.properties.keys().cloned());
@@ -751,6 +756,9 @@ fn nested_key_completions(
     partial: &str,
 ) -> Vec<CompletionItem> {
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
+    if let Some(items) = block_constraint_key_completions(ctx, ast, offset, line_start, indent, &ancestors, partial) {
+        return items;
+    }
     let ancestor_refs: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let segments = key_segments(&ancestor_refs);
     let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
@@ -762,6 +770,71 @@ fn nested_key_completions(
         return style_key_completions(ctx, offset, partial);
     }
     Vec::new()
+}
+
+/// The not-yet-present keys of a schema declaration's `$constraints:` mapping,
+/// from the catalog's [`block_constraint_descriptors`], or `None` when the
+/// cursor's mapping is not one. A declaration's root (or root-union arm)
+/// accepts only the object constraints; a property's object also accepts the
+/// presence markers.
+fn block_constraint_key_completions(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+    ancestors: &[String],
+    partial: &str,
+) -> Option<Vec<CompletionItem>> {
+    let overlay = ctx.overlay?;
+    let is_block = |path: &[String]| path.last().is_some_and(|key| key == "$constraints");
+    // An empty `$constraints:` holds null, so the tree places the line being
+    // authored in the enclosing mapping; the indentation still shows the
+    // block it opens.
+    let by_indent;
+    let ancestors = if is_block(ancestors) {
+        ancestors
+    } else {
+        by_indent = enclosing_path_by_indent(ctx.text, line_start, indent);
+        if !is_block(&by_indent) {
+            return None;
+        }
+        &by_indent
+    };
+    let (last, holder) = ancestors.split_last()?;
+    meta_schema_kinds_for_line(overlay, holder, last, false)?;
+    let on_root = match holder.split_last() {
+        Some((key, parent)) => meta_schema_kinds_for_line(overlay, parent, key, false)
+            .is_some_and(|kinds| kinds.contains(&MetaSchemaKind::Schema)),
+        None => false,
+    };
+    let present = present_child_keys(ast, ancestors);
+    let start = offset - partial.len();
+    Some(
+        block_constraint_descriptors()
+            .iter()
+            .filter(|descriptor| descriptor.on_root || !on_root)
+            .filter(|descriptor| descriptor.keyword.starts_with(partial) && !present.contains(&descriptor.keyword))
+            .filter_map(|descriptor| {
+                // A flag is only ever written `true`; a valued key leaves its
+                // value to the author.
+                let insert = if descriptor.form.ends_with(": true") {
+                    descriptor.form.to_string()
+                } else {
+                    format!("{}: ", descriptor.keyword)
+                };
+                item(
+                    ctx,
+                    start,
+                    offset,
+                    descriptor.keyword,
+                    &insert,
+                    CompletionItemKind::PROPERTY,
+                    Some(descriptor.description.to_string()),
+                )
+            })
+            .collect(),
+    )
 }
 
 /// A shape's not-yet-present property keys, filtered by `partial` and marked
@@ -1051,8 +1124,8 @@ pub(crate) fn expression_property_keys(ctx: &DocumentContext) -> Vec<String> {
     let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
     let schema = bundle.and_then(|bundle| bundle.effective.simplified.as_ref());
     let declared: Vec<String> = match schema {
-        Some(SimplifiedSchema::Single(document)) => document.properties.keys().cloned().collect(),
-        Some(SimplifiedSchema::Union(arms)) => merged_root_arm_shape(arms).properties.into_keys().collect(),
+        Some(SchemaRoot::Single(document)) => document.properties.keys().cloned().collect(),
+        Some(SchemaRoot::Union(arms)) => merged_root_arm_shape(arms).properties.into_keys().collect(),
         None => Vec::new(),
     };
     for name in declared {
@@ -1183,7 +1256,16 @@ fn classify_scalar<'p>(
             None => ExpressionTyping::Undecodable,
         }
     };
-    ScalarTyping { file: file_atom(def).is_some(), expression }
+    // A synthesized item definition drops the array's own constraints, so an
+    // item is eager when its array property is.
+    let item_of_eager_array = matches!(path.last(), Some(FmPathSegment::Index(_)))
+        && memo.def_at(&path[..path.len() - 1]).is_some_and(is_eager);
+    ScalarTyping {
+        file: file_atom(def).is_some(),
+        eager: is_eager(def) || item_of_eager_array,
+        mixed_arms: atoms_of(def).iter().any(|atom| !is_file(atom)),
+        expression,
+    }
 }
 
 /// The typing of the one scalar entry `index`, from the snapshot when any
@@ -1242,8 +1324,7 @@ pub(crate) fn expression_values<'c>(ctx: &DocumentContext<'c>) -> Vec<Expression
 }
 
 /// Hover on an Expression-typed frontmatter value, via the shared
-/// [`expressions::hover_markdown_condition`] authority (condition dialect, so
-/// `&&`/`||` values hover like any other expression). Fires only when the cursor
+/// [`expressions::hover_markdown`] authority. Fires only when the cursor
 /// is inside the value (a cursor on the key falls through to the schema hover,
 /// which describes the `expression` type itself). The value's own ternary and
 /// `&&`/`||` facts narrow it; no enclosing lifecycle or task `when` does.
@@ -1259,7 +1340,6 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, value: &Express
             |name: &str| expressions::host_global_hover(name, &host).or_else(|| schema_property_details(ctx, name));
         match event {
             Some(event) => expressions::hover_markdown_in_event(
-                expressions::parse_condition,
                 value.expression(),
                 expr_offset,
                 site,
@@ -1267,7 +1347,7 @@ fn expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, value: &Express
                 property,
                 &event,
             ),
-            None => expressions::hover_markdown_condition(value.expression(), expr_offset, site, scalar, property),
+            None => expressions::hover_markdown(value.expression(), expr_offset, site, scalar, property),
         }
     });
     markup_hover(ctx, value.expression_span(), markdown)
@@ -1287,7 +1367,6 @@ fn stack_expression_hover(ctx: &DocumentContext, ast: &FrontmatterAst, index: us
     let host = crate::providers::dsl::host_catalogs(ctx);
     let markdown = crate::providers::dsl::with_site_scope(ctx, None, |site| {
         expressions::hover_markdown_in_event(
-            expression.dialect.parser(),
             &expression.text,
             expr_offset,
             site,
@@ -1573,9 +1652,18 @@ fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
 
 // ── Hover ─────────────────────────────────────────────────────────────────
 
-/// Hover on a frontmatter key: schema type/constraints/default/description, or
-/// a `ctx.*` generated-key annotation.
+/// Hover in the frontmatter. A `$schema` string value explains the file it
+/// selects; a type definition in an inline schema describes the type; an
+/// Expression-typed value gets the expression hover; a static `file` value
+/// says where it resolves. Anywhere else, and on every key, the hover is the
+/// property's schema type/constraints/default/description, or a `ctx.*`
+/// generated-key annotation.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    // A `$schema` string or root-union string item is a file reference, not
+    // a type definition, so it is answered before the schema-authoring hover.
+    if let Some(hover) = schema_value_hover::schema_value_hover(ctx, offset) {
+        return Some(hover);
+    }
     if let Some(hover) = meta_schema_hover(ctx, offset) {
         return Some(hover);
     }
@@ -1588,14 +1676,16 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     // (parsed form + `ctx.*`/function catalog); a cursor on its key falls
     // through to the schema hover describing the `expression` type. Any other
     // scalar inside a lifecycle stack gets the hover of its own `{{ … }}` span
-    // or `when` guard. Only the cursor's scalar is typed.
+    // or `when` guard. A static value of a `file`-typed property then says
+    // where it resolves. Only the cursor's scalar is typed.
     if let Some(index) = cursor_scalar(ast, offset)
         && let Some(typing) = scalar_typing(ctx, index)
     {
         let hover = match expression_value(ast, index, typing) {
             Some(value) => expression_hover(ctx, ast, &value, offset),
             None => stack_expression_hover(ctx, ast, index, offset),
-        };
+        }
+        .or_else(|| file_value_hover::file_value_hover(ctx, ast, index, typing));
         if hover.is_some() {
             return hover;
         }
@@ -1798,7 +1888,9 @@ fn alphanumeric_hover_lines(atom: &PropertyAtom) -> Vec<String> {
     ]
 }
 
-/// Hover content for a schema-declared property, at any nesting depth.
+/// Hover content for a schema-declared property, at any nesting depth: on
+/// its key, and on a value no value hover (`$schema`, expression, `file`)
+/// answered.
 ///
 /// A scalar sequence item hovers as its item definition, labeled with its
 /// dotted path and ranged on the item value it describes.
@@ -2063,7 +2155,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
         }
         TypeExpr::InlineObject(_) => "Type: **object**".to_string(),
         TypeExpr::Tuple(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
-            let spelled = darkmatter::markdown::schemas::simplified::serialize_property_atom(&PropertyAtom {
+            let spelled = simplified_schema::simplified::serialize_property_atom(&PropertyAtom {
                 description: None,
                 ..atom.clone()
             });
@@ -2092,7 +2184,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
         && !described_by_alternatives
         && let Some(definition) = definitions.lookup_definition(key)
     {
-        let body = darkmatter::markdown::schemas::simplified::serialize_property_def(&definition.body);
+        let body = simplified_schema::simplified::serialize_property_def(&definition.body);
         lines.push(format!("`{}` is defined as: `{body}`", key.name));
     }
 
@@ -2147,7 +2239,8 @@ fn ctx_hover_markdown(dotted: &str, key: &str) -> String {
 // ── Navigation (definition + document links) ────────────────────────────────
 
 /// Definition on a named-type reference, a `$schema` file reference, or a
-/// `file(...)` value. Only the scalar under the cursor is typed and resolved.
+/// `file(...)` value. Only the `file` scalar under the cursor is typed and
+/// resolved; a `$schema` target is the overlay's selection.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if let Some(location) = named_references::definition(ctx, offset) {
         return vec![location];
@@ -2158,7 +2251,7 @@ pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if ctx.file_context().is_err() {
         return Vec::new();
     }
-    let schema = schema_target(ctx, ast).filter(|(span, _)| span.contains(&offset));
+    let schema = schema_targets(ctx, ast).into_iter().filter(|(span, _)| span.contains(&offset));
     let file = cursor_scalar(ast, offset)
         .and_then(|index| file_target(ctx, ast, index, scalar_typing(ctx, index)?));
     schema
@@ -2184,12 +2277,13 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 }
 
 /// The `(value_span, resolved_path)` navigation targets in the frontmatter:
-/// the `$schema` file reference plus every `file(...)`-typed scalar value,
+/// each `$schema` file reference plus every `file(...)`-typed scalar value,
 /// typed through the snapshot's scalar inventory.
 ///
-/// Each value resolves through the document's context to the existing file,
-/// else to where it would be created. A document without a context has no
-/// targets. Resolution is never cached: it reads the filesystem.
+/// Each value names the existing file, else where it would be created. A
+/// document without a context has no targets. A `$schema` target is the
+/// file the overlay selected for validation, cached with the schema; a
+/// `file` value resolves on every request, reading the filesystem.
 fn nav_targets(ctx: &DocumentContext) -> Vec<(SourceSpan, PathBuf)> {
     let Some(ast) = overlay_ast(ctx) else {
         return Vec::new();
@@ -2197,7 +2291,7 @@ fn nav_targets(ctx: &DocumentContext) -> Vec<(SourceSpan, PathBuf)> {
     if ctx.file_context().is_err() {
         return Vec::new();
     }
-    schema_target(ctx, ast)
+    schema_targets(ctx, ast)
         .into_iter()
         .chain(scalar_inventory(ctx).filter_map(|(index, typing)| file_target(ctx, ast, index, typing)))
         .collect()
@@ -2208,12 +2302,35 @@ fn navigation_path(ctx: &DocumentContext, value: &str) -> Option<PathBuf> {
     ctx.resolve_reference(value).and_then(|target| target.navigation_target().map(Path::to_path_buf))
 }
 
-/// The `$schema: ./file.yaml` target (an inline `{ ... }` mapping is not a
-/// file reference).
-fn schema_target(ctx: &DocumentContext, ast: &FrontmatterAst) -> Option<(SourceSpan, PathBuf)> {
-    let entry = ast.schema_entry().filter(|entry| entry.kind == FmValueKind::Scalar)?;
-    let value = entry.scalar.as_deref().filter(|value| looks_like_path(value))?;
-    Some((entry.value_span.clone(), navigation_path(ctx, value)?))
+/// The target of each `$schema` string reference (the scalar, or each item
+/// of a root union): the file the validator selects, else the path a missing
+/// reference would be created at. A sibling-only bare name links to its
+/// creation path, never to the sibling it does not name; a remote or
+/// unresolvable reference has no target.
+fn schema_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, PathBuf)> {
+    let Some(overlay) = ctx.overlay else {
+        return Vec::new();
+    };
+    overlay
+        .schema_references
+        .entries
+        .iter()
+        .filter_map(|fact| {
+            let entry = ast.entry_by_pointer(&fact.pointer)?;
+            if entry.scalar.as_deref() != Some(fact.reference.as_str()) {
+                return None;
+            }
+            let path = match &fact.selection.as_ref().ok()?.outcome {
+                SelectionOutcome::Found(path)
+                | SelectionOutcome::Missing { creation: Some(path), .. }
+                | SelectionOutcome::SiblingOnly { creation: path, .. } => path.clone(),
+                SelectionOutcome::Missing { creation: None, .. } | SelectionOutcome::Failed(_) => {
+                    return None;
+                }
+            };
+            Some((entry.value_span.clone(), path))
+        })
+        .collect()
 }
 
 /// The target of the `file(...)`-typed scalar entry `index`, at any depth:
@@ -3048,29 +3165,13 @@ fn is_sequence_item_line(text: &str, line_start: usize) -> bool {
     line == "-" || line.starts_with("- ")
 }
 
-/// Whether a scalar value is plausibly a local file path (not a URL or an
-/// obvious non-path token).
-///
-/// A dot/slash heuristic for callers with no schema type to trust — the
-/// `$schema` source reference, whose value is a `.yaml`/`.md`/`.json` file or an
-/// inline `{ ... }` mapping. A schema-confirmed `file(...)` value uses
-/// [`is_schema_file_value`] instead, which does not require a dot or slash.
-fn looks_like_path(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty()
-        && !value.contains("://")
-        && !value.starts_with('{')
-        && (value.contains('/') || value.contains('.'))
-}
-
 /// Whether a value the schema already types as `file(...)` is a navigable local
 /// reference.
 ///
 /// Once the effective schema confirms the `file` type, a bare extensionless
 /// filename (e.g. `LICENSE`, `Makefile`) is a valid relative reference — the
 /// same implicit-relative form `FileReference` accepts — so only a URL or an
-/// inline-object literal disqualifies it. The dot/slash heuristic in
-/// [`looks_like_path`] must not gate this path.
+/// inline-object literal disqualifies it; no dot/slash heuristic gates it.
 fn is_schema_file_value(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty() && !value.contains("://") && !value.starts_with('{')
@@ -3137,7 +3238,9 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Optio
     })
 }
 
+mod file_value_hover;
 mod named_references;
+mod schema_value_hover;
 
 #[cfg(test)]
 mod sequence_tests;
@@ -3316,11 +3419,11 @@ mod tests {
     }
 
     #[test]
-    fn condition_dialect_expression_value_hover_uses_condition_grammar() {
-        // The `expression` schema format validates with `parse_condition`; the
-        // value hover must parse the same dialect, so `||` lowers to a logical
-        // `or(...)` (not the value-dialect fallback) and the `is_empty` function
-        // call under the cursor is still enriched.
+    fn expression_value_hover_parses_logical_or() {
+        // The `expression` schema format and the value hover share one parser,
+        // so `||` stays a logical OR shown as authored (never lowered to an
+        // `or(...)` call) and the `is_empty` function call under the cursor is
+        // still enriched.
         let text = expression_doc(r#"when: 'is_empty(title) || is_string(title)'"#);
         with_ctx(&text, |ctx| {
             let offset = text.find("is_empty").unwrap() + 2;
@@ -3328,15 +3431,16 @@ mod tests {
             let HoverContents::Markup(MarkupContent { value, .. }) = hover.contents else {
                 panic!("markdown hover");
             };
-            assert!(value.contains("or("), "condition dialect lowers || to or(): {value}");
+            assert!(value.contains("is_empty(title) || is_string(title)"), "hover shows `||` as authored: {value}");
+            assert!(!value.contains("or("), "`||` is never lowered to or(): {value}");
             let is_empty = expressions::function_descriptor("is_empty").unwrap();
             assert!(value.contains(&expressions::format_function_block(is_empty)), "{value}");
         });
     }
 
     #[test]
-    fn condition_dialect_expression_value_completion_offers_catalog() {
-        // Completion is token-based and dialect-agnostic: a `&&`-containing value
+    fn logical_and_expression_value_completion_offers_catalog() {
+        // Completion is token-based: a `&&`-containing value
         // still offers `ctx.*` for the trailing token.
         let text = expression_doc(r#"when: 'is_agent() && ctx.'"#);
         with_ctx(&text, |ctx| {
@@ -4608,6 +4712,55 @@ mod tests {
     }
 
     #[test]
+    fn constraints_block_keys_come_from_the_catalog_by_placement() {
+        // A declaration root offers the object constraints not yet written.
+        let root = "---\n$schema:\n  title: string\n  $constraints:\n    min-keys: 1\n    \n---\n\nbody\n";
+        assert_eq!(top_level_labels_after(root, "min-keys: 1\n    "), ["max-keys", "uncounted-keys", "closed"]);
+        with_ctx(root, |ctx| {
+            let offset = root.find("min-keys: 1\n    ").unwrap() + "min-keys: 1\n    ".len();
+            let items = completion(ctx, offset);
+            let closed = items.iter().find(|item| item.label == "closed").expect("closed is offered");
+            let Some(CompletionTextEdit::Edit(edit)) = &closed.text_edit else {
+                panic!("a text edit: {closed:#?}")
+            };
+            assert_eq!(edit.new_text, "closed: true", "a flag is inserted with its only value");
+        });
+        let partial = "---\n$schema:\n  title: string\n  $constraints:\n    cl:\n---\n\nbody\n";
+        assert_eq!(top_level_labels_after(partial, "    cl"), ["closed"]);
+
+        // A property's object also takes the presence markers.
+        let nested = "---\n$schema:\n  addr:\n    street: string\n    $constraints:\n      \n---\n\nbody\n";
+        assert_eq!(
+            top_level_labels_after(nested, "$constraints:\n      "),
+            block_constraint_descriptors().iter().map(|descriptor| descriptor.keyword).collect::<Vec<_>>(),
+        );
+
+        // Data outside a schema declaration is not a constraints block.
+        let data = "---\ndata:\n  $constraints:\n    \n---\n\nbody\n";
+        let labels = top_level_labels_after(data, "$constraints:\n    ");
+        assert!(labels.iter().all(|label| label != "closed"), "{labels:?}");
+    }
+
+    #[test]
+    fn meta_type_constraint_lists_offer_their_declaration_options() {
+        for (declaration, offered, withheld) in [
+            ("type-definition(", ["forms", "declared-required", "non-null"], ["mapping", "property"]),
+            ("schema(", ["mapping", "property", "non-null"], ["forms", "declared-required"]),
+        ] {
+            let text = format!("---\n$schema:\n  p: {declaration}\n---\n\nbody\n");
+            let labels = top_level_labels_after(&text, declaration);
+            for keyword in offered {
+                assert!(labels.iter().any(|label| label == keyword), "{declaration} offers {keyword}: {labels:?}");
+            }
+            for keyword in withheld {
+                assert!(labels.iter().all(|label| label != keyword), "{declaration} withholds {keyword}: {labels:?}");
+            }
+        }
+        let labels = top_level_labels_after("---\n$schema:\n  p: unknown(\n---\n\nbody\n", "unknown(");
+        assert!(labels.iter().all(|label| label != "non-null"), "{labels:?}");
+    }
+
+    #[test]
     fn meta_schema_completion_catalog_is_descriptor_driven() {
         let text = "---\n$schema:\n  title: type-definition\ntitle: \n---\n\nbody\n";
         with_ctx(text, |ctx| {
@@ -4826,7 +4979,7 @@ mod tests {
 
     #[test]
     fn test_base_style_schema_exposes_nested_completion_shapes() {
-        let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+        let simplified_schema::SchemaRoot::Single(root) =
             darkmatter::markdown::schemas::darkmatter_base_schema()
         else {
             panic!("base schema must be a single object shape");
@@ -4900,15 +5053,6 @@ mod tests {
         // Unknown tails and the `ctx` container keep their generic annotations.
         assert!(ctx_hover_markdown("ctx.nope", "nope").contains("Darkmatter-generated"));
         assert!(ctx_hover_markdown("ctx", "ctx").starts_with("**`ctx`**"));
-    }
-
-    #[test]
-    fn test_looks_like_path() {
-        assert!(looks_like_path("./schema.yaml"));
-        assert!(looks_like_path("dir/file.md"));
-        assert!(!looks_like_path("https://example.com/s.yaml"));
-        assert!(!looks_like_path("plain"));
-        assert!(!looks_like_path("{ inline: true }"));
     }
 
     #[test]

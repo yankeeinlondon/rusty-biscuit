@@ -63,10 +63,10 @@ use serde_json::Value;
 
 pub use artifact::{FACTS_ARTIFACT_FORMAT_VERSION, FactsArtifact, NON_NULL_FACT_TYPE, facts_artifact_path};
 
-use super::ast::{SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{SpannedExpr, SpannedExprKind};
 use super::call_binding::{BoundCall, EvaluationMode, FunctionRegistration, RegistrationBuilder, RegistrationError};
 use super::catalog::{CatalogError, FunctionCatalog, load_catalog};
-use crate::markdown::schemas::{LocatedRelated, locate_standalone_definition_failure};
+use simplified_schema::{LocatedRelated, locate_standalone_definition_failure};
 use crate::markdown::span::SourceSpan;
 
 /// The diagnostic code for a call to a host function whose analysis

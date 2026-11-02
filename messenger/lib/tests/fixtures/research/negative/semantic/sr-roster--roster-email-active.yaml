@@ -1,4 +1,3 @@
----
 # Email pulled into the active fleet under a chat platform entry and not listed as excluded (criterion 1).
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-ROSTER
@@ -35,4 +34,3 @@ platforms:
     approved_by: maintainer
     approved_on: *id001
 excluded: []
----

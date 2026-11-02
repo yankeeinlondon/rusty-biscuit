@@ -98,6 +98,15 @@ retries = 0
 # and finish in 5–10s isolated but get squeezed past 15s under heavy parallel
 # load. 30s catches real hangs without killing healthy-but-contended tests.
 slow-timeout = { period = "5s", terminate-after = 6 }
+# This period is also the slow-test log's threshold for every profile and every
+# source (`scripts/slow-tests.rs`), so changing it changes what gets recorded.
+#
+# Repeat every SLOW test in the final summary, where a long run's scrollback
+# cannot hide it.
+final-status-level = "slow"
+# Every run leaves a report, so the canonical recipes can record its slow tests
+# (`_record_slow_tests` in `just/devops.just`) whichever profile ran.
+junit = { path = "test-results.xml" }
 # Fail any test that leaves a child process holding its stdout/stderr open when
 # it exits (nextest's `LEAK` status). `result = "fail"` stays: a genuinely
 # leaked child is a hard failure everywhere.
@@ -286,6 +295,7 @@ retries = 0
 # `retries = 0` deliberately stays. A timeout must not be retried into looking
 # healthy — it should either fit the ceiling or be reported.
 slow-timeout = { period = "30s", terminate-after = 3 }
+final-status-level = "slow"
 # Leaked child processes are a hard failure in CI as well. The 30s observation
 # window matches the default-profile policy above; `result = "fail"` keeps
 # genuine leaks fatal without turning timing-sensitive pipe drainage into a

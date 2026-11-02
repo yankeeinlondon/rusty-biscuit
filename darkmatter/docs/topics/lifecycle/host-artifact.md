@@ -38,8 +38,8 @@ frontmatter, `say` is a verb `md` ignores, and both calls warn.
 The artifact is named after its catalog: `<catalog stem>.lifecycle.json`
 beside the catalog file. Claudine's are `claudine/schemas/globals.yaml` and
 `claudine/schemas/globals.lifecycle.json`. DMLS finds host catalogs in a
-document's schema roots (package, package area, `base_dir()`, `SCHEMAS_DIR`,
-`~/schemas`), so a Claudine prompt anywhere in the `claudine/` package area
+document's schema roots (`SCHEMAS_DIR`, package, package area, `base_dir()`,
+`~/schemas`, in that order), so a Claudine prompt anywhere in the `claudine/` package area
 gets Claudine's lifecycle.
 
 ```mermaid

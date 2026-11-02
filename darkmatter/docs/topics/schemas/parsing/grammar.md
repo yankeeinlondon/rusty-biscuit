@@ -5,10 +5,11 @@ function per precedence level. It produces a `SpannedExpr`; the span-erased
 `Expr` the evaluator consumes is derived from it by `SpannedExpr::erase`, so
 there is one grammar and the two AST forms can never disagree.
 
-Implemented in
-[`expression/parser.rs`](../../../lib/src/markdown/compose/expression/parser.rs);
+Implemented in the `simplified-schema` library's
+[`expression/parser.rs`](../../../../../simplified-schema/lib/src/expression/parser.rs) (`simplified_schema::expression`);
 the AST lives in
-[`expression/ast.rs`](../../../lib/src/markdown/compose/expression/ast.rs).
+[`expression/ast.rs`](../../../../../simplified-schema/lib/src/expression/ast.rs). Darkmatter re-exports both under
+`darkmatter::markdown::compose::expression`.
 
 ## The ladder
 
@@ -18,13 +19,8 @@ precedence table. Loosest at the top:
 ```text
 expression      := ternary
 
-ternary         := ternary_branch ( "?" ternary ":" ternary )?
-ternary_branch  := logical_or                       -- condition mode
-                 | fallback                         -- interpolation mode
-
-logical_or      := logical_and ( "||" logical_and )*   -- condition mode
-fallback        := logical_and ( "||" logical_and )*   -- interpolation mode
-
+ternary         := logical_or ( "?" ternary ":" ternary )?
+logical_or      := logical_and ( "||" logical_and )*
 logical_and     := comparison ( "&&" comparison )*
 comparison      := additive ( comp_op additive )?
 additive        := multiplicative ( ( "+" | "-" ) multiplicative )*
@@ -48,36 +44,34 @@ parentheses.
 is therefore a parse error — "Expected end of expression, found '<'" — rather
 than a silently wrong `(a < b) < c`. Use `a < b && b < c`.
 
-## Parse modes
+`&&` binds **tighter** than `||`, because `logical_and` sits below
+`logical_or`: `a || b && c` is `a || (b && c)`.
 
-The two modes differ in one rule. Interpolation mode routes a ternary branch
-through `fallback`; condition mode routes it through `logical_or`. Both land on
-the same shared `logical_and`, so the comparison ladder and everything below it
-behave identically.
+There is one grammar for every surface. `parse` and `parse_spanned` are its
+entry points, whether the string is a `{{ … }}` body, a `when="…"` condition,
+or a Claudine lifecycle `when:`.
 
-| | Interpolation mode | Condition mode |
+## Lowering
+
+Infix `||` builds the `LogicalOr` node (fields `left`/`right`); `&&` lowers to
+`and(…)`. The two differ in what they return:
+
+| Operator | AST | Result |
 | --- | --- | --- |
-| Entry points | `parse`, `parse_spanned` | `parse_condition`, `parse_condition_spanned` |
-| `\|\|` | `Fallback` node — first truthy operand wins | lowered to `or(a, b)` |
-| `&&` | lowered to `and(a, b)` | lowered to `and(a, b)` |
+| `a \|\| b` | `LogicalOr { left: a, right: b }` | the deciding operand: `a` when truthy, otherwise `b` |
+| `a && b` | `FunctionCall { name: "and", args: [a, b] }` | a boolean |
 
-Note that `&&` binds **tighter** than `||` in both modes, because `logical_and`
-sits below both `fallback` and `logical_or`. `a || b && c` is `a || (b && c)`.
-
-## Lowering: the AST has no And/Or nodes
-
-Infix `&&` and (in condition mode) `||` are rewritten at parse time into
-`FunctionCall` nodes named `and` and `or`. There is no `SpannedExprKind::And`.
-Anything that walks the AST — the evaluator, DMLS diagnostics, context-variable
-collection — sees a two-argument function call.
+There is no `SpannedExprKind::And`. Anything that walks the AST — the
+evaluator, DMLS diagnostics, context-variable collection — sees `&&` as a
+two-argument `and` call. `||` stays a distinct node because its left operand is
+an absence check (a missing `x` in `x || "d"` raises no undeclared-property
+advisory) and because it returns an operand rather than a boolean, which an
+`or(…)` call does not.
 
 One consequence worth knowing when mapping spans: a lowered call's span starts
 at its **left operand**, not at a name token, because no name token exists in the
 source. Code that resolves "is the cursor on a function name" filters these out
 by checking that the source text at the name span actually equals the name.
-
-The `Fallback` node is *not* lowered — interpolation `||` stays a distinct AST
-variant.
 
 ## Postfix chains
 
@@ -138,8 +132,7 @@ grammatical.
 
 ## What the language server sees
 
-DMLS parses with the same `parse_spanned` / `parse_condition_spanned` entry
-points, so the editor's AST is byte-for-byte the compose pipeline's AST. It
+DMLS parses with the same `parse_spanned` entry point, so the editor's AST is byte-for-byte the compose pipeline's AST. It
 reports three diagnostics over that AST:
 
 | Diagnostic code | Severity | Fires on |

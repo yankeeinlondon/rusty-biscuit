@@ -34,6 +34,20 @@ cluster. Check `uptime` and re-run exactly those tests at `--test-threads 2`
 before treating a timeout as a regression; never run `just lint` concurrently
 with `just test`.
 
+YAML document corpus: `lib/tests/l1/shipped_schema_corpus.rs::every_kinded_schema_artifact_passes_its_definition_through_the_registry`
+validates every `schema`/`schema-trigger`/`yaml-schema` file in its listed
+folders through `validate_yaml_document`, one registry per folder. A file the
+corpus `EXCEPTIONS` table classes `Draft`, `EnvelopeRejected`, or
+`Placeholder` is skipped; when a fix makes such a file valid, delete its
+exception (the classifying test fails until you do) and the corpus then
+checks it. Design drafts inside a feature/fix directory and frozen golden
+inputs are snapshots: never edit them to make a corpus pass. Whole-YAML test
+fixtures carry no `---` fences (they would be a second document). The
+loader, selection, registry, and kind-check matrices are in-process lib
+suites (`yaml_document_loading`, `yaml_document_selection`,
+`yaml_kind_registry`, `kind_semantic_checks`); CLI and DMLS suites only wire
+a control plus one or two invalid shapes.
+
 The ordinary local L1 recipe excludes `slow_` tests and leaves the internal
 `terminal-tests` / `browser-tests` build features disabled. Tier recipes enable
 their required targets; CI enables both features when constructing all-tier

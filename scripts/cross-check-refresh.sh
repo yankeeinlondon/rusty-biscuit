@@ -3,16 +3,23 @@
 # space each host gets back. Runs nothing else: no fetch, no build, no test.
 #
 # The rules are exactly the ones every `cross-check` run applies before its
-# legs start (see `cross-check-hosts.sh`): a clone is retired when its lock is
-# not held and either
+# legs start (see `cross-check-hosts.sh`): a cross-check clone is retired when
+# its lock is not held and either
 #
 #   - it is this host's clone and its worktree no longer exists here, or
 #   - it has had no cross-check run in CROSS_CHECK_MAX_AGE_DAYS (default 3)
-#     days, whatever host created it.
+#     days, whatever host created it;
+#
+# and a standalone clone of this repository in the coding dir is retired, with
+# its linked worktrees, when nothing in it has been used for
+# CROSS_CHECK_ABANDONED_DAYS (default 7) days and nothing in it exists only
+# there (no stash, no unpushed commit, no uncommitted or untracked file).
 #
 # A run only prunes the hosts it selects; this checks every declared host
 # (BUILD_LINUX, BUILD_WIN, BUILD_WSL, BUILD_MACOS) except the local OS, so a
-# host you have not cross-checked recently is still cleaned.
+# host you have not cross-checked recently is still cleaned, and then this
+# machine's own coding dir (CODING_DIR), never touching the checkout it was
+# started from. With no build host declared, only this machine is checked.
 #
 # For each host it reports the state before (free and total space on the
 # coding dir's volume, and every clone with its size and days unused) and
@@ -52,7 +59,13 @@ done
 
 cd "$(git rev-parse --show-toplevel)"
 calling_host_identity
-select_hosts cross-check-refresh "${os_sel}"
+here="$(local_os)"
+if [[ "${os_sel}" == "${here}" ]]; then
+    # This machine's OS: only the local pass below runs.
+    want=("" "" "" "")
+else
+    select_hosts cross-check-refresh "${os_sel}" optional
+fi
 
 # A spinner on its own line while a host works, only when stdout is a
 # terminal. It is erased with a carriage return and spaces (no escape codes)
@@ -110,5 +123,21 @@ for os in "${ORDER[@]}"; do
         failed=1
     fi
 done
+if [[ "${os_sel}" == "all" || "${os_sel}" == "${here}" ]]; then
+    echo
+    start_spinner "this machine (${short_host}): sizing clones and $([[ "${dry_run}" == 1 ]] && echo "checking what to remove" || echo "removing what is no longer needed")..."
+    status=0
+    prune_host cross-check-refresh local refresh "" "${dry_run}" > "${report}" 2> "${problems}" || status=$?
+    stop_spinner
+    title="this machine (${short_host}, ${here})"
+    echo "${title}"
+    printf '%s\n' "${title//?/-}"
+    cat "${report}"
+    cat "${problems}" >&2
+    if ((status != 0)); then
+        echo "  could not run the refresh on this machine" >&2
+        failed=1
+    fi
+fi
 echo
 exit "${failed}"

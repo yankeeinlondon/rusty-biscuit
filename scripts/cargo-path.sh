@@ -14,14 +14,23 @@ case "$(uname -s)" in
         else
             cargo_bin="$(cygpath -u "${USERPROFILE:-$HOME}")/.cargo/bin"
         fi
+        # Appended, not prepended: the shell's own /usr/bin must stay first
+        # (just/shell.just), and a `cargo install`ed coreutils in here would
+        # otherwise shadow it.
+        cargo_path_order=append
         ;;
     *)
         cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+        cargo_path_order=prepend
         ;;
 esac
 
 if [[ -d "$cargo_bin" ]] && [[ ":$PATH:" != *":$cargo_bin:"* ]]; then
-    export PATH="$cargo_bin:$PATH"
+    if [[ "$cargo_path_order" == append ]]; then
+        export PATH="$PATH:$cargo_bin"
+    else
+        export PATH="$cargo_bin:$PATH"
+    fi
 fi
 
 # rustup writes this env file on Unix hosts; it is absent on Windows.
@@ -29,4 +38,4 @@ if [[ -f "${CARGO_HOME:-$HOME/.cargo}/env" ]]; then
     source "${CARGO_HOME:-$HOME/.cargo}/env"
 fi
 
-unset cargo_bin
+unset cargo_bin cargo_path_order

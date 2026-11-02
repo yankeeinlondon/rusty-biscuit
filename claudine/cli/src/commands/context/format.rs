@@ -6,7 +6,7 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectSafety;
 use darkmatter::markdown::compose::context::ContextValueType;
 use darkmatter::markdown::compose::expression::{ExpressionFunctionDescriptor, FunctionExample};
-use darkmatter::markdown::schemas::SimplifiedType;
+use simplified_schema::SimplifiedType;
 
 use crate::commands::context_render::inline_code_text;
 

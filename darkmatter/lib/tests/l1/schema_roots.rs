@@ -13,12 +13,13 @@ use std::process::Command;
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::file_match::FileMatchGlobs;
+use simplified_schema::file_match::FileMatchGlobs;
 use darkmatter::markdown::schemas::triggers::{PathSubject, matches};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidSchemasDir, MatchExpr, PathGlobs, SchemaError, SchemaRootKind,
-    SchemaRootState, SchemaRoots, TriggerSource,
+    DarkmatterSchemas, InvalidSchemasDir, MatchExpr, PathGlobs, SchemaRootKind, SchemaRootState, SchemaRoots,
+    TriggerSource,
 };
+use simplified_schema::SchemaError;
 use darkmatter::markdown::Markdown;
 use serde_json::json;
 
@@ -151,7 +152,7 @@ fn state_of(roots: &SchemaRoots, kind: SchemaRootKind) -> SchemaRootState {
 // ── Criterion 27: order ─────────────────────────────────────────────────
 
 #[test]
-fn schema_roots_are_package_area_tree_schemas_dir_then_home() {
+fn schema_roots_are_schemas_dir_package_area_tree_then_home() {
     let fixture = Fixture::new();
     for folder in [
         fixture.package().join("schemas"),
@@ -171,20 +172,20 @@ fn schema_roots_are_package_area_tree_schemas_dir_then_home() {
     assert_eq!(
         kinds,
         [
+            SchemaRootKind::SchemasDir,
             SchemaRootKind::Package,
             SchemaRootKind::PackageArea,
             SchemaRootKind::Tree,
-            SchemaRootKind::SchemasDir,
             SchemaRootKind::Home,
         ]
     );
     assert_eq!(
         search_paths(&context),
         [
+            fixture.defs(),
             fixture.package().join("schemas"),
             fixture.area().join("schemas"),
             fixture.repo().join("schemas"),
-            fixture.defs(),
             fixture.home().join("schemas"),
         ]
     );
@@ -215,11 +216,11 @@ fn schemas_dir_and_home_input_matrix() {
         SchemaRoots::for_document(&fixture.context(&document, env)).expect("schema roots")
     };
 
-    // Control: an absolute, existing folder is root 4, searched itself.
+    // Control: an absolute, existing folder is root 1, searched itself.
     let control = roots(&[("SCHEMAS_DIR", defs)]);
     assert_eq!(state_of(&control, SchemaRootKind::SchemasDir), SchemaRootState::Searched(fixture.defs()));
 
-    // Absent from the snapshot: no fourth root. The context reads only the
+    // Absent from the snapshot: no `SCHEMAS_DIR` root. The context reads only the
     // snapshot, so the test process's own environment cannot add one.
     assert_eq!(state_of(&roots(&[]), SchemaRootKind::SchemasDir), SchemaRootState::NotApplicable);
 
@@ -303,6 +304,79 @@ fn an_earlier_root_shadows_a_later_one_by_file_name() {
     let properties = effective_properties(&context, &document);
     assert!(properties.contains(&"from_home".to_string()), "{properties:?}");
     assert!(properties.contains(&"home_trigger".to_string()), "{properties:?}");
+}
+
+#[test]
+fn schemas_dir_shadows_the_package_root_by_file_name() {
+    let fixture = Fixture::new();
+    let defs = fixture.defs();
+    let package_schemas = fixture.package().join("schemas");
+    write(&defs.join("shared.yaml"), "$schema:\n  from_defs: string\n");
+    write(&package_schemas.join("shared.yaml"), "$schema:\n  from_package: string\n");
+    write(&defs.join("shared.trigger.yaml"), &trigger("**/*.md", "defs-payload.yaml"));
+    write(&defs.join("defs-payload.yaml"), "$schema:\n  defs_trigger: string\n");
+    write(&package_schemas.join("shared.trigger.yaml"), &trigger("**/*.md", "package-payload.yaml"));
+    write(&package_schemas.join("package-payload.yaml"), "$schema:\n  package_trigger: string\n");
+    let document = fixture.package().join("docs/doc.md");
+    write(&document, "---\n$schema: shared.yaml\n---\nBody\n");
+    let context = fixture.context(&document, &[("SCHEMAS_DIR", defs.to_str().unwrap())]);
+
+    let roots = SchemaRoots::for_document(&context).expect("schema roots");
+    let searched: Vec<SchemaRootKind> = roots.searched().iter().map(|root| root.kind).collect();
+    assert_eq!(searched, [SchemaRootKind::SchemasDir, SchemaRootKind::Package]);
+
+    let registry = darkmatter::markdown::schemas::scan(&context).expect("scan");
+    let mut shadowed: Vec<PathBuf> = registry.shadowed.iter().map(|file| canonical(&file.path)).collect();
+    shadowed.sort();
+    assert_eq!(shadowed, [package_schemas.join("shared.trigger.yaml"), package_schemas.join("shared.yaml")]);
+
+    // The bare-name `$schema` and the trigger both come from SCHEMAS_DIR.
+    let properties = effective_properties(&context, &document);
+    assert!(properties.contains(&"from_defs".to_string()), "{properties:?}");
+    assert!(properties.contains(&"defs_trigger".to_string()), "{properties:?}");
+    assert!(!properties.contains(&"from_package".to_string()), "{properties:?}");
+    assert!(!properties.contains(&"package_trigger".to_string()), "{properties:?}");
+
+    // Unset: the package root wins again.
+    let unset = fixture.context(&document, &[]);
+    let properties = effective_properties(&unset, &document);
+    assert!(properties.contains(&"from_package".to_string()), "{properties:?}");
+    assert!(properties.contains(&"package_trigger".to_string()), "{properties:?}");
+}
+
+#[test]
+fn schemas_dir_aliasing_a_package_schemas_folder_searches_it_as_schemas_dir() {
+    let fixture = Fixture::new();
+    let package_schemas = fixture.package().join("schemas");
+    // A bare `docs/*.md` pattern: read from the folder holding `schemas/`
+    // for a package root, and from the document's tree root for SCHEMAS_DIR.
+    write(&package_schemas.join("docs.trigger.yaml"), &trigger("docs/*.md", "payload.yaml"));
+    write(&package_schemas.join("payload.yaml"), "$schema:\n  aliased: string\n");
+    let in_package = fixture.package().join("docs/x.md");
+    write(&in_package, "---\ntitle: x\n---\n");
+    let at_root = fixture.repo().join("docs/x.md");
+    write(&at_root, "---\ntitle: x\n---\n");
+    let set = [("SCHEMAS_DIR", package_schemas.to_str().unwrap())];
+
+    let context = fixture.context(&in_package, &set);
+    let roots = SchemaRoots::for_document(&context).expect("schema roots");
+    assert_eq!(state_of(&roots, SchemaRootKind::SchemasDir), SchemaRootState::Searched(package_schemas.clone()));
+    assert_eq!(
+        state_of(&roots, SchemaRootKind::Package),
+        SchemaRootState::Duplicate { path: package_schemas.clone(), of: SchemaRootKind::SchemasDir }
+    );
+    let searched = roots.searched();
+    assert_eq!(searched.len(), 1, "{searched:?}");
+    assert_eq!(searched[0].kind, SchemaRootKind::SchemasDir);
+    assert_eq!(canonical(&searched[0].pattern_cwd), fixture.repo());
+
+    // The pattern base is now the tree root, so the package document no
+    // longer matches `docs/*.md` and the repository-root document does.
+    assert!(effective_properties(&context, &in_package).is_empty());
+    assert_eq!(effective_properties(&fixture.context(&at_root, &set), &at_root), ["aliased"]);
+
+    // Without the alias the package root reads patterns from the package.
+    assert_eq!(effective_properties(&fixture.context(&in_package, &[]), &in_package), ["aliased"]);
 }
 
 // ── Criterion 29: SCHEMAS_DIR ───────────────────────────────────────────
@@ -455,7 +529,7 @@ fn forbidden_path_prefixes_are_definition_errors_naming_the_pattern() {
     ] {
         let error = PathGlobs::new(vec!["**/*.md".into(), pattern.into()])
             .expect_err(&format!("`{pattern}` must be refused"));
-        let SchemaError::TriggerMatch { message } = &error else {
+        let SchemaError::TriggerMatch { message, .. } = &error else {
             panic!("`{pattern}`: expected a trigger match error, got {error:?}");
         };
         assert!(message.contains(&format!("`{pattern}`")), "`{pattern}`: {message}");
@@ -1004,9 +1078,11 @@ fn no_doc_or_skill_names_the_singular_schema_variable() {
         root.join("darkmatter/docs"),
         root.join("claudine/docs"),
         root.join("biscuit-file/docs"),
+        root.join("simplified-schema/docs"),
         root.join(".claude/skills/darkmatter"),
         root.join(".claude/skills/claudine"),
         root.join(".claude/skills/biscuit-file"),
+        root.join(".claude/skills/simplified-schema"),
     ];
     let mut files = Vec::new();
     for dir in &dirs {

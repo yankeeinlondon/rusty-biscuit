@@ -26,7 +26,8 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::triggers::evaluate_registry;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaError};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaError;
 use serde_json::Value;
 
 /// The fixture trigger the control is built from.

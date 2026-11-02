@@ -86,6 +86,14 @@ against that, never against `to_string_lossy()`.
    reproduce it. Nested builds inside an extracted nextest archive
    (`%TEMP%\nextest-archive-…\target\…`) hit it fast. Keep nested builds under
    a short `%TEMP%` directory and count the deepest path against 260.
+   A path past 260 also stays verbatim through
+   `biscuit_file::canonicalize_simplified` (`dunce` declines to reduce it),
+   so `strip_prefix` against a simplified base fails on the prefix
+   component (`VerbatimDisk` vs `Disk`). `just cross-check`'s consume
+   directory (`B:\coding\<host>--<branch>\cross-check-…-consume\src\…`) adds
+   about 60 characters over CI, so deep fixtures cross 260 only there; compare
+   with the `\\?\` disk prefix removed (`relative` in
+   `darkmatter/lib/tests/l1/recursive_schema_golden.rs`).
 8. **`Path::join("a/b")` keeps the literal `/`**, so a native-spelling needle
    has mixed separators and matches nothing. Normalize with
    `.components().collect::<PathBuf>()`. Values such as a scope catalog's

@@ -10,59 +10,72 @@ model_config_paths:
   - scope: user
     path: ~/.config/kilo/kilo.jsonc
     format: jsonc
-    notes: 'Global user config. Observed on this host at this path and currently contains only a "$schema" reference to https://app.kilo.ai/config.json. Also accepts kilo.json.'
+    notes:
+      - 'Global user config. Observed on this host at this path and currently contains only a "$schema" reference to https://app.kilo.ai/config.json. Also accepts kilo.json.'
   - scope: user
     path: ~/.config/kilo/kilo.json
     format: json
-    notes: 'JSON variant of the global config.'
+    notes:
+      - 'JSON variant of the global config.'
   - scope: user
     path: ~/.config/kilo/tui.jsonc
     format: jsonc
-    notes: 'TUI-specific settings (notifications, sounds, themes, keybindings) rather than model configuration.'
+    notes:
+      - 'TUI-specific settings (notifications, sounds, themes, keybindings) rather than model configuration.'
   - scope: repo
     path: ./kilo.jsonc
     format: jsonc
-    notes: 'Project config in repository root. Overrides global config. Also accepts kilo.json.'
+    notes:
+      - 'Project config in repository root. Overrides global config. Also accepts kilo.json.'
   - scope: repo
     path: ./.kilo/kilo.jsonc
     format: jsonc
-    notes: 'Project config inside .kilo directory. Legacy .kilocode/ is also read.'
+    notes:
+      - 'Project config inside .kilo directory. Legacy .kilocode/ is also read.'
   - scope: repo
     path: ./.kilo/tui.jsonc
     format: jsonc
-    notes: 'Project TUI settings.'
+    notes:
+      - 'Project TUI settings.'
   - scope: env
     path: KILO_CONFIG
     format: jsonc
-    notes: 'Custom config file path loaded between global and project configs (inherited OpenCode convention).'
+    notes:
+      - 'Custom config file path loaded between global and project configs (inherited OpenCode convention).'
   - scope: env
     path: KILO_CONFIG_CONTENT
     format: json
-    notes: 'Inline JSON config merged as a final local-scope override (inherited OpenCode convention).'
+    notes:
+      - 'Inline JSON config merged as a final local-scope override (inherited OpenCode convention).'
   - scope: env
     path: KILO_CONFIG_DIR
     format: jsonc
-    notes: 'Custom directory searched for agents, commands, modes, and plugins (inherited OpenCode convention).'
+    notes:
+      - 'Custom directory searched for agents, commands, modes, and plugins (inherited OpenCode convention).'
   - scope: env
     path: /Library/Application Support/kilo/ (macOS), /etc/kilo/ (Linux), %ProgramData%\kilo (Windows)
     format: jsonc
-    notes: 'Managed/organizational settings loaded at highest priority and not user-overridable (inherited OpenCode convention).'
+    notes:
+      - 'Managed/organizational settings loaded at highest priority and not user-overridable (inherited OpenCode convention).'
 api_standards:
   - standard: openai_compatible
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: '@ai-sdk/openai-compatible'
-    notes: 'Primary path for custom/local models and OpenAI Chat Completions-compatible gateways. Kilo custom providers default to this unless another API is selected.'
+    notes:
+      - 'Primary path for custom/local models and OpenAI Chat Completions-compatible gateways. Kilo custom providers default to this unless another API is selected.'
   - standard: anthropic_compatible
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: '@ai-sdk/anthropic'
-    notes: 'Used for Anthropic Messages API providers (e.g. Anthropic, MiniMax). Set via the provider api/npm fields.'
+    notes:
+      - 'Used for Anthropic Messages API providers (e.g. Anthropic, MiniMax). Set via the provider api/npm fields.'
   - standard: bespoke
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: 'npm AI SDK provider package (e.g. @ai-sdk/openai for OpenAI Responses, @ai-sdk/google, @ai-sdk/azure)'
-    notes: 'Provider-native protocols selected via the provider "api" or "npm" fields, such as OpenAI Responses for OpenAI/xAI models.'
+    notes:
+      - 'Provider-native protocols selected via the provider "api" or "npm" fields, such as OpenAI Responses for OpenAI/xAI models.'
 metadata_overrides:
   - id
   - name
@@ -88,32 +101,38 @@ local_runners:
     integration: base_url_override
     standard: openai_compatible
     example: '{"provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:11434/v1"},"models":{"gemma3:27b":{"name":"Gemma 3 27B","limit":{"context":128000,"output":8192}}}}},"model":"ollama/gemma3:27b"}'
-    notes: 'Ollama also exposes an Anthropic-compatible /v1/messages endpoint, but the documented Kilo path uses the OpenAI-compatible server. Size/quantization tags are part of the model ID.'
+    notes:
+      - 'Ollama also exposes an Anthropic-compatible /v1/messages endpoint, but the documented Kilo path uses the OpenAI-compatible server. Size/quantization tags are part of the model ID.'
   - runner: lmstudio
     integration: base_url_override
     standard: openai_compatible
     example: '{"provider":{"lmstudio":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:1234/v1"},"models":{"deepseek-r1-0528":{"name":"DeepSeek R1 0528"}}}},"model":"lmstudio/deepseek-r1-0528"}'
-    notes: 'LM Studio also supports Anthropic Messages, but the documented Kilo path uses the OpenAI-compatible server loaded by LM Studio.'
+    notes:
+      - 'LM Studio also supports Anthropic Messages, but the documented Kilo path uses the OpenAI-compatible server loaded by LM Studio.'
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
     example: '{"provider":{"llamacpp":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:8080/v1"},"models":{"qwen3-coder:a3b":{"name":"Qwen3-Coder a3b (local)","limit":{"context":128000,"output":65536}}}}},"model":"llamacpp/qwen3-coder:a3b"}'
-    notes: 'llama-server also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.'
+    notes:
+      - 'llama-server also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.'
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
     example: '{"provider":{"vllm":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:8000/v1","apiKey":"EMPTY"},"models":{"Qwen/Qwen2.5-1.5B-Instruct":{"name":"Qwen2.5 1.5B Instruct (local vLLM)"}}}},"model":"vllm/Qwen/Qwen2.5-1.5B-Instruct"}'
-    notes: 'vLLM also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.'
+    notes:
+      - 'vLLM also supports Anthropic Messages; the OpenAI-compatible endpoint is the standard Kilo example.'
   - runner: omlx
     integration: base_url_override
     standard: openai_compatible
     example: '{"provider":{"omlx":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:8000/v1"},"models":{"Qwen3.6-35B-A3B-oQ6":{"name":"Qwen3.6-35B-A3B-oQ6 (local)","limit":{"context":262144,"output":98304}}}}},"model":"omlx/Qwen3.6-35B-A3B-oQ6"}'
-    notes: 'oMLX also exposes an Anthropic-compatible /v1/messages endpoint; the OpenAI-compatible endpoint is the standard Kilo example.'
+    notes:
+      - 'oMLX also exposes an Anthropic-compatible /v1/messages endpoint; the OpenAI-compatible endpoint is the standard Kilo example.'
   - runner: other
     integration: base_url_override
     standard: openai_compatible
     example: '{"provider":{"my-local":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://localhost:<port>/v1"},"models":{"<model-id>":{"name":"My local model"}}}},"model":"my-local/<model-id>"}'
-    notes: 'Any local server exposing an OpenAI-compatible /v1 chat endpoint can be wired via @ai-sdk/openai-compatible. If the runner only speaks Anthropic Messages, use @ai-sdk/anthropic instead.'
+    notes:
+      - 'Any local server exposing an OpenAI-compatible /v1 chat endpoint can be wired via @ai-sdk/openai-compatible. If the runner only speaks Anthropic Messages, use @ai-sdk/anthropic instead.'
 cloud_bridge:
   supported: true
   mechanism: 'provider.<id>.options.baseURL plus the matching AI SDK adapter (the provider "npm" or "api" field).'

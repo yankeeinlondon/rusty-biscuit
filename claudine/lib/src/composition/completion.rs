@@ -20,7 +20,7 @@ use chrono::{DateTime, Utc};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::hash::{FrontmatterDelta, FrontmatterDeltaEntry};
-use darkmatter::markdown::schemas::{SchemaPhase, ValidationProblem, ValidationProblemKind};
+use simplified_schema::{SchemaPhase, ValidationProblem, ValidationProblemKind};
 
 use super::closure::{
     BodyRejection, CLOSURE_OWNED_PROPERTIES, InlineArtifact, InlineReconciliation,

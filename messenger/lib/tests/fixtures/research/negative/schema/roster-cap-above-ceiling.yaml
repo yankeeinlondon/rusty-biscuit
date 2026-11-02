@@ -1,4 +1,3 @@
----
 # The configurable cap cannot exceed the schema ceiling of 10.
 # expect-problem: /curated_source_cap
 $schema: ../../../../../../docs/platforms.schema.yaml
@@ -27,4 +26,3 @@ platforms:
     approved_by: maintainer
     approved_on: 2026-09-17
 excluded: []
----

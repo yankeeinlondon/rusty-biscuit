@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use darkmatter::lifecycle::{LifecycleSurfaceCalls, md_host};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::call_binding::{FactKind, FactType, FunctionRegistration, RegistrationError};
+use darkmatter::markdown::compose::expression::call_binding::{
+    FactKind, FactType, FunctionRegistration, RegistrationError,
+};
 use darkmatter::markdown::compose::expression::function_test_hooks::{self as hooks, TestFunctionGuard};
 use darkmatter::markdown::compose::expression::{
     ArgumentCategory, ArgumentType, CallCheck, DeclaredTypes, Polarity, Shape, TypeScope, check_expression_calls, parse,
@@ -22,14 +24,15 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
-use darkmatter::markdown::schemas::simplified::{PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SimplifiedSchema, parse_yaml_schema};
+use simplified_schema::simplified::{PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::json;
 use tempfile::TempDir;
 
 use ArgumentCategory::{Compatible, Incompatible, NullableMatch, Uncertain, Unknown};
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     parse_yaml_schema(&serde_yaml_ng::from_str(yaml).expect("YAML parses")).expect("schema parses")
 }
 
@@ -190,7 +193,7 @@ mod registered_facts {
     }
 
     /// The one `function(...)` a signature text declares.
-    fn function_of(text: &str) -> darkmatter::markdown::schemas::simplified::FunctionType {
+    fn function_of(text: &str) -> simplified_schema::simplified::FunctionType {
         match parse_type_definition("pred", text).expect("parses") {
             PropertyDef::Single(PropertyAtom { ty: TypeExpr::Function(function), .. }) => *function,
             other => panic!("one function, found {other:?}"),
@@ -225,7 +228,7 @@ mod registered_facts {
             let mut function = function_of(&format!(
                 "function(parameters(value: unknown | null); returns(boolean); narrows(value: {not_a_family}; true-implies))"
             ));
-            function.narrows.as_mut().expect("clause").kind = darkmatter::markdown::schemas::simplified::NarrowsKind::TrueIff;
+            function.narrows.as_mut().expect("clause").kind = simplified_schema::simplified::NarrowsKind::TrueIff;
             let programmatic = FunctionRegistration::builder_from_types("pred", vec![function]).build();
             assert!(
                 matches!(&programmatic, Err(RegistrationError::InvalidFact { message, .. }) if message.contains("true-iff")),
@@ -584,7 +587,7 @@ mod declared_builtin_facts {
         assert_eq!(narrowed(&declared, "is_object(v)", Polarity::False, "v"), "string | unknown[]");
     }
 
-    fn schema_with_object_and_array() -> SimplifiedSchema {
+    fn schema_with_object_and_array() -> SchemaRoot {
         schema("v:\n  - string(required)\n  - unknown[](required)\n  - \"{ a: string }\"\n")
     }
 

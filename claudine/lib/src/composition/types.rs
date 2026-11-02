@@ -923,7 +923,7 @@ pub struct LaunchSchema {
     /// `inline-compose` (required-but-not-eager properties may still be
     /// absent), `None` for direct compose, whose launch verdict is the
     /// unphased authoring contract.
-    pub phase: Option<darkmatter::markdown::schemas::SchemaPhase>,
+    pub phase: Option<simplified_schema::SchemaPhase>,
     /// The per-property launch status the preparation reached, in schema
     /// declaration order. `None` for a raw JSON Schema or a root union, whose
     /// property table is not modelled.

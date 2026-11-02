@@ -1,4 +1,5 @@
 import 'notify.just'
+import 'shell.just'
 mod util
 
 bold := '\033[1m'
@@ -767,6 +768,7 @@ _stage_junit tier pkg exit_code duration:
     report_present=false
     if [[ -f "${report}" ]] && cp "${report}" "${stage}/${relative_xml}" 2>/dev/null; then
         report_present=true
+        just _record_slow_tests '{{ tier }}' "${stage}/${relative_xml}"
     fi
 
     jq -c -n \
@@ -813,6 +815,8 @@ _stage_junit tier pkg exit_code duration:
 _run_all recipe specs *args="":
     #!/usr/bin/env bash
     set -uo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
 
     passed_packages=()
     failed_packages=()
@@ -1081,34 +1085,78 @@ _test_local_all specs *args="": _storage_preflight
         if [[ -z "${BISCUIT_TEST_FILTER:-}" ]] && printf '%s\n' "${package_names[@]}" | grep -Fxq git-wt-cli; then
             filter="(${filter}) & !(package(git-wt-cli) & test(/(^|::)perf_/))"
         fi
+        just _stage_junit_reset
+        exit_code=0
         "${nextest_bin[@]}" run "${selected[@]}" -E "${filter}" --no-tests=pass \
-            ${forwarded[@]+"${forwarded[@]}"}
+            ${forwarded[@]+"${forwarded[@]}"} || exit_code=$?
+        just _record_slow_tests L1
+        exit "${exit_code}"
     else
         cargo test "${selected[@]}" ${forwarded[@]+"${forwarded[@]}"} -- \
             --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ --skip perf_
     fi
 
-# Report every test Nextest marks SLOW for this package area.
+# Show this area's slow-test history, or add a CI run to it. Runs no tests:
+# every canonical test recipe records its own slow tests (`_record_slow_tests`).
 #
-# Runs the area's own `test` recipe, so selection stays exactly what the area
-# gates on — the packages, feature flags, and `_tier_filter L1` expression are
-# not restated here and cannot drift from `test`. Nextest prints each test past
-# the configured `slow-timeout.period` (`.config/nextest.toml`) and repeats the
-# list in its final summary; `--no-fail-fast` keeps that list complete when a
-# test fails. The status flags are Nextest-only, so there is deliberately no
-# `cargo test` fallback: a fallback would have no slow report to print.
-_slow_tests *args="":
+#   just slow-tests [report] [opts]  history (`--env`, `--package`, `--limit`)
+#   just slow-tests import <run>…    record a GitHub Actions run's slow tests
+#   just slow-tests fresh            exit 0 when `current.md` describes the working tree
+#   just slow-tests verify --baseline <state>
+#                                    exit 0 when that state's scopes re-ran clean
+_slow_tests *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
-    if ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
-        echo "slow-tests: cargo-nextest is required, but '${nextest_bin[*]} --version' failed." >&2
-        exit 1
+    case "${1:-}" in
+        import | fresh | verify)
+            exec just _slow_tests_tool "$@"
+            ;;
+        report)
+            shift
+            ;;
+    esac
+    exec just _slow_tests_tool report --area '{{ invocation_directory() }}' "$@"
+
+# Record the slow tests in one Nextest JUnit report in the slow-test log
+# (`scripts/slow-tests.rs`; `docs/testing-strategy.md`, "Slow-test log").
+# `report` defaults to this profile's report under the target directory.
+#
+# Like JUnit staging, recording never changes a test invocation's outcome. It
+# records only runs of this checkout. Tests drive these recipes against fixture
+# workspaces (`repo-deps`' archive fixtures, test-toolkit's staging contracts,
+# which also scrub `NEXTEST_*`), and those must not write the developer's log.
+# It is also skipped inside a test (`NEXTEST_RUN_ID`), on GitHub Actions
+# (hosted runs arrive through `just slow-tests import`), without Cargo (the WSL
+# archive guest), and when `BISCUIT_SLOW_TESTS=off`.
+_record_slow_tests tier report="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [[ -n "${NEXTEST_RUN_ID:-}" || -n "${GITHUB_ACTIONS:-}" || "${BISCUIT_SLOW_TESTS:-}" == "off" ]]; then
+        exit 0
     fi
-    echo
-    echo -e "🐌 {{ bold }}Slow tests{{ reset }} — this area's tests past the configured slow-timeout"
-    echo
-    just test --no-fail-fast --status-level slow --final-status-level slow {{ args }}
+    checkout="$(cd '{{ source_directory() }}/..' 2>/dev/null && pwd -P)" || exit 0
+    here="$(cd '{{ invocation_directory() }}' 2>/dev/null && pwd -P)" || exit 0
+    [[ "${here}/" == "${checkout}/"* ]] || exit 0
+    command -v cargo >/dev/null 2>&1 || exit 0
+    report='{{ report }}'
+    if [[ -z "${report}" ]]; then
+        target_dir="$(cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.target_directory // empty' 2>/dev/null)"
+        [[ -n "${target_dir}" ]] || exit 0
+        report="${target_dir%/}/nextest/${NEXTEST_PROFILE:-default}/test-results.xml"
+    fi
+    [[ -f "${report}" ]] || exit 0
+    if ! just _slow_tests_tool record --tier '{{ tier }}' --junit "${report}"; then
+        echo -e "⚠️  {{ yellow }}Slow-test recording failed{{ reset }}; this run's slow tests are not in the log." >&2
+    fi
+    exit 0
+
+# The slow-test tool, at `repo-deps`' default `local-tools` feature level: it
+# links sniff to key each run on the working-tree state (`scripts/Cargo.toml`).
+_slow_tests_tool *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec cargo run --quiet --manifest-path '{{ source_directory() }}/../scripts/Cargo.toml' \
+        --bin slow-tests -- "$@"
 
 # Sanity tier across several packages, continuing past failures. See `_run_all`.
 _sanity_all specs *args="":
@@ -1333,6 +1381,8 @@ _build_messenger_desktop_stubs:
 _test pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
 
     to_json_array() {
         local first=1
@@ -2073,6 +2123,8 @@ _check_tier_coverage *args="":
 _sanity pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     if [[ "{{ pkg }}" == "messenger" ]]; then
         just _build_messenger_desktop_stubs
     fi
@@ -2173,6 +2225,8 @@ _sanity pkg *args="": _storage_preflight
 _test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     echo
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
@@ -2382,6 +2436,8 @@ _test_l2 pkg *args="": _storage_preflight
 _test_l3 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     if [ "${BISCUIT_L3_TAKE_FOCUS:-}" != "1" ]; then
         if [ ! -t 0 ]; then
             echo -e "⛔ {{ bold }}just test-l3 refuses to run unattended{{ reset }}" >&2
@@ -2428,6 +2484,8 @@ _test_l3 pkg *args="": _storage_preflight
 _test_browser pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     echo
     echo -e "🌐 Browser tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
@@ -2480,6 +2538,8 @@ _test_browser pkg *args="": _storage_preflight
 _test_real pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    # One slow-test scope per recipe invocation (`_record_slow_tests`).
+    export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     echo
     echo -e "🔌 Real-resource tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo

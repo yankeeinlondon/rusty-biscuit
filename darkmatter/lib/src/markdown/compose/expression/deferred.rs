@@ -10,8 +10,8 @@
 use serde_json::Value;
 
 use super::lexer::ExpressionFinder;
-use super::parser::parse;
-use crate::markdown::coercion::PathSegment;
+use simplified_schema::expression::parser::parse;
+use simplified_schema::coercion::PathSegment;
 
 /// Whether `text` is a template whose value exists only once it is rendered.
 ///
@@ -52,7 +52,7 @@ pub fn is_deferred_value(value: &Value) -> bool {
     value.as_str().is_some_and(is_deferred_template)
 }
 
-/// The deferral predicate for [`crate::markdown::coercion::BindOptions`]:
+/// The deferral predicate for [`simplified_schema::coercion::BindOptions`]:
 /// a deferred value at any path is treated as matching the shape declared
 /// there, while its literal siblings are still bound.
 pub fn defer_templates(_path: &[PathSegment], value: &Value) -> bool {

@@ -2651,7 +2651,7 @@ fn test_services_detailed_returns_non_empty_names() {
 }
 
 /// On Windows the default `detect_timezone()` code path should populate the
-/// `timezone` field via `tzutil`.  This test locks down the runtime contract
+/// `timezone` field from the zone's key name.  This test locks down the runtime contract
 /// on an actual Windows host without using the plan-based opt-in path.
 #[cfg(target_os = "windows")]
 #[test]
@@ -2660,7 +2660,7 @@ fn test_detect_timezone_windows_populates_timezone_name() {
 
     assert!(
         time_info.timezone.is_some(),
-        "detect_timezone() should populate timezone on Windows via tzutil"
+        "detect_timezone() should populate timezone on Windows"
     );
 
     let tz = time_info.timezone.unwrap();

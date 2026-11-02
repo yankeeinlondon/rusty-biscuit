@@ -9,11 +9,11 @@ use std::path::Path;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
-use darkmatter::markdown::schemas::simplified::grammar::{parse_type_definition, parse_type_expr};
-use darkmatter::markdown::schemas::simplified::{ExampleOutcome, FunctionParameters, serialize_property_def};
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, PropertyDef, SchemaError, TypeExpr, ValidationReport,
-    parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
+use simplified_schema::simplified::grammar::{parse_type_definition, parse_type_expr};
+use simplified_schema::simplified::{ExampleOutcome, FunctionParameters, serialize_property_def};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{
+    PropertyDef, SchemaError, TypeExpr, parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
 };
 use insta::assert_snapshot;
 use serde_json::{Value, json};
@@ -125,8 +125,8 @@ fn function_type_with_every_constraint_parses() {
     assert_eq!(function.examples[2].display_only.as_deref(), Some("needs network"));
     assert_eq!(&text[function.examples[0].call_span.clone()], "check(\"a\")");
     assert_eq!(atom.description.as_deref(), Some("Checks a name."));
-    assert!(atom.constraints.contains(&darkmatter::markdown::schemas::Constraint::Category("Date Arithmetic".into())));
-    assert!(atom.constraints.contains(&darkmatter::markdown::schemas::Constraint::Example(vec!["./check.yaml".into()])));
+    assert!(atom.constraints.contains(&simplified_schema::Constraint::Category("Date Arithmetic".into())));
+    assert!(atom.constraints.contains(&simplified_schema::Constraint::Example(vec!["./check.yaml".into()])));
 
     let PropertyDef::Single(void) = definition("function(parameters(void); returns(string))") else { panic!() };
     assert!(matches!(&void.ty, TypeExpr::Function(function) if function.parameters == FunctionParameters::Void));
@@ -457,8 +457,8 @@ fn a_declared_categories_list_limits_category_names() {
         ("[]", "category `Text` is not declared"),
         ("[Text, ' Text ']", "`categories[1]`: duplicate category `Text`"),
         ("[Text, ' -> no name']", "`categories[1]`: a category name cannot be blank"),
-        ("null", "`categories` must be a list"),
-        ("[Text, 5]", "`categories[1]`: a category entry must be a string"),
+        ("null", "schema.yaml`: `/categories`"),
+        ("[Text, {a: b}]", "schema.yaml`: `/categories/1`"),
         ("[Text ->]", "`categories[0]`: `->` must be followed by a description"),
     ] {
         let source = format!("kind: schema\ncategories: {categories}\ntypes:\n  t: 'string(category(Text))'\n");
@@ -547,7 +547,7 @@ fn numeric_metadata_rejects_what_an_f64_cannot_hold() {
     let PropertyDef::Single(members) = definition("enum(100000000000000000000, 2.50)") else { panic!() };
     assert_eq!(
         members.constraints[0],
-        darkmatter::markdown::schemas::Constraint::Members(vec!["100000000000000000000".into(), "2.5".into()])
+        simplified_schema::Constraint::Members(vec!["100000000000000000000".into(), "2.5".into()])
     );
     let schema = lowered("n: 'number(min(100000000000000000000))'\nl: 'literal(100000000000000000000)'\n");
     assert_eq!(schema["properties"]["n"]["anyOf"][1]["minimum"], json!(1e20));

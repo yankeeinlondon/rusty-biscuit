@@ -674,7 +674,7 @@ fn required_expression_resolved_to_null_is_tolerated_at_inline_launch() {
 
     let prepared = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let launch = prepared.launch_schema.as_ref().expect("schema retained");
-    assert_eq!(launch.phase, Some(darkmatter::markdown::schemas::SchemaPhase::Launch));
+    assert_eq!(launch.phase, Some(simplified_schema::SchemaPhase::Launch));
     let report = launch.report.as_ref().expect("launch report retained");
     let design = report.required.iter().find(|p| p.name == "design").unwrap();
     assert_eq!(design.state, PropertyState::Deferred);
@@ -2010,7 +2010,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
     // schema.yaml lives ONLY under the document dir.
     fs::write(
         doc_dir.path().join("schema.yaml"),
-        "title: string(required)\n",
+        "$schema:\n  title: string(required)\n",
     )
     .unwrap();
     let source = make_source(
@@ -2042,7 +2042,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
     let fallback_dir = TempDir::new().unwrap();
     fs::write(
         doc_dir.path().join("arm-a.yaml"),
-        "kind: string(required)\n",
+        "$schema:\n  kind: string(required)\n",
     )
     .unwrap();
     let source = make_source(
@@ -2587,7 +2587,7 @@ fn presence_and_timing_read_through_a_resolved_union_reference() {
         &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap();
-    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    let Some(simplified_schema::SchemaRoot::Single(shape)) = &resolved.simplified
     else {
         panic!("a single shape");
     };
@@ -2618,7 +2618,7 @@ fn null_admitting_whole_values_are_not_required() {
         &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap();
-    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(shape)) = &resolved.simplified
+    let Some(simplified_schema::SchemaRoot::Single(shape)) = &resolved.simplified
     else {
         panic!("a single shape");
     };

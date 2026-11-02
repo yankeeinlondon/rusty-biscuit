@@ -741,6 +741,24 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::process::exit(1);
             }
+            crate::args::RepoAction::State => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let repo = sniff::filesystem::GitRepo::discover(dir)?
+                    .ok_or_else(|| format!("Not a git repository: {}", dir.display()))?;
+                let state = repo.working_state()?;
+                if cli.json {
+                    output::print_json_value(
+                        output::working_state::working_state_json(&state),
+                        perf.build_report().as_ref(),
+                    );
+                } else {
+                    output::emit_text(&output::working_state::render_working_state(&state), cli.plain);
+                    perf.emit_stderr(None);
+                }
+                return Ok(());
+            }
             crate::args::RepoAction::Name => {
                 let dir = base_dir
                     .as_deref()

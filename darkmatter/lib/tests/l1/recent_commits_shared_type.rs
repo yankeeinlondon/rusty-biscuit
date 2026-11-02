@@ -5,9 +5,8 @@
 
 use darkmatter::markdown::compose::expression::{expression_function_catalog, function_descriptors};
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
-use darkmatter::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SimplifiedSchema, SimplifiedType, TypeExpr,
-    parse_standalone_schema_document,
+use simplified_schema::{
+    Constraint, PropertyAtom, PropertyDef, SchemaRoot, SimplifiedType, TypeExpr, parse_standalone_schema_document,
 };
 
 const SHARED: &str = "recent-commits";
@@ -21,12 +20,12 @@ fn single(def: &PropertyDef) -> &PropertyAtom {
 
 /// The authored `types:` entries of a shipped partial, before any import is
 /// resolved.
-fn authored_types(source: &str, path: &str) -> darkmatter::markdown::schemas::SchemaShape {
+fn authored_types(source: &str, path: &str) -> simplified_schema::SchemaShape {
     let document = parse_standalone_schema_document(source, path)
         .expect("the shipped partial parses")
         .expect("the shipped partial is a schema document");
     match document.schema() {
-        Some(SimplifiedSchema::Single(shape)) => shape.clone(),
+        Some(SchemaRoot::Single(shape)) => shape.clone(),
         other => panic!("{path}: expected a `types:` mapping, got {other:?}"),
     }
 }

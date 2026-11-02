@@ -149,17 +149,18 @@ mod tests {
 
         fs::write(
             launch_dir.join("schema.yaml"),
-            "launch_only: string(required)\n",
+            "$schema:\n  launch_only: string(required)\n",
         )
         .unwrap();
         fs::write(launch_dir.join("spec.md"), "LAUNCH-SPEC\n").unwrap();
         fs::write(
             source_dir.join("schema.yaml"),
             concat!(
-                "source_file: 'file(eager; required)'\n",
-                "prepared_area: string(required)\n",
-                "prepared_repo: string(required)\n",
-                "prepared_cwd: string(required)\n",
+                "$schema:\n",
+                "  source_file: 'file(eager; required)'\n",
+                "  prepared_area: string(required)\n",
+                "  prepared_repo: string(required)\n",
+                "  prepared_cwd: string(required)\n",
             ),
         )
         .unwrap();
