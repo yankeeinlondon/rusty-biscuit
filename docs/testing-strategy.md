@@ -842,10 +842,13 @@ and every Level 2 suite the host can run without taking window focus. Apple
 Terminal and Level 3 are excluded for that reason. A comparison containing
 only documentation changes gates no packages, exactly as in CI.
 
-`RUSTY_BISCUIT_PRE_PUSH` controls the hook: `strict` publishes complete
-outcomes before blocking on failure and is the default; `warn` publishes them
-without blocking. `scope-only` checks constraints and publishes scope but runs
-no gates; `off` is its deprecated alias. `RUSTY_BISCUIT_PRE_PUSH_AREAS`
+`RUSTY_BISCUIT_PRE_PUSH` controls the hook. The default, `auto`, is `strict`
+when the push itself starts a CI run (an update of `main`, or of a branch with
+an open pull request) and `scope-only` otherwise; `just pr` pushes in `strict`
+because the pull request it opens does not exist yet. `strict` publishes
+complete outcomes before blocking on failure; `warn` publishes them without
+blocking. `scope-only` checks constraints and publishes scope but runs no
+gates; `off` is its deprecated alias. `RUSTY_BISCUIT_PRE_PUSH_AREAS`
 replaces the computed scope with a fixed selection and prevents reusable
 validation publication.
 

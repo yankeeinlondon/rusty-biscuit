@@ -28,7 +28,7 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 | Layer                     | Question it answers                                               | Blocking?                      |
 |---------------------------|-------------------------------------------------------------------|--------------------------------|
-| **Local pre-push hook**   | Do source-changed packages pass L1/L2 on this host?                | Strict by default              |
+| **Local pre-push hook**   | Do source-changed packages pass L1/L2 on this host?                | Strict when the push starts CI |
 | **Dependency-scoped CI**  | Do changed packages compile and test on the remaining runners?    | Yes                            |
 | **Affected coverage**     | Did the changed package closure lose exercised behavior?          | Report-only                    |
 | **Nightly / advisory**    | Did anything drift since yesterday?                               | No                             |
@@ -135,10 +135,22 @@ while leaving the policy expecting a CI result was the PR #76 seven-cell regress
 
 The hook is controlled by `RUSTY_BISCUIT_PRE_PUSH`:
 
+- `auto` — `strict` when the push itself starts a CI run (an update of `main`, or of a branch with an open pull request), otherwise `scope-only` (the default)
 - `scope-only` — resolve and print the plan, publish the scope receipt, run no gate, publish no outcomes, exclude no CI cells
 - `off` — deprecated alias of `scope-only`
 - `warn` — run and report, but never block the push
-- `strict` — run and block the push on failure (the default)
+- `strict` — run and block the push on failure
+
+A push that starts no run only moves a branch, for example to another host, so `auto` spends no
+local test time on it. The push that opens a pull request is the exception: the pull request does
+not exist when the hook runs, yet its CI reuses whatever that push publishes. `just pr` covers it by
+pushing in `strict` mode and then opening the pull request:
+
+```sh
+just pr                       # push with the gates on, then open the pull request
+git push                      # no open pull request: scope only, no gates
+RUSTY_BISCUIT_PRE_PUSH=strict git push   # gates on regardless
+```
 
 `just ci-local --plan` prints the plan's change inventory before the cell list, from the same field
 `ci-reporting` renders, so the terminal and the GitHub report cannot disagree about what changed.

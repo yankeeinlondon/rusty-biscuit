@@ -525,6 +525,11 @@ commit *args="":
 
     claudine compose prompts/commit.md {{ args }}
 
+# Propose this branch as a pull request: push it with the local test gates
+# on, then open the pull request (see prompts/pr.md)
+pr *args="":
+    RUSTY_BISCUIT_PRE_PUSH=strict claudine compose prompts/pr.md {{ args }}
+
 # stages all files in package area and then commits and pushes
 cp:
     @echo ""
@@ -2049,4 +2054,4 @@ _ensure-git-hooks:
     rm -f "${target}"
     mv "${staged}" "${target}"
     trap - EXIT
-    echo "Git hooks: installed worktree-aware pre-push dispatcher at ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=scope-only|warn|strict)"
+    echo "Git hooks: installed worktree-aware pre-push dispatcher at ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=auto|scope-only|warn|strict)"
