@@ -290,12 +290,14 @@ Hover is a provider-chain capability: each provider may contribute, and the regi
 
 | Provider (in order)  | Hovers on                                            | Content                                                                                                   |
 |----------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| substrate (Markdown) | a link                                               | graph-sourced target preview (an unopened target is read once, then cached)                               |
+| substrate (Markdown) | a heading or a link (not a `{{ }}` inside either)    | heading level and anchor; graph-sourced target preview (an unopened target is read once, then cached)     |
 | wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
 | frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
 | DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note, plus a guard-narrowed local type; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
+
+The substrate declines any offset inside a body `{{ … }}`, so an interpolation in a heading or link (`# Research on {{ seq.name }}`) shows the expression hover, while the rest of the heading still shows its anchor.
 
 ## Frontmatter typing and its reuse
 

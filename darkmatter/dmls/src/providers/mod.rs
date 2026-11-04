@@ -222,6 +222,12 @@ impl Provider for SubstrateProvider {
         {
             return None;
         }
+        // The same ordering problem for a body `{{ … }}`: a heading or link
+        // claims its whole span, which would hide the DSL provider's more
+        // specific expression hover for an interpolation inside it.
+        if crate::overlay::expressions::interpolation_at(ctx.text, dsl::body_base(ctx.text), offset).is_some() {
+            return None;
+        }
         hover::hover(ctx, offset)
     }
 
