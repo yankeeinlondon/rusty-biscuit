@@ -28,9 +28,10 @@ use darkmatter::markdown::span::{SourceSpan, Spanned};
 use darkmatter::markdown::{
     ReferenceKind, extract_document_references, extract_frontmatter_block, extract_headings,
 };
+use simplified_schema::pending::holds_pending_syntax;
 
 use super::node::{LinkTarget, classify_link_target};
-use crate::overlay::{FmValueKind, FrontmatterAst, expressions};
+use crate::overlay::{FmEntry, FmValueKind, FrontmatterAst, expressions};
 use crate::wiki::scan_wiki_links;
 
 /// A heading fact extracted from one document (document-relative spans).
@@ -171,6 +172,10 @@ pub struct DocumentIndex {
     pub variable_uses: Vec<VariableUseFact>,
     /// Top-level frontmatter keys, in document order.
     pub frontmatter_keys: Vec<FrontmatterKeyFact>,
+    /// The body-link hover summary: the first of the top-level `excerpt`,
+    /// `summary`, `description`, `about` values that is a nonempty, non-pending
+    /// YAML string, trimmed (see [`summary_text`]).
+    pub summary: Option<String>,
 }
 
 /// Per-document R-6 stage timings captured by [`index_document_timed`].
@@ -365,7 +370,13 @@ pub fn index_document_timed(path: &Path, source: &str) -> (DocumentIndex, IndexT
     let stage = Instant::now();
     let mut schema_uses: Vec<FileRefFact> = Vec::new();
     let mut frontmatter_keys: Vec<FrontmatterKeyFact> = Vec::new();
+    let mut summary: Option<String> = None;
     if let Some(ast) = FrontmatterAst::parse(source).and_then(|parse| parse.ast) {
+        summary = SUMMARY_FIELDS.iter().find_map(|field| {
+            ast.top_level()
+                .find(|entry| entry.key == *field)
+                .and_then(|entry| summary_text(source, entry))
+        });
         let file_typed = inline_schema_file_keys(&ast);
         for entry in ast.top_level() {
             // Top-level entries are always root-mapping properties.
@@ -433,8 +444,30 @@ pub fn index_document_timed(path: &Path, source: &str) -> (DocumentIndex, IndexT
         file_uses,
         variable_uses,
         frontmatter_keys,
+        summary,
     };
     (index, timings)
+}
+
+/// The frontmatter fields a body-link hover reads its summary from, in
+/// precedence order.
+const SUMMARY_FIELDS: [&str; 4] = ["excerpt", "summary", "description", "about"];
+
+/// The summary text of one top-level entry: its trimmed value when the entry is
+/// a scalar that decodes to a nonempty YAML string holding no pending
+/// `{{ … }}`/`$(…)` syntax. Anything else (null, a number or boolean, a
+/// collection, a blank or pending string) is `None`, so the caller tries the
+/// next field; nothing is stringified.
+fn summary_text(source: &str, entry: &FmEntry) -> Option<String> {
+    if entry.kind != FmValueKind::Scalar {
+        return None;
+    }
+    let authored = source.get(entry.value_span.clone())?;
+    let serde_yaml_ng::Value::String(text) = serde_yaml_ng::from_str(authored).ok()? else {
+        return None;
+    };
+    let text = text.trim();
+    (!text.is_empty() && !holds_pending_syntax(text)).then(|| text.to_string())
 }
 
 /// Whether a target is a remote (non-local) reference.
@@ -602,6 +635,86 @@ mod tests {
         ] {
             assert_eq!(is_file_type_string(type_string), expected, "{type_string:?}");
         }
+    }
+
+    /// The summary of a document whose frontmatter is `frontmatter`.
+    fn summary_of(frontmatter: &str) -> Option<String> {
+        index_document(Path::new("doc.md"), &format!("---\n{frontmatter}\n---\n# Title\n")).summary
+    }
+
+    #[test]
+    fn a_summary_is_a_nonempty_trimmed_yaml_string() {
+        for (frontmatter, expected) in [
+            ("summary: A plain summary", "A plain summary"),
+            ("summary: \"  Quoted, padded  \"", "Quoted, padded"),
+            ("summary: 'single quoted'", "single quoted"),
+            ("summary: |\n  First line.\n  Second line.", "First line.\nSecond line."),
+            ("summary: >\n  Folded\n  text", "Folded text"),
+            ("summary: \"123\"", "123"),
+            ("summary: \"null\"", "null"),
+            ("summary: A *rich* [link](x.md)", "A *rich* [link](x.md)"),
+        ] {
+            assert_eq!(summary_of(frontmatter).as_deref(), Some(expected), "{frontmatter:?}");
+        }
+    }
+
+    #[test]
+    fn an_unusable_summary_value_is_skipped_never_stringified() {
+        for frontmatter in [
+            "title: no summary field",
+            "summary:",
+            "summary: null",
+            "summary: ~",
+            "summary: 42",
+            "summary: 1.5",
+            "summary: true",
+            "summary: [a, b]",
+            "summary:\n  - a",
+            "summary: {a: b}",
+            "summary:\n  nested: value",
+            "summary: \"\"",
+            "summary: \"   \"",
+            "summary: \"{{ title }}\"",
+            "summary: Built by $(whoami)",
+        ] {
+            assert_eq!(summary_of(frontmatter), None, "{frontmatter:?}");
+            // The next field is tried after an unusable one.
+            let with_fallback = format!("{frontmatter}\nabout: Fallback");
+            assert_eq!(summary_of(&with_fallback).as_deref(), Some("Fallback"), "{frontmatter:?}");
+        }
+    }
+
+    #[test]
+    fn summary_fields_are_read_in_precedence_order() {
+        let all = "about: About\ndescription: Description\nsummary: Summary\nexcerpt: Excerpt";
+        assert_eq!(summary_of(all).as_deref(), Some("Excerpt"));
+        assert_eq!(summary_of("about: About\ndescription: Description\nsummary: Summary").as_deref(), Some("Summary"));
+        assert_eq!(summary_of("about: About\ndescription: Description").as_deref(), Some("Description"));
+        assert_eq!(summary_of("about: About").as_deref(), Some("About"));
+    }
+
+    #[test]
+    fn every_summary_field_skips_a_null_value() {
+        for field in SUMMARY_FIELDS {
+            assert_eq!(summary_of(&format!("{field}: Text")).as_deref(), Some("Text"), "{field}");
+            assert_eq!(summary_of(&format!("{field}: null")), None, "{field}");
+            assert_eq!(
+                summary_of(&format!("{field}: null\nabout: About\nexcerpt: ~")).as_deref(),
+                (field != "about").then_some("About"),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_top_level_summary_fields_count() {
+        assert_eq!(summary_of("meta:\n  summary: Nested"), None);
+    }
+
+    #[test]
+    fn a_document_without_frontmatter_has_no_summary() {
+        assert_eq!(index_document(Path::new("doc.md"), "# Title\n\nsummary: body text\n").summary, None);
+        assert_eq!(index_document(Path::new("doc.md"), "---\nsummary: [unclosed\n---\n# T\n").summary, None);
     }
 
     #[test]

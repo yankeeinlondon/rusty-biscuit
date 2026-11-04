@@ -38,17 +38,28 @@ pub enum ActionExprError {
     /// A `{{ … }}` span inside mixed text (`"status {{ fm. }}"`) did not
     /// parse. The text stays a literal template; only its spans' syntax is
     /// checked, so nothing is evaluated.
-    #[error("interpolation span `{{{{ {expression} }}}}` is not valid: {source}")]
-    SpanParse {
-        /// The span's inner expression text, as authored.
-        expression: String,
-        /// The Darkmatter parse failure.
-        #[source]
-        source: Box<ParseError>,
-    },
+    ///
+    /// Boxed whole so `Option<ActionExprError>` stays 24 bytes: unboxed, this
+    /// arm made `LifecycleActionInvalidLongForm` 136 bytes on Windows (whose
+    /// `PathBuf` is 8 bytes wider), past `clippy::result_large_err`'s 128.
+    /// `transparent` keeps the `Display` text and makes the next
+    /// [`source`](std::error::Error::source) the [`ParseError`].
+    #[error(transparent)]
+    SpanParse(Box<SpanParseError>),
     /// A scalar shape that cannot become an action expression at all.
     #[error("{0}")]
     Invalid(String),
+}
+
+/// The payload of [`ActionExprError::SpanParse`].
+#[derive(Error, Debug)]
+#[error("interpolation span `{{{{ {expression} }}}}` is not valid: {source}")]
+pub struct SpanParseError {
+    /// The span's inner expression text, as authored.
+    pub expression: String,
+    /// The Darkmatter parse failure.
+    #[source]
+    pub source: ParseError,
 }
 
 /// A lifecycle authoring error: the stack, an item, or an action does not
@@ -631,9 +642,17 @@ pub enum LifecycleExprError {
     #[error("{0}")]
     Prose(String),
 
-    /// The request's file-resolution context failed validation.
+    /// The request's file-resolution context failed validation. Boxed like
+    /// its siblings: unboxed, its `PathBuf` made this enum too large for
+    /// `clippy::result_large_err` on Windows.
     #[error(transparent)]
-    Context(#[from] crate::markdown::compose::ContextBuildError),
+    Context(Box<crate::markdown::compose::ContextBuildError>),
+}
+
+impl From<crate::markdown::compose::ContextBuildError> for LifecycleExprError {
+    fn from(error: crate::markdown::compose::ContextBuildError) -> Self {
+        LifecycleExprError::Context(Box::new(error))
+    }
 }
 
 impl LifecycleExprError {

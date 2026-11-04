@@ -307,14 +307,14 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     .unwrap();
     std::fs::write(
         launch_dir.join("schema.yaml"),
-        "launch_only: string(required)\n",
+        "$schema:\n  launch_only: string(required)\n",
     )
     .unwrap();
     std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
     std::fs::write(launch_dir.join("caller.md"), "LAUNCH-CALLER\n").unwrap();
     std::fs::write(
         source_dir.join("schema.yaml"),
-        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+        "$schema:\n  source_marker: string(required)\n  spec: 'file(eager; required)'\n  caller_spec: 'file(eager; required)'\n",
     )
     .unwrap();
     std::fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
@@ -342,7 +342,8 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     let source_context = invocation.derive_source(&source_path).unwrap();
     let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), crate::request::snapshot())
     .unwrap();
-    let pre = claudine::composition::pre_validate_schema(&source, None, Some(&launch_dir), &crate::request::test_context(), &claudine::composition::TriggerFindings::default())
+    let caller_overrides = serde_json::json!({ "caller_spec": materialized_caller });
+    let pre = claudine::composition::pre_validate_schema(&source, Some(&caller_overrides), Some(&launch_dir), &crate::request::test_context(), &claudine::composition::TriggerFindings::default())
         .expect("the source-side schema must be selected");
     let env = BTreeMap::from([
         ("AGENT".to_string(), "codex".to_string()),
@@ -354,9 +355,7 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         Some(&launch_dir),
         // The sequence boundary receives an already materialized caller
         // value and must pass it through without re-anchoring it.
-        claudine::composition::LayeredOverrides::authored(Some(
-            &serde_json::json!({ "caller_spec": materialized_caller }),
-        )),
+        claudine::composition::LayeredOverrides::authored(Some(&caller_overrides)),
         &env,
     );
     let context = options.prepared_context.clone().expect("the step captures its epoch snapshot");

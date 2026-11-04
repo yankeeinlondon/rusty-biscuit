@@ -485,4 +485,5 @@ See the source modules:
 - `darkmatter/lib/src/markdown/compose/interpolation/` — lexer, evaluator, rewriter
 - `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs` — frontmatter-specific interpolation engine
 - `darkmatter/lib/src/markdown/compose/value_origin.rs` and `body_origin.rs` — which frontmatter values and body bytes are data
-- `darkmatter/lib/src/markdown/literal_token.rs` — the `{{!data:v1:…}}` codec and `decode_literal_tokens`
+- `simplified-schema/lib/src/pending.rs` (re-exported as `darkmatter::markdown::literal_token`) — the `{{!data:v1:…}}` codec and `decode_literal_tokens`
+- `simplified-schema/lib/src/expression/scan.rs` — the `{{ … }}` / `{{{ … }}}` / literal-token scan that `ExpressionFinder` runs after excluding code blocks

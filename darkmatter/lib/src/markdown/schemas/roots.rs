@@ -1,16 +1,22 @@
 //! The five schema roots: where trigger schemas are discovered and where a
 //! bare-name `$schema` (`$schema: claudine.yaml`) is looked up.
 //!
-//! The roots are searched most local first, and the first root that holds a
-//! file name shadows the same name in every later root:
+//! The roots are searched `SCHEMAS_DIR` first and then most local first, and
+//! the first root that holds a file name shadows the same name in every later
+//! root:
 //!
-//! 1. `{package root}/schemas`
-//! 2. `{package-area root}/schemas`
-//! 3. `{base_dir()}/schemas`, the file tree root (the repository root in a
+//! 1. the folder `SCHEMAS_DIR` names, searched itself (no `schemas/` is
+//!    appended), so a user or host override outranks every repository root
+//! 2. `{package root}/schemas`
+//! 3. `{package-area root}/schemas`
+//! 4. `{base_dir()}/schemas`, the file tree root (the repository root in a
 //!    repository)
-//! 4. the folder `SCHEMAS_DIR` names, searched itself (no `schemas/` is
-//!    appended)
 //! 5. `{home}/schemas`
+//!
+//! When `SCHEMAS_DIR` names the same folder as a package, package-area, or
+//! tree `schemas/`, the `SCHEMAS_DIR` root searches it (reading trigger
+//! patterns from the document's tree root) and the later kind is reported as
+//! a duplicate of it.
 //!
 //! Every input comes from the document's [`FileResolutionContext`]: the
 //! package, package area, and tree root of the document being checked, and
@@ -22,9 +28,9 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, PathIdentity, canonicalize_simplified};
 
-use crate::markdown::schemas::SchemaError;
+use simplified_schema::SchemaError;
 
-/// The environment variable naming the fourth schema root.
+/// The environment variable naming the first schema root.
 pub const SCHEMAS_DIR_VARIABLE: &str = "SCHEMAS_DIR";
 
 /// The folder name a package, package-area, tree, or home root searches.
@@ -33,14 +39,14 @@ const SCHEMAS_DIR_NAME: &str = "schemas";
 /// Which of the five schema roots an entry is, in search order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaRootKind {
+    /// The folder `SCHEMAS_DIR` names.
+    SchemasDir,
     /// `{package root}/schemas`.
     Package,
     /// `{package-area root}/schemas`.
     PackageArea,
     /// `{base_dir()}/schemas`.
     Tree,
-    /// The folder `SCHEMAS_DIR` names.
-    SchemasDir,
     /// `{home}/schemas`.
     Home,
 }
@@ -108,7 +114,7 @@ pub enum SchemaRootState {
 
 /// One of the five schema roots and what it contributes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchemaRoot {
+pub struct SchemaSearchRoot {
     /// Which root this is.
     pub kind: SchemaRootKind,
     /// What it contributes.
@@ -133,7 +139,7 @@ pub struct SearchedRoot {
 /// The five schema roots of one document, in search order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaRoots {
-    entries: Vec<SchemaRoot>,
+    entries: Vec<SchemaSearchRoot>,
     searched: Vec<SearchedRoot>,
     search_paths: Vec<PathBuf>,
 }
@@ -161,6 +167,10 @@ impl SchemaRoots {
         let tree_root = ctx.base_dir().to_path_buf();
         let candidates = [
             (
+                SchemaRootKind::SchemasDir,
+                schemas_dir_candidate(ctx.env().get(SCHEMAS_DIR_VARIABLE)),
+            ),
+            (
                 SchemaRootKind::Package,
                 Candidate::from_folder(ctx.package_root()),
             ),
@@ -169,10 +179,6 @@ impl SchemaRoots {
                 Candidate::from_folder(ctx.package_area()),
             ),
             (SchemaRootKind::Tree, Candidate::from_folder(Some(&tree_root))),
-            (
-                SchemaRootKind::SchemasDir,
-                schemas_dir_candidate(ctx.env().get(SCHEMAS_DIR_VARIABLE)),
-            ),
             (SchemaRootKind::Home, Candidate::from_folder(ctx.home_dir())),
         ];
 
@@ -208,7 +214,7 @@ impl SchemaRoots {
                     }
                 }
             };
-            entries.push(SchemaRoot { kind, state });
+            entries.push(SchemaSearchRoot { kind, state });
         }
         let search_paths = searched.iter().map(|root| root.path.clone()).collect();
         Ok(Self {
@@ -231,7 +237,7 @@ impl SchemaRoots {
     /// All five roots in search order, including the ones that contribute
     /// nothing, for `md schema triggers`.
     #[must_use]
-    pub fn entries(&self) -> &[SchemaRoot] {
+    pub fn entries(&self) -> &[SchemaSearchRoot] {
         &self.entries
     }
 

@@ -407,7 +407,7 @@ Git Repository:
 
 Monorepo: cargo
   Packages: 8
-    sniff-cli v0.1.0 (sniff/cli) [Rust]
+    sniff-detection-cli v0.1.0 (sniff/cli) [Rust]
     sniff v0.1.0 (sniff/lib) [Rust]
     research-cli v0.1.0 (research/cli) [Rust]
     ...
@@ -926,11 +926,11 @@ sniff/
 
 ```bash
 # Run all tests
-cargo test -p sniff-cli
+cargo test -p sniff-detection-cli
 cargo test -p sniff
 
 # Test CLI parsing
-cargo test -p sniff-cli cli_parsing
+cargo test -p sniff-detection-cli cli_parsing
 ```
 
 ## Use Cases

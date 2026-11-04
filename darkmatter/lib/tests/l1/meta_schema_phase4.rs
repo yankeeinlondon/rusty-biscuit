@@ -4,12 +4,10 @@
 use std::fs;
 
 use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        Constraint, DarkmatterSchemas, PropertyAtom, SimplifiedType, TypeExpr,
-        ValidationProblemCode, parse_yaml_schema, to_json_schema,
-        triggers::{MatchExpr, PathSubject, matches as trigger_matches},
-    },
+    Markdown, schemas::{DarkmatterSchemas, triggers::{MatchExpr, PathSubject, matches as trigger_matches}},
+};
+use simplified_schema::{
+    Constraint, PropertyAtom, SimplifiedType, TypeExpr, ValidationProblemCode, parse_yaml_schema, to_json_schema,
 };
 use serde_json::{Value, json};
 
@@ -262,11 +260,16 @@ fn semantic_types_match_triggers_by_passive_parse() {
 
 #[test]
 fn shipped_schema_artifacts_validate_through_semantic_keywords() {
-    let root = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
+    // `docs/schemas` supplies the `env.yaml` type definitions; the shipped
+    // definitions and global catalog in `schemas/` supply the `$schema`
+    // declarations (the docs folder's schema files export none).
+    let docs = biscuit_test_harness::manifest_dir!().join("../docs/schemas");
+    let shipped = biscuit_test_harness::manifest_dir!().join("../schemas");
     let mut declarations = Vec::new();
     let mut definitions = Vec::new();
-    let mut paths = fs::read_dir(&root)
-        .expect("schema directory")
+    let mut paths = [docs, shipped]
+        .iter()
+        .flat_map(|root| fs::read_dir(root).expect("schema directory"))
         .map(|entry| entry.expect("schema entry").path())
         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("yaml"))
         .collect::<Vec<_>>();

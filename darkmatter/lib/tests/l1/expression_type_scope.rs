@@ -12,11 +12,11 @@ use darkmatter::markdown::compose::expression::{
     Availability, BindingView, DeclaredType, DeclaredTypes, EvaluationLookup, Polarity, ResolutionContext, ScopeId,
     ScopedType, Shape, Subject, TypeScope, UnavailabilityReason, WriteSet, evaluate, parse,
 };
-use darkmatter::markdown::schemas::simplified::serialize_property_atom;
-use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use simplified_schema::simplified::serialize_property_atom;
+use simplified_schema::{SchemaRoot, parse_yaml_schema};
 use serde_json::{Value, json};
 
-fn schema(yaml: &str) -> SimplifiedSchema {
+fn schema(yaml: &str) -> SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("schema YAML");
     parse_yaml_schema(&value).expect("schema parses")
 }

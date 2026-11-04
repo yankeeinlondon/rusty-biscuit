@@ -10,9 +10,10 @@
 use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, expand_named_types, resolve_yaml_schema};
-use darkmatter::markdown::schemas::simplified::types::Constraint;
-use darkmatter::markdown::schemas::{SchemaConstraintConflictKind, SchemaError, parse_yaml_schema};
+use darkmatter::markdown::schemas::resolve::{expand_named_types, resolve_yaml_schema};
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::simplified::types::Constraint;
+use simplified_schema::{SchemaConstraintConflictKind, SchemaError, parse_yaml_schema};
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
 use tempfile::TempDir;

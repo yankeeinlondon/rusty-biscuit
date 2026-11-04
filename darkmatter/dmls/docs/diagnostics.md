@@ -212,16 +212,17 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 
 | Code | Meaning |
 |------|---------|
-| `dm.frontmatter.yaml_parse` | The frontmatter YAML could not be parsed. |
+| `dm.frontmatter.yaml_parse` | The frontmatter YAML could not be parsed, or a whole YAML document is not one admissible YAML document (see [Whole YAML documents](#whole-yaml-documents)). |
 | `dm.schema.invalid_schema_shape` | The `$schema` value is not a valid schema shape. In a standalone schema document this also covers a rejected **outer** declaration — an empty root union, an arm of the wrong type, or an invalid whole-file reference — ranged at that value or arm. An invalid definition *inside* a root-union mapping arm (`count: number(bogus(1))` in `$schema: [{…}]`) is a `dm.schema.invalid_type_definition` at its token instead, like any other definition. |
 | `dm.schema.prepare` | The schema could not be resolved, merged, or compiled. |
 | `dm.schema.invalid_trigger` | **Warning**, on a schema-trigger file. Discovery skipped the trigger because its envelope or payload failed to load; the other triggers still apply. See below. |
 | `dm.schema.type_mismatch` | A value did not match its declared type. |
 | `dm.schema.constraint` | A non-type constraint failed (range, length, pattern, enum, …). |
-| `dm.schema.missing_required` | A required key is absent. **Strict mode only** — see [Severity](#severity). |
+| `dm.schema.missing_required` | A required key is absent. **Strict mode only** in frontmatter; always in a whole YAML document — see [Severity](#severity). |
 | `dm.schema.unknown_key` | A key the schema does not declare is present. |
 | `dm.schema.deprecated_key` | A deprecated key is present. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
+| `dm.schema.kind_check` | A YAML document of one of Darkmatter's kinds (`schema`, `schema-trigger`, `yaml-schema`) fails a check its definition cannot state, such as an invalid trigger `$path` glob. Ranged on the node the library located. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
 | `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. An envelope error comes first: a tagged envelope with an unsupported key reports this code even when a definition inside it is also invalid, matching `md schema validate`. |
 | `dm.schema.host_catalog` | **Warning.** A host global catalog in the document's schema roots (a `kind: schema` file with a `$schema` mapping of globals and no `types`, such as Claudine's `globals.yaml`) failed to load. The message names the file, the field, and the reason; it is placed at the top of the document. The globals that catalog declares are unknown to this document, so expressions reading them are checked as document properties; every catalog that did load keeps working. The same warning reports a host **function** catalog in those roots (a `kind: schema` file with `categories:` and `function(...)` `types:`) that fails to load or declares a function a built-in already names; its functions stay unknown to this document. Source `darkmatter.schema`. |
@@ -269,6 +270,31 @@ The pointer is the same one `md schema validate --format json` reports as
 message names the key. A file-reference failure carries both keys,
 `{"instance_path": "/spec", "resolution_failure": "NoMatch"}`.
 
+#### Whole YAML documents
+
+A `.yaml` / `.yml` file (any letter case) is judged by the schema its `kind`
+or root `$schema` selects, with the same codes, ranged the same way
+([DMLS Schema Support](../../docs/topics/schemas/dmls-schema-support.md#yaml-documents)
+has the full table):
+
+- a file that is not one admissible YAML document gets one
+  `dm.frontmatter.yaml_parse` error and nothing else;
+- a `kind` that cannot select its definition (claimed twice, reserved by a
+  failed definition, unavailable) is one `dm.schema.prepare` error on the
+  `kind` value, with the definition files as related information;
+- a problem with the document is coded and ranged as in frontmatter, and a
+  missing required key and an undeclared key are errors in either mode;
+- each problem is published once: in a claimed `kind: schema` or
+  `kind: schema-trigger` file, a definition problem is the kind's, so the
+  envelope's whole-document `document_malformed` / `prepare` error is not
+  repeated beside it, and a trigger's grammar failure is its
+  `dm.schema.kind_check`, on the offending node.
+
+No Markdown body diagnostic (directives, interpolation, shell) runs on a YAML
+file.
+
+#### Beyond the document under edit
+
 Two Layer-2 behaviors reach beyond the Markdown document under edit:
 
 - **Standalone schema documents own their problems.** When a schema YAML file
@@ -305,11 +331,14 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
   is never diagnosed this way. See
   [Failures](../../docs/lsp/indexing.md#failures).
 - **An open envelope keeps its strict authoring check.** While a trigger file
-  is open, its buffer is checked directly. A buffer whose envelope does not
-  load (invalid YAML, an unsupported key, a bad `match`) gets a
-  `dm.schema.prepare` **error** instead of the warning: an envelope that is
-  not valid YAML is diagnosed from the reported line and column to the end of
-  that line, and other failures cover the whole file. A buffer whose envelope
+  is open, its buffer is checked directly, as the `kind: schema-trigger`
+  YAML document it is. A buffer that is not valid YAML gets a
+  `dm.schema.prepare` **error** instead of the warning, from the reported
+  line and column to the end of that line. A buffer that loads but breaks the
+  trigger's definition (an unsupported key, a wrong `match` type) gets the
+  definition's errors on the offending keys and values, and one that breaks
+  the trigger grammar (a bad `$path` glob, an empty `match`) a
+  `dm.schema.kind_check` error on the offending node. A buffer whose envelope
   loads, but whose saved file discovery skipped (for example, its payload is
   missing), shows the warning over the YAML error's span or the whole
   file. Closing the file publishes the closed-file warning again if the
@@ -352,6 +381,9 @@ are **errors**. Two codes vary with `schema.strict`:
 |------|----------------------|--------|
 | `dm.schema.unknown_key` | Warning | Error |
 | `dm.schema.missing_required` | *not emitted* | Error |
+
+In a whole YAML document both are **errors** in either mode: nothing is
+injected into it later, and `md schema validate` fails on both.
 
 `missing_required` is suppressed by default because `required` is a compose-time
 contract (the value is injected via CLI / seed / interactive prompt), so a
@@ -466,7 +498,7 @@ severity. That is why the editor and composition agree: an
 `incompatible_call` error appears on exactly the calls that make `md compose`
 reject the document, and composition rejects nothing the editor shows as a
 warning or leaves silent. How each type converts to another is described in
-[Type Coercion](../../docs/topics/schemas/definition.md#type-coercion).
+[Type Coercion](../../../simplified-schema/docs/topics/conversion.md#type-coercion).
 
 The message names the function, the parameter, both types, and the category
 with its reason:
@@ -600,7 +632,7 @@ Some diagnostics attach secondary locations:
   declared as bare `alphanumeric` has no option token, so its related
   location is the type's definition. The values use the same excerpt as the
   library's message (see
-  [Merging use-site constraints](../../docs/topics/schemas/definition.md#merging-use-site-constraints)).
+  [Merging use-site constraints](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#merging-use-site-constraints)).
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 
 ## Configuration

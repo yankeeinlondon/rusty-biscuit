@@ -808,6 +808,7 @@ fn corrupt_loose_object(repo_path: &Path, sha: &str) {
     #[cfg(unix)]
     perms.set_mode(0o644);
     #[cfg(not(unix))]
+    #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
     perms.set_readonly(false);
     fs::set_permissions(&obj_path, perms).unwrap();
     fs::write(&obj_path, b"garbage").unwrap();
@@ -1845,6 +1846,7 @@ fn phase3_unborn_head_is_not_dirty_and_has_no_changes() {
 /// Inject a staged blob whose index path is the raw `bytes` (not necessarily
 /// valid UTF-8). Bypasses the filesystem — macOS APFS rejects invalid-UTF-8
 /// filenames — to exercise the byte-native status path directly.
+#[cfg(unix)]
 fn stage_raw_path(repo: &git2::Repository, bytes: &[u8], content: &[u8]) {
     let mut index = repo.index().unwrap();
     index

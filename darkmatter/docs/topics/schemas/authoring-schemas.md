@@ -66,7 +66,7 @@ Then there the more esoteric or "meta" types like:
 
 - `schema` and `expression`
 
-The full list of _types_ can be found at: [`SimplifiedSchema` Types](./definition.md#types) but for now here's a simple example of using _types_ to define a schema:
+The full list of _types_ can be found at: [`SimplifiedSchema` Types](../../../../simplified-schema/docs/topics/language/types.md#types) but for now here's a simple example of using _types_ to define a schema:
 
 ```yaml
 $schema:
@@ -81,10 +81,10 @@ $schema:
 
 A **constraint** is the a way to further _constrain_ a base type. There are some constraints that are available to _all_ types and others which can only be used with a subset of types:
 
-- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](./definition.md#null-admitting-properties))
+- `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
-For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./definition.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
+For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
 
 ```yaml
 $schema:
@@ -143,14 +143,15 @@ In the example above:
 
 In a moment of "recursive truth" the external schema definition is defined as a schema:
 
-::code ^darkmatter/docs/schemas/schema-definition.yaml
+::code ^simplified-schema/schemas/schema.yaml
 
 A schema file can export document properties and declare reusable types:
 
 - **pure**: `$schema` holds the export, with an optional sibling `types` mapping
-- **tagged**: `kind: schema` and `types`, with an optional `$schema` export and `categories` list
+- **tagged**: `kind: schema` and `types`, with an optional `$schema` export
 
-A tagged file accepts no other keys. When a file has both `$schema` and
+Either may also carry a `description` string and a `categories` list, and
+accepts no other keys. When a file has both `$schema` and
 `types`, only `$schema` defines document properties; `types` supplies local
 names and named imports. Without separate export and type tables, every
 top-level entry of the payload plays two roles. It is a property of the schema
@@ -182,7 +183,7 @@ types:
     notice: communicate@darkmatter:lifecycle   # one say/info/warn/… action
 ```
 
-See [Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem)
+See [Reserved Darkmatter References](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#reserved-darkmatter-references-namedarkmatterstem)
 for the rules, and [Lifecycle Event Typing](./definition.md#lifecycle-event-typing)
 for the lifecycle types Darkmatter ships.
 
@@ -194,7 +195,7 @@ document that uses `recipient: address@./address-types.yaml` gains a
 Built-in names such as `string` keep their normal meaning. If you give a local
 type the same name as a built-in, use `string@this` to select your definition.
 A misspelled or missing type is an error at the reference, not a new type
-created automatically. See [Local Type References](./local-type-references.md)
+created automatically. See [Local Type References](../../../../simplified-schema/docs/topics/language/local-type-references.md)
 for where local names live and how they resolve.
 
 #### Presence travels with the type
@@ -204,7 +205,7 @@ and `generated`. If you define `code: string(required)`, every property that
 uses `code`, `code@this`, or `code@./types.yaml` is required; you don't need to
 write `code(required)` again. Use-site constraints add to the inherited ones
 and never remove them. See
-[Inheriting Constraints](./local-type-references.md#inheriting-constraints)
+[Inheriting Constraints](../../../../simplified-schema/docs/topics/language/local-type-references.md#inheriting-constraints)
 for how they combine.
 
 Presence belongs to the value it is declared on. Requiring a field inside an
@@ -235,7 +236,7 @@ types:
 Do not define the variant as `draft_owner: owner`: an alias inherits
 `required` again. A union with `null` does make it optional:
 `draft_owner: [owner, null]` accepts `null`, an omitted value, or a valid
-`owner` (see [Null-Admitting Properties](./definition.md#null-admitting-properties)).
+`owner` (see [Null-Admitting Properties](../../../../simplified-schema/docs/topics/language/types.md#null-admitting-properties)).
 
 An inherited `generated` keeps its usual meaning. It does not create a value
 provider. Checking an authored document, as `md schema validate` and DMLS do,
@@ -244,19 +245,19 @@ supplies the value later. Runtime checks use two phases: launch requires an
 inherited `required` value immediately only when it is also `eager`;
 completion requires it after the work finishes. Supplied values are checked
 at both phases. A type that admits `null` remains optional regardless of
-these markers. See [Universal Constraints](./definition.md#universal-constraints).
+these markers. See [Universal Constraints](../../../../simplified-schema/docs/topics/language/types.md#universal-constraints).
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 
-1. in a monorepo, `{package-root}/schemas` of the document's package
-2. in a monorepo, `{package-area-root}/schemas` of the document's package area
-3. `{root}/schemas`
-4. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended)
+1. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended), so a team or host override outranks every repository copy
+2. in a monorepo, `{package-root}/schemas` of the document's package
+3. in a monorepo, `{package-area-root}/schemas` of the document's package area
+4. `{root}/schemas`
 5. `~/schemas`
 
 `{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). `md` searches these folders only for a document in a repository; DMLS searches them for any document inside an open workspace folder. Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else, such as `{package-root}/docs/schemas`, are not searched. An earlier folder shadows a file of the same name in every later one.
 
-Today only a `kind: schema-trigger` file in these folders applies automatically (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
+Today two kinds of file in these folders apply automatically: a `kind: schema-trigger` file to the Markdown documents it matches (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)), and a `kind: yaml-schema` file to the YAML documents whose `kind` it claims (see [Defining a YAML Document Kind](#defining-a-yaml-document-kind)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
 
 Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. The `SCHEMAS_DIR` folder and `~/schemas` are in every document's roots, so their definitions can apply to documents in any repository; they add to the package, package-area, and `{root}` folders rather than replacing them. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
 
@@ -293,7 +294,7 @@ $schema:
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
-A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](./definition.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
+A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
 
 #### Passive Activation Expressions
 
@@ -332,6 +333,122 @@ The explicit-base form requires an explicit-relative `path`, preventing a fallba
 The consuming root is independent of schema-source location, including external `SCHEMAS_DIR` sources. It does not expand the applicability of automatically discovered nested schemas. Additional base selectors remain under design review; these examples describe the intended contract, not current support.
 
 For the matching model and its implementation status, read [Schema Triggers in Darkmatter](./schema-targeting.md).
+
+### Defining a YAML Document Kind
+
+A schema trigger picks Markdown documents by their frontmatter. When you have
+a family of **YAML files** that should all follow one contract (rosters,
+service manifests, fixture files), write a `kind: yaml-schema` definition
+instead. Each file then only has to say what it is, with `kind: roster`, and
+the definition does the rest: no file carries its own copy of the schema, and
+none can point at the wrong one.
+
+Put this in your repository's `schemas/roster.yaml`:
+
+```yaml
+kind: yaml-schema
+description: The platforms a team publishes to
+types:
+    platform:
+        name: string(required)
+$schema:
+    kind: literal(roster; required) -> the document kind this file defines
+    roster_version: literal(1; required)
+    platforms: platform[](required)
+    $constraints: { closed: true }
+```
+
+Every YAML document in the repository that says `kind: roster` is now
+validated against that `$schema`:
+
+```yaml
+kind: roster
+roster_version: 1
+platforms:
+    - name: slack
+```
+
+The rules for a definition:
+
+- **`kind: yaml-schema` and a `$schema` are required.** `$schema` is the
+  contract every document of the kind must meet. `description`, `categories`,
+  and `types` are optional and mean what they mean in a `kind: schema` file;
+  `types` entries are local names for `$schema`, not properties of a roster.
+- **The `kind` property of `$schema` names the kinds you claim.** Declare it
+  as `literal(roster; required)` or, to claim several,
+  `enum(roster, team; required)`. It must be `required`: `literal(roster)` alone, or a plain
+  `kind: string(required)`, claims nothing and the definition is rejected.
+- **A root union claims every arm's kinds.** Each arm declares its own `kind`,
+  and a document must satisfy one of the arms:
+
+  ```yaml
+  kind: yaml-schema
+  $schema:
+      - kind: literal(left; required)
+        a: string
+      - kind: enum(right, middle; required)
+        b: string
+  ```
+
+- **Close the root.** `$constraints: { closed: true }` turns a misspelled key
+  into an unknown-key problem instead of an ignored property. It also means a
+  roster cannot carry a stray `$schema`: once a definition claims the kind, a
+  root `$schema` is an ordinary property that the definition must declare.
+- **A definition is never referenced.** Naming a `yaml-schema` file in a
+  `$schema` or a `Name@file` import is an error. Put types that a definition
+  and a Markdown schema share in a `kind: schema` file and import them from
+  both (see [A `yaml-schema` Is Selected by `kind`, Never Referenced](../../../../simplified-schema/docs/topics/language/schema-documents.md#a-yaml-schema-is-selected-by-kind-never-referenced)).
+
+Darkmatter's own definitions are worked examples of each form:
+
+- [`yaml-schema.yaml`](../../../../simplified-schema/schemas/yaml-schema.yaml)
+  defines `yaml-schema` itself, and validates itself. Its
+  `property(kind, ...)` declaration option is what requires your `$schema` to
+  declare a literal or enum `kind`.
+- [`schema-trigger.yaml`](../../../schemas/schema-trigger.yaml) uses `types`
+  for a recursive `match-expression` and a closed root.
+- [`schema.yaml`](../../../../simplified-schema/schemas/schema.yaml) uses a
+  root union whose two arms claim the same `schema` kind: one requires
+  `$schema`, the other requires `types`.
+
+#### Where to put a definition
+
+Place the file directly in one of the five
+[schema roots](./definition.md#schema-roots), not in a subfolder. Its reach
+follows the root: a package's `schemas/` covers that package's documents, the
+repository's `schemas/` covers the whole repository, and `~/schemas` or the
+`SCHEMAS_DIR` folder covers every repository you work in. Definitions are only
+read for documents inside a repository; elsewhere only the shipped `schema`,
+`yaml-schema`, and `schema-trigger` kinds exist.
+
+Unlike triggers, file names never shadow each other: what matters is the kinds
+a file claims. Two definitions that claim one kind, in any roots and under any
+names, make every document of that kind fail with an error naming both files.
+That includes claiming a shipped kind such as `schema-trigger`. See
+[Schema Discovery](./schema-discovery.md) for the full rules, including what a
+broken definition does to the documents around it.
+
+#### Changing a shipped definition
+
+In this repository the shipped definitions are ordinary files in schema roots:
+[`darkmatter/schemas/schema-trigger.yaml`](../../../schemas/schema-trigger.yaml)
+sits in the `darkmatter` package area's root. Edit it in place and the edit
+applies at once to documents whose roots include that folder, with no
+rebuild, because a file at a shipped definition's repository-relative path
+that claims the same kind replaces the compiled-in copy. Documents elsewhere
+keep the compiled-in copy until Darkmatter is rebuilt. A copy saved under any
+other path is a second claim, and therefore a duplicate.
+
+#### Checking a definition
+
+A definition is itself a YAML document of kind `yaml-schema`, so validating
+it checks it against `yaml-schema.yaml` and then checks that its `$schema`
+prepares and claims a finite set of kinds (a
+[kind check](./definition.md#kind-checks)). Validate one with
+`md schema validate schemas/roster.yaml`
+([YAML documents on the command line](./definition.md#yaml-documents-on-the-command-line));
+the library's entry point is
+[`validate_yaml_document`](./definition.md#validating-from-the-library).
 
 ### Schemas for Global Variables
 
@@ -440,9 +557,9 @@ A value that already matches an option is kept as written: `"4"` against
 the one option it can reach: `"1"` against `number(min(5)) | boolean` becomes
 `true`, because `1` fails `min(5)`. The order of the options never matters.
 The full rule, including how ties are settled, is in
-[Choosing a Union Option](./definition.md#choosing-a-union-option); the
-grammar is in [The `|` Operator and Grouping](./definition.md#the--operator-and-grouping)
-and [Tuples](./definition.md#tuples).
+[Choosing a Union Option](../../../../simplified-schema/docs/topics/conversion.md#choosing-a-union-option); the
+grammar is in [The `|` Operator and Grouping](../../../../simplified-schema/docs/topics/language/unions.md#the--operator-and-grouping)
+and [Tuples](../../../../simplified-schema/docs/topics/language/types.md#tuples).
 
 ### Recursive Types
 
@@ -474,7 +591,7 @@ and is a schema error that names each reference in the cycle.
 The definition describes the value. Whether a property using it is
 `required`, `eager`, or nullable is decided where the type is used, so
 `plan: step(required)` and `draft: step` can share one definition. See
-[Recursive Named Types](./definition.md#recursive-named-types) for the full
+[Recursive Named Types](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#recursive-named-types) for the full
 rules.
 
 ### Examples: using Inline Syntax
@@ -515,7 +632,7 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    A tagged schema file has `kind: schema`, a `types` mapping, an optional `$schema` export, and optionally a [`categories:` list](./definition.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
+    A tagged schema file has `kind: schema`, a `types` mapping, an optional `$schema` export, and optionally a [`categories:` list](../../../../simplified-schema/docs/topics/language/schema-documents.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Without an explicit export, its `types` entries are both the schema's properties and its named types (see [External Schemas](#external-schemas)):
     
   ```yaml
   kind: schema
@@ -541,6 +658,8 @@ There are two primary types of grammar files which are distinguished by their `k
   description: |-
       string -> allows you to describe the intent of this trigger in prose
   ```
+
+A third kind, `kind: yaml-schema`, defines a kind of YAML document rather than a Markdown schema; see [Defining a YAML Document Kind](#defining-a-yaml-document-kind).
 
 A conditional trigger supplies its schema under `$schema`; a `kind: schema` file supplies it under `types`. The trigger predicate catalog and complete envelope validation rules are still being finalized; these sketches do not establish additional required fields.
 

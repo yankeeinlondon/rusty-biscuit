@@ -5,7 +5,7 @@ use crate::events::{
 };
 use crate::provider::Provider;
 use chrono::{TimeZone, Utc};
-use darkmatter::markdown::compose::expression::{ParseMode, Parser, evaluate};
+use darkmatter::markdown::compose::expression::{Parser, evaluate};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -14,10 +14,9 @@ mod hook_leaf_reads;
 
 fn parse_and_evaluate<L: EvaluationLookup>(
     expression: &str,
-    mode: ParseMode,
     lookup: &L,
 ) -> Value {
-    let mut parser = Parser::with_mode(expression, mode).expect("parser should construct");
+    let mut parser = Parser::new(expression).expect("parser should construct");
     let parsed = parser.parse().expect("expression should parse");
     evaluate(&parsed, lookup).expect("expression should evaluate")
 }
@@ -244,7 +243,6 @@ fn evaluator_handles_fallback_for_missing_env_var() {
 
     let value = parse_and_evaluate(
         "env.CLAUDINE_EXPRESSION_TEST_FALLBACK || \"local\"",
-        ParseMode::Interpolation,
         &lookup,
     );
 
@@ -258,7 +256,6 @@ fn evaluator_handles_ternary_on_git_is_dirty() {
 
     let value = parse_and_evaluate(
         "git.is_dirty ? \"dirty\" : \"clean\"",
-        ParseMode::Interpolation,
         &lookup,
     );
 
@@ -272,7 +269,6 @@ fn evaluator_handles_numeric_comparison_on_hardware_cores() {
 
     let value = parse_and_evaluate(
         "hardware.cores > 8 ? \"fast\" : \"slow\"",
-        ParseMode::Interpolation,
         &lookup,
     );
 
@@ -286,7 +282,6 @@ fn evaluator_supports_length_helper_on_extra_array() {
 
     let value = parse_and_evaluate(
         "length(extra.tags) > 2 ? \"many\" : \"few\"",
-        ParseMode::Interpolation,
         &lookup,
     );
 
@@ -300,7 +295,6 @@ fn evaluator_handles_string_equality_in_condition_mode() {
 
     let value = parse_and_evaluate(
         "tool_name == 'Bash' && git.branch == 'main'",
-        ParseMode::Condition,
         &lookup,
     );
 
@@ -316,7 +310,6 @@ fn evaluator_treats_missing_optional_field_as_falsy() {
     // Interpolation fallback: tool_name is None -> Null -> falsy -> "default"
     let value = parse_and_evaluate(
         "tool_name || \"default\"",
-        ParseMode::Interpolation,
         &lookup,
     );
     assert_eq!(value, json!("default"));
@@ -332,7 +325,6 @@ fn evaluator_handles_unary_not_on_git_is_dirty() {
 
     let value = parse_and_evaluate(
         "provider == 'claude' && !git.is_dirty",
-        ParseMode::Condition,
         &lookup,
     );
 
@@ -539,7 +531,6 @@ fn condition_lookup_evaluator_handles_string_equality_in_condition_mode() {
 
     let value = parse_and_evaluate(
         "tool_name == 'Bash' && git.branch == 'main'",
-        ParseMode::Condition,
         &lookup,
     );
 
@@ -553,7 +544,6 @@ fn condition_lookup_evaluator_handles_numeric_comparison_on_hardware_cores() {
 
     let value = parse_and_evaluate(
         "hardware.cores > 8 ? \"fast\" : \"slow\"",
-        ParseMode::Interpolation,
         &lookup,
     );
 
@@ -645,15 +635,15 @@ fn condition_lookup_hook_namespace_resolves() {
     assert_eq!(lookup.get("hook.tool_name"), Some(json!("Bash")));
     assert!(lookup.get("hook").is_some_and(|value| value.is_object()));
     assert_eq!(
-        parse_and_evaluate("hook.tool_name == 'Bash'", ParseMode::Condition, &lookup),
+        parse_and_evaluate("hook.tool_name == 'Bash'", &lookup),
         json!(true)
     );
     assert_eq!(
-        parse_and_evaluate("doc.tool_name == 'Bash'", ParseMode::Condition, &lookup),
+        parse_and_evaluate("doc.tool_name == 'Bash'", &lookup),
         json!(false)
     );
     assert_eq!(
-        parse_and_evaluate("tool_name == 'Bash'", ParseMode::Condition, &lookup),
+        parse_and_evaluate("tool_name == 'Bash'", &lookup),
         json!(true)
     );
 }
@@ -667,11 +657,11 @@ fn condition_lookup_read_side_function_resolves_against_base_dir() {
 
     assert!(lookup.resolution_context().is_some());
     assert_eq!(
-        parse_and_evaluate("file_exists('artifact')", ParseMode::Condition, &lookup),
+        parse_and_evaluate("file_exists('artifact')", &lookup),
         json!(true)
     );
     assert_eq!(
-        parse_and_evaluate("file_exists('missing')", ParseMode::Condition, &lookup),
+        parse_and_evaluate("file_exists('missing')", &lookup),
         json!(false)
     );
 }
@@ -683,7 +673,6 @@ fn condition_lookup_evaluator_supports_length_helper_on_extra_array() {
 
     let value = parse_and_evaluate(
         "length(extra.tags) > 2 ? \"many\" : \"few\"",
-        ParseMode::Interpolation,
         &lookup,
     );
 

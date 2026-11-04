@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "file-reference")]
 use tracing::{debug, trace};
 
 use crate::file_reference::MagicPathList;
 use crate::file_reference::error::FileReferenceError;
-use crate::file_reference::resolve::normalize_components;
+use crate::file_reference::lexical::normalize_components;
 
 /// Policy for assigning a package-area root when a monorepo directory is not
 /// covered by an explicitly cataloged area.
@@ -467,6 +468,7 @@ fn most_specific_containing(roots: &[PathBuf], base: &Path) -> Option<PathBuf> {
 }
 
 /// Runtime state captured for file reference resolution.
+#[cfg(feature = "file-reference")]
 pub(crate) struct ResolutionContext {
     pub cwd: PathBuf,
     pub home_dir: Option<PathBuf>,
@@ -502,6 +504,7 @@ pub(crate) struct ResolutionContext {
     pub relative_boundary: Option<PathBuf>,
 }
 
+#[cfg(feature = "file-reference")]
 impl ResolutionContext {
     /// Build from live process state.
     pub fn from_ambient() -> Result<Self, FileReferenceError> {
@@ -1230,6 +1233,7 @@ impl FileResolutionContext {
     /// kind provenance (package, package area, repository or
     /// [`super::RootProvenance::LocalRoot`], home); configured roots carry
     /// [`super::RootProvenance::Magic`].
+    #[cfg(feature = "file-reference")]
     pub fn magic_search_roots(&self) -> Vec<super::MagicSearchRoot> {
         crate::file_reference::resolve::magic_root_chain_for_context(self)
     }
@@ -1239,6 +1243,7 @@ impl FileResolutionContext {
         &self.vault_roots
     }
 
+    #[cfg(feature = "file-reference")]
     pub(crate) fn magic_paths(&self) -> &MagicPathList {
         &self.magic_paths
     }
@@ -1438,6 +1443,7 @@ impl FileResolutionContext {
 /// Find the git repository root starting from `from`.
 ///
 /// Returns `Ok(None)` if no git repository is found.
+#[cfg(feature = "file-reference")]
 pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
     use gix::discover::upwards::Error as Up;
     trace!(?from, "searching for git root");
@@ -1745,12 +1751,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file-reference")]
     fn from_ambient_succeeds() {
         let ctx = ResolutionContext::from_ambient().unwrap();
         assert!(ctx.cwd.is_absolute());
     }
 
     #[test]
+    #[cfg(feature = "file-reference")]
     fn from_cwd_absolute_path_is_preserved() {
         // Windows has no drive-less absolute path: `/tmp` is *rooted* there but
         // `is_absolute()` is false, so the literal must be selected per platform.
@@ -1764,6 +1772,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file-reference")]
     fn from_cwd_relative_path_is_joined_to_ambient_cwd() {
         let ctx = ResolutionContext::from_cwd(Path::new("sub/dir")).unwrap();
         assert!(ctx.cwd.is_absolute());
@@ -1771,6 +1780,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file-reference")]
     fn find_git_root_inside_repo() {
         // We're inside the rusty-biscuit repo
         let root = find_git_root(&std::env::current_dir().unwrap()).unwrap();
@@ -1778,6 +1788,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "file-reference")]
     fn find_git_root_outside_repo() {
         // The OS temp directory is the portable stand-in for a real directory
         // that is unlikely to sit inside a git repository. A POSIX `/tmp`

@@ -23,6 +23,7 @@
 //! explicit environment inside a temporary directory; neither the checkout,
 //! the process environment, nor the process CWD is consulted.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -37,15 +38,17 @@ use claudine::composition::{
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::simplified::{DefKey, DefNamespace};
+use simplified_schema::simplified::{DefKey, DefNamespace};
 use darkmatter::markdown::schemas::triggers::parse_trigger_envelope_from_str;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaOriginKind, SchemaRootKind, SchemaRoots,
-    StandaloneSchemaEnvelope, TriggerSource, parse_standalone_schema_document,
+    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaRootKind, SchemaRoots, TriggerSource,
 };
+use simplified_schema::{SchemaOriginKind, StandaloneSchemaEnvelope, parse_standalone_schema_document};
 
 use crate::claudine_schemas::{AC5_GROUPS, BundleFile, SchemaRepo, problems, shipped_bundle};
-use crate::claudine_schemas_matrix::{Origin, Shape, Syntax, assert_cells_are_the_shapes, assert_non_string_trigger_key_errors, column_names};
+use crate::claudine_schemas_matrix::{
+    Origin, Shape, Syntax, assert_cells_are_the_shapes, assert_non_string_trigger_key_errors, column_names,
+};
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -599,13 +602,13 @@ fn embedded_non_string_top_level_trigger_key_is_an_error() {
 
 // ── AC13: schema locations and the last-resort rule ────────────────────────
 
-/// The schema roots a fixture can write to, most local first.
+/// The schema roots a fixture can write to, in search order.
 #[derive(Clone, Copy, Debug)]
 enum Root {
+    SchemasDir,
     Package,
     Area,
     Tree,
-    SchemasDir,
     Home,
 }
 
@@ -751,16 +754,16 @@ fn is_load_failure(error: &CompositionError) -> bool {
     matches!(error, CompositionError::SchemaLoad { .. } | CompositionError::SchemaParse { .. })
 }
 
-/// The nearest root holding `claudine.yaml` wins over every farther one, and
+/// The first root holding `claudine.yaml` wins over every later one, and
 /// with no disk copy left the embedded one applies.
 #[test]
 fn nearest_claudine_trigger_shadows_farther_ones() {
     let locations = Locations::new();
     let order = [
+        (Root::SchemasDir, "defs"),
         (Root::Package, "package"),
         (Root::Area, "area"),
         (Root::Tree, "tree"),
-        (Root::SchemasDir, "defs"),
         (Root::Home, "home"),
     ];
     for (root, tier) in order {
@@ -771,7 +774,7 @@ fn nearest_claudine_trigger_shadows_farther_ones() {
     let kinds: Vec<SchemaRootKind> = roots.searched().iter().map(|root| root.kind).collect();
     assert_eq!(
         kinds,
-        [SchemaRootKind::Package, SchemaRootKind::PackageArea, SchemaRootKind::Tree, SchemaRootKind::SchemasDir, SchemaRootKind::Home],
+        [SchemaRootKind::SchemasDir, SchemaRootKind::Package, SchemaRootKind::PackageArea, SchemaRootKind::Tree, SchemaRootKind::Home],
         "the fixture has all five roots"
     );
 
@@ -1491,8 +1494,8 @@ fn passive_parity_tests_cover_every_ac5_fixture() {
 /// every acyclic helper was inlined at each use.
 #[test]
 fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
-    use darkmatter::markdown::schemas::ValidationProblemCode::ConstraintViolation;
-    use darkmatter::markdown::schemas::validate::build_position_map;
+    use simplified_schema::ValidationProblemCode::ConstraintViolation;
+    use simplified_schema::validate::build_position_map;
 
     const BARE_VERB: &str = "a zero-argument verb written as a bare list item";
     let bare = Bare::new();

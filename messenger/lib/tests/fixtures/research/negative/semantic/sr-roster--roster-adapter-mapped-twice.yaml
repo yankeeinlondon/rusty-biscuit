@@ -1,4 +1,3 @@
----
 # The discord adapter mapped by two platforms (criterion 1).
 # Schema-valid by design; the Rust rule rejects it.
 # expect-rule: SR-ROSTER
@@ -62,4 +61,3 @@ platforms:
     approved_by: maintainer
     approved_on: *id002
 excluded: []
----

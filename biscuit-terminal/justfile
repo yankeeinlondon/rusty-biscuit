@@ -61,7 +61,7 @@ install *args="":
 # declares no `default` feature set. `image` gates the resvg rasterization
 # tests, and `serde` gates the horizontal-rule serialization tests. Every
 # consumer that renders artifacts enables `image` — biscuit-terminal-cli,
-# darkmatter, worktree-cli, sniff-cli — so the no-feature build is a
+# darkmatter, git-wt-cli, sniff-detection-cli — so the no-feature build is a
 # configuration nobody ships.
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
@@ -72,7 +72,7 @@ sanity:
 test *args="":
     @just _test_all "{{ LIBRARY }} --features image,serde; {{ CLI }}" {{ args }}
 
-# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+# Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args="":
     @just _slow_tests {{ args }}
 

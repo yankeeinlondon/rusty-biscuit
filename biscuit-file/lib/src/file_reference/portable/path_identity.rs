@@ -97,6 +97,7 @@ impl PathIdentity {
 
     /// Whether the path has no root and no leading `..` hops: plain names
     /// below wherever it is read from.
+    #[cfg(feature = "file-reference")]
     pub(crate) fn is_unanchored(&self) -> bool {
         self.root.is_empty() && !self.rooted && self.leading_parents == 0
     }
@@ -183,6 +184,8 @@ impl From<&Path> for PathIdentity {
 /// provenance and its own path spelling. Taking identities rather than paths
 /// lets every host test the Windows equalities (verbatim versus legacy, drive
 /// case, mixed separators) through this function.
+// Resolution's dedupe rule; its unit tests also run without `file-reference`.
+#[cfg_attr(not(feature = "file-reference"), allow(dead_code))]
 pub(crate) fn first_seen_by_identity<T>(
     items: impl IntoIterator<Item = T>,
     identity: impl Fn(&T) -> PathIdentity,

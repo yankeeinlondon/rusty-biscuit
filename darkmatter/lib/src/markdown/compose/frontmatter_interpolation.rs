@@ -585,12 +585,12 @@ impl FrontmatterExpressionLocation {
     /// the shared decoder does not model (a flow-collection member spread over
     /// several lines).
     pub(crate) fn project(&self, loaded: &str) -> Option<Range<usize>> {
-        use crate::markdown::schemas::SchemaValueKind;
-        use crate::markdown::schemas::decode_scalar_node;
-        use crate::markdown::schemas::simplified::yaml_scalar::alias_token;
+        use simplified_schema::SchemaValueKind;
+        use simplified_schema::decode_scalar_node;
+        use simplified_schema::simplified::yaml_scalar::alias_token;
 
         let block = crate::markdown::extract_frontmatter_block(loaded).ok()??;
-        let root = crate::markdown::schemas::simplified::locate_frontmatter_value(
+        let root = simplified_schema::simplified::locate_frontmatter_value(
             block.yaml,
             block.yaml_span.start,
         )?;
@@ -1421,32 +1421,32 @@ fn collect_variable_roots_for_shell_blocking(
     seed_map: &SharedFrontmatter,
 ) {
     match expr {
-        Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
-            Some(true) => collect_variable_roots(primary, refs),
+        Expr::LogicalOr { left, right } => match static_truthiness(left, seed_map) {
+            Some(true) => collect_variable_roots(left, refs),
             Some(false) => collect_variable_roots_for_shell_blocking(
-                fallback,
+                right,
                 refs,
                 shell_pending_keys,
                 blocked_keys,
                 seed_map,
             ),
             None => {
-                let mut primary_refs = Vec::new();
-                collect_variable_roots(primary, &mut primary_refs);
-                let primary_depends_on_shell = primary_refs
+                let mut left_refs = Vec::new();
+                collect_variable_roots(left, &mut left_refs);
+                let left_depends_on_shell = left_refs
                     .iter()
                     .any(|r| shell_pending_keys.contains(r) || blocked_keys.contains(r));
-                refs.extend(primary_refs);
-                if primary_depends_on_shell {
+                refs.extend(left_refs);
+                if left_depends_on_shell {
                     collect_variable_roots_for_shell_blocking(
-                        fallback,
+                        right,
                         refs,
                         shell_pending_keys,
                         blocked_keys,
                         seed_map,
                     );
                 } else {
-                    collect_variable_roots(fallback, refs);
+                    collect_variable_roots(right, refs);
                 }
             }
         },
@@ -1556,9 +1556,9 @@ fn static_truthiness(expr: &Expr, seed_map: &SharedFrontmatter) -> Option<bool> 
                 get_nested(value, rest).map(|nested| super::expression::is_truthy(&nested))
             }
         }
-        Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
+        Expr::LogicalOr { left, right } => match static_truthiness(left, seed_map) {
             Some(true) => Some(true),
-            Some(false) => static_truthiness(fallback, seed_map),
+            Some(false) => static_truthiness(right, seed_map),
             None => None,
         },
         _ => None,

@@ -25,9 +25,9 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use super::diagnostic::CleanDiagnostic;
-use crate::markdown::coercion::{self, Shape};
+use simplified_schema::coercion::{self, Shape};
 use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def};
-use crate::markdown::schemas::simplified::parse_property_definition;
+use simplified_schema::simplified::parse_property_definition;
 use crate::markdown::literal_token::holds_pending_syntax;
 
 /// The width `fixed-width: true` stands for.

@@ -28,14 +28,11 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::{
-    Markdown,
-    compose::{RequestSnapshot, build_resolution_context},
-    schemas::{
-        DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema,
-        parse_trigger_envelope_from_str,
-        resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema, resolve_yaml_schema_with_roots},
-    },
+    Markdown, compose::{RequestSnapshot, build_resolution_context},
+    schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, darkmatter_base_json_schema, parse_trigger_envelope_from_str, resolve::{resolve_schema_with_roots, resolve_yaml_schema, resolve_yaml_schema_with_roots}},
 };
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::{NotSchemaReason, SchemaError};
 use serde::Deserialize;
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
@@ -171,7 +168,17 @@ fn load_manifest(fixtures: &Path) -> Manifest {
 
 /// `path` relative to `base`, `/`-separated; `None` outside `base`.
 fn relative(path: &Path, base: &Path) -> Option<String> {
-    let rest = path.strip_prefix(base).ok()?;
+    // `canonicalize_simplified` keeps a result past MAX_PATH in its `\\?\C:\`
+    // form, whose prefix component never matches a simplified `C:\` base.
+    let without_verbatim_disk = |path: &Path| {
+        let text = path.to_string_lossy();
+        match text.strip_prefix(r"\\?\") {
+            Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+            _ => path.to_path_buf(),
+        }
+    };
+    let (path, base) = (without_verbatim_disk(path), without_verbatim_disk(base));
+    let rest = path.strip_prefix(&base).ok()?;
     Some(
         rest.components()
             .map(|component| component.as_os_str().to_string_lossy())
@@ -320,7 +327,24 @@ fn lower(
         .ok_or("the input has no UTF-8 file name")?;
     let key = entry.key.as_deref().unwrap_or("$schema");
     match entry.kind {
-        Kind::SchemaFile | Kind::PureSchemaDocument => {
+        // A `kind: schema` document with only `types` is a named-type library,
+        // not a `$schema` target, so its table is lowered as an inline root
+        // from the file's own directory.
+        Kind::SchemaFile => {
+            match resolve_schema_with_roots(&serde_json::json!(format!("./{file_name}")), dir, &[], context) {
+                Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }) => {}
+                other => {
+                    return Err(format!(
+                        "a schema-file entry must be a types-only document, but `$schema` resolution gave {:?}",
+                        other.map(|_| ())
+                    ));
+                }
+            }
+            resolve_yaml_schema(&declared_value(&input, "types"), dir, context)
+                .map(Lowered::from)
+                .map_err(|error| error.to_string())
+        }
+        Kind::PureSchemaDocument => {
             resolve_schema_with_roots(&serde_json::json!(format!("./{file_name}")), dir, &[], context)
                 .map(Lowered::from)
                 .map_err(|error| error.to_string())

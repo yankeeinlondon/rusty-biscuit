@@ -11,6 +11,11 @@
 //! file list (wiki candidates, workspace symbols) must not grow because an
 //! unlisted target was parsed.
 //!
+//! The target's frontmatter summary follows the same refresh paths: it
+//! appears in a body-link hover in every case, comes from an open buffer
+//! before disk, and changes or disappears as the target changes, closes, is
+//! deleted, or cannot be read.
+//!
 //! Parse and read counts come from `dmls::work_counters`, which are
 //! process-wide; nextest runs each test in its own process.
 
@@ -349,6 +354,140 @@ fn workspace_symbols(case: Case) {
     fixture.shutdown();
 }
 
+// ── body-link summaries ────────────────────────────────────────────────────
+
+const DISK_SUMMARY: &str = "Disk summary.";
+
+/// A target whose frontmatter holds `summary`, with `# Alpha` and `## Beta`.
+fn summary_target(summary: &str) -> String {
+    format!("---\nsummary: {summary}\n---\n# Alpha\n\n## Beta\n")
+}
+
+impl Scenario {
+    /// A document link (line 0) and a heading link (line 1) to the target,
+    /// which holds [`DISK_SUMMARY`].
+    fn summary_text(&self) -> String {
+        write(&self.target, &summary_target(DISK_SUMMARY));
+        format!("[d]({r})\n[b]({r}#beta)\n", r = self.reference)
+    }
+}
+
+/// The hover text of the document link (line 0) and the heading link
+/// (line 1).
+fn link_hovers(scenario: &Scenario, fixture: &mut LspFixture<'_>) -> (String, String) {
+    let text = |result: Value| result["contents"]["value"].as_str().unwrap_or_default().to_string();
+    let document = text(position(fixture, "textDocument/hover", &scenario.source, 0, 1));
+    let heading = text(position(fixture, "textDocument/hover", &scenario.source, 1, scenario.beta_character()));
+    (document, heading)
+}
+
+/// Both hovers end with `summary`, the heading one after its `Heading:` line.
+fn assert_summary(hovers: &(String, String), summary: &str, context: &str) {
+    let (document, heading) = hovers;
+    assert!(document.starts_with("**Alpha**\n\n→ `"), "{context}: {document}");
+    assert!(document.ends_with(&format!("`\n\n{summary}")), "{context}: {document}");
+    assert!(heading.ends_with(&format!("\n\nHeading: Beta\n\n{summary}")), "{context}: {heading}");
+}
+
+/// Both hovers are free of any summary.
+fn assert_no_summary(hovers: &(String, String), context: &str) {
+    let (document, heading) = hovers;
+    for hover in [document, heading] {
+        assert!(!hover.contains("summary."), "{context}: {hover}");
+    }
+}
+
+/// The summary shows on both link kinds, and only the source and the hovered
+/// target are parsed: a listed sibling with its own summary is not.
+fn summary_hover(case: Case) {
+    let scenario = Scenario::new(case);
+    write(&scenario.folder.join("other.md"), "---\nsummary: Other summary.\n---\n# Other\n");
+    let text = scenario.summary_text();
+    let mut fixture = scenario.start(Client::GlobWatches);
+    let before = work_counts();
+    scenario.open(&mut fixture, &text);
+    let hovers = link_hovers(&scenario, &mut fixture);
+    let work = work_counts().since(before);
+    assert_summary(&hovers, DISK_SUMMARY, &format!("{case:?}"));
+    assert_eq!(work.parses, 2, "{case:?}: the source, then the target: {work:?}");
+    fixture.shutdown();
+}
+
+/// An open target buffer outranks disk, its edits change the summary, and
+/// closing it falls back to disk.
+fn summary_from_buffer(case: Case) {
+    let scenario = Scenario::new(case);
+    let text = scenario.summary_text();
+    let mut fixture = scenario.start(Client::GlobWatches);
+    scenario.open(&mut fixture, &text);
+    let target = uri(&scenario.target);
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": target, "languageId": "markdown", "version": 1, "text": summary_target("Buffer summary.") } }),
+    );
+    assert_summary(&link_hovers(&scenario, &mut fixture), "Buffer summary.", &format!("{case:?} opened"));
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": target, "version": 2 },
+            "contentChanges": [ { "text": summary_target("Edited summary.") } ]
+        }),
+    );
+    assert_summary(&link_hovers(&scenario, &mut fixture), "Edited summary.", &format!("{case:?} edited"));
+
+    fixture.notify("textDocument/didClose", json!({ "textDocument": { "uri": target } }));
+    assert_summary(&link_hovers(&scenario, &mut fixture), DISK_SUMMARY, &format!("{case:?} closed"));
+    fixture.shutdown();
+}
+
+/// A disk change replaces the summary and deletion removes it, as `refresh`
+/// delivers each step.
+fn summary_refresh(case: Case, client: Client, refresh: fn(&Scenario, &mut LspFixture<'_>, u32)) {
+    let scenario = Scenario::new(case);
+    let text = scenario.summary_text();
+    let mut fixture = scenario.start(client);
+    scenario.open(&mut fixture, &text);
+    assert_summary(&link_hovers(&scenario, &mut fixture), DISK_SUMMARY, &format!("{case:?}"));
+
+    write(&scenario.target, &summary_target("Changed summary."));
+    refresh(&scenario, &mut fixture, 2);
+    latest(&mut fixture, &uri(&scenario.source));
+    assert_summary(&link_hovers(&scenario, &mut fixture), "Changed summary.", &format!("{case:?} after the change"));
+
+    std::fs::remove_file(&scenario.target).unwrap();
+    refresh(&scenario, &mut fixture, 3);
+    latest(&mut fixture, &uri(&scenario.source));
+    let hovers = link_hovers(&scenario, &mut fixture);
+    assert_no_summary(&hovers, &format!("{case:?} after deletion"));
+    assert!(hovers.0.contains("target.md"), "{case:?}: the deleted target's hover names it: {}", hovers.0);
+    fixture.shutdown();
+}
+
+fn watched_summary_refresh(case: Case) {
+    summary_refresh(case, Client::FolderWatches, watched_event);
+}
+
+fn save_summary_refresh(case: Case) {
+    summary_refresh(case, Client::Unwatched, save);
+}
+
+/// A target that cannot be read as text keeps the hover it had without a
+/// summary.
+fn unreadable_summary(case: Case) {
+    let scenario = Scenario::new(case);
+    let text = format!("[d]({r})\n[b]({r}#beta)\n", r = scenario.reference);
+    let mut bytes = summary_target(DISK_SUMMARY).into_bytes();
+    bytes.extend_from_slice(&[0xff, 0xfe, b'\n']);
+    std::fs::write(&scenario.target, bytes).unwrap();
+    let mut fixture = scenario.start(Client::GlobWatches);
+    scenario.open(&mut fixture, &text);
+    let hovers = link_hovers(&scenario, &mut fixture);
+    assert_no_summary(&hovers, &format!("{case:?}"));
+    assert!(hovers.0.contains("target.md"), "{case:?}: {}", hovers.0);
+    fixture.shutdown();
+}
+
 /// One `#[test]` per (case, consumer) cell.
 macro_rules! cells {
     ($($name:ident => $consumer:ident($case:ident);)*) => {
@@ -394,6 +533,21 @@ cells! {
     listed_target_workspace_symbols => workspace_symbols(Listed);
     excluded_target_workspace_symbols => workspace_symbols(Excluded);
     outside_target_workspace_symbols => workspace_symbols(Outside);
+    listed_target_summary_hover => summary_hover(Listed);
+    excluded_target_summary_hover => summary_hover(Excluded);
+    outside_target_summary_hover => summary_hover(Outside);
+    listed_target_summary_from_buffer => summary_from_buffer(Listed);
+    excluded_target_summary_from_buffer => summary_from_buffer(Excluded);
+    outside_target_summary_from_buffer => summary_from_buffer(Outside);
+    listed_target_watched_summary_refresh => watched_summary_refresh(Listed);
+    excluded_target_watched_summary_refresh => watched_summary_refresh(Excluded);
+    outside_target_watched_summary_refresh => watched_summary_refresh(Outside);
+    listed_target_save_summary_refresh => save_summary_refresh(Listed);
+    excluded_target_save_summary_refresh => save_summary_refresh(Excluded);
+    outside_target_save_summary_refresh => save_summary_refresh(Outside);
+    listed_target_unreadable_summary => unreadable_summary(Listed);
+    excluded_target_unreadable_summary => unreadable_summary(Excluded);
+    outside_target_unreadable_summary => unreadable_summary(Outside);
 }
 
 #[test]

@@ -21,8 +21,8 @@ use darkmatter::markdown::compose::shell_expansion::types::{
     ShellRuleEntry,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SimplifiedSchema};
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::{PropertyDef, SchemaShape, SchemaRoot};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -41,7 +41,7 @@ fn typed(command: &str, declarations: &[(&str, &str)]) -> CommandTemplate {
             .insert((*name).to_string(), PropertyDef::Single(parse_type_expr(name, ty).unwrap()));
     }
     let mut template = parse_authored(command).unwrap();
-    let schema = SimplifiedSchema::Single(shape);
+    let schema = SchemaRoot::Single(shape);
     let declared = DeclaredTypes::new(Some(&schema));
     template.project_types(&TypeScope::unguarded(&declared));
     template
@@ -393,7 +393,9 @@ fn an_exact_rule_wins_over_a_template_rule() {
 
 #[test]
 fn a_document_late_value_snapshot_survives_changes_before_dispatch() {
-    use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, DocumentShellValues, ShellPreApprovals};
+    use darkmatter::markdown::compose::shell_expansion::template::{
+        DeferredShellRoots, DocumentShellValues, ShellPreApprovals,
+    };
     let directory = TempDir::new().unwrap();
     let document = directory.path().join("prompt.md");
     std::fs::write(&document, format!("::shell {MISSING} {{{{ last(outputs) }}}}\n")).unwrap();
@@ -418,7 +420,9 @@ fn a_document_late_value_snapshot_survives_changes_before_dispatch() {
 
 #[test]
 fn a_document_site_changed_after_the_barrier_cannot_read_a_new_late_value() {
-    use darkmatter::markdown::compose::shell_expansion::template::{DeferredShellRoots, DocumentShellValues, ShellPreApprovals};
+    use darkmatter::markdown::compose::shell_expansion::template::{
+        DeferredShellRoots, DocumentShellValues, ShellPreApprovals,
+    };
     let directory = TempDir::new().unwrap();
     let document = directory.path().join("prompt.md");
     std::fs::write(&document, format!("::shell {MISSING} {{{{ last(outputs) }}}}\n")).unwrap();

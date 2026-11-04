@@ -86,6 +86,12 @@ remaining schema as "valid by default", never as passing the baseline.
 (`--baseline-schema PATH` on `md compose` and `md clean`, `--schema PATH` on
 `md schema validate`) is a usage error.
 
+A YAML file given to `md schema validate` never uses a baseline or trigger
+schemas, so both identifiers are accepted there and change nothing for it;
+its kind definitions come from the schema roots whatever `schema-triggers`
+says. See
+[YAML documents on the command line](../topics/schemas/definition.md#yaml-documents-on-the-command-line).
+
 ### Diagnostics (`--deny`)
 
 - **`style`**: unknown or deprecated `style:` keys, and deprecated inline

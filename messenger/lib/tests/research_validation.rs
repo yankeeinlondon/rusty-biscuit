@@ -214,6 +214,57 @@ fn shipped_legacy_documents_are_reported_as_unbound() {
     }
 }
 
+/// The roster, overrides, and mappings are whole YAML documents, judged
+/// against their root `$schema` by the `md schema validate` entry point: a
+/// leading `---` is a document marker, while the Markdown frontmatter fences
+/// they once carried make a second document and fail to load.
+#[test]
+fn yaml_contract_files_load_as_one_whole_yaml_document() {
+    let workspace = TempWorkspace::new();
+    let shipped = fs::read_to_string(repo_root().join("messenger/docs/platforms.yaml")).expect("roster");
+    let roster = "messenger/docs/platforms.yaml";
+    let root = workspace.root().display().to_string();
+
+    let control = workspace.loader.load_roster(&workspace.write(roster, &shipped)).expect("control loads");
+    assert!(control.is_clean(), "{}", show(&control.diagnostics));
+    assert!(control.frontmatter.get("$schema").is_none(), "`$schema` is binding, not data");
+    assert_eq!(control.frontmatter["roster_version"], Value::from(1));
+
+    let marked = workspace.loader.load_roster(&workspace.write(roster, &format!("---\n{shipped}"))).expect("marker loads");
+    assert!(marked.is_clean(), "{}", show(&marked.diagnostics));
+
+    let broken = workspace
+        .loader
+        .load_roster(&workspace.write(roster, &shipped.replacen("roster_version: 1", "roster_version: 2", 1)))
+        .expect("loads with findings");
+    assert!(broken.record.is_none());
+    assert!(
+        broken.diagnostics.iter().any(|d| d.rule == Rule::Schema && d.pointer == "/roster_version"),
+        "{}",
+        show(&broken.diagnostics)
+    );
+
+    let unloadable = [
+        (format!("---\n{shipped}---\n"), "more than one document"),
+        (shipped.replacen("roster_version: 1", "roster_version: 1\nroster_version: 1", 1), "duplicate"),
+        ("- roster_version: 1\n".to_string(), "not a mapping"),
+    ];
+    for (text, expected) in unloadable {
+        match workspace.loader.load_roster(&workspace.write(roster, &text)) {
+            Err(ResearchError::Document { path, message }) => {
+                assert_eq!(path.as_str(), roster);
+                assert!(message.contains(expected), "{expected}: {message}");
+                assert!(!message.contains(&root), "host path leaked: {message}");
+            }
+            other => panic!("{expected}: expected a document error, got {other:?}"),
+        }
+    }
+
+    let overrides = fs::read_to_string(fixture("contract/overrides-valid.yaml")).expect("overrides");
+    let fenced = workspace.write("messenger/docs/research/platforms/_overrides.yaml", &format!("---\n{overrides}---\n"));
+    assert!(matches!(workspace.loader.load_overrides(&fenced), Err(ResearchError::Document { .. })));
+}
+
 #[test]
 fn unreadable_files_are_errors_with_repository_relative_paths() {
     let workspace = TempWorkspace::new();

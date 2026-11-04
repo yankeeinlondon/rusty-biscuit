@@ -292,7 +292,7 @@ fn a_raw_json_schema_contributes_its_top_level_names() {
     doc(
         &fixture,
         "plan.schema.json",
-        r#"{"type":"object","properties":{"phase":{"type":"string","properties":{"nested":{}}}}}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"phase":{"type":"string","properties":{"nested":{}}}}}"#,
     );
     let file = doc(&fixture, "plan.md", "---\n$schema: ./plan.schema.json\n---\nBody\n");
 
@@ -369,9 +369,14 @@ fn bare_words_become_argv_in_order_and_override_an_authored_argv() {
     let launch = &launches(&log)[0];
     assert_eq!(occurrences(launch, &["-c", "model=y", "gamma"]), 1, "{launch:?}");
     assert!(!contains(launch, "alpha") && !contains(launch, "beta"), "{launch:?}");
+}
 
-    // With no positionals the authored value is left alone.
-    fs::remove_file(fixture.cwd().join("probe.log")).unwrap();
+#[test]
+fn without_positionals_an_authored_argv_is_left_alone() {
+    let fixture = CliProcessFixture::named("own-argv-authored");
+    stub(&fixture, "codex", "exit 0");
+    let file = doc(&fixture, "plan.md", &probed("argv: [authored]\n"));
+
     let (code, stderr) = run(&fixture, &["compose", &file, "--codex"]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(probe(&fixture).trim(), r#"phase=[] x=[] argv=["authored"]"#);

@@ -59,7 +59,7 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE, "an expression that did not evaluate"),
     (ComposeWarning::GLOB_SKIPPED_SYMLINK_CODE, "a symlink a glob left out"),
     (super::RemoteFetchStats::CACHE_WARNING_CODE, "a remote cache read or write that failed"),
-    (crate::markdown::schemas::SchemaAdvisory::MISSING_SIMPLIFIED_ENVELOPE_CODE, "a schema file without its `$schema` envelope"),
+    (simplified_schema::SchemaAdvisory::MISSING_SIMPLIFIED_ENVELOPE_CODE, "a schema file without its `$schema` envelope"),
     (crate::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE, "a schema trigger skipped because it failed to load"),
     (MISSING_HYPERLINK_CODE, "a missing hyperlink target"),
     (MISSING_IMAGE_CODE, "a missing image target"),

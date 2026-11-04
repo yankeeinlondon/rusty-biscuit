@@ -20,8 +20,8 @@ use serde_json::Value;
 
 use crate::catalog::{Described, Example, ExampleVerification};
 use crate::markdown::compose::expression::call_binding::TypeResolver;
-use crate::markdown::schemas::simplified::{
-    Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SimplifiedSchema,
+use simplified_schema::simplified::{
+    Constraint, ExampleOutcome, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaRoot,
     StandaloneSchemaEnvelope, TypeExpr, parse_standalone_schema_document, serialize_property_def,
 };
 
@@ -280,7 +280,7 @@ pub fn function_descriptors(name: &str) -> &'static [ExpressionFunctionDescripto
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CatalogError {
     #[error(transparent)]
-    Schema(#[from] crate::markdown::schemas::SchemaError),
+    Schema(#[from] simplified_schema::SchemaError),
     #[error("{path}: {message}")]
     Invalid { path: String, message: String },
 }
@@ -310,7 +310,7 @@ pub(crate) fn load_catalog(
     let Some(categories) = document.categories.as_ref() else {
         return Err(invalid("missing the `categories:` list".into()));
     };
-    let Some(SimplifiedSchema::Single(types)) = document.schema() else {
+    let Some(SchemaRoot::Single(types)) = document.schema() else {
         return Err(invalid("`types:` must be a mapping of named types".into()));
     };
     let raw_entries = raw_type_entries(source);
@@ -558,7 +558,7 @@ fn file_example(function: &str, reference: &str, example_files: &[(&str, &str)])
         .iter()
         .find(|(path, _)| *path == key)
         .ok_or_else(|| format!("`types.{function}`: example file `{reference}` is not embedded"))?;
-    let object = crate::markdown::schemas::example::validate_example_bytes(reference, text.as_bytes())
+    let object = simplified_schema::example::validate_example_bytes(reference, text.as_bytes())
         .map_err(|error| format!("`types.{function}`: {error}"))?;
     let invocation = object
         .get("invocation")

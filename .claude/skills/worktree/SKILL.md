@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Expert knowledge for the `worktree` package area of rusty-biscuit — the `worktree` library and the `wt` CLI (`worktree-cli`) for managing git worktrees. Use when working in `worktree/`, changing `wt create`, `wt list`, `wt remove`, or `wt go`, the shell wrapper and completions, `.worktreeinclude` copying, fork-origin records, the PR and live-head refresh worker, the `wt list` caption, table, or git graph, or when writing or debugging worktree tests.
+description: Expert knowledge for the `worktree` package area of rusty-biscuit — the `worktree` library and the `wt` CLI (`git-wt-cli`) for managing git worktrees. Use when working in `worktree/`, changing `wt create`, `wt list`, `wt remove`, or `wt go`, the shell wrapper and completions, `.worktreeinclude` copying, fork-origin records, the PR and live-head refresh worker, the `wt list` caption, table, or git graph, or when writing or debugging worktree tests.
 ---
 
 # Worktree
@@ -10,7 +10,7 @@ The `worktree` package area has two crates:
 | Crate | Path | Role |
 | ----- | ---- | ---- |
 | `worktree` | `worktree/lib/` | Library holding the git-worktree logic (listing, include copying, removal safety, remote stores) |
-| `worktree-cli` | `worktree/cli/` | The `wt` binary, plus rendering, the shell wrapper, and the refresh worker |
+| `git-wt-cli` | `worktree/cli/` | The `wt` binary, plus rendering, the shell wrapper, and the refresh worker |
 
 User-facing behavior is documented in `worktree/README.md`,
 `worktree/docs/base-directory.md`,
@@ -37,7 +37,7 @@ facts and traps, not user docs.
 
 ## Rules that bite everywhere
 
-- **`worktree-cli` compiles shared modules twice.** It has a binary target
+- **`git-wt-cli` compiles shared modules twice.** It has a binary target
   (`src/main.rs`, binary `wt`) and a library target (`src/lib.rs`). Shared
   modules such as `commands` and `perf` are declared in both so integration
   tests (library target) and the binary can use them. Their `#[cfg(test)]`

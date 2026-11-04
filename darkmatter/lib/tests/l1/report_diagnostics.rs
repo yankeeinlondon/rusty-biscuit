@@ -18,7 +18,7 @@ use darkmatter::markdown::compose::report_diagnostics::{
     warning_diagnostic,
 };
 use darkmatter::markdown::compose::{ComposeContext, ComposeFailure, ComposeOptions, ComposeReport};
-use darkmatter::markdown::schemas::SCHEMA_TYPE_MISMATCH_CODE;
+use simplified_schema::SCHEMA_TYPE_MISMATCH_CODE;
 use darkmatter::markdown::Markdown;
 use serde_json::json;
 use tempfile::TempDir;

@@ -37,9 +37,14 @@ fn files_association_is_stable_inside_a_large_monorepo() {
     }
     std::fs::write(area.join("README.md"), "# Area\n").unwrap();
     std::fs::write(area.join("justfile"), "default:\n    echo sample\n").unwrap();
+    // A sibling outside every `--base`: a walk that strays into it visits at
+    // least this many entries, which the `entries_visited` bound below catches
+    // directly. It need not exceed the 10,000-file inventory cap, which would
+    // cost seconds of fixture writes on Windows.
+    const UNRELATED: u64 = 64;
     let unrelated = root.join("unrelated");
     std::fs::create_dir(&unrelated).unwrap();
-    for index in 0..10_050 {
+    for index in 0..UNRELATED {
         std::fs::write(unrelated.join(format!("file-{index}.txt")), "text\n").unwrap();
     }
 
@@ -57,6 +62,8 @@ fn files_association_is_stable_inside_a_large_monorepo() {
         let json: Value = serde_json::from_slice(&output).unwrap();
         let counters = &json["performance"]["counters"];
         assert_eq!(counters["filesystem.file_inventory.files_accepted"], total, "{json}");
+        let visited = counters["filesystem.walk.entries_visited"].as_u64().unwrap();
+        assert!(visited < UNRELATED, "the walk left `--base`: {json}");
         for counter in [
             "git.status_walks",
             "filesystem.docs.documents_parsed",
@@ -262,6 +269,7 @@ fn assert_osc8_destination_identity(
 }
 
 /// Percent-decodes a file-URL path segment per RFC 3986 (tests only).
+#[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -284,6 +292,7 @@ fn percent_decode(value: &str) -> String {
 /// Converts a `file://` URL back to its native path for identity comparison,
 /// allowing the URL forms the encoder produces on Windows (forward slashes,
 /// lowered drive letter, `file://server/share` network shares).
+#[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
 fn file_url_to_native_path(url: &str) -> PathBuf {
     let rest = url.strip_prefix("file://").expect("file URL");
     // `file:///…` has an empty authority; `file://server/share/…` names a
@@ -326,6 +335,7 @@ fn file_url_to_native_path(url: &str) -> PathBuf {
 /// `canonicalize` returns extended-length `\\?\` paths while file URLs carry
 /// the plain drive spelling, and NTFS identity is case-insensitive; other
 /// platforms compare natively.
+#[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
 fn identity_path(path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
@@ -369,6 +379,7 @@ struct FilesListFixture {
     /// `repo/area/lib` — the workspace package whose files get captured.
     package_root: PathBuf,
     /// Canonical package root (fixture alias normalized once).
+    #[cfg_attr(windows, allow(dead_code, reason = "only the unix-gated OSC8 link-identity tests use it"))]
     canonical_package_root: PathBuf,
 }
 
@@ -5655,6 +5666,7 @@ fn corrupt_loose_object(repo_path: &Path, sha: &str) {
         perms.set_mode(0o644);
     }
     #[cfg(not(unix))]
+    #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
     perms.set_readonly(false);
     std::fs::set_permissions(&obj_path, perms).unwrap();
     std::fs::write(&obj_path, b"garbage").unwrap();
@@ -7165,7 +7177,7 @@ fn test_recent_commits_package_filters_and_attribution_in_a_monorepo() {
 }
 
 /// A workspace with `worktree/lib` (`worktree`), `worktree/cli`
-/// (`worktree-cli`), and `other/lib` (`other`), and commits touching shared
+/// (`git-wt-cli`), and `other/lib` (`other`), and commits touching shared
 /// area files, look-alike paths, and a misleading scope. Returns the commit
 /// ids oldest first, labeled `C0`..=`C9` in the assertions.
 fn create_area_membership_repo() -> (tempfile::TempDir, PathBuf, Vec<String>) {
@@ -7175,7 +7187,7 @@ fn create_area_membership_repo() -> (tempfile::TempDir, PathBuf, Vec<String>) {
     git2::Repository::init(dir.path()).unwrap();
     let path = dir.path().to_path_buf();
     let worktree_manifest = format!("{PACKAGE}\"worktree\"\n");
-    let cli_manifest = format!("{PACKAGE}\"worktree-cli\"\n");
+    let cli_manifest = format!("{PACKAGE}\"git-wt-cli\"\n");
     let other_manifest = format!("{PACKAGE}\"other\"\n");
     let history: [(&[(&str, &str)], &str); 10] = [
         (
@@ -7244,7 +7256,7 @@ fn test_recent_commits_package_area_selects_shared_area_files_by_location() {
 
     let package = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree", "--json"]);
     assert_eq!(hashes(&package), pick(&[1, 0]), "the planning commit touches no package");
-    let cli = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree-cli", "--json"]);
+    let cli = run_commit_json(&path, &["recent-commits", "50", "--package", "git-wt-cli", "--json"]);
     assert_eq!(hashes(&cli), pick(&[8, 0]));
 
     // Attribution comes from the files, not from the filter being present.
@@ -10049,7 +10061,7 @@ fn test_repo_worktrees_detached_head() {
 ///
 /// - `homelab/lib`        → area `homelab`,        name `homelab-lib`
 /// - `homelab/server/srv` → area `homelab/server`, name `homelab-srv`
-/// - `sniff/cli`          → area `sniff`,          name `sniff-cli`
+/// - `sniff/cli`          → area `sniff`,          name `sniff-detection-cli`
 fn create_cli_monorepo_with_nested_areas() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
@@ -10069,7 +10081,7 @@ members = ["homelab/lib", "homelab/server/srv", "sniff/cli"]
     let members = [
         ("homelab/lib", "homelab-lib"),
         ("homelab/server/srv", "homelab-srv"),
-        ("sniff/cli", "sniff-cli"),
+        ("sniff/cli", "sniff-detection-cli"),
     ];
     for (rel, name) in &members {
         let pkg = dir.path().join(rel);
@@ -10122,7 +10134,7 @@ fn test_repo_package_flag_returns_single_package() {
             "repo",
             "packages",
             "--package",
-            "sniff-cli",
+            "sniff-detection-cli",
             "--list",
             "--plain",
         ])
@@ -10130,7 +10142,7 @@ fn test_repo_package_flag_returns_single_package() {
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert_eq!(stdout.trim(), "sniff-cli");
+    assert_eq!(stdout.trim(), "sniff-detection-cli");
 }
 
 /// Spec §6.2 — `--package-area homelab` matches both `homelab` and
@@ -10198,7 +10210,7 @@ fn test_repo_package_and_area_flags_non_overlap_errors() {
             "repo",
             "packages",
             "--package",
-            "sniff-cli",
+            "sniff-detection-cli",
             "--package-area",
             "homelab",
         ])
@@ -10207,7 +10219,7 @@ fn test_repo_package_and_area_flags_non_overlap_errors() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
-        stderr.contains("sniff-cli"),
+        stderr.contains("sniff-detection-cli"),
         "intersection error must name the package, got:\n{stderr}"
     );
     assert!(
@@ -10247,7 +10259,7 @@ fn test_repo_unknown_package_errors_with_valid_list() {
         "error must mention valid package names, got:\n{stderr}"
     );
     assert!(
-        stderr.contains("sniff-cli") && stderr.contains("homelab-lib"),
+        stderr.contains("sniff-detection-cli") && stderr.contains("homelab-lib"),
         "error must list the actual valid package names, got:\n{stderr}"
     );
 }
@@ -10315,12 +10327,12 @@ fn test_repo_positional_filter_and_package_flag_combine() {
 /// Spec §6.8 — `-p` short flag works on a `FileListArgs`-based command.
 ///
 /// Stage and modify a file under `sniff/cli` so `dirty-files` has something
-/// to report, then verify `-p sniff-cli` scopes the result to that package.
+/// to report, then verify `-p sniff-detection-cli` scopes the result to that package.
 #[test]
 fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
     let (_dir, path) = create_cli_monorepo_with_nested_areas();
 
-    // Mark the sniff-cli source file dirty (untracked modification of an
+    // Mark the sniff-detection-cli source file dirty (untracked modification of an
     // already-tracked file).
     std::fs::write(
         path.join("sniff/cli/src/lib.rs"),
@@ -10335,7 +10347,7 @@ fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
             "repo",
             "dirty-files",
             "-p",
-            "sniff-cli",
+            "sniff-detection-cli",
             "--list",
             "--plain",
         ])
@@ -10768,4 +10780,33 @@ fn package_identity_shipped_manifest_through_cli() {
             assert!(value["packages"][0].get("name_source").is_none());
         }
     }
+}
+
+/// `repo state --json` reports the working-tree id, and an edit to a tracked
+/// file changes it while the clean tree's id is reproducible.
+#[test]
+fn test_repo_state_json_tracks_working_tree_content() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let state = |path: &std::path::Path| -> serde_json::Value {
+        let output = common::owned_sniff_command()
+            .args(["--base", path.to_str().unwrap(), "repo", "state", "--json"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).expect("valid json")
+    };
+
+    let clean = state(&path);
+    assert_eq!(clean["id"].as_str().map(str::len), Some(16), "{clean}");
+    assert_eq!(clean["head"].as_str().map(str::len), Some(40), "{clean}");
+    assert_eq!(clean["changed"], serde_json::json!([]));
+    assert_eq!(state(&path)["id"], clean["id"], "the same state has the same id");
+
+    std::fs::write(path.join("src/main.rs"), "fn main() { println!(); }").unwrap();
+    let edited = state(&path);
+    assert_ne!(edited["id"], clean["id"]);
+    assert_eq!(edited["changed"][0]["path"], "src/main.rs");
+    assert!(edited["changed"][0]["content"].as_str().unwrap().starts_with("file:"));
 }

@@ -808,10 +808,8 @@ fn non_ternary_arg_interpolation_cannot_inject_new_action() {
 
 #[test]
 fn ternary_condition_supports_infix_and() {
-    // Review-3 high finding: condition-mode infix `&&` must lower to
-    // `and(a, b)` and select the then-branch when both operands are
-    // truthy. The non-condition `parse` entrypoint refuses bare `&&`
-    // outside `{{ }}` interpolation; only `parse_condition` accepts it.
+    // Review-3 high finding: infix `&&` in a ternary condition must lower to
+    // `and(a, b)` and select the then-branch when both operands are truthy.
     let temp_dir = TempDir::new().unwrap();
     let mut fm = fm_from_json(json!({
         "a": true,
@@ -875,7 +873,7 @@ fn ternary_condition_supports_infix_or() {
 
 #[test]
 fn ternary_condition_supports_negation() {
-    // Condition-mode parses `!flag` as `not(flag)`.
+    // A ternary condition parses `!flag` as `not(flag)`.
     let temp_dir = TempDir::new().unwrap();
     let mut fm = fm_from_json(json!({
         "flag": false,
@@ -919,7 +917,7 @@ fn ternary_condition_supports_comparison() {
 
 #[test]
 fn ternary_condition_supports_nested_expression_ternary() {
-    // Condition-mode supports `?:` inside the condition expression
+    // A ternary condition supports `?:` inside the condition expression
     // itself. Here `(flag ? true : false)` evaluates to `true`, which
     // selects the outer then-branch.
     let temp_dir = TempDir::new().unwrap();

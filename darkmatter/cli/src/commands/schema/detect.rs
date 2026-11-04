@@ -7,9 +7,8 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
-use darkmatter::markdown::schemas::{
-    DetectOptions, detect_schema_with_contexts, schema_to_yaml, to_json_schema,
-};
+use darkmatter::markdown::schemas::{DetectOptions, detect_schema_with_contexts, schema_to_yaml};
+use simplified_schema::to_json_schema;
 
 use crate::io::{DocumentArgumentError, open_argument};
 use crate::request::MdRequest;
@@ -111,7 +110,7 @@ fn load_document(
 fn emit_schema(
     format: SchemaDetectFormat,
     sources: &[PathBuf],
-    schema: &darkmatter::markdown::schemas::SimplifiedSchema,
+    schema: &simplified_schema::SchemaRoot,
 ) {
     match format {
         SchemaDetectFormat::Yaml => {

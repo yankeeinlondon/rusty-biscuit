@@ -14,7 +14,7 @@ mod schema_validation_integration {
     }
 
     use super::*;
-    use crate::markdown::schemas::{ValidationProblem, ValidationProblemCode};
+    use simplified_schema::{ValidationProblem, ValidationProblemCode};
 
     #[test]
     fn schema_validation_fails_fast_before_shell_expansion() {
@@ -375,13 +375,12 @@ mod schema_validation_integration {
     #[test]
     fn baseline_cache_does_not_reuse_across_distinct_baselines() {
         use crate::markdown::compose::CacheAccessMode;
-        use crate::markdown::schemas::{
-            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
-            SimplifiedType, TypeExpr,
+        use simplified_schema::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
         };
         use indexmap::IndexMap;
 
-        fn baseline_required(prop: &str) -> SimplifiedSchema {
+        fn baseline_required(prop: &str) -> SchemaRoot {
             let mut properties = IndexMap::new();
             properties.insert(
                 prop.into(),
@@ -393,7 +392,7 @@ mod schema_validation_integration {
                     description: None,
                 }),
             );
-            SimplifiedSchema::Single(SchemaShape {
+            SchemaRoot::Single(SchemaShape {
                 properties,
                 ..Default::default()
             })
@@ -785,9 +784,8 @@ mod schema_validation_integration {
 
     #[test]
     fn baseline_file_projection_layers_with_document_schema_and_skips_absent_optional() {
-        use crate::markdown::schemas::{
-            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
-            SimplifiedType, TypeExpr,
+        use simplified_schema::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
         };
         use indexmap::IndexMap;
 
@@ -822,7 +820,7 @@ mod schema_validation_integration {
                 description: None,
             }),
         );
-        let baseline = SimplifiedSchema::Single(SchemaShape {
+        let baseline = SchemaRoot::Single(SchemaShape {
             properties,
             ..Default::default()
         });
@@ -1844,7 +1842,7 @@ mod schema_validation_integration {
 
     #[test]
     fn recursive_lazy_caller_file_requires_eager_binding() {
-        use crate::markdown::schemas::FileReferenceDiagnostic;
+        use simplified_schema::FileReferenceDiagnostic;
 
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git")).unwrap();
@@ -2332,7 +2330,7 @@ mod schema_validation_integration {
 
     #[test]
     fn eager_caller_file_failures_retain_typed_reference_diagnostics() {
-        use crate::markdown::schemas::FileReferenceDiagnostic;
+        use simplified_schema::FileReferenceDiagnostic;
 
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git")).unwrap();

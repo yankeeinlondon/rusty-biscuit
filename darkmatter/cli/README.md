@@ -207,6 +207,19 @@ During `compose`, Darkmatter supports both body `::shell ...` directives and top
 
 A root document that authors `initialize`, `composed`, `failed`, `cancelled`, or `finalize` runs those lifecycle stacks around composition. See [Lifecycle Events](../docs/topics/lifecycle/index.md) and the [`compose` reference](../docs/cli/compose.md#lifecycle-events).
 
+### Schema Validation
+
+```bash
+# Markdown frontmatter, against its `$schema`, triggers, and the baseline
+md schema validate docs/post.md
+
+# Whole YAML files, against their claimed `kind` or root `$schema`
+md schema validate schemas/roster.yaml data/platforms.yaml
+```
+
+See [`md schema validate`](../docs/topics/schemas/definition.md#cli-md-schema-validate)
+for flags, output, and exit codes.
+
 ### Frontmatter Set
 
 ```bash

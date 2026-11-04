@@ -37,7 +37,7 @@ Source code is defined by the library's canonical classifier (`sniff::filesystem
 
 ```bash
 sniff repo dirty-source-code                          # All dirty source files
-sniff repo dirty-source-code --package sniff-cli      # Only in sniff/cli/
+sniff repo dirty-source-code --package sniff-detection-cli      # Only in sniff/cli/
 sniff repo dirty-source-code --list --plain            # Plain bullet list
 sniff repo dirty-source-code blast_radius              # Filter by substring
 ```

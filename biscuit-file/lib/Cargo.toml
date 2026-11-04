@@ -3,7 +3,7 @@ name = "biscuit-file"
 version = "0.1.0"
 edition = "2024"
 description = "File format utilities for PDF, TOML, and YAML"
-license = "MIT"
+license = "AGPL-3.0-only"
 autotests = false
 
 [lib]
@@ -25,10 +25,15 @@ extract = ["dep:pdf-extract"]
 lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
-# File reference resolution
-file-reference = ["dep:gix", "dep:walkdir", "dep:globset", "url"]
+# File reference grammar: passive parsing of file and glob references and the
+# data types they produce. No `gix` or `walkdir`; `globset` stays because glob
+# pattern parsing validates the glob text.
+file-reference-syntax = ["dep:globset", "url"]
 
-# URL support (automatically enabled by file-reference)
+# File reference resolution, listing, and git root discovery
+file-reference = ["file-reference-syntax", "dep:gix", "dep:walkdir"]
+
+# URL support (automatically enabled by file-reference-syntax)
 url = ["dep:url"]
 
 # Remote fetch (off-by-default; gates reqwest and HTTP dependencies)
@@ -104,6 +109,7 @@ test-toolkit = { path = "../../tools/test-toolkit" }
 [[bench]]
 name = "parsers"
 harness = false
+required-features = ["toml", "yaml", "json5"]
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a

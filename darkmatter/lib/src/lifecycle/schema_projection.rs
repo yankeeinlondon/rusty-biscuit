@@ -53,8 +53,8 @@ use crate::effects::{EFFECT_DESCRIPTORS, effect_function_catalog, effect_functio
 use crate::markdown::compose::expression::{
     ExpressionFunctionDescriptor, FunctionCatalog, expression_function_catalog, expression_function_descriptors,
 };
-use crate::markdown::schemas::simplified::grammar::parse_type_expr;
-use crate::markdown::schemas::simplified::{
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::{
     Constraint, FunctionParameter, FunctionParameters, FunctionType, LOCAL_REFERENCE, PropertyAtom, PropertyDef,
     SchemaShape, SimplifiedType, TupleElement, TupleType, TypeExpr, serialize_property_atom,
 };
@@ -1015,7 +1015,7 @@ fn yaml_atom(atom: &PropertyAtom) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::simplified::grammar::parse_type_definition;
+    use simplified_schema::simplified::grammar::parse_type_definition;
 
     fn shipped() -> LifecycleSchemaProjection {
         LifecycleSchemaProjection::shipped().expect("the shipped catalogs project")

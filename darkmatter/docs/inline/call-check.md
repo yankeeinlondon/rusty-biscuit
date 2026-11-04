@@ -154,7 +154,7 @@ A few rules decide the category:
   category 5.
 - **A recursive type is judged by its definition, and named in messages.** A
   property typed by a
-  [recursive named type](../topics/schemas/definition.md#cross-file-named-type-imports-namefile)
+  [recursive named type](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#cross-file-named-type-imports-namefile)
   is checked against what one level of the type holds, never by expanding it,
   so the check always finishes. With `node: "{ label: string, children:
   node[] }"` and `tree: node(required)`, `keys(tree)` is category 1 and

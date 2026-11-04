@@ -420,7 +420,7 @@ pub fn extract_control_variables(config: &LoopConfig) -> Vec<String> {
     let condition_source = match &config.condition {
         LoopCondition::While(source) | LoopCondition::Until(source) => source,
     };
-    if let Ok(expr) = darkmatter::markdown::compose::expression::parse_condition(condition_source) {
+    if let Ok(expr) = darkmatter::markdown::compose::expression::parse(condition_source) {
         insert_control_variables(&expr, &mut names);
     }
 

@@ -42,7 +42,7 @@
     "hover": {
       "contents": {
         "kind": "markdown",
-        "value": "**Expression**\n\n`or(!total_phases, total_phases <= 0)`\n\nStatic value: `{{\n    file_exists(plan)\n        ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0\n        : 0\n}}` (from frontmatter `total_phases`)"
+        "value": "**Expression**\n\n`!total_phases || total_phases <= 0`\n\nStatic value: `{{\n    file_exists(plan)\n        ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0\n        : 0\n}}` (from frontmatter `total_phases`)"
       },
       "range": {
         "start": {

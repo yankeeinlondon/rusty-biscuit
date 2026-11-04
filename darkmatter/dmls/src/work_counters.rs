@@ -20,6 +20,9 @@
 //! them, which is why scans are counted), and hashes that only build an
 //! in-memory cache key.
 //!
+//! [`yaml_preparation_threads`] likewise names every thread a YAML document's
+//! contract was prepared on ([`record_yaml_preparation`]).
+//!
 //! [`registry_scan_threads`] also names every thread a registry scan ran on,
 //! so a test can show that none ran on the server's dispatch thread, and
 //! [`peak_concurrent_registry_scans`] is the most scans ever in progress at
@@ -32,7 +35,8 @@
 //! ([`record_item_synthesis`]), scalar entries classified against the schema
 //! ([`record_scalar_classification`]), whole-document typing walks
 //! ([`record_typing_walk`]), and whole-document lifecycle stack-expression
-//! walks ([`record_stack_walk`]).
+//! walks ([`record_stack_walk`]). Each `$schema` target read for a hover
+//! preview is [`record_schema_target_inspection`].
 //!
 //! [`record_definition_lookups`] starts recording the name of every recursive
 //! definition an editor walk opens, read back with [`definition_lookups`], so
@@ -58,12 +62,15 @@ static DOCUMENT_TABLES: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static REGISTRY_SCANS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCANS_PEAK: AtomicUsize = AtomicUsize::new(0);
+static YAML_PREPARATIONS: AtomicUsize = AtomicUsize::new(0);
+static YAML_PREPARATION_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static ROOT_ASSEMBLIES: AtomicUsize = AtomicUsize::new(0);
 static MERGED_SHAPES: AtomicUsize = AtomicUsize::new(0);
 static ITEM_SYNTHESES: AtomicUsize = AtomicUsize::new(0);
 static SCALAR_CLASSIFICATIONS: AtomicUsize = AtomicUsize::new(0);
 static TYPING_WALKS: AtomicUsize = AtomicUsize::new(0);
 static STACK_WALKS: AtomicUsize = AtomicUsize::new(0);
+static SCHEMA_TARGET_INSPECTIONS: AtomicUsize = AtomicUsize::new(0);
 static RECORDING_DEFINITION_LOOKUPS: AtomicBool = AtomicBool::new(false);
 static DEFINITION_LOOKUPS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -80,6 +87,10 @@ pub struct WorkCounts {
     pub enumerations: usize,
     /// Trigger-registry scans (root classification and payload resolution).
     pub registry_scans: usize,
+    /// YAML document contracts prepared (selection, schema resolution,
+    /// validator compilation, file-reading kind checks, and a standalone
+    /// schema's named types).
+    pub yaml_preparations: usize,
     /// Effective frontmatter root shapes assembled.
     pub root_assemblies: usize,
     /// Merged views of several union arms built.
@@ -92,6 +103,9 @@ pub struct WorkCounts {
     pub typing_walks: usize,
     /// Whole-document lifecycle stack-expression walks.
     pub stack_walks: usize,
+    /// Files a `$schema` reference selected, read and inspected for a hover
+    /// preview.
+    pub schema_target_inspections: usize,
     /// Wiki universes constructed.
     pub wiki_universes: usize,
     /// Wiki path facts (canonical logical path and owning root) computed.
@@ -111,12 +125,14 @@ impl WorkCounts {
             parses: self.parses - earlier.parses,
             enumerations: self.enumerations - earlier.enumerations,
             registry_scans: self.registry_scans - earlier.registry_scans,
+            yaml_preparations: self.yaml_preparations - earlier.yaml_preparations,
             root_assemblies: self.root_assemblies - earlier.root_assemblies,
             merged_shapes: self.merged_shapes - earlier.merged_shapes,
             item_syntheses: self.item_syntheses - earlier.item_syntheses,
             scalar_classifications: self.scalar_classifications - earlier.scalar_classifications,
             typing_walks: self.typing_walks - earlier.typing_walks,
             stack_walks: self.stack_walks - earlier.stack_walks,
+            schema_target_inspections: self.schema_target_inspections - earlier.schema_target_inspections,
             wiki_universes: self.wiki_universes - earlier.wiki_universes,
             wiki_path_facts: self.wiki_path_facts - earlier.wiki_path_facts,
             wiki_portability_keys: self.wiki_portability_keys - earlier.wiki_portability_keys,
@@ -132,12 +148,14 @@ impl WorkCounts {
             parses: self.parses + other.parses,
             enumerations: self.enumerations + other.enumerations,
             registry_scans: self.registry_scans + other.registry_scans,
+            yaml_preparations: self.yaml_preparations + other.yaml_preparations,
             root_assemblies: self.root_assemblies + other.root_assemblies,
             merged_shapes: self.merged_shapes + other.merged_shapes,
             item_syntheses: self.item_syntheses + other.item_syntheses,
             scalar_classifications: self.scalar_classifications + other.scalar_classifications,
             typing_walks: self.typing_walks + other.typing_walks,
             stack_walks: self.stack_walks + other.stack_walks,
+            schema_target_inspections: self.schema_target_inspections + other.schema_target_inspections,
             wiki_universes: self.wiki_universes + other.wiki_universes,
             wiki_path_facts: self.wiki_path_facts + other.wiki_path_facts,
             wiki_portability_keys: self.wiki_portability_keys + other.wiki_portability_keys,
@@ -154,12 +172,14 @@ pub fn work_counts() -> WorkCounts {
         parses: PARSES.load(Ordering::SeqCst),
         enumerations: ENUMERATIONS.load(Ordering::SeqCst),
         registry_scans: REGISTRY_SCANS.load(Ordering::SeqCst),
+        yaml_preparations: YAML_PREPARATIONS.load(Ordering::SeqCst),
         root_assemblies: ROOT_ASSEMBLIES.load(Ordering::SeqCst),
         merged_shapes: MERGED_SHAPES.load(Ordering::SeqCst),
         item_syntheses: ITEM_SYNTHESES.load(Ordering::SeqCst),
         scalar_classifications: SCALAR_CLASSIFICATIONS.load(Ordering::SeqCst),
         typing_walks: TYPING_WALKS.load(Ordering::SeqCst),
         stack_walks: STACK_WALKS.load(Ordering::SeqCst),
+        schema_target_inspections: SCHEMA_TARGET_INSPECTIONS.load(Ordering::SeqCst),
         wiki_universes: WIKI_UNIVERSES.load(Ordering::SeqCst),
         wiki_path_facts: WIKI_PATH_FACTS.load(Ordering::SeqCst),
         wiki_portability_keys: WIKI_PORTABILITY_KEYS.load(Ordering::SeqCst),
@@ -225,6 +245,11 @@ pub(crate) fn record_stack_walk() {
     STACK_WALKS.fetch_add(1, Ordering::SeqCst);
 }
 
+/// Counts one schema target read and inspected for its hover preview.
+pub(crate) fn record_schema_target_inspection() {
+    SCHEMA_TARGET_INSPECTIONS.fetch_add(1, Ordering::SeqCst);
+}
+
 /// Counts one wiki universe constructed.
 pub(crate) fn record_wiki_universe() {
     WIKI_UNIVERSES.fetch_add(1, Ordering::SeqCst);
@@ -280,6 +305,22 @@ pub fn registry_scan_threads() -> Vec<ThreadId> {
     REGISTRY_SCAN_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
+/// Counts one YAML document contract preparation and the thread it runs on.
+pub(crate) fn record_yaml_preparation() {
+    let thread = std::thread::current().id();
+    let mut threads = YAML_PREPARATION_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !threads.contains(&thread) {
+        threads.push(thread);
+    }
+    YAML_PREPARATIONS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Every thread a YAML document contract preparation has run on, in
+/// first-preparation order.
+pub fn yaml_preparation_threads() -> Vec<ThreadId> {
+    YAML_PREPARATION_THREADS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
 /// Clears the definition-lookup record and starts recording every lookup,
 /// on any thread, until [`definition_lookups`] is read.
 pub fn record_definition_lookups() {
@@ -295,7 +336,7 @@ pub fn definition_lookups() -> Vec<String> {
 }
 
 /// Records one recursive-definition lookup while a test is recording.
-pub(crate) fn note_definition_lookup(key: &darkmatter::markdown::schemas::DefKey) {
+pub(crate) fn note_definition_lookup(key: &simplified_schema::DefKey) {
     if RECORDING_DEFINITION_LOOKUPS.load(Ordering::Relaxed) {
         DEFINITION_LOOKUPS
             .lock()
@@ -326,11 +367,13 @@ mod tests {
         record_scalar_classification();
         record_typing_walk();
         record_stack_walk();
+        record_schema_target_inspection();
         record_wiki_universe();
         record_wiki_path_facts();
         record_wiki_path_facts();
         record_wiki_portability_key();
         record_document_table();
+        record_yaml_preparation();
         let middle = work_counts();
         let one = WorkCounts {
             reads: 2,
@@ -338,12 +381,14 @@ mod tests {
             parses: 1,
             enumerations: 1,
             registry_scans: 1,
+            yaml_preparations: 1,
             root_assemblies: 1,
             merged_shapes: 1,
             item_syntheses: 1,
             scalar_classifications: 1,
             typing_walks: 1,
             stack_walks: 1,
+            schema_target_inspections: 1,
             wiki_universes: 1,
             wiki_path_facts: 2,
             wiki_portability_keys: 1,

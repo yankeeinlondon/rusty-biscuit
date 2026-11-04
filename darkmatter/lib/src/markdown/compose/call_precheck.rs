@@ -50,7 +50,7 @@ use super::expression::{ALWAYS_FALSE_CALL_CODE, UNCERTAIN_CALL_CODE};
 use super::expression::{
     CallCheck, DeclaredTypes, ExpressionDiagnostic, ExpressionError, ExpressionFinder, ExpressionLocation,
     IncompleteHostCall, SpannedExpr, TypeScope, check_expression_calls, incomplete_host_calls, one_based_position,
-    parse_condition_spanned, parse_spanned,
+    parse_spanned,
 };
 use super::frontmatter_interpolation::{FrontmatterExpressionLocation, LocatedFrontmatterError};
 use super::value_origin::ValuePathSegment as Segment;
@@ -606,7 +606,7 @@ fn rejected_condition(
     scope: &TypeScope<'_>,
     record: &mut impl FnMut(&[CallCheck], &[IncompleteHostCall]),
 ) -> Option<(CallCheck, usize)> {
-    let expr = parse_condition_spanned(when).ok()?;
+    let expr = parse_spanned(when).ok()?;
     let (checks, rejected) = checked(&expr, scope);
     record(&checks, &incomplete_host_calls(&expr));
     rejected

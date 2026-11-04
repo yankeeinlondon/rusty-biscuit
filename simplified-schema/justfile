@@ -1,0 +1,133 @@
+set dotenv-load
+set positional-arguments
+
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+LIBRARY := "simplified-schema"
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "{{ BOLD }}SimplifiedSchema Library{{ RESET }}"
+    echo "========================"
+    echo
+
+    just --list | grep -v 'default'
+    echo
+
+# build the library
+build *args="":
+    @just _build {{LIBRARY}} "SimplifiedSchema Library" {{args}}
+
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+
+# run L1 tests for the library (default features plus the test-only
+# `work-counters` and the opt-in `terminal`, then without default features)
+test *args="":
+    @just _test {{ LIBRARY }} --features work-counters,terminal {{args}}
+    @just test-minimal {{args}}
+
+# Proves the crate builds and passes its suite without the `file` feature,
+# whose absence keeps `gix`, `walkdir`, and `sniff` out of the graph. A
+# separate feature resolution, so it is skipped in archive mode (prebuilt
+# binaries, no Rust toolchain; see biscuit-file's `test-minimal`).
+test-minimal *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case " {{ args }} " in
+        *" --archive-file "* | *" --archive-file="*)
+            echo ""
+            echo -e "Skipping the {{ ITALIC }}--no-default-features{{ RESET }} gate: archive mode has no Rust toolchain."
+            exit 0
+            ;;
+    esac
+
+    echo ""
+    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} with {{ ITALIC }}--no-default-features{{ RESET }}"
+    echo "--------------------------"
+    cargo nextest run -p {{ LIBRARY }} --no-default-features
+
+# Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
+# not applicable: simplified-schema has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for simplified-schema"
+
+# not applicable: simplified-schema has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for simplified-schema"
+
+# not applicable: simplified-schema emits no HTML
+test-browser:
+    @echo "test-browser: not applicable for simplified-schema"
+
+# not applicable: simplified-schema has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for simplified-schema"
+
+# run clippy on the library: default features, with `work-counters` and
+# `terminal`, and without default features
+lint *args="":
+    @just _lint {{ LIBRARY }} {{args}}
+    cargo clippy -p {{ LIBRARY }} --features work-counters,terminal --all-targets -- -D warnings
+    cargo clippy -p {{ LIBRARY }} --no-default-features --all-targets -- -D warnings
+
+# not applicable: simplified-schema has no benchmarks yet
+bench:
+    @echo "bench: not applicable for simplified-schema"
+
+# Per-package LCOV coverage for the library.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{args}}
+
+# run doctests for the library
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{args}}
+
+# not applicable: simplified-schema has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for simplified-schema"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ RED }} {{ DIM }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ GREEN }} >/dev/null || true

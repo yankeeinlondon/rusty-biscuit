@@ -1,7 +1,7 @@
 //! Typed descriptor catalogs for expression semantics.
 //!
 //! These catalogs expose the literal semantics of the Darkmatter expression
-//! language — precedence, truthiness, parse modes, null propagation, unary and
+//! language — precedence, truthiness, null propagation, unary and
 //! comparison operators, arithmetic rules, and variable access — as static,
 //! runtime-readable metadata. They are anchored to the parser and evaluator so
 //! documentation surfaces such as `claudine context --expressions` can render
@@ -102,7 +102,7 @@ pub const OPERATOR_DESCRIPTORS: &[OperatorDescriptor] = &[
     OperatorDescriptor {
         name: "Logical AND",
         operators: "`&&`",
-        description: "Logical AND in both interpolation and condition mode.",
+        description: "Logical AND; returns a boolean.",
         order: 6,
         example: Some(Example {
             invocation: "true && false",
@@ -111,9 +111,9 @@ pub const OPERATOR_DESCRIPTORS: &[OperatorDescriptor] = &[
         }),
     },
     OperatorDescriptor {
-        name: "Logical OR / Fallback",
+        name: "Logical OR",
         operators: "`||`",
-        description: "Fallback in interpolation mode; logical OR in condition mode.",
+        description: "Returns the operand that decided the result: the first truthy operand, otherwise the last.",
         order: 7,
         example: Some(Example {
             invocation: "false || \"default\"",
@@ -254,65 +254,6 @@ pub const TRUTHINESS_DESCRIPTORS: &[TruthinessDescriptor] = &[
         example: Some(Example {
             invocation: "!\"hello\"",
             result: "false",
-            verification: ExampleVerification::Executable,
-        }),
-    },
-];
-
-/// A parse-mode difference.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModeDescriptor {
-    /// Surface syntax (e.g. `{{ ... }}`).
-    pub surface: &'static str,
-    /// Meaning of `||` on that surface.
-    pub pipe_meaning: &'static str,
-    /// Short description.
-    pub description: &'static str,
-    /// Stable display order.
-    pub order: usize,
-    /// Optional verified example expression and result.
-    pub example: Option<Example<'static>>,
-}
-
-impl Described for ModeDescriptor {
-    fn key(&self) -> &str {
-        self.surface
-    }
-    fn description(&self) -> &str {
-        self.description
-    }
-    fn category(&self) -> &str {
-        "Interpolation vs. Condition Mode"
-    }
-    fn order(&self) -> usize {
-        self.order
-    }
-    fn example(&self) -> Option<Example<'_>> {
-        self.example
-    }
-}
-
-/// Parse-mode catalog.
-pub const MODE_DESCRIPTORS: &[ModeDescriptor] = &[
-    ModeDescriptor {
-        surface: "`{{ ... }}` (interpolation)",
-        pipe_meaning: "fallback, first truthy value wins",
-        description: "Interpolation surfaces treat `||` as fallback sugar.",
-        order: 1,
-        example: Some(Example {
-            invocation: "\"a\" || \"b\"",
-            result: "a",
-            verification: ExampleVerification::Executable,
-        }),
-    },
-    ModeDescriptor {
-        surface: "`when=\"...\"` (condition)",
-        pipe_meaning: "logical OR, returns a boolean",
-        description: "Condition surfaces treat `||` as logical OR.",
-        order: 2,
-        example: Some(Example {
-            invocation: "false || true",
-            result: "true",
             verification: ExampleVerification::Executable,
         }),
     },
@@ -773,11 +714,6 @@ pub fn truthiness_descriptors() -> &'static [TruthinessDescriptor] {
     TRUTHINESS_DESCRIPTORS
 }
 
-/// Returns all parse-mode descriptors.
-pub fn mode_descriptors() -> &'static [ModeDescriptor] {
-    MODE_DESCRIPTORS
-}
-
 /// Returns all null-propagation descriptors.
 pub fn null_propagation_descriptors() -> &'static [NullPropagationDescriptor] {
     NULL_PROPAGATION_DESCRIPTORS
@@ -912,28 +848,6 @@ mod tests {
         );
     }
 
-    /// Mode examples must evaluate to their declared results.
-    #[test]
-    fn mode_examples_evaluate_correctly() {
-        let (_dir, lookup) = make_fixture();
-        let mut failures = Vec::new();
-        for desc in MODE_DESCRIPTORS {
-            let Some(example) = desc.example() else { continue };
-            if example.verification != ExampleVerification::Executable {
-                continue;
-            }
-            match evaluate_example(example.invocation, &lookup) {
-                Ok(result) if result == example.result => {}
-                Ok(result) => failures.push((desc.surface, example.invocation, result, example.result)),
-                Err(err) => failures.push((desc.surface, example.invocation, err, example.result)),
-            }
-        }
-        assert!(
-            failures.is_empty(),
-            "mode examples did not evaluate correctly: {failures:?}"
-        );
-    }
-
     /// Null-propagation examples must evaluate to their declared results.
     #[test]
     fn null_propagation_examples_evaluate_correctly() {
@@ -1048,7 +962,7 @@ mod tests {
     /// precedence table.
     #[test]
     fn operator_precedence_matches_parser() {
-        use crate::markdown::compose::expression::parser::PRECEDENCE_TABLE;
+        use simplified_schema::expression::parser::PRECEDENCE_TABLE;
 
         assert_eq!(
             OPERATOR_DESCRIPTORS.len(),

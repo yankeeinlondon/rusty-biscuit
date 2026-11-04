@@ -444,7 +444,7 @@ fn schema_sources() -> Vec<(&'static str, TempDir, &'static str)> {
             "a raw JSON Schema",
             fixture(&[(
                 "docs/plan.schema.json",
-                r#"{"type":"object","properties":{"phase":{"type":"string"}}}"#,
+                r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"phase":{"type":"string"}}}"#,
             )]),
             "---\n$schema: ./plan.schema.json\n---\nBody\n",
         ),

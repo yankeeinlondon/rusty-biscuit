@@ -31,7 +31,7 @@ use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_mai
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
 use darkmatter::markdown::schemas::triggers::PayloadMemoTally;
-use darkmatter::markdown::schemas::validate::ValidatorCache;
+use simplified_schema::validate::ValidatorCache;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, reset_process_caches_for_bench};
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashMap;

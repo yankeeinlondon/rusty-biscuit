@@ -366,7 +366,7 @@ fn raw_json_schema_required_is_enforced_at_completion() {
     let sidecar = dir.path().join("raw.json");
     std::fs::write(
         &sidecar,
-        r#"{"type":"object","properties":{"researched_by":{"type":"string"}},"required":["researched_by"]}"#,
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"researched_by":{"type":"string"}},"required":["researched_by"]}"#,
     )
     .expect("write raw JSON Schema");
     let schema = launch_schema(&format!(
@@ -383,7 +383,7 @@ fn raw_json_schema_required_is_enforced_at_completion() {
     assert!(!missing.is_satisfied());
     assert_eq!(missing.problems[0].property, "researched_by");
     assert_eq!(missing.problems[0].kind, CompletionProblemKind::Missing);
-    // The per-property status table is projected from SimplifiedSchema, so a
+    // The per-property status table is projected from SchemaRoot, so a
     // raw JSON Schema contributes no rows and the failure travels through the
     // problem list alone.
     let status = missing.status.as_ref().expect("a status report is still built");

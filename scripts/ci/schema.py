@@ -412,7 +412,7 @@ TIER_MARKERS = ("level2_", "level3_", "browser_", "real_", "slow_", "perf_")
 #: selects exactly its own marker. An L1-shaped tier negates a union of
 #: markers that MUST take every other tier out and MAY also take out the
 #: L1-internal ones — `slow_` unless `l1-include-slow`, `perf_` for
-#: `worktree-cli` — because those two vary by package and switch, not by gate.
+#: `git-wt-cli` — because those two vary by package and switch, not by gate.
 CANONICAL_SELECTION: dict[str, Any] = {
     "selects": {"L2": "level2_", "L3": "level3_", "browser": "browser_", "real": "real_"},
     "excludes": {

@@ -15,9 +15,8 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::triggers::{
     self, PayloadMemoCounts, PayloadMemoTally, TriggerRegistry,
 };
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, SchemaError, TriggerSource,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, TriggerSource};
+use simplified_schema::SchemaError;
 
 /// A valid trigger selecting documents with a `title`, layering `level: number`.
 const GOOD_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema:\n  level: number\n";
@@ -149,6 +148,30 @@ fn assert_valid_trigger_applies_beside_invalid(good: &str, bad: &str) {
     assert_eq!(report.trigger_findings.len(), 1);
 }
 
+/// An informal schema may declare `categories`, as a tagged one may; a
+/// trigger naming either applies its payload.
+#[test]
+fn a_payload_file_with_categories_applies_informal_or_tagged() {
+    let informal = "categories: [Core]\n$schema:\n  level: number\ntypes:\n  Id: string\n";
+    for (label, payload) in [("informal", informal.to_string()), ("tagged", format!("kind: schema\n{informal}"))] {
+        let repo = Repo::new(&[
+            ("schemas/host.trigger.yaml", &trigger_with_payload("./subject.yaml")),
+            ("schemas/subject.yaml", &payload),
+        ]);
+
+        let schemas = repo.schemas();
+
+        assert!(schemas.discovery_findings().is_empty(), "{label}: {:?}", schemas.discovery_findings());
+        assert_eq!(file_sources(schemas.trigger_registry().expect("registry")), [repo.path("schemas/host.trigger.yaml")], "{label}");
+        let rejected = repo.document("bad.md", "title: t\nlevel: high\n");
+        let report = schemas.validate(&rejected).expect("validates");
+        assert!(
+            report.problems.iter().any(|problem| problem.instance_path.first() == Some("level")),
+            "{label}: the payload applies: {report:?}"
+        );
+    }
+}
+
 #[test]
 fn a_valid_trigger_after_an_invalid_one_still_applies() {
     assert_valid_trigger_applies_beside_invalid("schemas/b-good.yaml", "schemas/a-bad.yaml");
@@ -222,7 +245,7 @@ fn a_payload_that_is_neither_schema_form_names_the_payload() {
 
     let finding = assert_related(&repo, "schemas/payload.yaml");
 
-    assert!(matches!(finding.cause(), SchemaError::AmbiguousReferenced { .. }), "{finding:?}");
+    assert!(matches!(finding.cause(), SchemaError::NotASchemaDocument { .. }), "{finding:?}");
 }
 
 #[test]
@@ -260,7 +283,7 @@ fn a_non_object_payload_reached_through_an_alias_names_the_schema_file() {
     let repo = Repo::new(&[
         ("schemas/host.yaml", &trigger_with_payload("./alias.yaml")),
         ("schemas/alias.yaml", "$schema: ./raw.json\n"),
-        ("schemas/raw.json", r#"{"type":"string"}"#),
+        ("schemas/raw.json", r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string"}"#),
     ]);
 
     let finding = assert_related(&repo, "schemas/raw.json");
@@ -273,7 +296,8 @@ fn a_payload_that_fails_to_compile_through_an_alias_names_the_schema_file() {
     let repo = Repo::new(&[
         ("schemas/host.yaml", &trigger_with_payload("./alias.yaml")),
         ("schemas/alias.yaml", "$schema: ./raw.json\n"),
-        ("schemas/raw.json", r#"{"type":"object","properties":{"x":{"type":12}}}"#),
+        // An invalid regex passes the meta-schema check but fails to compile.
+        ("schemas/raw.json", r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"x":{"type":"string","pattern":"["}}}"#),
     ]);
 
     let finding = assert_related(&repo, "schemas/raw.json");
@@ -404,7 +428,8 @@ fn a_raw_payload_that_fails_to_compile_is_skipped_even_when_a_later_layer_redecl
     let payload = "schemas/bad.json";
     let repo = Repo::new(&[
         (trigger, &trigger_with_payload("./bad.json")),
-        (payload, r#"{"type":"object","properties":{"x":{"type":12}}}"#),
+        // An invalid regex passes the meta-schema check but fails to compile.
+        (payload, r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"x":{"type":"string","pattern":"["}}}"#),
     ]);
 
     let schemas = repo.schemas();
@@ -677,4 +702,37 @@ fn a_self_referencing_trigger_found_through_a_symlink_names_no_other_file() {
     let finding = the_finding(registry.findings());
     assert!(matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }), "{finding:?}");
     assert_eq!(finding.cause_path(), None, "the payload is the trigger itself: {finding:?}");
+}
+
+/// A grammar failure the trigger's definition cannot state (an invalid
+/// `$path` glob) skips the trigger with a warning positioned on the glob,
+/// the same failure `md schema validate` reports as an error in the file.
+#[test]
+fn an_invalid_path_glob_is_a_finding_positioned_on_the_glob() {
+    let trigger = "schemas/globbed.yaml";
+    let repo = Repo::new(&[(trigger, "kind: schema-trigger\nmatch:\n  all:\n    - $path: \"@/docs/**\"\n")]);
+
+    let registry = repo.scan();
+
+    let finding = the_finding(registry.findings());
+    let SchemaError::TriggerMatch { message, span } = finding.cause() else {
+        panic!("a grammar failure: {finding:?}");
+    };
+    assert!(message.contains("`match.all[0].$path`") && message.contains("cannot use `@`"), "{message}");
+    assert!(span.is_some(), "{finding:?}");
+    assert_eq!(finding.position(), Some((4, 14)), "{finding:?}");
+}
+
+/// A failure about the match expression as a whole (vacuous) is positioned
+/// on the `match` value.
+#[test]
+fn a_vacuous_match_is_a_finding_positioned_on_the_match_value() {
+    let trigger = "schemas/vacuous.yaml";
+    let repo = Repo::new(&[(trigger, "kind: schema-trigger\nmatch:\n  title: string\n")]);
+
+    let registry = repo.scan();
+
+    let finding = the_finding(registry.findings());
+    assert!(matches!(finding.cause(), SchemaError::TriggerVacuousMatch), "{finding:?}");
+    assert_eq!(finding.position(), Some((3, 3)), "{finding:?}");
 }

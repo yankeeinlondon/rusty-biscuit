@@ -9,6 +9,7 @@ workspace, completion, hover, and diagnostic work.
 - [Passive-analysis contract](#passive-analysis-contract)
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
+- [Whole YAML documents](#whole-yaml-documents)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
 - [Call diagnostics](#call-diagnostics)
 - [Rollout chronology](#rollout-chronology)
@@ -205,7 +206,7 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   a broken link; the list decides graph documents, never existence. A
   Markdown `File` target an open document needs (`prepare_targets`, hover,
   definition, anchor completion) is parsed as a dependency
-  (`DocumentRecord::dependency`: headings and transclusions only; excluded
+  (`DocumentRecord::dependency`: headings, transclusions, and summary only; excluded
   from wiki candidates, path completion, workspace symbols, `transcluded_by`,
   and the index store; its folder joins the schema-location watches; tests in
   `tests/l1/referenced_targets.rs`). Opening a dependency is a role change:
@@ -336,6 +337,37 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   trigger registry enters the key as its install `version`, and the
   registry's envelopes and payload files are left out of the cache's
   re-hashed dependencies (the registry cache tracks them).
+- `$schema` navigation never resolves on its own: `overlay/references.rs`
+  (`DocumentOverlay::schema_references`) selects each `$schema` string (the
+  scalar, or each string item of a root union; `null`/numbers/aliases/inline
+  mappings are not references) through `select_schema_file` in
+  `schema_for`, beside assembly and from its exact inputs (last-good text,
+  `roots.search_paths()`, `path.parent()`, the context). A registry error
+  gives every fact `Err` (no root guessed). `CachedSchema.probes` (each
+  attempted location and whether it existed) must be unchanged for a hit,
+  and each selected file joins `collect_dep_hashes`.
+  `providers/frontmatter.rs::schema_targets` links `Found`, else the
+  `creation` path (never a sibling). A `NoMatch` file-reference problem
+  without `caller_file` is not published (`diagnostics/frontmatter.rs`); `md`
+  keeps the runtime eager check.
+- Value hovers: each `Found` fact also carries `target: SchemaTargetPreview`
+  (format, description, first 10 lines, total, verdict), built on the same
+  cache miss from `simplified_schema::resolve::inspect_schema_target` and
+  counted by `work_counters::schema_target_inspections`; a hover reads no
+  file. A target is `Valid` when the schema assembled, else that one
+  reference is re-resolved. `frontmatter::hover` order: `$schema` value
+  (`frontmatter/schema_value_hover.rs`), meta-schema, expression/stack, then
+  `file` value (`frontmatter/file_value_hover.rs`, probes disk; skipped for
+  `{{ expr }}`/`$(...)`, kept for biscuit-file `{{VAR}}`), then key/schema
+  hover. All wording lives in the pure `providers/reference_hover.rs`.
+  User docs: `dmls/docs/hover.md` (every outcome) and `dmls/docs/file-references.md`.
+- Body-link summaries: `DocumentIndex::summary` (`graph/substrate.rs::summary_text`,
+  first nonempty, non-pending YAML string of `excerpt`/`summary`/`description`/`about`)
+  is content state on the per-snapshot `DocumentState` (`Clone`, not `Copy`),
+  exposed as `DocumentRecord::summary`; never in the shared `DocumentTable` or
+  `FileFacts` (`into_index` yields `None`, so `FACTS_VERSION` is unchanged).
+  `providers/hover.rs::resolved_hover` appends it last; existing target
+  preparation and invalidation refresh it (`referenced_targets.rs` summary cells).
 - `dmls/tests/l1/schema_roots_parity.rs` is the `md` vs DMLS parity gate for
   schema roots, applied triggers, bare-name `$schema`, and `$path`
   definition errors; DMLS shows missing required properties only with
@@ -388,7 +420,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   (warning, line of a YAML error, related information = `cause_path`); an
   open trigger whose buffer envelope parses gets
   `SuggestionState::TriggerWarning` from `finding_for`, while a malformed
-  buffer keeps the strict `TriggerError` (`dm.schema.prepare`) and wins;
+  buffer keeps the strict `TriggerError` (`dm.schema.prepare`) and wins,
+  unless its YAML document report already owns the problem (see
+  [Whole YAML documents](#whole-yaml-documents));
   `didClose` republishes the warning (`closed_file_diagnostics`). Triggered
   schemas only produce document diagnostics in `[schema] strict = true`, so
   a session test of trigger properties sets it. Tests:
@@ -626,6 +660,124 @@ Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
 `parse_frontmatter_shell_suffixes`, the grammar `md compose` parses with.
 `frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
 because the YAML span includes them.
+
+## Whole YAML documents
+
+User docs: `docs/topics/schemas/dmls-schema-support.md#yaml-documents`,
+`docs/lsp/indexing.md#yaml-document-kinds`.
+
+- Routing is `overlay::is_yaml_path` (ASCII case-insensitive `yaml`/`yml`),
+  the one test every YAML decision reads (overlay, `registry_demand`,
+  `workspace/discover.rs`, `registry.rs` invalidation, `didSave`); the watch
+  globs are `workspace::watch::{YAML_GLOB, YML_GLOB}` (bracketed, so a
+  `globset` guard test pins them to `is_yaml_path`). A YAML path never
+  enters the Markdown frontmatter path: a leading `---` is a YAML marker.
+- The `KindRegistry` lives in the YAML document's own trigger-registry
+  `Scope` (`Scope.kinds: Option<InstalledKinds>`; plan rule 26 called it
+  `OverlayCache.kind_registries`), built in `Preparation::run` on the
+  registry worker for `is_yaml_path` documents only, from the same
+  `RootContents` through `BufferedRoots` (open buffers win, and an open
+  buffer directly inside a searched root is listed before it is saved),
+  inside `simplified_schema::resolve::buffers::with(&TriggerRegistries::source_buffers())`
+  so definitions' imports read open buffers too (the library seam: every
+  resolver read and `select_schema_file` probe consults the thread's
+  snapshot; never add a DMLS-side read path). Invalidation is the trigger
+  scope's, plus `TriggerRegistries::set_buffer` from
+  `didOpen`/`didChange`/`didClose` (`ServerState::note_schema_buffer`: YAML
+  and `.json` buffers, since a JSON file can be a `$schema` target), which
+  marks stale scopes whose `deps.kind_sources` (root files and imports) read
+  that file with other text, and, for a path never read, kind scopes it
+  could join (`joins_kind_sources`: directly inside a searched or absent
+  root, or a searched candidate). An absent root whose folder does not exist
+  is listed through `SchemaRootSource::absent_root_files` (default none;
+  `BufferedRoots` lists its buffers there), so an editor-only
+  `schemas/roster.yaml` claims before `schemas/` exists. Outside a workspace folder: `KindRegistry::shipped()`.
+  `SourceBuffers` is `Send + Sync`: carry the snapshot to whichever thread
+  prepares.
+- Every file-reading step of a YAML document runs in `overlay/yaml_contract.rs`
+  on the registry worker: `RegistryNeed.yaml: Option<YamlNeed>` (text, context
+  generation) makes `run_document` call `OverlayState::prepare_need`
+  (registry, then `prepare_yaml_contract`). `ContractJob::run` (inside
+  `buffers::with(&TriggerRegistries::source_buffers())` and
+  `observed::collect`) calls the library's `prepare_yaml_contract`
+  (selection, fallback resolution, compiled validators), the whole
+  `YamlContract::validate` only when `checks_read_files()` (`schema`/
+  `yaml-schema` kind checks), `SchemaReferenceFacts::select_in`, a
+  `kind: schema`/`yaml-schema` document's `resolve_standalone` (its model
+  read with `parse_selected_standalone_schema_document` from
+  `EffectiveSchema::data_copy`, never admitted again), and, off the kind
+  route, the root `$schema`'s `NamedTypeCatalog::build_tolerant`
+  (`PreparedYaml::named_types`, served by `yaml_only`). `YamlContracts` keys
+  an entry on `declaration_key()` + context identity + generation + kinds
+  version (+ text hash only when `kind_checks_read_files()`),
+  never on data; begin/run/install mirror the registry's (epoch, seq,
+  in-flight changes), and staleness is event-driven (`invalidate_paths`,
+  `set_buffer`, `invalidate_all` from the trigger hooks; deps compared by
+  buffer-aware hash, probes by presence, a failed entry stale on any change).
+  `registry_demand` reports a YAML need when the registry is stale or the
+  contract is not fresh for the current key, inside a workspace folder or
+  not; its folders join `trigger_watch_folders`.
+- `overlay/yaml_document.rs` (dispatch thread) reads no file: it looks the
+  entry up by key (`Pending` when none matches: never an earlier
+  declaration's), runs the passive `YamlContract::validate` (or takes the
+  worker's validation), and caches in `OverlayCache.yaml_documents` by text,
+  revision, context, and entry version. The envelope's YAML standalone
+  authoring state comes from `OverlayCache::prepared_standalone`; only a
+  non-YAML standalone keeps the synchronous `standalone_named_types`
+  (`yaml_document::{hash_files, deps_unchanged, probes_unchanged}`). Thread
+  evidence: `work_counters::yaml_preparation_threads()` and
+  `darkmatter::work_counters::threads(Work::{YamlContractPreparation,
+  YamlKindCheck, StandaloneImportCheck})`
+  (`yaml_document_session::a_yaml_documents_contract_is_prepared_and_compiled_off_the_dispatch_thread`,
+  `a_data_only_edit_reuses_the_prepared_contract_and_reads_no_schema_file`).
+  The `SchemaBundle` is the selected schema alone
+  (`YamlValidation::effective()`); `AnalysisIdentity.yaml_document` makes
+  `root()` the selected shape (empty without one, never `baseline_root`).
+  The tree is `FrontmatterAst::parse_yaml_document(text, kind_route)`:
+  on the kind route `schema_entry()` is `None` (data), and
+  `whole_document` makes `contains_offset(len)` true.
+- `for_document_timed` routes YAML first, then attaches the state to the
+  envelope overlay (`DocumentOverlay::with_yaml`) or builds `yaml_only`
+  (`frontmatter_authoring` from the definition, plus a root-`$schema`
+  contract's `suggest(...)` lints (`suggestions::yaml_document_lints`) and
+  import catalog). The selected contract is the only judge of a YAML
+  document's shape: `envelope_overlay(.., Some(yaml))` classifies only a
+  `kind: schema`/`yaml-schema` claim (`selected_standalone_document`, which
+  reads the accepted copy, never the compiled envelope), never the informal
+  `Pure` envelope, so `description`/`categories`/`types` beside a root
+  `$schema` are data and a sibling `types` is no type library (as `md schema
+  validate` judges them); and a `schemas/` trigger whose definition judged
+  it gets no strict-parser `TriggerError`. The trigger branch runs only for
+  text that `claims_trigger_envelope` (a string `kind` naming the envelope,
+  or a lexical claim in unparseable text); a null, non-string, or other
+  `kind` claims nothing, so `NoSchema`/`Failed`/`Validated` stands alone
+  (`yaml_document_editor::an_unclaimed_kind_*`). Non-YAML buffers keep the
+  informal classifier. Substrate hover declines inside a root-`$schema`
+  contract (`DocumentOverlay::yaml_contract_covers`), as inside a standalone
+  region.
+- Diagnostics (`diagnostics/yaml_document.rs`) replace every Markdown
+  frontmatter pass when `overlay.yaml_document` is set.
+  `ProblemGrading::YamlDocument` makes `missing_required` and `unknown_key`
+  errors in either mode and ranges `KindCheck` by `YamlValidation::byte_range`.
+  One publication per problem: `reports_definition_problems` (kind route,
+  any problem that is neither a kind check nor a meta-type problem)
+  suppresses the envelope's `Standalone { error }`; a `TriggerError` exists
+  only for a file that claims the trigger envelope and only while no
+  definition judged it; a standalone error or
+  `standalone_resolution` suppresses `KindCheck` (the envelope ranges it
+  with related info); an envelope error suppresses meta-type problems; a
+  root-`$schema` route `Failed` is always the route's
+  `schema_prepare_diagnostic` (located through
+  `located_inline_failure`, shape errors included). A load failure under a
+  claiming envelope keeps the envelope's code.
+  `DslProvider` returns nothing for a YAML path.
+- Tests: `tests/l1/yaml_document_editor.rs` (in-process `Probe`, one
+  `OverlayState` so texts of one URI replace each other),
+  `tests/l1/yaml_document_session.rs` (`LspFixture`), and
+  `standalone_stdio.rs::yaml_document_diagnostics_reach_a_stdio_client`.
+  `LspFixture::take_buffered_diagnostics` takes the **latest** publication
+  first (`rposition`): drain with `while take(..).is_some() {}` after
+  `wait_for_diagnostics_params`, never `latest = params` in the loop.
 
 ## Undeclared properties and unknown functions
 

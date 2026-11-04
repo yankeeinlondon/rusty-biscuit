@@ -15,7 +15,7 @@ engine output still surfaces path candidates.
 This document is the canonical user-facing reference for the completion surface:
 how to install it, what the root menu offers, how composition-command
 completion behaves (per mode), how `@`-gated setter values work, why
-the legacy shells (`powershell`, `elvish`) behave differently, and how
+PowerShell and Elvish wire in, and how
 the engine hits its sub-100 ms target without an on-disk cache.
 
 Key code:
@@ -49,9 +49,11 @@ claudine completions zsh > "${fpath[1]}/_claudine"
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
 
-# PowerShell / Elvish (legacy one-line bootstrap — see "Legacy shells")
-claudine completions powershell >> $PROFILE
-claudine completions elvish    >> ~/.elvish/rc.elv
+# PowerShell — add this line to $PROFILE (see "PowerShell")
+claudine completions powershell | Out-String | Invoke-Expression
+
+# Elvish — a module, then `use claudine-completion` in rc.elv (see "Elvish")
+claudine completions elvish > ~/.config/elvish/lib/claudine-completion.elv
 ```
 
 Open a new shell (or re-source the rc file) and completion is live. The
@@ -1009,25 +1011,105 @@ scenarios — well inside the 100 ms target. A stale-while-revalidate
 cache is reserved for future activation if profiling ever shows a
 `p95 > 150 ms` on representative hardware.
 
-## Legacy shells
+## PowerShell
 
-PowerShell and Elvish retain the legacy one-line bootstrap:
+PowerShell 7 and Windows PowerShell 5.1 get the same engine as bash, zsh,
+and fish. Add one line to `$PROFILE`:
 
-```sh
-claudine completions powershell >> $PROFILE
-# →  & { $env:COMPLETE="powershell"; claudine } | Out-String | Invoke-Expression
+```powershell
+claudine completions powershell | Out-String | Invoke-Expression
 ```
 
-That bootstrap activates `clap_complete::CompleteEnv`, which derives
-candidates directly from the clap command tree — subcommand names and
-flag names only. None of the curated composition / setter / magic-path
-rules apply on these shells.
+The script registers a native argument completer for `claudine` (and
+`claudine.exe`). On each `<TAB>` it rebuilds argv from the command line up
+to the cursor and calls `claudine __complete`, so every rule on this page
+applies:
 
-**Why the gap is intentional.** `clap_complete`'s dynamic path on
-PowerShell / Elvish requires a different callback contract than the
-one the new engine exposes. Porting it would double the surface
-without doubling the user base. The gap is documented here so users
-on those shells know what to expect.
+```text
+PS> claudine compose slow<TAB>
+PS> claudine compose prompts/slow.md
+```
+
+When the engine returns nothing, PowerShell falls back to its own path
+completion.
+
+### Shortcut functions
+
+A function that wraps a subcommand can complete as if you typed the full
+command. Register it after loading the script, giving the words the
+function supplies as `-Prefix`:
+
+```powershell
+function compose { claudine compose @args }
+function inline-compose { claudine inline-compose @args }
+Register-ClaudineShortcutCompletion -Name compose -Prefix compose
+Register-ClaudineShortcutCompletion -Name inline-compose -Prefix inline-compose
+```
+
+`compose slow<TAB>` then completes to `prompts/slow.md`.
+
+### Known limitation
+
+Windows PowerShell 5.1 does not call a native completer when the word
+under the cursor is exactly `-` or `--`, so `claudine compose --<TAB>`
+lists nothing there. Type one more character (`--c<TAB>`) or use
+PowerShell 7, which has no such gap.
+
+## Elvish
+
+The Elvish script is a module. Write it into Elvish's library directory
+and load it from `rc.elv`:
+
+```sh
+# macOS / Linux
+claudine completions elvish > ~/.config/elvish/lib/claudine-completion.elv
+# Windows
+claudine completions elvish > $E:APPDATA/elvish/lib/claudine-completion.elv
+```
+
+```elvish
+# rc.elv
+use claudine-completion
+```
+
+`claudine compose slow<TAB>` then completes to `prompts/slow.md`. When the
+engine has no candidates, the completer falls back to Elvish's filename
+completion.
+
+### Shortcut functions
+
+A function that wraps a subcommand completes as if you typed the full
+command once it is registered with the words it supplies:
+
+```elvish
+fn compose {|@a| claudine compose $@a }
+claudine-completion:shortcut compose compose
+```
+
+### Effect on Elvish's matcher
+
+Elvish filters each argument candidate through `edit:completion:matcher`,
+which by default keeps only candidates that start with the typed word. That
+would discard the engine's fuzzy matches, so the module wraps the
+`argument` matcher. When the Claudine engine has just answered a `<TAB>`,
+every candidate it returned is shown. Every other completion, including
+other commands' arguments, goes through the matcher that was installed
+before the module loaded (`edit:match-prefix` when none was). If you
+replace the `argument` matcher in `rc.elv`, do it before
+`use claudine-completion` so the module wraps yours.
+
+## Upgrading from the old bootstrap
+
+Earlier releases installed a one-line bootstrap for PowerShell and Elvish:
+
+```text
+& { $env:COMPLETE="powershell"; claudine } | Out-String | Invoke-Expression
+eval (E:COMPLETE=elvish claudine | slurp)
+```
+
+Those lines still work, but they reach only clap's subcommand and flag
+names, with no Markdown, setter, or provider-aware completion. Replace them
+with the installation shown above.
 
 ## Examples
 
@@ -1222,7 +1304,7 @@ flowchart TD
 | [`walker.rs`](../../../cli/src/completion/walker.rs) | Bounded, `.gitignore`-aware walker over a scope set. |
 | [`frontmatter.rs`](../../../cli/src/completion/frontmatter.rs) | Mode-specific frontmatter gates (`prompt`, `sequence`). |
 | [`fuzzy.rs`](../../../cli/src/completion/fuzzy.rs) | Subsequence matching with prefix-length progression. |
-| [`bootstrap.rs`](../../../cli/src/completion/bootstrap.rs) | Shell scripts (bash/zsh/fish) + legacy PowerShell/Elvish. |
+| [`bootstrap.rs`](../../../cli/src/completion/bootstrap.rs) | Shell scripts for bash, zsh, fish, PowerShell, and Elvish. |
 | [`commands/completions.rs`](../../../cli/src/commands/completions.rs) | `claudine completions` and the hidden `__complete`. |
 | [`schema_completion/mod.rs`](../../../cli/src/completion/schema_completion/mod.rs) | Schema-aware property-name and property-value completion for setter slots. |
 | [`autocomplete_ui.rs`](../../../cli/src/completion/autocomplete_ui.rs) | ENTER-path chooser / confirmation dialog rendering. |

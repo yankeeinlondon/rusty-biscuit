@@ -3,7 +3,7 @@ name = "model-citizen"
 version = "0.1.0"
 edition = "2024"
 description = "Local LLM model management across Ollama, LM Studio, and Llama.cpp"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [dependencies]
 # Error handling

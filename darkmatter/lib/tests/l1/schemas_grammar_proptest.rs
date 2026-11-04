@@ -5,7 +5,7 @@
 //! atom must equal the original — proving the parser and serialiser agree on
 //! every code path.
 
-use darkmatter::markdown::schemas::simplified::{
+use simplified_schema::simplified::{
     AlphanumericOption, AlphanumericOptions, Constraint, PropertyAtom, SimplifiedType, TypeExpr, grammar::parse_type_expr,
     serialize_property_atom,
 };

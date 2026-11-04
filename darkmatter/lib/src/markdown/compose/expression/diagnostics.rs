@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use super::ast::SpannedExpr;
+use simplified_schema::expression::ast::SpannedExpr;
 use super::call_check::{ALWAYS_FALSE_CALL_CODE, ArgumentCategory, CallCheck, check_expression_calls};
 use super::iteration::IterationPath;
 use super::host::{INCOMPLETE_ANALYSIS_CODE, IncompleteHostCall, incomplete_host_calls};
@@ -161,7 +161,7 @@ impl CallCheck {
             .filter_map(|finding| {
                 let severity = call_severity(finding.category, strict)?;
                 let code = if matches!(self.problem, Some(super::call_check::CallProblem::InvalidCallback { .. })) {
-                    super::parser::INVALID_CALLBACK_CODE
+                    simplified_schema::expression::parser::INVALID_CALLBACK_CODE
                 } else if finding.category == ArgumentCategory::Incompatible {
                     INCOMPATIBLE_CALL_CODE
                 } else {

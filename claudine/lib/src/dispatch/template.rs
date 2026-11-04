@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use darkmatter::markdown::compose::expression::{
-    Expr, ExpressionFinder, ParseMode, Parser, evaluate, scalar_string,
+    Expr, ExpressionFinder, Parser, evaluate, scalar_string,
 };
 use regex::Regex;
 use tracing::warn;
@@ -474,7 +474,7 @@ fn render_expression(expression: &str, lookup: &EventMetaExpressionLookup<'_>) -
         return None;
     }
 
-    let parsed = Parser::with_mode(trimmed, ParseMode::Interpolation)
+    let parsed = Parser::new(trimmed)
         .ok()?
         .parse()
         .ok()?;

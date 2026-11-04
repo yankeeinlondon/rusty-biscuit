@@ -7,6 +7,7 @@
 //! matrix at the end edits one field of the shipped file per test, from an
 //! unedited positive control, through Darkmatter's public catalog reader.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use std::collections::{BTreeSet, HashMap};
 
 use claudine::composition::lifecycle::LifecycleSignal;
@@ -23,7 +24,8 @@ use claudine::composition::schema::globals::{
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::catalog::{CatalogError, CatalogErrorReason, GlobalCatalog};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, PatternKey};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::PatternKey;
 use serde_json::{Value, json};
 
 fn load(text: &str) -> Result<GlobalCatalog, CatalogError> {
@@ -73,12 +75,12 @@ fn every_shape_matches_the_runtime_value() {
     let settled = Value::Object(group.event_value(LifecycleSignal::Finalize));
     assert_eq!(members(catalog, "group"), keys(&settled));
     let legs = catalog.global("group").and_then(|group| group.member("legs")).expect("legs");
-    let darkmatter::markdown::schemas::PropertyDef::Single(legs) = legs else { panic!("legs is one atom") };
-    let darkmatter::markdown::schemas::TypeExpr::InlineObject(legs) = &legs.ty else { panic!("legs is a shape") };
+    let simplified_schema::PropertyDef::Single(legs) = legs else { panic!("legs is one atom") };
+    let simplified_schema::TypeExpr::InlineObject(legs) = &legs.ty else { panic!("legs is a shape") };
     let leg = &legs.pattern_keys.first().expect("legs are keyed by name");
     assert_eq!(leg.key, PatternKey::CatchAll);
-    let darkmatter::markdown::schemas::PropertyDef::Single(leg) = &leg.def else { panic!("a leg is one atom") };
-    let darkmatter::markdown::schemas::TypeExpr::InlineObject(leg) = &leg.ty else { panic!("a leg is a shape") };
+    let simplified_schema::PropertyDef::Single(leg) = &leg.def else { panic!("a leg is one atom") };
+    let simplified_schema::TypeExpr::InlineObject(leg) = &leg.ty else { panic!("a leg is a shape") };
     let declared: BTreeSet<_> = leg.properties.keys().cloned().collect();
     assert_eq!(declared, keys(&settled["legs"]["lint"]));
     for global in ["seq", "group"] {
@@ -112,10 +114,12 @@ fn every_binding_view_declares_exactly_the_catalog_globals() {
 }
 
 /// With the bundle and the host catalog in a repository's `schemas/` root,
-/// the catalog is no trigger and no document schema: a document gains no
-/// property from it, and naming it fails.
+/// the catalog is no trigger: a document gains no property from it. Named by
+/// a document's `$schema`, it reads as the ordinary tagged schema document its
+/// envelope is, so its globals become that document's properties; only host
+/// registration makes them globals.
 #[test]
-fn the_host_catalog_is_never_a_trigger_or_a_document_schema() {
+fn the_host_catalog_is_never_a_trigger_and_reads_as_a_schema_only_when_named() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical");
     std::fs::create_dir_all(root.join(".git")).expect("repository marker");
@@ -138,10 +142,10 @@ fn the_host_catalog_is_never_a_trigger_or_a_document_schema() {
         assert_ne!(named.as_deref(), Some("globals.yaml"), "{origin:?}");
     }
     assert!(!selected.declares_top_level_property("seq") && !selected.declares_top_level_property("group"));
-    let Err(error) = effective("$schema: globals.yaml\n") else {
-        panic!("the host catalog applied as a document schema");
-    };
-    assert!(format!("{error:?}").contains("global catalog"), "{error:?}");
+    let named = effective("$schema: globals.yaml\n")
+        .expect("the catalog reads as a tagged schema document")
+        .expect("a document schema");
+    assert!(named.declares_top_level_property("seq") && named.declares_top_level_property("group"));
 }
 
 // ── input robustness matrix ────────────────────────────────────────────────

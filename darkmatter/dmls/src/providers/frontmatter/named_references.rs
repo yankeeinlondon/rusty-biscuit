@@ -10,7 +10,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use darkmatter::markdown::schemas::{PropertyDef, SchemaSpanKind, SimplifiedType};
+use simplified_schema::{PropertyDef, SchemaSpanKind, SimplifiedType};
 use lsp_types::{Hover, Location};
 
 use super::{markup_hover, meta_schema_definition_hover_body};

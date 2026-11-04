@@ -135,7 +135,7 @@ A property below the recursion (`value` four levels down) hovers exactly as
 it does at the top level.
 
 The same named form describes a property typed by a
-[shared named type](../../docs/topics/schemas/definition.md#shared-named-types),
+[shared named type](../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types),
 an acyclic object, dictionary, tuple, or list that the schema stores once
 because two or more places use it: `` `entry` is defined as: … ``. A stored
 **union**, recursive or shared, is the exception. It hovers exactly as the
@@ -143,6 +143,229 @@ inlined union would, listing its alternatives as described under
 [Union-typed properties and list items](#union-typed-properties-and-list-items),
 so the item line ("matches alternative N of M") numbers the same list
 whether the union was stored or copied.
+
+## Value versus key hover
+
+In frontmatter, the key and the value of the same line answer different
+questions. The **key** explains the property: the schema hover above. The
+**value** of a `$schema` string, or of a property whose type includes
+`file`, is a file reference, so it explains where that reference goes:
+
+```yaml
+$schema: review.yaml   # key: what `$schema` is · value: the file review.yaml selects
+source: ./draft.md     # key: the `source` property · value: where ./draft.md resolves
+```
+
+Each hover's range is what it describes: the key's span for a key hover, the
+authored value's span for a value hover, in the position encoding the
+client negotiated. Inside the frontmatter, the first of these that applies
+answers:
+
+```mermaid
+flowchart TD
+    C[cursor in frontmatter] --> S{"on a $schema string?<br/>(the scalar, or a string item of a root union)"}
+    S -- yes --> SV["$schema value hover"]
+    S -- no --> M{"on a named-type reference, or inside<br/>an inline $schema mapping or arm?"}
+    M -- yes --> MS[schema-authoring hover]
+    M -- no --> E{"on an expression-typed value, or a<br/>{{ … }} / when inside a lifecycle stack?"}
+    E -- yes --> EX[expression hover]
+    E -- no --> F{"on the static string value of a<br/>file-typed property?"}
+    F -- yes --> FV[file value hover]
+    F -- no --> K["key hover: the property's schema hover<br/>(or the ctx.* annotation)"]
+```
+
+So an inline arm such as `{status: string}` in `$schema: [shape.yaml,
+{status: string}]` keeps its schema-authoring hover, while `shape.yaml` in
+the same list gets the value hover.
+
+## Formatting rule: `$schema` value hover
+
+Hovering the value of `$schema` shows the file the reference selects and
+what it holds, or why it selects nothing. It is the same file the document
+link, go-to-definition, and validation use; the lookup rules are in
+[`$schema` references](./file-references.md#schema-references). Each string
+item of a root union (`$schema: [a.yaml, b.yaml]`) hovers on its own, so one
+missing item does not change the hover of another. A value that is not a
+string (a mapping, `null`, a number) is not a reference and gets no value
+hover.
+
+### A valid schema file
+
+With `repo/schemas/review.yaml`:
+
+```yaml
+kind: schema
+description: A review of one feature.
+$schema:
+  # Who wrote it
+  author: string(required)
+  status: enum(draft, done)
+```
+
+hovering `review.yaml` in `$schema: review.yaml` shows:
+
+````markdown
+A review of one feature.
+
+Schema Definition:
+
+```yaml
+# Who wrote it
+author: string(required)
+status: enum(draft, done)
+```
+
+Resolves to [schemas/review.yaml](file:///work/repo/schemas/review.yaml)
+````
+
+- **Description first.** A nonblank top-level string `description` in the
+  target file leads the hover, trimmed and rendered as Markdown. Only the
+  property counts: a leading YAML comment block is never used, and a
+  missing, blank, or non-string `description` is simply left out.
+- **The definition, not the file.** For a YAML target the block shows only
+  the target's own `$schema` value as you wrote it: comments and line order
+  kept, the key and the common indentation removed. Other top-level
+  properties (`kind`, `description`, `types`) are not shown. A JSON target's
+  whole document is the definition, shown in a `json` block.
+- **At most 10 lines.** A longer definition shows its first ten lines, then
+  `*Showing **10** of **{total}** lines*` after the block, where `{total}`
+  counts every line of the definition (a final newline is not a line, and
+  `\r\n` is shown as `\n`). The fence is longer than any run of backticks in
+  the excerpt, so a definition containing a fence still renders.
+- **Where it resolves.** `Resolves to` links the file. The label is
+  relative to the document's repository when the file is inside it,
+  otherwise an absolute path with `/` separators; labels and quoted error
+  text are escaped, so a folder named `[x] (y)` reads literally.
+- **Delegation is not expanded.** A target whose `$schema` is itself a
+  reference, such as `alias.yaml` holding `$schema: ./real.yaml`, previews
+  `./real.yaml` and links `alias.yaml`, the file the document named. Imports
+  are not followed and no generated JSON Schema is shown.
+
+The preview is built when DMLS prepares the document's schema, so a hover
+reads no file and never composes. It is refreshed with the selection (see
+[When a `$schema` selection is redone](./file-references.md#when-a-schema-selection-is-redone)).
+
+### A file that is not a usable schema
+
+The file was found, so the hover links it and says why it cannot be used.
+It never calls an existing file missing.
+
+| The selected file | Hover |
+|---|---|
+| Exists but is not an accepted schema format: a `types`-only library, YAML with no `$schema`, JSON without a dialect, a JSON array | ``The file [`schemas/types-only.yaml`](…) exists but it is **not** a valid schema definition!`` |
+| JSON that declares a dialect other than Draft 2020-12 | ``The file [`schemas/draft7.json`](…) declares the unsupported JSON Schema dialect `http://json-schema.org/draft-07/schema#`. Only `https://json-schema.org/draft/2020-12/schema` is supported.`` |
+| Malformed YAML or JSON, an invalid schema grammar, a missing or invalid import, a cycle, or a file that cannot be read | ``The file [`schemas/malformed.yaml`](…) could not be used as a schema: {reason}`` |
+
+Which YAML and JSON files a `$schema` reference may point at is described
+in [What a `$schema` Reference May Point At](../../docs/topics/schemas/definition.md#what-a-schema-reference-may-point-at).
+The verdict is for this reference alone: in a root union, another item
+failing does not mark this one unusable.
+
+An unreadable file is reported this way when it is outside the schema
+roots, such as `./locked.yaml`. An unreadable file inside a schema root
+stops the schema-root scan itself, so its hover is the "schema roots could
+not be read" one below, with no link.
+
+### A reference that selects no file
+
+A clean miss lists every location searched, in order, then the path the
+document link opens, explicitly labeled as missing:
+
+```markdown
+`gone.yaml` does not match a schema file.
+
+Searched, in order:
+
+- `schemas/gone.yaml`
+- `/home/ana/schemas/gone.yaml`
+
+Missing: `schemas/gone.yaml` does not exist yet; following the link opens this path.
+```
+
+Only roots that exist are searched, and the creation path is in the first
+of them. An explicit miss (`./gone.yaml`) reads the same, with the one
+location beside the document. Neither the hover nor the link creates a file.
+
+The first line changes with the kind of miss:
+
+| Case | First line |
+|---|---|
+| Bare name or explicit path, not found | `` `gone.yaml` does not match a schema file. `` |
+| Bare name with no schema root folder at all, so the ordinary lookup (document folder, then repository root) was used | `` `gone.yaml` was looked up like any other file reference (no schema root folder exists). `` |
+| Bare name found only beside the document | `` `beside.yaml` is not in any schema root, but a file with that name is beside this document. Write `./beside.yaml` to reference it. `` |
+
+For the sibling case the `Missing:` path is still in the first schema root:
+the hover suggests the `./` spelling and never links the sibling as if the
+bare name had resolved.
+
+### A reference that cannot be resolved
+
+These get one sentence and no link, because there is no honest path to
+offer:
+
+| Case | Hover |
+|---|---|
+| A remote URL | `` `https://example.com/s.yaml` is a remote reference. Remote schemas are not fetched. `` |
+| A malformed reference, a missing anchor (`&x.yaml` outside a repository), or a location that could not be checked | `` `&x.yaml` could not be resolved: {reason} `` |
+| A schema root that could not be read | `` `policy.yaml` could not be resolved because the schema roots could not be read: {reason} `` |
+| A document without a file-resolution context | `` This document has no file-resolution context, so `shape.yaml` is not resolved. `` |
+
+## Formatting rule: `file` value hover
+
+Hovering the value of a property whose type includes `file` says where the
+reference resolves, or why it does not:
+
+```yaml
+$schema:
+  source: file(eager)
+  notes: file
+  pages: file(eager)[]
+source: ./present.md     # Resolves to [`docs/present.md`](file:///work/repo/docs/present.md)
+notes: ./later.md        # missing, not eager: not required even at run time
+pages:
+  - ./gone.md            # missing, eager: must exist at run time
+```
+
+| Value | Hover |
+|---|---|
+| Not a valid file reference | ``` `@` is not a valid file reference: {reason} ``` (also a `dm.schema.invalid_file_reference` diagnostic) |
+| The file exists | ``Resolves to [`docs/present.md`](…)``, with the label rules of the `$schema` hover |
+| Missing, property not `eager` | "This file reference is a valid file reference but the file does not exist yet in the filesystem. Because `notes` is not defined as being **eager** then the file reference is not required to exist even at run time." |
+| Missing, property `eager` | "This file reference is a valid file reference but the file does not exist yet in the filesystem. The `pages` is defined as being an **eager** file reference so that means the file reference must refer to a real file at runtime." |
+| Missing, a union where an `eager` `file` arm is one of several possible types | "This file reference is a valid file reference but the file does not exist yet in the filesystem. The `either` has an **eager** `file` arm, so when this value is read as that file reference it must refer to a real file at runtime." |
+| Needs an anchor the document lacks (`&x.md` outside a repository, an undefined `{{DIR}}`) | "This file reference needs context this document does not have (a home folder, repository, or package), so it cannot be resolved." |
+| The filesystem could not be checked | "The filesystem could not be checked for this file reference (a permission or I/O failure)." |
+| A URL | "This is a remote URL. It is a well-formed file reference, but the editor never fetches remote content and has not checked whether it exists." |
+
+A missing file is never a diagnostic in the editor, `eager` or not; the
+hover is where it is explained (see
+[Missing `file` values are explained, not flagged](./file-references.md#missing-file-values-are-explained-not-flagged)).
+None of these hovers offers a creation path.
+
+Which values get the hover:
+
+- **The selected arm decides.** A union arm that the value's other fields
+  rule out does not make it a file: in
+  `entry: "{ kind: literal(doc), path: file(eager) } | { kind: literal(text), path: string }"`,
+  `path` under `kind: text` is a string and keeps its property hover. When
+  several arms remain possible, any surviving `file` arm counts.
+- **Any depth.** Nested mapping properties (`nested.main`) and scalar array
+  items count. The hover names the property by its dotted path; an array
+  item names its array (`pages`).
+- **Static strings only.** A Darkmatter `{{ title }}.md` expression or a
+  `$(echo x.md)` command is computed at compose time, so it keeps its
+  property or expression hover. A biscuit-file environment reference such
+  as `{{DIR}}/x.md` is a static reference and is hovered.
+- **Not references:** `null`, numbers, inline mappings, sequence markers,
+  and comments.
+- **No context, no file hover.** A document without a file-resolution
+  context assembles no schema, so none of its values is `file`-typed; its
+  one `dm.context.build_failure` diagnostic explains why.
+
+Resolution follows the ordinary `file` rules: an implicit path from the
+document's folder, then the repository root; `./` and `../` from the
+document's folder. The hover probes the local filesystem through the
+document's context, like navigation, and never fetches a URL.
 
 ## Formatting rule: interpolation `ctx.*` hover
 
@@ -284,15 +507,69 @@ description; hover is where it appears.
 
 A cursor anywhere inside an interpolation literal (`{{{ … }}}`) renders an `**Interpolation literal**` block showing the composed output — the inner content wrapped in `{{ … }}` as inline code (a fenced block when multiline, with backtick fences sized to survive content containing backticks) — followed by the note that the content is rendered as literal `{{ … }}` text and is not interpolated. The body is assembled by the pure `literal_hover_markdown` function in `src/providers/dsl.rs`. The hover range is the literal's complete outer `{{{ … }}}` span.
 
+## Formatting rule: body-link hover to a Markdown document
+
+Hovering a body link (`[setup](./setup.md)`, `[install](./setup.md#install)`)
+that resolves to a Markdown document shows the target's title and path, the
+heading line for a `#fragment`, and then the target's **summary**, so you
+can tell what a document is about without opening it. With `docs/setup.md`:
+
+```markdown
+---
+summary: Install the toolchain and run the first build.
+---
+# Setup
+
+## Install
+```
+
+hovering `[install](./setup.md#install)` shows:
+
+```markdown
+**Setup**
+
+→ `/work/repo/docs/setup.md`
+
+Heading: Install
+
+Install the toolchain and run the first build.
+```
+
+The summary is the first of the target's top-level frontmatter properties
+`excerpt`, `summary`, `description`, and `about`, in that order, whose value
+is a string that is nonempty after trimming. It is shown trimmed and
+rendered as Markdown.
+
+- A property whose value is `null`, a number or boolean, a list or mapping,
+  a blank string, or a pending `{{ … }}` expression or `$(…)` command is
+  skipped, never stringified, and the next property is tried. A quoted
+  `"null"` or `"42"` is text and counts.
+- Only top-level properties count; `meta.summary` does not. The target is
+  never composed and its expressions are never run.
+- With no usable property the hover is unchanged: title, path, and heading
+  line only.
+- Only body links to Markdown documents get a summary. A link to any other
+  file shows only its path, and a `[[wiki]]` link keeps its own hover, which
+  does not include the summary.
+
+The summary is read when the target is parsed, the same way its headings
+are, so the hover itself reads nothing from disk. A target is parsed on
+demand the first time a link to it needs it, including a Markdown file
+outside the workspace file list; DMLS does not parse every listed file to
+collect summaries. An open buffer of the target wins over the file on disk;
+editing it changes the summary, and closing it falls back to the disk copy.
+A watched change or a save-triggered rescan refreshes it, deleting the
+target removes it, and an unreadable target keeps the hover it had, without a summary.
+
 ## What answers a hover
 
 Hover is a provider-chain capability: each provider may contribute, and the registry keeps the **first non-empty** result. Providers run in registration order, so a more specific overlay wins over the substrate for the same offset.
 
 | Provider (in order)  | Hovers on                                            | Content                                                                                                   |
 |----------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| substrate (Markdown) | a heading or a link (not a `{{ }}` inside either)    | heading level and anchor; graph-sourced target preview (an unopened target is read once, then cached)     |
-| wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview                                                                         |
-| frontmatter          | a frontmatter key or its value                       | schema type/required/enum/default/description; or a `ctx.*` generated-key annotation                      |
+| substrate (Markdown) | a heading or a link (not a `{{ }}` inside either)    | heading level and anchor; graph-sourced target preview, plus a Markdown target's frontmatter summary (an unopened target is read once, then cached) |
+| wiki                 | `[[target]]` / `[[target#heading]]`                  | resolved target + heading preview (no summary)                                                            |
+| frontmatter          | a frontmatter key or its value                       | key: schema type/required/enum/default/description, or a `ctx.*` generated-key annotation; value: the `$schema` or `file` value hover |
 | DSL                  | a directive, `{{ }}` interpolation, `{{{ }}}` literal, or a `$()` value | directive semantics + resolved target; interpolation's static value, schema-property fallback, or `ctx.*` note, plus a guard-narrowed local type; literal composed-output + inert note; on a `$()` suffix (`::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), what the suffix does; elsewhere on a `$()` value, the shell policy verdict |
 
 Because the chain stops at the first non-empty hover, a schema-defined frontmatter key whose value contains `{{ }}` is explained by the **frontmatter** provider (the schema description), while an *undefined* key's `{{ … }}` value falls through to the **DSL** provider's interpolation hover.
@@ -400,6 +677,8 @@ The formatting rule is covered at two levels:
 
 - **Unit** (`src/providers/frontmatter.rs`): `schema_hover_body` is called with   hand-built `PropertyDef`s and the emitted Markdown is asserted directly (type   is bold and not inline code; enum members and default are italic). No LSP   session is needed because the function is pure.
 - **Integration** (`tests/l1/lsp_session.rs`): a full   `initialize → didOpen → textDocument/hover` session over the in-memory   connection asserts the rendered `contents.value` the editor would receive. The   `hover_markup(fixture, uri, line, character)` helper collapses the   request-and-extract boilerplate so hover assertions stay one line.
+
+The value hovers' exact wording is unit-tested in `src/providers/reference_hover/tests.rs`, and every `$schema` and `file` outcome above is asserted end to end in `tests/l1/value_hovers.rs`.
 
 ## Collection locals
 

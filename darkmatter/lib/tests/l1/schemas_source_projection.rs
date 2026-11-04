@@ -1,9 +1,8 @@
-use darkmatter::markdown::schemas::{
-    PropertyDef, SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath,
-    SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, parse_property_definition,
-    parse_property_definition_with_source, parse_schema_declaration,
-    parse_schema_declaration_with_source, parse_yaml_schema,
-    classify_schema_reference, resolve::resolve_schema_with_roots,
+use darkmatter::markdown::schemas::resolve::resolve_schema_with_roots;
+use simplified_schema::{
+    PropertyDef, SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath, SchemaSourcePathSegment,
+    SchemaSpanKind, SchemaRoot, parse_property_definition, parse_property_definition_with_source,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema, classify_schema_reference,
     simplified::grammar::MAX_INLINE_OBJECT_DEPTH,
 };
 use serde_yaml_ng::Value as YamlValue;
@@ -15,7 +14,7 @@ fn yaml(source: &str) -> YamlValue {
 fn property_from_schema(value: &YamlValue) -> PropertyDef {
     let mut mapping = serde_yaml_ng::Mapping::new();
     mapping.insert(YamlValue::String("candidate".into()), value.clone());
-    let SimplifiedSchema::Single(mut shape) =
+    let SchemaRoot::Single(mut shape) =
         parse_yaml_schema(&YamlValue::Mapping(mapping)).expect("schema parser must accept value")
     else {
         panic!("one property must produce one schema shape");
@@ -895,7 +894,7 @@ fn expression_source_maps_follow_description_and_file_reference_modes() {
 /// Every authored span of `kind` at `path`, as authored text.
 fn span_texts<'a>(
     source: &'a str,
-    map: &darkmatter::markdown::schemas::SchemaSourceMap,
+    map: &simplified_schema::SchemaSourceMap,
     path: &SchemaSourcePath,
     kind: SchemaSpanKind,
 ) -> Vec<&'a str> {
@@ -984,7 +983,7 @@ fn bare_local_reference_in_a_schema_declaration_records_import_name_spans() {
 #[test]
 fn a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference() {
     use darkmatter::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves};
-    use darkmatter::markdown::schemas::simplified::{
+    use simplified_schema::simplified::{
         grammar::parse_type_expr, serialize_property_atom,
     };
 
@@ -1019,9 +1018,8 @@ fn a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference() {
 
 // ── Located definition failures ───────────────────────────────────────────
 
-use darkmatter::markdown::schemas::{
-    LocatedDefinitionFailure, locate_standalone_definition_failure,
-    parse_standalone_schema_document,
+use simplified_schema::{
+    LocatedDefinitionFailure, locate_standalone_definition_failure, parse_standalone_schema_document,
 };
 
 fn root() -> SchemaSourcePath {
@@ -1232,6 +1230,11 @@ fn standalone_definition_failures_are_located_in_both_envelopes() {
             "$schema:\n  - a: string\n  - b: string(min(nope))\n",
             root().property("$schema").union_arm(1).property("b"),
         ),
+        // A tagged document may declare `$schema` without `types`.
+        (
+            "kind: schema\n$schema:\n  slug: string(min(nope))\n",
+            root().property("$schema").property("slug"),
+        ),
     ] {
         let failure = standalone_failure(source);
         assert_eq!(failure.path, path, "{source:?}");
@@ -1280,8 +1283,7 @@ fn outer_envelope_and_declaration_shape_failures_return_none() {
         "kind: schema\ntypes:\n  slug: string(min(nope))\n  slug: string\n",
         "kind: schema\ntypes:\n  slug: string(min(nope))\n---\nkind: note\n",
         "kind: schema\ntypes:\n  slug: string(min(nope))\n]\n",
-        // Envelopes: a global catalog, malformed `types`, extra tagged keys.
-        "kind: schema\n$schema:\n  slug: string(min(nope))\n",
+        // Envelopes: malformed `types`, neither `types` nor `$schema`, extra tagged keys.
         "kind: schema\ntypes: 7\n",
         "kind: schema\ntypes:\n",
         "kind: schema\n",

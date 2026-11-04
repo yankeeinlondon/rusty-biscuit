@@ -10,7 +10,8 @@
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
-use darkmatter::markdown::schemas::{SchemaError, TriggerEnvelope, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::{TriggerEnvelope, parse_trigger_envelope_from_str};
+use simplified_schema::SchemaError;
 
 /// A valid envelope; every unparseable cell appends [`BROKEN`] or edits it.
 const CONTROL: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  model: string\n";
@@ -181,7 +182,7 @@ fn parseable_kind_shapes_other_than_the_claim_are_unclaimed_or_errors() {
     for kind in ["kind: null\n", "kind:\n", "kind: 123\n", "kind: [schema-trigger]\n", "kind: {a: 1}\n"] {
         let source = format!("{kind}match:\n  prompt: string(required)\n");
         match classify(&source) {
-            Err(SchemaError::TriggerMatch { message }) => assert!(message.starts_with("`kind`:"), "{kind:?}: {message}"),
+            Err(SchemaError::TriggerMatch { message, .. }) => assert!(message.starts_with("`kind`:"), "{kind:?}: {message}"),
             other => panic!("{kind:?}: {other:?}"),
         }
     }

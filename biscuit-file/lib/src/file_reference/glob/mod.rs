@@ -9,22 +9,28 @@
 //! "Glob References" section of `biscuit-file/docs/topics/file-references.md`.
 
 mod error;
+#[cfg(feature = "file-reference")]
 mod list;
+#[cfg(feature = "file-reference")]
 mod matches;
 mod parse;
+#[cfg(feature = "file-reference")]
 mod roots;
 
-use std::path::{Path, PathBuf};
-
 pub use error::GlobReferenceError;
+use parse::{GlobPattern, parse_pattern};
 
-use crate::file_reference::FileResolutionContext;
-use crate::file_reference::PathIdentity;
-use crate::file_reference::context::ResolutionContext;
-use crate::file_reference::{MagicPathList, ParsedReference, ReferenceKind};
-use list::PreparedSet;
-use parse::{GlobPattern, Piece, parse_pattern};
-use roots::{PatternInput, authored_pieces, prepare};
+#[cfg(feature = "file-reference")]
+use {
+    crate::file_reference::FileResolutionContext,
+    crate::file_reference::PathIdentity,
+    crate::file_reference::context::ResolutionContext,
+    crate::file_reference::{MagicPathList, ParsedReference, ReferenceKind},
+    list::PreparedSet,
+    parse::Piece,
+    roots::{PatternInput, authored_pieces, prepare},
+    std::path::{Path, PathBuf},
+};
 
 /// One or more glob patterns sharing the file-reference prefix grammar.
 ///
@@ -63,6 +69,7 @@ pub struct GlobReference {
 }
 
 /// The result of [`GlobReference::list_files`].
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GlobListing {
     /// Every matched file, in native order, each once.
@@ -74,6 +81,7 @@ pub struct GlobListing {
 
 /// A matched file symlink left out of a listing because its target lies
 /// outside the file tree.
+#[cfg(feature = "file-reference")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedEntry {
     /// The symlink, spelled under its root.
@@ -87,11 +95,13 @@ pub struct SkippedEntry {
 ///
 /// For a caller that walks the roots itself, to apply its own filters, and
 /// must offer exactly what [`GlobReference::list_files`] would.
+#[cfg(feature = "file-reference")]
 pub struct PreparedGlobReference {
     set: PreparedSet,
     cwd: PathBuf,
 }
 
+#[cfg(feature = "file-reference")]
 impl PreparedGlobReference {
     /// The positive patterns' roots in precedence order, as
     /// [`GlobReference::roots`] returns them.
@@ -166,7 +176,10 @@ impl GlobReference {
     pub fn escape(text: &str) -> String {
         parse::escape(text)
     }
+}
 
+#[cfg(feature = "file-reference")]
+impl GlobReference {
     /// Every matching file across all roots, in native order.
     ///
     /// ## Errors
@@ -334,6 +347,7 @@ impl GlobReference {
 /// so `%pages/[id].md` finds a file named `[id].md`. Leading `./` and `../`
 /// stay ahead of the `**/` (`%./x.md` searches `./**/x.md`). An absolute
 /// payload searches below its own directory (`%/a/b/x.md` is `/a/b/**/x.md`).
+#[cfg(feature = "file-reference")]
 pub(crate) fn take_first_recursive(
     parsed: &ParsedReference,
     interpolated: &str,
@@ -381,6 +395,7 @@ pub(crate) fn take_first_recursive(
 }
 
 /// The byte length of the leading `./` and `../` hops of `text`.
+#[cfg(feature = "file-reference")]
 fn leading_dot_hops(text: &str) -> usize {
     let mut rest = text;
     loop {

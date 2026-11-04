@@ -139,14 +139,14 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
 
     std::fs::write(
         launch_dir.join("schema.yaml"),
-        "launch_only: string(required)\n",
+        "$schema:\n  launch_only: string(required)\n",
     )
     .unwrap();
     std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
     for (dir, label) in [(&primary_dir, "PRIMARY"), (&appendix_dir, "APPENDIX")] {
         std::fs::write(
             dir.join("schema.yaml"),
-            "marker: string(required)\nspec: 'file(eager; required)'\n",
+            "$schema:\n  marker: string(required)\n  spec: 'file(eager; required)'\n",
         )
         .unwrap();
         std::fs::write(dir.join("spec.md"), format!("{label}-SOURCE-SPEC\n")).unwrap();
@@ -468,7 +468,7 @@ fn explicit_replace_preserves_mode() {
 //
 // The following tests pin the spec at `claudine/features/2026-06-14-system-prompt-mode/spec.md`.
 // Discovered `system-prompt.md` files may declare `mode: append|replace`
-// in frontmatter; the value is validated by the baseline `SimplifiedSchema`
+// in frontmatter; the value is validated by the baseline `SchemaRoot`
 // attached in `compose_prompt_markdown` and read back from the composed
 // frontmatter by `mode_from_composed`.
 

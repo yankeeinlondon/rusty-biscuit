@@ -23,7 +23,7 @@
 //! use darkmatter::markdown::compose::expression::{
 //!     ArgumentCategory, DeclaredTypes, TypeScope, check_expression_calls, parse_spanned,
 //! };
-//! use darkmatter::markdown::schemas::parse_yaml_schema;
+//! use simplified_schema::parse_yaml_schema;
 //!
 //! let schema = parse_yaml_schema(&serde_yaml_ng::from_str("flag: boolean(required)").unwrap()).unwrap();
 //! let declared = DeclaredTypes::new(Some(&schema));
@@ -37,7 +37,7 @@ use std::fmt;
 use serde_json::Value;
 
 use super::absence::branch_scope;
-use super::ast::{Expr, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind};
+use simplified_schema::expression::ast::{Expr, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::call_binding::{
     CallBindingError, CompiledParameter, CompiledSignature, FunctionRegistration, NoNamedTypes, SignatureProblem,
     shape_from_property_def_with_definitions,
@@ -45,9 +45,9 @@ use super::call_binding::{
 use super::functions;
 use super::prepared::PreparedValue;
 use super::scope::{Polarity, Shape as ScopeShape, TypeScope};
-use crate::markdown::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
-use crate::markdown::schemas::simplified::serialize_property_atom;
-use crate::markdown::schemas::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, is_subtype_with_definitions};
+use simplified_schema::coercion::{Additional, ContentFormat, NumberShape, Shape, ValueKind, bind};
+use simplified_schema::simplified::serialize_property_atom;
+use simplified_schema::{Constraint, DefinitionTable, PropertyAtom, PropertyDef, is_subtype_with_definitions};
 use crate::markdown::span::SourceSpan;
 
 /// How an argument's design-time type relates to a parameter's type.
@@ -193,9 +193,9 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
             };
             ScopeShape::array_of(&result)
         },
-        SpannedExprKind::Fallback { primary, fallback } => {
-            let present = expression_type(primary, scope).without_null();
-            present.union(&expression_type(fallback, &scope.assume(&primary.erase(), Polarity::False)))
+        SpannedExprKind::LogicalOr { left, right } => {
+            let present = expression_type(left, scope).without_null();
+            present.union(&expression_type(right, &scope.assume(&left.erase(), Polarity::False)))
         }
         SpannedExprKind::Ternary {
             condition,
@@ -1194,9 +1194,9 @@ fn unlocated(expr: &Expr) -> SpannedExpr {
             base: boxed(base),
             name: name.clone(),
         },
-        Expr::Fallback { primary, fallback } => SpannedExprKind::Fallback {
-            primary: boxed(primary),
-            fallback: boxed(fallback),
+        Expr::LogicalOr { left, right } => SpannedExprKind::LogicalOr {
+            left: boxed(left),
+            right: boxed(right),
         },
         Expr::Ternary {
             condition,
@@ -1219,15 +1219,15 @@ fn unlocated(expr: &Expr) -> SpannedExpr {
         Expr::CallbackCall { name, args } => SpannedExprKind::CallbackCall {
             name: name.clone(),
             args: args.iter().map(|argument| match argument {
-                super::ast::CallArgument::Value(value) => SpannedCallArgument::Value(unlocated(value)),
-                super::ast::CallArgument::Callback(callback) => {
+                simplified_schema::expression::ast::CallArgument::Value(value) => SpannedCallArgument::Value(unlocated(value)),
+                simplified_schema::expression::ast::CallArgument::Callback(callback) => {
                     let binding = |name: &String| crate::markdown::span::Spanned::new(name.clone(), 0..0);
                     let pattern = match &callback.pattern {
-                        super::ast::BindingPattern::Identifier(name) => {
-                            super::ast::SpannedBindingPattern::Identifier(binding(name))
+                        simplified_schema::expression::ast::BindingPattern::Identifier(name) => {
+                            simplified_schema::expression::ast::SpannedBindingPattern::Identifier(binding(name))
                         }
-                        super::ast::BindingPattern::Fields(fields) => {
-                            super::ast::SpannedBindingPattern::Fields(fields.iter().map(binding).collect())
+                        simplified_schema::expression::ast::BindingPattern::Fields(fields) => {
+                            simplified_schema::expression::ast::SpannedBindingPattern::Fields(fields.iter().map(binding).collect())
                         }
                     };
                     SpannedCallArgument::Callback(SpannedCallback {
@@ -1300,9 +1300,9 @@ pub(crate) fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut
             visit_call_nodes(base, visit);
             visit_call_nodes(index, visit);
         }
-        SpannedExprKind::Fallback { primary, fallback } => {
-            visit_call_nodes(primary, visit);
-            visit_call_nodes(fallback, visit);
+        SpannedExprKind::LogicalOr { left, right } => {
+            visit_call_nodes(left, visit);
+            visit_call_nodes(right, visit);
         }
         SpannedExprKind::Ternary {
             condition,
@@ -1347,7 +1347,7 @@ pub(crate) fn callback_scope<'d>(callback: &SpannedCallback, args: &[SpannedCall
 mod callback_tests {
     use super::*;
     use crate::markdown::compose::expression::{parse_spanned, static_access_reads, static_variable_reads};
-    use crate::markdown::schemas::parse_yaml_schema;
+    use simplified_schema::parse_yaml_schema;
 
     #[test]
     fn narrowing_predicates_accept_callback_results_in_guards() {
@@ -1449,7 +1449,7 @@ mod callback_tests {
         for name in ["seq", "loop"] {
             let source = format!("map([], {name} => {name})");
             let checks = check_expression_calls(&parse_spanned(&source).unwrap(), &scope);
-            assert_eq!(checks[0].rejection_diagnostic().unwrap().code, super::super::parser::INVALID_CALLBACK_CODE);
+            assert_eq!(checks[0].rejection_diagnostic().unwrap().code, simplified_schema::expression::parser::INVALID_CALLBACK_CODE);
         }
     }
 

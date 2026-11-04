@@ -57,6 +57,42 @@ Windows-specific behavior of the recipe itself:
 WSL remains a supported Linux environment: run `just init` directly inside the
 WSL terminal, not through `scripts\init.ps1`.
 
+### PATH order inside recipes
+
+Windows tools that share a name with a POSIX utility can sit anywhere on your
+PATH: `uname.exe` and `env.exe` from uutils coreutils in WinGet's `Links`
+folder, scoop shims, `find.exe` and `sort.exe` in `System32`. A bash started by
+`just` keeps the Windows PATH order, so without help the first of these would
+answer for the POSIX tool. uutils' `uname -s`, for example, prints
+`Windows_NT`, which no recipe recognizes as Windows.
+
+You do not need to reorder your PATH for this. On native Windows every
+justfile in the repository imports `just/shell.just`, which puts the bin
+directory of the bash that runs recipes first on the PATH `just` gives each
+recipe:
+
+| Bash that runs recipes | Directory placed first |
+|---|---|
+| Cygwin | `C:\cygwin64\bin` (the shell's `/usr/bin`) |
+| Git for Windows | `C:\Program Files\Git\usr\bin` |
+| MSYS2 | `C:\msys64\usr\bin` |
+
+Everything else keeps its order, so a recipe still finds `cargo`, `winget`,
+`gh`, and Python where you installed them. Linux, macOS, and WSL are
+unaffected.
+
+```text
+your PATH:     WinGet\Links ; .cargo\bin ; C:\cygwin64\bin ; System32 ; ...
+recipe PATH:   C:\cygwin64\bin ; WinGet\Links ; .cargo\bin ; C:\cygwin64\bin ; System32 ; ...
+uname -s   →   CYGWIN_NT-10.0-26300   (was Windows_NT)
+```
+
+Two consequences for anyone writing recipes or scripts:
+
+- Add a tool-manager directory (WinGet `Links`, Cargo's `bin`, npm's prefix)
+  to PATH by **appending** it. Prepending it puts its coreutils back in front.
+- A script run directly, not through `just`, does not get this ordering.
+
 
 ## Build Caching
 
@@ -105,7 +141,7 @@ The `_ensure-kache` step runs one ordered sequence, activation last:
    Dev Drive.
 4. **User config write** — `[cache] local_store = "<store>"` plus
    `ignore_env = true` into `~/.config/kache/config.toml`
-   (`%APPDATA%\kache\config.toml` on Windows) via a targeted merge that
+   (`%USERPROFILE%\.config\kache\config.toml` on Windows) via a targeted merge that
    preserves every other key and comment, validates before replacing, and
    keeps a dated backup (`scripts/kache-config-merge.py`). The config file is
    the single source of truth: interactive shells, the daemon, editors, and
@@ -348,6 +384,13 @@ sniff runtime
 gitnexus status
 just kache-status   # compiler-cache verdict for this host
 ```
+
+On native Windows, a recipe that reports `unrecognized host OS 'Windows_NT'`,
+or one that looks for `cc` and `apt-get`, is running a foreign `uname`. Check
+that the justfile imports `just/shell.just` (directly or through
+`just/devops.just`; `just check-canonical` enforces this for every package
+area), and that the failing script does not prepend a tool-manager directory
+to PATH. See [PATH order inside recipes](#path-order-inside-recipes).
 
 If Cargo reports that `kache` cannot be found, the wrapper is active but the
 binary is not on PATH — clear it for this shell with `export RUSTC_WRAPPER=""`

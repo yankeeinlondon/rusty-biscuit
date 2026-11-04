@@ -40,7 +40,7 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   directory at the checkout volume's mount point on macOS when writable, else the user cache dir
   when it is on the serving device, else a user-owned directory on that volume; never a root-owned
   mount point — then writes `[cache] local_store = "<path>"` plus `ignore_env = true` into
-  `~/.config/kache/config.toml` (`%APPDATA%\kache\config.toml` on Windows) via a targeted,
+  `~/.config/kache/config.toml` (`%USERPROFILE%\.config\kache\config.toml` on Windows) via a targeted,
   comment-preserving merge (`scripts/kache-config-merge.py`, validated with `tomllib`, dated
   backup beside the original). The write happens even when the value equals kache's default: the
   pin is deliberate, so a future release changing its default cannot silently relocate the store,
@@ -48,8 +48,9 @@ use it. Rationale and measurements: `fixes/2026-07-30-ci-cd-stabilization/plan.m
   the same location. init never moves an existing store's contents; it reports an abandoned
   store's size and leaves deleting it to the human.
 - **Store cap:** `just install-kache` seeds `local_max_size = "100GiB"` when a host has no kache
-  config (never overwrites). Config path: `~/.config/kache/config.toml` on macOS/Linux,
-  `%APPDATA%\kache\config.toml` on Windows.
+  config (never overwrites). Config path: `$XDG_CONFIG_HOME/kache/config.toml`, defaulting to `~/.config`, on every OS;
+  on Windows `~` is the profile folder Windows reports (`%USERPROFILE%`), never Cygwin's `$HOME`.
+  kache 1.2.2 does not read `%APPDATA%\kache\config.toml`.
 - **macOS hardened runtime strips `DYLD_*`** (measured 2026-09-23). The `cargo binstall` release
   ships with the hardened runtime (`codesign -dvv` → `flags=0x10000(runtime)`), and dyld removes
   every `DYLD_*` variable from a hardened process's environment at launch — kache cannot forward

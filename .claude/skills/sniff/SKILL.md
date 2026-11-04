@@ -104,6 +104,14 @@ indexes valid and metadata-only consumers independent of readable index state.
 `changed_paths_tests::index_reads` covers every shared consumer; CLI
 `changed::index_corruption` partitions the full prefix/report matrix by shape.
 
+`GitRepo::working_state()` (CLI `sniff repo state`) builds on that: `HEAD`
+plus a `PathContent` per changed path, hashed into a 16-hex `id` that is equal
+exactly when commit and uncommitted bytes are equal (ignored files and
+timestamps never count; paths hash in Git spelling, so ids match across OSes).
+It reuses the one status walk, then reads each changed path once, counted as
+`git.working_state.paths_hashed`. `scripts/slow-tests.rs` keys test runs on it.
+Tests: `filesystem/git/working_state_tests.rs`.
+
 `filesystem::repo::{PackageNameSource, PackageOwnershipLookup}` support callers
 that need declared identity and repeated file ownership. Check `name_source ==
 Manifest`; a nonempty `name` alone may be a relative-path fallback. Legacy
@@ -241,6 +249,12 @@ separate APIs.
 
 ## Remote authority
 
+Everything that sends HTTP stays behind `network`/`remote`. A build with
+neither feature compiles no `reqwest`, `hyper`, or `tokio`, and local-only
+consumers such as `simplified-schema` rely on that. `schematic-schema` is
+therefore optional and enabled only by `remote`. Never make an HTTP-carrying
+dependency unconditional.
+
 `resolve_remote_at` is the selection authority for configured remotes.
 Classification stays local when possible; ambiguous self-hosted HTTP(S) hosts
 require exact-host consent before probing.
@@ -322,7 +336,7 @@ coverage. Cross-platform compile guards must enable the same feature.
 passes over warnings in `#[cfg(test)]` modules and test targets that CI's
 shared `_lint` (`--all-targets -D warnings`, no features) rejects. Before
 handoff, also run `cargo clippy -p sniff --all-targets -- -D warnings` and the
-same for `sniff-cli`.
+same for `sniff-detection-cli`.
 
 Read [testing.md](testing.md) for the CLI `test-fixtures` feature, suite
 audits, regression-input rules, real-tool lockfile fixtures, and the L1/L2

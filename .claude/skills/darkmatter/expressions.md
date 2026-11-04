@@ -126,7 +126,7 @@ parameter only through an explicit `| null`. `and`/`or` are lazy
 ones it evaluates. Callback registrations bind the source through the same
 engine; the evaluator owns item frames and body execution, with no eager
 callback handler. User docs: "Function Calls: Bind, Then Compute" in
-`darkmatter/docs/topics/schemas/definition.md`.
+`simplified-schema/docs/topics/conversion.md`.
 
 **Inserted text is data.** Every authored span is scanned once. Produced text
 is never scanned again. This covers expression results, file reads, shell
@@ -193,8 +193,10 @@ Claudine's `type_scope_ownership_guard.rs` fails on an unreviewed
 static presence and type at a site: `DeclaredTypes` (built once per owner
 from `EffectiveSchema.simplified`, static frontmatter, and host roots or a
 `BindingView`) refined by guards. `TypeScope::assume(&Expr, Polarity)` is the
-only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
-`FunctionCall`/`Fallback`, matched through the registry), ternaries,
+only fact producer. It handles `!`, parentheses, `and`/`or`/`&&`/`||`
+(`&&` lowers to an `and(...)` `FunctionCall`; `||` is the `LogicalOr` node,
+treated as `or(...)` when used as a truth test; both matched through the
+registry), ternaries,
 `==`/`!=` by strict typed equality (`Shape::equal_to`/`differs_from`, and
 `finite_values` for subject-to-subject), and each predicate's
 `NarrowingFact` (`call_binding/registration.rs`: `FactKind::{TrueIff,
@@ -204,7 +206,7 @@ function's signature by `narrows(param: T; kind)` / `narrows(param; kind)`
 (`file_exists` and `is_file_type` are `true-implies` `file`; `is_empty` is
 presence-only `false-implies`) and compiled at registration, so a built-in, a
 test function, and a host function narrow alike. Declaration validity is
-schema-owned (`schemas/simplified/narrowing.rs`: `clause_problem`,
+schema-owned (`simplified-schema/lib/src/simplified/narrowing.rs`: `clause_problem`,
 `declaration_problem`, `overload_arms_problem`, plus the pure family
 predicates `scope/shape.rs` imports); the grammar, catalog loading, and
 `compile_declared_fact` all apply it, and registration only lowers. Never add
@@ -269,7 +271,7 @@ compare `Value`s with `==` or through rendered text for an expression
 `==`/`!=`; ordering (`<`, `>=`, …) still coerces to numbers. User docs:
 [What a Guard Proves](../../../darkmatter/docs/topics/darkmatter-expressions.md#what-a-guard-proves).
 
-Numbers enter Darkmatter only through `markdown::numeric` (`admit_number_spelling`
+Numbers enter Darkmatter only through `simplified_schema::numeric` (`admit_number_spelling`
 for loader/lexer text, `admit_number_text` for the one lenient text parser,
 `admit_json_number`/`admit_f64` for values without a spelling). A whole number
 must be exact in every spelling, decimals round, underflow and non-finite are

@@ -10,46 +10,56 @@ model_config_paths:
   - scope: user
     path: ~/.config/opencode/opencode.json
     format: jsonc
-    notes: 'Global user config. Also accepts opencode.jsonc. Observed on this host with a built-in Z.AI provider block and model metadata.'
+    notes:
+      - 'Global user config. Also accepts opencode.jsonc. Observed on this host with a built-in Z.AI provider block and model metadata.'
   - scope: user
     path: ~/.config/opencode/opencode.jsonc
     format: jsonc
-    notes: 'JSON-with-comments variant of the global config.'
+    notes:
+      - 'JSON-with-comments variant of the global config.'
   - scope: repo
     path: opencode.json
     format: jsonc
-    notes: 'Project config in repository root. Also accepts opencode.jsonc. OpenCode walks up from cwd to the nearest Git root.'
+    notes:
+      - 'Project config in repository root. Also accepts opencode.jsonc. OpenCode walks up from cwd to the nearest Git root.'
   - scope: repo
     path: opencode.jsonc
     format: jsonc
-    notes: 'JSON-with-comments variant of the project config.'
+    notes:
+      - 'JSON-with-comments variant of the project config.'
   - scope: env
     path: OPENCODE_CONFIG
     format: jsonc
-    notes: 'Custom config file path loaded between global and project configs.'
+    notes:
+      - 'Custom config file path loaded between global and project configs.'
   - scope: env
     path: OPENCODE_CONFIG_CONTENT
     format: json
-    notes: 'Inline JSON config merged as a final local-scope override.'
+    notes:
+      - 'Inline JSON config merged as a final local-scope override.'
   - scope: env
     path: "/Library/Application Support/opencode/opencode.json (macOS), /etc/opencode/opencode.json (Linux), %ProgramData%\\opencode\\opencode.json (Windows)"
     format: jsonc
-    notes: 'Managed/organizational settings loaded at highest priority and not user-overridable.'
+    notes:
+      - 'Managed/organizational settings loaded at highest priority and not user-overridable.'
   - scope: env
     path: ai.opencode.managed plist / .mobileconfig (macOS MDM)
     format: jsonc
-    notes: 'macOS managed preferences deployed via MDM; highest priority, not user-overridable.'
+    notes:
+      - 'macOS managed preferences deployed via MDM; highest priority, not user-overridable.'
 api_standards:
   - standard: openai_compatible
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: '@ai-sdk/openai-compatible'
-    notes: 'Officially documented path for user-added cloud/local models. Use @ai-sdk/openai-compatible for /v1/chat/completions endpoints and @ai-sdk/openai for /v1/responses endpoints.'
+    notes:
+      - 'Officially documented path for user-added cloud/local models. Use @ai-sdk/openai-compatible for /v1/chat/completions endpoints and @ai-sdk/openai for /v1/responses endpoints.'
   - standard: bespoke
     base_url_site: provider.<id>.options.baseURL
     auth_site: provider.<id>.options.apiKey or {env:VARIABLE_NAME}
     adapter: 'npm key naming any AI SDK provider package (e.g. @ai-sdk/google, @ai-sdk/anthropic if installed)'
-    notes: 'OpenCode can load arbitrary AI SDK packages via npm, but custom providers are officially documented only as OpenAI-compatible.'
+    notes:
+      - 'OpenCode can load arbitrary AI SDK packages via npm, but custom providers are officially documented only as OpenAI-compatible.'
 metadata_overrides:
   - id
   - name
@@ -75,32 +85,38 @@ local_runners:
     integration: first_class
     standard: openai_compatible
     example: '{ "provider": { "ollama": { "npm": "@ai-sdk/openai-compatible", "name": "Ollama (local)", "options": { "baseURL": "http://localhost:11434/v1" }, "models": { "gemma3:27b": { "name": "Gemma 3 27B", "limit": { "context": 128000, "output": 8192 } } } } }, "model": "ollama/gemma3:27b" }'
-    notes: 'First-class `ollama launch opencode` integration. Manual setup uses the OpenAI-compatible server endpoint. Size/quantization tags are part of the model ID.'
+    notes:
+      - 'First-class `ollama launch opencode` integration. Manual setup uses the OpenAI-compatible server endpoint. Size/quantization tags are part of the model ID.'
   - runner: omlx
     integration: first_class
     standard: openai_compatible
     example: '{ "provider": { "omlx": { "npm": "@ai-sdk/openai-compatible", "name": "oMLX (local)", "options": { "baseURL": "http://localhost:8000/v1" }, "models": { "Qwen3.6-35B-A3B-oQ6": { "name": "Qwen3.6 35B A3B oQ6 (local)" } } } }, "model": "omlx/Qwen3.6-35B-A3B-oQ6" }'
-    notes: 'First-class `omlx launch opencode` integration configures and launches OpenCode against the running oMLX server. Manual setup uses the OpenAI-compatible endpoint served by `omlx serve`; auth is optional — pass the key in options.apiKey or {env:VAR} if enabled.'
+    notes:
+      - 'First-class `omlx launch opencode` integration configures and launches OpenCode against the running oMLX server. Manual setup uses the OpenAI-compatible endpoint served by `omlx serve`; auth is optional — pass the key in options.apiKey or {env:VAR} if enabled.'
   - runner: lmstudio
     integration: base_url_override
     standard: openai_compatible
     example: '{ "provider": { "lmstudio": { "npm": "@ai-sdk/openai-compatible", "name": "LM Studio (local)", "options": { "baseURL": "http://127.0.0.1:1234/v1" }, "models": { "google/gemma-3n-e4b": { "name": "Gemma 3n-e4b (local)" } } } }, "model": "lmstudio/google/gemma-3n-e4b" }'
-    notes: 'Uses the OpenAI-compatible server endpoint loaded by LM Studio. Set options.apiKey to the configured token when authentication is enabled.'
+    notes:
+      - 'Uses the OpenAI-compatible server endpoint loaded by LM Studio. Set options.apiKey to the configured token when authentication is enabled.'
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
     example: '{ "provider": { "llamacpp": { "npm": "@ai-sdk/openai-compatible", "name": "llama-server (local)", "options": { "baseURL": "http://127.0.0.1:8080/v1" }, "models": { "qwen3-coder:a3b": { "name": "Qwen3-Coder a3b (local)", "limit": { "context": 128000, "output": 65536 } } } } }, "model": "llamacpp/qwen3-coder:a3b" }'
-    notes: 'Uses llama.cpp llama-server OpenAI-compatible endpoint. Pass options.apiKey or {env:LLAMA_API_KEY} when --api-key is set.'
+    notes:
+      - 'Uses llama.cpp llama-server OpenAI-compatible endpoint. Pass options.apiKey or {env:LLAMA_API_KEY} when --api-key is set.'
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
     example: '{ "provider": { "vllm": { "npm": "@ai-sdk/openai-compatible", "name": "vLLM (local)", "options": { "baseURL": "http://localhost:8000/v1" }, "models": { "qwen2.5-coder-32b-instruct": { "name": "Qwen2.5 Coder 32B Instruct (local)" } } } }, "model": "vllm/qwen2.5-coder-32b-instruct" }'
-    notes: 'vLLM exposes an OpenAI-compatible API by default. Each vLLM process hosts one model; use --served-model-name aliases if needed.'
+    notes:
+      - 'vLLM exposes an OpenAI-compatible API by default. Each vLLM process hosts one model; use --served-model-name aliases if needed.'
   - runner: other
     integration: base_url_override
     standard: openai_compatible
     example: '{ "provider": { "my-local": { "npm": "@ai-sdk/openai-compatible", "name": "My local runner", "options": { "baseURL": "http://localhost:<port>/v1" }, "models": { "<runner-model-id>": { "name": "My local model" } } } }, "model": "my-local/<runner-model-id>" }'
-    notes: 'Any local server that exposes an OpenAI-compatible /v1 chat endpoint works with @ai-sdk/openai-compatible.'
+    notes:
+      - 'Any local server that exposes an OpenAI-compatible /v1 chat endpoint works with @ai-sdk/openai-compatible.'
 cloud_bridge:
   supported: true
   mechanism: 'provider.<id>.options.baseURL with npm adapter @ai-sdk/openai-compatible (or @ai-sdk/openai for /v1/responses)'

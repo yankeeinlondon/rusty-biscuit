@@ -58,10 +58,10 @@ fn diagnostics(catalog: &str, artifact: Option<&str>) -> Vec<Value> {
         json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": DOCUMENT } }),
     );
     fixture.flush_server();
-    let mut latest = fixture.wait_for_diagnostics_params(&uri);
-    while let Some(params) = fixture.take_buffered_diagnostics(&uri) {
-        latest = params;
-    }
+    // The buffered take returns the latest publication first; the
+    // earlier ones still buffered are dropped.
+    let latest = fixture.wait_for_diagnostics_params(&uri);
+    while fixture.take_buffered_diagnostics(&uri).is_some() {}
     fixture.shutdown();
     latest["diagnostics"].as_array().cloned().unwrap_or_default()
 }

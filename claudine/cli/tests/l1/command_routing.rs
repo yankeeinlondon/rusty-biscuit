@@ -157,14 +157,12 @@ fn agents_and_commands_route_to_empty_state_messages() {
 }
 
 #[test]
-fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
-    // Phase 5 of the `2026-04-18-file-completion-supplement` feature
-    // flips `claudine completions bash|zsh|fish` from the old one-line
-    // `COMPLETE=<shell>` bootstrap to full shell-specific scripts that
-    // shell out to the hidden `claudine __complete` subcommand. This
-    // test pins the three script contracts so unintended regressions
-    // surface at install time rather than at runtime on a user's
-    // shell.
+fn completions_emit_engine_backed_shell_scripts() {
+    // `claudine completions bash|zsh|fish|powershell|elvish` emit full
+    // shell-specific scripts that shell out to the hidden
+    // `claudine __complete` subcommand. This test pins each script
+    // contract so unintended regressions surface at install time rather
+    // than at runtime on a user's shell.
     let fixture = CliProcessFixture::named("command-routing-completions");
 
     for (shell, markers) in [
@@ -205,6 +203,25 @@ fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
                 "-a '(__claudine_complete)'",
             ],
         ),
+        (
+            "powershell",
+            vec![
+                "function __ClaudineComplete",
+                "'__complete', '--current'",
+                "function Register-ClaudineShortcutCompletion",
+                "Register-ArgumentCompleter -Native -CommandName 'claudine', 'claudine.exe'",
+            ],
+        ),
+        (
+            "elvish",
+            vec![
+                "fn complete {|prefix words|",
+                "e:claudine __complete --current",
+                "fn shortcut {|name @prefix|",
+                "set edit:completion:arg-completer[claudine]",
+                "edit:complete-filename",
+            ],
+        ),
     ] {
         let output = fixture
             .command()
@@ -237,42 +254,6 @@ fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
             !stdout.contains("COMPLETE="),
             "{shell} script must not fall back to the legacy `COMPLETE=<shell>` \
              bootstrap; output was:\n{stdout}",
-        );
-    }
-}
-
-#[test]
-fn completions_retain_legacy_bootstrap_for_powershell_and_elvish() {
-    // The supplement acceptance matrix covers bash/zsh/fish only.
-    // PowerShell and Elvish keep the previous one-line `COMPLETE=<shell>`
-    // bootstrap so stale installations and future shell additions don't
-    // regress.
-    let fixture = CliProcessFixture::named("command-routing-legacy-completions");
-
-    for (shell, expected) in [
-        (
-            "powershell",
-            "& { $env:COMPLETE=\"powershell\"; claudine } | Out-String | Invoke-Expression\n",
-        ),
-        ("elvish", "eval (E:COMPLETE=elvish claudine | slurp)\n"),
-    ] {
-        let output = fixture
-            .command()
-            .args(["completions", shell])
-            .assert()
-            .success()
-            .get_output()
-            .clone();
-
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        let stderr = String::from_utf8(output.stderr).unwrap();
-        assert_eq!(
-            stdout, expected,
-            "expected {shell} legacy bootstrap snippet to match exactly",
-        );
-        assert!(
-            stderr.trim().is_empty(),
-            "expected no stderr, got: {stderr}"
         );
     }
 }

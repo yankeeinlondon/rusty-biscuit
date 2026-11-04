@@ -37,7 +37,7 @@
   the wrong directory when a `cargo nextest archive` is executed elsewhere.
 - `claudine-cli` takes `xpty` 0.3.6 as a Windows-only dev dependency. It opens
   a ConPTY pseudoconsole with no window, so a test can type Ctrl+C into a real
-  console during the exit drain. `unchained-ai` and `worktree-cli` already
+  console during the exit drain. `unchained-ai` and `git-wt-cli` already
   build it, so it adds no crate to `Cargo.lock`.
 
 ## Audio Handoff
@@ -153,7 +153,8 @@ See [Steering Routing](topics/steering-routing.md).
   and `claudine-gen` depend on it; `strum`'s variant-name introspection backs
   the generator's schema↔catalog enum-subset gate.
 - `claudine-gen` (`claudine/gen`) depends on `darkmatter` (frontmatter parsing
-  plus SimplifiedSchema sidecar validation), `biscuit-file` (file-reference
+  plus SimplifiedSchema sidecar validation), `simplified-schema` (the schema
+  language's types and conversion, imported directly), `biscuit-file` (file-reference
   resolution for empirical research fixtures), `sniff` (focused repository
   observation at the generator command boundary), `serde`/`serde_json`/
   `serde_yaml_ng`, `clap`, `thiserror`, and `regex` (generate-time

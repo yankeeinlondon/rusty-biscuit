@@ -92,7 +92,7 @@ name = "biscuit-speaks-cli"
 changelog_path = "biscuit-speaks/cli/CHANGELOG.md"
 
 [[package]]
-name = "sniff-cli"
+name = "sniff-detection-cli"
 changelog_path = "sniff/cli/CHANGELOG.md"
 
 [[package]]

@@ -121,7 +121,7 @@ Every curated package area defines these recipes, delegating to the shared
 |----------------|-------------------------------------------------------------------------|
 | `sanity`       | Fast confidence (≤15 s). `cargo nextest run --lib --bins -E '!set:slow'`. |
 | `test`         | Full L1 suite.                                                          |
-| `slow-tests`   | Nextest's SLOW report over the `test` tier (local diagnostic).         |
+| `slow-tests`   | Reports the area's slow-test log (runs no tests); `import <run>` adds a CI run; `fresh` and `verify --baseline <state>` check `target/slow-tests/current.md`, the slow tests of every run in the current working-tree state. Every canonical recipe records automatically ([testing-strategy](../../../docs/testing-strategy.md#slow-test-log)). |
 | `test-l2`      | Real-terminal tests; parallel by default, serial with a shared pane for packages that declare `l2-serial` (`BISCUIT_L2_THREADS` overrides) — see [l2-tests.md](l2-tests.md). |
 | `test-l3`      | OS keyboard/mouse tests.                                                |
 | `test-browser` | Headless browser tests, one Chrome at a time (`-j 1`).                  |
@@ -132,6 +132,12 @@ Every curated package area defines these recipes, delegating to the shared
 | `doctest`      | `cargo test --doc`.                                                     |
 | `fuzz`         | `cargo +nightly fuzz run` over `<crate>/fuzz/` targets (no-op if none); nightly CI only, never a PR gate. |
 | `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`.              |
+
+Run fuzzing with `just fuzz`, not a bare `cargo fuzz`. Each `<crate>/fuzz/` is
+its own Cargo workspace whose `Cargo.lock` is **not committed**: `just fuzz`
+and `fuzz-nightly` copy the root `Cargo.lock` over it first, so fuzzing uses the
+dependency versions that ship. A committed fuzz lock drifted from the root lock
+and in 2026-09 stopped resolving, failing every nightly fuzz run.
 
 To narrow a recipe to one module, pass a positional filter:
 `just test-cli context_command::` — see [tier-filters.md](tier-filters.md).

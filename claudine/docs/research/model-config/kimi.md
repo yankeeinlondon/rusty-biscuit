@@ -10,38 +10,44 @@ model_config_paths:
   - scope: user
     path: ~/.kimi/config.toml
     format: toml
-    notes: |
-      Primary user configuration. Also accepts JSON (`~/.kimi/config.json`), which is auto-migrated to TOML on first run if `config.toml` is absent. Observed on this host with `default_model = "kimi-code/kimi-for-coding"` and managed provider/model entries.
+    notes:
+      - |
+        Primary user configuration. Also accepts JSON (`~/.kimi/config.json`), which is auto-migrated to TOML on first run if `config.toml` is absent. Observed on this host with `default_model = "kimi-code/kimi-for-coding"` and managed provider/model entries.
   - scope: env
     path: $KIMI_SHARE_DIR/config.toml
     format: toml
-    notes: |
-      `KIMI_SHARE_DIR` relocates the entire share directory (default `~/.kimi`), which moves the config file with it.
+    notes:
+      - |
+        `KIMI_SHARE_DIR` relocates the entire share directory (default `~/.kimi`), which moves the config file with it.
   - scope: env
     path: --config-file /path/to/config.toml
     format: toml
-    notes: |
-      CLI flag that replaces the default config file for the launched session. `--config '<json/toml>'` can also supply raw config content inline for one session.
+    notes:
+      - |
+        CLI flag that replaces the default config file for the launched session. `--config '<json/toml>'` can also supply raw config content inline for one session.
 
 api_standards:
   - standard: openai_compatible
     base_url_site: providers.<name>.base_url (or OPENAI_BASE_URL env var for openai_legacy/openai_responses providers)
     auth_site: providers.<name>.api_key (or OPENAI_API_KEY env var)
     adapter: none
-    notes: |
-      Use provider type `openai_legacy` for Chat Completions-compatible services or `openai_responses` for the newer Responses API. Custom headers can be added with `custom_headers`.
+    notes:
+      - |
+        Use provider type `openai_legacy` for Chat Completions-compatible services or `openai_responses` for the newer Responses API. Custom headers can be added with `custom_headers`.
   - standard: anthropic_compatible
     base_url_site: providers.<name>.base_url
     auth_site: providers.<name>.api_key
     adapter: none
-    notes: |
-      Use provider type `anthropic` for Anthropic Claude API-compatible endpoints. The base URL should omit `/v1`; the client appends `/v1/messages`.
+    notes:
+      - |
+        Use provider type `anthropic` for Anthropic Claude API-compatible endpoints. The base URL should omit `/v1`; the client appends `/v1/messages`.
   - standard: bespoke
     base_url_site: providers.<name>.base_url (or KIMI_BASE_URL env var for kimi providers)
     auth_site: providers.<name>.api_key (or KIMI_API_KEY env var for kimi providers)
     adapter: none
-    notes: |
-      Use provider type `kimi` for the native Kimi/Moonshot API, `gemini` for Google Gemini, or `vertexai` for Google Vertex AI. OAuth-backed managed providers (e.g. `managed:kimi-code`) store tokens separately under `~/.kimi/credentials`.
+    notes:
+      - |
+        Use provider type `kimi` for the native Kimi/Moonshot API, `gemini` for Google Gemini, or `vertexai` for Google Vertex AI. OAuth-backed managed providers (e.g. `managed:kimi-code`) store tokens separately under `~/.kimi/credentials`.
 
 metadata_overrides:
   - provider
@@ -68,8 +74,9 @@ local_runners:
       max_context_size = 131072
       capabilities = ["thinking", "image_in", "tool_use"]
       display_name = "Qwen3 1.7B (Ollama)"
-    notes: |
-      Ollama exposes an OpenAI-compatible Chat Completions endpoint at `/v1/chat/completions`. Pass the Ollama model tag (including size/quantization suffix) as the API `model` value. The same runner also serves an Anthropic-compatible endpoint, so `type = "anthropic"` with `base_url = "http://localhost:11434"` works as well.
+    notes:
+      - |
+        Ollama exposes an OpenAI-compatible Chat Completions endpoint at `/v1/chat/completions`. Pass the Ollama model tag (including size/quantization suffix) as the API `model` value. The same runner also serves an Anthropic-compatible endpoint, so `type = "anthropic"` with `base_url = "http://localhost:11434"` works as well.
   - runner: lmstudio
     integration: base_url_override
     standard: openai_compatible
@@ -85,28 +92,33 @@ local_runners:
       max_context_size = 128000
       capabilities = ["thinking", "image_in", "tool_use"]
       display_name = "GPT-OSS 20B (LM Studio)"
-    notes: |
-      LM Studio's local server is OpenAI-compatible. Use the model id reported by LM Studio's `/v1/models` endpoint. LM Studio also supports the Anthropic Messages API, so `type = "anthropic"` with `base_url = "http://localhost:1234"` is an alternative.
+    notes:
+      - |
+        LM Studio's local server is OpenAI-compatible. Use the model id reported by LM Studio's `/v1/models` endpoint. LM Studio also supports the Anthropic Messages API, so `type = "anthropic"` with `base_url = "http://localhost:1234"` is an alternative.
   - runner: vllm
     integration: base_url_override
     standard: openai_compatible
-    notes: |
-      vLLM serves an OpenAI-compatible API by default. The `model` value is the served model name or a `--served-model-name` alias.
+    notes:
+      - |
+        vLLM serves an OpenAI-compatible API by default. The `model` value is the served model name or a `--served-model-name` alias.
   - runner: llamacpp
     integration: base_url_override
     standard: openai_compatible
-    notes: |
-      llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. The client-visible model id is the `--alias` value or the GGUF filename.
+    notes:
+      - |
+        llama-server exposes an OpenAI-compatible `/v1/chat/completions` endpoint. The client-visible model id is the `--alias` value or the GGUF filename.
   - runner: omlx
     integration: base_url_override
     standard: openai_compatible
-    notes: |
-      oMLX serves an OpenAI-compatible API at `/v1/chat/completions`. Use the model directory name or alias as the API `model` value.
+    notes:
+      - |
+        oMLX serves an OpenAI-compatible API at `/v1/chat/completions`. Use the model directory name or alias as the API `model` value.
   - runner: other
     integration: base_url_override
     standard: openai_compatible
-    notes: |
-      Any runner that implements the OpenAI Chat Completions API can be added via `openai_legacy`. Runners exposing the Anthropic Messages API can use `anthropic`.
+    notes:
+      - |
+        Any runner that implements the OpenAI Chat Completions API can be added via `openai_legacy`. Runners exposing the Anthropic Messages API can use `anthropic`.
 
 cloud_bridge:
   supported: true

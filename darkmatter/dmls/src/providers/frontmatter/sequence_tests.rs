@@ -54,19 +54,19 @@ fn resolved_root_with_definitions(path: &Path) -> (SchemaShape, Definitions) {
     )
     .unwrap_or_else(|error| panic!("{} resolves: {error}", path.display()));
     match resolved.simplified {
-        Some(SimplifiedSchema::Single(shape)) => (shape, Definitions(resolved.definitions)),
+        Some(SchemaRoot::Single(shape)) => (shape, Definitions(resolved.definitions)),
         other => panic!("{} is a single shape: {other:?}", path.display()),
     }
 }
 
 /// A resolved schema file's definition table, opened by an editor walk.
-struct Definitions(Arc<darkmatter::markdown::schemas::simplified::DefinitionTable>);
+struct Definitions(Arc<simplified_schema::simplified::DefinitionTable>);
 
 impl DefinitionLookup for Definitions {
     fn lookup_definition(
         &self,
-        key: &darkmatter::markdown::schemas::simplified::DefKey,
-    ) -> Option<&darkmatter::markdown::schemas::simplified::Definition> {
+        key: &simplified_schema::simplified::DefKey,
+    ) -> Option<&simplified_schema::simplified::Definition> {
         self.0.get(key)
     }
 }

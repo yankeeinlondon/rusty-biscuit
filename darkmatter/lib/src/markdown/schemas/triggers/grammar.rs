@@ -7,7 +7,7 @@
 //!
 //! Each property condition is `property: <type-expr>` where the type
 //! expression reuses the existing [`PropertyAtom`] / [`TypeExpr`] grammar
-//! from [`crate::markdown::schemas::simplified`]. Match loading rejects
+//! from [`simplified_schema::simplified`]. Match loading rejects
 //! constraints that resolve files, import types, load examples, provide
 //! defaults, or mark generated values (see [`is_match_safe_constraint`]).
 //!
@@ -29,8 +29,8 @@
 use biscuit_file::{FileReference, FileReferenceKind, GlobReference, GlobReferenceError};
 use serde_yaml_ng::Value as YamlValue;
 
-use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::simplified::{
+use simplified_schema::errors::SchemaError;
+use simplified_schema::simplified::{
     Constraint, PropertyAtom, PropertyDef, TypeExpr,
     grammar::parse_type_expr,
 };
@@ -136,6 +136,7 @@ impl PathGlobs {
         if patterns.is_empty() {
             return Err(SchemaError::TriggerMatch {
                 message: "$path must have at least one glob pattern".into(),
+                span: None,
             });
         }
         let mut compiled = Vec::with_capacity(patterns.len());
@@ -246,6 +247,7 @@ fn path_error(pattern: Option<&str>, reason: &str) -> SchemaError {
             Some(pattern) => format!("$path pattern `{pattern}` {reason}"),
             None => format!("$path {reason}"),
         },
+        span: None,
     }
 }
 
@@ -304,14 +306,14 @@ pub fn parse_match_conditions(value: &YamlValue) -> Result<MatchConditions, Sche
 
 /// A [`SchemaError::TriggerMatch`] whose message starts with the field `at`.
 fn located(at: &str, message: String) -> SchemaError {
-    SchemaError::TriggerMatch { message: format!("`{at}`: {message}") }
+    SchemaError::TriggerMatch { message: format!("`{at}`: {message}"), span: None }
 }
 
 /// Re-locates an unlocated [`SchemaError::TriggerMatch`] at `at`; any other
 /// error, or one already located, is returned unchanged.
 fn relocate(at: &str, error: SchemaError) -> SchemaError {
     match error {
-        SchemaError::TriggerMatch { message } if !message.starts_with('`') => located(at, message),
+        SchemaError::TriggerMatch { message, .. } if !message.starts_with('`') => located(at, message),
         other => other,
     }
 }
@@ -497,6 +499,7 @@ fn parse_property_condition_atom(name: &str, value: &YamlValue) -> Result<Proper
                 "property `{name}` in a match condition may not be a property-level union; use \
                  a `group:` of conditions instead"
             ),
+            span: None,
         }),
     }
 }
@@ -519,6 +522,7 @@ fn parse_property_condition_def(name: &str, value: &YamlValue) -> Result<Propert
                  got {}",
                 yaml_kind(other)
             ),
+            span: None,
         }),
     }
 }
@@ -529,32 +533,34 @@ fn parse_property_condition_def(name: &str, value: &YamlValue) -> Result<Propert
 fn single_shape_from_yaml(
     name: &str,
     value: &YamlValue,
-) -> Result<crate::markdown::schemas::simplified::SchemaShape, SchemaError> {
-    use crate::markdown::schemas::simplified::{SimplifiedSchema, parse_yaml_schema};
+) -> Result<simplified_schema::simplified::SchemaShape, SchemaError> {
+    use simplified_schema::simplified::{SchemaRoot, parse_yaml_schema};
     match parse_yaml_schema(value)? {
-        SimplifiedSchema::Single(shape) => Ok(shape),
-        SimplifiedSchema::Union(_) => Err(SchemaError::TriggerMatch {
+        SchemaRoot::Single(shape) => Ok(shape),
+        SchemaRoot::Union(_) => Err(SchemaError::TriggerMatch {
             message: format!(
                 "property `{name}` inline object must be a single mapping shape",
             ),
+            span: None,
         }),
     }
 }
 
 fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>, SchemaError> {
-    use crate::markdown::schemas::simplified::{SimplifiedSchema, parse_yaml_schema};
+    use simplified_schema::simplified::{SchemaRoot, parse_yaml_schema};
     let items = value.as_sequence().expect("sequence checked by caller");
     let mut atoms = Vec::with_capacity(items.len());
     for item in items {
         match item {
             YamlValue::String(s) => atoms.push(parse_type_expr(name, s)?),
             YamlValue::Mapping(_) => match parse_yaml_schema(item)? {
-                SimplifiedSchema::Single(shape) => {
+                SchemaRoot::Single(shape) => {
                     atoms.push(PropertyAtom::bare_inline_object(shape));
                 }
-                SimplifiedSchema::Union(_) => {
+                SchemaRoot::Union(_) => {
                     return Err(SchemaError::TriggerMatch {
                         message: format!("property `{name}` union arm must be a single shape",),
+                        span: None,
                     });
                 }
             },
@@ -564,6 +570,7 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
                         "property `{name}` union arm must be a string or mapping, got {}",
                         yaml_kind(other)
                     ),
+                    span: None,
                 });
             }
         }
@@ -571,6 +578,7 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
     if atoms.is_empty() {
         return Err(SchemaError::TriggerMatch {
             message: format!("property `{name}` union must have at least one arm"),
+            span: None,
         });
     }
     Ok(atoms)
@@ -582,7 +590,8 @@ fn parse_union_atoms(name: &str, value: &YamlValue) -> Result<Vec<PropertyAtom>,
 /// examples, provide defaults, mark generated values, or otherwise consult
 /// state outside the candidate value. Allowed: `required`, `enum` members,
 /// `literal` value equality, `pattern`, length/range, item-count, key-count,
-/// and structural purity constraints (`integer`, `not-empty`, `unique`).
+/// structural purity constraints (`integer`, `not-empty`, `unique`),
+/// `non-null`, and the `schema` / `type-definition` declaration options.
 pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
     matches!(
         constraint,
@@ -607,6 +616,14 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
             | Constraint::MaxKeys(_)
             | Constraint::NotEmpty
             | Constraint::Unique
+            // `non-null` only judges whether a present value is null.
+            | Constraint::NonNull
+            // The declaration options judge the carried declaration
+            // parse-only, as the lowered meta-type keywords do.
+            | Constraint::Mapping
+            | Constraint::Property { .. }
+            | Constraint::Forms(_)
+            | Constraint::DeclaredRequired
     )
 }
 

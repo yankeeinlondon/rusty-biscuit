@@ -509,6 +509,7 @@ fn prediction_preconditions_are_errors() {
         permissions.set_mode(permissions.mode() | 0o200);
     }
     #[cfg(windows)]
+    #[allow(clippy::permissions_set_readonly_false, reason = "Windows only: clears the read-only bit Git sets on objects")]
     permissions.set_readonly(false);
     fs::set_permissions(&object_path, permissions).expect("make incoming object writable");
     fs::write(object_path, b"corrupt").expect("corrupt incoming commit");

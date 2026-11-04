@@ -11,26 +11,31 @@ model_config_paths:
   - scope: user
     path: ~/.claude/settings.json
     format: json
-    notes: 'Global user settings. Top-level `model` key pins the default model; `env` block persists model-related environment variables. Observed on this host with `"model": "claude-fable-5[1m]"`.'
+    notes:
+      - 'Global user settings. Top-level `model` key pins the default model; `env` block persists model-related environment variables. Observed on this host with `"model": "claude-fable-5[1m]"`.'
   - scope: repo
     path: .claude/settings.json
     format: json
-    notes: 'Project-shared settings committed to source control. Lower precedence than local settings.'
+    notes:
+      - 'Project-shared settings committed to source control. Lower precedence than local settings.'
   - scope: repo
     path: .claude/settings.local.json
     format: json
-    notes: 'Personal project-only overrides. Gitignored by default when created by Claude Code.'
+    notes:
+      - 'Personal project-only overrides. Gitignored by default when created by Claude Code.'
   - scope: env
     path: managed-settings.json / MDM plist / Windows registry / server-managed
     format: json
-    notes: 'Organization-managed policy that cannot be overridden by user, project, or local settings. Delivery paths vary by OS and admin mechanism.'
+    notes:
+      - 'Organization-managed policy that cannot be overridden by user, project, or local settings. Delivery paths vary by OS and admin mechanism.'
 
 api_standards:
   - standard: anthropic_compatible
     base_url_site: ANTHROPIC_BASE_URL
     auth_site: ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or apiKeyHelper
     adapter:
-    notes: 'Primary path for user-added arbitrary models. Claude Code emits the Anthropic Messages API to this base URL. Cloud-provider deployments (Bedrock, Vertex/Agent Platform, Foundry, Claude Platform on AWS) use their own base-url variables and CLAUDE_CODE_USE_* toggles but are intended for Claude-family models, not generic user models.'
+    notes:
+      - 'Primary path for user-added arbitrary models. Claude Code emits the Anthropic Messages API to this base URL. Cloud-provider deployments (Bedrock, Vertex/Agent Platform, Foundry, Claude Platform on AWS) use their own base-url variables and CLAUDE_CODE_USE_* toggles but are intended for Claude-family models, not generic user models.'
 
 metadata_overrides:
   - model_id
@@ -46,32 +51,38 @@ local_runners:
     integration: first_class
     standard: anthropic_compatible
     example: 'ollama launch claude  # or manually: ANTHROPIC_BASE_URL=http://localhost:11434 ANTHROPIC_AUTH_TOKEN=ollama claude --model qwen3:1.7b'
-    notes: 'Ollama serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `ollama launch claude` hook. Size/quantization tags such as `:1.7b` are part of the model identifier.'
+    notes:
+      - 'Ollama serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `ollama launch claude` hook. Size/quantization tags such as `:1.7b` are part of the model identifier.'
   - runner: omlx
     integration: first_class
     standard: anthropic_compatible
     example: 'omlx launch claude  # or manually: ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=<key> claude --model Qwen3.6-35B-A3B-oQ6'
-    notes: 'oMLX serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `omlx launch claude` hook. Default port is 8000.'
+    notes:
+      - 'oMLX serves an Anthropic-compatible `/v1/messages` endpoint and ships a native `omlx launch claude` hook. Default port is 8000.'
   - runner: lmstudio
     integration: base_url_override
     standard: anthropic_compatible
     example: 'ANTHROPIC_BASE_URL=http://localhost:1234 ANTHROPIC_AUTH_TOKEN=lmstudio claude --model openai/gpt-oss-20b'
-    notes: 'LM Studio serves an Anthropic-compatible `/v1/messages` endpoint. Set auth token to `lmstudio` when authentication is disabled, or to the configured API token when required.'
+    notes:
+      - 'LM Studio serves an Anthropic-compatible `/v1/messages` endpoint. Set auth token to `lmstudio` when authentication is disabled, or to the configured API token when required.'
   - runner: llamacpp
     integration: base_url_override
     standard: anthropic_compatible
     example: 'ANTHROPIC_BASE_URL=http://localhost:8080 ANTHROPIC_AUTH_TOKEN=<LLAMA_API_KEY-if-set> claude --model gemma-3-1b-it.Q4_K_M.gguf'
-    notes: 'llama-server serves an Anthropic-compatible `/v1/messages` endpoint (added in build b7187). The model ID is the `--alias` value or the GGUF filename.'
+    notes:
+      - 'llama-server serves an Anthropic-compatible `/v1/messages` endpoint (added in build b7187). The model ID is the `--alias` value or the GGUF filename.'
   - runner: vllm
     integration: base_url_override
     standard: anthropic_compatible
     example: 'ANTHROPIC_BASE_URL=http://localhost:8000 ANTHROPIC_AUTH_TOKEN=EMPTY claude --model Qwen/Qwen2.5-1.5B-Instruct'
-    notes: 'vLLM serves an Anthropic-compatible `/v1/messages` endpoint (v0.11.1+). Each vLLM process hosts one model; use `--served-model-name` aliases if needed.'
+    notes:
+      - 'vLLM serves an Anthropic-compatible `/v1/messages` endpoint (v0.11.1+). Each vLLM process hosts one model; use `--served-model-name` aliases if needed.'
   - runner: other
     integration: base_url_override
     standard: anthropic_compatible
     example: 'ANTHROPIC_BASE_URL=http://localhost:<port> ANTHROPIC_AUTH_TOKEN=<token> claude --model <runner-model-id>'
-    notes: 'Any local runner that exposes an Anthropic Messages API-compatible `/v1/messages` endpoint can be pointed at directly. Runners that speak only the OpenAI Chat Completions API require a translating gateway.'
+    notes:
+      - 'Any local runner that exposes an Anthropic Messages API-compatible `/v1/messages` endpoint can be pointed at directly. Runners that speak only the OpenAI Chat Completions API require a translating gateway.'
 
 cloud_bridge:
   supported: true

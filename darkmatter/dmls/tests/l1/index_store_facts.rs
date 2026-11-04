@@ -46,6 +46,7 @@ fn stored_part(mut index: DocumentIndex) -> DocumentIndex {
     index.file_uses.clear();
     index.variable_uses.clear();
     index.frontmatter_keys.clear();
+    index.summary = None;
     index
 }
 

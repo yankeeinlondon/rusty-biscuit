@@ -12,7 +12,7 @@ use darkmatter::lifecycle::{
 };
 use darkmatter::lifecycle::actions::LifecyclePath;
 use darkmatter::markdown::compose::expression::{
-    AuthoredMode, Expr, ParseMode, prepare_value, validate_prepared,
+    AuthoredMode, Expr, prepare_value, validate_prepared,
 };
 
 use super::bindings;
@@ -55,7 +55,7 @@ pub fn validate_no_err_in_no_error_events(
         for (_, path, surface) in surfaces.iter().filter(|(owner, ..)| *owner == signal) {
             if let Some(AuthoredValue::Text(text)) = sources.get(path) {
                 let mode = if surface.predicate {
-                    AuthoredMode::Expression(ParseMode::Condition)
+                    AuthoredMode::Expression
                 } else {
                     AuthoredMode::InterpolatedValue
                 };

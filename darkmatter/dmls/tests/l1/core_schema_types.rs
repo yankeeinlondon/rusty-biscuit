@@ -540,6 +540,27 @@ fn native_null_declarations_validate_without_false_diagnostics() {
     fixture.shutdown();
 }
 
+/// A Markdown buffer's own `$schema` judges it, not the saved file's: the
+/// effective schema is built from the open buffer, and the saved file is
+/// left as it was.
+#[test]
+fn an_unsaved_document_schema_judges_the_buffer() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace);
+    let saved = "---\n$schema:\n  count: string\ncount: many\n---\n\nBody\n";
+    let text = "---\n$schema:\n  count: number\ncount: many\n---\n\nBody\n";
+    let buffer = Buffer::open(&fixture, &workspace, "page.md", saved, text);
+    let diagnostics = fixture.wait_for_diagnostics(&buffer.uri);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0]["code"], json!("dm.schema.type_mismatch"));
+    assert_eq!(diagnostics[0]["range"], buffer.range_of("many", 0));
+
+    let path = workspace.path().join("page.md");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+    assert!(library_accepts(workspace.path(), &path), "the saved schema accepts the saved page");
+    fixture.shutdown();
+}
+
 /// The library's validation (what `md schema validate` reports) for one
 /// document written to `path`.
 fn library_accepts(dir: &Path, path: &Path) -> bool {

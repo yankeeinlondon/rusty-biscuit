@@ -35,7 +35,8 @@ Only `md compose` has this format. `md render`, `md FILE`, `md clean`, and
 `md schema validate` refuse `report-json` as an unsupported output format
 (exit 2) before they read anything; their own JSON formats (`--output json`
 for the Markdown AST, `md schema validate --format json` for a multi-file
-report) are unchanged.
+report, described in [JSON Output](../topics/schemas/definition.md#json-output)
+with its YAML-document values) are unchanged.
 
 ## The object
 

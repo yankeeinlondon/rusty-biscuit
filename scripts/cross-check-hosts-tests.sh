@@ -155,9 +155,120 @@ check "windows report: kept clones are listed only in the before table" '[[ "$(g
 output="$( (source "${SCRIPT_DIR}/cross-check-hosts.sh"; report_prune test quiet-host refresh 0 $'coding: /c\nvolume-before: 1073741824 2147483648\nclone: 1048576 0 /c/me--live\nvolume-after: 1073741824') 2>&1 )" || true
 check "nothing to remove: one line, no free-space or reclaim noise" 'grep -q "^  nothing to remove; 1.0 GiB free (50% used)$" <<< "${output}" && ! grep -qE "free space|reclaimed" <<< "${output}"'
 
+# --- abandoned standalone clones ---------------------------------------------
+# Real Git clones of a local origin, isolated from the user's Git config (a
+# global `commit.gpgsign` would otherwise demand a key).
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.com
+export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.com
+
+# make_origin <path>: a bare repository with one pushed commit on `main`.
+make_origin() {
+    local seed="${scratch}/seed-${1##*/}"
+    git init -q --bare -b main "$1"
+    git init -q -b main "${seed}"
+    echo tracked > "${seed}/tracked.txt"
+    git -C "${seed}" add tracked.txt
+    git -C "${seed}" commit -q -m seed
+    git -C "${seed}" push -q "$1" main
+}
+
+# age_git <clone> <days>: backdates every file the rule reads as activity.
+age_git() {
+    local file
+    for file in "$1"/.git/HEAD "$1"/.git/FETCH_HEAD "$1"/.git/logs/HEAD "$1"/.git/worktrees/*/HEAD "$1"/.git/worktrees/*/logs/HEAD; do
+        [[ -f "${file}" ]] && age_path "${file}" "$2"
+    done
+    return 0
+}
+
+# make_standalone <name> <days idle> <state> [origin]
+#   clean | dirty | unpushed | stash | worktree-clean | worktree-dirty
+make_standalone() {
+    local dir="${CODING_DIR}/$1" origin="${4:-${scratch}/origin/rusty-biscuit.git}"
+    local tree="${worktrees_root}/$1/feature"
+    git clone -q "${origin}" "${dir}"
+    case "$3" in
+        dirty) echo new > "${dir}/untracked.txt" ;;
+        unpushed)
+            git -C "${dir}" switch -q -c local-only
+            echo change >> "${dir}/tracked.txt"
+            git -C "${dir}" commit -q -am "never pushed"
+            ;;
+        stash)
+            echo change >> "${dir}/tracked.txt"
+            git -C "${dir}" stash -q
+            ;;
+        worktree-clean) git -C "${dir}" worktree add -q -b feature "${tree}" ;;
+        worktree-dirty)
+            git -C "${dir}" worktree add -q -b feature "${tree}"
+            echo new > "${tree}/untracked.txt"
+            ;;
+    esac
+    age_git "${dir}" "$2"
+}
+
+[[ -d "${scratch}/origin/rusty-biscuit.git" ]] || make_origin "${scratch}/origin/rusty-biscuit.git"
+[[ -d "${scratch}/origin/other.git" ]] || make_origin "${scratch}/origin/other.git"
+
+standalone_fixture() {
+    export CODING_DIR="${scratch}/coding-$1"
+    worktrees_root="${scratch}/worktrees-$1"
+    rm -rf "${CODING_DIR}" "${worktrees_root}"
+    mkdir -p "${CODING_DIR}" "${worktrees_root}"
+    make_standalone idle 10 clean
+    make_standalone idle-worktree 10 worktree-clean
+    make_standalone recent 2 clean
+    make_standalone dirty 10 dirty
+    make_standalone unpushed 10 unpushed
+    make_standalone stashed 10 stash
+    make_standalone dirty-worktree 10 worktree-dirty
+    make_standalone other-project 30 clean "${scratch}/origin/other.git"
+    make_standalone home 30 clean
+}
+
+# run_local_prune <dry_run>: the `local` target, protecting `home`.
+run_local_prune() {
+    (
+        # shellcheck source=cross-check-hosts.sh
+        source "${SCRIPT_DIR}/cross-check-hosts.sh"
+        local_os() { echo linux; }
+        origin_host="testhost"
+        live_worktrees=(main)
+        protected_checkout="${CODING_DIR}/home"
+        prune_host test local refresh "" "$1"
+    ) 2>&1
+}
+
+standalone_fixture abandoned
+output="$(run_local_prune 0)" || true
+check "abandoned: idle clean clone removed" '[[ ! -e "${CODING_DIR}/idle" ]] && grep -qE "^ +[0-9.]+ (MiB|GiB)  idle +standalone clone unused 10 days, nothing unpushed$" <<< "$(after_section)"'
+check "abandoned: its linked worktree goes too, and the emptied parent" '[[ ! -e "${CODING_DIR}/idle-worktree" && ! -e "${worktrees_root}/idle-worktree" ]]'
+check "abandoned: a recently used clone is kept and not reported" '[[ -d "${CODING_DIR}/recent" ]] && ! grep -q "kept recent" <<< "${output}"'
+check "abandoned: uncommitted files keep it" '[[ -d "${CODING_DIR}/dirty" ]] && grep -q "^  kept dirty: unused, but .*dirty has uncommitted changes$" <<< "${output}"'
+check "abandoned: an unpushed branch keeps it" '[[ -d "${CODING_DIR}/unpushed" ]] && grep -q "^  kept unpushed: unused, but a branch has commits on no remote$" <<< "${output}"'
+check "abandoned: a stash keeps it" '[[ -d "${CODING_DIR}/stashed" ]] && grep -q "^  kept stashed: unused, but it has stashed changes$" <<< "${output}"'
+check "abandoned: a dirty linked worktree keeps the clone and the worktree" '[[ -d "${CODING_DIR}/dirty-worktree" && -f "${worktrees_root}/dirty-worktree/feature/untracked.txt" ]] && grep -q "^  kept dirty-worktree: unused, but .*feature has uncommitted changes$" <<< "${output}"'
+check "abandoned: another project's clone is never considered" '[[ -d "${CODING_DIR}/other-project" ]] && ! grep -q "other-project" <<< "${output}"'
+check "abandoned: the checkout the run started from is never considered" '[[ -d "${CODING_DIR}/home" ]] && ! grep -q " home" <<< "${output}"'
+check "abandoned: removals are counted in the after state" 'grep -qE "^ +[0-9.]+ (MiB|GiB)  2 clones$" <<< "$(after_section)"'
+check "abandoned: trash deleted" '! ls -d "${CODING_DIR}"/.cross-check-trash--* > /dev/null 2>&1'
+
+standalone_fixture abandoned-dry
+output="$(run_local_prune 1)" || true
+check "abandoned dry run: nothing removed, both reported" '[[ -d "${CODING_DIR}/idle" && -d "${worktrees_root}/idle-worktree/feature" ]] && grep -q "WOULD REMOVE" <<< "${output}" && grep -qE "^ +[0-9.]+ (MiB|GiB)  2 clones$" <<< "$(after_section)"'
+
+standalone_fixture abandoned-threshold
+output="$(CROSS_CHECK_ABANDONED_DAYS=14 run_local_prune 1)" || true
+check "abandoned threshold: a longer idle period keeps 10-day clones" '! grep -q "WOULD REMOVE" <<< "${output}" && grep -q "^  nothing to remove;" <<< "${output}"'
+output="$(CROSS_CHECK_ABANDONED_DAYS=0 run_local_prune 1 || true)"
+check "abandoned threshold: zero is rejected" 'grep -q "CROSS_CHECK_ABANDONED_DAYS must be a positive whole number" <<< "${output}"'
+
 # --- host selection ----------------------------------------------------------
 output="$( (source "${SCRIPT_DIR}/cross-check-hosts.sh"; HOST=("" "" "" ""); select_hosts test all) 2>&1 )" && status=0 || status=$?
 check "hosts: none declared is an error, not a silent no-op" '[[ ${status} -eq 2 ]] && grep -q "no build host for an OS other than this one" <<< "${output}"'
+output="$( (source "${SCRIPT_DIR}/cross-check-hosts.sh"; HOST=("" "" "" ""); select_hosts test all optional; joined="${want[*]}"; echo "selected:${joined// /}.") 2>&1 )" && status=0 || status=$?
+check "hosts: none declared is fine for a caller that also works locally" '[[ ${status} -eq 0 ]] && grep -q "^selected:\.$" <<< "${output}"'
 
 echo
 echo "cross-check-hosts tests: ${PASS} passed, ${FAIL} failed"

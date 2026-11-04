@@ -16,7 +16,7 @@
 
 use serde_json::{Map, Value};
 
-use super::ast::Expr;
+use simplified_schema::expression::ast::Expr;
 
 /// The reserved expression root that names the document's own frontmatter.
 pub const FRONTMATTER_ROOT: &str = "fm";

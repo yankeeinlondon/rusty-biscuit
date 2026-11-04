@@ -195,25 +195,6 @@ fn is_declarable(name: &str) -> bool {
         .is_ok()
 }
 
-/// The grammar an expression is parsed with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dialect {
-    /// A `{{ … }}` span: `||` is fallback.
-    Value,
-    /// A `when` guard's condition text: `||` is logical OR.
-    Condition,
-}
-
-impl Dialect {
-    /// The parser for this dialect.
-    pub fn parser(self) -> fn(&str) -> Result<SpannedExpr, ParseError> {
-        match self {
-            Self::Value => expressions::parse,
-            Self::Condition => expressions::parse_condition,
-        }
-    }
-}
-
 /// One expression inside a lifecycle stack value.
 #[derive(Debug, Clone)]
 pub struct StackExpression<'a> {
@@ -225,7 +206,6 @@ pub struct StackExpression<'a> {
     pub index: usize,
     /// The expression text the parser sees.
     pub text: String,
-    pub dialect: Dialect,
     /// Where `text` starts in the scalar's analyzed text.
     start: usize,
     /// The authored range a cursor must be in: the `{{ … }}` span, or the
@@ -271,7 +251,7 @@ impl StackExpression<'_> {
     }
 
     pub fn parse(&self) -> Result<SpannedExpr, ParseError> {
-        (self.dialect.parser())(&self.text)
+        expressions::parse(&self.text)
     }
 }
 
@@ -326,7 +306,6 @@ pub fn scalar_stack_expressions<'a>(
             reach: interpolation.outer_span(),
             projection: interpolation.projection().clone(),
             text: interpolation.text,
-            dialect: Dialect::Value,
         })
         .collect();
     if !spans.is_empty() || !crate::diagnostics::nested_span::lifecycle::is_stack_predicate(&path[1..]) {
@@ -347,7 +326,6 @@ pub fn scalar_stack_expressions<'a>(
         reach: entry.value_span.clone(),
         projection,
         text: analyzed,
-        dialect: Dialect::Condition,
     }]
 }
 
@@ -400,14 +378,14 @@ mod tests {
         let text = "---\ncomposed:\n  - when: err.message != ''\n    then:\n      - info: \"{{ err.message }}\"\nnotes:\n  - info: \"{{ err }}\"\n---\n";
         let ast = ast(text);
         let found = stack_expressions(&LifecycleHost::md(), text, &ast, |_| false);
-        let texts: Vec<(&str, Dialect)> = found.iter().map(|e| (e.text.as_str(), e.dialect)).collect();
-        assert_eq!(texts, [("err.message != ''", Dialect::Condition), ("err.message", Dialect::Value)]);
+        let texts: Vec<&str> = found.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["err.message != ''", "err.message"]);
         assert!(found.iter().all(|e| e.event.name() == "composed"));
     }
 
-    /// `(index, text, dialect, reach)` of each expression, comparable.
-    fn summary(found: &[StackExpression<'_>]) -> Vec<(usize, String, Dialect, SourceSpan)> {
-        found.iter().map(|e| (e.index, e.text.clone(), e.dialect, e.reach().clone())).collect()
+    /// `(index, text, reach)` of each expression, comparable.
+    fn summary(found: &[StackExpression<'_>]) -> Vec<(usize, String, SourceSpan)> {
+        found.iter().map(|e| (e.index, e.text.clone(), e.reach().clone())).collect()
     }
 
     #[test]
@@ -442,18 +420,10 @@ mod tests {
         per_scalar.sort_by_key(|expression| expression.reach.start);
         assert_eq!(summary(&walked), summary(&per_scalar));
 
-        let texts: Vec<(&str, Dialect)> = walked.iter().map(|e| (e.text.as_str(), e.dialect)).collect();
+        let texts: Vec<&str> = walked.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(
             texts,
-            [
-                ("plain != ''", Dialect::Condition),
-                ("first", Dialect::Value),
-                ("second", Dialect::Value),
-                ("quoted", Dialect::Value),
-                ("block", Dialect::Value),
-                ("tagged", Dialect::Value),
-                ("wrapped", Dialect::Value),
-            ],
+            ["plain != ''", "first", "second", "quoted", "block", "tagged", "wrapped"],
             "a span-holding guard is analyzed through its span; the typed guard is skipped"
         );
         // Two spans of one scalar come from that scalar alone, in order.
@@ -471,7 +441,8 @@ mod tests {
         // the caller's decision.
         let guard = scalar_stack_expressions(&host, text, &ast, typed);
         assert_eq!(summary(&guard).len(), 1);
-        assert_eq!(guard[0].dialect, Dialect::Condition);
+        assert_eq!(guard[0].text, "typed == 1");
+        assert_eq!(guard[0].reach(), &ast.entries()[typed].value_span);
     }
 
     #[test]

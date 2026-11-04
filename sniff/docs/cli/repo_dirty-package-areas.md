@@ -49,7 +49,7 @@ sniff repo dirty-package-areas !biscuit   # All dirty areas except biscuit
 `-p/--package` reduces the result to the area containing the resolved package; `--package-area` applies a case-insensitive prefix filter on the area name. Both can be combined with the positional filter (AND).
 
 ```bash
-sniff repo dirty-package-areas -p sniff-cli            # The area sniff-cli lives in (when dirty)
+sniff repo dirty-package-areas -p sniff-detection-cli            # The area sniff-detection-cli lives in (when dirty)
 sniff repo dirty-package-areas --package-area homelab  # Dirty homelab/* areas
 ```
 
@@ -80,6 +80,6 @@ is `"package_areas"`, and `names` is an array of area name strings
 
 ```bash
 # These may return different granularity:
-sniff repo dirty-packages       # → sniff-cli, sniff
+sniff repo dirty-packages       # → sniff-detection-cli, sniff
 sniff repo dirty-package-areas  # → sniff
 ```

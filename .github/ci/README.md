@@ -89,7 +89,7 @@ nowhere else.
 
 ## `ci.yml`'s jobs
 
-`ci.yml` defines exactly eight top-level jobs, and a contract test
+`ci.yml` defines exactly 10 top-level jobs, and a contract test
 (`ci_defines_exactly_the_surviving_top_level_jobs`) pins the set:
 
 | job | blocks the merge? | what it is for |
@@ -101,6 +101,8 @@ nowhere else.
 | `area-ci` | yes | one caller identity per selected package area; every package gate lives under it |
 | `area-drift` | yes | checks that the planner's areas match `sniff`; skipped when nothing can move area derivation |
 | `ci-gate` | yes — **the required check** | a policy-free fold of the six above |
+| `certify-nightly` | no | publishes successful nightly coverage certifications; failure still fails the scheduled run |
+| `publish-observations` | no | publishes finished nightly cells' observations; failure still fails the scheduled run |
 | `ci-reporting` | no (`continue-on-error: true`) | renders one reader-facing report of the run |
 
 There is no job that owns a test suite on CI's behalf. Every suite belongs to a
@@ -571,7 +573,6 @@ gates = false
 exclusion-class = "promotion-pending"
 owner = "@yankeeinlondon"
 reason = "…"
-expiry = "2027-01-31"
 
 [package.metadata.ci.native]
 ubuntu-latest = ["libasound2-dev"]
@@ -600,7 +601,7 @@ would silently exempt a package and miss its first test.
 | `exclusion-class` | string | when `gates = false` | `capability`, `promotion-pending`, or `time-bounded` |
 | `owner` | string | when `gates = false` | GitHub handle accountable for closing the exclusion |
 | `reason` | string | when `gates = false` | why it does not gate, and what would unblock it |
-| `expiry` | ISO date | when `gates = false` unless `capability` | a **past** date fails the scope calculation |
+| `expiry` | ISO date | only with `time-bounded` (forbidden otherwise) | a **past** date fails the scope calculation |
 
 `[package.metadata.ci.tests]`:
 
@@ -793,17 +794,20 @@ declared suite is answered for separately, an unreported suite fails its cell,
 and an outcome for a suite the cell never declared fails it as a mis-wired
 producer.
 
-### Exclusions must be owned and time-bounded
+### Exclusions must be owned
 
-`gates = false` requires `reason`, `owner`, and `exclusion-class`, plus
-`expiry` unless the class is `capability`. A **past** `expiry` fails the scope
-calculation loudly.
+`gates = false` requires `reason`, `owner`, and `exclusion-class`. Only a
+`time-bounded` exclusion carries an `expiry`, and a **past** `expiry` fails the
+scope calculation for every package, loudly.
 
 - `capability` — excluded because the environment genuinely cannot host it.
   Permanent, so it must **not** carry an `expiry`.
 - `promotion-pending` — a real package with real tests, blocked on identified
-  work.
-- `time-bounded` — nothing to gate yet (zero or near-zero tests). No current
+  work (named in `reason`). It stays excluded until someone works on the
+  package, so it must **not** carry an `expiry`: a date on a package nobody is
+  touching does nothing but fail every package's plan when it lapses.
+- `time-bounded` — nothing to gate yet (zero or near-zero tests), and the
+  one class that requires an `expiry`. No current
   package uses this class: a package with no tests gates and records
   `NOTHING TO RUN` instead (AC15), which makes its first future test run
   automatic.

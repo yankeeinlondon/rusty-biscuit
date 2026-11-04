@@ -238,7 +238,7 @@ fn match_alternative_files(
 /// below the root, then component-wise, as `GlobReference::list_files`
 /// orders its matches.
 ///
-/// [`PreparedFileMatch::roots`]: darkmatter::markdown::schemas::file_match::PreparedFileMatch::roots
+/// [`PreparedFileMatch::roots`]: simplified_schema::file_match::PreparedFileMatch::roots
 fn match_glob_files(groups: &MatchGroups, resolution: &FileResolutionContext) -> Vec<PathBuf> {
     let Some(prepared) = groups.prepare(resolution) else {
         return Vec::new();
@@ -434,8 +434,8 @@ fn format_array_candidate(property: &str, prefix_segments: &[String], selected: 
 /// Compiled `file(match(...))` groups. Darkmatter owns the comparison so the
 /// candidates offered here are exactly the files a root-union arm that
 /// contests the groups accepts.
-use darkmatter::markdown::schemas::file_match::FileMatchGroups as MatchGroups;
+use simplified_schema::file_match::FileMatchGroups as MatchGroups;
 
 /// One compiled `match(...)` group, for tests that judge a single path.
 #[cfg(test)]
-pub(super) use darkmatter::markdown::schemas::file_match::FileMatchGlobs as MatchGlobs;
+pub(super) use simplified_schema::file_match::FileMatchGlobs as MatchGlobs;

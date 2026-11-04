@@ -16,7 +16,7 @@ use super::expression::{
     CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, fm_namespace,
     evaluate,
     evaluate_observed, is_truthy,
-    parse_condition,
+    parse,
 };
 use super::interpolation::Evaluator;
 use crate::markdown::compose::ComposeWarning;
@@ -122,8 +122,8 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
 /// Evaluates a `when` condition expression against an effective state.
 ///
 /// This is the primary entry point for condition evaluation in the compose
-/// pipeline. It parses the expression in condition mode (where `||` is logical
-/// OR and `&&` is logical AND) and evaluates it against the provided state.
+/// pipeline. It parses the expression with the one expression grammar and
+/// judges the result by truthiness.
 ///
 /// ## Returns
 ///
@@ -157,7 +157,7 @@ pub(crate) fn evaluate_condition_observed<L: EvaluationLookup, O: MissingRootObs
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
 
-    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
+    let parsed = parse(expr).map_err(|e| ConditionError::Parse {
         ctx: Box::new(ctx.clone()),
         expr: expr.to_string(),
         line,
@@ -180,7 +180,7 @@ pub(crate) fn evaluate_condition_observed<L: EvaluationLookup, O: MissingRootObs
 
 /// Collects context-typo warnings for a `when=` condition expression.
 ///
-/// Parses `expr` in condition mode and walks the resulting AST for `ctx.*`
+/// Parses `expr` and walks the resulting AST for `ctx.*`
 /// references that do not resolve to a known runtime context variable, reusing
 /// the same AST-based check as `{{ ... }}` interpolation. Because the walk is
 /// parser-aware, a string literal such as `state == "ctx.toady"` never triggers
@@ -196,7 +196,7 @@ pub fn collect_condition_context_warnings<L: EvaluationLookup>(
     state: &L,
     warning_stage: &'static str,
 ) -> Vec<ComposeWarning> {
-    let Ok(parsed) = parse_condition(expr) else {
+    let Ok(parsed) = parse(expr) else {
         return Vec::new();
     };
     Evaluator::new(state).collect_context_warnings(&parsed, warning_stage)
@@ -291,7 +291,7 @@ pub fn evaluate_condition_against(
         expr.to_string(),
     );
 
-    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
+    let parsed = parse(expr).map_err(|e| ConditionError::Parse {
         ctx: Box::new(ctx.clone()),
         expr: expr.to_string(),
         line: 1,
@@ -442,7 +442,7 @@ mod tests {
         lookup.ctx.mark_captured_without_projection(super::super::context::capture::ContextGroup::Os);
 
         for expression in ["ctx.os == 'macos'", "ctx.os"] {
-            let parsed = parse_condition(expression).unwrap();
+            let parsed = parse(expression).unwrap();
             assert!(
                 matches!(
                     evaluate(&parsed, &lookup),
@@ -451,7 +451,7 @@ mod tests {
                 "{expression} must surface the invariant",
             );
         }
-        assert!(evaluate(&parse_condition("ctx.oss").unwrap(), &lookup).is_ok());
+        assert!(evaluate(&parse("ctx.oss").unwrap(), &lookup).is_ok());
     }
 
     /// The public standalone entry point classifies like its lookup: an
@@ -939,7 +939,7 @@ mod tests {
         let data = json!({ "false_flag": false });
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
-        let parsed = expression::parse_condition("false_flag && ctx.repo == 'x'").unwrap();
+        let parsed = expression::parse("false_flag && ctx.repo == 'x'").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
         assert!(
@@ -956,7 +956,7 @@ mod tests {
         let data = json!({ "true_flag": true });
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
-        let parsed = expression::parse_condition("true_flag || ctx.gpu").unwrap();
+        let parsed = expression::parse("true_flag || ctx.gpu").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
         assert!(
@@ -973,7 +973,7 @@ mod tests {
         let data = json!({ "draft": true });
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
-        let parsed = expression::parse_condition("draft == true").unwrap();
+        let parsed = expression::parse("draft == true").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
         assert!(
@@ -990,7 +990,7 @@ mod tests {
         let data = json!({});
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
-        let parsed = expression::parse_condition("missing_repo_name").unwrap();
+        let parsed = expression::parse("missing_repo_name").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
         assert!(
@@ -1008,7 +1008,7 @@ mod tests {
         let data = json!({});
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
-        let parsed = expression::parse_condition("ctx.today").unwrap();
+        let parsed = expression::parse("ctx.today").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
         assert!(
@@ -1025,7 +1025,7 @@ mod tests {
         let data = json!({});
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
-        let parsed = expression::parse_condition("ctx.today && ctx.year").unwrap();
+        let parsed = expression::parse("ctx.today && ctx.year").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
         assert_eq!(
@@ -1048,7 +1048,7 @@ mod tests {
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
         // Condition is false, so `ctx.repo` (then-branch) should NOT be evaluated or captured
-        let parsed = expression::parse_condition("false_flag ? ctx.repo : 'default'").unwrap();
+        let parsed = expression::parse("false_flag ? ctx.repo : 'default'").unwrap();
         let result = expression::evaluate(&parsed, &lookup).unwrap();
         let captured = lookup.captured_groups();
         assert_eq!(
@@ -1071,7 +1071,7 @@ mod tests {
         let context = dot_context();
         let lookup = ShortcutLookup::new(&data, &context);
         // Condition is true, so `ctx.repo` (else-branch) should NOT be evaluated or captured
-        let parsed = expression::parse_condition("true_flag ? 'default' : ctx.repo").unwrap();
+        let parsed = expression::parse("true_flag ? 'default' : ctx.repo").unwrap();
         let result = expression::evaluate(&parsed, &lookup).unwrap();
         let captured = lookup.captured_groups();
         assert_eq!(

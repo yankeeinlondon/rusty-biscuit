@@ -20,6 +20,15 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   the exit status is success. Use `sniff::process::configure_detached_child`,
   which clears `HANDLE_FLAG_INHERIT` on the current stdio before setting the
   detached creation flags. Unix fds are close-on-exec and never show this.
+- **Read OS facts in-process, not through a command, on a hot path.** A spawn
+  costs 30–50 ms here. Sniff's timezone name came from `tzutil /g`, and
+  Darkmatter captures the datetime context for every loop and lifecycle
+  expression, so a 100-container sequence test took 12 s instead of 0.6 s.
+  `GetDynamicTimeZoneInformation().TimeZoneKeyName` is the same ID, except
+  that `tzutil` appends `_dstoff` when automatic DST is off
+  (`sniff/lib/src/os/time.rs`). Removing such a delay can expose a race it
+  was hiding: parallel group legs then collided on `tempfile::persist` (see
+  the open-readers item below).
 - **`std::env::temp_dir()` ignores `TMPDIR`.** It reads `TMP`, then `TEMP`,
   then `USERPROFILE`. A fixture that redirects only `TMPDIR` writes into the
   host's real temp directory, and a later run trips over the leftovers. Set
@@ -63,6 +72,12 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   present its `git` children can segfault (exit 139). Use a process-scoped
   `PATH` that drops every `cygwin` entry and prepends
   `C:\Program Files\Git\usr\bin` and the real Python directory.
+  - From Git Bash, the Cygwin `python3` shim (`/c/cygwin64/bin/python3`)
+    fails outright: it `exec`s `/cygdrive/c/.../python.exe`, a path only
+    Cygwin resolves. The pre-push hook then blocks every push with "the
+    planner could not resolve the committed scope" even though Python is
+    installed. Put the real Python directory (it has `python3.exe`) first on
+    `PATH`; `py -3` also works.
 - **Bash scripts lose data on Windows three ways:**
   - Native `jq.exe -r` ends lines with CRLF, so a value read back keeps a
     `\r` and matches nothing (for example a PR base of `main\r`). Use
@@ -87,6 +102,15 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   file because it is being used by another process"; POSIX `>>` never does.
   Give each concurrent writer its own file and merge them in the assertion
   (claudine's `document_environment_routes::group_leg_shells_row`).
+- **`cmd.exe` keeps `''` as two characters.** Exact-approved lifecycle and
+  sequence shell bytes run under the host shell (`cmd /D /C` here), by the
+  documented rule that bytes keep the system shell's grammar (fixtures rely
+  on `echo` and on `&` chains). The exact key is spelled with POSIX quoting,
+  so `''` reads as `""` in the key but reaches the program as `''`. A
+  portable test or prompt writes the empty word as `""`. Moving Windows to
+  starting the split arguments directly was tried and reverted on
+  2026-11-01: it broke about 20 fixtures and a shipped example that use
+  `cmd.exe` built-ins.
 - **A Claudine lifecycle `stdout` prints `\\` as `\`.** A `{{ seq.outputs }}`
   holding a Windows path therefore reaches stdout as `["C:\Users\…"]`, which
   is not JSON. Redact path strings in the text before parsing
@@ -241,6 +265,97 @@ consoles, WezTerm, and PowerShell are in [windows-console.md](windows-console.md
   (`ShellExpansionError: command not found`) even though the same command
   passed in-process with `pre_approved_commands`. Use the recorder for a CLI
   sentinel command too. Do not add an interpreter fallback.
+
+## POSIX tools shadowed on PATH inside recipes
+
+**Symptom.** `just init` on native Windows prints `Missing build dependencies
+(cc linker not found)` and `Could not detect package manager`, or a recipe
+reports `unrecognized host OS 'Windows_NT'`. Seen on `build-win-native`
+2026-11-01 after `uutils.coreutils` 0.12.0 was installed through WinGet.
+
+**Cause.** WinGet puts uutils' `uname.exe`, `env.exe`, `sort.exe`, `cat.exe`,
+... in `%LOCALAPPDATA%\Microsoft\WinGet\Links`, which there sorted ahead of
+`C:\cygwin64\bin`. A non-login Cygwin or Git Bash keeps the Windows PATH
+order, so `uname -s` printed `Windows_NT`, every `MINGW*|MSYS*|CYGWIN*` case
+missed, and recipes fell into their Linux branch. uutils `cat` also cannot read
+`/proc`. The same trap applies to scoop shims, a `cargo install`ed coreutils,
+and `System32`'s `find.exe`/`sort.exe`.
+
+**Rule now in place.** `just/shell.just` (imported by `just/devops.just`, so
+by every area justfile; `just check-canonical` fails an area that runs bash
+without it) exports, on Windows only, a PATH with the recipe bash's own bin
+directory first. The directory comes from `/proc/$$/winexename` in a
+Windows-only load-time backtick. Scripts that add a tool-manager directory
+(WinGet `Links`, Cargo's `bin`) **append** it; `ensure-ci-tools.sh` and
+`ensure-host-tools.sh` used to prepend `WinGet\Links` and reintroduced the
+problem even after the recipe PATH was fixed. On Linux, macOS, and WSL the
+exported PATH is identical to the inherited one.
+
+**Facts that shaped it (all verified on `build-win-native`):**
+
+- **BASH_ENV does not work for linewise recipes over SSH.** Cygwin's bash is
+  built with `SSH_SOURCE_BASHRC`: a `bash -c` with `SSH_CLIENT` set and
+  `SHLVL` < 2 sources `/etc/bash.bashrc` and `~/.bashrc` and returns without
+  reading `BASH_ENV`. Every linewise recipe on a rig is that shell. Shebang
+  recipes run a script, not `-c`, and do read `BASH_ENV`. This SSH bashrc path
+  is also why the `env CYG_SYS_BASHRC=1` prefix in `set shell` is needed.
+- **`just` resolves the `set shell` program from its own inherited PATH,** not
+  from an exported PATH, so the bare `env` can still be uutils' `env.exe`
+  (confirmed through the Windows parent process of the recipe's `bash.exe`). It
+  is harmless as a launcher: it sets one variable and finds `bash` through the
+  exported PATH.
+- **`just` 1.59's `which()` needs the unstable `set lists`,** so it cannot
+  locate bash. An `if os_family() == "windows"` branch's backtick is not
+  evaluated on other OSes, so a Windows-only backtick costs Unix nothing.
+- **`/proc/$$/winexename` has no trailing newline:** `read` assigns it but
+  returns 1, so a `set -e` shell needs `|| true`. Under Git Bash's
+  `bin\bash.exe` launcher it reads `...\Git\bin\..\usr\bin\bash.exe`.
+- **Cygwin collapses `\\` in a command line from a native parent.** `just` is
+  native, so a recipe line or backtick holding `\\` reaches bash with `\`.
+  Write Windows-path manipulation without backslashes (`${exe%?bash.exe}`).
+- **`/etc/bash.bashrc`'s `CYG_SYS_BASHRC` crash** appears for any `bash -eu -c`
+  started over SSH without that variable, so ad hoc probes on the rig need it
+  too.
+- **Fixing detection exposed a kache path that a shadowed `uname` had hidden.**
+  With a real `uname`, the ReFS `B:` drive qualifies for kache. `_ensure-kache`
+  then warned that the store differed from the pin, and kache stayed off
+  (init still succeeded). The cause: kache 1.2.2 on Windows reads
+  `~/.config\kache\config.toml` (`%USERPROFILE%\.config\kache\config.toml`),
+  while the recipe wrote the pin to `%APPDATA%\kache\config.toml`. Confirmed
+  on `build-win-native` 2026-11-01 with a clean install: one `kache.exe`
+  (1.2.2) and no daemon running. kache honors `XDG_CONFIG_HOME` there, but
+  ignores `HOME` and `USERPROFILE` overrides because it asks Windows for the
+  profile. `scripts/kache-host.sh config-path` now uses
+  `$XDG_CONFIG_HOME`, else `$(cygpath -m -F 40)/.config`, and is the only
+  place that path is computed.
+- **Activation then failed four more times on Cygwin, each a native-program
+  boundary** (all fixed in `scripts/kache-host.sh` and `_ensure-kache`):
+  - A `/cygdrive/c/...` path given to the Windows `python3` (which
+    `ensure-ci-tools.sh` puts behind `/usr/bin/python3`) is read as
+    `C:\cygdrive\c\...`: the store pin landed in a stray
+    `C:\cygdrive\c\Users\ken\.config\kache\config.toml`, and
+    `~/.worktree.json` read as unreadable. Git Bash converts such arguments for
+    native programs; Cygwin does not. Paths handed to native programs use
+    `cygpath -m` (`C:/...`), which Cygwin and MSYS shell tools accept too.
+  - Cygwin's `$HOME` is not the Windows profile (often `/home/<user>`), so
+    `${CARGO_HOME:-$HOME/.cargo}` can name a Cargo home Cargo never reads.
+    `kache-host.sh cargo-home` and `user_home` (`cygpath -m -F 40`) replace it.
+  - A Windows `python3` writes `\r\n`; the `\r` survives `$(...)`, so
+    `'B:/kache'` compared unequal to `'B:/kache'` and the daemon read as not
+    running (`yes\r`). `kache-host.sh` wraps `python3` to strip it on Windows.
+  - `stat -c %d` and the drive-letter filesystem check described a symlink,
+    not its target: `C:\Users\ken\wt -> B:\coding\wt` read as another
+    device and as NTFS. `stat -L` and `readlink -f` fix both, on every OS.
+- **kache does block-clone on ReFS** even though `kache doctor` reports
+  "reflinks unsupported on this filesystem" from its staging check: a
+  clean-and-rebuild probe on `B:` restored 74% of bytes without copying, and
+  the restored `.rlib` was writable with no hard link into the store, so
+  rebuilding over it worked.
+
+**Reproducing.** `build-win-native`'s own PATH already puts `WinGet\Links`
+first. Build a scratch shared clone as [build-hosts.md](build-hosts.md)
+describes, then run `just _ensure-build-deps` from PowerShell. To check which
+`uname` a recipe gets, run a recipe line `echo "$(command -v uname) $(uname -s)"`.
 
 ## Current-directory locks
 
@@ -552,3 +667,31 @@ yourself and ask the kernel who holds it.
   `Get-Process cdb, <test exe> | Stop-Process`.
 - The four loopback-TLS tests in `schematic/runtime/tests/l1/builder.rs`
   carry `#[cfg_attr(windows, ignore = "…")]`; macOS, Linux, and WSL2 run them.
+  So does sniff's `network::tests::test_detect_network_returns_info` (gated
+  on `all(windows, feature = "network")`). Its live WAN-IP HTTPS lookup
+  aborted 2 times in 240 runs when 12 copies ran in parallel, with the same
+  captured stack.
+- Ordinary parallel test runs on a 12-thread host are enough load to
+  reproduce this. Burner threads are not needed. Match only `Security check
+  failure` in cdb logs: `c0000409` also appears in the echoed `sxe` line.
+
+## Clippy findings only Windows produces
+
+CI runs `lint` on Linux only, so a clippy failure that exists only on Windows
+reaches `main` unnoticed and accumulates. Before handing off a change, run
+`cargo clippy -p <pkg> --all-targets -- -D warnings` here for every package it
+touches. Three shapes recur:
+
+- **`result_large_err`.** `PathBuf`/`OsString` are 32 bytes on Windows and 24
+  elsewhere, so an error variant with a `PathBuf` that sits at exactly 128
+  bytes on Linux is 136 here. Box the heavy payload (a whole variant's data
+  when a downcast must keep working: `SpanParse(Box<SpanParseError>)` with
+  `#[error(transparent)]`), not every signature that returns the error.
+- **`permissions_set_readonly_false`** on `perms.set_readonly(false)` inside a
+  `#[cfg(windows)]`/`#[cfg(not(unix))]` block. It is the correct call there;
+  allow it with a reason at that statement.
+- **Dead code and unused bindings** in test helpers whose only callers are
+  `#[cfg(unix)]`. Gate a test that asserts nothing on Windows as a whole;
+  for a helper that already carries Windows branches, use
+  `#[cfg_attr(windows, allow(dead_code, reason = "…"))]` instead of deleting
+  them.

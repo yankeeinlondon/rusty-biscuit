@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::coercion::{Shape, accepts_exactly, bind};
+use simplified_schema::coercion::{Shape, accepts_exactly, bind};
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
 use darkmatter::markdown::MarkdownError;
@@ -203,7 +203,7 @@ fn numberlike_boolish_formats_agree_with_engine_on_probe_list() {
         "1e400", "1e-400", "maybe", " true ",
     ];
     let mut disagreements = Vec::new();
-    for (property, shape) in [("n", Shape::Number(darkmatter::markdown::coercion::NumberShape {
+    for (property, shape) in [("n", Shape::Number(simplified_schema::coercion::NumberShape {
         as_sent: true,
         ..Default::default()
     })), ("b", Shape::Boolean { as_sent: true })] {
@@ -310,14 +310,14 @@ fn integer_ceiling_applies_to_frontmatter() {
 /// the validator's verdict and never blocks a present property's conversion.
 #[test]
 fn a_missing_required_sibling_does_not_block_conversion() {
-    let schema = darkmatter::markdown::schemas::simplified::to_json_schema(
-        &darkmatter::markdown::schemas::simplified::parse_yaml_schema(
+    let schema = simplified_schema::simplified::to_json_schema(
+        &simplified_schema::simplified::parse_yaml_schema(
             &serde_yaml_ng::from_str("enabled: boolean\ncount: \"number(required)\"\n").expect("schema YAML"),
         )
         .expect("schema parses"),
     )
     .expect("schema lowers");
-    let outcome = darkmatter::markdown::schemas::coerce::coerce_frontmatter(&schema, &json!({ "enabled": "true" }));
+    let outcome = simplified_schema::coerce::coerce_frontmatter(&schema, &json!({ "enabled": "true" }));
     assert_eq!(outcome.value, json!({ "enabled": true }));
     rejected("$schema:\n  enabled: boolean\n  count: \"number(required)\"\nenabled: \"true\"\n", "count");
 }

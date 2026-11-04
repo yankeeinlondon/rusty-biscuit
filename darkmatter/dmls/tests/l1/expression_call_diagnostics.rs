@@ -450,7 +450,7 @@ mod narrowing {
         ArgumentCategory, DeclaredTypes, TypeScope, check_expression_calls, parse_spanned,
     };
     use darkmatter::markdown::compose::page_blocks::BodyGuards;
-    use darkmatter::markdown::schemas::parse_yaml_schema;
+    use simplified_schema::parse_yaml_schema;
 
     const SCHEMA: &str = "x: number\nready: boolean\nflag: boolean(required)\nfoo:\n  - string(required)\n  - number(required)\n";
 

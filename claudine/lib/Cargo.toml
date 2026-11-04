@@ -51,6 +51,7 @@ sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5", "file-reference"] }
 darkmatter = { path = "../../darkmatter/lib" }
+simplified-schema = { path = "../../simplified-schema/lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async", "native-playback"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
 messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }

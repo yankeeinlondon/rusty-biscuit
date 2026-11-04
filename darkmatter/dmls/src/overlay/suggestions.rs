@@ -9,23 +9,22 @@
 //!   into document-relative byte ranges.
 //! - **Standalone** YAML SimplifiedSchema envelopes (pure `$schema`-only or
 //!   tagged `kind: schema`): the whole buffer is the source, and spans are
-//!   already document-relative (offset zero).
+//!   already document-relative (offset zero). An open whole YAML document is
+//!   a standalone schema only by its `kind`; its inline root `$schema`
+//!   contract is linted as Markdown's is ([`yaml_document_lints`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::{
-    Constraint, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SuggestionLintProblem,
-    TypeExpr,
-};
+use simplified_schema::{Constraint, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SuggestionLintProblem, TypeExpr};
 use darkmatter::markdown::span::SourceSpan;
-use darkmatter::markdown::schemas::SchemaError;
-use darkmatter::markdown::schemas::StandaloneSchemaEnvelope;
-use darkmatter::markdown::schemas::lint_suggestions;
-use darkmatter::markdown::schemas::parse_standalone_schema_document;
-use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+use simplified_schema::SchemaError;
+use simplified_schema::StandaloneSchemaEnvelope;
+use simplified_schema::lint_suggestions;
+use simplified_schema::parse_standalone_schema_document;
+use simplified_schema::simplified::parse_yaml_schema_with_source;
 
 use crate::overlay::FrontmatterAst;
 use crate::overlay::SuggestionState;
@@ -48,7 +47,7 @@ pub fn inline_lints(text: &str, ast: Option<&FrontmatterAst>) -> SuggestionState
 /// The inline `$schema` mapping of a Markdown document, parsed with its
 /// `suggest(...)` candidate spans in document offsets; `None` when there is
 /// no inline mapping or it does not parse.
-pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<SimplifiedSchema> {
+pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<SchemaRoot> {
     let schema_entry = ast?.schema_entry()?;
     if schema_entry.kind != crate::overlay::FmValueKind::Mapping {
         return None;
@@ -64,6 +63,27 @@ pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<Simplif
     parse_yaml_schema_with_source(schema_value, schema_yaml_source, value_span.start).ok()
 }
 
+/// [`inline_lints`]'s problems for a whole YAML document (`ast` from
+/// [`FrontmatterAst::parse_yaml_document`]) whose root `$schema` is an inline
+/// mapping it selects as its contract; empty on the kind route, where
+/// `$schema` is data and has no schema entry.
+pub fn yaml_document_lints(text: &str, ast: &FrontmatterAst) -> Vec<SuggestionLintProblem> {
+    let Some(entry) = ast.schema_entry().filter(|entry| entry.kind == crate::overlay::FmValueKind::Mapping) else {
+        return Vec::new();
+    };
+    let Some(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text)
+        .ok()
+        .and_then(|document| document.get("$schema").cloned())
+    else {
+        return Vec::new();
+    };
+    let span = crate::overlay::frontmatter::line_aligned_span(text, entry.value_span.clone());
+    parse_yaml_schema_with_source(&value, &text[span.clone()], span.start)
+        .ok()
+        .and_then(|schema| lint_suggestions(&schema).ok())
+        .unwrap_or_default()
+}
+
 /// Lints the `suggest(...)` candidates written on named-type references
 /// against the definitions those references resolve to.
 ///
@@ -74,7 +94,7 @@ pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<Simplif
 /// such candidate is not expanded at all, and a schema whose references fail
 /// to resolve reports nothing here, because resolution reports that failure.
 pub fn reference_lints(
-    schema: &SimplifiedSchema,
+    schema: &SchemaRoot,
     local_types: Option<&SchemaShape>,
     base_dir: &Path,
     defining_file: Option<&Path>,
@@ -102,7 +122,7 @@ pub fn reference_lints(
 
 /// `(span, decoded)` of every `suggest(...)` candidate written on a
 /// named-type reference.
-fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(SourceSpan, String)>) {
+fn collect_reference_candidates(schema: &SchemaRoot, out: &mut Vec<(SourceSpan, String)>) {
     fn walk_shape(shape: &SchemaShape, out: &mut Vec<(SourceSpan, String)>) {
         let definitions = shape
             .properties
@@ -137,8 +157,8 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
         }
     }
     match schema {
-        SimplifiedSchema::Single(root) => walk_shape(root, out),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(root) => walk_shape(root, out),
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(root) = arm {
                     walk_shape(root, out);
@@ -152,8 +172,8 @@ fn collect_reference_candidates(schema: &SimplifiedSchema, out: &mut Vec<(Source
 ///
 /// Returns `None` for ordinary YAML documents, raw JSON Schema, and text that
 /// is not YAML. Once a
-/// recognized envelope claims the document (`$schema`-only pure or
-/// `kind: schema` tagged), malformed payload content is carried as a
+/// recognized envelope claims the document (`$schema`-only pure,
+/// `kind: schema` tagged, or `kind: yaml-schema`), malformed payload content is carried as a
 /// [`SuggestionState::Standalone`] error rather than falling back.
 pub fn standalone_lints(text: &str, path: &Path) -> Option<SuggestionState> {
     match parse_standalone_schema_document(text, path) {
@@ -194,10 +214,10 @@ fn infer_envelope(text: &str) -> StandaloneSchemaEnvelope {
         return StandaloneSchemaEnvelope::Pure;
     };
     let kind_key = serde_yaml_ng::Value::String("kind".into());
-    if map.get(&kind_key).and_then(serde_yaml_ng::Value::as_str) == Some("schema") {
-        StandaloneSchemaEnvelope::Tagged
-    } else {
-        StandaloneSchemaEnvelope::Pure
+    match map.get(&kind_key).and_then(serde_yaml_ng::Value::as_str) {
+        Some("schema") => StandaloneSchemaEnvelope::Tagged,
+        Some("yaml-schema") => StandaloneSchemaEnvelope::YamlSchema,
+        _ => StandaloneSchemaEnvelope::Pure,
     }
 }
 

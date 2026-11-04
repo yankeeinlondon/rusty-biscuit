@@ -66,11 +66,12 @@ test *args="":
     @just _test_all "biscuit-file --features fetch; biscuit-file-cli" {{args}}
     @just test-minimal {{args}}
 
-# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+# Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args="":
     @just _slow_tests {{ args }}
 
-# Proves the path→text boundary is genuinely unfeatured.
+# Proves the path→text boundary is genuinely unfeatured, and that the reference
+# and glob grammar work under `file-reference-syntax` alone.
 #
 # `to_portable_string` / `try_portable_string` are documented as available
 # without `file-reference` and its gix/cargo_metadata/walkdir/dirs/url stack, so
@@ -79,7 +80,8 @@ slow-tests *args="":
 # still compile and its tests would still pass — which is why this runs its own
 # feature resolution rather than a filter over the run above. Plain `cargo test`
 # on purpose: this invocation is fixed and must not inherit `test`'s nextest
-# partitioning arguments.
+# partitioning arguments; the grammar run is a fixed, filtered nextest run for
+# the same reason.
 #
 # Skipped in archive mode. `--archive-file` means prebuilt binaries are being
 # executed in the WSL2 guest, which deliberately installs neither Cargo nor
@@ -109,6 +111,15 @@ test-minimal *args="":
     echo "--------------------------"
     cargo test -p biscuit-file --no-default-features --lib path_text
 
+    # The passive reference and glob grammar must build and parse without the
+    # resolution stack (`gix`, `walkdir`). Nextest, not `cargo test`: `l1` is a
+    # consolidated binary.
+    echo ""
+    echo -e "Testing {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}file-reference-syntax{{ RESET }} only"
+    echo "--------------------------"
+    cargo nextest run -p biscuit-file --no-default-features --features file-reference-syntax,yaml \
+        --test l1 -E 'test(/^reference_syntax_only::/)'
+
 # not applicable: biscuit-file has no real-terminal (Level-2) tests
 test-l2:
     @echo "test-l2: not applicable for biscuit-file"
@@ -132,6 +143,9 @@ lint:
     @echo "--------------------------"
     @echo ""
     @just _lint biscuit-file
+    @echo ""
+    @echo -e "Linting {{ BOLD }}biscuit-file{{ RESET }} with {{ ITALIC }}file-reference-syntax{{ RESET }} only"
+    @cargo clippy -p biscuit-file --no-default-features --features file-reference-syntax,yaml --all-targets -- -D warnings
     @just _lint biscuit-file-cli
 
 # Criterion benches for biscuit-file format parsers.

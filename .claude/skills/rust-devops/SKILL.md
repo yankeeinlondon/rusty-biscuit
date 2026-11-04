@@ -48,8 +48,10 @@ behavior.
 
 Rusty-biscuit tracks no `RUSTC_WRAPPER` and CI explicitly clears it. Kache is a
 host opt-in only where `just kache-status` proves clone-capable storage between
-the store and that checkout's `target/`; Windows and WSL remain off. Never mix
-wrapped and unwrapped builds in one `target/`.
+the store and that checkout's `target/`. The filesystem decides, never the OS:
+APFS, reflink-capable Linux filesystems, and Windows ReFS qualify; ext4
+(including WSL's) and NTFS do not. Never mix wrapped and unwrapped builds in
+one `target/`.
 
 ## Git Interaction
 

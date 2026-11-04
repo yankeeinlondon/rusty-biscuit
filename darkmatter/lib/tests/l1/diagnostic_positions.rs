@@ -3,7 +3,8 @@
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationProblemKind};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::ValidationProblemKind;
 
 use crate::position_fixtures::{self, ExpectedStart};
 

@@ -15,7 +15,7 @@
 //! - `{{ ctx.today }}` - Context property (date/time values)
 //! - `{{ env.HOME }}` - Environment variable
 //!
-//! Fallback values:
+//! Logical OR:
 //! - `{{ color || "unknown" }}` - Use "unknown" if color is falsy
 //!
 //! Ternary expressions:
@@ -34,7 +34,7 @@
 //! Precedence from highest to lowest:
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
 //! 2. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 3. **Fallback** - `||`
+//! 3. **Logical OR** - `||`
 //! 4. **Ternary** - `? :`
 //!
 //! ## Code Exclusion
@@ -53,9 +53,9 @@
 //! let expr = parse("foo").unwrap();
 //! assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
 //!
-//! // Parse a fallback expression
+//! // Parse a logical OR expression
 //! let expr = parse(r#"color || "unknown""#).unwrap();
-//! assert!(matches!(expr, Expr::Fallback { .. }));
+//! assert!(matches!(expr, Expr::LogicalOr { .. }));
 //!
 //! // Parse a ternary with comparison
 //! let expr = parse(r#"count > 0 ? "items" : "empty""#).unwrap();
@@ -75,8 +75,8 @@ pub(crate) mod rewrite;
 // compatibility. The canonical location is now `compose::expression`.
 pub use super::expression::{
     ComparisonOp, Expr, ExpressionError, ExpressionFinder, ExpressionLocation,
-    FileRefFailure, FileReferenceDiagnostic, Lexer, LexerError, ParseError, ParseMode, Parser,
-    Token, parse, parse_condition,
+    FileRefFailure, FileReferenceDiagnostic, Lexer, LexerError, ParseError, Parser,
+    Token, parse,
 };
 
 // Re-export the lookup trait with its old name for backward compatibility.

@@ -2,7 +2,7 @@
 //!
 //! Zed loads the manifest before compiling the extension, while Cargo builds
 //! this crate outside the main workspace. These file-level invariants therefore
-//! need an explicit cross-platform L1 gate in the `dmls` package.
+//! need an explicit cross-platform L1 gate in the `darkmatter-lsp` package.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,0 +1,13 @@
+description: formalizes the use of the `kind` Frontmatter for documents in this monorepo
+$schema:
+    kind: |-
+        enum(
+            schema,
+            schema-trigger,
+            yaml-schema,
+            sequence,
+            task,
+            index,
+            canonical-documentation;
+            required
+        ) -> a formal identifier of the _kind_ of document this document is

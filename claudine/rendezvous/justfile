@@ -50,7 +50,7 @@ sanity:
 test *args="":
     @just _test_all "{{ CORE }} {{ DAEMON }} {{ CLIENT }}" {{ args }}
 
-# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+# Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args="":
     @just _slow_tests {{ args }}
 

@@ -1024,14 +1024,14 @@ class PackagePolicyTests(unittest.TestCase):
             )
         self.assertIn("unknown field", str(raised.exception))
 
-    def test_exclusion_requires_owner_reason_class_and_expiry(self) -> None:
+    def test_exclusion_requires_owner_reason_and_class(self) -> None:
         for missing in ("reason", "owner", "exclusion-class"):
             with self.subTest(missing=missing):
                 ci = ci_policy(
                     gates=False,
                     reason="x",
                     owner="@o",
-                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    **{"exclusion-class": "promotion-pending"},
                 )
                 ci.pop(missing.replace("_", "-"))
                 with self.assertRaises(RuntimeError):
@@ -1058,7 +1058,7 @@ class PackagePolicyTests(unittest.TestCase):
             gates=False,
             reason="x",
             owner="@o",
-            **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+            **{"exclusion-class": "promotion-pending"},
         )
         validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
         resolved = package_ci_policy(
@@ -1078,11 +1078,30 @@ class PackagePolicyTests(unittest.TestCase):
             gates=False,
             reason="x",
             owner="@o",
-            **{"exclusion-class": "promotion-pending", "expiry": "2026-01-01"},
+            **{"exclusion-class": "time-bounded", "expiry": "2026-01-01"},
         )
         with self.assertRaises(RuntimeError) as raised:
             validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
         self.assertIn("expired", str(raised.exception))
+
+    def test_a_time_bounded_exclusion_requires_expiry(self) -> None:
+        ci = ci_policy(gates=False, reason="x", owner="@o", **{"exclusion-class": "time-bounded"})
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("must give an 'expiry'", str(raised.exception))
+
+    def test_a_promotion_pending_exclusion_must_not_carry_expiry(self) -> None:
+        # It lasts until someone works on the package; a date on a package
+        # nobody touches only fails every package's plan when it lapses.
+        ci = ci_policy(
+            gates=False,
+            reason="x",
+            owner="@o",
+            **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
+        self.assertIn("no end date", str(raised.exception))
 
     def test_a_capability_exclusion_must_not_carry_expiry(self) -> None:
         ci = ci_policy(
@@ -1093,7 +1112,7 @@ class PackagePolicyTests(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError) as raised:
             validate_package_ci("a", ci, self.RUNNER_LABELS, root=Path("/"), today=TODAY)
-        self.assertIn("permanent", str(raised.exception))
+        self.assertIn("no end date", str(raised.exception))
 
     def test_exclusion_governance_only_applies_to_non_gating(self) -> None:
         ci = ci_policy(gates=True, owner="@o", reason="x")
@@ -1319,23 +1338,23 @@ class PackageExecutionTests(unittest.TestCase):
 
     def test_features_become_qualified_check_and_test_args(self) -> None:
         policy = {"features": ["test-fixtures"], "all_features": False}
-        features = feature_args(policy, "sniff-cli")
+        features = feature_args(policy, "sniff-detection-cli")
         self.assertEqual(features, "--features test-fixtures")
         self.assertEqual(
-            check_arguments("sniff-cli", ["lib"], features), "-p sniff-cli --features test-fixtures"
+            check_arguments("sniff-detection-cli", ["lib"], features), "-p sniff-detection-cli --features test-fixtures"
         )
         contracts = resolved_contracts(
             plan_package(
-                package="sniff-cli",
+                package="sniff-detection-cli",
                 tiers=["L1", "L2"],
                 l2_backends=["tmux"],
                 test_args=features,
-                check_args=check_arguments("sniff-cli", ["lib"], features),
+                check_args=check_arguments("sniff-detection-cli", ["lib"], features),
             )
         )
         # Every producer is handed the plan's feature contract; none re-derives it.
         for cell, contract in contracts.items():
-            self.assertEqual("-p sniff-cli --features test-fixtures", contract["check_args"], cell)
+            self.assertEqual("-p sniff-detection-cli --features test-fixtures", contract["check_args"], cell)
             self.assertEqual("--features test-fixtures", contract["test_args"], cell)
             self.assertEqual("", contract["requires_node"], cell)
         self.assertEqual(
@@ -2117,7 +2136,7 @@ class GatesFalseScopeTests(unittest.TestCase):
                         gates=False,
                         reason="blocked on identified work",
                         owner="@o",
-                        **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                        **{"exclusion-class": "promotion-pending"},
                     ),
                 )
             },
@@ -3286,7 +3305,7 @@ class DependentSeamTests(unittest.TestCase):
                     gates=False,
                     reason="blocked on identified work",
                     owner="@o",
-                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    **{"exclusion-class": "promotion-pending"},
                 ),
             ),
         ]
@@ -3627,7 +3646,7 @@ class ApplyFixture(unittest.TestCase):
                     gates=False,
                     reason="promotion pending",
                     owner="@o",
-                    **{"exclusion-class": "promotion-pending", "expiry": "2027-01-31"},
+                    **{"exclusion-class": "promotion-pending"},
                 ),
             ),
         ]
@@ -4652,7 +4671,7 @@ class AreaDriftFlagTests(unittest.TestCase):
 
     Scoped in both directions on purpose. Too narrow and a real divergence
     schedules the contract nowhere, which is silent; too broad and every pull
-    request pays for a release `sniff-cli`.
+    request pays for a release `sniff-detection-cli`.
     """
 
     def setUp(self) -> None:
@@ -6151,11 +6170,11 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
         self.assertEqual(["messenger-cli", "test-toolkit"], sorted(gates_by_package(plan)))
 
-    def test_workspace_excluded_zed_extension_selects_dmls_companion(self) -> None:
+    def test_workspace_excluded_zed_extension_selects_darkmatter_lsp_companion(self) -> None:
         plan = self.plan("darkmatter/dmls/zed-dmls/src/lib.rs")
-        self.assertEqual(["dmls", "test-toolkit"], legacy_scope_document(plan)["packages"])
-        self.assertEqual(["dmls", "test-toolkit"], sorted(gates_by_package(plan)))
-        contracts = producer_contracts(plan, "dmls")
+        self.assertEqual(["darkmatter-lsp", "test-toolkit"], legacy_scope_document(plan)["packages"])
+        self.assertEqual(["darkmatter-lsp", "test-toolkit"], sorted(gates_by_package(plan)))
+        contracts = producer_contracts(plan, "darkmatter-lsp")
         self.assertTrue(contracts)
         for cell, contract in contracts.items():
             self.assertEqual(["neovim", "zed-extension"], json.loads(contract["runner_tools"]), cell)
@@ -6200,52 +6219,28 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             self.assertIn(required, latest_stable)
 
     def test_sniff_change_selects_exact_direct_dependents(self) -> None:
-        # Deliberate friction: this exact list makes a human acknowledge a
-        # change to sniff's direct dependents. On mismatch, the message below
-        # hands back the computed list ready to paste into this fixture.
+        # Checked against what each manifest declares, not a hand-kept list:
+        # a list went stale every time a package started depending on sniff.
         scope = self.scope("sniff/lib/src/lib.rs")
         self.assertEqual(["sniff", "test-toolkit"], scope["packages"])
-        computed = scope["reverse_dependencies"]
-        paste_ready = "\n".join(f'                "{name}",' for name in computed)
-        hint = (
-            "\nsniff's direct dependents changed (a workspace dependency edge "
-            "was added or removed). If intentional, replace the expected list "
-            f"in {__file__} :: {self._testMethodName} with:\n{paste_ready}"
-        )
-        self.assertEqual(
-            [
-                "biscuit-speaks",
-                "biscuit-speaks-cli",
-                "biscuit-terminal-cli",
-                "claudine",
-                "claudine-cli",
-                "claudine-gen",
-                "darkmatter",
-                "darkmatter-cli",
-                "dmls",
-                "messenger",
-                "messenger-cli",
-                "model-citizen",
-                "playa",
-                "playa-cli",
-                "rendezvous-core",
-                "rendezvous-daemon",
-                # `repo-deps` joined the root workspace when `scripts/` was
-                # promoted to a gating package; `drift` links sniff.
-                "repo-deps",
-                "research",
-                "sniff-cli",
-                # `hug --changed` asks sniff which paths Git reports changed.
-                "tree-hugger-cli",
-                "unchained-ai",
-                "worktree",
-                "worktree-cli",
-                "zed-dmls-cli",
-            ],
-            computed,
-            hint,
-        )
+        computed = set(scope["reverse_dependencies"])
 
+        declared: dict[str, list[bool]] = {}
+        for package in self.metadata["packages"]:
+            if package["name"] == "sniff":
+                continue
+            for dependency in package["dependencies"]:
+                if dependency["name"] == "sniff" and dependency.get("path"):
+                    declared.setdefault(package["name"], []).append(dependency["optional"])
+        required = {name for name, optional in declared.items() if not all(optional)}
+
+        self.assertTrue(required, "the workspace should have packages that depend on sniff")
+        # Direct only: a package reaching sniff through another package is not
+        # selected (decided 2026-08-13; see `direct_dependents`).
+        self.assertEqual(set(), computed - declared.keys(), "selected without declaring sniff")
+        # An optional dependency counts only when a feature enables it, which
+        # is the planner's call; a non-optional one must always be selected.
+        self.assertEqual(set(), required - computed, "declares sniff but was not selected")
 
 class WorkflowContractTests(unittest.TestCase):
     """Contracts in workflow YAML that are not represented by scope data."""
@@ -6278,7 +6273,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(pattern, current)
         self.assertIn("github-token: ${{ github.token }}", newest)
         self.assertIn("run-id: ${{ github.run_id }}", newest)
-        self.assertIn(pattern, newest)
+        # The overlay spends the run's shared REST budget per artifact, so it
+        # runs only on a rerun and fetches only this area's packages.
+        overlay_step = rollup_downloads.split(
+            "- name: Overlay newest run-wide result and status artifacts", 1
+        )[1]
+        self.assertIn("if: ${{ github.run_attempt > 1 }}", overlay_step.split("uses:", 1)[0])
+        self.assertIn("pattern: ${{ steps.area.outputs.overlay }}", newest)
+        self.assertIn('"build-status-*"', plan)
 
 
 # --- helpers ---------------------------------------------------------------

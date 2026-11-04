@@ -46,10 +46,11 @@
 //! poll loop observes the shared flag or the already-terminated child first is
 //! a genuine race on this platform.
 //!
-//! Liveness is measured by heartbeat rather than by pid. A `cmd /C` task can
-//! spawn grandchildren, so a pid check on any one process could report a dead
-//! process while other members of the Job tree are still ticking. A file that
-//! stops growing proves the fixture's work stopped.
+//! Liveness is measured by heartbeat file rather than by pid. A `cmd /C` task
+//! can spawn grandchildren, so a pid check on any one process could report a
+//! dead process while other members of the Job tree are still ticking. Every
+//! member inherits the open heartbeat file, so a file that opens with no
+//! sharing proves the whole tree, and the fixture's work, stopped.
 //!
 //! The two assertions that a broken implementation cannot pass are the ones
 //! that read the shared flag and nothing else: `later-step-ran.txt` must not
@@ -62,6 +63,7 @@ use crate::common;
 
 use common::CliProcessFixture;
 use std::fs;
+use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::Stdio;
@@ -115,11 +117,13 @@ fn sequence_document() -> String {
         .iter()
         .map(|name| {
             // `ping -n 2 127.0.0.1` is the portable `cmd` sleep, so the loop
-            // ticks about once a second for up to 600s.
+            // ticks about once a second for up to 600s. The redirection wraps
+            // the whole loop, so the task's tree holds its heartbeat file open
+            // until the last member exits.
             format!(
                 "        - name: {name}\n\
                  \x20         timeout: 300s\n\
-                 \x20         shell: \"for /l %i in (1,1,600) do @(echo tick >> {name}.live & ping -n 2 127.0.0.1 > nul)\"\n"
+                 \x20         shell: \"(for /l %i in (1,1,600) do @(echo tick & ping -n 2 127.0.0.1 > nul)) >> {name}.live\"\n"
             )
         })
         .collect();
@@ -185,6 +189,14 @@ fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
         .expect("spawn claudine sequence");
 
     await_all_tasks_running(fixture.cwd());
+    // The liveness probe below is meaningful only if a running tree refuses it.
+    for name in TASKS {
+        let opened = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(heartbeat(fixture.cwd(), name));
+        assert!(opened.is_err(), "task {name}'s running tree must hold its heartbeat file");
+    }
 
     let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, claudine.id()) };
     assert_ne!(sent, 0, "GenerateConsoleCtrlEvent failed");
@@ -204,21 +216,25 @@ fn sequence_ctrl_c_fans_out_to_parallel_children_on_windows() {
         std::thread::sleep(Duration::from_millis(200));
     };
 
-    // Every task tree stopped: two heartbeat samples three seconds apart (the
-    // loop ticks about once a second) must be identical.
-    let ticks = |name: &str| {
-        fs::metadata(heartbeat(fixture.cwd(), name))
-            .expect("heartbeat file")
-            .len()
-    };
-    let before: Vec<u64> = TASKS.iter().map(|name| ticks(name)).collect();
-    std::thread::sleep(Duration::from_secs(3));
-    for (name, was) in TASKS.iter().zip(before) {
-        assert_eq!(
-            ticks(name),
-            was,
-            "task {name} was still running after the interrupt"
-        );
+    // Every task tree stopped: no member still holds its heartbeat file, so
+    // it opens with no sharing. A surviving member would hold it for the rest
+    // of its 600 ticks; the bound only absorbs a host scanner's brief open.
+    for name in TASKS {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let opened = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(heartbeat(fixture.cwd(), name));
+            match opened {
+                Ok(_) => break,
+                Err(error) => assert!(
+                    Instant::now() < deadline,
+                    "task {name} was still running after the interrupt: {error}"
+                ),
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     assert!(

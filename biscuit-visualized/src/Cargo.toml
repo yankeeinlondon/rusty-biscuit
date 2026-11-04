@@ -3,6 +3,7 @@ name = "biscuit-visualized"
 version = "0.1.0"
 edition = "2024"
 autotests = false
+license = "AGPL-3.0-only"
 
 [lib]
 name = "biscuit_visualized"

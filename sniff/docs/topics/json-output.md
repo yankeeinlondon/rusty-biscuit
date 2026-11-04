@@ -49,7 +49,7 @@ sniff repo --json
 #   "package_count": 8,
 #   "root": "/path/to/repo",
 #   "context": {
-#     "package": "sniff-cli",
+#     "package": "sniff-detection-cli",
 #     "package_area": "sniff",
 #     "package_root": "/path/to/repo/sniff/cli",
 #     "package_area_root": "/path/to/repo/sniff",

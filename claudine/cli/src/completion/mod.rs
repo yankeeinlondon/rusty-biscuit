@@ -2,7 +2,7 @@
 //!
 //! This module serves two distinct completion paths:
 //!
-//! 1. **`claudine __complete`** (bash / zsh / fish) — the hidden
+//! 1. **`claudine __complete`** (every generated script) — the hidden
 //!    subcommand that generated completion scripts shell out to on every
 //!    `<TAB>`. Routing flows through [`engine::run`], which classifies
 //!    the cursor slot and dispatches to a slot-specific completer
@@ -13,10 +13,10 @@
 //!    subcommands, etc.) emits zero candidates so the shell's native
 //!    file / flag completion takes over.
 //!
-//! 2. **`CompleteEnv`** (powershell / elvish) — the legacy
-//!    `COMPLETE=<shell> claudine` bootstrap that activates at process
-//!    startup via [`maybe_complete`]. This path stays alive for shells
-//!    the new engine does not target; it delegates completion candidates
+//! 2. **`CompleteEnv`** — the legacy `COMPLETE=<shell> claudine`
+//!    bootstrap that activates at process startup via [`maybe_complete`].
+//!    No generated script uses it; it stays alive for shell profiles that
+//!    still carry an old `COMPLETE=<shell>` line. It delegates completion candidates
 //!    to whatever `clap_complete` derives from the [`crate::args::Cli`]
 //!    command tree, with `ignore_errors(true)` applied to the wrapper
 //!    subcommands so unknown passthrough tokens do not crash the walk.
@@ -49,8 +49,9 @@ use crate::argv;
 ///   `COMPLETE` guard is never exercised on the happy completion path.
 /// - Must be called before any stdout output — clap_complete reserves the
 ///   completion stdout channel.
-/// - Only PowerShell and Elvish still rely on this path; bash / zsh / fish
-///   shell out to `claudine __complete` and dispatch through [`engine::run`].
+/// - Only shell profiles carrying an old `COMPLETE=<shell>` line still rely
+///   on this path; every generated script shells out to
+///   `claudine __complete` and dispatches through [`engine::run`].
 pub(crate) fn maybe_complete() {
     CompleteEnv::with_factory(completion_command).complete();
 }
@@ -59,7 +60,7 @@ pub(crate) fn maybe_complete() {
 ///
 /// The only adjustment to the derived tree is `ignore_errors(true)` on
 /// each wrapper subcommand, which mirrors the lenient wrapper parse in
-/// [`crate::parse_cli_from`]. Without it, a PowerShell / Elvish
+/// [`crate::parse_cli_from`]. Without it, a legacy `COMPLETE=<shell>`
 /// completion walk over `claudine claude <unknown provider flag>` would
 /// short-circuit on the unknown token.
 fn completion_command() -> clap::Command {

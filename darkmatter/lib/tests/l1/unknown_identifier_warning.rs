@@ -385,7 +385,7 @@ fn a_baseline_schema_property_is_known() {
     let dir = TempDir::new().unwrap();
     let path = write(dir.path(), "doc.md", "---\ntitle: T\n---\n[{{ from-baseline }}]\n");
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("from-baseline: string\n").unwrap();
-    let baseline = darkmatter::markdown::schemas::simplified::parse_yaml_schema(&yaml).unwrap();
+    let baseline = simplified_schema::simplified::parse_yaml_schema(&yaml).unwrap();
 
     let (content, report) = compose(&path, options(dir.path(), &path).with_baseline_schema(baseline));
 
@@ -469,7 +469,7 @@ fn pass_one_candidates_known_by_the_final_state_or_schema_are_dropped() {
         "---\n$schema:\n  declared: string\nlabel: \"{{ declared }}{{ baseline_only }}\"\n---\n[{{ label }}]\n",
     );
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str("baseline_only: string\n").unwrap();
-    let baseline = darkmatter::markdown::schemas::simplified::parse_yaml_schema(&yaml).unwrap();
+    let baseline = simplified_schema::simplified::parse_yaml_schema(&yaml).unwrap();
 
     let (content, report) = compose(&path, options(dir.path(), &path).with_baseline_schema(baseline));
 
@@ -704,4 +704,36 @@ fn absence_handling_names_no_function() {
         assert!(!source.contains("fn is_absence_predicate"), "a name-based absence rule remains");
     }
     assert!(production.contains("handles_absence_at"), "the classifier asks the registration");
+}
+
+// ── Logical OR in a condition (one absence rule on every surface) ───────────
+
+/// A condition's `||` handles its left operand's absence exactly as an
+/// interpolation's does: the left root is silent, while the right operand is
+/// an ordinary read that warns once it is evaluated.
+#[test]
+fn a_page_block_gate_logical_or_handles_only_its_left_operand() {
+    let block = |gate: &str| format!("---\ntitle: T\n---\n::block when=\"{gate}\"\nshown\n::end-block\n");
+
+    let (content, report) = compose_doc(&block("spce || plan"));
+    assert!(!content.contains("shown"), "{content}");
+    assert_eq!(warned_roots(&report), ["plan"], "{:?}", report.warnings);
+    assert_eq!(unknown_identifiers(&report)[0].line_number, Some(4));
+
+    let (content, report) = compose_doc(&block("plan || spce"));
+    assert!(!content.contains("shown"), "{content}");
+    assert_eq!(warned_roots(&report), ["spce"], "{:?}", report.warnings);
+}
+
+/// Schema-declared roots are known in either operand position, so neither
+/// gate raises an advisory.
+#[test]
+fn a_page_block_gate_logical_or_over_declared_roots_is_silent() {
+    for gate in ["spce || plan", "plan || spce"] {
+        let (content, report) = compose_doc(&format!(
+            "---\n$schema:\n  spce: string\n  plan: string\n---\n::block when=\"{gate}\"\nshown\n::end-block\n"
+        ));
+        assert!(!content.contains("shown"), "{gate}: {content}");
+        assert!(unknown_identifiers(&report).is_empty(), "{gate}: {:?}", report.warnings);
+    }
 }

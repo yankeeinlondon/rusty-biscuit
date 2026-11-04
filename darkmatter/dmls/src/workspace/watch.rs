@@ -42,6 +42,12 @@ impl WatchMode {
 /// The registration id DMLS uses for its watcher registration.
 pub const WATCH_REGISTRATION_ID: &str = "dmls-watch-workspace";
 
+/// The watched-file glob of `.yaml` files, in any ASCII letter case.
+pub const YAML_GLOB: &str = "**/*.[yY][aA][mM][lL]";
+
+/// The watched-file glob of `.yml` files, in any ASCII letter case.
+pub const YML_GLOB: &str = "**/*.[yY][mM][lL]";
+
 /// Builds the dynamic watcher registration for the workspace: the configured
 /// include globs, every YAML file, the discovery inputs, and the context
 /// inputs. An empty `include` drops only the Markdown globs.
@@ -61,8 +67,9 @@ pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
         .collect();
     // YAML is listed whatever `include` says, and schema-root files, which
     // shape every document, are YAML; the discovery inputs (ignore files and
-    // the config file) rebuild the file list.
-    let globs = ["**/*.yaml".to_string(), "**/*.yml".to_string()]
+    // the config file) rebuild the file list. A YAML extension routes in any
+    // letter case (`crate::overlay::is_yaml_path`), so its globs do too.
+    let globs = [YAML_GLOB.to_string(), YML_GLOB.to_string()]
         .into_iter()
         .chain(DISCOVERY_INPUT_NAMES.iter().map(|name| format!("**/{name}")));
     watchers.extend(globs.map(|pattern| FileSystemWatcher {
@@ -339,6 +346,24 @@ mod tests {
         assert_eq!(WatchMode::for_profile(&no_watch), WatchMode::ServerRescan);
     }
 
+    /// The YAML watch globs match exactly the paths
+    /// [`crate::overlay::is_yaml_path`] routes as YAML, in any letter case.
+    #[test]
+    fn yaml_watch_globs_match_every_letter_case_the_router_accepts() {
+        let globs = [YAML_GLOB, YML_GLOB]
+            .iter()
+            .fold(globset::GlobSetBuilder::new(), |mut builder, glob| {
+                builder.add(globset::Glob::new(glob).unwrap());
+                builder
+            })
+            .build()
+            .unwrap();
+        for path in ["a/b.yaml", "a/b.YAML", "b.Yaml", "a/b.yml", "a/b.YML", "b.yMl", "a.md", "a.yaml.md", "a.json"] {
+            let path = std::path::Path::new(path);
+            assert_eq!(globs.is_match(path), crate::overlay::is_yaml_path(path), "{}", path.display());
+        }
+    }
+
     #[test]
     fn test_registration_covers_include_globs() {
         let config = WorkspaceConfig::default();
@@ -361,7 +386,7 @@ mod tests {
             assert!(globs.contains(&format!("**/{name}")), "{name} watched: {globs:?}");
         }
         assert!(globs.contains(&"**/.git/config".to_string()), "{globs:?}");
-        for glob in ["**/*.yaml", "**/*.yml", "**/.gitignore", "**/.ignore", "**/.dmls.toml"] {
+        for glob in [YAML_GLOB, YML_GLOB, "**/.gitignore", "**/.ignore", "**/.dmls.toml"] {
             assert!(globs.contains(&glob.to_string()), "{glob} watched: {globs:?}");
         }
     }
@@ -377,7 +402,7 @@ mod tests {
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
         assert_eq!(options.watchers.len(), 10);
         assert!(options.watchers.iter().any(|watcher| {
-            matches!(&watcher.glob_pattern, GlobPattern::String(glob) if glob == "**/*.yaml")
+            matches!(&watcher.glob_pattern, GlobPattern::String(glob) if glob == YAML_GLOB)
         }));
     }
 

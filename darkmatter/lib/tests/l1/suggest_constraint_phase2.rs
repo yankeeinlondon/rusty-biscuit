@@ -1,17 +1,14 @@
-use darkmatter::markdown::schemas::{
-    parse_yaml_schema,
-    resolve::resolve_schema,
-    simplified::{
-        Constraint, PropertyDef, SimplifiedSchema, grammar::normalize_simple_decimal,
+use darkmatter::markdown::schemas::resolve::resolve_schema;
+use simplified_schema::{parse_yaml_schema, simplified::{
+        Constraint, PropertyDef, SchemaRoot, grammar::normalize_simple_decimal,
         parse_yaml_schema_with_source, serialize_property_atom, to_json_schema,
-    },
-};
+    }};
 use serde_json::{Value, json};
 
-fn suggestions(expression: &str) -> Vec<darkmatter::markdown::schemas::simplified::SuggestionCandidate> {
+fn suggestions(expression: &str) -> Vec<simplified_schema::simplified::SuggestionCandidate> {
     let yaml = format!("value: {expression}\n");
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).unwrap();
-    let SimplifiedSchema::Single(shape) = parse_yaml_schema(&value).unwrap() else {
+    let SchemaRoot::Single(shape) = parse_yaml_schema(&value).unwrap() else {
         unreachable!()
     };
     let PropertyDef::Single(atom) = &shape.properties["value"] else {
@@ -87,7 +84,7 @@ fn observable_json_round_trip_controls_lossless_number_interpretation() {
 fn serializer_is_deterministic_and_reparses_suggestions() {
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str("value: number(integer; suggest(003.500, many))[]\n").unwrap();
-    let SimplifiedSchema::Single(shape) = parse_yaml_schema(&value).unwrap() else {
+    let SchemaRoot::Single(shape) = parse_yaml_schema(&value).unwrap() else {
         unreachable!()
     };
     let PropertyDef::Single(atom) = &shape.properties["value"] else {
@@ -95,7 +92,7 @@ fn serializer_is_deterministic_and_reparses_suggestions() {
     };
     let serialized = serialize_property_atom(atom);
     assert_eq!(serialized, "number(integer;suggest(3.5,many))[]");
-    let reparsed = darkmatter::markdown::schemas::simplified::grammar::parse_type_expr(
+    let reparsed = simplified_schema::simplified::grammar::parse_type_expr(
         "value",
         &serialized,
     )
@@ -124,7 +121,7 @@ fn conversion_keeps_suggestions_non_validating_metadata() {
 fn source_aware_parse_projects_multibyte_and_yaml_escape_ranges() {
     let yaml = "café: string\r\nvalue: \"string(suggest(alpha, 'blue\\u0020gray'))\"\r\n";
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
-    let SimplifiedSchema::Single(shape) =
+    let SchemaRoot::Single(shape) =
         parse_yaml_schema_with_source(&value, yaml, 17).unwrap()
     else {
         unreachable!()
@@ -160,7 +157,7 @@ fn import_suggestions_are_interpreted_after_exact_target_resolution() {
         &biscuit_file::FileResolutionContext::new(dir.path()),
     )
     .unwrap();
-    let SimplifiedSchema::Single(shape) = resolved.simplified.unwrap() else {
+    let SchemaRoot::Single(shape) = resolved.simplified.unwrap() else {
         unreachable!()
     };
     let PropertyDef::Single(atom) = &shape.properties["value"] else {

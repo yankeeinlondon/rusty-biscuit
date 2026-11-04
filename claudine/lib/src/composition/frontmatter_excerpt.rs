@@ -30,7 +30,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::dsl::CodeBlockMeta;
-use darkmatter::markdown::schemas::mapping_separator;
+use simplified_schema::mapping_separator;
 
 /// Lines of context shown above and below each focused line (ruling D2; there
 /// is deliberately no configuration surface).

@@ -23,7 +23,8 @@ use biscuit_file::{SourceSpan, YamlAnalysis, YamlDiagnostic, YamlRepair, analyze
 use super::diagnostic::{CleanCode, CleanDiagnostic, CleanStage, shift, shift_repair};
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::{FrontmatterExtraction, extract_frontmatter_block};
-use crate::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding, SchemaError};
+use crate::markdown::schemas::{CleanSchemaConfig, InvalidTriggerFinding};
+use simplified_schema::SchemaError;
 use crate::markdown::{Markdown, MarkdownError};
 
 /// Why [`repair_frontmatter`] could not produce a result.

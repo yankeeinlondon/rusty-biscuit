@@ -1,4 +1,3 @@
----
 # The default refresh interval cannot exceed ten 366-day years (3660 days).
 # expect-problem: /refresh_interval_days
 $schema: ../../../../../../docs/platforms.schema.yaml
@@ -27,4 +26,3 @@ platforms:
     approved_by: maintainer
     approved_on: 2026-09-17
 excluded: []
----

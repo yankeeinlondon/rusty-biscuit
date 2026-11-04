@@ -66,13 +66,8 @@ impl DiscoveryFilter {
         if self.include.is_match(relative) {
             return Some(ListedKind::Markdown);
         }
-        is_yaml(relative).then_some(ListedKind::Yaml)
+        crate::overlay::is_yaml_path(relative).then_some(ListedKind::Yaml)
     }
-}
-
-/// Whether `path` has a `.yaml` or `.yml` extension.
-fn is_yaml(path: &Path) -> bool {
-    matches!(path.extension().and_then(|ext| ext.to_str()), Some("yaml" | "yml"))
 }
 
 /// The outcome of a discovery pass: the workspace file list.

@@ -7,14 +7,15 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
-use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
-use darkmatter::markdown::schemas::simplified::serialize_property_atom;
-use darkmatter::markdown::schemas::{
-    AlphanumericOption, AlphanumericOptions, Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef,
-    SchemaConstraintConflictKind, SchemaError, SchemaSourceId, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition,
-    parse_property_definition_with_source, parse_yaml_schema,
+use darkmatter::markdown::schemas::resolve::resolve_yaml_schema;
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::simplified::grammar::parse_type_expr;
+use simplified_schema::simplified::serialize_property_atom;
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{
+    AlphanumericOption, AlphanumericOptions, Constraint, PropertyAtom, PropertyDef, SchemaConstraintConflictKind,
+    SchemaError, SchemaSourceId, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType, TypeExpr,
+    parse_property_definition, parse_property_definition_with_source, parse_yaml_schema,
 };
 use serde_json::json;
 use serde_yaml_ng::Value as YamlValue;
@@ -35,7 +36,7 @@ fn resolve_inline(dir: &Path, schema: &str) -> Result<ResolvedSchema, SchemaErro
 }
 
 fn atom<'a>(resolved: &'a ResolvedSchema, property: &str) -> &'a PropertyAtom {
-    let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+    let Some(SchemaRoot::Single(shape)) = &resolved.simplified else {
         panic!("expected a single simplified shape");
     };
     match &shape.properties[property] {
@@ -96,7 +97,7 @@ fn every_native_null_spelling_is_the_null_type_at_a_property() {
     for spelling in ["null", "Null", "NULL", "~", "", "'null'", "\"null\""] {
         let schema = parse_yaml_schema(&yaml(&format!("review: {spelling}\n")))
             .unwrap_or_else(|error| panic!("`review: {spelling}` parses: {error}"));
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!("single shape expected");
         };
         assert_eq!(
@@ -113,7 +114,7 @@ fn native_null_is_a_union_arm_and_a_nested_property() {
         "draft: [string, null]\nblock:\n  - number\n  - ~\nmeta:\n  gone:\n",
     ))
     .expect("parses");
-    let SimplifiedSchema::Single(shape) = schema else {
+    let SchemaRoot::Single(shape) = schema else {
         panic!("single shape expected");
     };
     for property in ["draft", "block"] {
@@ -186,7 +187,7 @@ fn an_empty_value_and_an_empty_union_item_project_as_null() {
         );
     }
     let dir = TempDir::new().expect("tempdir");
-    write(dir.path(), "types.yaml", &format!("kind: schema\ntypes:\n  {}", source.replace('\n', "\n  ")));
+    write(dir.path(), "types.yaml", &format!("$schema:\n  {}", source.replace('\n', "\n  ")));
     let reference = "./types.yaml";
     assert!(validates(dir.path(), reference, "title: null\nstatus: null"));
     assert!(validates(dir.path(), reference, "status: 4"));
@@ -201,7 +202,7 @@ fn a_null_named_type_resolves_through_local_and_imported_references() {
     write(
         dir.path(),
         "local.yaml",
-        "kind: schema\ntypes:\n  nothing: null\n  a: nothing\n  b: [string, nothing@this]\n",
+        "kind: schema\ntypes:\n  nothing: null\n$schema:\n  a: nothing\n  b: [string, nothing@this]\n",
     );
     let resolved = resolve_inline(
         dir.path(),
@@ -348,12 +349,12 @@ fn equal_option_sets_at_a_use_site_resolve() {
     assert_eq!(
         b.constraints
             .iter()
-            .filter(|c| matches!(c, darkmatter::markdown::schemas::Constraint::Options(_)))
+            .filter(|c| matches!(c, simplified_schema::Constraint::Options(_)))
             .count(),
         1,
         "the repeated option list is not duplicated: {b:?}"
     );
-    assert!(b.constraints.contains(&darkmatter::markdown::schemas::Constraint::MaxLen(10)));
+    assert!(b.constraints.contains(&simplified_schema::Constraint::MaxLen(10)));
 }
 
 #[test]
@@ -413,12 +414,12 @@ fn every_route_to_a_different_option_set_conflicts() {
     write(
         dir.path(),
         "local.yaml",
-        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  wide: slug(allow-periods)\n  w: wide\n",
+        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  wide: slug(allow-periods)\n$schema:\n  w: wide\n",
     );
     write(
         dir.path(),
         "union.yaml",
-        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  u: [slug(allow-slashes), null]\n  w: u\n",
+        "kind: schema\ntypes:\n  slug: alphanumeric(allow-dashes)\n  u: [slug(allow-slashes), null]\n$schema:\n  w: u\n",
     );
     for file in ["./local.yaml", "./union.yaml"] {
         let err = resolve_yaml_schema(
@@ -491,7 +492,7 @@ fn lowering_records_the_canonical_options() {
 #[test]
 fn type_definition_values_follow_the_same_null_rules() {
     let dir = TempDir::new().expect("tempdir");
-    write(dir.path(), "meta.yaml", "kind: schema\ntypes:\n  def: type-definition(required)\n");
+    write(dir.path(), "meta.yaml", "$schema:\n  def: type-definition(required)\n");
     for (data, valid) in [
         ("def: [string, null]", true),
         ("def: [string, ~]", true),

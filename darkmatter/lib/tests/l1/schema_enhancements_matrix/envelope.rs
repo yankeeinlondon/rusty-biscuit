@@ -14,7 +14,7 @@
 
 use super::validate_document;
 use crate::schema_yaml_spellings::{Edit, Edit::*, apply};
-use darkmatter::markdown::schemas::{SchemaError, parse_standalone_schema_document};
+use simplified_schema::{NotSchemaReason, SchemaError, parse_standalone_schema_document};
 
 /// The public outcome of one cell.
 #[derive(Clone, Copy)]
@@ -26,6 +26,9 @@ enum Outcome {
     /// Loading fails and nothing usable is produced, with no recognized
     /// envelope to name.
     Fails,
+    /// The file is a well-formed envelope but not a `$schema` target:
+    /// `NotASchemaDocument` with this reason.
+    NotASchema(NotSchemaReason),
 }
 
 use Outcome::*;
@@ -41,8 +44,11 @@ const fn cell(label: &'static str, edit: Edit, outcome: Outcome) -> Cell {
 }
 
 /// Walks `cells` over `seed`, one schema file per cell so a path-keyed
-/// validator cache never serves an earlier cell.
-fn walk(seed_name: &str, seed: &str, cells: &[Cell]) {
+/// validator cache never serves an earlier cell. Every outcome but
+/// `Validates` is read through `$schema: ./{file}`; `Validates` instances are
+/// checked against the document schema `declare` builds from the file name,
+/// since a `types`-only file is reached through a named-type import.
+fn walk(seed_name: &str, seed: &str, cells: &[Cell], declare: fn(&str) -> String) {
     let workspace = tempfile::tempdir().expect("matrix workspace");
     let dir = workspace.path();
     let mut failures = Vec::new();
@@ -56,7 +62,7 @@ fn walk(seed_name: &str, seed: &str, cells: &[Cell]) {
         let reference = format!("$schema: ./{file_name}");
         let problem = match cell.outcome {
             Validates(instances) => instances.iter().find_map(|(instance, expected)| {
-                match validate_document(dir, &format!("{reference}\n{instance}")) {
+                match validate_document(dir, &format!("{}\n{instance}", declare(&file_name))) {
                     Ok(report) if report.valid == *expected => None,
                     Ok(report) => Some(format!(
                         "{instance:?}: expected valid={expected}, problems {:?}",
@@ -72,6 +78,10 @@ fn walk(seed_name: &str, seed: &str, cells: &[Cell]) {
             Fails => validate_document(dir, &reference)
                 .ok()
                 .map(|report| format!("expected a load error, got a report {report:?}")),
+            NotASchema(expected) => match validate_document(dir, &reference) {
+                Err(SchemaError::NotASchemaDocument { reason, .. }) if reason == expected => None,
+                other => Some(format!("expected NotASchemaDocument {{ {expected:?} }}, got {other:?}")),
+            },
         };
         if let Some(problem) = problem {
             failures.push(format!("{seed_name}/{}: {problem}\n--- source ---\n{source}", cell.label));
@@ -87,7 +97,8 @@ const TIMING_CONTROL: &[(&str, bool)] = &[
 ];
 
 /// `darkmatter/schemas/partials/timing.yaml`: the tagged envelope's `types`
-/// map and its one named type `timing`.
+/// map and its one named type `timing`, imported as `timing@file` by the
+/// `Validates` cells.
 const TAGGED_CELLS: &[Cell] = &[
     cell("control", Control, Validates(TIMING_CONTROL)),
     // `types`
@@ -97,11 +108,8 @@ const TAGGED_CELLS: &[Cell] = &[
     cell("types list", Set("types", " [timing]"), Rejects),
     cell("types one wrong element", Replace("    timing:\n", "    bad: 5\n    timing:\n"), Rejects),
     cell("types every element wrong", Set("types", "\n    first: 5\n    second: true"), Rejects),
-    cell(
-        "types empty mapping",
-        Set("types", " {}"),
-        Validates(&[("timing:\n  document_ms: -1", true)]),
-    ),
+    // Still a `types`-only document, so not a `$schema` target.
+    cell("types empty mapping", Set("types", " {}"), NotASchema(NotSchemaReason::TypesOnly)),
     cell("types duplicate", Duplicate("types"), Rejects),
     cell("second document", Append("---\nkind: schema\ntypes: {}\n"), Rejects),
     cell("trailing garbage", Append("]\n"), Rejects),
@@ -147,20 +155,20 @@ const PURE_CELLS: &[Cell] = &[
 #[test]
 fn shipped_tagged_envelope_matrix() {
     let seed = include_str!("../../fixtures/schema_enhancements_matrix/timing.shipped.yaml");
-    walk("timing", seed, TAGGED_CELLS);
+    walk("timing", seed, TAGGED_CELLS, |file| format!("$schema:\n  timing: timing@./{file}"));
 }
 
 #[test]
 fn shipped_pure_envelope_matrix() {
     let seed = include_str!("../../fixtures/schema_enhancements_matrix/slash-commands.shipped.yaml");
-    walk("slash-commands", seed, PURE_CELLS);
+    walk("slash-commands", seed, PURE_CELLS, |file| format!("$schema: ./{file}"));
 }
 
 /// The public outcome of one types-file cell.
 #[derive(Clone, Copy)]
 enum TypesOutcome {
-    /// The types file loads; used as a document schema it fails because its
-    /// named type is a description-only `function`.
+    /// The types file loads; as a `$schema` target it is
+    /// `NotASchemaDocument { TypesOnly }`, since it declares no `$schema`.
     Loads,
     /// The types file is rejected with a `SchemaDocument` error containing
     /// the text, and so is a document schema that references it.
@@ -197,11 +205,9 @@ fn walk_types(seed_name: &str, seed: &str, cells: &[TypesCell]) {
         let as_document = validate_document(dir, &format!("$schema: ./{file_name}"));
         let problem = match cell.outcome {
             Loads => match (&loaded, &as_document) {
-                (Ok(Some(_)), Err(SchemaError::ReferencedSchema { source, .. }))
-                    if matches!(source.as_ref(), SchemaError::Convert { property, message }
-                        if property == "min" && message.contains("description-only")) => None,
+                (Ok(Some(_)), Err(SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. })) => None,
                 (Ok(Some(_)), other) => Some(format!(
-                    "as a document schema the function must be a load error, got {other:?}"
+                    "as a document schema a types-only file must be NotASchemaDocument {{ TypesOnly }}, got {other:?}"
                 )),
                 (other, _) => Some(format!("expected the types file to load, got {other:?}")),
             },
@@ -224,23 +230,26 @@ fn walk_types(seed_name: &str, seed: &str, cells: &[TypesCell]) {
 const CATEGORY_CELLS: &[TypesCell] = &[
     types_cell("control", Control, Loads),
     types_cell("categories absent", Remove("categories"), Loads),
-    types_cell("categories null", Set("categories", " null"), RejectsWith("`categories` must be a list")),
-    types_cell("categories number", Set("categories", " 5"), RejectsWith("`categories` must be a list")),
+    // The shape of the list is `schema.yaml`'s `categories: string[](non-null)`.
+    types_cell("categories null", Set("categories", " null"), RejectsWith("schema.yaml`: `/categories`")),
+    types_cell("categories number", Set("categories", " 5"), RejectsWith("schema.yaml`: `/categories`")),
     types_cell(
         "categories mapping",
         Set("categories", " {Math: numbers}"),
-        RejectsWith("`categories` must be a list"),
+        RejectsWith("schema.yaml`: `/categories`"),
     ),
     types_cell(
         "categories one wrong element",
-        Replace("    - Devops\n", "    - Devops\n    - 5\n"),
-        RejectsWith("`categories[2]`: a category entry must be a string"),
+        Replace("    - Devops\n", "    - Devops\n    - {a: b}\n"),
+        RejectsWith("schema.yaml`: `/categories/2`"),
     ),
     types_cell(
         "categories every element wrong",
-        Set("categories", " [5, true]"),
-        RejectsWith("`categories[0]`: a category entry must be a string"),
+        Set("categories", " [[a], {b: c}]"),
+        RejectsWith("schema.yaml`: `/categories/0`"),
     ),
+    // A number entry converts softly to its text, as in frontmatter.
+    types_cell("categories number element", Replace("    - Devops\n", "    - Devops\n    - 5\n"), Loads),
     types_cell(
         "categories empty list",
         Set("categories", " []"),

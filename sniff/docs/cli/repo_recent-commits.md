@@ -130,7 +130,7 @@ sniff repo recent-commits 1w --branch origin/main
 In monorepos, `--package` keeps commits that changed at least one file owned by the given package, and `--package-area` keeps commits that changed at least one file inside the given area's directory:
 
 ```bash
-sniff repo recent-commits 1w --package sniff-cli
+sniff repo recent-commits 1w --package sniff-detection-cli
 sniff repo recent-commits --package-area homelab
 ```
 

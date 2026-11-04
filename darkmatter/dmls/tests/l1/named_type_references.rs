@@ -127,7 +127,7 @@ fn offset_of(text: &str, needle: &str) -> usize {
 #[test]
 fn unused_local_types_are_checked_in_their_own_table() {
     let workspace = LspWorkspace::new();
-    let schema = write(&workspace, "unused.yaml", "$schema:\n  title: string\ntypes:\n  unused: missing\n");
+    let schema = write(&workspace, "unused.yaml", "kind: schema\n$schema:\n  title: string\ntypes:\n  unused: missing\n");
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(workspace.path()));
     open(&fixture, &schema);
@@ -144,9 +144,7 @@ fn incomplete_combined_exports_and_local_types_keep_type_completion() {
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(workspace.path()));
     for (index, text, marker) in [
-        (0, "$schema:\n  title: [\ntypes:\n  label: string\n", "title: ["),
         (1, "kind: schema\n$schema:\n  title: [\ntypes:\n  label: string\n", "title: ["),
-        (2, "$schema:\n  title: label\ntypes:\n  label: [\n", "label: ["),
         (3, "kind: schema\n$schema:\n  title: label\ntypes:\n  label: [\n", "label: ["),
     ] {
         let document = write(&workspace, &format!("partial-{index}.yaml"), text);
@@ -162,7 +160,7 @@ fn incomplete_combined_exports_and_local_types_keep_type_completion() {
 fn an_exported_schema_keeps_local_types_and_imports_available_to_the_editor() {
     let workspace = LspWorkspace::new();
     let external = write(&workspace, "shared.yaml", "kind: schema\ntypes:\n  shared: number\n");
-    let schema = write(&workspace, "contract.yaml", "$schema:\n  title: label(suggest(abc))\n  count: external\ntypes:\n  label: string(required)\n  external: shared@./shared.yaml\n");
+    let schema = write(&workspace, "contract.yaml", "kind: schema\n$schema:\n  title: label(suggest(abc))\n  count: external\ntypes:\n  label: string(required)\n  external: shared@./shared.yaml\n");
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(workspace.path()));
     open(&fixture, &schema);
@@ -495,7 +493,7 @@ fn a_standalone_contradiction_and_a_mixed_cycle_are_schema_definition_errors() {
         "conflict.yaml",
         "kind: schema\ntypes:\n  label: number(min(10))\n  title: label(max(5))\n",
     );
-    let cycle = write(&workspace, "cycle.yaml", "$schema:\n  a: b\n  b: 'a@this'\n");
+    let cycle = write(&workspace, "cycle.yaml", "kind: schema\n$schema:\n  a: b\n  b: 'a@this'\n");
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(initialize_params(workspace.path()));
 
@@ -702,7 +700,7 @@ fn editing_an_imported_definition_refreshes_every_assistance_without_reopening()
 fn a_wrapped_conflict_watches_every_participant_file() {
     let workspace = LspWorkspace::new();
     let types = write(&workspace, "types.yaml", "kind: schema\ntypes:\n  label: number(min(10))\n");
-    write(&workspace, "outer.yaml", "kind: schema\ntypes:\n  title: 'label(max(5))@./types.yaml'\n");
+    write(&workspace, "outer.yaml", "$schema:\n  title: 'label(max(5))@./types.yaml'\n");
     let document = write(&workspace, "doc.md", "---\n$schema: ./outer.yaml\ntitle: 3\n---\n\nBody\n");
     let conflicts = |diagnostics: &[Value]| {
         diagnostics
@@ -775,7 +773,7 @@ fn suggestions_on_a_reference_are_checked_against_the_resolved_target() {
     let combined = write(
         &workspace,
         "combined.yaml",
-        "$schema:\n  pick: label(suggest(toolong))\ntypes:\n  label: string(max(3))\n  alias: label(suggest(another))\n",
+        "kind: schema\n$schema:\n  pick: label(suggest(toolong))\ntypes:\n  label: string(max(3))\n  alias: label(suggest(another))\n",
     );
     open(&fixture, &combined);
     let diagnostics = fixture.wait_for_diagnostics(&combined.uri);

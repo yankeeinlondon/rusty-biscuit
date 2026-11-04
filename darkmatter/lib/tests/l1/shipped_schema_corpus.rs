@@ -32,12 +32,14 @@ use std::time::SystemTime;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
-    Constraint, MatchExpr, PathSubject, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError,
-    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr,
-    locate_standalone_definition_failure, parse_property_definition, parse_schema_declaration,
-    parse_schema_declaration_with_source, parse_standalone_schema_document,
-    parse_trigger_envelope_from_str,
-    resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema},
+    MatchExpr, PathSubject, parse_trigger_envelope_from_str,
+    resolve::{resolve_schema_with_roots, resolve_yaml_schema},
+};
+use simplified_schema::resolve::ResolvedSchema;
+use simplified_schema::{
+    Constraint, NotSchemaReason, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError, SchemaShape, SimplifiedType,
+    StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, locate_standalone_definition_failure, parse_property_definition,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_standalone_schema_document,
 };
 use serde_yaml_ng::Value as YamlValue;
 
@@ -46,11 +48,16 @@ fn repo_root() -> PathBuf {
 }
 
 /// How a shipped schema artifact is expected to behave. Unlisted artifacts are
-/// [`Class::Loadable`].
+/// [`Class::Loadable`], or [`Class::TypesOnly`] when their content is a
+/// `types`-only tagged envelope.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Class {
     /// Parses as a standalone schema and resolves through `$schema: ./file`.
     Loadable,
+    /// A `kind: schema` document with `types` and no `$schema`: a valid
+    /// envelope that serves named-type imports, but never a `$schema` target.
+    /// Derived from content, never listed in [`EXCEPTIONS`].
+    TypesOnly,
     /// An empty file reserving a name.
     Placeholder,
     /// A YAML artifact that is not a schema document; any `$schema` it carries
@@ -64,14 +71,20 @@ enum Class {
     /// A `kind: schema-trigger` envelope: never a standalone schema, and its
     /// `$schema` payload parses and resolves inline from its own directory.
     Trigger,
-    /// A global catalog (`kind: schema` with `$schema` declarations): refused
-    /// as a document schema by any path, while its declarations parse and
+    /// A global catalog (`kind: schema` with `$schema` declarations), which
+    /// a host registers through its own loader. Its envelope parses as an
+    /// ordinary tagged schema document, and its declarations parse and
     /// resolve inline from its own directory.
     GlobalCatalog,
+    /// A `kind: yaml-schema` definition: the library admits it as a
+    /// standalone envelope (against its own `yaml-schema.yaml`), it is never
+    /// a trigger, and it is refused as a `$schema` target because it is
+    /// selected by `kind`. Every definition it carries parses passively.
+    YamlSchemaDefinition,
     /// A function catalog (`kind: schema` with `categories:` and `function`
-    /// types): it parses as a standalone schema, but a document schema can
-    /// never hold a function, so applying it through `$schema: ./file` fails;
-    /// each of its other named types imports and lowers.
+    /// types, and no `$schema`): it parses as a standalone schema, but as a
+    /// `types`-only document it is never a `$schema` target; each of its
+    /// other named types imports and lowers.
     FunctionCatalog,
 }
 
@@ -101,25 +114,20 @@ const fn exception(
 
 /// Every shipped schema artifact that does not load through `$schema: ./file`.
 const EXCEPTIONS: &[Exception] = &[
-    // darkmatter/docs/schemas
-    exception(
-        "darkmatter/docs/schemas",
-        "schema-definition.yaml",
-        Class::Placeholder,
-        "reserved meta-schema name that `err.yaml` declares as its `$schema`",
-    ),
-    exception(
-        "darkmatter/docs/schemas",
-        "err.yaml",
-        Class::EnvelopeRejected,
-        "tagged envelope carries `$schema`, `name`, and `description` header keys",
-    ),
     // darkmatter/schemas: the global catalog; its partials are libraries.
     exception(
         "darkmatter/schemas",
         "darkmatter.yaml",
         Class::GlobalCatalog,
         "Darkmatter's global catalog, registered explicitly",
+    ),
+    // Darkmatter's `kind: yaml-schema` definition; the library's two live in
+    // `simplified-schema/schemas/`, covered by that crate's corpus.
+    exception(
+        "darkmatter/schemas",
+        "schema-trigger.yaml",
+        Class::YamlSchemaDefinition,
+        "the definition of `kind: schema-trigger` documents, applied by `kind`",
     ),
     exception(
         "darkmatter/schemas",
@@ -206,12 +214,6 @@ const EXCEPTIONS: &[Exception] = &[
         "partials/sequence.yaml",
         Class::Placeholder,
         "draft placeholder",
-    ),
-    exception(
-        "claudine/docs/schemas",
-        "partials/communication.yaml",
-        Class::EnvelopeRejected,
-        "draft with a `description` header key",
     ),
     exception(
         "claudine/docs/schemas",
@@ -351,6 +353,10 @@ fn collect_artifacts(groups: &[(&'static str, PathBuf)]) -> Vec<Artifact> {
                 .map_or(Class::Loadable, |exception| exception.class);
             let source = fs::read_to_string(&file)
                 .unwrap_or_else(|error| panic!("{} is unreadable: {error}", file.display()));
+            let class = match class {
+                Class::Loadable if is_types_only(&source, &file) => Class::TypesOnly,
+                other => other,
+            };
             artifacts.push(Artifact {
                 dir,
                 file: relative,
@@ -371,6 +377,52 @@ fn collect_artifacts(groups: &[(&'static str, PathBuf)]) -> Vec<Artifact> {
         );
     }
     artifacts
+}
+
+/// Whether `source` is a recognized standalone envelope with no `$schema`.
+fn is_types_only(source: &str, path: &Path) -> bool {
+    matches!(parse_standalone_schema_document(source, path), Ok(Some(document)) if !document.exports_schema)
+}
+
+/// Asserts that a `types`-only schema file is refused as a `$schema` target
+/// with the `TypesOnly` reason, and that each of its non-function named
+/// types still imports through `Name@./file` and lowers. Returns the number
+/// of imports resolved and whether any of them stores definitions.
+fn assert_types_only_file(
+    path: &Path,
+    document: &YamlValue,
+    context: &FileResolutionContext,
+    label: &str,
+) -> (usize, bool) {
+    let dir = path.parent().expect("artifact directory");
+    let file_name = path.file_name().and_then(|name| name.to_str()).expect("UTF-8 file name");
+    let error = resolve_schema_with_roots(&serde_json::json!(format!("./{file_name}")), dir, &[], context)
+        .expect_err(&format!("{label} is `types`-only and must never apply as a document schema"));
+    assert!(
+        matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }),
+        "{label}: {error}"
+    );
+    let types = yaml_key(document, "types")
+        .and_then(YamlValue::as_mapping)
+        .unwrap_or_else(|| panic!("{label} declares `types:`"));
+    let mut imports = 0;
+    let mut stores_definitions = false;
+    for (name, value) in types {
+        let name = name.as_str().expect("a type name");
+        let definition = parse_property_definition(name, value)
+            .unwrap_or_else(|error| panic!("{label} `{name}`: {error}"));
+        if is_function_definition(&definition) {
+            continue;
+        }
+        let import = serde_yaml_ng::from_str::<YamlValue>(&format!("probe: \"{name}@./{file_name}\""))
+            .expect("YAML");
+        let resolved = resolve_yaml_schema(&import, dir, context)
+            .unwrap_or_else(|error| panic!("{label} `{name}` must import: {error}"));
+        assert_lowered(&resolved, &format!("{label} `{name}`"));
+        stores_definitions |= resolved.json_schema.get("$defs").is_some();
+        imports += 1;
+    }
+    (imports, stores_definitions)
 }
 
 type Fingerprint = Vec<(PathBuf, Vec<u8>, Option<SystemTime>)>;
@@ -679,9 +731,9 @@ fn shipped_schema_artifacts_parse_passively() {
             (_, None) => {}
         }
         match artifact.class {
-            Class::Loadable => {
+            Class::Loadable | Class::TypesOnly => {
                 assert!(
-                    matches!(outcome, Ok(Some(_))),
+                    matches!(&outcome, Ok(Some(parsed)) if parsed.exports_schema == (artifact.class == Class::Loadable)),
                     "{label} must parse as a standalone schema; classify it in EXCEPTIONS if it is not one: {outcome:?}",
                 );
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
@@ -723,17 +775,33 @@ fn shipped_schema_artifacts_parse_passively() {
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
             }
+            Class::YamlSchemaDefinition => {
+                assert!(
+                    matches!(&outcome, Ok(Some(parsed))
+                        if parsed.exports_schema && parsed.envelope == StandaloneSchemaEnvelope::YamlSchema),
+                    "{label} must be admitted as a `yaml-schema` envelope: {outcome:?}",
+                );
+                assert!(
+                    matches!(parse_trigger_envelope_from_str(&artifact.source), Ok(None)),
+                    "{label} is now claimed as a trigger; reclassify it",
+                );
+                let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
+                definitions += parsed.len();
+                record_core_types(&mut core_type_users, &label, &parsed);
+            }
             Class::EnvelopeRejected => {
                 let message =
                     outcome.expect_err(&format!("{label} now loads; remove its exception"));
-                assert!(message.contains("unsupported keys"), "{label}: {message}");
+                assert!(message.contains("was unexpected"), "{label}: {message}");
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
             }
             Class::GlobalCatalog => {
-                let message = outcome.expect_err(&format!("{label} now loads as a document schema"));
-                assert!(message.contains("global catalog"), "{label}: {message}");
+                assert!(
+                    matches!(&outcome, Ok(Some(parsed)) if parsed.exports_schema),
+                    "{label} must parse as a tagged envelope with `$schema`: {outcome:?}"
+                );
                 let parsed = bodies.unwrap_or_else(|failures| panic!("{label}: {failures:#?}"));
                 definitions += parsed.len();
                 record_core_types(&mut core_type_users, &label, &parsed);
@@ -830,6 +898,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     let context = FileResolutionContext::new(scratch.path());
 
     let mut resolved_files = 0usize;
+    let mut types_only_files = 0usize;
     let mut with_definitions = 0usize;
     let mut inline_bodies = 0usize;
     for artifact in &artifacts {
@@ -865,8 +934,15 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     with_definitions += 1;
                 }
             }
+            Class::TypesOnly => {
+                let (imports, stores_definitions) =
+                    assert_types_only_file(&artifact.path, &document, &context, &label);
+                inline_bodies += imports;
+                types_only_files += 1;
+                with_definitions += usize::from(stores_definitions);
+            }
             Class::EnvelopeRejected | Class::NotASchema | Class::Trigger | Class::GlobalCatalog => {
-                if matches!(artifact.class, Class::EnvelopeRejected | Class::GlobalCatalog) {
+                if artifact.class == Class::EnvelopeRejected {
                     let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                         .expect_err(&format!("{label} now loads; remove its exception"));
                     assert!(
@@ -888,12 +964,20 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                     inline_bodies += 1;
                 }
             }
+            Class::YamlSchemaDefinition => {
+                let error = resolve_schema_with_roots(&reference, dir, &[], &context)
+                    .expect_err(&format!("{label} is a `yaml-schema` and must never be a `$schema` target"));
+                assert!(
+                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::SelectedByKind, .. }),
+                    "{label}: {error}"
+                );
+            }
             Class::FunctionCatalog => {
                 let error = resolve_schema_with_roots(&reference, dir, &[], &context)
                     .expect_err(&format!("{label} must never apply as a document schema"));
                 assert!(
-                    format!("{error:?}").contains("a `function` type is description-only"),
-                    "{label} must be refused for its function types: {error}"
+                    matches!(error, SchemaError::NotASchemaDocument { reason: NotSchemaReason::TypesOnly, .. }),
+                    "{label} must be refused as a `types`-only document: {error}"
                 );
                 let types = yaml_key(&document, "types")
                     .and_then(YamlValue::as_mapping)
@@ -919,14 +1003,13 @@ fn loadable_shipped_schemas_resolve_and_lower() {
             Class::Placeholder | Class::Draft { .. } => {}
         }
     }
-    assert!(
-        resolved_files >= 10,
-        "only {resolved_files} shipped schemas resolved"
-    );
-    // Claudine's lifecycle and sequence schemas store their repeated helpers.
+    assert!(resolved_files >= 5, "only {resolved_files} shipped schemas resolved");
+    // The global catalog's partials are `types`-only libraries: refused as a
+    // `$schema` target, each of their types imported instead.
+    assert!(types_only_files >= 5, "only {types_only_files} shipped `types`-only libraries");
+    // Claudine's lifecycle and sequence schemas store their repeated helpers
+    // (as `types`-only libraries, through the imports of their types).
     assert!(with_definitions >= 2, "only {with_definitions} shipped schemas store definitions");
-    // The global catalog's partials became loadable libraries, so they count
-    // among `resolved_files` rather than here.
     assert!(
         inline_bodies >= 9,
         "only {inline_bodies} rejected-envelope bodies resolved inline"
@@ -1261,6 +1344,10 @@ fn shipped_research_contracts_resolve_and_lower() {
         named_references += source.matches("@this").count() + source.matches("@./").count()
             + source.matches("@../").count();
 
+        if is_types_only(&source, path) {
+            named_references += assert_types_only_file(path, &document, &context, &label).0;
+            continue;
+        }
         let reference = serde_json::json!(format!(
             "./{}",
             path.file_name().and_then(|name| name.to_str()).expect("UTF-8 file name")
@@ -1552,4 +1639,113 @@ fn shipped_trigger_fixtures_gate_on_a_list_of_steps() {
         before == fingerprint(inputs.iter().copied()),
         "loading a trigger mutated a fixture"
     );
+}
+
+/// The `kind` an artifact declares at its top level, when it is a string.
+fn declared_kind(source: &str) -> Option<String> {
+    let body = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let document: YamlValue = serde_yaml_ng::from_str(body).ok()?;
+    yaml_key(&document, "kind").and_then(YamlValue::as_str).map(str::to_string)
+}
+
+/// Every `kind: yaml-schema` file in the two folders that ship definitions
+/// is in the compiled-in table (and nothing else is): a definition added on
+/// disk without its `include_str!` entry would apply in this checkout only.
+#[test]
+fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
+    let root = repo_root();
+    let mut on_disk = Vec::new();
+    for (dir, path) in [
+        ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
+    ] {
+        for file in files_below(&path, "yaml") {
+            let source = fs::read_to_string(&file).expect("readable");
+            if declared_kind(&source).as_deref() == Some("yaml-schema") {
+                on_disk.push(PathBuf::from(format!("{dir}/{}", relative(&file, &path))));
+            }
+        }
+    }
+    on_disk.sort();
+    let mut shipped = darkmatter::markdown::schemas::yaml_documents::shipped_kind_definition_paths();
+    shipped.sort();
+    assert_eq!(on_disk, shipped);
+}
+
+/// Every repository schema, trigger, and `yaml-schema` document passes its
+/// definition through the registry of its own package area, where the
+/// checkout copies of the shipped definitions sit in a schema root: each copy
+/// is recognized as the source of its built-in (source-path identity), so the
+/// corpus manufactures no duplicate claim, and validation follows the copy.
+#[test]
+fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
+    use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+    use darkmatter::markdown::schemas::yaml_documents::{Claim, DefinitionSource};
+    use darkmatter::markdown::schemas::{DarkmatterSchemas, KindRegistry, RegistryScope, YamlOutcome};
+
+    let root = repo_root();
+    let areas = [
+        ("darkmatter/schemas", root.join("darkmatter/schemas")),
+        ("darkmatter/docs/schemas", root.join("darkmatter/docs/schemas")),
+        ("darkmatter/example-docs/schemas", root.join("darkmatter/example-docs/schemas")),
+        ("simplified-schema/schemas", root.join("simplified-schema/schemas")),
+        ("content-policy/schemas", root.join("content-policy/schemas")),
+        ("claudine/schemas", root.join("claudine/schemas")),
+        ("claudine/docs/schemas", root.join("claudine/docs/schemas")),
+        ("claudine/docs/research", root.join("claudine/docs/research")),
+        (".claudine/schemas", root.join(".claudine/schemas")),
+        ("schemas", root.join("schemas")),
+    ];
+    // Artifacts the corpus above already knows are not valid schema documents.
+    let known_invalid = |dir: &str, file: &str| {
+        EXCEPTIONS.iter().any(|exception| {
+            exception.dir == dir
+                && exception.file == file
+                && matches!(exception.class, Class::Draft { .. } | Class::EnvelopeRejected | Class::Placeholder)
+        })
+    };
+    let mut checked = 0usize;
+    let mut failures = Vec::new();
+    for (dir, path) in &areas {
+        let files = files_below(path, "yaml");
+        // One context and registry per folder: the folder's package area
+        // decides its schema roots, and every artifact in it shares them.
+        let snapshot = RequestSnapshot::new(path).with_home(None);
+        let context = build_resolution_context(&snapshot).expect("checkout context");
+        let registry = std::sync::Arc::new(KindRegistry::from_filesystem(&context, RegistryScope::WithRoots));
+        for (kind, claim) in registry.claims() {
+            if let Claim::Duplicate(files) = claim {
+                failures.push(format!("{dir}: `{kind}` is claimed twice: {files:?}"));
+            }
+        }
+        if dir.starts_with("darkmatter/schemas") {
+            let Some(Claim::Healthy(trigger)) = registry.claim("schema-trigger") else {
+                panic!("schema-trigger is claimed in {dir}");
+            };
+            assert!(
+                matches!(trigger.source(), DefinitionSource::File(file) if file.ends_with("darkmatter/schemas/schema-trigger.yaml")),
+                "the checkout copy replaces the built-in: {:?}",
+                trigger.source()
+            );
+        }
+        let schemas = DarkmatterSchemas::new(context).with_kind_registry(registry);
+        for file in files {
+            let file_label = relative(&file, path);
+            let source = fs::read_to_string(&file).expect("readable");
+            let Some(kind) = declared_kind(&source) else { continue };
+            if !matches!(kind.as_str(), "schema" | "schema-trigger" | "yaml-schema") || known_invalid(dir, &file_label) {
+                continue;
+            }
+            checked += 1;
+            match schemas.validate_yaml_document(&source, &file) {
+                Ok(YamlOutcome::Validated(validation)) if validation.report.valid => {}
+                Ok(YamlOutcome::Validated(validation)) => {
+                    failures.push(format!("{dir}/{file_label}: {:?}", validation.report.problems))
+                }
+                other => failures.push(format!("{dir}/{file_label}: {other:?}")),
+            }
+        }
+    }
+    assert!(checked >= 20, "the corpus checked {checked} kinded artifacts");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

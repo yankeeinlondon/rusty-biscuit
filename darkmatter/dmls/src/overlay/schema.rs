@@ -18,14 +18,17 @@ use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::completion::DefinitionLookup;
-use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
-use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
+use darkmatter::markdown::schemas::resolve::resolve_schema;
+use simplified_schema::resolve::merge_baseline;
+use simplified_schema::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
-    SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage,
-    darkmatter_base_json_schema_ref, effective_property_shape, mapping_separator,
+    DarkmatterSchemas, EffectiveSchema, darkmatter_base_json_schema_ref, effective_property_shape,
     triggers::TriggerRegistry,
+};
+use simplified_schema::{
+    DefKey, Definition, DefinitionTable, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaAdvisory,
+    SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SchemaRoot, SimplifiedType,
+    StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage, mapping_separator,
 };
 use globset::{Glob, GlobSetBuilder};
 use serde_json::Value;
@@ -74,12 +77,12 @@ pub struct SemanticTypeRegion {
 
 /// Projects every complete definition in a parsed schema as a semantic region.
 pub fn semantic_type_regions(
-    schema: &SimplifiedSchema,
+    schema: &SchemaRoot,
     source_map: &SchemaSourceMap,
 ) -> Vec<SemanticTypeRegion> {
     let mut regions = Vec::new();
     match schema {
-        SimplifiedSchema::Single(shape) => {
+        SchemaRoot::Single(shape) => {
             collect_semantic_type_regions(
                 shape,
                 &SchemaSourcePath::root(),
@@ -87,7 +90,7 @@ pub fn semantic_type_regions(
                 &mut regions,
             );
         }
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Union(arms) => {
             for (index, arm) in arms.iter().enumerate() {
                 if let SchemaArm::Inline(shape) = arm {
                     collect_semantic_type_regions(
@@ -107,7 +110,7 @@ pub fn semantic_type_regions(
 pub fn standalone_type_regions(model: &StandaloneSchemaDocument) -> Vec<SemanticTypeRegion> {
     let mut regions = model.schema().map_or_else(Vec::new, |schema| semantic_type_regions(schema, &model.source_map));
     if let (Some(types), Some(source_map)) = (&model.local_types, &model.local_type_source_map) {
-        regions.extend(semantic_type_regions(&SimplifiedSchema::Single(types.clone()), source_map));
+        regions.extend(semantic_type_regions(&SchemaRoot::Single(types.clone()), source_map));
     }
     regions
 }
@@ -239,10 +242,13 @@ pub fn frontmatter_authoring(
         // `build` → `target` path that does not exist, silently dropping the
         // property's declared semantic meta-type.
         let path = ast.key_path_at(index);
-        if path.len() > 1 && path[0] == "$schema" {
+        // A YAML document's `$schema` selected by its `kind` is data, typed
+        // by the definition like any other property.
+        let schema_reference = ast.schema_entry().is_some();
+        if schema_reference && path.len() > 1 && path[0] == "$schema" {
             continue;
         }
-        let kinds = if path == ["$schema"] {
+        let kinds = if schema_reference && path == ["$schema"] {
             vec![MetaSchemaKind::Schema]
         } else {
             def_at_path(&shape, &path, definitions)
@@ -268,7 +274,7 @@ pub fn frontmatter_authoring(
 ///
 /// This recognizes only top-level YAML mapping entries, in either block or
 /// flow presentation — the authoritative parser
-/// ([`parse_standalone_schema_document`](darkmatter::markdown::schemas::parse_standalone_schema_document))
+/// ([`parse_standalone_schema_document`](simplified_schema::parse_standalone_schema_document))
 /// accepts a mapping regardless of presentation, so a claim that saw only
 /// block style would drop the retained model of a flow-authored document at
 /// the first malformed keystroke.
@@ -277,22 +283,31 @@ pub fn frontmatter_authoring(
 /// that is *already known* to be unparseable, on every keystroke. The
 /// recognizer is therefore lexical — one linear scan, no backtracking — and
 /// tolerant of truncated or otherwise broken input. It still refuses ordinary
-/// YAML and raw JSON Schema, which carry top-level keys beyond `$schema`
-/// and an optional `types` table and never carry `kind: schema`.
+/// YAML and raw JSON Schema, which carry a top-level key the informal
+/// envelope does not admit
+/// ([`StandaloneSchemaEnvelope::admits_top_level_key`]) and never carry
+/// `kind: schema` or `kind: yaml-schema`. A whole YAML document is a schema
+/// document only by its `kind`, so only the `Tagged` and `YamlSchema` claims
+/// serve it; the informal (`Pure`) claim serves other buffers alone.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
     let top_level = match flow_mapping_start(text) {
         Some(start) => flow_top_level_entries(&text[start + 1..]),
         None => block_top_level_entries(text),
     };
-    if top_level.iter().any(|(key, value)| {
-        key == "kind" && lexical_scalar(value).as_deref() == Some("schema")
-    }) {
-        return Some(StandaloneSchemaEnvelope::Tagged);
+    let kind = top_level
+        .iter()
+        .find(|(key, _)| key == "kind")
+        .and_then(|(_, value)| lexical_scalar(value));
+    match kind.as_deref() {
+        Some("schema") => return Some(StandaloneSchemaEnvelope::Tagged),
+        Some("yaml-schema") => return Some(StandaloneSchemaEnvelope::YamlSchema),
+        _ => {}
     }
     (top_level.iter().any(|(key, _)| key == "$schema")
-        && (top_level.len() == 1
-            || (top_level.len() == 2 && top_level.iter().any(|(key, _)| key == "types"))))
-        .then_some(StandaloneSchemaEnvelope::Pure)
+        && top_level
+            .iter()
+            .all(|(key, _)| StandaloneSchemaEnvelope::Pure.admits_top_level_key(key)))
+    .then_some(StandaloneSchemaEnvelope::Pure)
 }
 
 /// Top-level implicit or explicit pairs of a block mapping.
@@ -1065,7 +1080,7 @@ fn combined_baseline(
             continue;
         }
         let resolved = load_extension_schema(extension, workspace_roots, context)?;
-        if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
+        if let Some(SchemaRoot::Single(shape)) = &resolved.simplified {
             shapes.push(shape.clone());
             if !resolved.definitions.is_empty() {
                 definitions.push(Arc::clone(&resolved.definitions));
@@ -1099,7 +1114,7 @@ fn load_extension_schema(
     extension: &SchemaExtensionConfig,
     workspace_roots: &[PathBuf],
     context: &FileResolutionContext,
-) -> Result<darkmatter::markdown::schemas::resolve::ResolvedSchema, SchemaError> {
+) -> Result<simplified_schema::resolve::ResolvedSchema, SchemaError> {
     let path = resolve_extension_path(&extension.path, workspace_roots);
     let base_dir = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
     // Drive resolution through the same file-reference path a `$schema` string
@@ -1271,7 +1286,7 @@ mod tests {
             "    - string\n",
             "    - item: boolean\n",
         );
-        let model = darkmatter::markdown::schemas::parse_standalone_schema_document(
+        let model = simplified_schema::parse_standalone_schema_document(
             source,
             Path::new("/w/schema.yaml"),
         )
@@ -1307,6 +1322,12 @@ mod tests {
             "---\n{ \"$schema\": { \"title\": \"str\" } }\n",
             // Truncated mid-edit: the closing braces are not typed yet.
             "{\"$schema\": {\"title\": \"str",
+            // An informal envelope may carry a `description` beside `types`.
+            "description: Feature reviews\n$schema:\n  title: string\n",
+            "description: Reviews\ntypes:\n  Id: string\n$schema:\n  id: Id@this\n",
+            "{description: Reviews, $schema: {title: string}}",
+            // ... and a `categories` list, as the tagged envelope may.
+            "categories: [Core]\n$schema:\n  title: string\ntypes:\n  Id: string\n",
         ] {
             assert_eq!(
                 standalone_envelope_claim(pure),
@@ -1319,12 +1340,26 @@ mod tests {
             "kind: schema\ntypes:\n  title: string\n",
             "? kind\n: schema\n? types\n:\n  title: string\n",
             "{kind: schema, types: {title: string}}",
+            "kind: schema\ndescription: Reviews\n$schema:\n  title: string\n",
             "{\"types\": {\"title\": \"str\"}, \"kind\": \"schema\"}",
         ] {
             assert_eq!(
                 standalone_envelope_claim(tagged),
                 Some(StandaloneSchemaEnvelope::Tagged),
                 "{tagged:?}"
+            );
+        }
+
+        for yaml_schema in [
+            "kind: yaml-schema\n$schema:\n  kind: literal(roster; required)\n",
+            "{kind: yaml-schema, $schema: {kind: literal(roster; required)}}",
+            // Truncated mid-edit.
+            "kind: yaml-schema\n$schema:\n  kind: literal(ros",
+        ] {
+            assert_eq!(
+                standalone_envelope_claim(yaml_schema),
+                Some(StandaloneSchemaEnvelope::YamlSchema),
+                "{yaml_schema:?}"
             );
         }
 
@@ -1336,6 +1371,9 @@ mod tests {
             "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\"}",
             "{kind: config, types: {title: string}}",
             "[1, 2, 3]\n",
+            // A key the informal envelope does not admit declines.
+            "description: Reviews\ntitle: x\n$schema:\n  title: string\n",
+            "kind: config\ndescription: Reviews\n$schema:\n  title: string\n",
         ] {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
         }
@@ -1368,7 +1406,7 @@ mod tests {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1423,7 +1461,7 @@ mod tests {
             concat!("kind: schema\n", "types:\n", "  title: foo-\"bar\n"),
         ] {
             assert!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     carrier,
                     Path::new("/w/schema.yaml"),
                 )
@@ -1439,12 +1477,12 @@ mod tests {
 
         // Part 2 — a `-"` mid-plain-scalar on a *top-level* line must not open a
         // cross-line quote that swallows the deciding `kind` key. The extra
-        // top-level `description` key makes the parser reject the recognized
+        // top-level `notes` key makes the parser reject the recognized
         // envelope, so `Some(Tagged)` still agrees with it.
         let top_level_poison =
-            concat!("description: foo-\"bar\n", "kind: schema\n", "types:\n", "  x: string\n");
+            concat!("notes: foo-\"bar\n", "kind: schema\n", "types:\n", "  x: string\n");
         assert!(
-            darkmatter::markdown::schemas::parse_standalone_schema_document(
+            simplified_schema::parse_standalone_schema_document(
                 top_level_poison,
                 Path::new("/w/schema.yaml"),
             )
@@ -1477,7 +1515,7 @@ mod tests {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1501,7 +1539,7 @@ mod tests {
             r#"{kind: schema, types: {title: foo- "bar}}"#,
         ] {
             assert!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     carrier,
                     Path::new("/w/schema.yaml"),
                 )
@@ -1524,7 +1562,7 @@ mod tests {
             assert_eq!(standalone_envelope_claim(inert), None, "{inert:?}");
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1543,14 +1581,16 @@ mod tests {
     fn envelope_claim_distinguishes_block_plain_scalars_from_flow_collections() {
         for indicator in ['[', '{', ','] {
             let value = format!("foo{indicator} \"bar");
+            // `notes` is outside the tagged envelope's keys, so the parser
+            // recognizes the envelope and rejects it.
             let tagged = format!(
-                "description: {value}\nkind: schema\ntypes:\n  title: nope\n"
+                "notes: {value}\nkind: schema\ntypes:\n  title: nope\n"
             );
             serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&tagged).unwrap_or_else(|error| {
                 panic!("block carrier must be valid YAML: {tagged:?}: {error}")
             });
             assert!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     &tagged,
                     Path::new("/w/schema.yaml"),
                 )
@@ -1569,7 +1609,7 @@ mod tests {
             });
             assert!(
                 matches!(
-                    darkmatter::markdown::schemas::parse_standalone_schema_document(
+                    simplified_schema::parse_standalone_schema_document(
                         &inert,
                         Path::new("/w/schema.yaml"),
                     ),
@@ -1617,7 +1657,7 @@ mod tests {
             ("\"a: b\": c\n$schema: ./a.yaml\n", None),
         ] {
             let recognized = !matches!(
-                darkmatter::markdown::schemas::parse_standalone_schema_document(
+                simplified_schema::parse_standalone_schema_document(
                     text,
                     Path::new("/w/schema.yaml"),
                 ),
@@ -1661,7 +1701,7 @@ mod tests {
             "  \"<ending::.md>\": boolean\n",
             "  \"<pattern::[0-9_]$>\": string\n",
         );
-        let model = darkmatter::markdown::schemas::parse_standalone_schema_document(
+        let model = simplified_schema::parse_standalone_schema_document(
             source,
             Path::new("/w/schema.yaml"),
         )

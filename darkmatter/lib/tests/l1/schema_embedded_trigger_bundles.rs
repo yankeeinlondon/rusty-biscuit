@@ -9,6 +9,7 @@
 //! `build_resolution_context` from a `RequestSnapshot` with an empty fixture
 //! `HOME` and no environment.
 
+use darkmatter::markdown::schemas::TriggerOrigin;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -16,9 +17,9 @@ use biscuit_file::{FileResolutionContext, canonicalize_simplified};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, SchemaError, SchemaOriginKind,
-    SchemaSourceId, TriggerSource, trace_registry,
+    DarkmatterSchemas, EmbeddedSchemaBundle, InvalidTriggerFinding, TriggerSource, trace_registry,
 };
+use simplified_schema::{SchemaError, SchemaOriginKind, SchemaSourceId};
 use serde_json::json;
 
 const BUNDLE: &str = "host-bundle";

@@ -8,7 +8,9 @@ Source: `biscuit-file/lib/src/`
 | `yaml` | `yaml` | `Yaml`, `YamlError`, `YamlSource`, `ConversionOutput` |
 | `json5` | `json5` | `Json5`, `Json5Error`, `Json5Source` |
 | `pdf` | `extract` / `lopdf` / `pdfium` | `Pdf`, `PdfConfig`, `PdfError`, `PdfMarkdown`, `PdfToc` |
-| `file_reference` | `file-reference` | `FileReference`, `FileReferenceError`, `PathPosition`, `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope`; from `file_reference::portable` (`strategy`, `env_anchor`, `diagnostics`, `evaluate`, `path_identity`, crate-internal `text`): `PortablePath`, `PortableReference`, `PortabilityPreference`, `IntentForms`, `PORTABLE_ENV_VARIABLES`, `PortablePathError` and its diagnostics types, `PathIdentity`, `RelativeRoute` |
+| `file_reference` | `file-reference-syntax` | `FileReference` (parse, `class`, `payload`, builders), `FileReferenceKind`, `FileReferenceClass`, `FileReferenceError`, `ResolutionFailure`, `ResolutionCandidate`, `RootProvenance`, `PathPosition`, `MagicPathTier`, `GlobReference` (`new`, `patterns`, `escape`), `GlobReferenceError`, `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope`, `home_dir`, `user_cache_dir`; from `file_reference::portable` (`path_identity`, `strategy`): `PathIdentity`, `RelativeRoute`, `PortabilityPreference`, `IntentForms` |
+| `file_reference` (resolution) | `file-reference` | `resolve.rs` and every `resolve*`/`candidate_plan*`/`complete_partial*`/`validate_*_candidate` method, `DetailedResolution`, `PartialCompletion`, `Resolved`, `MagicSearchRoot`, glob listing (`glob/{list,matches,roots}.rs`: `GlobListing`, `SkippedEntry`, `PreparedGlobReference`), `find_git_root`, `FileReferenceError::Git`; from `file_reference::portable` (`env_anchor`, `diagnostics`, `evaluate`, crate-internal `text`): `PortablePath`, `PortableReference`, `PORTABLE_ENV_VARIABLES`, `PortablePathError` and its diagnostics types |
+| `frontmatter` | `yaml` | `extract_frontmatter_block`, `FrontmatterExtraction`, `FrontmatterEnvelopeError`, `line_spans`, `LineSpan`, `detect_near_miss_fence` |
 | `detect` | (always) | `FileType`, `detect_file_type`, `detect_file_type_from_bytes` |
 | `format` | (always) | `DataFormat` |
 | `path_text` | (always) | `to_portable_string`, `try_portable_string` |
@@ -26,7 +28,8 @@ Default features: `toml`, `yaml`, `json5`, `extract`, `lopdf`, `file-reference`
 | `extract` | `pdf-extract` | PDF text extraction |
 | `lopdf` | `lopdf` | PDF TOC extraction |
 | `pdfium` | `pdfium-render` | High-fidelity PDF extraction |
-| `file-reference` | `gix`, `walkdir`, `globset`, `url` | File reference parsing and resolution |
+| `file-reference-syntax` | `globset`, `url` | Passive file and glob reference grammar and data types |
+| `file-reference` | `file-reference-syntax`, `gix`, `walkdir` | File reference resolution, glob listing, portable references, git root discovery |
 | `schema` | `jsonschema` | JSON Schema validation (not yet implemented) |
 | `full` | all above | All features enabled |
 

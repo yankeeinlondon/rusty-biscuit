@@ -16,10 +16,10 @@ use super::content_policy_fixtures::{
 use crate::markdown::Markdown;
 use crate::markdown::schemas::embedded::{self, EmbeddedDocument};
 use crate::markdown::schemas::catalog::{DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog};
-use crate::markdown::schemas::resolve::{ResolvedSchema, prepare_embedded_inline_schema, prepare_embedded_schema};
-use crate::markdown::schemas::{
-    DarkmatterSchemas, PropertyDef, SchemaError, SchemaSourceId, SimplifiedSchema, TypeExpr,
-};
+use crate::markdown::schemas::resolve::{prepare_embedded_inline_schema, prepare_embedded_schema};
+use simplified_schema::resolve::ResolvedSchema;
+use crate::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::{PropertyDef, SchemaError, SchemaSourceId, SchemaRoot, TypeExpr};
 
 const IMPORTER: &str = "schemas/main.yaml";
 
@@ -42,7 +42,7 @@ fn prepare(schema: &str, others: &[(&str, &str)]) -> Result<ResolvedSchema, Sche
 /// The message of a [`SchemaError::SchemaDocument`] naming `IMPORTER`.
 fn importer_message(error: SchemaError) -> String {
     match error {
-        SchemaError::SchemaDocument { path, message } => {
+        SchemaError::SchemaDocument { path, message, .. } => {
             assert_eq!(path, std::path::Path::new(IMPORTER), "{message}");
             message
         }
@@ -52,7 +52,7 @@ fn importer_message(error: SchemaError) -> String {
 
 fn property<'a>(resolved: &'a ResolvedSchema, name: &str) -> &'a PropertyDef {
     match resolved.simplified.as_ref().expect("simplified") {
-        SimplifiedSchema::Single(shape) => &shape.properties[name],
+        SchemaRoot::Single(shape) => &shape.properties[name],
         other => panic!("expected a single shape, got {other:?}"),
     }
 }
@@ -184,8 +184,12 @@ fn malformed_imports_cycles_and_examples_fail_preparation() {
     );
     assert!(message.contains("example"), "{message}");
 
+    // A root union of inline arms prepares; one naming a schema file would
+    // need a file lookup.
     let union = prepare_embedded_schema(IMPORTER, &table(&[(IMPORTER, "$schema:\n  - a: string\n  - b: string\n")]));
-    assert!(importer_message(union.expect_err("root union")).contains("root union"));
+    assert!(union.is_ok(), "an inline root union prepares: {union:?}");
+    let file_arm = prepare_embedded_schema(IMPORTER, &table(&[(IMPORTER, "$schema:\n  - a: string\n  - ./other.yaml\n")]));
+    assert!(importer_message(file_arm.expect_err("file arm")).contains("root union cannot name a schema file"));
     let reference = prepare_embedded_schema(IMPORTER, &table(&[(IMPORTER, "$schema: ./other.yaml\n")]));
     assert!(importer_message(reference.expect_err("whole-file reference")).contains("whole-file reference"));
 }
@@ -253,7 +257,7 @@ fn run_column(column: &str, shipped: Shipped<'_>) {
             .map_err(|error| error.to_string())
             .and_then(|catalog| {
                 let (baseline, definitions) = catalog.baseline().expect("the catalog declares `fm`");
-                let json = crate::markdown::schemas::to_json_schema_with_definitions(&baseline, &definitions)
+                let json = simplified_schema::to_json_schema_with_definitions(&baseline, &definitions)
                     .map_err(|error| error.to_string())?;
                 DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
                     .with_baseline_json_schema(json)

@@ -7,13 +7,15 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
-use darkmatter::markdown::schemas::coerce::coerce_frontmatter;
+use simplified_schema::coerce::coerce_frontmatter;
+use simplified_schema::{DRAFT_2020_12_DIALECT, SchemaError};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
 use serde_json::{Value, json};
 
 use crate::request_support::{context_at, request};
 
-/// A raw schema written as `schema.json` beside documents that reference it.
+/// A raw schema written as `schema.json` beside documents that reference it,
+/// declaring the Draft 2020-12 dialect a `$schema` target requires.
 struct RawSchema {
     _dir: tempfile::TempDir,
     root: PathBuf,
@@ -23,7 +25,13 @@ impl RawSchema {
     fn new(schema: &Value) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
-        std::fs::write(root.join("schema.json"), serde_json::to_string_pretty(schema).expect("schema JSON"))
+        let mut declared = schema.clone();
+        declared
+            .as_object_mut()
+            .expect("schema object")
+            .entry("$schema")
+            .or_insert_with(|| json!(DRAFT_2020_12_DIALECT));
+        std::fs::write(root.join("schema.json"), serde_json::to_string_pretty(&declared).expect("schema JSON"))
             .expect("write schema");
         Self { _dir: dir, root }
     }
@@ -277,20 +285,37 @@ fn id_and_anchor_resolve_through_their_resource() {
     );
 }
 
+/// Raw JSON Schema written in YAML is not a `$schema` target: the loader
+/// names the unsupported keys and points at the `.json` migration instead of
+/// converting it.
 #[test]
-fn yaml_raw_schema_converts_like_json() {
+fn yaml_raw_schema_is_rejected_as_a_schema_target() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root_dir = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
+    let schema_path = root_dir.join("schema.yaml");
     std::fs::write(
-        root_dir.join("schema.yaml"),
-        "$defs:\n  count:\n    type: number\ntype: object\nproperties:\n  n:\n    $ref: '#/$defs/count'\n",
+        &schema_path,
+        format!(
+            "$schema: {DRAFT_2020_12_DIALECT}\n$defs:\n  count:\n    type: number\ntype: object\nproperties:\n  n:\n    $ref: '#/$defs/count'\n"
+        ),
     )
     .expect("write schema");
     let path = root_dir.join("doc.md");
     std::fs::write(&path, "---\n$schema: ./schema.yaml\nn: \"3\"\n---\nBody\n").expect("write");
-    let (composed, _) = Markdown::try_from(path.as_path())
-        .expect("document loads")
-        .compose_with(&request(ComposeOptions::new().with_source_file(&path)))
-        .expect("composition succeeds");
-    assert_eq!(composed.frontmatter().get::<Value>("n").expect("reads"), Some(json!(3)));
+    let markdown = Markdown::try_from(path.as_path()).expect("document loads");
+    match DarkmatterSchemas::new(context_at(&root_dir)).validate(&markdown) {
+        Err(SchemaError::SchemaDocument { path: reported, message, .. }) => {
+            assert_eq!(
+                biscuit_file::canonicalize_simplified(&reported).unwrap_or(reported),
+                schema_path
+            );
+            assert!(message.starts_with("unsupported top-level key(s)"), "{message}");
+            assert!(message.contains(".json"), "{message}");
+        }
+        other => panic!("expected an unsupported-key SchemaDocument error, got {other:?}"),
+    }
+    assert!(
+        markdown.compose_with(&request(ComposeOptions::new().with_source_file(&path))).is_err(),
+        "composition refuses the document too"
+    );
 }

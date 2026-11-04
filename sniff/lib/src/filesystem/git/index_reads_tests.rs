@@ -77,8 +77,8 @@ fn assert_readers_reject(path: &Path) {
     metadata_controls(path);
 }
 
-#[test]
-fn truncated_indexes_are_typed_errors_across_readers_and_cache_consumers() {
+/// A committed `leaf.rs` edited in the working tree, with its 104-byte index.
+fn index_fixture() -> (tempfile::TempDir, PathBuf, Vec<u8>) {
     let dir = tempfile::TempDir::new().unwrap();
     init_repo(dir.path());
     commit_files(dir.path(), "index fixture", MAIN_BRANCH, &[("leaf.rs", "fn original() {}\n")]);
@@ -86,6 +86,68 @@ fn truncated_indexes_are_typed_errors_across_readers_and_cache_consumers() {
     let index = dir.path().join(".git/index");
     let original = std::fs::read(&index).unwrap();
     assert_eq!(original.len(), 104, "known libgit2-written fixture index");
+    (dir, index, original)
+}
+
+/// The index truncated to `length` bytes: every live-index reader returns a
+/// typed error, a tree-diff cache captured before the truncation keeps
+/// answering, and restoring the index restores the reads.
+fn assert_truncated_index_is_contained(length: usize) {
+    let (dir, index, original) = index_fixture();
+    let gix = gix::open(dir.path()).unwrap();
+    let mut captured_cache = git::open::tree_diff_cache(&gix).unwrap();
+    let commit = gix.head_id().unwrap().detach();
+    std::fs::write(&index, &original[..length]).unwrap();
+    assert_readers_reject(dir.path());
+    assert_eq!(git::discovery::get_commit_files_with_cache_fallible(&gix, commit, &mut captured_cache).unwrap(), vec![(PathBuf::from("leaf.rs"), git::DeltaKind::Added)]);
+    assert_eq!(git::get_commit_files_with_cache(&gix, commit, &mut captured_cache), vec![(PathBuf::from("leaf.rs"), git::DeltaKind::Added)]);
+    let enriched = git::discovery::committed_file_changes_with_cache(&gix, commit, &mut captured_cache).unwrap();
+    assert_eq!(enriched.len(), 1);
+    assert_eq!(enriched[0].path, PathBuf::from("leaf.rs"));
+    assert_eq!(enriched[0].kind, git::DeltaKind::Added);
+    std::fs::write(&index, original).unwrap();
+    assert_eq!(discover(dir.path()).changed_paths(ChangedBase::Omitted).unwrap(), vec![PathBuf::from("leaf.rs")]);
+}
+
+/// One test per truncated prefix, so nextest spreads the rows across cores.
+macro_rules! truncated_index_tests {
+    ($($name:ident => $length:expr),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_truncated_index_is_contained($length);
+            }
+        )+
+
+        const TESTED_PREFIXES: &[usize] = &[$($length),+];
+    };
+}
+
+truncated_index_tests! {
+    truncated_index_prefix_0 => 0,
+    truncated_index_prefix_1 => 1,
+    truncated_index_prefix_4 => 4,
+    truncated_index_prefix_8 => 8,
+    truncated_index_prefix_11 => 11,
+    truncated_index_prefix_12 => 12,
+    truncated_index_prefix_13 => 13,
+    truncated_index_prefix_16 => 16,
+    truncated_index_prefix_20 => 20,
+    truncated_index_prefix_31 => 31,
+    truncated_index_prefix_84 => 84,
+    truncated_index_prefix_103 => 103,
+}
+
+#[test]
+fn every_truncated_prefix_has_a_test() {
+    assert_eq!(TESTED_PREFIXES, PREFIXES);
+}
+
+/// The untruncated controls for [`assert_truncated_index_is_contained`]: every
+/// reader it expects to fail succeeds on the intact index.
+#[test]
+fn truncated_indexes_are_typed_errors_across_readers_and_cache_consumers() {
+    let (dir, _index, _original) = index_fixture();
     metadata_controls(dir.path());
     assert_eq!(discover(dir.path()).changed_paths(ChangedBase::Omitted).unwrap(), vec![PathBuf::from("leaf.rs")]);
     let changes = discover(dir.path()).file_changes().unwrap();
@@ -123,22 +185,6 @@ fn truncated_indexes_are_typed_errors_across_readers_and_cache_consumers() {
     let history = git::commits_for_path_at(dir.path(), "leaf.rs", git::PathHistoryOptions::new(1)).unwrap();
     assert_eq!(history.commits.len(), 1);
     assert_eq!(history.commits[0].message, "index fixture");
-    let mut captured_cache = git::open::tree_diff_cache(&gix).unwrap();
-    let commit = gix.head_id().unwrap().detach();
-    for &length in PREFIXES {
-        std::fs::write(&index, &original).unwrap();
-        std::fs::write(&index, &original[..length]).unwrap();
-        assert_readers_reject(dir.path());
-        assert_eq!(git::discovery::get_commit_files_with_cache_fallible(&gix, commit, &mut captured_cache).unwrap(), vec![(PathBuf::from("leaf.rs"), git::DeltaKind::Added)]);
-        assert_eq!(git::get_commit_files_with_cache(&gix, commit, &mut captured_cache), vec![(PathBuf::from("leaf.rs"), git::DeltaKind::Added)]);
-        let enriched = git::discovery::committed_file_changes_with_cache(&gix, commit, &mut captured_cache).unwrap();
-        assert_eq!(enriched.len(), 1);
-        assert_eq!(enriched[0].path, PathBuf::from("leaf.rs"));
-        assert_eq!(enriched[0].kind, git::DeltaKind::Added);
-
-    }
-    std::fs::write(&index, original).unwrap();
-    assert_eq!(discover(dir.path()).changed_paths(ChangedBase::Omitted).unwrap(), vec![PathBuf::from("leaf.rs")]);
 }
 
 #[test]

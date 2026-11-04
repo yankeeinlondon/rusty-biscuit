@@ -1,4 +1,4 @@
-//! Schema detection — infer a [`SimplifiedSchema`] from one or more documents.
+//! Schema detection — infer a [`SchemaRoot`] from one or more documents.
 //!
 //! The single-file algorithm walks a document's frontmatter and produces a
 //! [`SchemaShape`] of base types (no constraints are inferred; see the
@@ -17,7 +17,7 @@ use serde_json::Value;
 use url::Url;
 
 use super::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
 };
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
@@ -32,7 +32,7 @@ pub struct DetectOptions {
     pub merge: bool,
 }
 
-/// Detects a [`SimplifiedSchema`] from one or more Markdown documents.
+/// Detects a [`SchemaRoot`] from one or more Markdown documents.
 ///
 /// Empty `sources` returns an empty single-shape schema. When
 /// `opts.merge` is false (or only one source is supplied), the per-file
@@ -46,7 +46,7 @@ pub fn detect_schema(
     sources: &[&Markdown],
     opts: DetectOptions,
     context: &FileResolutionContext,
-) -> SimplifiedSchema {
+) -> SchemaRoot {
     let contexts = vec![context.clone(); sources.len()];
     detect_schema_with_contexts(sources, opts, &contexts)
 }
@@ -64,10 +64,10 @@ pub fn detect_schema_with_contexts(
     sources: &[&Markdown],
     opts: DetectOptions,
     contexts: &[FileResolutionContext],
-) -> SimplifiedSchema {
+) -> SchemaRoot {
     assert_eq!(sources.len(), contexts.len(), "one resolution context is required per source");
     if sources.is_empty() {
-        return SimplifiedSchema::Single(SchemaShape::default());
+        return SchemaRoot::Single(SchemaShape::default());
     }
 
     let shapes: Vec<SchemaShape> = sources
@@ -77,7 +77,7 @@ pub fn detect_schema_with_contexts(
         .collect();
 
     if shapes.len() == 1 {
-        return SimplifiedSchema::Single(shapes.into_iter().next().unwrap());
+        return SchemaRoot::Single(shapes.into_iter().next().unwrap());
     }
 
     let merged = if opts.merge {
@@ -85,7 +85,7 @@ pub fn detect_schema_with_contexts(
     } else {
         union_shapes_no_promote(&shapes)
     };
-    SimplifiedSchema::Single(merged)
+    SchemaRoot::Single(merged)
 }
 
 /// Detects a [`SchemaShape`] from a single document's frontmatter, inferring
@@ -475,7 +475,7 @@ fn mark_required(def: &mut PropertyDef) {
 
 // ── YAML serialisation of a detected SimplifiedSchema ─────────────────────
 
-/// Serialises a [`SimplifiedSchema`] as a `$schema:` YAML mapping, matching
+/// Serialises a [`SchemaRoot`] as a `$schema:` YAML mapping, matching
 /// the shape consumers can paste back into a Markdown frontmatter.
 ///
 /// Property values are emitted as quoted type-and-constraint strings when
@@ -485,13 +485,13 @@ fn mark_required(def: &mut PropertyDef) {
 /// never produces a resolved union type ([`TypeExpr::Union`]), whose
 /// [`serialize_property_atom`](super::simplified::serialize_property_atom)
 /// form is display only.
-pub fn schema_to_yaml(schema: &SimplifiedSchema) -> String {
+pub fn schema_to_yaml(schema: &SchemaRoot) -> String {
     let mut out = String::from("$schema:\n");
     match schema {
-        SimplifiedSchema::Single(shape) => {
+        SchemaRoot::Single(shape) => {
             write_shape(&mut out, shape, 1);
         }
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 match arm {
                     super::simplified::SchemaArm::Inline(shape) => {
@@ -610,7 +610,7 @@ mod tests {
     fn detects_simple_scalars() {
         let md = md_with_frontmatter("title: Hello\nactive: true\ncount: 42\nrating: 3.14\n");
         let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!("expected Single");
         };
         let kinds: Vec<(&str, TypeExpr, bool)> = shape
@@ -650,7 +650,7 @@ mod tests {
             "published: '2026-05-11'\nwhen: '2026-05-11T10:00:00Z'\nstart: '10:30'\n",
         );
         let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let types: Vec<TypeExpr> = shape
@@ -675,7 +675,7 @@ mod tests {
     fn detects_url_and_email() {
         let md = md_with_frontmatter("homepage: https://example.com\nauthor: alice@example.com\n");
         let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let types: Vec<TypeExpr> = shape
@@ -738,7 +738,7 @@ mod tests {
     fn skips_reserved_schema_property() {
         let md = md_with_frontmatter("$schema:\n  title: string\ntitle: Hello\n");
         let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         assert!(!shape.properties.contains_key("$schema"));
@@ -749,7 +749,7 @@ mod tests {
     fn array_of_strings_detected() {
         let md = md_with_frontmatter("tags:\n  - a\n  - b\n  - c\n");
         let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let def = shape.properties.get("tags").unwrap();
@@ -766,7 +766,7 @@ mod tests {
     fn array_with_disjoint_items_falls_back_to_any() {
         let md = md_with_frontmatter("mixed:\n  - 1\n  - true\n  - hi\n");
         let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let def = shape.properties.get("mixed").unwrap();
@@ -784,7 +784,7 @@ mod tests {
         let a = md_with_frontmatter("score: 1\n");
         let b = md_with_frontmatter("score: 1.5\n");
         let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let def = shape.properties.get("score").unwrap();
@@ -802,7 +802,7 @@ mod tests {
         let a = md_with_frontmatter("v: '2026-05-11'\n");
         let b = md_with_frontmatter("v: 'plain text'\n");
         let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let def = shape.properties.get("v").unwrap();
@@ -819,7 +819,7 @@ mod tests {
         let a = md_with_frontmatter("flag: true\n");
         let b = md_with_frontmatter("flag: hello\n");
         let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let def = shape.properties.get("flag").unwrap();
@@ -838,7 +838,7 @@ mod tests {
         let a = md_with_frontmatter("title: A\nextra: 1\n");
         let b = md_with_frontmatter("title: B\n");
         let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let title = shape.properties.get("title").unwrap();
@@ -862,7 +862,7 @@ mod tests {
         let a = md_with_frontmatter("title: A\n");
         let b = md_with_frontmatter("title: B\n");
         let schema = detect_schema(&[&a, &b], DetectOptions { merge: false }, &detection_context());
-        let SimplifiedSchema::Single(shape) = schema else {
+        let SchemaRoot::Single(shape) = schema else {
             panic!();
         };
         let title = shape.properties.get("title").unwrap();

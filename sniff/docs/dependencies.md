@@ -136,21 +136,23 @@ whether a recreated file should be analyzed.
 
 ## Optional Features
 
-- `network` (`reqwest` + `tokio` + `futures`, rustls) gates remote lookups; `remote`
-  is an alias for it. `metrics` gates instrumentation. Both are off by default,
+- `network` (`reqwest` + `tokio` + `futures`, rustls) gates remote lookups;
+  `remote` implies `network` and adds the `remote` module with its
+  `schematic-schema` clients. `metrics` gates instrumentation. All are off by default,
   so a consumer that only needs local detection — such as `rendezvous-core`,
   which depends on Sniff with `default-features = false` — compiles none of
-  Sniff's own network or remote code. It still links an HTTP stack, because
-  `schematic-schema` (below) is an unconditional dependency.
+  Sniff's own network or remote code and links no HTTP stack (`reqwest`,
+  `hyper`, `tokio`). `remote` additionally enables `schematic-schema` (below).
 
 ## Generated REST Clients (`remote::{github, gitlab, gitea, bitbucket}`)
 
 - **`schematic-schema`.** The remote providers call its generated clients,
   which send through `schematic-runtime` (re-exported as
   `schematic_schema::schematic_runtime`), so Sniff declares no runtime
-  dependency of its own. The edge is unconditional even though only the
-  `remote` module uses it, so every build of Sniff carries the runtime's
-  `reqwest` and `tokio` whatever its features.
+  dependency of its own. It is optional and enabled only by the `remote`
+  feature, the only feature whose code uses it, because the runtime carries
+  `reqwest`, `hyper`, and `tokio`: a local-only consumer such as
+  `simplified-schema` must not compile that stack.
 - **`wiremock` (dev-dependency).** Local HTTP mocks for the provider and other
   remote-lookup tests, so none of them reaches a real forge.
 - The CLI's `test-fixtures` feature carries `biscuit-test-harness` into the

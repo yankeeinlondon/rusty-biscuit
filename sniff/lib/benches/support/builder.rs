@@ -119,6 +119,39 @@ pub fn commit_all(repo: &Repository, message: &str) {
     index
         .add_all(["."].iter(), IndexAddOption::DEFAULT, None)
         .expect("stage files");
+    commit_index(repo, &mut index, message);
+}
+
+/// [`commit_all`] for a builder that writes no ignored path: every file under
+/// `root` outside `.git` is staged by path. `add_all` also diffs the work tree
+/// and checks each path against the ignore rules, about 1.4 ms a file on
+/// native Windows; the commit is the same.
+pub fn commit_written(repo: &Repository, root: &Path, message: &str) {
+    let mut paths = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).expect("read fixture directory") {
+            let entry = entry.expect("read fixture entry");
+            if entry.file_name() == ".git" {
+                continue;
+            }
+            if entry.file_type().expect("fixture entry type").is_dir() {
+                pending.push(entry.path());
+            } else {
+                paths.push(entry.path().strip_prefix(root).expect("entry under root").to_path_buf());
+            }
+        }
+    }
+    let mut index = repo.index().expect("load repo index");
+    for path in &paths {
+        index.add_path(path).expect("stage file");
+    }
+    commit_index(repo, &mut index, message);
+}
+
+/// Write `index`, then commit its tree on top of `HEAD` (if any) with the
+/// deterministic signature.
+fn commit_index(repo: &Repository, index: &mut git2::Index, message: &str) {
     index.write().expect("write index");
     let tree_id = index.write_tree().expect("write tree");
     let tree = repo.find_tree(tree_id).expect("resolve tree");
@@ -247,7 +280,7 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
         write_file(&pkg.join("README.md"), &format!("# app{i:02}\n"));
     }
 
-    commit_all(&repo, "c1: initial monorepo layout");
+    commit_written(&repo, root, "c1: initial monorepo layout");
 
     // Churn commits touching different packages to create a deep-ish history.
     // Each round changes one file, so it stages just that path, and the index
@@ -294,15 +327,25 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
         "export const name = 'dirty';\n",
     );
 
+    store_as_one_pack(&repo, &odb, &mempack, root)
+}
+
+/// Store the objects `mempack` holds as one pack in `odb`, and return a fresh
+/// handle on the repository at `root`: the mempack stays attached to the old
+/// handle's object database and would swallow any later write.
+fn store_as_one_pack(
+    repo: &Repository,
+    odb: &git2::Odb<'_>,
+    mempack: &git2::Mempack<'_>,
+    root: &Path,
+) -> Repository {
     let mut pack = git2::Buf::new();
     mempack
-        .dump(&repo, &mut pack)
+        .dump(repo, &mut pack)
         .expect("dump in-memory objects");
     let mut writer = odb.packwriter().expect("open pack writer");
     writer.write_all(&pack).expect("write pack");
     writer.commit().expect("store pack");
-    // The mempack stays attached to this handle's object database and would
-    // swallow any later write, so the caller gets a fresh handle.
     Repository::open(root).expect("reopen fixture repository")
 }
 
@@ -517,6 +560,12 @@ pub fn build_deep_wide_formatting_tree(root: &Path, depth: usize, width: usize) 
 /// Build a mixed Cargo, JavaScript, Python, and Go monorepo of `package_count`.
 pub fn build_mixed_monorepo(root: &Path, package_count: usize) -> Repository {
     let repo = init_repo(root);
+    // One pack instead of a loose-object file per blob and tree: about 0.7 s
+    // for 100 packages on native Windows.
+    let odb = repo.odb().expect("open object database");
+    let mempack = odb
+        .add_new_mempack_backend(1000)
+        .expect("add mempack backend");
     let rust_count = package_count * 2 / 5;
     let js_count = package_count * 3 / 10;
     let python_count = package_count / 5;
@@ -592,8 +641,8 @@ pub fn build_mixed_monorepo(root: &Path, package_count: usize) -> Repository {
         );
         write_file(&package.join("main.go"), "package main\nfunc main() {}\n");
     }
-    commit_all(&repo, "mixed monorepo fixture");
-    repo
+    commit_written(&repo, root, "mixed monorepo fixture");
+    store_as_one_pack(&repo, &odb, &mempack, root)
 }
 
 /// Build an over-cap inventory tree with Markdown files distributed through it.

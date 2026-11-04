@@ -11,7 +11,7 @@ use crate::commands::trigger_findings::emit_warnings;
 use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::request::MdRequest;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidSchemasDir, SchemaRoot, SchemaRootKind, SchemaRootState,
+    DarkmatterSchemas, InvalidSchemasDir, SchemaSearchRoot, SchemaRootKind, SchemaRootState,
     trace_registry,
 };
 use std::path::Path;
@@ -113,7 +113,7 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
 
 /// One root's line: its label, its folder, and why it is not searched when it
 /// is not.
-fn describe_root(root: &SchemaRoot) -> String {
+fn describe_root(root: &SchemaSearchRoot) -> String {
     let label = root.kind.label();
     match &root.state {
         SchemaRootState::Searched(path) => format!("{label}: {}", escaped(path)),

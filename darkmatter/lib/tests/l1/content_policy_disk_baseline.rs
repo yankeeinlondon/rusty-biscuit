@@ -14,9 +14,8 @@ use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, SchemaError, SchemaOriginKind, ValidationProblemKind, ValidationReport,
-};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, ValidationReport};
+use simplified_schema::{SchemaError, SchemaOriginKind, ValidationProblemKind};
 
 use crate::content_policy_fixtures::{
     BASELINE_PATH, CATALOG_PATH, DECLARATIONS, OTHER_PARTIAL_PATHS, INVALID_CONTROL, LOAD_FAILURES, MIXED_POLICY_FRONTMATTER,

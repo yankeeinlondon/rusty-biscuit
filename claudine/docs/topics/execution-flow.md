@@ -87,8 +87,7 @@ every `<TAB>`. The supplement engine applies these rules in order:
 Install with `claudine completions <shell>` — regenerate and reinstall
 after a Claudine upgrade that changes the callback wiring. The hidden
 `claudine __complete` subprocess always tracks the running binary, so
-the completion candidates themselves never go stale. PowerShell and
-Elvish retain the legacy one-line `COMPLETE=<shell>` bootstrap; users
+the completion candidates themselves never go stale. Users
 who installed an older `COMPLETE=<shell>` snippet continue to reach the
 legacy completion path on every shell until they regenerate. See
 [completions/shell-completions.md](completions/shell-completions.md) for the full install

@@ -30,7 +30,8 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaPhase};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaPhase;
 use serde_yaml_ng::Value as YamlValue;
 
 use crate::request_support::context_at;

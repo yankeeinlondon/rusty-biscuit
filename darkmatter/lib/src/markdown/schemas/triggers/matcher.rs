@@ -37,7 +37,8 @@ use std::path::Path;
 use biscuit_file::FileResolutionContext;
 use serde_json::Value;
 
-use crate::markdown::schemas::simplified::{
+use simplified_schema::format::{judge_schema, judge_type_definition};
+use simplified_schema::simplified::{
     Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_property_definition,
     parse_schema_declaration,
 };
@@ -210,9 +211,11 @@ fn property_matches(frontmatter: &Value, name: &str, atom: &PropertyAtom) -> boo
         }
         Some(v) => {
             // A present null is treated like an absent value (SimplifiedSchema
-            // nullable semantics): required fails, guard passes.
+            // nullable semantics): required fails, guard passes, and
+            // `non-null`, which keeps the key optional but rejects null,
+            // defeats.
             if v.is_null() {
-                return !required;
+                return !required && !atom.marks_non_null();
             }
             type_conforms(atom, v)
         }
@@ -244,6 +247,9 @@ fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
     if !value_matches_type(&atom.ty, value) {
         return false;
     }
+    if !declaration_options_hold(atom, value) {
+        return false;
+    }
     if let Some(options) = atom.alphanumeric_options()
         && !value.as_str().is_some_and(|text| options.accepts(text))
     {
@@ -255,6 +261,24 @@ fn scalar_conforms(atom: &PropertyAtom, value: &Value) -> bool {
         }
     }
     true
+}
+
+/// Judges a `schema` / `type-definition` value against the atom's declaration
+/// options with the same judge the lowered keyword uses. Atoms without
+/// options were already judged by `primitive_matches`.
+fn declaration_options_hold(atom: &PropertyAtom, value: &Value) -> bool {
+    let has_options = atom.constraints.iter().any(|constraint| {
+        matches!(
+            constraint,
+            Constraint::Mapping | Constraint::Property { .. } | Constraint::Forms(_) | Constraint::DeclaredRequired
+        )
+    });
+    match &atom.ty {
+        _ if !has_options => true,
+        TypeExpr::Primitive(SimplifiedType::TypeDefinition) => judge_type_definition(&atom.constraints, value).is_ok(),
+        TypeExpr::Primitive(SimplifiedType::Schema) => judge_schema(&atom.constraints, value).is_ok(),
+        _ => true,
+    }
 }
 
 /// Checks the declared structural type against a value.
@@ -280,8 +304,8 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
             };
             for (name, def) in &shape.properties {
                 let atom = match def {
-                    crate::markdown::schemas::simplified::PropertyDef::Single(a) => a,
-                    crate::markdown::schemas::simplified::PropertyDef::Union(arms) => {
+                    simplified_schema::simplified::PropertyDef::Single(a) => a,
+                    simplified_schema::simplified::PropertyDef::Union(arms) => {
                         let v = map.get(name);
                         match v {
                             None => {
@@ -294,7 +318,7 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
                             }
                             Some(val) => {
                                 if val.is_null() {
-                                    if def.is_required() {
+                                    if def.is_required() || def.marks_non_null() {
                                         return false;
                                     }
                                     continue;
@@ -323,7 +347,7 @@ fn value_matches_type(ty: &TypeExpr, value: &Value) -> bool {
                         }
                     }
                     Some(val) if val.is_null() => {
-                        if is_required(atom) {
+                        if is_required(atom) || atom.marks_non_null() {
                             return false;
                         }
                     }
@@ -539,7 +563,7 @@ fn regex_match(pattern: &str, input: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::schemas::simplified::{
+    use simplified_schema::simplified::{
         Constraint, PropertyAtom, SimplifiedType, TypeExpr,
     };
     use crate::markdown::schemas::triggers::grammar::{MatchExpr, PathGlobs};
@@ -688,6 +712,40 @@ mod tests {
 
         let guard = prop("maybe", SimplifiedType::String, vec![]);
         assert!(matches(&guard, &fm, &PathSubject::detached()));
+    }
+
+    /// Loads `conditions` through the trigger grammar, as a trigger file's
+    /// `match:` is loaded, so load-time match safety is exercised too.
+    fn loaded(conditions: &str) -> crate::markdown::schemas::triggers::grammar::MatchConditions {
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(conditions).expect("yaml");
+        crate::markdown::schemas::triggers::grammar::parse_match_conditions(&yaml)
+            .unwrap_or_else(|error| panic!("`{conditions}` loads: {error}"))
+    }
+
+    #[test]
+    fn non_null_guard_passes_when_absent_and_defeats_on_null() {
+        let conditions = loaded("title: string(non-null)");
+        let detached = PathSubject::detached();
+        assert!(conditions.matches(&frontmatter(&[]), &detached));
+        assert!(conditions.matches(&frontmatter(&[("title", json!("x"))]), &detached));
+        assert!(!conditions.matches(&frontmatter(&[("title", Value::Null)]), &detached));
+        assert!(!conditions.matches(&frontmatter(&[("title", json!(1))]), &detached));
+        let nested = loaded("meta: '{ title: string(non-null) }'");
+        assert!(nested.matches(&frontmatter(&[("meta", json!({}))]), &detached));
+        assert!(!nested.matches(&frontmatter(&[("meta", json!({ "title": null }))]), &detached));
+    }
+
+    #[test]
+    fn declaration_options_judge_a_matched_declaration() {
+        let detached = PathSubject::detached();
+        let mapping = loaded("declares: schema(mapping; required)");
+        assert!(mapping.matches(&frontmatter(&[("declares", json!({ "title": "string" }))]), &detached));
+        assert!(!mapping.matches(&frontmatter(&[("declares", json!("./a.yaml"))]), &detached));
+        let forms = loaded("kind: type-definition(forms(literal); required)");
+        assert!(forms.matches(&frontmatter(&[("kind", json!("literal(a)"))]), &detached));
+        assert!(!forms.matches(&frontmatter(&[("kind", json!("enum(a, b)"))]), &detached));
+        let plain = loaded("kind: type-definition(required)");
+        assert!(plain.matches(&frontmatter(&[("kind", json!("enum(a, b)"))]), &detached), "control");
     }
 
     // ── value predicates ─────────────────────────────────────────────────

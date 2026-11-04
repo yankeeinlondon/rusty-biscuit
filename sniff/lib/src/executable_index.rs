@@ -643,11 +643,13 @@ mod tests {
         assert!(index.path_dir_count() > 0);
     }
 
+    // Unix only: the fixtures are extensionless scripts, which Windows does not
+    // treat as executables.
+    #[cfg(unix)]
     #[test]
     fn test_eager_path_index_respects_path_precedence() {
         use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
-        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
@@ -660,12 +662,8 @@ mod tests {
 
         fs::write(&exec_first, "#!/bin/sh\necho first").unwrap();
         fs::write(&exec_second, "#!/bin/sh\necho second").unwrap();
-
-        #[cfg(unix)]
-        {
-            fs::set_permissions(&exec_first, fs::Permissions::from_mode(0o755)).unwrap();
-            fs::set_permissions(&exec_second, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        fs::set_permissions(&exec_first, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&exec_second, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut env = ScopedEnv::new();
         let new_path =
@@ -678,27 +676,24 @@ mod tests {
             eager_path: Some(eager_path),
             #[cfg(target_os = "macos")]
             bundle_executables: HashMap::new(),
-            #[cfg(target_os = "windows")]
-            windows_index: crate::programs::windows_apps::WindowsIndex::default(),
         };
 
-        #[cfg(unix)]
-        {
-            let found = index.find("precedence-test");
-            assert!(found.is_some());
-            assert_eq!(
-                found.unwrap().parent().unwrap(),
-                dir_first.path(),
-                "PATH precedence should be respected in eager index"
-            );
-        }
+        let found = index.find("precedence-test");
+        assert!(found.is_some());
+        assert_eq!(
+            found.unwrap().parent().unwrap(),
+            dir_first.path(),
+            "PATH precedence should be respected in eager index"
+        );
     }
 
+    // Unix only: the fixture is an extensionless script, which Windows does not
+    // treat as an executable.
+    #[cfg(unix)]
     #[test]
     fn test_eager_lookup_returns_path_source() {
         use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
-        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
@@ -706,7 +701,6 @@ mod tests {
         let dir = tempdir().unwrap();
         let exec = dir.path().join("eager-lookup-test");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
-        #[cfg(unix)]
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut env = ScopedEnv::new();
@@ -721,18 +715,13 @@ mod tests {
             eager_path: Some(eager_path),
             #[cfg(target_os = "macos")]
             bundle_executables: HashMap::new(),
-            #[cfg(target_os = "windows")]
-            windows_index: crate::programs::windows_apps::WindowsIndex::default(),
         };
 
-        #[cfg(unix)]
-        {
-            let result = index.find_with_source("eager-lookup-test");
-            assert!(result.is_some());
-            let (path, source) = result.unwrap();
-            assert_eq!(source, ExecutableSource::Path);
-            assert!(path.ends_with("eager-lookup-test"));
-        }
+        let result = index.find_with_source("eager-lookup-test");
+        assert!(result.is_some());
+        let (path, source) = result.unwrap();
+        assert_eq!(source, ExecutableSource::Path);
+        assert!(path.ends_with("eager-lookup-test"));
     }
 
     #[test]

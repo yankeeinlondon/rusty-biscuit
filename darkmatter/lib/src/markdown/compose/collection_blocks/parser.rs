@@ -28,8 +28,8 @@ use crate::markdown::compose::body_origin::DataRanges;
 use crate::markdown::compose::directives_api::{
     BlockScanError, DirectiveKind, ParsedDirective, read_key_token, scan_darkmatter_directives_in,
 };
-use crate::markdown::compose::expression::lexer::{ParseMode, Token, lex_spanned};
-use crate::markdown::compose::expression::parser::{parse_callback_spanned, parse_condition};
+use crate::markdown::compose::expression::{Token, lex_spanned};
+use simplified_schema::expression::parser::{parse, parse_callback_spanned};
 use crate::markdown::compose::parse_utils::{Cursor, strip_blockquote_prefix};
 use crate::markdown::compose::pipeline::operations::{ComposeOperation, ComposeOperationSet};
 use crate::markdown::span::Spanned;
@@ -241,7 +241,7 @@ fn read_quoted(
 /// Whether `token` is exactly one lexer variable path (dashed segments allowed).
 fn is_source_path(token: &str) -> bool {
     matches!(
-        lex_spanned(token, ParseMode::Interpolation).as_deref(),
+        lex_spanned(token).as_deref(),
         Ok([first, last])
             if matches!(&first.value, Token::Variable(name) if name == token)
                 && matches!(last.value, Token::Eof)
@@ -255,7 +255,7 @@ fn check_expression(quoted: &QuotedExpression, what: &str, condition: bool) -> R
         return Err(HeaderProblem::malformed(quoted.span.clone(), format!("{what} must not be empty")));
     }
     let outcome = if condition {
-        parse_condition(&quoted.text).map(|_| ())
+        parse(&quoted.text).map(|_| ())
     } else {
         parse_callback_spanned(&quoted.text).map(|_| ())
     };

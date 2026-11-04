@@ -62,7 +62,10 @@ definitions away from their references or replace them with placeholders.
 | Parser details | [pulldown-cmark.md](pulldown-cmark.md) |
 | Frontmatter ecosystem comparison | [frontmatter-crates.md](frontmatter-crates.md) |
 
-Load only the topic needed for the task. For render-tree implementation work,
+Load only the topic needed for the task. For the SimplifiedSchema language
+itself (grammar, named types, conversion, `SimplifiedSchema`/`Prepared`
+validation, layering), load the `simplified-schema` skill
+([SKILL.md](../simplified-schema/SKILL.md)). For render-tree implementation work,
 also load the `renderable` skill; for terminal components, load
 `biscuit-terminal`; for file-reference or JSON/YAML/TOML conversion work, load
 `biscuit-file`.
@@ -109,10 +112,31 @@ context property, cache key, transclusion directive, or file-resolution path.
 
 ## Schema authority
 
-Darkmatter uses `SimplifiedSchema`, compiled to Draft 2020-12 JSON Schema.
+Darkmatter uses the SimplifiedSchema language (the `simplified-schema` crate),
+compiled to Draft 2020-12 JSON Schema.
 `DarkmatterSchemas` owns baseline merging and validator caching. The standalone
-classifier is `parse_standalone_schema_document`; it recognizes either a pure
-root `$schema` document or a `kind: schema` document with a `types` mapping.
+classifier is `parse_standalone_schema_document`; it recognizes an informal
+`$schema` document (optional `types`, `description`, `categories`), a `kind: schema`
+document with `$schema` and/or `types`, or a `kind: yaml-schema` (a YAML
+document kind, never a `$schema` target or import source: `SelectedByKind`),
+and admits each against the library's compiled envelope definitions. A `$schema` target must export
+`$schema` (YAML) or be a JSON object declaring Draft 2020-12; anything else is
+`NotASchemaDocument`/`UnsupportedJsonDialect`/`InvalidJsonSchema`, while a
+`types`-only file still serves `Name@file` imports. A loader refusal of a
+trigger file is reported as `TriggerSchemaReferenced`/`TriggerPayloadCycle`
+(`triggers::assemble::refused_trigger_file`).
+A whole `.yaml`/`.yml` document is validated by
+`DarkmatterSchemas::validate_yaml_document` (claimed `kind` > root `$schema` >
+none, no baseline or triggers) over a per-context `KindRegistry`; read
+[schema.md](schema.md#whole-yaml-documents-schemasyaml_documents) first.
+Ownership: the `simplified-schema` crate owns the `schema` and `yaml-schema`
+definitions (`simplified-schema/schemas/`) and envelope admission;
+Darkmatter owns `schema-trigger.yaml`, the `KindRegistry`, selection, and the
+kind checks. A registry is built per call (or once per folder/worker and
+passed with `with_kind_registry`); it never fails as a whole, and a
+duplicate, reserved, or broken claim is a `KindSelection` error only for a
+document whose `kind` it could affect. A YAML file is never Markdown: a
+fenced `---`…`---` file is two documents and fails to load.
 
 Important contracts:
 
@@ -133,19 +157,49 @@ Important contracts:
   `const`; quoted and native YAML forms are observably different.
 - `expression`, `yaml`, and `json` are passive content formats. They parse or
   coerce but never execute.
-- One coercion engine (`markdown::coercion`) converts frontmatter and binds
-  function arguments; numbers enter only through `markdown::numeric` as exact
+- One coercion engine (`simplified_schema::coercion`) converts frontmatter and binds function arguments; numbers enter only through `simplified_schema::numeric` as exact
   `f64`s. See [schema.md](schema.md#conversion-engine) and
   [expressions.md](expressions.md).
+- The SimplifiedSchema language lives in the `simplified-schema` crate (no
+  Markdown dependency): the AST and grammar (`simplified_schema::simplified`,
+  `SchemaRoot` is the parsed `$schema` enum), resolution, conversion,
+  validators, formats, `SchemaError`, `ValidationProblem`, the numeric model,
+  `coercion`, `MappingOrders`, and the expression syntax. Import those from
+  `simplified_schema` (every consumer crate depends on it directly);
+  `darkmatter::markdown::schemas` no longer re-exports them. Darkmatter keeps
+  only `markdown::{span, literal_token}` and the expression items its
+  composition API names (`compose::expression::{Expr, Lexer, parse, …}`).
+  Edit the language in `simplified-schema/lib/src/`. What stays in Darkmatter:
+  `DarkmatterSchemas`/`EffectiveSchema`, the baseline, schema roots
+  (`SchemaSearchRoot`), triggers (`TriggerOrigin` maps a `SchemaOrigin` to its
+  `TriggerSource`), the shipped catalog (`embedded::SHIPPED_SOURCES`, which
+  `schemas::resolve` wrappers pass to the library resolver so
+  `Name@darkmatter:<stem>` resolves), pending classification
+  (`coerce::nested_templates`), `ProblemPositions`, and completion over an
+  `EffectiveSchema`. Work counters for moved code are recorded by the library
+  and folded into `darkmatter::work_counters::snapshot()`.
+- The library's standalone object is `simplified_schema::SimplifiedSchema`
+  (content and file factories, strict/soft validation, atomic layering, type
+  queries, export; `simplified-schema/docs/topics/schema-object.md`).
+  Darkmatter's own validation entry points do not route through it: the
+  effective schema merges the already lowered baseline, trigger, and
+  document layers with the same `merge_baseline` the object's `layer_under`
+  uses (memoized by `Arc` identity), and
+  `darkmatter/lib/tests/l1/effective_schema_layering.rs` pins the two
+  equal.
+  `compose::repository_scope_catalog` re-exports the library's projection,
+  the same one its raw-path factories capture with: edit it there.
 - `type-definition` and `schema` meta-types delegate to the same passive
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a
   kinded document and must retain its root `kind` declaration.
 - Triggers and bare-name `$schema` lookup use the five schema roots of the
   **document's** context (`schemas::roots::SchemaRoots::for_document`):
-  package, package area, `base_dir()`, `SCHEMAS_DIR` (the folder itself, from
-  `ctx.env()`), `~/schemas`. Never walk ancestors or read the process
-  environment for them. `$path` patterns are `GlobReference`s; see
+  `SCHEMAS_DIR` (the folder itself, from `ctx.env()`), package, package area,
+  `base_dir()`, `~/schemas`. Never walk ancestors or read the process
+  environment for them. Every bare-name consumer (`$schema`, `Name@file`,
+  `example(file)`, trigger payloads) selects through
+  `simplified_schema::resolve::select_schema_file`; never add another copy. `$path` patterns are `GlobReference`s; see
   [schema.md](schema.md#schema-roots-and-path-triggers).
 - The runtime baseline is compiled in with its imports (Content Policy's
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,
@@ -156,8 +210,9 @@ Read [schema.md](schema.md) for imports, recursive named types (`$defs`,
 DMLS schema behavior.
 
 The global catalog `darkmatter/schemas/darkmatter.yaml` declares every
-global's shape; the built-in baseline is its resolved `fm`. A catalog is
-registered explicitly, never applied as a document schema; see
+global's shape; the built-in baseline is its resolved `fm`. A catalog acts
+as globals only when registered explicitly; a document `$schema` naming one
+just gets its entries as optional properties; see
 [schema.md](schema.md#authored-global-catalog).
 
 ## Remote and cache safety

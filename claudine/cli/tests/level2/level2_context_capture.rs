@@ -20,10 +20,10 @@
 //!   `Type` / the final column and wraps instead of dropping `Type`.
 //! - **descriptive-content retention** — known descriptive text survives at
 //!   every width.
-//! - **inverse inline code** — the `` `||` `` mode header and alias-row
+//! - **inverse inline code** — the `` `||` `` operator cell and alias-row
 //!   descriptions render with the inverse SGR (`\x1b[7m`), never literal
 //!   backticks/markup.
-//! - **unordered list** — the modes consequence list renders with the `- `
+//! - **unordered list** — the side-effects constraint list renders with the `- `
 //!   marker and a hanging indent on wrapped continuation lines, surrounded by
 //!   exactly one blank line on each side, and reserves a 1ch right margin so
 //!   list lines never reach the full pane width.
@@ -316,13 +316,9 @@ fn context_report_plain(frame: &CapturedFrame) -> &str {
 /// its first marker and exactly one blank line immediately after its last
 /// content line.
 ///
-/// The operator sections that once rendered as lists are now descriptor tables,
-/// so the only unordered list left in the `--expressions` report is the modes
-/// consequence list that closes the `Interpolation vs. Condition Mode` section
-/// and precedes `Null Propagation Summary`. That list does not open directly
-/// under its own heading (an intro paragraph and the modes table sit between),
-/// so this searches forward from `heading` for the first `- ` marker rather
-/// than assuming it sits on the line directly below.
+/// The list need not open directly under `heading` (the side-effects
+/// constraint list follows an intro paragraph), so this searches forward from
+/// `heading` for the first `- ` marker.
 fn assert_list_single_blank_lines(plain: &str, heading: &str, next_heading: &str) {
     let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
     let find = |label: &str| {
@@ -641,18 +637,16 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 // ---------------------------------------------------------------------------
 
 /// `--expressions` narrow (`COLUMNS=100`, below its ~114 natural width so
-/// wrapping is active): the `` `||` `` mode header renders inverse, the modes
-/// consequence list uses the `- ` marker with a hanging indent and is surrounded
-/// by exactly one blank line, and rows fit the pane.
+/// wrapping is active): the `` `||` `` operator cell renders inverse rather than
+/// with literal backticks, and rows fit the pane.
 ///
 /// At 100 columns the `Example` column is kept (100 >= the 70-cell threshold),
-/// so the function catalog wraps the report to ~533 lines. The `||` mode header
-/// and the modes consequence list anchor assertions past the descriptor-table
-/// operator sections, so the pane must hold the whole report — `capture-pane`
-/// has no scrollback. 700 rows fit it with headroom.
+/// so the function catalog wraps the report to ~500 lines; `capture-pane` has
+/// no scrollback, so the pane must hold the whole report. 2400 rows fit it with
+/// headroom.
 #[test]
 #[serial(level2_terminal)]
-fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
+fn level2_context_expressions_narrow_inline_code_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 100, 2400);
     let report_plain = context_report_plain(&frame);
@@ -664,42 +658,8 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     );
     assert!(
         frame.raw.contains("\x1b[7m"),
-        "the `||` mode header must render with inverse SGR.\nraw:\n{}",
+        "inline code such as the `||` operator cell must render with inverse SGR.\nraw:\n{}",
         frame.raw,
-    );
-
-    // The modes consequence list uses the `- ` marker.
-    let marker_line = frame
-        .plain
-        .lines()
-        .skip_while(|l| !l.contains("Darkmatter Expression Engine"))
-        .find(|l| l.trim_start().starts_with("- "))
-        .unwrap_or_else(|| panic!("expected a `- ` list marker.\nplain:\n{}", report_plain));
-    let bullet_indent = marker_line.len() - marker_line.trim_start().len();
-    // A wrapped continuation line of a list item is indented past the bullet.
-    let has_hanging_indent = report_plain.lines().any(|l| {
-        let trimmed = l.trim();
-        let indent = l.len() - l.trim_start().len();
-        !trimmed.is_empty()
-            && !trimmed.starts_with("- ")
-            && !trimmed.starts_with('│')
-            && indent > bullet_indent
-    });
-    assert!(
-        has_hanging_indent,
-        "wrapped list items must hang-indent past the `- ` bullet.\nplain:\n{}",
-        report_plain,
-    );
-
-    // The modes consequence list (the only unordered list in this report — the
-    // operator sections are now descriptor tables) closes the
-    // `Interpolation vs. Condition Mode` section and precedes
-    // `Null Propagation Summary`, and must carry exactly one blank line on each
-    // side (spec: one blank before and after every unordered list).
-    assert_list_single_blank_lines(
-        report_plain,
-        "Interpolation vs. Condition Mode",
-        "Null Propagation Summary",
     );
 
     assert!(
@@ -748,27 +708,6 @@ fn level2_context_expressions_caps_at_140_in_wide_tmux() {
         "wide expressions report must render the function section.\nplain:\n{}",
         frame.plain,
     );
-}
-
-/// `--expressions` at 65 columns: every unordered-list line stays within the
-/// pane's `width - 1` envelope, proving the 1ch right margin the spec reserves
-/// for list content. 65 is chosen deliberately: one operator item
-/// (`+ performs string concatenation when either operand is a string`) is
-/// exactly 65 cells wide, so only the reserved margin forces it to wrap. A
-/// regression dropping the margin would let it fill the full 65-cell pane and
-/// fail the bound — the discrimination a frame-wide `<= width` check lacks.
-#[test]
-#[serial(level2_terminal)]
-fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    // At 65 columns the `--expressions` report wraps to ~772 lines. The only
-    // `- ` list is the modes consequence list, the 7th of 9 sections; the
-    // Functions catalog below it must not push that list above the captured
-    // pane (`capture-pane` has no scrollback). 820 rows fit the full report
-    // with headroom for the prompt echo and footer.
-    let frame = capture_context(&["--expressions"], 65, 3600);
-
-    assert_list_lines_reserve_right_margin(&frame, 65);
 }
 
 // ---------------------------------------------------------------------------
@@ -841,7 +780,9 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
 /// (`Markdown mutations honor Darkmatter's auto-rehash behavior`) is exactly 60
 /// cells wide, so only the reserved margin forces it to wrap. A regression
 /// dropping the margin would let it fill the full 60-cell pane and fail the
-/// bound. 60 also clears the report's 53-cell table floor.
+/// bound. 60 also clears the report's 53-cell table floor. The list (the only
+/// one in any `context` report) also hang-indents its wrapped lines past the
+/// `- ` bullet and carries exactly one blank line on each side.
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_list_reserves_right_margin_in_tmux() {
@@ -849,6 +790,25 @@ fn level2_context_side_effects_list_reserves_right_margin_in_tmux() {
     let frame = capture_context(&["--side-effects"], 60, 200);
 
     assert_list_lines_reserve_right_margin(&frame, 60);
+
+    let marker_line = frame
+        .plain
+        .lines()
+        .find(|l| l.trim_start().starts_with("- "))
+        .unwrap_or_else(|| panic!("expected a `- ` list marker.\nplain:\n{}", frame.plain));
+    let bullet_indent = marker_line.len() - marker_line.trim_start().len();
+    let has_hanging_indent = frame.plain.lines().skip_while(|l| !l.trim_start().starts_with("- ")).any(|l| {
+        let trimmed = l.trim();
+        let indent = l.len() - l.trim_start().len();
+        !trimmed.is_empty() && !trimmed.starts_with("- ") && !trimmed.starts_with('│') && indent > bullet_indent
+    });
+    assert!(
+        has_hanging_indent,
+        "wrapped list items must hang-indent past the `- ` bullet.\nplain:\n{}",
+        frame.plain,
+    );
+
+    assert_list_single_blank_lines(&frame.plain, "Darkmatter Side-Effect Capabilities", "State Mutation");
 }
 
 // ---------------------------------------------------------------------------

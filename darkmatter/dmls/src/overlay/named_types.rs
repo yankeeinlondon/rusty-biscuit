@@ -19,12 +19,11 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
-use darkmatter::markdown::schemas::{
-    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError,
-    SchemaShape, SchemaSourceMap, SourceAware,
-    SchemaSourcePath,
-    SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
-    parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
+use simplified_schema::{
+    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape,
+    SchemaSourceMap, SourceAware, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaRoot,
+    StandaloneSchemaDocument, TypeExpr, flow_collection_end, parse_property_definition,
+    parse_schema_declaration_with_source,
 };
 
 use super::FrontmatterAst;
@@ -39,8 +38,9 @@ pub struct AuthoredDeclaration {
     local_types: Option<SchemaShape>,
 }
 
-/// The authored bytes of the frontmatter `$schema` value.
-fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::Range<usize>> {
+/// The authored bytes of the frontmatter `$schema` value, a flow
+/// collection's closing bracket included.
+pub(crate) fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::Range<usize>> {
     let mut span = ast.schema_entry()?.value_span.clone();
     // A flow collection's recorded value span stops before its closing
     // bracket.
@@ -130,8 +130,8 @@ impl AuthoredDeclaration {
             return None;
         };
         match schema {
-            SimplifiedSchema::Single(shape) => Some((shape, SchemaSourcePath::root())),
-            SimplifiedSchema::Union(arms) => {
+            SchemaRoot::Single(shape) => Some((shape, SchemaSourcePath::root())),
+            SchemaRoot::Union(arms) => {
                 let Some(SchemaSourcePathSegment::UnionArm(index)) = path.segments().first() else {
                     return None;
                 };
@@ -235,7 +235,7 @@ impl NamedTypeCatalog {
             collect_schema_targets(schema, &mut targets);
         }
         if let Some(types) = &model.local_types {
-            collect_schema_targets(&SimplifiedSchema::Single(types.clone()), &mut targets);
+            collect_schema_targets(&SchemaRoot::Single(types.clone()), &mut targets);
         }
         Self::read(targets, base_dir, schema_roots, context)
     }
@@ -283,8 +283,13 @@ impl NamedTypeCatalog {
                 let path = named_type_reference_path(&target, base_dir, schema_roots, context)
                     .ok()
                     .flatten()?;
-                let text: Arc<str> = Arc::from(crate::work_counters::read_to_string(&path).ok()?);
-                let (document, error) = match parse_standalone_schema_document(&text, &path) {
+                // An open buffer in the snapshot in force replaces the file,
+                // as it does for the resolver.
+                let text: Arc<str> = match simplified_schema::resolve::buffers::text(&path) {
+                    Some(text) => text,
+                    None => Arc::from(crate::work_counters::read_to_string(&path).ok()?),
+                };
+                let (document, error) = match simplified_schema::resolve::parse_referenced_schema_document(&text, &path) {
                     Ok(document) => (document, None),
                     Err(error) => (None, Some(Arc::new(error))),
                 };
@@ -331,10 +336,10 @@ fn collect_yaml_targets(value: &serde_yaml_ng::Value, targets: &mut BTreeSet<Str
     }
 }
 
-fn collect_schema_targets(schema: &SimplifiedSchema, targets: &mut BTreeSet<String>) {
+fn collect_schema_targets(schema: &SchemaRoot, targets: &mut BTreeSet<String>) {
     match schema {
-        SimplifiedSchema::Single(shape) => collect_shape_targets(shape, targets),
-        SimplifiedSchema::Union(arms) => {
+        SchemaRoot::Single(shape) => collect_shape_targets(shape, targets),
+        SchemaRoot::Union(arms) => {
             for arm in arms {
                 if let SchemaArm::Inline(shape) = arm {
                     collect_shape_targets(shape, targets);

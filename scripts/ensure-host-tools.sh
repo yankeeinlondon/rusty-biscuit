@@ -5,8 +5,11 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
         winget_links="$(cygpath -u "${LOCALAPPDATA:?}")/Microsoft/WinGet/Links"
         cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+        # Appended: WinGet links can hold uutils coreutils, which must never
+        # sort ahead of the shell's own /usr/bin (just/shell.just) or answer
+        # the coreutils check below.
         if [[ -d "$winget_links" ]]; then
-            export PATH="$cargo_bin:$winget_links:$PATH"
+            export PATH="$PATH:$cargo_bin:$winget_links"
         fi
         ;;
 esac
@@ -82,7 +85,7 @@ install_fzf() {
                 cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
                 mkdir -p "$cargo_bin"
                 cp "$fzf_target" "$cargo_bin/fzf.exe"
-                export PATH="$cargo_bin:$PATH"
+                export PATH="$PATH:$cargo_bin"
             fi
             ;;
         Darwin)

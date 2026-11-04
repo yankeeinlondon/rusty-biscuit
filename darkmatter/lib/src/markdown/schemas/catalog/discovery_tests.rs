@@ -12,12 +12,12 @@ use crate::lifecycle::host_profile::{HostLifecycleProfile, lifecycle_artifact, l
 use crate::lifecycle::registry::EventRegistry;
 use crate::lifecycle::{LifecycleParseOptions, UnknownVerbPolicy, VerbList};
 
-/// A repository whose tree root (`repo/schemas`) is searched before the
-/// `SCHEMAS_DIR` root (`external`).
+/// A repository whose `SCHEMAS_DIR` root (`external`, `earlier`) is searched
+/// before its tree root (`repo/schemas`, `later`).
 struct Roots {
     _dir: tempfile::TempDir,
-    tree: PathBuf,
-    external: PathBuf,
+    earlier: PathBuf,
+    later: PathBuf,
     context: biscuit_file::FileResolutionContext,
 }
 
@@ -32,7 +32,7 @@ fn roots() -> Roots {
     std::fs::create_dir_all(&external).expect("SCHEMAS_DIR root");
     let env = HashMap::from([("SCHEMAS_DIR".to_string(), external.to_string_lossy().into_owned())]);
     let context = biscuit_file::FileResolutionContext::from_snapshot(&repo, None, env).with_repository_root(&repo);
-    Roots { _dir: dir, tree, external, context }
+    Roots { _dir: dir, earlier: external, later: tree, context }
 }
 
 /// A host catalog declaring `run`; `description` makes distinct revisions.
@@ -114,7 +114,7 @@ impl Owned {
 #[test]
 fn a_replaced_revision_releases_the_old_profile_once_its_holders_drop() {
     let roots = roots();
-    let path = usable(&roots.tree, "host.yaml", "first");
+    let path = usable(&roots.earlier, "host.yaml", "first");
     let text = std::fs::read_to_string(&path).expect("catalog");
 
     let first = only_profile(&roots.context);
@@ -145,7 +145,7 @@ fn a_replaced_revision_releases_the_old_profile_once_its_holders_drop() {
 
     // A new catalog revision with its own fresh artifact.
     let second_owned = Owned::of(&second);
-    usable(&roots.tree, "host.yaml", "second");
+    usable(&roots.earlier, "host.yaml", "second");
     let third = only_profile(&roots.context);
     assert!(!Arc::ptr_eq(&second, &third));
     assert!(!second_owned.released(), "the caller still holds the old profile");
@@ -160,7 +160,7 @@ fn a_replaced_revision_releases_the_old_profile_once_its_holders_drop() {
 #[test]
 fn a_refused_artifact_is_cached_by_reason_and_rebuilt_only_when_it_changes() {
     let roots = roots();
-    let path = usable(&roots.tree, "host.yaml", "host");
+    let path = usable(&roots.earlier, "host.yaml", "host");
     let artifact = lifecycle_artifact_path(&path);
     let fresh = std::fs::read_to_string(&artifact).expect("artifact");
     let probe = DiscoveryProbe::install();
@@ -204,7 +204,7 @@ fn a_refused_artifact_is_cached_by_reason_and_rebuilt_only_when_it_changes() {
 #[test]
 fn a_cached_success_is_dropped_when_its_catalog_stops_loading() {
     let roots = roots();
-    let path = roots.tree.join("host.yaml");
+    let path = roots.earlier.join("host.yaml");
     let probe = DiscoveryProbe::install();
     type Mutation<'a> = (&'a str, Box<dyn Fn() + 'a>, Option<CachedOutcome>);
     let mutations: Vec<Mutation<'_>> = vec![
@@ -223,7 +223,7 @@ fn a_cached_success_is_dropped_when_its_catalog_stops_loading() {
     ];
     for (label, mutate, after) in mutations {
         probe.restore_reads_of(&path);
-        usable(&roots.tree, "host.yaml", label);
+        usable(&roots.earlier, "host.yaml", label);
         let owned = Owned::of(&only_profile(&roots.context));
         assert_eq!(cached_outcome(&path), Some(CachedOutcome::Profile), "{label}");
         mutate();
@@ -238,12 +238,12 @@ fn a_cached_success_is_dropped_when_its_catalog_stops_loading() {
 #[test]
 fn a_non_catalog_file_s_new_revision_replaces_its_entry() {
     let roots = roots();
-    let path = roots.tree.join("host.yaml");
+    let path = roots.earlier.join("host.yaml");
     std::fs::write(&path, "title: plain\n").expect("plain YAML");
     assert!(discover(&roots.context).is_empty());
     assert_eq!(cached_outcome(&path), Some(CachedOutcome::NotHostCatalog));
 
-    usable(&roots.tree, "host.yaml", "now a catalog");
+    usable(&roots.earlier, "host.yaml", "now a catalog");
     only_profile(&roots.context);
     assert_eq!(cached_outcome(&path), Some(CachedOutcome::Profile), "the new revision replaced the entry");
 }
@@ -253,7 +253,7 @@ fn a_non_catalog_file_s_new_revision_replaces_its_entry() {
 #[test]
 fn the_host_text_loader_builds_from_the_supplied_bytes() {
     let roots = roots();
-    let path = roots.tree.join("host.yaml");
+    let path = roots.earlier.join("host.yaml");
     let supplied = host_catalog("supplied");
 
     let absent = GlobalCatalog::from_host_text(&path, &supplied, &roots.context).expect("no file is read");
@@ -282,9 +282,9 @@ fn the_host_text_loader_builds_from_the_supplied_bytes() {
 #[test]
 fn discovery_stops_reading_at_the_first_usable_profile() {
     let roots = roots();
-    let first = usable(&roots.tree, "a.yaml", "first");
-    let later = usable(&roots.tree, "b.yaml", "later");
-    let external = usable(&roots.external, "c.yaml", "external");
+    let first = usable(&roots.earlier, "a.yaml", "first");
+    let same_root = usable(&roots.earlier, "b.yaml", "same root");
+    let later_root = usable(&roots.later, "c.yaml", "later root");
     let probe = DiscoveryProbe::install();
 
     let found = host_lifecycle_profiles(&roots.context).find_map(|discovery| discovery.profile.ok());
@@ -294,7 +294,7 @@ fn discovery_stops_reading_at_the_first_usable_profile() {
     // And again from the cache: the winner is reread and hashed, nothing else.
     host_lifecycle_profiles(&roots.context).find_map(|discovery| discovery.profile.ok()).expect("cached");
     let reads = probe.take_reads();
-    for unread in [&later, &external] {
+    for unread in [&same_root, &later_root] {
         assert!(!reads.contains(unread) && !reads.contains(&lifecycle_artifact_path(unread)), "{reads:?}");
     }
 }
@@ -306,16 +306,16 @@ fn discovery_stops_reading_at_the_first_usable_profile() {
 fn discovery_keeps_root_order_sorted_names_and_shadowing() {
     let roots = roots();
     for name in ["b.yaml", "a.yml"] {
-        std::fs::write(roots.tree.join(name), host_catalog(name)).expect("catalog without artifact");
+        std::fs::write(roots.earlier.join(name), host_catalog(name)).expect("catalog without artifact");
     }
-    std::fs::write(roots.tree.join("shadow.yaml"), "kind: schema\n$schema:\n    run: 42\n").expect("unusable");
-    let shadowed = usable(&roots.external, "shadow.yaml", "shadowed but valid");
-    std::fs::write(roots.external.join("c.yaml"), host_catalog("c")).expect("catalog without artifact");
+    std::fs::write(roots.earlier.join("shadow.yaml"), "kind: schema\n$schema:\n    run: 42\n").expect("unusable");
+    let shadowed = usable(&roots.later, "shadow.yaml", "shadowed but valid");
+    std::fs::write(roots.later.join("c.yaml"), host_catalog("c")).expect("catalog without artifact");
     let probe = DiscoveryProbe::install();
 
     let found = discover(&roots.context);
     let catalogs: Vec<_> = found.iter().map(|discovery| discovery.catalog.clone()).collect();
-    assert_eq!(catalogs, [roots.tree.join("a.yml"), roots.tree.join("b.yaml"), roots.external.join("c.yaml")]);
+    assert_eq!(catalogs, [roots.earlier.join("a.yml"), roots.earlier.join("b.yaml"), roots.later.join("c.yaml")]);
     for (discovery, catalog) in found.iter().zip(&catalogs) {
         let reason = discovery.profile.as_ref().expect_err("no artifact");
         let artifact = lifecycle_artifact_path(catalog).display().to_string();
@@ -325,9 +325,9 @@ fn discovery_keeps_root_order_sorted_names_and_shadowing() {
     assert!(!reads.contains(&shadowed), "a shadowed file is never read: {reads:?}");
 
     // An earlier root's file shadows a later root's valid catalog of the same name.
-    std::fs::write(roots.external.join("a.yml"), host_catalog("later")).expect("catalog");
+    std::fs::write(roots.later.join("a.yml"), host_catalog("later")).expect("catalog");
     std::fs::write(
-        lifecycle_artifact_path(&roots.external.join("a.yml")),
+        lifecycle_artifact_path(&roots.later.join("a.yml")),
         host_artifact(&host_catalog("later"), &[]),
     )
     .expect("artifact");

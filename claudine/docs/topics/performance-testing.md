@@ -93,7 +93,7 @@ This is the primary tool for diagnosing performance in real workflows.
 
 ### Run the Performance Review Prompt
 
-The prompt at `.ai/prompts/performance-review.md` drives an evidence-based code review across runtime, memory, async, I/O, parsing, data structures, API architecture, and compile-time dimensions. Invoke it through claudine compose or your preferred agent.
+The prompt at `prompts/_reviews/performance-review.md` drives an evidence-based code review across runtime, memory, async, I/O, parsing, data structures, API architecture, and compile-time dimensions. Invoke it through claudine compose or your preferred agent.
 
 ## CI/CD Integration
 

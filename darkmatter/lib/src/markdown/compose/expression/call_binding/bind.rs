@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 use super::error::{ArgumentError, ArgumentProblem, CallBindingError, CandidateFailure, SignatureProblem};
 use super::registration::{EvaluationMode, FunctionRegistration};
 use super::signature::{CompiledParameter, CompiledSignature};
-use crate::markdown::coercion::{BindOptions, Bound, PathSegment, ValueKind, bind_with};
+use simplified_schema::coercion::{BindOptions, Bound, PathSegment, ValueKind, bind_with};
 
 /// A numeric recovery that bound the call with the fallback selected.
 #[derive(Debug, Clone, PartialEq)]

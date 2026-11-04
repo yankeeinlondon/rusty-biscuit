@@ -438,7 +438,7 @@ mod infix_logic_conditions {
 
     #[test]
     fn page_block_with_chained_or() {
-        // Chained `||` in condition mode evaluates as logical OR
+        // A chained `||` is truthy when any operand is.
         let content = "---\na: false\nb: false\nc: true\n---\n::block when=\"a || b || c\"\ninside\n::end-block\n";
         let (output, _report) = compose_with_page_blocks(content);
         assert!(output.contains("inside"));

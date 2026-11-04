@@ -1,8 +1,9 @@
 [package]
-name = "dmls"
+name = "darkmatter-lsp"
 description = "Darkmatter Language Server"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-only"
 autotests = false
 
 [lib]
@@ -66,6 +67,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Semantic authorities
 darkmatter = { path = "../lib" }
+simplified-schema = { path = "../../simplified-schema/lib" }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 # xxHash content-hash identity for invalidation (design "Invalidation").
 biscuit-hash = { path = "../../biscuit-hash/lib" }

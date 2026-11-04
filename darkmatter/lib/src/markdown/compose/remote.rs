@@ -454,7 +454,7 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         Expr::Binary { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         Expr::Index { base, index } => vec![base.as_ref(), index.as_ref()],
         Expr::MemberAccess { base, .. } => vec![base.as_ref()],
-        Expr::Fallback { primary, fallback } => vec![primary.as_ref(), fallback.as_ref()],
+        Expr::LogicalOr { left, right } => vec![left.as_ref(), right.as_ref()],
         Expr::Ternary {
             condition,
             then_branch,

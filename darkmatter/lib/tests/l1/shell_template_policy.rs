@@ -19,14 +19,15 @@ use darkmatter::markdown::compose::shell_expansion::types::{
 use darkmatter::markdown::compose::shell_expansion::{
     check_filled_chain, check_template_blacklist, check_user_blacklist, normalize_command,
 };
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SimplifiedSchema};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaRoot;
 use serde_json::json;
 use std::path::Path;
 use tempfile::TempDir;
 
-/// The `SimplifiedSchema` projection of a document whose `$schema` body is
+/// The `SchemaRoot` projection of a document whose `$schema` body is
 /// `schema` (YAML lines indented two spaces).
-fn schema(schema: &str) -> Option<SimplifiedSchema> {
+fn schema(schema: &str) -> Option<SchemaRoot> {
     let source: Markdown = format!("---\n$schema:\n{schema}---\nbody\n").into();
     DarkmatterSchemas::new(crate::request_support::cwd_context())
         .effective_for(&source)
@@ -37,13 +38,13 @@ fn schema(schema: &str) -> Option<SimplifiedSchema> {
 
 /// `expression` typed at an unguarded site of a document whose projection
 /// is `schema` and whose host declares `host_globals`.
-fn project_hole(expression: &str, schema: Option<&SimplifiedSchema>, host_globals: &[&str]) -> HoleType {
+fn project_hole(expression: &str, schema: Option<&SchemaRoot>, host_globals: &[&str]) -> HoleType {
     let declared = DeclaredTypes::new(schema).with_host_globals(host_globals);
     darkmatter::markdown::compose::shell_expansion::template::project_hole(expression, &TypeScope::unguarded(&declared))
 }
 
 /// The shape of `command` typed against `schema`.
-fn typed_shape(command: &str, schema: Option<&SimplifiedSchema>) -> TemplateShape {
+fn typed_shape(command: &str, schema: Option<&SchemaRoot>) -> TemplateShape {
     let mut template = parse_authored(command).unwrap_or_else(|error| panic!("{command}: {error}"));
     template.project_types(&TypeScope::unguarded(&DeclaredTypes::new(schema)));
     TemplateShape::from_template(&template)

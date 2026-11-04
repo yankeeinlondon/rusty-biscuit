@@ -6,8 +6,10 @@ source scripts/cargo-path.sh
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
         winget_links="$(cygpath -u "${LOCALAPPDATA:?}")/Microsoft/WinGet/Links"
+        # Appended: WinGet links can hold uutils coreutils, which must never
+        # sort ahead of the shell's own /usr/bin (just/shell.just).
         if [[ -d "$winget_links" ]]; then
-            export PATH="$winget_links:$PATH"
+            export PATH="$PATH:$winget_links"
         fi
         ;;
 esac
@@ -45,7 +47,9 @@ activate_windows_python() {
     fi
     export PATH="$python_dir:$PATH"
     if [[ -d /usr/bin && -w /usr/bin ]]; then
-        printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$python_exe" > /usr/bin/python3
+        # A mixed path (`C:/...`): this shim is also found on PATH from Git
+        # Bash, which cannot resolve the `/cygdrive/...` form Cygwin produces.
+        printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$(cygpath -m "$python_exe")" > /usr/bin/python3
         chmod +x /usr/bin/python3
     fi
 }

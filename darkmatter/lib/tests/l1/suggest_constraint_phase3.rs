@@ -1,14 +1,10 @@
-use darkmatter::markdown::{
-    Markdown,
-    schemas::{
-        DarkmatterSchemas, SuggestionLintReason, lint_suggestions, parse_yaml_schema,
-        simplified::{parse_yaml_schema_with_source, to_json_schema},
-    },
-};
+use darkmatter::markdown::{Markdown, schemas::{DarkmatterSchemas}};
+use simplified_schema::{SuggestionLintReason, lint_suggestions, parse_yaml_schema};
+use simplified_schema::simplified::{parse_yaml_schema_with_source, to_json_schema};
 use insta::assert_snapshot;
 use serde_json::{Value, json};
 
-fn parse(yaml: &str) -> darkmatter::markdown::schemas::SimplifiedSchema {
+fn parse(yaml: &str) -> simplified_schema::SchemaRoot {
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
     parse_yaml_schema(&value).unwrap()
 }

@@ -58,7 +58,7 @@ use crate::lifecycle::{
     ActionCall, OperandLocation, OperandVerdict, action_call, action_value_to_expr, operand_form, template_operands,
     validate_action_operands_with,
 };
-use crate::markdown::coercion::PathSegment;
+use simplified_schema::coercion::PathSegment;
 use crate::markdown::compose::expression::call_binding::{CallBindingError, CallErrorKind};
 use crate::markdown::compose::expression::{defer_templates, is_malformed_template};
 use crate::markdown::literal_token::decode_leaf;
@@ -67,15 +67,6 @@ use crate::markdown::literal_token::decode_leaf;
 /// before giving up on it: translators close every cycle through a value
 /// descent, so this is only a backstop.
 const MAX_HOPS: usize = 64;
-
-/// Whether some node of `schema` carries `x-darkmatter-operands`.
-pub(super) fn marks_operands(schema: &Value) -> bool {
-    match schema {
-        Value::Object(map) => map.contains_key(DARKMATTER_OPERANDS_KEYWORD) || map.values().any(marks_operands),
-        Value::Array(items) => items.iter().any(marks_operands),
-        _ => false,
-    }
-}
 
 /// The verdicts on every generated verb value of one instance.
 #[derive(Debug, Default)]

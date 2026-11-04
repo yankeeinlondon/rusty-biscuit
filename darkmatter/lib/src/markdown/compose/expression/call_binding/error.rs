@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::markdown::coercion::{ConversionError, ValueFailure, ValueKind, compact, render_path};
+use simplified_schema::coercion::{ConversionError, ValueFailure, ValueKind, compact, render_path};
 
 /// The four kinds of call-binding error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

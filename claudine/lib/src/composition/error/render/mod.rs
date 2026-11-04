@@ -328,14 +328,14 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
     let problem = problems.iter().find(|problem| problem.caller_file.is_some())?;
     let caller = problem.caller_file.as_ref()?;
     let reference = match problem.file_reference.as_ref()? {
-        darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { raw }
-        | darkmatter::markdown::schemas::FileReferenceDiagnostic::ResolutionFailed { raw, .. }
-        | darkmatter::markdown::schemas::FileReferenceDiagnostic::NoMatch { raw, .. } => raw,
+        simplified_schema::FileReferenceDiagnostic::InvalidSyntax { raw }
+        | simplified_schema::FileReferenceDiagnostic::ResolutionFailed { raw, .. }
+        | simplified_schema::FileReferenceDiagnostic::NoMatch { raw, .. } => raw,
     };
     let mut detail = null_detail_for("composition.invalid_file_reference");
     detail["reference"] = json!(reference);
     detail["kind"] = json!(match problem.file_reference.as_ref()? {
-        darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { .. } => "malformed",
+        simplified_schema::FileReferenceDiagnostic::InvalidSyntax { .. } => "malformed",
         _ => "not_found",
     });
     detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.cwd()));
@@ -358,7 +358,7 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
     }
     if matches!(
         problem.file_reference,
-        Some(darkmatter::markdown::schemas::FileReferenceDiagnostic::NoMatch { .. })
+        Some(simplified_schema::FileReferenceDiagnostic::NoMatch { .. })
     ) {
         detail["failure"] = json!("no_match");
     }

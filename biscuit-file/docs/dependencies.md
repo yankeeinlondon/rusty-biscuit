@@ -2,16 +2,28 @@
 
 ## File References And Remote Fetch
 
-- `url` is enabled by `file-reference` so `FileReference` can classify HTTP(S)
+File references are split across two features. `file-reference-syntax` is the
+passive grammar: it parses file and glob references and holds the data types
+(including `FileResolutionContext`) and needs only `globset` and `url`.
+`file-reference` enables `file-reference-syntax` and adds resolution, glob
+listing, portable references, and git root discovery, which bring in `gix`
+and `walkdir`.
+
+- `url` is enabled by `file-reference-syntax` so `FileReference` can classify HTTP(S)
   descriptors without applying local path normalization to URL syntax.
 - `gix` (pure-Rust, `default-features = false` + `sha1`) is gated behind
   `file-reference` and used only for repository-root discovery in
   `find_git_root`. It replaces the former `git2`/libgit2 dependency so the
   crate (and its consumers, e.g. `sniff`) carries no C-linked git backend.
-- `globset` is gated behind `file-reference` and compiles the glob half of a
+- `globset` is gated behind `file-reference-syntax` and compiles the glob half of a
   `GlobReference` (a file-reference prefix followed by a glob); only the
   `file_reference/glob/` module names it, and only `glob/parse.rs` builds a
-  matcher (`roots.rs` holds the compiled `GlobMatcher`). Darkmatter already depends on the
+  matcher (`roots.rs` holds the compiled `GlobMatcher`). It belongs to the
+  syntax feature because `GlobReference::new` compiles each pattern to
+  report invalid glob syntax before any context exists. It is a passive
+  syntax dependency, not a resolver dependency: it performs no I/O, so a
+  consumer that keeps only `file-reference-syntax` (for example
+  `simplified-schema` without its `file` feature) still compiles it. Darkmatter already depends on the
   same `0.4` line, so the workspace gains no new crate. Patterns are built
   with explicit options, never the crate defaults: `literal_separator(true)`,
   case-sensitive, and `backslash_escape(false)` on every OS (the default is on
@@ -29,7 +41,8 @@
     `dunce::canonicalize` call. Every filesystem canonicalization in
     biscuit-file, Claudine, and Darkmatter whose result leaves a private
     comparison goes through it, including the resolver's containment check.
-  - `simplify_root` (behind `file-reference`), the resolver's root boundary.
+  - `simplify_root` (behind `file-reference-syntax`), the resolver's root
+    boundary, which context validation also uses to normalize anchors.
     Anchors reach the resolver in both spellings (`std::fs::canonicalize` yields
     verbatim; `gix` and an environment-read home usually yield legacy), and Win32 applies no path
     normalization under the verbatim prefix, so a reference's own `/` separators
@@ -44,7 +57,7 @@
   feature. They provide the shared policy-enforcing HTTP primitive used by
   Darkmatter compose and side-effect network paths.
 
-The default feature set includes URL classification through `file-reference`,
+The default feature set includes URL classification through `file-reference-syntax`,
 but it does not compile the HTTP client stack unless `fetch` is enabled.
 
 ## Development Only

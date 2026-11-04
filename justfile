@@ -6,8 +6,14 @@ set positional-arguments
 # The `env CYG_SYS_BASHRC=1` prefix is load-bearing. Cygwin's /etc/bash.bashrc
 # opens with `[[ -z ${CYG_SYS_BASHRC} ]]`, an unguarded expansion that the `-u`
 # below turns into a fatal "unbound variable" wherever bash sources that file
-# non-interactively (a shell exporting BASH_ENV is the usual cause). Pre-setting
-# the variable sends that guard down its already-initialized early-return path.
+# non-interactively. The usual cause is SSH: Cygwin's bash sources it for any
+# top-level `bash -c` that sees SSH_CLIENT, which is every recipe on a remote
+# rig. Pre-setting the variable sends that guard down its already-initialized
+# early-return path.
+#
+# On native Windows the bare `env` below may be a foreign `env.exe` (uutils
+# from WinGet); `just` resolves it from the PATH it inherited. That is
+# harmless, and `just/shell.just` fixes the PATH recipes run with.
 #
 # It must reach bash through the environment rather than just's `export`, which
 # covers recipe shells but NOT the shells just spawns to evaluate backtick
@@ -35,7 +41,7 @@ import "./just/spec.just"
 # Those four carry zero or one test, so a canonical recipe set would gate
 # nothing (`agent-sandbox` and `tabby` have no justfile at all). Add each one
 # here at the same time it gains a suite worth running.
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard simplified-schema"
 
 # The `areas :=` list above is a LOCAL convenience (canonical-recipe validation
 # and `_orchestrate` iteration). CI does not read it: CI selects and records
@@ -132,6 +138,10 @@ check-tier-coverage *args="":
 test-leaks *args="":
     @cargo run -q -p test-toolkit --features leak-sweep --bin leak-sweep -- just test {{ args }}
 
+# Show the workspace's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
+slow-tests *args:
+    @just _slow_tests {{ args }}
+
 # pre-push hook entry point: full local evidence for source-changed packages
 #
 # Runs lint and L1 plus hostable L2 for source packages. Direct reverse
@@ -155,8 +165,11 @@ cross-check *args:
 
 # Retire build-host clones that `cross-check` no longer needs (this host's
 # clones whose worktree is gone, and any clone with no run in
-# CROSS_CHECK_MAX_AGE_DAYS, default 3) on every declared host, and report each
-# host's free space and clone sizes before and the space reclaimed after.
+# CROSS_CHECK_MAX_AGE_DAYS, default 3) and abandoned standalone clones of this
+# repository (idle CROSS_CHECK_ABANDONED_DAYS, default 7, with nothing
+# unpushed, stashed, or uncommitted) on every declared host and in this
+# machine's own CODING_DIR, and report each host's free space and clone sizes
+# before and the space reclaimed after.
 # Usage: just cross-check-refresh [--os linux|windows|wsl|macos|all] [--dry-run]
 cross-check-refresh *args:
     @./scripts/cross-check-refresh.sh {{ args }}
@@ -366,7 +379,7 @@ _toolchain-latest-stable:
 
 # run the latest debug build of the `sniff` CLI
 sniff *args="":
-    @cargo run -p sniff-cli -- {{ args }}
+    @cargo run -p sniff-detection-cli -- {{ args }}
 
 # show workspace package dependencies
 repo-deps:
@@ -458,6 +471,14 @@ check-canonical *args="":
             fi
         done < <(grep -E '^[A-Za-z_]+ *:?=.*`' "$area/justfile" || true)
 
+        # A bash recipe shell without just/shell.just keeps the Windows PATH
+        # order, where WinGet/uutils coreutils shadow the shell's own.
+        if grep -Eq '^set shell .*"bash"' "$area/justfile" \
+            && ! grep -Eq "^import ['\"](\.\./)+just/(devops|shell)\.just['\"]" "$area/justfile"; then
+            echo -e "  {{ RED }}❌ Runs recipes through bash without importing just/shell.just{{ RESET }} (directly or via devops.just)"
+            missing+=("<shell.just>")
+        fi
+
         if (( ${#missing[@]} > 0 )); then
             echo -e "  {{ RED }}❌ Missing canonical recipes:{{ RESET }} ${missing[*]}"
             failed_areas+=("$area")
@@ -503,6 +524,11 @@ commit *args="":
     fi
 
     claudine compose prompts/commit.md {{ args }}
+
+# Propose this branch as a pull request: push it with the local test gates
+# on, then open the pull request (see prompts/pr.md)
+pr *args="":
+    RUSTY_BISCUIT_PRE_PUSH=strict claudine compose prompts/pr.md {{ args }}
 
 # stages all files in package area and then commits and pushes
 cp:
@@ -683,6 +709,12 @@ _ensure-build-deps:
                 -property installationPath | tr -d '\r' | head -n1)"
             exit 0
             ;;
+        Linux|Darwin) ;;
+        *)
+            echo "_ensure-build-deps: unrecognized host OS '$(uname -s)'." >&2
+            echo "On Windows this means a non-POSIX uname is answering; see just/shell.just." >&2
+            exit 1
+            ;;
     esac
 
     # --- Linux / macOS ------------------------------------------------------
@@ -727,7 +759,12 @@ _ensure-native-libs *packages="":
     case "$(uname -s)" in
         Linux)  runner_key="ubuntu-latest" ;;
         Darwin) runner_key="macos-latest" ;;
-        *)      runner_key="windows-latest" ;;
+        MINGW*|MSYS*|CYGWIN*) runner_key="windows-latest" ;;
+        *)
+            echo "_ensure-native-libs: unrecognized host OS '$(uname -s)'." >&2
+            echo "On Windows this means a non-POSIX uname is answering; see just/shell.just." >&2
+            exit 1
+            ;;
     esac
 
     sudo_cmd=""
@@ -929,11 +966,13 @@ _ensure-kache:
     warn() { echo -e "{{ YELLOW }}WARNING{{ RESET }}: $*"; }
     dev_id() {
         case "$(uname -s)" in
-            Darwin) stat -f %d "$1" ;;
-            *)      stat -c %d "$1" ;;
+            Darwin) stat -L -f %d "$1" ;;
+            *)      stat -L -c %d "$1" ;;
         esac
     }
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    # Not ${CARGO_HOME:-$HOME/.cargo}: under Cygwin $HOME is often /home/<user>,
+    # and native python3 cannot open a /cygdrive path (see kache-host.sh).
+    cargo_home="$(./scripts/kache-host.sh cargo-home)"
     # The one host file Cargo reads: a legacy extensionless `config` hides a
     # `config.toml` beside it, so activation and its undo go where Cargo looks.
     host_config="$cargo_home/config.toml"
@@ -1153,7 +1192,7 @@ _ensure-kache:
     print("installed=" + ("yes" if d.get("service_installed") else "no"))
     print("version=" + field("daemon_version"))
     print("socket=" + field("socket"))
-    ' <<<"$json")" || return 1
+    ' <<<"$json" | tr -d '\r')" || return 1
         while IFS='=' read -r key value; do
             case "$key" in
                 running)   daemon_running="$value" ;;
@@ -1395,10 +1434,7 @@ install-kache binary_only="false":
         # existing config — hosts size against their own volume. A read-only
         # config directory (build-linux mounts ~/.config over CIFS) is reported,
         # not fatal, so `just init` still completes there.
-        case "$(uname -s)" in
-            MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
-            *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
-        esac
+        kache_config_dir="$(dirname "$(./scripts/kache-host.sh config-path)")"
         if [[ ! -f "$kache_config_dir/config.toml" ]]; then
             if mkdir -p "$kache_config_dir" 2> /dev/null \
                 && printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml" 2> /dev/null; then
@@ -1458,7 +1494,9 @@ kache-status:
     # shadowed activation takes over once the one above it is undone. A
     # kache-named winner is healthy only when it resolves to the kache on
     # PATH, the binary whose version and passthrough are checked below.
-    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    # Not ${CARGO_HOME:-$HOME/.cargo}: under Cygwin $HOME is often /home/<user>,
+    # and native python3 cannot open a /cygdrive path (see kache-host.sh).
+    cargo_home="$(./scripts/kache-host.sh cargo-home)"
     active="" wrapper_error="" wrapper_problem=""
     if wrapper_out="$(./scripts/kache-host.sh wrapper 2>&1)"; then
         winner="$(sed -n 's/^kache-host: wrapper=//p' <<<"$wrapper_out" | head -1)"
@@ -2016,4 +2054,4 @@ _ensure-git-hooks:
     rm -f "${target}"
     mv "${staged}" "${target}"
     trap - EXIT
-    echo "Git hooks: installed worktree-aware pre-push dispatcher at ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=scope-only|warn|strict)"
+    echo "Git hooks: installed worktree-aware pre-push dispatcher at ${target} (host L1/L2 evidence for source changes; RUSTY_BISCUIT_PRE_PUSH=auto|scope-only|warn|strict)"

@@ -37,7 +37,21 @@ pub fn uri_to_file_path(uri: &Uri) -> Option<PathBuf> {
 /// `None` when the path is not absolute (file URIs require absolute paths).
 pub fn file_path_to_uri(path: &std::path::Path) -> Option<Uri> {
     let url = url::Url::from_file_path(path).ok()?;
-    url.as_str().parse().ok()
+    // `url` leaves `[`, `]`, `^`, `|`, and `\` literal in a path, which
+    // `lsp_types::Uri` rejects; without this a file in a folder such as
+    // `[x] notes` would get no link at all. Percent-decoding restores them.
+    let mut encoded = url[..url::Position::BeforePath].to_string();
+    for character in url.path().chars() {
+        match character {
+            '[' => encoded.push_str("%5B"),
+            ']' => encoded.push_str("%5D"),
+            '^' => encoded.push_str("%5E"),
+            '|' => encoded.push_str("%7C"),
+            '\\' => encoded.push_str("%5C"),
+            other => encoded.push(other),
+        }
+    }
+    encoded.parse().ok()
 }
 
 /// Extracts workspace root paths from `initialize` params.
@@ -123,6 +137,15 @@ mod tests {
         let path = dir.path().join("with space").join("doc.md");
         let uri = file_path_to_uri(&path).unwrap();
         assert!(uri.as_str().contains("with%20space"));
+        assert_eq!(uri_to_file_path(&uri), Some(path));
+    }
+
+    #[test]
+    fn file_uris_encode_brackets_and_other_characters_a_uri_rejects() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("[x] (y) café ^a|b").join("doc.md");
+        let uri = file_path_to_uri(&path).expect("a bracketed folder still gets a URI");
+        assert!(uri.as_str().contains("%5Bx%5D%20(y)%20caf%C3%A9%20%5Ea%7Cb"), "{}", uri.as_str());
         assert_eq!(uri_to_file_path(&uri), Some(path));
     }
 

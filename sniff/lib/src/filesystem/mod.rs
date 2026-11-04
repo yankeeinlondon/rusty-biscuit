@@ -31,7 +31,7 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, ChangedBase, CommitInfo, CommitLink, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
+    BehindStatus, ChangedBase, ChangedContent, CommitInfo, CommitLink, DEFAULT_PATH_HISTORY_SCAN_LIMIT,
     DEFAULT_RECENT_COMMIT_COUNT, DeltaKind, FileChange, GitHostingProvider, GitInfo, GitRepo,
     LocalBranchInfo, NamedDate, PathHistoryOptions, PathHistoryResult,
     RecentCommit, RecentCommitAuthor, RecentCommitFile, RecentCommitFileKind,
@@ -43,6 +43,7 @@ pub use git::{
     commits_for_path_at, detect_git, detect_git_with_request, detect_merge_conflicts,
     get_commit_by_sha, get_commit_files, get_commits_for_branch, get_commits_for_path,
     merge_conflicts_at,
+    PathContent, WorkingState,
     merge_conflicts_with_branch_at, parse_commit_message, preferred_remote_url,
     remote_identity, remote_url, repo_root, repository_link,
 };

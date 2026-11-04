@@ -10,9 +10,9 @@
 
 use std::collections::HashMap;
 
-use super::ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
-use super::lexer::{ExpressionFinder, ExpressionLocation, Lexer, ParseMode, Token};
-use super::parser::{parse_condition_spanned, parse_spanned};
+use simplified_schema::expression::ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
+use super::{ExpressionFinder, ExpressionLocation, Lexer, Token};
+use simplified_schema::expression::parser::parse_spanned;
 use crate::markdown::span::SourceSpan;
 
 /// A syntactic defect found in authored expression source.
@@ -41,48 +41,35 @@ pub enum ExpressionLintKind {
     },
 }
 
-/// Parses `source` in `mode` and lints it. A parse failure yields no lints;
+/// Parses `source` and lints it. A parse failure yields no lints;
 /// malformed-expression diagnostics own that path.
 ///
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::expression::{lint_expression, ParseMode};
+/// use darkmatter::markdown::compose::expression::lint_expression;
 ///
-/// let lints = lint_expression(r#"ok ? "done" : "failed in {{ repo }}""#, ParseMode::Interpolation);
+/// let lints = lint_expression(r#"ok ? "done" : "failed in {{ repo }}""#);
 /// assert_eq!(lints.len(), 1);
 /// assert_eq!(
 ///     lints[0].suggestion.as_deref(),
 ///     Some(r#"ok ? "done" : "failed in " + repo"#)
 /// );
 /// ```
-pub fn lint_expression(source: &str, mode: ParseMode) -> Vec<ExpressionLint> {
-    let parsed = match mode {
-        ParseMode::Interpolation => parse_spanned(source),
-        ParseMode::Condition => parse_condition_spanned(source),
-    };
-    match parsed {
-        Ok(expr) => lint_with_modes(source, &expr, &[mode]),
+pub fn lint_expression(source: &str) -> Vec<ExpressionLint> {
+    match parse_spanned(source) {
+        Ok(expr) => lint_parsed(source, &expr, true),
         Err(_) => Vec::new(),
     }
 }
 
 /// Lints an already-parsed expression whose spans index into `source`.
 ///
-/// The dialect `expr` was parsed in is recovered by re-parsing `source`; when
-/// both dialects produce `expr`, a suggestion must be valid in both.
+/// A suggestion is offered only when re-parsing `source` reproduces `expr`;
+/// otherwise the spans cannot be trusted to splice a rewrite.
 pub fn lint_spanned(source: &str, expr: &SpannedExpr) -> Vec<ExpressionLint> {
-    let modes: Vec<ParseMode> = [ParseMode::Interpolation, ParseMode::Condition]
-        .into_iter()
-        .filter(|mode| {
-            let reparsed = match mode {
-                ParseMode::Interpolation => parse_spanned(source),
-                ParseMode::Condition => parse_condition_spanned(source),
-            };
-            reparsed.is_ok_and(|reparsed| &reparsed == expr)
-        })
-        .collect();
-    lint_with_modes(source, expr, &modes)
+    let suggest = parse_spanned(source).is_ok_and(|reparsed| &reparsed == expr);
+    lint_parsed(source, expr, suggest)
 }
 
 /// True when the trimmed text is exactly one `{{ … }}` span: the shape
@@ -120,18 +107,14 @@ struct FlaggedLiteral {
     is_object_key: bool,
 }
 
-fn lint_with_modes(source: &str, expr: &SpannedExpr, modes: &[ParseMode]) -> Vec<ExpressionLint> {
+fn lint_parsed(source: &str, expr: &SpannedExpr, suggest: bool) -> Vec<ExpressionLint> {
     let mut flagged = Vec::new();
     collect_flagged(source, expr, false, &mut flagged);
     if flagged.is_empty() {
         return Vec::new();
     }
 
-    let suggestion = if modes.is_empty() {
-        None
-    } else {
-        rewrite(source, expr, &flagged, modes)
-    };
+    let suggestion = if suggest { rewrite(source, expr, &flagged) } else { None };
 
     flagged
         .iter()
@@ -187,9 +170,9 @@ fn collect_flagged(
             collect_flagged(source, index, false, out);
         }
         SpannedExprKind::MemberAccess { base, .. } => collect_flagged(source, base, true, out),
-        SpannedExprKind::Fallback { primary, fallback } => {
-            collect_flagged(source, primary, false, out);
-            collect_flagged(source, fallback, false, out);
+        SpannedExprKind::LogicalOr { left, right } => {
+            collect_flagged(source, left, false, out);
+            collect_flagged(source, right, false, out);
         }
         SpannedExprKind::Ternary {
             condition,
@@ -299,15 +282,10 @@ fn decoded_literal_inner<'a>(
     (decoded == expected).then_some((inner, boundaries))
 }
 
-/// Builds the corrected expression and proves it: the rewrite must re-parse,
-/// in every candidate dialect, to exactly the tree the author meant. A re-parse
-/// that merely succeeds is not enough — a mis-spliced ternary parses cleanly.
-fn rewrite(
-    source: &str,
-    expr: &SpannedExpr,
-    flagged: &[FlaggedLiteral],
-    modes: &[ParseMode],
-) -> Option<String> {
+/// Builds the corrected expression and proves it: the rewrite must re-parse
+/// to exactly the tree the author meant. A re-parse that merely succeeds is
+/// not enough — a mis-spliced ternary parses cleanly.
+fn rewrite(source: &str, expr: &SpannedExpr, flagged: &[FlaggedLiteral]) -> Option<String> {
     let mut text_replacements = Vec::with_capacity(flagged.len());
     let mut tree_replacements = HashMap::with_capacity(flagged.len());
     for literal in flagged {
@@ -325,20 +303,10 @@ fn rewrite(
     }
 
     let expected = substitute(expr, &tree_replacements);
-    modes
-        .iter()
-        .all(|mode| {
-            let reparsed = match mode {
-                ParseMode::Interpolation => parse_spanned(&rewritten),
-                ParseMode::Condition => parse_condition_spanned(&rewritten),
-            };
-            // A lifted span can itself hold a nested literal; a suggestion
-            // that leaves a defect behind is not offered.
-            reparsed.is_ok_and(|reparsed| {
-                reparsed.erase() == expected
-                    && lint_with_modes(&rewritten, &reparsed, &[]).is_empty()
-            })
-        })
+    // A lifted span can itself hold a nested literal; a suggestion that leaves
+    // a defect behind is not offered.
+    parse_spanned(&rewritten)
+        .is_ok_and(|reparsed| reparsed.erase() == expected && lint_parsed(&rewritten, &reparsed, false).is_empty())
         .then_some(rewritten)
 }
 
@@ -484,9 +452,9 @@ fn substitute(expr: &SpannedExpr, replacements: &HashMap<usize, Expr>) -> Expr {
             base: sub(base),
             name: name.clone(),
         },
-        SpannedExprKind::Fallback { primary, fallback } => Expr::Fallback {
-            primary: sub(primary),
-            fallback: sub(fallback),
+        SpannedExprKind::LogicalOr { left, right } => Expr::LogicalOr {
+            left: sub(left),
+            right: sub(right),
         },
         SpannedExprKind::Ternary {
             condition,
@@ -509,8 +477,8 @@ fn substitute(expr: &SpannedExpr, replacements: &HashMap<usize, Expr>) -> Expr {
         SpannedExprKind::CallbackCall { name, args } => Expr::CallbackCall {
             name: name.clone(),
             args: args.iter().map(|arg| match arg {
-                super::ast::SpannedCallArgument::Value(value) => super::ast::CallArgument::Value(substitute(value, replacements)),
-                super::ast::SpannedCallArgument::Callback(callback) => super::ast::CallArgument::Callback(super::ast::Callback {
+                simplified_schema::expression::ast::SpannedCallArgument::Value(value) => simplified_schema::expression::ast::CallArgument::Value(substitute(value, replacements)),
+                simplified_schema::expression::ast::SpannedCallArgument::Callback(callback) => simplified_schema::expression::ast::CallArgument::Callback(simplified_schema::expression::ast::Callback {
                     pattern: callback.pattern.erase(),
                     body: substitute(&callback.body, replacements),
                 }),
@@ -561,7 +529,7 @@ mod tests {
     }
 
     fn lint(source: &str) -> Vec<ExpressionLint> {
-        lint_expression(source, ParseMode::Interpolation)
+        lint_expression(source)
     }
 
     fn suggestion(source: &str) -> String {
@@ -631,10 +599,9 @@ mod tests {
         }
 
         #[test]
-        fn fires_in_both_parse_modes() {
+        fn fires_once_beside_logical_or() {
             let source = r#"a || "in {{ x }}""#;
-            assert_eq!(lint_expression(source, ParseMode::Interpolation).len(), 1);
-            assert_eq!(lint_expression(source, ParseMode::Condition).len(), 1);
+            assert_eq!(lint(source).len(), 1);
         }
 
         #[test]
@@ -867,12 +834,14 @@ mod tests {
         }
 
         #[test]
-        fn fallback_span_in_condition_dialect_has_no_suggestion() {
-            // Lifting `y || 'd'` into condition grammar would turn a fallback
-            // into a boolean OR.
+        fn logical_or_span_is_offered_a_suggestion() {
+            // `||` means the same thing inside and outside the span, so
+            // lifting `y || 'd'` preserves the value on every surface.
             let source = r#"a == "x {{ y || 'd' }}""#;
-            assert!(lint_expression(source, ParseMode::Interpolation)[0].suggestion.is_some());
-            assert_eq!(lint_expression(source, ParseMode::Condition)[0].suggestion, None);
+            assert_eq!(
+                lint(source)[0].suggestion.as_deref(),
+                Some(r#"a == "x " + (y || 'd')"#)
+            );
         }
 
         #[test]
@@ -890,14 +859,11 @@ mod tests {
         }
 
         #[test]
-        fn suggestion_reparses_in_the_original_dialect() {
+        fn suggestion_beside_logical_or_reparses() {
             let source = r#"a || "x {{ y }}""#;
-            let rewrite = lint_expression(source, ParseMode::Condition)[0]
-                .suggestion
-                .clone()
-                .unwrap();
+            let rewrite = lint(source)[0].suggestion.clone().unwrap();
             assert_eq!(rewrite, r#"a || "x " + y"#);
-            assert!(parse_condition_spanned(&rewrite).is_ok());
+            assert!(parse_spanned(&rewrite).is_ok());
         }
     }
     mod authority {
@@ -935,18 +901,10 @@ mod tests {
             /// the lexer's decoded string tokens in which `find_all_plain`
             /// finds a span, independent of the lint's own tree walk.
             #[test]
-            fn flagged_literals_equal_scanner_hits(
-                source in expression_source(),
-                condition in any::<bool>(),
-            ) {
-                let mode = if condition { ParseMode::Condition } else { ParseMode::Interpolation };
-                let parsed = match mode {
-                    ParseMode::Interpolation => parse_spanned(&source),
-                    ParseMode::Condition => parse_condition_spanned(&source),
-                };
-                prop_assume!(parsed.is_ok());
+            fn flagged_literals_equal_scanner_hits(source in expression_source()) {
+                prop_assume!(parse_spanned(&source).is_ok());
 
-                let expected: BTreeSet<(usize, usize, usize)> = lex_spanned(&source, mode)
+                let expected: BTreeSet<(usize, usize, usize)> = lex_spanned(&source)
                     .unwrap()
                     .into_iter()
                     .flat_map(|token| {
@@ -971,7 +929,7 @@ mod tests {
                             .into_iter()
                     })
                     .collect();
-                let flagged: BTreeSet<(usize, usize, usize)> = lint_expression(&source, mode)
+                let flagged: BTreeSet<(usize, usize, usize)> = lint_expression(&source)
                     .into_iter()
                     .map(|lint| {
                         let ExpressionLintKind::NestedSpanInStringLiteral { literal, .. } = lint.kind;

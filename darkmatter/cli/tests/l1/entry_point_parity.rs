@@ -1071,9 +1071,10 @@ fn detection_surfaces_infer_through_the_context_they_are_given() {
     use darkmatter::markdown::Markdown;
     use darkmatter::markdown::compose::RequestSnapshot;
     use darkmatter::markdown::schemas::{
-        DarkmatterSchemas, DetectOptions, SimplifiedSchema, detect_from_document, detect_schema,
-        detect_schema_with_contexts, schema_to_yaml,
+        DarkmatterSchemas, DetectOptions, detect_from_document, detect_schema, detect_schema_with_contexts,
+        schema_to_yaml,
     };
+use simplified_schema::SchemaRoot;
     use darkmatter_cli::request::MdRequest;
 
     let cli = CliProcessFixture::named("detection_surfaces");
@@ -1087,7 +1088,7 @@ fn detection_surfaces_infer_through_the_context_they_are_given() {
 
     // `--merge` options, so every form must read `file(required)` or
     // `string(required)`, through the printed form `md` emits.
-    let types = |schema: SimplifiedSchema| -> Vec<String> {
+    let types = |schema: SchemaRoot| -> Vec<String> {
         let printed = detected_types(&schema_to_yaml(&schema));
         assert_eq!(printed.len(), 1, "one schema");
         DETECTION_FORMS.iter().map(|form| format!("{form}: {:?}", printed[0].get(*form))).collect()
@@ -1096,7 +1097,7 @@ fn detection_surfaces_infer_through_the_context_they_are_given() {
         let options = DetectOptions { merge: true };
         let pair = [context.clone(), context.clone()];
         vec![
-            ("detect_from_document", types(SimplifiedSchema::Single(detect_from_document(&markdown, context)))),
+            ("detect_from_document", types(SchemaRoot::Single(detect_from_document(&markdown, context)))),
             ("detect_schema", types(detect_schema(&[&markdown, &markdown], options, context))),
             ("detect_schema_with_contexts", types(detect_schema_with_contexts(&[&markdown, &markdown], options, &pair))),
             ("DarkmatterSchemas::detect", types(DarkmatterSchemas::new(context.clone()).detect(&[&markdown, &markdown], options))),

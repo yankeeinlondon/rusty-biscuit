@@ -25,7 +25,7 @@
 
 use std::path::Path;
 
-use darkmatter::markdown::schemas::{SchemaError, ValidatorCache};
+use simplified_schema::{SchemaError, ValidatorCache};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 

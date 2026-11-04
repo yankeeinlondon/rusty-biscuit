@@ -140,7 +140,7 @@ class ShippedFilterCorpusTests(unittest.TestCase):
     def test_every_tier_and_override_filter_parses(self) -> None:
         filters = {tier: tool.tier_filter(tier, "claudine-cli") for tier in tool.TIER_SELECTORS}
         filters[tool.INCLUDE_SLOW_SELECTOR] = tool.tier_filter("L1", "darkmatter", include_slow=True)
-        filters["worktree-L1"] = tool.tier_filter("L1", "worktree-cli")
+        filters["worktree-L1"] = tool.tier_filter("L1", "git-wt-cli")
         filters.update(tool.override_filters())
         self.assertTrue(any(s.startswith("override-") for s in filters), "nextest.toml overrides were read")
         for selector, text in filters.items():
@@ -427,7 +427,7 @@ class SharedAndRuledPlanTests(unittest.TestCase):
         self.assertEqual([{"old_target": "win_only", "target": "level2", "ruling": "R4"}], ruled.manifest["ruled_targets"])
 
     def test_joining_a_target_with_more_features_needs_no_test_without_them(self) -> None:
-        # The sniff-cli shape (R14): no manifest feature, but an inner cfg empties the binary without it.
+        # The sniff-detection-cli shape (R14): no manifest feature, but an inner cfg empties the binary without it.
         targets = [{"name": "level2_gated"}, {"name": "level2_x", "required_features": ["t"]}]
         empty = [make_capture("pkg", {"level2_gated": []}), make_capture("pkg", {"level2_gated": ["level2_g"], "level2_x": ["level2_y"]}, features=("t",))]
         result = self.plan(targets, empty, {"level2_gated": ("level2", "R14")})
@@ -850,24 +850,24 @@ class PackageTableTests(unittest.TestCase):
             "tree-hugger": ((),),
             "claudine": ((), ("work-counters",)),
             "sniff": ((), ("remote",), ("network",)),
-            "sniff-cli": ((), ("test-fixtures",)),
+            "sniff-detection-cli": ((), ("test-fixtures",)),
             "biscuit-file": ((), ("fetch",)),
             "schematic-gen": ((), ("terminal-tests",)),
             "biscuit-terminal-cli": ((), ("terminal-tests",)),
             "claudine-gen": ((), ("terminal-tests",)),
-            "dmls": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
+            "darkmatter-lsp": ((), ("effects-instrumentation",), ("terminal-tests",), ("terminal-tests", "effects-instrumentation")),
             "biscuit-tui-cli": ((), ("terminal-tests",)),
         }, {package: tool.PACKAGE_FEATURE_SETS[package] for package in tool.WAVE_2_PACKAGES})
         self.assertEqual(set(tool.PACKAGES), set(tool.PACKAGE_FEATURE_SETS))
 
     def test_an_unlisted_package_is_refused_before_any_subprocess(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(tool.ToolError, "no feature sets are known for worktree-cli"):
-                tool.capture_package("worktree-cli", Path(temporary), repo=Path(temporary))
+            with self.assertRaisesRegex(tool.ToolError, "no feature sets are known for git-wt-cli"):
+                tool.capture_package("git-wt-cli", Path(temporary), repo=Path(temporary))
             self.assertEqual([], list(Path(temporary).iterdir()), "nothing was written")
         with contextlib.redirect_stderr(io.StringIO()) as stderr:
-            self.assertEqual(2, tool.main(["inventory", "--package", "worktree-cli"]))
-        self.assertIn("worktree-cli not in PACKAGES", stderr.getvalue())
+            self.assertEqual(2, tool.main(["inventory", "--package", "git-wt-cli"]))
+        self.assertIn("git-wt-cli not in PACKAGES", stderr.getvalue())
 
 
 class ShippedPackageTableTests(unittest.TestCase):
@@ -1334,6 +1334,8 @@ class ShippedWave2PlanTests(unittest.TestCase):
     rulings R3, R4, R5, R10, R14, and R19.
     """
 
+    # Keyed by the frozen capture's package names, which predate the
+    # 2026-10-03 renames (`consolidation.RENAMED`).
     EXPECTED = {
         "tree-hugger": ({"l1": []}, {}),
         "claudine": ({"l1": []}, {}),

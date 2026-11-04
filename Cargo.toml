@@ -28,6 +28,7 @@ members = [
     "claudine/lib",
     "darkmatter/cli",
     "darkmatter/lib",
+    "simplified-schema/lib",
     "homelab/arcam-amp-integration",
     "homelab/cli",
     "homelab/eversolo-integration",

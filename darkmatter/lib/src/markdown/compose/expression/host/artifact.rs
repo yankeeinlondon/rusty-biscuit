@@ -40,7 +40,7 @@ use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value, json};
 
 use super::{FunctionState, HostFunction, HostFunctionCatalog, HostFunctionError, HostFunctions, validate_names};
-use crate::markdown::coercion::ValueKind;
+use simplified_schema::coercion::ValueKind;
 use crate::markdown::compose::expression::call_binding::{
     EvaluationMode, FactKind, FactType, FunctionRegistration, RegistrationBuilder,
 };

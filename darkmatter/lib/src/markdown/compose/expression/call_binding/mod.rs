@@ -1,6 +1,6 @@
 //! The call binder: binds a function call's evaluated arguments to the
 //! function's declared signatures through the one coercion engine
-//! ([`crate::markdown::coercion`]) before any handler runs.
+//! ([`simplified_schema::coercion`]) before any handler runs.
 //!
 //! - [`translate`] compiles SimplifiedSchema grammar types into coercion
 //!   shapes, meaning exactly what the JSON Schema lowering means.

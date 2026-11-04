@@ -567,7 +567,17 @@ claudine completions zsh > ~/.zfunc/_claudine
 
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
+
+# PowerShell (line in $PROFILE); shortcut functions opt in separately
+claudine completions powershell | Out-String | Invoke-Expression
+Register-ClaudineShortcutCompletion -Name compose -Prefix compose
+
+# Elvish (module; then `use claudine-completion` in rc.elv)
+claudine completions elvish > ~/.config/elvish/lib/claudine-completion.elv
 ```
+
+Every shell's script calls the `claudine __complete` engine. The old
+`COMPLETE=<shell>` one-liners still reach clap's names-only completion.
 
 **Related runtime behavior.** The `completions` command only installs the
 static shell script. Runtime file selection also happens through the
@@ -643,7 +653,7 @@ The function catalog comes from Darkmatter's library API (`expression_function_c
 
 `cli/tests/l1/context_command.rs::context_expressions_function_order_snapshot` pins the category and signature order.
 
-The `Function` column is the catalog's display key (parameter names, optional ones bracketed), not the typed signature; DMLS completion and hover show the typed form (`typed_signature()`). The report states no conversion rules of its own: argument conversion and the design-time call check that rejects a proven-bad call before composition are Darkmatter's (`darkmatter/docs/topics/schemas/definition.md#type-coercion`, `darkmatter/docs/inline/call-check.md`).
+The `Function` column is the catalog's display key (parameter names, optional ones bracketed), not the typed signature; DMLS completion and hover show the typed form (`typed_signature()`). The report states no conversion rules of its own: argument conversion and the design-time call check that rejects a proven-bad call before composition are Darkmatter's (`simplified-schema/docs/topics/conversion.md`, `darkmatter/docs/inline/call-check.md`).
 
 ### `--side-effects` report
 

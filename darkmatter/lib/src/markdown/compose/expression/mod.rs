@@ -1,14 +1,18 @@
 //! Core expression parsing and evaluation foundation.
 //!
-//! This module provides the shared AST, lexer, parser, and lookup trait
-//! used by both interpolation and condition evaluation. It is the foundation
-//! for expression processing in the compose pipeline.
+//! This module evaluates expressions for both interpolation and conditions.
+//! It is the foundation for expression processing in the compose pipeline.
+//! The passive syntax (AST, lexer, parser) lives in
+//! [`simplified_schema::expression`]; its most-used items are re-exported
+//! here.
 //!
 //! ## Components
 //!
-//! - **AST** (`ast::Expr`) - Abstract syntax tree for expressions
-//! - **Lexer** (`lexer::Lexer`) - Tokenizes expression strings
-//! - **Parser** (`parser::Parser`) - Builds AST from tokens
+//! - **AST** (`Expr`) - Abstract syntax tree for expressions
+//! - **Lexer** (`Lexer`) - Tokenizes expression strings
+//! - **Parser** (`Parser`) - Builds AST from tokens
+//! - **ExpressionFinder** (`lexer::ExpressionFinder`) - Locates `{{ … }}` in
+//!   Markdown, skipping code blocks
 //! - **EvaluationLookup** - Trait for resolving variable lookups
 //!
 //! ## Expression Syntax
@@ -30,15 +34,13 @@
 //!    and otherwise doubles as string concatenation)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
 //! 6. Logical AND `&&`
-//! 7. Logical OR / Fallback `||`
+//! 7. Logical OR `||`
 //! 8. Ternary `? :` (right-associative; all binary operators are
 //!    left-associative)
 //!
-//! ## Parser Modes
-//!
-//! `&&` is logical AND in both modes. Only `||` differs:
-//! - **Interpolation** (`ParseMode::Interpolation`) - `||` is fallback operator
-//! - **Condition** (`ParseMode::Condition`) - `||` is logical OR
+//! `||` is logical OR on every surface and returns the operand that decided
+//! the result: the first truthy operand, otherwise the last. `&&` returns a
+//! boolean.
 //!
 //! ## Truthiness
 //!
@@ -65,7 +67,6 @@
 //! topic.
 
 pub(crate) mod absence;
-pub mod ast;
 pub mod binding;
 pub mod call_binding;
 pub mod call_check;
@@ -84,7 +85,6 @@ pub mod iteration;
 pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
-pub mod parser;
 pub mod prepared;
 pub mod resolve_ctx;
 pub mod scope;
@@ -95,7 +95,7 @@ pub use absence::{
     AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_callback_reads,
     static_variable_reads, static_variable_reads_in_scope,
 };
-pub use ast::{
+pub use simplified_schema::expression::ast::{
     BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedCallArgument, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
 };
 pub use binding::{
@@ -150,13 +150,12 @@ pub use scope::{
     WriteSet, project_pattern, project_source,
 };
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
-pub use lexer::{
-    ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
-    Lexer, LiteralTokenLocation, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
+pub use lexer::{ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral, LiteralTokenLocation};
+pub use simplified_schema::expression::lexer::{
+    ComparisonOp, Lexer, LexerError, Token, identifier_prefix_start, lex_spanned,
 };
-pub use parser::{
-    ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_condition, parse_condition_spanned,
-    parse_spanned,
+pub use simplified_schema::expression::parser::{
+    ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_spanned,
 };
 pub use prepared::{
     AuthoredMode, PlaceholderView, PreparationError, PreparedExpression, PreparedInterpolation,
@@ -167,7 +166,7 @@ pub use prepared::{
 use absence::{AbsenceScope, MissingRootObserver};
 use serde_json::Value;
 
-use crate::markdown::numeric::{self, NumberTextError, NumericAdmissionError};
+use simplified_schema::numeric::{self, NumberTextError, NumericAdmissionError};
 
 use crate::catalog::{describe_for_error, suggest};
 
@@ -653,18 +652,18 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             let base = evaluate_expr(base, lookup, scope, observer, budget)?;
             Ok(evaluate_member(&base, name))
         }
-        Expr::Fallback { primary: primary_expr, fallback } => {
-            let primary = evaluate_expr(primary_expr, lookup, scope.absence_check(), observer, budget)?;
-            if is_truthy(&primary) {
-                Ok(primary)
+        Expr::LogicalOr { left: left_expr, right } => {
+            let left = evaluate_expr(left_expr, lookup, scope.absence_check(), observer, budget)?;
+            if is_truthy(&left) {
+                Ok(left)
             } else if O::OBSERVES {
                 // Keeps `scope`'s handling: in a chain `a || b || "d"` that is
-                // itself a primary, `b` is handled too. The fallback is read
-                // only when the primary failed, so it gets the false side.
-                let facts = scope.facts().assume(primary_expr, scope::Polarity::False);
-                evaluate_expr(fallback, lookup, scope.with_facts(&facts), observer, budget)
+                // itself a left operand, `b` is handled too. The right operand
+                // is read only when the left was falsy, so it gets the false side.
+                let facts = scope.facts().assume(left_expr, scope::Polarity::False);
+                evaluate_expr(right, lookup, scope.with_facts(&facts), observer, budget)
             } else {
-                evaluate_expr(fallback, lookup, scope, observer, budget)
+                evaluate_expr(right, lookup, scope, observer, budget)
             }
         }
         Expr::Ternary {
@@ -1156,14 +1155,13 @@ mod tests {
         use super::*;
 
         #[test]
-        fn interpolation_fallback_versus_condition_or() {
-            // Interpolation: a || "default" -> Fallback
-            // Condition: a || "default" -> or(a, "default")
-            // Both should return the truthy value
+        fn logical_or_returns_operand_while_or_function_returns_bool() {
+            // `a || "default"` returns the deciding operand; `or(a, "default")`
+            // stays boolean.
             let state = lookup(json!({"a": "present"}));
-            let fallback_expr = Expr::Fallback {
-                primary: Box::new(Expr::Variable("a".to_string())),
-                fallback: Box::new(Expr::StringLiteral("default".to_string())),
+            let logical_or_expr = Expr::LogicalOr {
+                left: Box::new(Expr::Variable("a".to_string())),
+                right: Box::new(Expr::StringLiteral("default".to_string())),
             };
             let or_expr = Expr::FunctionCall {
                 name: "or".to_string(),
@@ -1173,16 +1171,16 @@ mod tests {
                 ],
             };
 
-            assert_eq!(evaluate(&fallback_expr, &state).unwrap(), json!("present"));
+            assert_eq!(evaluate(&logical_or_expr, &state).unwrap(), json!("present"));
             assert_eq!(evaluate(&or_expr, &state).unwrap(), json!(true));
         }
 
         #[test]
-        fn interpolation_fallback_uses_fallback_when_falsy() {
+        fn logical_or_returns_right_operand_when_left_is_falsy() {
             let state = lookup(json!({}));
-            let expr = Expr::Fallback {
-                primary: Box::new(Expr::Variable("missing".to_string())),
-                fallback: Box::new(Expr::StringLiteral("default".to_string())),
+            let expr = Expr::LogicalOr {
+                left: Box::new(Expr::Variable("missing".to_string())),
+                right: Box::new(Expr::StringLiteral("default".to_string())),
             };
 
             assert_eq!(evaluate(&expr, &state).unwrap(), json!("default"));

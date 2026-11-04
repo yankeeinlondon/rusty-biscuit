@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use darkmatter::markdown::coercion::{FailureReason, ValueKind};
+use simplified_schema::coercion::{FailureReason, ValueKind};
 use darkmatter::markdown::compose::expression::call_binding::{
     ArgumentProblem, CallBindingError, CallErrorKind, FunctionRegistration,
 };

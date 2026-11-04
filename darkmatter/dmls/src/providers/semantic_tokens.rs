@@ -620,7 +620,7 @@ fn encode_document(ctx: &DocumentContext, range: Option<SourceSpan>) -> Semantic
             }
         }
         for value in super::frontmatter::expression_values(ctx) {
-            if let Ok(parsed) = expressions::parse_condition(value.expression()) {
+            if let Ok(parsed) = expressions::parse(value.expression()) {
                 raw.extend(callback_tokens(&parsed, |span| value.project(span)));
             }
         }

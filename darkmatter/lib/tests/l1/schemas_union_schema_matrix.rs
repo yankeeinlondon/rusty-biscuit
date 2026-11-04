@@ -12,7 +12,8 @@ use std::path::Path;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaError};
+use darkmatter::markdown::schemas::DarkmatterSchemas;
+use simplified_schema::SchemaError;
 
 use crate::request_support::context_at;
 use crate::union_fixtures::{CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, content_policy_union_schema};

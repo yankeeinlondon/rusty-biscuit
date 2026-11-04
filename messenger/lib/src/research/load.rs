@@ -1,9 +1,10 @@
 //! Passive loading of research contract files.
 //!
 //! Loading reads the file, binds it to the contract schema for its kind,
-//! validates the frontmatter through Darkmatter's library (the `md schema
-//! validate` code path), gates the schema version, and deserializes the same
-//! vocabulary into the typed model. It never evaluates frontmatter
+//! validates it through Darkmatter's library (the `md schema validate` code
+//! path: a research document's frontmatter, or a whole YAML contract file
+//! against its root `$schema`), gates the schema version, and deserializes
+//! the same vocabulary into the typed model. It never evaluates frontmatter
 //! expressions, spawns a process, or touches the network, and it never
 //! shells out to `md`.
 //!
@@ -18,7 +19,8 @@ use std::sync::{Arc, Mutex};
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationProblemCode};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, LoadedYamlDocument, ValidationReport, YamlOutcome};
+use simplified_schema::ValidationProblemCode;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
@@ -57,6 +59,19 @@ impl ContractKind {
             ContractKind::Mappings => workspace.mappings_schema(),
         }
     }
+
+    /// Whether files of this kind are whole YAML documents rather than
+    /// Markdown with frontmatter. The roster, overrides, and mappings are
+    /// `.yaml` files with no fences.
+    pub fn is_yaml_document(self) -> bool {
+        !matches!(self, ContractKind::Document)
+    }
+}
+
+/// A contract file's text, parsed in its kind's format.
+enum Source {
+    Markdown(Box<Markdown>),
+    Yaml(LoadedYamlDocument),
 }
 
 /// A typed contract file.
@@ -87,8 +102,9 @@ impl ContractFile for Mappings {
 #[derive(Debug, Clone)]
 pub struct Loaded<T> {
     pub path: RepoPath,
-    /// The frontmatter object without `$schema`, exactly as authored (no
-    /// Darkmatter type coercion). Canonical fact fingerprints hash records
+    /// The top-level mapping without `$schema`, exactly as authored (no
+    /// Darkmatter type coercion): a research document's frontmatter, or the
+    /// whole document of a YAML contract file. Canonical fact fingerprints hash records
     /// taken from here.
     pub frontmatter: Value,
     pub record: Option<T>,
@@ -179,8 +195,9 @@ impl Loader {
     /// ## Errors
     ///
     /// Returns [`ResearchError`] only when the file cannot be read, is outside
-    /// the workspace, has unparseable frontmatter, or its bound schema cannot
-    /// be resolved or compiled. Contract problems are findings instead.
+    /// the workspace, has unparseable frontmatter (a YAML contract file: is
+    /// not one YAML mapping), or its bound schema cannot be resolved or
+    /// compiled. Contract problems are findings instead.
     pub fn load<T: ContractFile>(&self, path: &Path) -> Result<Loaded<T>, ResearchError> {
         let absolute = normalize(&self.absolute(path));
         let repo_path = self.workspace.repo_path(&absolute)?;
@@ -205,20 +222,9 @@ impl Loader {
     }
 
     fn load_text_at<T: ContractFile>(&self, absolute: &Path, repo_path: RepoPath, text: String) -> Result<Loaded<T>, ResearchError> {
-        let markdown = Markdown::try_from_content(text)
-            .map_err(|error| ResearchError::Frontmatter {
-                path: repo_path.clone(),
-                message: self.scrub(&error.to_string()),
-            })?
-            .with_source(ComposeSource::infer_from_path(absolute));
+        let (source, mut frontmatter) = self.parse(T::KIND, absolute, &repo_path, text)?;
         let absolute = absolute.to_path_buf();
 
-        let mut frontmatter: Map<String, Value> = markdown
-            .frontmatter()
-            .as_map()
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
         let declared_schema = frontmatter.remove("$schema");
         let frontmatter = Value::Object(frontmatter);
 
@@ -235,8 +241,10 @@ impl Loader {
             return Ok(loaded);
         }
 
-        let effective = self.effective_schema(T::KIND, &markdown, &repo_path)?;
-        let report = effective.validate(&loaded.frontmatter);
+        let report = match &source {
+            Source::Markdown(markdown) => self.effective_schema(T::KIND, markdown, &repo_path)?.validate(&loaded.frontmatter),
+            Source::Yaml(document) => self.validate_yaml(document, &absolute, &repo_path)?,
+        };
         for problem in &report.problems {
             let mut pointer = problem.path.clone();
             let mut rule = Rule::Schema;
@@ -256,6 +264,62 @@ impl Loader {
         }
         loaded.diagnostics = findings.finish();
         Ok(loaded)
+    }
+
+    /// Parses `text` in `kind`'s format and returns it with its top-level
+    /// mapping.
+    fn parse(
+        &self,
+        kind: ContractKind,
+        absolute: &Path,
+        repo_path: &RepoPath,
+        text: String,
+    ) -> Result<(Source, Map<String, Value>), ResearchError> {
+        if kind.is_yaml_document() {
+            let unparseable = |message: String| ResearchError::Document {
+                path: repo_path.clone(),
+                message: self.scrub(&message),
+            };
+            let document = LoadedYamlDocument::load(&text, absolute).map_err(|error| unparseable(error.to_string()))?;
+            let Value::Object(top) = document.json() else {
+                return Err(unparseable("the document root is not a mapping".to_string()));
+            };
+            let top = top.clone();
+            return Ok((Source::Yaml(document), top));
+        }
+        let markdown = Markdown::try_from_content(text)
+            .map_err(|error| ResearchError::Frontmatter {
+                path: repo_path.clone(),
+                message: self.scrub(&error.to_string()),
+            })?
+            .with_source(ComposeSource::infer_from_path(absolute));
+        let top = markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        Ok((Source::Markdown(Box::new(markdown)), top))
+    }
+
+    /// Judges a whole YAML contract file against its root `$schema` alone
+    /// (no Markdown baseline), in the file's own context.
+    fn validate_yaml(
+        &self,
+        document: &LoadedYamlDocument,
+        absolute: &Path,
+        path: &RepoPath,
+    ) -> Result<ValidationReport, ResearchError> {
+        let resolution = |message: String| ResearchError::SchemaResolution {
+            path: path.clone(),
+            message: self.scrub(&message),
+        };
+        let schemas = DarkmatterSchemas::new(self.context.for_source(absolute.to_path_buf()));
+        match schemas.validate_loaded_yaml_document(document) {
+            Ok(YamlOutcome::Validated(validation)) => Ok(validation.report),
+            Ok(YamlOutcome::NoSchema) => Err(resolution("the bound schema resolved to nothing".to_string())),
+            Err(error) => Err(resolution(error.to_string())),
+        }
     }
 
     fn effective_schema(

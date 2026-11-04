@@ -12,15 +12,14 @@
 //! surface is the one exception (see `nested_span`).
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::format::is_pending_expression_value;
-use darkmatter::markdown::schemas::{
-    PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
-    ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
-    SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
-    SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value,
-    LocatedDefinitionFailure, LocatedRelated, locate_standalone_definition_failure, parse_property_definition,
-    parse_property_definition_with_source, parse_schema_declaration,
-    parse_schema_declaration_with_source, parse_yaml_schema,
+use simplified_schema::format::is_pending_expression_value;
+use darkmatter::markdown::schemas::{ValidationOptions, ValidationReport};
+use simplified_schema::{
+    FileReferenceDiagnostic, PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason, ValidationProblem,
+    ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
+    SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
+    locate_standalone_definition_failure, parse_property_definition, parse_property_definition_with_source,
+    parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
 };
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
@@ -79,7 +78,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
         ));
     }
 
+    // A whole YAML document is judged by its selected schema alone: the
+    // passes below assume Markdown (coercion, `style`, expressions,
+    // lifecycle stacks, deferred values).
+    if let Some(yaml) = &overlay.yaml_document {
+        crate::diagnostics::yaml_document::diagnostics(ctx, yaml, &mut out);
+    }
+
     match &overlay.schema {
+        _ if overlay.yaml_document.is_some() => {}
         SchemaOutcome::Failed(error) => {
             schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, &mut out);
         }
@@ -100,7 +107,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
                 // every Expression-typed value, and both passes read it.
                 let expression_values =
                     crate::providers::frontmatter::expression_values(ctx);
-                schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
+                schema_problem_diagnostics(
+                    ctx,
+                    ast,
+                    bundle,
+                    &report,
+                    &expression_values,
+                    ProblemGrading::Frontmatter,
+                    &mut out,
+                );
                 style_diagnostics(ctx, ast, &mut out);
                 // One lifecycle host and one library walk serve every
                 // expression inside a stack, schema-typed or not.
@@ -123,11 +138,15 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 
     // A stale last-good tree does not describe the current buffer, so its
     // ranges and rewrites would land on the wrong bytes.
-    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale) {
+    if let Some(ast) = overlay.ast.as_deref().filter(|_| !overlay.stale && overlay.yaml_document.is_none()) {
         crate::diagnostics::nested_span::whole_value_diagnostics(ctx, ast, &mut out);
     }
 
-    suggestion_diagnostics(ctx, &overlay.suggestions, &mut out);
+    // A claimed kind's definition problems are the report's: the envelope's
+    // admission error judges the same text against the same definition.
+    let definition_reported =
+        overlay.yaml_document.as_deref().is_some_and(crate::diagnostics::yaml_document::reports_definition_problems);
+    suggestion_diagnostics(ctx, &overlay.suggestions, definition_reported, &mut out);
 
     if let Some(error) = &overlay.standalone_resolution
         && let SchemaAuthoringState::Standalone { model: Some(model), stale: false, .. } =
@@ -143,6 +162,8 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
         out.push(invalid_trigger_diagnostic_at(finding, range));
     }
 
+    // Only a document whose `kind` names the trigger envelope, and that its
+    // selected definition has not judged, carries this error.
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
         let span = trigger_yaml_span(ctx.text, error).unwrap_or(0..ctx.text.len());
         out.push(diagnostic(
@@ -159,7 +180,7 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
     out
 }
 
-fn schema_advisory_diagnostics(
+pub(crate) fn schema_advisory_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
@@ -209,7 +230,7 @@ fn invalid_trigger_diagnostic_at(finding: &InvalidTriggerFinding, range: Range) 
 }
 
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
-fn schema_prepare_diagnostic(
+pub(crate) fn schema_prepare_diagnostic(
     ctx: &DocumentContext,
     ast: Option<&FrontmatterAst>,
     error: &SchemaError,
@@ -237,7 +258,7 @@ fn schema_prepare_diagnostic_with_origin(
     }
 
     let fallback_span = ast
-        .and_then(|ast| ast.schema_entry().map(|entry| entry.value_span.clone()))
+        .and_then(|ast| crate::overlay::named_types::frontmatter_value_span(ctx.text, ast))
         .or_else(|| ast.map(FrontmatterAst::block_span));
     if named_types::is_named_type_error(error) {
         let scope = named_types::NamedTypeScope::frontmatter(ctx, ast, fallback_span);
@@ -269,14 +290,25 @@ fn schema_prepare_diagnostic_with_origin(
             }
             (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span.or_else(|| fallback_span.clone()))
         }
-        SchemaError::FrontmatterShape { message } => {
-            (code::SCHEMA_INVALID_SHAPE, message.clone(), fallback_span.clone())
-        }
-        SchemaError::RemoteUnsupported { .. } => {
-            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
-        }
-        SchemaError::Grammar { .. } | SchemaError::Convert { .. } => {
-            (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
+        SchemaError::FrontmatterShape { .. } | SchemaError::RemoteUnsupported { .. } | SchemaError::Grammar { .. } | SchemaError::Convert { .. } => {
+            let message = match error {
+                SchemaError::FrontmatterShape { message } => message.clone(),
+                other => other.to_string(),
+            };
+            // The declaration's own shape: the source-aware parser locates
+            // the offending arm or value when it rejects it the same way.
+            let located = referenced_origin
+                .is_none()
+                .then(|| ast.and_then(|ast| located_inline_failure(ctx, ast, error, true)))
+                .flatten();
+            let span = match located {
+                Some((span, located)) => {
+                    related.extend(located_related(ctx, &located));
+                    Some(span)
+                }
+                None => fallback_span.clone(),
+            };
+            (code::SCHEMA_INVALID_SHAPE, message, span)
         }
         other => {
             // A standalone schema file folds its payload failure into this
@@ -340,18 +372,8 @@ fn inline_definition_span(
     error: &SchemaError,
     property: &str,
 ) -> Option<(Option<std::ops::Range<usize>>, Vec<LocatedRelated>)> {
-    let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
-    if let Some(failure) = fresh
-        .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
-        .flatten()
-        .filter(|failure| failure.error.to_string() == error.to_string())
-    {
-        let span = failure
-            .authored_span
-            .clone()
-            .or_else(|| failure.value_span.clone())
-            .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path));
-        return Some((span, failure.related));
+    if let Some((span, related)) = located_inline_failure(ctx, ast, error, false) {
+        return Some((Some(span), related));
     }
     let span = ast
         .entry_by_key_path(&["$schema", property])
@@ -364,13 +386,60 @@ fn inline_definition_span(
     Some((span, Vec::new()))
 }
 
+/// The located range of an inline `$schema` failure that the source-aware
+/// declaration parser reports as this same error, in the current buffer: its
+/// token, else the rejected value, else the deepest entry along its
+/// structural path, with its related locations. With `shape`, `error` is a
+/// declaration-shape error, which the parser words differently from the
+/// resolver; any shape failure the parser locates is then the same problem.
+fn located_inline_failure(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    error: &SchemaError,
+    shape: bool,
+) -> Option<(std::ops::Range<usize>, Vec<LocatedRelated>)> {
+    let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
+    let failure = fresh
+        .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
+        .flatten()
+        .filter(|failure| {
+            failure.error.to_string() == error.to_string() || (shape && is_declaration_shape_failure(&failure.error))
+        })?;
+    let span = failure
+        .authored_span
+        .clone()
+        .or_else(|| failure.value_span.clone())
+        .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path))?;
+    Some((span, failure.related))
+}
+
+/// Whether the declaration parser's `error` rejects the declaration's own
+/// shape (the root or a root-union arm) rather than a definition inside it.
+fn is_declaration_shape_failure(error: &SchemaError) -> bool {
+    matches!(error, SchemaError::Grammar { property, .. } if property == "<root>" || property.starts_with("<arm["))
+}
+
+/// How a schema problem's severity is decided, by what the instance is.
+#[derive(Clone, Copy)]
+pub(crate) enum ProblemGrading<'a> {
+    /// Markdown frontmatter: a missing required key is reported only in
+    /// strict mode, since composition can still supply it.
+    Frontmatter,
+    /// A whole YAML document, `validation` its library judgment: nothing
+    /// supplies or strips a value later, so a missing required key and an
+    /// undeclared key are errors (as `md schema validate` fails on them), and
+    /// a kind check is located where the library located it.
+    YamlDocument(&'a darkmatter::markdown::schemas::YamlValidation),
+}
+
 /// Instance-validation problems mapped onto concrete ranges.
-fn schema_problem_diagnostics(
+pub(crate) fn schema_problem_diagnostics(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     bundle: &SchemaBundle,
     report: &ValidationReport,
     expression_values: &[ExpressionValue<'_>],
+    grading: ProblemGrading<'_>,
     out: &mut Vec<Diagnostic>,
 ) {
     // Exactly projected Expression-typed scalar values are owned by the
@@ -417,12 +486,20 @@ fn schema_problem_diagnostics(
         if specialized_paths.contains(&problem.path) {
             continue;
         }
-        let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict) else {
+        let Some((code_value, severity)) = classify(problem.code, ctx.config.schema.strict, grading) else {
             continue;
         };
         // Without a context no file value was resolved for this document; its
         // one context-failure diagnostic stands in for them.
         if problem.file_reference.is_some() && ctx.file_context().is_err() {
+            continue;
+        }
+        // A well-formed reference to a file that does not exist yet is the
+        // value hover's to explain, not an editor error; `md` still enforces
+        // an eager file at runtime. A projection's caller-owned failure stays.
+        if matches!(problem.file_reference, Some(FileReferenceDiagnostic::NoMatch { .. }))
+            && problem.caller_file.is_none()
+        {
             continue;
         }
         if matches!(
@@ -432,7 +509,13 @@ fn schema_problem_diagnostics(
         {
             continue;
         }
-        let Some(range) = problem_range(ctx.text, ast, ctx.source_map, problem) else {
+        let located = match grading {
+            ProblemGrading::YamlDocument(validation) if problem.code == ValidationProblemCode::KindCheck => {
+                validation.byte_range(problem).and_then(|span| ctx.source_map.byte_range_to_lsp(span))
+            }
+            _ => None,
+        };
+        let Some(range) = located.or_else(|| problem_range(ctx.text, ast, ctx.source_map, problem)) else {
             continue;
         };
         let mut diagnostic = diagnostic(
@@ -655,6 +738,12 @@ enum SemanticProblemKind {
     Schema,
 }
 
+/// Whether `problem` is a `type-definition` or `schema` meta-type rejecting
+/// the authored definition text, rather than the value's structure.
+pub(crate) fn is_meta_type_problem(problem: &ValidationProblem) -> bool {
+    semantic_problem_kind(problem).is_some()
+}
+
 fn semantic_problem_kind(problem: &ValidationProblem) -> Option<SemanticProblemKind> {
     let segments = problem.schema_path.as_ref()?.segments();
     if segments.iter().any(|segment| segment == "x-darkmatter-type-definition") {
@@ -773,7 +862,7 @@ fn expression_diagnostics(
             Some(error) => Err(error),
             None => {
                 note_expression_diagnostic_parse();
-                crate::overlay::expressions::parse_condition(expression)
+                crate::overlay::expressions::parse(expression)
             }
         };
         match parsed {
@@ -862,7 +951,7 @@ fn expression_diagnostics(
                     &view,
                     &parsed,
                     expression,
-                    crate::overlay::expressions::parse_condition,
+                    crate::overlay::expressions::parse,
                     yaml_quote(ctx, value),
                 );
                 let first = out.len();
@@ -980,7 +1069,7 @@ fn stack_expression_diagnostics(
             .get(expression.entry.value_span.start..)
             .and_then(|value| value.chars().next())
             .filter(|first| matches!(first, '\'' | '"'));
-        let findings = known_roots.findings(view, &parsed, &expression.text, expression.dialect.parser(), quote);
+        let findings = known_roots.findings(view, &parsed, &expression.text, crate::overlay::expressions::parse, quote);
         for finding in findings {
             let span = crate::providers::dsl::finding_span(&finding).clone();
             // A fix edits authored bytes, so it rides only on an exact range
@@ -1239,6 +1328,7 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
 fn suggestion_diagnostics(
     ctx: &DocumentContext,
     suggestions: &SuggestionState,
+    definition_reported: bool,
     out: &mut Vec<Diagnostic>,
 ) {
     match suggestions {
@@ -1252,7 +1342,7 @@ fn suggestion_diagnostics(
             for problem in problems {
                 out.push(suggestion_warning(ctx, problem));
             }
-            if let Some(error) = error {
+            if let Some(error) = error.as_ref().filter(|_| !definition_reported) {
                 out.push(standalone_error_diagnostic(ctx, error));
             }
         }
@@ -1427,13 +1517,11 @@ fn standalone_declaration_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic
     ))
 }
 
-/// The payload key of whichever envelope claimed a standalone document.
+/// The payload key of a standalone document: its exported `$schema`, else
+/// the `types` table a `kind: schema` document may hold alone (as the
+/// library's envelope reads it).
 fn standalone_payload_key(mapping: &serde_yaml_ng::Mapping) -> &'static str {
-    let tagged = mapping
-        .get(serde_yaml_ng::Value::String("kind".to_string()))
-        .and_then(serde_yaml_ng::Value::as_str)
-        == Some("schema");
-    if tagged { "types" } else { "$schema" }
+    if mapping.contains_key(serde_yaml_ng::Value::String("$schema".to_string())) { "$schema" } else { "types" }
 }
 
 /// The located payload value of a standalone envelope, in document offsets.
@@ -1493,13 +1581,16 @@ fn arm_is_rejected(item: &serde_yaml_ng::Value) -> bool {
 /// the deferred `{{ }}` / `$(...)` values follow. `md compose` / `md schema
 /// validate` still catch genuine omissions with the injected values present. In
 /// strict mode it is an opt-in `ERROR`, mirroring how `UnknownKey` escalates.
+/// A whole YAML document ([`ProblemGrading::YamlDocument`]) has no compose
+/// step, so both are errors there in either mode.
 fn classify(
     code: ValidationProblemCode,
     strict: bool,
+    grading: ProblemGrading<'_>,
 ) -> Option<(&'static str, DiagnosticSeverity)> {
     Some(match code {
         ValidationProblemCode::MissingRequired => {
-            if !strict {
+            if !strict && matches!(grading, ProblemGrading::Frontmatter) {
                 return None;
             }
             (code::SCHEMA_MISSING_REQUIRED, DiagnosticSeverity::ERROR)
@@ -1512,7 +1603,7 @@ fn classify(
         }
         ValidationProblemCode::UnknownKey => (
             code::SCHEMA_UNKNOWN_KEY,
-            if strict {
+            if strict || matches!(grading, ProblemGrading::YamlDocument(_)) {
                 DiagnosticSeverity::ERROR
             } else {
                 DiagnosticSeverity::WARNING
@@ -1521,11 +1612,12 @@ fn classify(
         ValidationProblemCode::InvalidFileReference => {
             (code::SCHEMA_INVALID_FILE_REFERENCE, DiagnosticSeverity::ERROR)
         }
+        ValidationProblemCode::KindCheck => (code::SCHEMA_KIND_CHECK, DiagnosticSeverity::ERROR),
     })
 }
 
 /// Builds a diagnostic with a stable source + code.
-fn diagnostic(
+pub(crate) fn diagnostic(
     range: Range,
     severity: DiagnosticSeverity,
     source_value: &str,
@@ -1898,8 +1990,8 @@ mod tests {
     }
 
     #[test]
-    fn condition_dialect_and_expression_is_not_malformed() {
-        // The `expression` schema format validates with `parse_condition`, which
+    fn logical_and_expression_is_not_malformed() {
+        // The `expression` schema format validates with the shared parser, which
         // accepts `&&`; the spec's own example must not be diagnosed malformed.
         let text = expression_doc(r#"when: 'is_agent() && os == "macos"'"#);
         diagnostics_for(&text, |diagnostics| {
@@ -1909,13 +2001,13 @@ mod tests {
                     code != Some(code::EXPRESSION_MALFORMED)
                         && code != Some(code::SCHEMA_CONSTRAINT)
                 }),
-                "a condition-dialect `&&` expression must not be malformed: {diagnostics:#?}"
+                "a `&&` expression must not be malformed: {diagnostics:#?}"
             );
         });
     }
 
     #[test]
-    fn condition_dialect_or_expression_is_not_malformed() {
+    fn logical_or_expression_is_not_malformed() {
         let text = expression_doc(r#"when: 'os == "macos" || os == "linux"'"#);
         diagnostics_for(&text, |diagnostics| {
             assert!(
@@ -1924,7 +2016,7 @@ mod tests {
                     code != Some(code::EXPRESSION_MALFORMED)
                         && code != Some(code::SCHEMA_CONSTRAINT)
                 }),
-                "a condition-dialect `||` expression must not be malformed: {diagnostics:#?}"
+                "a `||` expression must not be malformed: {diagnostics:#?}"
             );
         });
     }
@@ -2216,9 +2308,9 @@ mod tests {
     fn missing_required_is_off_by_default_and_error_in_strict() {
         // `required` is a compose-time contract: no edit-time diagnostic unless
         // the workspace opts into strict schema mode.
-        assert_eq!(classify(ValidationProblemCode::MissingRequired, false), None);
+        assert_eq!(classify(ValidationProblemCode::MissingRequired, false, ProblemGrading::Frontmatter), None);
         assert_eq!(
-            classify(ValidationProblemCode::MissingRequired, true),
+            classify(ValidationProblemCode::MissingRequired, true, ProblemGrading::Frontmatter),
             Some((code::SCHEMA_MISSING_REQUIRED, DiagnosticSeverity::ERROR)),
         );
     }
@@ -2226,11 +2318,11 @@ mod tests {
     #[test]
     fn unknown_key_warns_in_non_strict_and_errors_in_strict() {
         assert_eq!(
-            classify(ValidationProblemCode::UnknownKey, false),
+            classify(ValidationProblemCode::UnknownKey, false, ProblemGrading::Frontmatter),
             Some((code::SCHEMA_UNKNOWN_KEY, DiagnosticSeverity::WARNING)),
         );
         assert_eq!(
-            classify(ValidationProblemCode::UnknownKey, true),
+            classify(ValidationProblemCode::UnknownKey, true, ProblemGrading::Frontmatter),
             Some((code::SCHEMA_UNKNOWN_KEY, DiagnosticSeverity::ERROR)),
         );
     }
@@ -2242,8 +2334,8 @@ mod tests {
             ValidationProblemCode::ConstraintViolation,
             ValidationProblemCode::InvalidFileReference,
         ] {
-            assert_eq!(classify(code, false).unwrap().1, DiagnosticSeverity::ERROR);
-            assert_eq!(classify(code, true).unwrap().1, DiagnosticSeverity::ERROR);
+            assert_eq!(classify(code, false, ProblemGrading::Frontmatter).unwrap().1, DiagnosticSeverity::ERROR);
+            assert_eq!(classify(code, true, ProblemGrading::Frontmatter).unwrap().1, DiagnosticSeverity::ERROR);
         }
     }
 
@@ -2513,5 +2605,244 @@ mod tests {
                 assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
             }
         }
+    }
+
+    /// Builds a context for `text` written to `{root}/doc.md`, resolving
+    /// through a context anchored at `root` (never the process cwd), runs
+    /// `diagnostics`, and hands both to `f`.
+    fn diagnostics_on_disk<R>(
+        root: &Path,
+        text: &str,
+        strict: bool,
+        f: impl FnOnce(&DocumentContext, &[Diagnostic]) -> R,
+    ) -> R {
+        let path = root.join("doc.md");
+        std::fs::write(&path, text).expect("write document");
+        let uri = crate::workspace::file_path_to_uri(&path).expect("document uri");
+        let mut config = DmlsConfig::default();
+        config.schema.strict = strict;
+        let roots = [root.to_path_buf()];
+        let resolution = crate::context::test_support::resolution_in(root, &path);
+        let state = OverlayState::default();
+        let overlay = state.for_document(&uri, text, &path, &config, &roots, &resolution);
+        let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
+        let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
+        let ctx = DocumentContext {
+            uri: &uri,
+            path: &path,
+            text,
+            source_map: &source_map,
+            graph: &graph,
+            doc_id: None,
+            config: &config,
+            profile: &profile,
+            overlay: overlay.as_ref(),
+            resolution: &resolution,
+        };
+        let diagnostics = diagnostics(&ctx);
+        f(&ctx, &diagnostics)
+    }
+
+    /// A canonical temp directory, so a macOS `/var` spelling never differs
+    /// from the resolver's `/private/var`.
+    fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().canonicalize().expect("canonical temp dir");
+        (dir, root)
+    }
+
+    /// `(code, [start line, start char, end line, end char], message, data)`
+    /// of each diagnostic with `code`.
+    fn pinned<'d>(
+        diagnostics: &'d [Diagnostic],
+        code: &str,
+    ) -> Vec<(&'d str, [u32; 4], &'d str, Option<serde_json::Value>)> {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| code_of(diagnostic) == Some(code))
+            .inspect(|diagnostic| assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR)))
+            .map(|diagnostic| {
+                let range = diagnostic.range;
+                (
+                    code_of(diagnostic).unwrap(),
+                    [range.start.line, range.start.character, range.end.line, range.end.character],
+                    diagnostic.message.as_str(),
+                    diagnostic.data.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// The paths the effective schema's own validation reports a
+    /// `NoMatch` file reference at, so a test of the suppression proves the
+    /// validator still found the missing file.
+    fn no_match_paths(ctx: &DocumentContext) -> Vec<String> {
+        let bundle = ctx.overlay.and_then(|overlay| overlay.bundle()).expect("schema bundle");
+        bundle
+            .effective
+            .validate_with_options(&bundle.frontmatter_json, &PositionMap::new(), &ValidationOptions::default())
+            .problems
+            .into_iter()
+            .filter(|problem| matches!(problem.file_reference, Some(FileReferenceDiagnostic::NoMatch { .. })))
+            .map(|problem| problem.path)
+            .collect()
+    }
+
+    #[test]
+    fn a_missing_file_value_is_left_to_the_hover_not_diagnosed() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("exists.md"), "x").unwrap();
+        let text = "---\n$schema:\n  missing: file(eager)\n  plain: file\n  present: file(eager)\nmissing: ./nope.md\nplain: ./nope-too.md\npresent: ./exists.md\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, false, |ctx, diagnostics| {
+            assert_eq!(no_match_paths(ctx), ["/missing"], "the validator still finds the missing eager file");
+            assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        });
+    }
+
+    #[test]
+    fn a_missing_eager_file_in_a_sequence_item_is_not_diagnosed() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("exists.md"), "x").unwrap();
+        let text = "---\n$schema:\n  items: file(eager)[]\nitems:\n  - ./exists.md\n  - ./gone.md\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, false, |ctx, diagnostics| {
+            assert_eq!(no_match_paths(ctx), ["/items/1"]);
+            assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        });
+    }
+
+    #[test]
+    fn a_malformed_file_reference_keeps_its_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  bad: file(eager)\n  lazybad: file\nbad: \"@\"\nlazybad: \"@\"\n---\n\nbody\n";
+        let message = "`@` is not a valid file reference: file reference syntax is invalid: the `@` sigil requires a relative payload: `@`";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_INVALID_FILE_REFERENCE),
+                [
+                    (
+                        "dm.schema.invalid_file_reference",
+                        [4, 5, 4, 8],
+                        message,
+                        Some(serde_json::json!({ "instance_path": "/bad", "resolution_failure": "InvalidReference" })),
+                    ),
+                    (
+                        "dm.schema.invalid_file_reference",
+                        [5, 9, 5, 12],
+                        message,
+                        Some(serde_json::json!({ "instance_path": "/lazybad", "resolution_failure": "InvalidReference" })),
+                    ),
+                ],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_repository_reference_without_a_repository_keeps_its_context_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  anchored: file(eager)\nanchored: \"&root-only.md\"\n---\n\nbody\n";
+        let message = format!(
+            "could not resolve file reference `&root-only.md`: `&` repository reference requires a repository containing reference CWD `{}`",
+            root.display()
+        );
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_INVALID_FILE_REFERENCE),
+                [(
+                    "dm.schema.invalid_file_reference",
+                    [3, 10, 3, 25],
+                    message.as_str(),
+                    Some(serde_json::json!({ "instance_path": "/anchored", "resolution_failure": "MissingContext" })),
+                )],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    /// A path through a regular file fails its probe with `ENOTDIR`, which
+    /// is an I/O failure rather than absence. Windows reports the same probe
+    /// as not found, so it has no equivalent here.
+    #[cfg(unix)]
+    #[test]
+    fn an_io_failure_keeps_its_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("afile.md"), "x").unwrap();
+        let text = "---\n$schema:\n  through: file(eager)\nthrough: ./afile.md/inner.md\n---\n\nbody\n";
+        let message = format!(
+            "could not resolve file reference `./afile.md/inner.md`: filesystem error while resolving `{}/./afile.md/inner.md`: Not a directory (os error 20)",
+            root.display()
+        );
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_INVALID_FILE_REFERENCE),
+                [(
+                    "dm.schema.invalid_file_reference",
+                    [3, 9, 3, 28],
+                    message.as_str(),
+                    Some(serde_json::json!({ "instance_path": "/through", "resolution_failure": "Io" })),
+                )],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn missing_schema_import_and_example_files_keep_their_prepare_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        for (text, range, missing) in [
+            ("---\n$schema: ./missing-schema.yaml\ntitle: A\n---\n\nbody\n", [1, 9, 1, 30], "./missing-schema.yaml"),
+            ("---\n$schema:\n  thing: Thing@./missing-types.yaml\nthing: x\n---\n\nbody\n", [2, 2, 3, 0], "./missing-types.yaml"),
+            (
+                "---\n$schema:\n  title: string(example(./missing-example.yaml))\ntitle: x\n---\n\nbody\n",
+                [2, 2, 3, 0],
+                "./missing-example.yaml",
+            ),
+        ] {
+            let message = format!("could not resolve $schema reference `{missing}`");
+            diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+                assert_eq!(
+                    pinned(diagnostics, code::SCHEMA_PREPARE),
+                    [("dm.schema.prepare", range, message.as_str(), None)],
+                    "{text:?}: {diagnostics:#?}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn a_missing_required_value_keeps_its_strict_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  title: string(required)\nother: 1\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, true, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::SCHEMA_MISSING_REQUIRED),
+                [(
+                    "dm.schema.missing_required",
+                    [1, 0, 4, 0],
+                    "\"title\" is a required property",
+                    Some(serde_json::json!({ "instance_path": "" })),
+                )],
+                "{diagnostics:#?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_yaml_syntax_error_keeps_its_parse_diagnostic() {
+        let (_dir, root) = canonical_tempdir();
+        let text = "---\n$schema:\n  title: string\ntitle: [unclosed\n---\n\nbody\n";
+        diagnostics_on_disk(&root, text, false, |_, diagnostics| {
+            assert_eq!(
+                pinned(diagnostics, code::FM_YAML_PARSE),
+                [(
+                    "dm.frontmatter.yaml_parse",
+                    [4, 0, 4, 0],
+                    "unterminated flow collection: unexpected end of input",
+                    None,
+                )],
+                "{diagnostics:#?}"
+            );
+        });
     }
 }

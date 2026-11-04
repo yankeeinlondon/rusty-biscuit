@@ -173,8 +173,31 @@ fn open(fixture: &LspFixture<'_>, uri: &str, text: &str) {
     );
 }
 
+/// The `dm.schema.prepare` diagnostics on a consumer whose `$schema` names a
+/// YAML file with no `$schema` property, after checking that the retired
+/// missing-envelope advisory is never emitted.
+fn no_schema_property_errors<'a>(diagnostics: &'a [Value], file: &str) -> Vec<&'a Value> {
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")),
+        "the loader no longer emits the missing-envelope advisory: {diagnostics:?}"
+    );
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.prepare")
+                && diagnostic["message"].as_str().is_some_and(|message| {
+                    message.contains(&format!(
+                        "{file}` is not a valid schema definition: it has no `$schema` property"
+                    ))
+                })
+        })
+        .collect()
+}
+
 #[test]
-fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
+fn bare_sidecar_without_schema_property_errors_on_consumer_and_tracks_dependency_changes() {
     let workspace = LspWorkspace::new();
     let sidecar_path = workspace.path().join("schema.yaml");
     let document_path = workspace.path().join("doc.md");
@@ -191,37 +214,32 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     open(&fixture, document_uri.as_str(), document);
 
     let initial = fixture.wait_for_diagnostics(document_uri.as_str());
-    let advisories: Vec<_> = initial
-        .iter()
-        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_simplified_envelope"))
-        .collect();
-    assert_eq!(advisories.len(), 1, "consumer diagnostics: {initial:?}");
-    let advisory = advisories[0];
-    assert_eq!(advisory["source"], json!("darkmatter.schema"));
-    assert_eq!(advisory["severity"], json!(2));
+    let errors = no_schema_property_errors(&initial, "schema.yaml");
+    assert_eq!(errors.len(), 1, "consumer diagnostics: {initial:?}");
+    let error = errors[0];
+    assert_eq!(error["source"], json!("darkmatter.schema"));
+    assert_eq!(error["severity"], json!(1));
     assert_eq!(
-        advisory["range"],
+        error["range"],
         json!({
             "start": { "line": 1, "character": 9 },
             "end": { "line": 1, "character": 22 }
         })
     );
     assert!(
-        advisory["message"]
+        error["message"]
             .as_str()
             .unwrap()
             .contains(&sidecar_path.display().to_string()),
-        "advisory message: {}",
-        advisory["message"]
+        "error message: {}",
+        error["message"]
     );
 
     open(&fixture, sidecar_uri.as_str(), bare_sidecar);
     let sidecar_diagnostics = fixture.wait_for_diagnostics(sidecar_uri.as_str());
     assert!(
-        sidecar_diagnostics.iter().all(|diagnostic| {
-            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
-        }),
-        "the advisory belongs only to the consuming Markdown document: {sidecar_diagnostics:?}"
+        no_schema_property_errors(&sidecar_diagnostics, "schema.yaml").is_empty(),
+        "the error belongs only to the consuming Markdown document: {sidecar_diagnostics:?}"
     );
     fixture.notify(
         "textDocument/didClose",
@@ -240,10 +258,10 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     );
     let corrected = fixture.wait_for_diagnostics(document_uri.as_str());
     assert!(
-        corrected.iter().all(|diagnostic| {
-            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
-        }),
-        "correcting the sidecar must clear the advisory: {corrected:?}"
+        corrected
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != json!("dm.schema.prepare")),
+        "correcting the sidecar must clear the error: {corrected:?}"
     );
 
     std::fs::write(&sidecar_path, bare_sidecar).unwrap();
@@ -253,21 +271,16 @@ fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
     );
     let restored = fixture.wait_for_diagnostics(document_uri.as_str());
     assert_eq!(
-        restored
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
-            })
-            .count(),
+        no_schema_property_errors(&restored, "schema.yaml").len(),
         1,
-        "the advisory must return once after a repeated read/write/read: {restored:?}"
+        "the error must return once after a repeated read/write/read: {restored:?}"
     );
 
     fixture.shutdown();
 }
 
 #[test]
-fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() {
+fn bare_sidecar_rejection_reports_once_for_root_union_and_rejects_raw_yaml_json_schema() {
     let workspace = LspWorkspace::new();
     let bare_path = workspace.path().join("bare.yaml");
     let raw_path = workspace.path().join("raw.yaml");
@@ -289,24 +302,20 @@ fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() 
     open(&fixture, union_uri.as_str(), union_document);
     let union_diagnostics = fixture.wait_for_diagnostics(union_uri.as_str());
     assert_eq!(
-        union_diagnostics
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
-            })
-            .count(),
+        no_schema_property_errors(&union_diagnostics, "bare.yaml").len(),
         1,
-        "duplicate reference arms must produce one advisory: {union_diagnostics:?}"
+        "duplicate reference arms must produce one error: {union_diagnostics:?}"
     );
 
+    // Raw JSON Schema keywords in YAML no longer make a file loadable: with no
+    // `$schema` property it is rejected like any other bare mapping.
     let raw_uri = url::Url::from_file_path(&raw_document_path).unwrap();
     open(&fixture, raw_uri.as_str(), raw_document);
     let raw_diagnostics = fixture.wait_for_diagnostics(raw_uri.as_str());
-    assert!(
-        raw_diagnostics.iter().all(|diagnostic| {
-            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
-        }),
-        "raw JSON Schema keywords must suppress the advisory: {raw_diagnostics:?}"
+    assert_eq!(
+        no_schema_property_errors(&raw_diagnostics, "raw.yaml").len(),
+        1,
+        "raw YAML JSON Schema must be rejected: {raw_diagnostics:?}"
     );
 
     fixture.shutdown();
@@ -838,10 +847,10 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
 /// The diagnostics last published for `uri` once the server is idle.
 fn latest_diagnostics(fixture: &mut LspFixture<'_>, uri: &str) -> Vec<Value> {
     fixture.flush_server();
-    let mut latest = fixture.wait_for_diagnostics_params(uri);
-    while let Some(params) = fixture.take_buffered_diagnostics(uri) {
-        latest = params;
-    }
+    // The buffered take returns the latest publication first; the
+    // earlier ones still buffered are dropped.
+    let latest = fixture.wait_for_diagnostics_params(uri);
+    while fixture.take_buffered_diagnostics(uri).is_some() {}
     latest["diagnostics"].as_array().cloned().unwrap_or_default()
 }
 
@@ -4802,12 +4811,15 @@ fn original_voip_schema_definitions_are_clean() {
     let uri = url::Url::from_file_path(path).unwrap();
     open(&fixture, uri.as_str(), text);
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    // The file is also data on the root-`$schema` route, which reports each
+    // required property it lacks; the declarations themselves are clean.
+    let schema: Vec<&Value> =
+        diagnostics.iter().filter(|diagnostic| diagnostic["source"] == json!("darkmatter.schema")).collect();
     assert!(
-        diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic["source"] != json!("darkmatter.schema")),
-        "the original voip.md schema block must have no schema diagnostics: {diagnostics:#?}"
+        schema.iter().all(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
+        "the original voip.md schema block must have no declaration diagnostics: {diagnostics:#?}"
     );
+    assert_eq!(schema.len(), 4, "{diagnostics:#?}");
 
     fixture.shutdown();
 }
@@ -5140,10 +5152,12 @@ fn meta_schema_standalone_scalar_reference_completion() {
 #[test]
 fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() {
     let workspace = LspWorkspace::new();
-    let valid = "$schema: ./schema.yaml\n";
-    let malformed = "$schema: ./schema.yaml\n\tbad\n";
+    let valid = "kind: schema\n$schema: ./schema.yaml\n";
+    let malformed = "kind: schema\n$schema: ./schema.yaml\n\tbad\n";
     let path = workspace.path().join("scalar-reference.yaml");
     std::fs::write(&path, valid).unwrap();
+    // The `schema` kind check resolves the exported reference.
+    std::fs::write(workspace.path().join("schema.yaml"), "$schema:\n  title: string\n").unwrap();
 
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -5171,7 +5185,7 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
             "textDocument/completion",
             json!({
                 "textDocument": { "uri": uri.as_str() },
-                "position": { "line": 0, "character": 14 }
+                "position": { "line": 1, "character": 14 }
             }),
         )
         .result
@@ -5191,8 +5205,8 @@ fn meta_schema_standalone_scalar_reference_completion_survives_malformed_edit() 
 #[test]
 fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnostic() {
     let workspace = LspWorkspace::new();
-    let valid = "$schema:\n  title: string\n";
-    let malformed = "$schema:\n  title: str(\n";
+    let valid = "kind: schema\n$schema:\n  title: string\n";
+    let malformed = "kind: schema\n$schema:\n  title: str(\n";
     let path = workspace.path().join("schema.yaml");
     std::fs::write(&path, valid).unwrap();
 
@@ -5222,7 +5236,7 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
             "textDocument/completion",
             json!({
                 "textDocument": { "uri": uri.as_str() },
-                "position": { "line": 1, "character": 12 }
+                "position": { "line": 2, "character": 12 }
             }),
         )
         .result
@@ -5235,8 +5249,63 @@ fn meta_schema_phase7_standalone_last_good_keeps_completion_and_current_diagnost
             .any(|item| item["label"] == json!("string")),
         "last-good schema state keeps completion alive: {completion:?}"
     );
-    let hover = hover_markup(&mut fixture, uri.as_str(), 1, 3);
+    let hover = hover_markup(&mut fixture, uri.as_str(), 2, 3);
     assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string**"), "{hover}");
+
+    fixture.shutdown();
+}
+
+/// A schema document may carry a `description` before its `kind`; the
+/// lexical claim must still recognize it mid-edit, or the description would
+/// drop the last-good model the moment the payload stops parsing.
+#[test]
+fn meta_schema_standalone_with_description_keeps_last_good_while_mid_edit() {
+    let workspace = LspWorkspace::new();
+    let valid = "description: Feature reviews\nkind: schema\n$schema:\n  title: string\n";
+    let malformed = "description: Feature reviews\nkind: schema\n$schema:\n  title: str(\n";
+    let path = workspace.path().join("schema.yaml");
+    std::fs::write(&path, valid).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), valid);
+    assert!(fixture.wait_for_diagnostics(uri.as_str()).is_empty());
+
+    fixture.notify(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri.as_str(), "version": 2 },
+            "contentChanges": [ { "text": malformed } ]
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
+        "the current malformed definition owns diagnostics: {diagnostics:?}"
+    );
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": uri.as_str() },
+                "position": { "line": 3, "character": 12 }
+            }),
+        )
+        .result
+        .expect("last-good completion");
+    assert!(
+        completion
+            .as_array()
+            .expect("completion array")
+            .iter()
+            .any(|item| item["label"] == json!("string")),
+        "last-good schema state keeps completion alive: {completion:?}"
+    );
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 3);
     assert!(hover.contains("Declares: **string**"), "{hover}");
 
     fixture.shutdown();
@@ -5427,7 +5496,7 @@ fn meta_schema_standalone_types_first_retains_last_good_across_nested_quote_edit
 #[test]
 fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
     let workspace = LspWorkspace::new();
-    let malformed = "description: foo{ \"bar\nkind: schema\ntypes:\n  title: nope(\n";
+    let malformed = "notes: foo{ \"bar\nkind: schema\ntypes:\n  title: nope(\n";
     let poison_line_len = malformed.lines().next().unwrap().len();
     let valid = format!(
         "#{}\nkind: schema\ntypes:\n  title: string\n",
@@ -5456,16 +5525,21 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
         }),
     );
 
-    // The unsupported `description` key makes the envelope itself invalid, so
-    // the current buffer's diagnostic is the classifier's envelope error, not
-    // the definition inside it.
+    // The unsupported `notes` key makes the envelope itself invalid: the
+    // `schema` kind's definition rejects it, on the key, and the envelope's
+    // admission of the same text against the same definition is not repeated.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.document_malformed")
-                && diagnostic["message"].as_str().is_some_and(|message| message.contains("description"))
+            diagnostic["code"] == json!("dm.schema.unknown_key")
+                && diagnostic["severity"] == json!(1)
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("notes"))
         }),
         "the current malformed envelope owns diagnostics: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic["code"] != json!("dm.schema.document_malformed")),
+        "{diagnostics:?}"
     );
 
     let labels = completion_labels(&mut fixture, uri.as_str(), 3, 9);
@@ -5552,10 +5626,10 @@ fn meta_schema_standalone_flow_envelopes_retain_last_good_across_malformed_edit(
     // (file, valid, malformed, character inside the `title` key token)
     let cases = [
         (
-            "flow-pure.yaml",
-            "{\"$schema\": {\"title\": \"string\"}}\n",
-            "{\"$schema\": {\"title\": \"str(\"}}\n",
-            16u32,
+            "flow-exports.yaml",
+            "{kind: schema, \"$schema\": {\"title\": \"string\"}}\n",
+            "{kind: schema, \"$schema\": {\"title\": \"str(\"}}\n",
+            30u32,
         ),
         (
             "flow-tagged.yaml",
@@ -5806,18 +5880,14 @@ fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
             "contentChanges": [ { "text": malformed } ]
         }),
     );
+    // The partial claims no `kind`: it is data of its root `$schema`, and a
+    // buffer that does not load is the YAML loader's one parse problem.
     let current = fixture.wait_for_diagnostics(uri.as_str());
-    assert_eq!(
-        current
-            .iter()
-            .filter(|diagnostic| { diagnostic["code"] == json!("dm.schema.document_malformed") })
-            .count(),
-        1,
-        "the malformed current buffer must own exactly one schema diagnostic: {current:?}"
-    );
+    assert_eq!(current.len(), 1, "the malformed current buffer must own exactly one diagnostic: {current:?}");
+    assert_eq!(current[0]["code"], json!("dm.frontmatter.yaml_parse"), "{current:?}");
     assert_eq!(
         current[0]["range"]["start"],
-        json!({ "line": 0, "character": 0 })
+        json!({ "line": 1, "character": 0 })
     );
 
     fixture.shutdown();
@@ -6129,8 +6199,8 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
     // (file, text, expected code, offending substring — `None` = whole buffer)
     let cases: [(&str, &str, &str, Option<&str>); 7] = [
         (
-            "pure-empty-union.yaml",
-            "$schema: []\n",
+            "export-empty-union.yaml",
+            "kind: schema\n$schema: []\n",
             "dm.schema.invalid_schema_shape",
             Some("[]"),
         ),
@@ -6141,27 +6211,27 @@ fn standalone_outer_declaration_errors_are_shape_coded_and_precisely_ranged() {
             Some("[]"),
         ),
         (
-            "pure-invalid-arm.yaml",
-            "$schema:\n  - title: string\n  - 42\n",
+            "export-invalid-arm.yaml",
+            "kind: schema\n$schema:\n  - title: string\n  - 42\n",
             "dm.schema.invalid_schema_shape",
             Some("42"),
         ),
         (
-            "pure-invalid-reference.yaml",
-            "$schema: \"   \"\n",
+            "export-invalid-reference.yaml",
+            "kind: schema\n$schema: \"   \"\n",
             "dm.schema.invalid_schema_shape",
             Some("\"   \""),
         ),
         (
             // A tab cannot indent YAML, so this never becomes a mapping at all.
             "malformed.yaml",
-            "$schema:\n\tbad: string\n",
+            "kind: schema\n$schema:\n\tbad: string\n",
             "dm.schema.document_malformed",
             None,
         ),
         (
-            "pure-invalid-inner.yaml",
-            "$schema:\n  title: str(\n",
+            "export-invalid-inner.yaml",
+            "kind: schema\n$schema:\n  title: str(\n",
             "dm.schema.invalid_type_definition",
             Some("str("),
         ),
@@ -6235,28 +6305,28 @@ fn standalone_reference_declarations_match_the_shared_declaration_parser() {
         // valid reference must not depend on the file being present.
         (
             "valid-scalar-reference.yaml",
-            "$schema: ./other.yaml\n",
+            "kind: schema\n$schema: ./other.yaml\n",
             None,
         ),
         (
             "whitespace-arm.yaml",
-            "$schema: [\"   \"]\n",
+            "kind: schema\n$schema: [\"   \"]\n",
             Some("\"   \""),
         ),
         (
             "remote-arm.yaml",
-            "$schema: [https://example.com/schema.yaml]\n",
+            "kind: schema\n$schema: [https://example.com/schema.yaml]\n",
             Some("https://example.com/schema.yaml"),
         ),
         (
             // The valid first arm must not launder the invalid second one.
             "mixed-union.yaml",
-            "$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
+            "kind: schema\n$schema:\n  - ./valid.yaml\n  - https://example.com/schema.yaml\n",
             Some("https://example.com/schema.yaml"),
         ),
         (
             "valid-reference-union.yaml",
-            "$schema:\n  - ./a.yaml\n  - ./b.yaml\n",
+            "kind: schema\n$schema:\n  - ./a.yaml\n  - ./b.yaml\n",
             None,
         ),
     ];
@@ -7092,9 +7162,10 @@ fn undeclared_property_fires_in_every_operand_position_at_warning_severity() {
         (span_on(OPERAND_DOC, "f1:", "fm_bin"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f2:", "fm_then"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f3:", "fm_arg"), "darkmatter.frontmatter"),
-        // `f4`'s `known || fm_rhs` is the condition grammar's `or`, whose
-        // operands bind `unknown | null`, so `fm_rhs` is handled; `B4`'s body
-        // `||` is a fallback, whose right-hand side is not.
+        // `||` has one absence rule everywhere: its left operand is an absence
+        // check, its right operand an ordinary read, so `f4`'s `fm_rhs` is
+        // reported exactly like `B4`'s body `rhs_var`.
+        (span_on(OPERAND_DOC, "f4:", "fm_rhs"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f6:", "foo--bar"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f7:", "a- b"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "B1:", "bin_op"), "darkmatter.compose"),

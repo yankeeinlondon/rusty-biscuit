@@ -1,0 +1,3353 @@
+//! Validator construction and caching.
+//!
+//! This module is the bridge between a fully-formed JSON Schema
+//! `serde_json::Value` and a `jsonschema::Validator` that can be exercised
+//! against frontmatter data. Two responsibilities live here:
+//!
+//! - **Validator construction** — wires up Darkmatter's custom formats
+//!   ([`format::DARKMATTER_FILE_FORMAT`],
+//!   [`format::DARKMATTER_FILE_REFERENCE_FORMAT`]) and the
+//!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`],
+//!   [`format::DARKMATTER_TYPE_DEFINITION_KEYWORD`], and
+//!   [`format::DARKMATTER_SCHEMA_KEYWORD`] keywords on top of Draft 2020-12.
+//!   A root union that contests a `file(match(...))` glob also carries
+//!   [`super::file_match::DARKMATTER_MATCH_KEYWORD`].
+//! - **Caching** — compiling a `Validator` is several milliseconds of work;
+//!   the [`ValidatorCache`] hashes the canonicalised schema bytes and reuses
+//!   compiled validators across calls. The default bound (64 entries) is
+//!   adjustable via `DARKMATTER_SCHEMA_CACHE_SIZE`.
+//!
+//! Validation problems are mapped from `jsonschema::ValidationError` into the
+//! public [`super::ValidationProblem`] shape (JSON-pointer path, friendly
+//! message, optional source line/column).
+
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
+
+use jsonschema::{
+    Draft, JsonType, PatternOptions, Validator,
+    error::{TypeKind, ValidationErrorKind},
+};
+use serde_json::{Map, Value};
+
+use super::{
+    FileReferenceDiagnostic, JsonPointer, ValidationProblem, ValidationProblemCode,
+    ValidationProblemKind, errors::SchemaError, format, scope::SchemaScope,
+};
+
+pub use super::positions::{PositionMap, build_position_map};
+
+/// Environment variable for overriding the validator-cache bound.
+pub const CACHE_SIZE_ENV: &str = "DARKMATTER_SCHEMA_CACHE_SIZE";
+
+/// Default validator-cache bound. Matches the value documented in the spec.
+pub const DEFAULT_CACHE_SIZE: usize = 64;
+
+/// The process-wide validator cache a host's validations share (F8), and the
+/// one conversion consults before compiling its own structural validator.
+///
+/// Compiling a `jsonschema::Validator` is milliseconds of work, and a single
+/// `md compose` runs schema validation up to twice (a second pass after shell
+/// expansion when trigger schemas are enabled) while a long-running host
+/// (claudine) composes many documents against the same handful of schemas.
+/// Sharing one cache — cloned into each instance — lets those passes reuse
+/// compiled validators instead of recompiling per instance. The cache key folds
+/// in both file-reference anchors (see [`ValidatorCache`]), so clones carrying
+/// different launch-area fallbacks share the map without cross-contamination.
+pub static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
+    std::sync::LazyLock::new(ValidatorCache::new);
+
+/// Cache of compiled validators keyed by canonicalised schema hash.
+///
+/// The hashmap entry stores the compiled validator together with an internal
+/// LRU "tick" so eviction is `O(n)` over the cache rather than requiring a
+/// linked structure. With the default cap of 64 entries this is fast enough
+/// and trades implementation complexity for predictable behaviour.
+///
+/// The inner map is an `Arc<Mutex<..>>`, so cloning a cache shares its entries.
+/// A host such as Darkmatter (`DarkmatterSchemas::new`) hands out clones of
+/// one process-wide cache, so validators compiled for one document (or one
+/// compose) are reused by the next — including the second `schema_validation`
+/// pass a schema-trigger compose runs after shell expansion.
+///
+/// ## File-reference resolution invariant
+///
+/// The prompt document directory (`base_dir`) is supplied per call to
+/// [`Self::validator_for`] because it varies per document. It participates in
+/// the cache key alongside the schema JSON so validators preserve the
+/// document-first, then repository-relative candidate plan of their document.
+/// The request's file-resolution context, passed per call, is part of cache
+/// identity too, since it supplies the repository tier of that plan.
+/// [`Self::file_ref_fallback_dir`] is also part of cache identity, though it
+/// is not a resolution candidate for document-authored references. So are
+/// [`Self::with_caller_origins`]: a caller-supplied property's `match()` globs
+/// are judged from the caller's own context.
+///
+/// [`Self::structural_validator_for`] serves validators that judge file values
+/// by syntax alone, for callers with no request (coercion probes, examples).
+#[derive(Clone)]
+pub struct ValidatorCache {
+    inner: Arc<Mutex<CacheInner>>,
+    /// Launch-area metadata carried to file-reference diagnostics.
+    ///
+    /// This is not a resolution candidate for document-authored references.
+    file_ref_fallback_dir: Option<PathBuf>,
+    /// Where each caller-supplied top-level property was authored.
+    caller_origins: CallerOrigins,
+}
+
+impl Default for ValidatorCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct CacheInner {
+    /// Validators by key. The key omits parts of [`JudgedIn`] (a document
+    /// and its transcluded children share one), so a slot holds every
+    /// validator whose `judged_in` differs rather than replacing one with
+    /// another and recompiling on each alternation.
+    entries: HashMap<u64, Vec<CacheEntry>>,
+    /// Content hashes of shared schemas, by allocation. The `Weak` keeps the
+    /// allocation from being reused for another schema while it is listed.
+    schema_hashes: Vec<(Weak<Value>, SchemaDigest)>,
+    tick: u64,
+    capacity: usize,
+}
+
+struct CacheEntry {
+    validator: Arc<Validator>,
+    /// What the validator's `file` formats were judged against. A hit must
+    /// match it exactly: a validator compiled without a repository root would
+    /// otherwise drop the repository tier for every later request.
+    judged_in: JudgedIn,
+    last_used: u64,
+}
+
+/// What a cached validator judges file values against.
+#[derive(Clone, PartialEq)]
+enum JudgedIn {
+    /// Syntax alone (a structural validator).
+    Syntax,
+    /// A request's context, and the contexts its caller-supplied properties
+    /// were authored in.
+    Context(Box<biscuit_file::FileResolutionContext>, CallerOrigins),
+}
+
+/// Where a top-level property's value came from (see [`CallerOrigins`]).
+pub enum ValueOrigin<'a> {
+    /// Authored in the document: judged from the document's folder.
+    Document,
+    /// Supplied by a caller, who authored it in this context.
+    Caller(&'a biscuit_file::FileResolutionContext),
+}
+
+/// The context each caller-supplied top-level property was authored in,
+/// keyed by property name.
+///
+/// A caller's value reaches validation projected from its own context (the
+/// launch directory), so its `match()` globs are judged there too: a bare or
+/// `./` pattern starts at the launch directory for a caller value and at the
+/// document's folder for a frontmatter value.
+///
+/// A validator compiled for a sub-schema of one top-level property (a union
+/// arm the eager-file rewrite judges alone) instead takes
+/// [`Self::whole_instance`]: the arm's location no longer names that
+/// property, so every value it judges takes the property's origin.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CallerOrigins(Origins);
+
+#[derive(Clone, Debug, PartialEq)]
+enum Origins {
+    ByProperty(Arc<std::collections::BTreeMap<String, biscuit_file::FileResolutionContext>>),
+    /// Every value of the instance was authored in this context.
+    WholeInstance(Arc<biscuit_file::FileResolutionContext>),
+}
+
+impl Default for Origins {
+    fn default() -> Self {
+        Self::ByProperty(Arc::default())
+    }
+}
+
+impl CallerOrigins {
+    pub fn new(
+        origins: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
+    ) -> Self {
+        Self(Origins::ByProperty(Arc::new(origins.into_iter().collect())))
+    }
+
+    /// Origins for a validator whose whole instance is the value of one
+    /// top-level property that came from `origin`: a document origin is the
+    /// empty map, a caller's applies to every keyword whatever its location.
+    pub fn whole_instance(origin: ValueOrigin<'_>) -> Self {
+        match origin {
+            ValueOrigin::Document => Self::default(),
+            ValueOrigin::Caller(context) => Self(Origins::WholeInstance(Arc::new(context.clone()))),
+        }
+    }
+
+    /// Where `property`'s value came from.
+    pub fn origin_of(&self, property: &str) -> ValueOrigin<'_> {
+        self.origin_at(Some(property))
+    }
+
+    /// Where the value a keyword judges came from; `property` is the
+    /// top-level property its location names, if any.
+    pub(crate) fn origin_at(&self, property: Option<&str>) -> ValueOrigin<'_> {
+        let context = match &self.0 {
+            Origins::ByProperty(by_property) => property.and_then(|property| by_property.get(property)),
+            Origins::WholeInstance(context) => Some(context.as_ref()),
+        };
+        context.map_or(ValueOrigin::Document, ValueOrigin::Caller)
+    }
+
+    fn is_empty(&self) -> bool {
+        matches!(&self.0, Origins::ByProperty(by_property) if by_property.is_empty())
+    }
+
+    /// Cache-key bytes: each property and the directories that root its
+    /// patterns. The full contexts are compared on lookup.
+    fn key_bytes(&self, bytes: &mut Vec<u8>) {
+        match &self.0 {
+            Origins::ByProperty(by_property) => {
+                for (property, origin) in by_property.iter() {
+                    bytes.push(0xfd);
+                    bytes.extend_from_slice(property.as_bytes());
+                    bytes.push(0xff);
+                    bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+                }
+            }
+            Origins::WholeInstance(origin) => {
+                bytes.push(0xfc);
+                bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+            }
+        }
+    }
+}
+
+impl ValidatorCache {
+    /// Creates a cache with the default capacity (overridable via the
+    /// `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable).
+    pub fn new() -> Self {
+        Self::with_capacity(default_capacity())
+    }
+
+    /// Creates a cache with an explicit capacity. Capacity values of `0` are
+    /// promoted to `1` so the cache always holds at least the most recently
+    /// built validator.
+    pub fn with_capacity(capacity: usize) -> Self {
+        let cap = capacity.max(1);
+        Self {
+            inner: Arc::new(Mutex::new(CacheInner {
+                entries: HashMap::new(),
+                schema_hashes: Vec::new(),
+                tick: 0,
+                capacity: cap,
+            })),
+            file_ref_fallback_dir: None,
+            caller_origins: CallerOrigins::default(),
+        }
+    }
+
+    /// Records the launch-area metadata carried to
+    /// `format: darkmatter-file` diagnostics.
+    ///
+    /// Per D2 the launch area is not a resolution input for a document-authored
+    /// `file` value — those resolve against the document first, then the repository
+    /// `base_dir`.
+    #[must_use]
+    pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.file_ref_fallback_dir = Some(dir.into());
+        self
+    }
+
+    /// Records the contexts caller-supplied properties were authored in, so
+    /// their `match()` globs are judged from there (see [`CallerOrigins`]).
+    #[must_use]
+    pub fn with_caller_origins(mut self, origins: CallerOrigins) -> Self {
+        self.caller_origins = origins;
+        self
+    }
+
+    /// Returns a compiled validator for the given JSON Schema, building it on
+    /// first use and reusing the cached one thereafter.
+    ///
+    /// `base_dir`, when `Some`, is the prompt document directory used to build
+    /// the request-scoped candidate plan for `format: darkmatter-file` values;
+    /// otherwise `context`'s `cwd` is. It is folded into the cache key so two
+    /// documents that share a schema but live in different directories do not
+    /// share a validator. A schema that judges no file value (no
+    /// `darkmatter-file*` format and no `match()`) is the same in every
+    /// context, so it shares one structural validator instead.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`SchemaError::BuildValidator`] when `jsonschema` rejects
+    /// the schema (bad draft features, malformed keywords, etc.).
+    pub fn validator_for(
+        &self,
+        schema: &Value,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        self.validator_for_hashed(schema, schema_digest(schema), base_dir, context)
+    }
+
+    /// [`Self::validator_for`] for a schema shared through an `Arc`: its
+    /// content is hashed once per allocation rather than on every lookup,
+    /// which matters for a large schema (the Darkmatter baseline) that every
+    /// compose phase looks up again.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validator_for`].
+    pub fn validator_for_shared(
+        &self,
+        schema: &Arc<Value>,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        let digest = self.shared_schema_digest(schema);
+        self.validator_for_hashed(schema, digest, base_dir, context)
+    }
+
+    /// The content hash of a shared schema, computed once per allocation
+    /// (see [`Self::validator_for_shared`]).
+    pub fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
+        self.shared_schema_digest(schema).hash
+    }
+
+    fn shared_schema_digest(&self, schema: &Arc<Value>) -> SchemaDigest {
+        let pointer = Arc::as_ptr(schema);
+        {
+            let guard = self.inner.lock().expect("validator cache lock poisoned");
+            if let Some((_, digest)) = guard.schema_hashes.iter().find(|(weak, _)| weak.as_ptr() == pointer) {
+                return *digest;
+            }
+        }
+        let digest = schema_digest(schema);
+        let mut guard = self.inner.lock().expect("validator cache lock poisoned");
+        guard.schema_hashes.retain(|(weak, _)| weak.strong_count() > 0);
+        guard.schema_hashes.push((Arc::downgrade(schema), digest));
+        digest
+    }
+
+    /// [`Self::validator_for`], also reporting whether this call compiled
+    /// the validator (a cache miss) rather than reusing a cached one.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validator_for`].
+    pub fn validator_for_reporting_compile(
+        &self,
+        schema: &Value,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<(Arc<Validator>, bool), SchemaError> {
+        self.lookup_or_compile(schema, schema_digest(schema), base_dir, context)
+    }
+
+    fn validator_for_hashed(
+        &self,
+        schema: &Value,
+        digest: SchemaDigest,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        self.lookup_or_compile(schema, digest, base_dir, context).map(|(validator, _)| validator)
+    }
+
+    /// The validator and whether it was compiled by this call.
+    fn lookup_or_compile(
+        &self,
+        schema: &Value,
+        digest: SchemaDigest,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<(Arc<Validator>, bool), SchemaError> {
+        // A schema with no file value to judge validates identically in every
+        // context, so one structural validator serves every document.
+        if !digest.judges_files {
+            return self.structural_lookup_or_compile(schema, digest.hash);
+        }
+        let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
+        let key = canonical_hash(digest.hash, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
+        // Fast path: hit.
+        if let Some(hit) = self.lookup(&key, &judged_in) {
+            return Ok((hit, false));
+        }
+        // Miss: build outside the lock to keep contention low.
+        let validator = Arc::new(build_validator_with(
+            schema,
+            &FileValues::Resolved {
+                base_dir: base_dir.map(PathBuf::from),
+                fallback: self.file_ref_fallback_dir.clone(),
+                context: Box::new(context.clone()),
+                callers: self.caller_origins.clone(),
+            },
+        )?);
+        self.insert(key, validator.clone(), judged_in);
+        Ok((validator, true))
+    }
+
+    /// Returns a cached structural validator for `schema`: file values that
+    /// need a context are judged by syntax alone (see
+    /// [`build_structural_validator`]).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`SchemaError::BuildValidator`] when `jsonschema` rejects
+    /// the schema.
+    pub fn structural_validator_for(&self, schema: &Value) -> Result<Arc<Validator>, SchemaError> {
+        self.structural_validator_hashed(schema, schema_content_hash(schema))
+    }
+
+    /// [`Self::structural_validator_for`] for a schema whose content hash is
+    /// known.
+    pub fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
+        self.structural_lookup_or_compile(schema, content).map(|(validator, _)| validator)
+    }
+
+    /// The structural validator and whether it was compiled by this call.
+    fn structural_lookup_or_compile(&self, schema: &Value, content: u64) -> Result<(Arc<Validator>, bool), SchemaError> {
+        let key = canonical_hash(content, None, None, &JudgedIn::Syntax);
+        if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
+            return Ok((hit, false));
+        }
+        let validator = Arc::new(build_structural_validator(schema)?);
+        self.insert(key, validator.clone(), JudgedIn::Syntax);
+        Ok((validator, true))
+    }
+
+    /// The structural validator for a schema whose content hash is
+    /// `content`, when this cache already holds one; builds nothing.
+    pub(crate) fn cached_structural(&self, content: u64) -> Option<Arc<Validator>> {
+        self.lookup(&canonical_hash(content, None, None, &JudgedIn::Syntax), &JudgedIn::Syntax)
+    }
+
+    fn lookup(&self, key: &u64, judged_in: &JudgedIn) -> Option<Arc<Validator>> {
+        super::timings::looked_up_validator();
+        let mut guard = self.inner.lock().expect("validator cache lock poisoned");
+        guard.tick = guard.tick.wrapping_add(1);
+        let tick = guard.tick;
+        let entry = guard
+            .entries
+            .get_mut(key)?
+            .iter_mut()
+            .find(|entry| &entry.judged_in == judged_in)?;
+        entry.last_used = tick;
+        Some(entry.validator.clone())
+    }
+
+    fn insert(&self, key: u64, validator: Arc<Validator>, judged_in: JudgedIn) {
+        let mut guard = self.inner.lock().expect("validator cache lock poisoned");
+        guard.tick = guard.tick.wrapping_add(1);
+        let tick = guard.tick;
+        let cap = guard.capacity;
+        let slot = guard.entries.entry(key).or_default();
+        slot.retain(|entry| entry.judged_in != judged_in);
+        slot.push(CacheEntry {
+            validator,
+            judged_in,
+            last_used: tick,
+        });
+        while guard.entries.values().map(Vec::len).sum::<usize>() > cap {
+            let Some((victim_key, victim_index)) = guard
+                .entries
+                .iter()
+                .flat_map(|(key, slot)| slot.iter().enumerate().map(move |(index, entry)| (*key, index, entry.last_used)))
+                .min_by_key(|(_, _, last_used)| *last_used)
+                .map(|(key, index, _)| (key, index))
+            else {
+                break;
+            };
+            let slot = guard.entries.get_mut(&victim_key).expect("victim slot exists");
+            slot.remove(victim_index);
+            if slot.is_empty() {
+                guard.entries.remove(&victim_key);
+            }
+        }
+    }
+
+    /// Returns the launch-area metadata configured for file-reference
+    /// diagnostics, if any.
+    pub fn file_ref_fallback_dir(&self) -> Option<&Path> {
+        self.file_ref_fallback_dir.as_deref()
+    }
+
+    pub fn caller_origins(&self) -> &CallerOrigins {
+        &self.caller_origins
+    }
+
+    /// Returns the current number of cached validators. Mainly a testing aid.
+    pub fn len(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("validator cache lock poisoned")
+            .entries
+            .values()
+            .map(Vec::len)
+            .sum()
+    }
+
+    /// Reports whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Drops every cached validator and memoized schema digest, for every
+    /// clone sharing this cache.
+    pub fn clear(&self) {
+        let mut guard = self.inner.lock().expect("validator cache lock poisoned");
+        guard.entries.clear();
+        guard.schema_hashes.clear();
+    }
+}
+
+/// Reports whether any `patternProperties` key in the compiled JSON Schema
+/// carries a regex lookaround (Feature C literal precedence). Such schemas need
+/// the backtracking `fancy-regex` engine; everything else stays on the linear
+/// `regex` engine.
+fn schema_uses_lookaround(schema: &Value) -> bool {
+    match schema {
+        Value::Object(map) => {
+            if let Some(Value::Object(pattern_props)) = map.get("patternProperties")
+                && pattern_props
+                    .keys()
+                    .any(|key| super::simplified::convert::has_lookaround(key))
+            {
+                return true;
+            }
+            map.values().any(schema_uses_lookaround)
+        }
+        Value::Array(items) => items.iter().any(schema_uses_lookaround),
+        _ => false,
+    }
+}
+
+/// Builds a structural `Validator`: darkmatter's custom formats and keywords,
+/// for callers with no request (coercion probes, example checks, lint).
+///
+/// A file value whose meaning needs a context (a relative, `&`, `^`, `@`, `~`,
+/// vault, or `{{VAR}}` reference) is judged by its syntax alone and admitted by
+/// `match()`. An absolute path needs none, so it is judged as a context-bound
+/// validator judges it: it must exist, and `match()` judges its full path.
+/// Nothing reads the process's directory, home, or environment.
+pub(crate) fn build_structural_validator(schema: &Value) -> Result<Validator, SchemaError> {
+    build_validator_with(schema, &FileValues::Syntax)
+}
+
+/// Builds a `Validator` configured with darkmatter's custom formats and
+/// keywords, resolving file values through `file_resolution_context`.
+///
+/// `base_dir` (the prompt document directory, else the context's `cwd`)
+/// anchors `format: darkmatter-file` value resolution: implicit bare
+/// references resolve document-first then repository-root, explicit
+/// `./`/`../` from the document directory only. `file_ref_fallback_dir` (the
+/// launch area) is **not** a resolution input (D2). A document value's
+/// `match()` globs are judged from `base_dir` too. Threading `base_dir` lets
+/// schema validation agree with expression-side `file_exists`/`frontmatter`
+/// resolution on the same `file` value.
+pub fn build_validator_in_context(
+    schema: &Value,
+    base_dir: Option<&Path>,
+    file_ref_fallback_dir: Option<&Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<Validator, SchemaError> {
+    build_validator_with_callers(
+        schema,
+        base_dir,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        CallerOrigins::default(),
+    )
+}
+
+/// [`build_validator_in_context`] for a document some of whose top-level
+/// properties a caller supplied (see [`CallerOrigins`]).
+pub fn build_validator_with_callers(
+    schema: &Value,
+    base_dir: Option<&Path>,
+    file_ref_fallback_dir: Option<&Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    callers: CallerOrigins,
+) -> Result<Validator, SchemaError> {
+    build_validator_with(
+        schema,
+        &FileValues::Resolved {
+            base_dir: base_dir.map(PathBuf::from),
+            fallback: file_ref_fallback_dir.map(PathBuf::from),
+            context: Box::new(file_resolution_context.clone()),
+            callers,
+        },
+    )
+}
+
+/// How a validator judges `format: darkmatter-file` values and `match()` globs.
+#[derive(Clone)]
+pub(crate) enum FileValues {
+    /// Without a context: absolute paths as resolved, everything else by
+    /// syntax (see [`build_structural_validator`]).
+    Syntax,
+    /// Resolved through a request's context from `base_dir`, else the
+    /// context's `cwd`; a caller-supplied property's `match()` globs are
+    /// judged in its entry of `callers`.
+    Resolved {
+        base_dir: Option<PathBuf>,
+        fallback: Option<PathBuf>,
+        context: Box<biscuit_file::FileResolutionContext>,
+        callers: CallerOrigins,
+    },
+}
+
+fn build_validator_with(schema: &Value, file_values: &FileValues) -> Result<Validator, SchemaError> {
+    let _compile = super::timings::compiling();
+    crate::note_work!(ValidatorCompile);
+    // Feature C literal-precedence emits negative-lookahead `patternProperties`
+    // keys, which the linear `regex` engine rejects. Opt such schemas into the
+    // backtracking `fancy-regex` engine while keeping every lookaround-free
+    // schema on the ReDoS-safe linear engine (byte-identical to prior behavior).
+    // The two `PatternOptions` values are distinct types, so the branch is on
+    // the builder call, not a shared binding.
+    let base = jsonschema::options().with_draft(Draft::Draft202012);
+    let opts = if schema_uses_lookaround(schema) {
+        base.with_pattern_options(PatternOptions::fancy_regex())
+    } else {
+        base.with_pattern_options(PatternOptions::regex())
+    };
+    let opts = format::register_darkmatter_formats_with(opts, file_values.clone())
+        .should_validate_formats(true)
+        .with_keyword(
+            format::DARKMATTER_URL_SCHEME_KEYWORD,
+            format::url_scheme_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_INTEGER_KEYWORD,
+            format::integer_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_TYPE_DEFINITION_KEYWORD,
+            format::type_definition_keyword_factory,
+        )
+        .with_keyword(
+            format::DARKMATTER_SCHEMA_KEYWORD,
+            format::schema_keyword_factory,
+        )
+        .with_keyword(
+            super::file_match::DARKMATTER_MATCH_KEYWORD,
+            super::file_match::match_keyword_factory(file_values.clone()),
+        );
+    opts.build(schema)
+        .map_err(|err| SchemaError::BuildValidator {
+            message: err.to_string(),
+        })
+}
+
+/// Maps `jsonschema::ValidationError` into the public `ValidationProblem`
+/// shape (JSON pointer + plain message). Line/column come from `positions`,
+/// which the caller builds once per frontmatter source (for example with
+/// [`build_position_map`]) and shares across every problem.
+pub fn collect_problems(
+    validator: &Validator,
+    instance: &Value,
+    positions: &PositionMap,
+) -> Vec<ValidationProblem> {
+    let mut problems = collect_problems_with_anchors(validator, instance, FileRefAnchors::Syntax);
+    positions.locate_all(&mut problems);
+    problems
+}
+
+/// Like [`collect_problems`] but carries the request-scoped document anchor and
+/// diagnostic launch metadata used by the validator. Problems carry no
+/// line/column: the caller locates its settled report
+/// ([`PositionMap::locate_all`]).
+pub fn collect_problems_with_anchors(
+    validator: &Validator,
+    instance: &Value,
+    anchors: FileRefAnchors<'_>,
+) -> Vec<ValidationProblem> {
+    validator
+        .iter_errors(instance)
+        .flat_map(|err| build_problems(&err, None, anchors))
+        .collect()
+}
+
+/// Per-arm validation of a root-union schema.
+///
+/// Each `arm_validator` is the compiled validator for the corresponding
+/// `anyOf` arm of the document schema. The arm producing the fewest problems
+/// "wins"; its problems are returned with `arm_index` populated. When every
+/// arm validates successfully (which should not happen for a failed instance)
+/// the empty problem list is returned with no arm tag.
+pub fn collect_root_union_problems(
+    arm_validators: &[Arc<Validator>],
+    instance: &Value,
+    positions: &PositionMap,
+) -> Vec<ValidationProblem> {
+    let mut problems =
+        collect_root_union_problems_with_anchors(arm_validators, instance, FileRefAnchors::Syntax);
+    positions.locate_all(&mut problems);
+    problems
+}
+
+/// Like [`collect_root_union_problems`] but carries the request-scoped document
+/// anchor and diagnostic launch metadata used by the validators. Problems
+/// carry no line/column, as [`collect_problems_with_anchors`]'s do.
+pub fn collect_root_union_problems_with_anchors(
+    arm_validators: &[Arc<Validator>],
+    instance: &Value,
+    anchors: FileRefAnchors<'_>,
+) -> Vec<ValidationProblem> {
+    if arm_validators.is_empty() {
+        return Vec::new();
+    }
+    let mut per_arm: Vec<Vec<ValidationProblem>> = Vec::with_capacity(arm_validators.len());
+    for (idx, validator) in arm_validators.iter().enumerate() {
+        let problems: Vec<ValidationProblem> = validator
+            .iter_errors(instance)
+            .flat_map(|err| build_problems(&err, Some(idx), anchors))
+            .collect();
+        if problems.is_empty() {
+            // Instance satisfies this arm — overall validation passes.
+            return Vec::new();
+        }
+        per_arm.push(problems);
+    }
+    // Closest-matching arm: the one with the fewest problems. Ties broken by
+    // arm order (stable: smaller index wins). An arm whose `match`
+    // glob rejected the file is ruled out, so it is reported only when every
+    // arm was.
+    per_arm
+        .into_iter()
+        .enumerate()
+        .min_by_key(|(idx, problems)| {
+            (problems.iter().any(is_match_rule_out), problems.len(), *idx)
+        })
+        .map(|(_, problems)| problems)
+        .unwrap_or_default()
+}
+
+fn is_match_rule_out(problem: &ValidationProblem) -> bool {
+    problem.schema_path.as_ref().is_some_and(|path| {
+        path.segments().last().map(String::as_str)
+            == Some(super::file_match::DARKMATTER_MATCH_KEYWORD)
+    })
+}
+
+/// Maps one `jsonschema::ValidationError` into one-or-more public problems.
+///
+/// Most errors map to a single problem. An `anyOf` failure is drilled into so
+/// the precise offending sub-path surfaces instead of the parent: when the
+/// `coerce`/`convert` pipeline wraps an optional typed property as
+/// `anyOf: [{ "type": "null" }, <typed-fragment>]` (see
+/// [`super::simplified::convert`]), a non-null value that fails the typed arm
+/// otherwise reports only at the wrapper path with the generic "is not valid
+/// under any of the schemas" message — pointing at the property instead of the
+/// field that actually failed. We recurse into the arm context, keeping only
+/// nested errors that drill *below* the wrapper path (this drops the `null`
+/// sentinel's same-path type error), so an author sees `/config/name` rather
+/// than `/config`. When no arm drills deeper (e.g. `[null, string]` against a
+/// wrong-typed scalar — every arm fails at the wrapper path) the original
+/// `anyOf` problem is kept.
+fn build_problems(
+    err: &jsonschema::ValidationError<'_>,
+    arm_index: Option<usize>,
+    anchors: FileRefAnchors<'_>,
+) -> Vec<ValidationProblem> {
+    if let ValidationErrorKind::AnyOf { context } = err.kind() {
+        let parent = err.instance_path().as_str();
+        let mut branches = Vec::new();
+        union_branch_errors(context, parent, &mut branches);
+        let mut deeper: Vec<ValidationProblem> = branches
+            .into_iter()
+            .filter(|nested| {
+                let path = nested.instance_path().as_str();
+                path.len() > parent.len() && path.starts_with(parent)
+            })
+            .flat_map(|nested| build_problems(nested, arm_index, anchors))
+            .collect();
+        if !deeper.is_empty() {
+            // Distinct arms can fail identically against the same value (e.g.
+            // overlapping inline-object arms); collapse exact duplicates so the
+            // report points at each offending site once. Duplicates need not be
+            // adjacent, so dedup by a seen set rather than `dedup_by`.
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            deeper.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+            return deeper;
+        }
+        let mut same_path_file_errors: Vec<ValidationProblem> = context
+            .iter()
+            .flat_map(|arm| arm.iter())
+            .filter(|nested| {
+                nested.instance_path().as_str() == parent
+                    && (is_file_format_error(nested) || is_match_keyword_error(nested))
+            })
+            .flat_map(|nested| build_problems(nested, arm_index, anchors))
+            .collect();
+        if !same_path_file_errors.is_empty() {
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            same_path_file_errors.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+            return same_path_file_errors;
+        }
+        // Nullable scalar wrapper: `anyOf: [{ "type": "null" }, <typed atom>]`
+        // (see [`super::simplified::convert::wrap_optional_null`]). A non-null
+        // value that fails the typed arm at the *same* path — a format, pattern,
+        // enum, or type mismatch, none of which drills deeper — otherwise
+        // reports the opaque "is not valid under any of the schemas listed in
+        // the 'anyOf' keyword" wrapper message. Surface the typed arm's precise
+        // error instead, dropping the null sentinel's own "expected null" type
+        // error. Scoped to the two-arm optional wrapper so multi-arm unions
+        // (`numberlike`/`boolish`/root unions) keep their aggregate message.
+        if context.len() == 2
+            && context
+                .iter()
+                .any(|arm| arm.len() == 1 && is_null_type_sentinel(&arm[0]))
+        {
+            let mut typed: Vec<ValidationProblem> = context
+                .iter()
+                .flat_map(|arm| arm.iter())
+                .filter(|nested| {
+                    nested.instance_path().as_str() == parent && !is_null_type_sentinel(nested)
+                })
+                .flat_map(|nested| build_problems(nested, arm_index, anchors))
+                .collect();
+            if !typed.is_empty() {
+                let mut seen: HashSet<(String, String)> = HashSet::new();
+                typed.retain(|p| seen.insert((p.path.clone(), p.message.clone())));
+                return typed;
+            }
+        }
+    }
+    let problem = build_problem(err, arm_index, anchors);
+    match anchors {
+        FileRefAnchors::Resolved { excused: Some(excused), .. } if excused(&problem) => Vec::new(),
+        _ => vec![problem],
+    }
+}
+
+/// The errors of every arm of a failed `anyOf`, with an arm that is itself a
+/// failed union at the same location (a reference to a recursive union type,
+/// such as a lifecycle stack's shared `entry`) replaced by its own arms' errors,
+/// so the drill-down sees through nested unions as through one.
+fn union_branch_errors<'e>(
+    context: &'e [Vec<jsonschema::ValidationError<'static>>],
+    parent: &str,
+    out: &mut Vec<&'e jsonschema::ValidationError<'static>>,
+) {
+    for nested in context.iter().flat_map(|arm| arm.iter()) {
+        match nested.kind() {
+            ValidationErrorKind::AnyOf { context } if nested.instance_path().as_str() == parent => {
+                union_branch_errors(context, parent, out);
+            }
+            _ => out.push(nested),
+        }
+    }
+}
+
+/// A root-union arm's `match` glob rejected the file; see [`super::file_match`].
+fn is_match_keyword_error(err: &jsonschema::ValidationError<'_>) -> bool {
+    err.schema_path().as_str().ends_with(super::file_match::DARKMATTER_MATCH_KEYWORD)
+}
+
+fn is_file_format_error(err: &jsonschema::ValidationError<'_>) -> bool {
+    let ValidationErrorKind::Format { format } = err.kind() else {
+        return false;
+    };
+    format == format::DARKMATTER_FILE_FORMAT
+        || format == format::DARKMATTER_FILE_REFERENCE_FORMAT
+}
+
+/// Replaces the generic `"<value>" is not a "darkmatter-datetime"` /
+/// `"darkmatter-time"` format-error text with a reader-facing ISO 8601
+/// diagnostic. `None` for every other error kind (the caller keeps
+/// `err.to_string()`).
+fn datetime_format_message(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    let ValidationErrorKind::Format { format } = err.kind() else {
+        return None;
+    };
+    let noun = match format.as_str() {
+        format::DARKMATTER_DATETIME_FORMAT => "an ISO-8601 datetime",
+        format::DARKMATTER_TIME_FORMAT => "an ISO-8601 time",
+        _ => return None,
+    };
+    Some(format!("{} is not {noun}", err.instance()))
+}
+
+/// `true` when `err` is the "expected null" type error contributed by the
+/// `{ "type": "null" }` arm of an optional-property wrapper against a non-null
+/// value.
+fn is_null_type_sentinel(err: &jsonschema::ValidationError<'_>) -> bool {
+    matches!(
+        err.kind(),
+        ValidationErrorKind::Type {
+            kind: TypeKind::Single(JsonType::Null)
+        }
+    )
+}
+
+fn build_problem(
+    err: &jsonschema::ValidationError<'_>,
+    arm_index: Option<usize>,
+    anchors: FileRefAnchors<'_>,
+) -> ValidationProblem {
+    let path = err.instance_path().as_str().to_string();
+    let property = match err.kind() {
+        ValidationErrorKind::Required { property } => property.as_str().map(str::to_string),
+        _ => None,
+    };
+    let kind = classify_kind(err.kind());
+    let code = classify_code(err.kind());
+    let offending_property = offending_property_of(err.kind());
+    let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
+        Some((message, diagnostic)) => (message, Some(diagnostic)),
+        None => (
+            datetime_format_message(err).unwrap_or_else(|| err.to_string()),
+            None,
+        ),
+    };
+    let instance_path = JsonPointer::parse(&path);
+    let schema_path = {
+        let raw = err.schema_path().as_str();
+        (!raw.is_empty()).then(|| JsonPointer::parse(raw))
+    };
+    ValidationProblem {
+        path,
+        message,
+        kind,
+        property,
+        line: None,
+        column: None,
+        arm_index,
+        description: None,
+        code,
+        instance_path,
+        schema_path,
+        offending_property,
+        file_reference,
+        caller_file: None,
+    }
+}
+
+/// Maps a `jsonschema::ValidationErrorKind` onto the fine-grained
+/// [`ValidationProblemCode`] (R-5 Priority 1). Unlike [`classify_kind`], this
+/// separates unknown keys and file-reference failures from the generic
+/// constraint bucket.
+fn classify_code(kind: &ValidationErrorKind) -> ValidationProblemCode {
+    match kind {
+        ValidationErrorKind::Required { .. } => ValidationProblemCode::MissingRequired,
+        ValidationErrorKind::Type { .. } => ValidationProblemCode::TypeMismatch,
+        ValidationErrorKind::AdditionalProperties { .. }
+        | ValidationErrorKind::UnevaluatedProperties { .. } => ValidationProblemCode::UnknownKey,
+        ValidationErrorKind::Format { format } if is_darkmatter_file_format_name(format) => {
+            ValidationProblemCode::InvalidFileReference
+        }
+        _ => ValidationProblemCode::ConstraintViolation,
+    }
+}
+
+fn is_darkmatter_file_format_name(format: &str) -> bool {
+    format == format::DARKMATTER_FILE_FORMAT || format == format::DARKMATTER_FILE_REFERENCE_FORMAT
+}
+
+/// The specific undeclared key for an `additionalProperties` /
+/// `unevaluatedProperties` failure, whose instance path points at the *parent*
+/// object. `None` for every other error kind.
+fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
+    match kind {
+        ValidationErrorKind::AdditionalProperties { unexpected }
+        | ValidationErrorKind::UnevaluatedProperties { unexpected } => unexpected.first().cloned(),
+        _ => None,
+    }
+}
+
+/// Anchors used to re-resolve a `format: darkmatter-file` value when
+/// substituting a targeted diagnostic.
+///
+/// Mirrors the [`FileValues`] the compiled validator was built with so the
+/// re-resolution reproduces the same failure mode.
+#[derive(Clone, Copy)]
+pub enum FileRefAnchors<'a> {
+    /// A structural validator: only absolute paths were resolved.
+    Syntax,
+    /// A validator that resolved file values in a request's context.
+    Resolved {
+        /// Prompt document directory the reference resolves against
+        /// (document-first then repository for implicit references).
+        base_dir: Option<&'a Path>,
+        /// Captured launch-area anchor; not a resolution input (D2).
+        fallback: Option<&'a Path>,
+        /// The request context the validator resolved file values in, so the
+        /// re-resolution sees the same repository root.
+        context: &'a biscuit_file::FileResolutionContext,
+        /// Problems this returns `true` for are left out of the report as
+        /// they are built, before an `anyOf` failure chooses which of its
+        /// arms' problems to show, so an excused problem never hides a
+        /// sibling one (nested `{{ … }}` templates, see
+        /// [`super::coerce::NestedTemplates`]).
+        excused: Option<&'a Excused<'a>>,
+    },
+}
+
+/// The `excused` predicate of [`FileRefAnchors::Resolved`].
+pub type Excused<'a> = dyn Fn(&ValidationProblem) -> bool + 'a;
+
+impl FileRefAnchors<'_> {
+    fn file_values(&self) -> FileValues {
+        match *self {
+            Self::Syntax => FileValues::Syntax,
+            Self::Resolved { base_dir, fallback, context, .. } => FileValues::Resolved {
+                base_dir: base_dir.map(PathBuf::from),
+                fallback: fallback.map(PathBuf::from),
+                context: Box::new(context.clone()),
+                callers: CallerOrigins::default(),
+            },
+        }
+    }
+}
+
+/// Returns the substituted message *and* the structured
+/// [`FileReferenceDiagnostic`] classification for `format: darkmatter-file`
+/// (eager) and `format: darkmatter-file-reference` (lazy) failures, so users
+/// see a targeted diagnostic instead of the generic `"<value>" is not a
+/// "<format>"` text produced by `jsonschema`. The message is preserved
+/// byte-for-byte; the classification rides alongside on the problem (R-5
+/// Priority 4).
+///
+/// The two formats fail for different reasons, so the substitution differs:
+///
+/// - **eager `darkmatter-file`** — re-runs [`format::resolve_file_reference`]
+///   against the failing instance string using the same `anchors` the
+///   validator was built with, reproducing the exact existence/resolution
+///   failure (invalid syntax, unresolvable context, or no matching file).
+/// - **lazy `darkmatter-file-reference`** — the lazy validator only fails on
+///   malformed syntax (it never resolves or checks existence), so the targeted
+///   diagnostic is purely the [`FileReference::new`] parse error. No
+///   resolution is attempted here, keeping the lazy contract intact.
+///
+/// The format validator already ran during `jsonschema` validation (returning
+/// `false` on failure), so the outcome here reproduces the exact path that
+/// produced the `false`. Returns `None` for non-string instances, unrelated
+/// formats, or any other error kind so the caller falls back to
+/// `err.to_string()`.
+fn darkmatter_file_reference_outcome(
+    err: &jsonschema::ValidationError<'_>,
+    anchors: FileRefAnchors<'_>,
+) -> Option<(String, FileReferenceDiagnostic)> {
+    let ValidationErrorKind::Format { format } = err.kind() else {
+        return None;
+    };
+    let instance = err.instance();
+    let Value::String(value) = instance.as_ref() else {
+        return None;
+    };
+    if format == format::DARKMATTER_FILE_FORMAT
+        && let FileRefAnchors::Resolved { base_dir, fallback, context, .. } = anchors
+    {
+        return match format::resolve_file_reference_in_context(value, base_dir, fallback, context) {
+            Ok(_) => None,
+            // The rendered `message` is preserved byte-for-byte from the
+            // failure's `Display`; the structured classification rides
+            // alongside on the problem (R-5 Priority 4).
+            Err(failure) => Some((failure.to_string(), file_reference_diagnostic(&failure))),
+        };
+    }
+    // A structural validator resolved only an absolute eager value; it judged
+    // every other one as the lazy format does.
+    if format == format::DARKMATTER_FILE_FORMAT && format::context_free_path(value).is_some() {
+        let failure = format::FileReferenceFailure::NoMatch { raw: value.to_string(), resolved_from: None };
+        return Some((failure.to_string(), file_reference_diagnostic(&failure)));
+    }
+    if format == format::DARKMATTER_FILE_REFERENCE_FORMAT || format == format::DARKMATTER_FILE_FORMAT {
+        // Lazy: the only way to reach here is a malformed reference. Report the
+        // construction error verbatim, without resolving or touching the
+        // filesystem.
+        return match biscuit_file::FileReference::new(value) {
+            Ok(_) => None,
+            Err(err) => Some((
+                format!("`{value}` is not a valid file reference: {err}"),
+                FileReferenceDiagnostic::InvalidSyntax {
+                    raw: value.to_string(),
+                },
+            )),
+        };
+    }
+    None
+}
+
+/// Maps the crate-private [`format::FileReferenceFailure`] to the public
+/// [`FileReferenceDiagnostic`] classification.
+fn file_reference_diagnostic(failure: &format::FileReferenceFailure) -> FileReferenceDiagnostic {
+    match failure {
+        format::FileReferenceFailure::InvalidSyntax { raw, .. } => {
+            FileReferenceDiagnostic::InvalidSyntax { raw: raw.clone() }
+        }
+        format::FileReferenceFailure::Resolution { raw, err } => {
+            FileReferenceDiagnostic::ResolutionFailed {
+                raw: raw.clone(),
+                failure: err.resolution_failure(),
+            }
+        }
+        format::FileReferenceFailure::NoMatch { raw, resolved_from } => {
+            FileReferenceDiagnostic::NoMatch {
+                raw: raw.clone(),
+                resolved_from: resolved_from.clone(),
+            }
+        }
+    }
+}
+
+/// Maps a `jsonschema::ValidationErrorKind` onto the coarse
+/// [`ValidationProblemKind`] used by renderers.
+///
+/// Renderers must not infer the category from `property.is_some()` or by
+/// substring-matching `message`; both lose information as soon as the
+/// validator grows new error shapes.
+fn classify_kind(kind: &ValidationErrorKind) -> ValidationProblemKind {
+    match kind {
+        ValidationErrorKind::Required { .. } => ValidationProblemKind::Missing,
+        ValidationErrorKind::Type { .. } => ValidationProblemKind::Type,
+        _ => ValidationProblemKind::Invalid,
+    }
+}
+
+/// Top-level frontmatter key a validation error is attributable to, if any:
+/// the first JSON-pointer segment, or the missing-property name for a
+/// `Required` failure on the root itself.
+pub fn error_top_level_key(err: &jsonschema::ValidationError<'_>) -> Option<String> {
+    identify_key(err.instance_path().as_str(), err.kind())
+}
+
+/// Picks the top-level frontmatter key to attribute a problem to.
+///
+/// A `Required` failure's path points at the object missing the property,
+/// so only a failure on the root names its key through the error kind; a
+/// nested one belongs to the top-level key that holds it, never to a
+/// top-level key that happens to share the missing property's name.
+fn identify_key(path: &str, kind: &ValidationErrorKind) -> Option<String> {
+    let trimmed = path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return match kind {
+            ValidationErrorKind::Required { property } => property.as_str().map(str::to_string),
+            _ => None,
+        };
+    }
+    let segment = trimmed.split('/').next()?;
+    Some(unescape_pointer_segment(segment))
+}
+
+fn unescape_pointer_segment(segment: &str) -> String {
+    segment.replace("~1", "/").replace("~0", "~")
+}
+
+/// Resolves the declared description for `problem` by walking `root` (the
+/// compiled JSON Schema) along the problem's instance path to the failing
+/// property node and reading its `description`.
+///
+/// `instance` is the validated value; it is consulted only to let a shared
+/// literal discriminant pick a union arm while descending (see
+/// [`schema_nodes_at`]).
+///
+/// Returns `None` when the property declares no description, when the path
+/// cannot be resolved (including a local `$ref` on the way that names
+/// nothing), or when several union arms reach the path with different
+/// descriptions. The walk is intentionally defensive: any missing or
+/// mis-shaped node yields `None` rather than panicking, so an unresolvable or
+/// ambiguous path degrades to "no description" instead of a wrong one.
+///
+/// ## Notes
+///
+/// The base node is the winning root-union arm (`root["anyOf"][arm_index]`)
+/// when `problem.arm_index` is `Some`, walked together with the `properties`
+/// and `items` a raw root declares beside its `anyOf`; otherwise it is `root`
+/// itself. References
+/// resolve against `root`, whose `$defs` hold every recursive body. The final
+/// node is read with its reference targets, use site first, so a sibling
+/// description wins and a referenced union yields its articulation (Decision
+/// #6).
+pub fn resolve_problem_description(
+    root: &Value,
+    problem: &ValidationProblem,
+    instance: &Value,
+) -> Option<String> {
+    // Decision #10: an `additionalProperties: false` failure points its path at
+    // the *parent* object, but the offending key is undeclared — reusing the
+    // parent's description would misidentify what the author must fix.
+    if problem.message.starts_with("Additional properties are not allowed") {
+        return None;
+    }
+
+    let (base, beside) = match problem.arm_index {
+        Some(idx) => (root.get("anyOf")?.as_array()?.get(idx)?, Some(root)),
+        None => (root, None),
+    };
+
+    let mut segments: Vec<String> = problem
+        .path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(unescape_pointer_segment)
+        .collect();
+
+    // Decision #3: a `Missing` problem's path points at the parent object; the
+    // missing property name lives in `problem.property`.
+    if problem.kind == ValidationProblemKind::Missing
+        && let Some(property) = &problem.property
+    {
+        segments.push(property.clone());
+    }
+
+    let scope = SchemaScope::new(root);
+    let mut descriptions = schema_nodes_at(&scope, base, beside, &segments, instance)?
+        .into_iter()
+        .map(|node| description_at_node(&scope, node));
+    let first = descriptions.next()??;
+    descriptions.all(|other| other.as_deref() == Some(first.as_str())).then_some(first)
+}
+
+/// The schema nodes that govern the instance location `segments` below `base`.
+///
+/// Each step follows local references and looks through `anyOf` before
+/// descending into `properties` (named segment) or `items` (numeric segment,
+/// Decision #4):
+///
+/// - a reference stands for itself and each target it reaches, since a
+///   reference's siblings and its target both constrain the value;
+/// - a nullable wrapper (one non-null arm) is replaced by that arm (Decision
+///   #5);
+/// - a genuine union (two or more non-null arms) — a property union or an
+///   item union under `items.anyOf` — is replaced
+///   by the arm the shared literal discriminant selects for the instance value
+///   at that location, else by every non-null arm. Arms that cannot take the
+///   next segment drop out.
+///
+/// `beside` is a root union whose arm `base` is: its own `properties` and
+/// `items` apply beside the arm at the first step, while its other arms do
+/// not.
+///
+/// The returned nodes are read as-is, so a final union or reference node is
+/// not expanded. Several nodes mean several arms reach the location; an empty
+/// result means the path does not resolve. `None` means a reference on the way
+/// names nothing: the schema is broken there, and an explanation must not
+/// guess past it. Arm choice here explains a report and must never authorize
+/// a transformation.
+fn schema_nodes_at<'a>(
+    scope: &SchemaScope<'a>,
+    base: &'a Value,
+    beside: Option<&'a Value>,
+    segments: &[String],
+    instance: &Value,
+) -> Option<Vec<&'a Value>> {
+    let mut nodes = vec![base];
+    let mut value = Some(instance);
+    let mut beside = beside;
+    for segment in segments {
+        let mut arms = Vec::new();
+        // Each step consumes a segment, so only a union reached again at the
+        // same instance location (a reference loop through `anyOf`) can
+        // repeat; a definition revisited one level deeper is a new location.
+        let mut expanded = HashSet::new();
+        for node in nodes {
+            push_union_arms(scope, node, value, &mut expanded, &mut arms)?;
+        }
+        arms.extend(beside.take());
+        let numeric = is_numeric_segment(segment);
+        nodes = Vec::new();
+        for arm in arms {
+            let next = if numeric {
+                arm.get("items") // Decision #4
+            } else {
+                arm.get("properties").and_then(|props| props.get(segment.as_str()))
+            };
+            if let Some(next) = next
+                && !nodes.iter().any(|seen| std::ptr::eq(*seen, next))
+            {
+                nodes.push(next);
+            }
+        }
+        value = value.and_then(|value| match value {
+            Value::Array(items) if numeric => segment.parse::<usize>().ok().and_then(|i| items.get(i)),
+            _ => value.get(segment.as_str()),
+        });
+    }
+    Some(nodes)
+}
+
+/// Pushes the concrete (non-union) schemas `node` stands for at an instance
+/// location holding `value`, plus any union node that declares `properties`
+/// or `items` beside its `anyOf`; see [`schema_nodes_at`] for the arm rules.
+/// `expanded` holds the unions already expanded at this location. `None` when
+/// a reference names nothing.
+fn push_union_arms<'a>(
+    scope: &SchemaScope<'a>,
+    node: &'a Value,
+    value: Option<&Value>,
+    expanded: &mut HashSet<*const Value>,
+    out: &mut Vec<&'a Value>,
+) -> Option<()> {
+    for hop in scope.chain(node, "").ok()? {
+        let Some(arms) = hop.get("anyOf").and_then(Value::as_array) else {
+            out.push(hop);
+            continue;
+        };
+        if !expanded.insert(std::ptr::from_ref(hop)) {
+            continue;
+        }
+        // Children declared beside the union apply under every arm.
+        if hop.get("properties").is_some() || hop.get("items").is_some() {
+            out.push(hop);
+        }
+        let non_null: Vec<&Value> = arms.iter().filter(|arm| !is_null_schema(arm)).collect();
+        if non_null.is_empty() {
+            out.push(hop);
+            continue;
+        }
+        let selected = match value {
+            Some(value) if non_null.len() >= 2 && !value.is_null() => {
+                super::discriminant::select_literal_discriminant_arm_in(arms, value, scope)
+            }
+            _ => None,
+        };
+        match selected {
+            Some(idx) => push_union_arms(scope, &arms[idx], value, expanded, out)?,
+            None => {
+                for arm in non_null {
+                    push_union_arms(scope, arm, value, expanded, out)?;
+                }
+            }
+        }
+    }
+    Some(())
+}
+
+/// Reads the description at the resolved node and its reference targets, use
+/// site first: a direct `description` string, else a property-level-union
+/// articulation (Decision #6), else `None`.
+fn description_at_node(scope: &SchemaScope<'_>, node: &Value) -> Option<String> {
+    let hops = scope.chain(node, "").ok()?;
+    if let Some(desc) = hops.iter().find_map(|hop| hop.get("description").and_then(Value::as_str)) {
+        return Some(desc.to_string());
+    }
+    hops.iter().find_map(|hop| {
+        let arms = hop.get("anyOf").and_then(Value::as_array)?;
+        let non_null: Vec<&Value> = arms.iter().filter(|arm| !is_null_schema(arm)).collect();
+        // A lone non-null arm is just a nullable wrapper, not a union worth
+        // articulating; only two-or-more genuine alternatives qualify.
+        (non_null.len() >= 2).then(|| articulate_union(scope, &non_null)).flatten()
+    })
+}
+
+/// The first `description` string among `arm` and its reference targets.
+fn arm_description<'a>(scope: &SchemaScope<'a>, arm: &'a Value) -> Option<&'a str> {
+    scope
+        .chain(arm, "")
+        .ok()?
+        .into_iter()
+        .find_map(|hop| hop.get("description").and_then(Value::as_str))
+}
+
+/// Articulates a property-level union (Decision #6) over its non-null arms.
+///
+/// `|D| == 1` returns the lone arm's description verbatim (it speaks for the
+/// whole union); `|D| >= 2` and `|D| == 0` synthesize `a union type of: …`,
+/// drawing on each arm's `description` or its [`type_label`]. A reference arm
+/// is read with its targets, use site first. Returns `None` when no
+/// description and no derivable type label exist.
+fn articulate_union<'a>(scope: &SchemaScope<'a>, non_null_arms: &[&'a Value]) -> Option<String> {
+    let descriptions: Vec<Option<&str>> =
+        non_null_arms.iter().map(|arm| arm_description(scope, arm)).collect();
+
+    if descriptions.iter().filter(|description| description.is_some()).count() == 1 {
+        return descriptions.into_iter().flatten().next().map(str::to_string);
+    }
+
+    let parts: Vec<String> = non_null_arms
+        .iter()
+        .zip(descriptions)
+        .filter_map(|(arm, description)| {
+            description.map(str::to_string).or_else(|| {
+                let hops = scope.chain(arm, "").ok()?;
+                hops.into_iter().find_map(type_label).map(str::to_string)
+            })
+        })
+        .collect();
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("a union type of: {}", parts.join(" | ")))
+    }
+}
+
+/// Maps a compiled arm schema to a short human-readable type keyword for union
+/// articulation (display aid only; never affects validation). Returns `None`
+/// when no label is derivable.
+fn type_label(arm: &Value) -> Option<&'static str> {
+    if arm.get("enum").is_some() || arm.get("const").is_some() {
+        return Some("enum");
+    }
+    match arm.get("type").and_then(Value::as_str)? {
+        "string" => Some("string"),
+        "number" => Some("number"),
+        "integer" => Some("integer"),
+        "boolean" => Some("boolean"),
+        "object" => Some("object"),
+        "array" => Some("array"),
+        _ => None,
+    }
+}
+
+/// Returns the lone non-null arm of a nullable `anyOf` wrapper, else the node
+/// unchanged. A union with two or more non-null arms is ambiguous to descend
+/// into, so it is left as-is and a caller's subsequent `properties`/`items`
+/// lookup fails. Description lookup does not use this; it looks through unions
+/// with [`schema_nodes_at`].
+pub fn unwrap_nullable_arm(node: &Value) -> &Value {
+    let Some(arms) = node.get("anyOf").and_then(Value::as_array) else {
+        return node;
+    };
+    let mut non_null = arms.iter().filter(|arm| !is_null_schema(arm));
+    match (non_null.next(), non_null.next()) {
+        (Some(only), None) => only,
+        _ => node,
+    }
+}
+
+/// Whether `arm` is the `{ "type": "null" }` sentinel emitted for optional
+/// (nullable) properties.
+pub(super) fn is_null_schema(arm: &Value) -> bool {
+    arm.get("type").and_then(Value::as_str) == Some("null")
+}
+
+fn is_numeric_segment(segment: &str) -> bool {
+    !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Root keywords that never change which values a root union accepts; any
+/// other keyword beside a root `anyOf` is an assertion every arm must keep.
+const ROOT_UNION_NON_ASSERTIONS: &[&str] = &[
+    "anyOf",
+    "$schema",
+    "$defs",
+    "$comment",
+    "title",
+    "description",
+    "examples",
+    "default",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+];
+
+/// Whether `root` declares a keyword beside its `anyOf` that every arm must
+/// keep.
+fn has_root_union_sibling_assertions(root: &Value) -> bool {
+    root.as_object()
+        .is_some_and(|map| map.keys().any(|key| !ROOT_UNION_NON_ASSERTIONS.contains(&key.as_str())))
+}
+
+/// Root keywords whose verdict reads what every successful `anyOf`
+/// alternative evaluated, so an arm cannot be judged by them alone.
+const ROOT_UNION_EVALUATION_READERS: &[&str] = &["unevaluatedProperties", "unevaluatedItems"];
+
+/// The keywords `root` declares beside its `anyOf`, as a schema of their own
+/// (`root` without `anyOf`), or `None` when none of them is an assertion, as
+/// in a generated SimplifiedSchema union.
+///
+/// Conversion uses it where an arm is judged through
+/// [`wrap_arm_as_root_schema`]: that schema's `allOf` drives no conversion,
+/// so a caller converts against the arm and then against these keywords,
+/// and the root's own `properties` convert as they do without the union.
+pub fn root_union_sibling_schema(root: &Value) -> Option<Value> {
+    if !has_root_union_sibling_assertions(root) {
+        return None;
+    }
+    let mut map = root.as_object()?.clone();
+    map.shift_remove("anyOf");
+    Some(Value::Object(map))
+}
+
+/// An `anyOf` arm of `root` as a standalone schema the cache can compile,
+/// accepting exactly the values `root` accepts through that arm, so some
+/// arm's schema accepts a value exactly when `root` does.
+///
+/// The result carries the canonical `$schema` URI and `root`'s `$defs`, where
+/// the arm's `#/$defs/…` references resolve. A generated SimplifiedSchema
+/// union (an object arm, no assertion beside the root `anyOf`) is the arm
+/// itself, so its problem paths are the arm's. Otherwise the result is `root`
+/// with the arm added under `allOf`: the root's sibling assertions (a raw
+/// JSON Schema's `required` or `type`) still apply, and a boolean arm keeps
+/// its meaning (`false` rejects every value).
+///
+/// The root's `anyOf` is removed, except where the root declares
+/// `unevaluatedProperties` or `unevaluatedItems`: those read the fields and
+/// items every successful alternative evaluated, not only the selected
+/// arm's. There the alternatives stay, followed by a `true` alternative so
+/// the union itself never fails and the problems reported are still the
+/// selected arm's and the siblings'.
+pub fn wrap_arm_as_root_schema(arm: &Value, root: &Value) -> Value {
+    if has_root_union_sibling_assertions(root) || !arm.is_object() {
+        let mut map = root.as_object().cloned().unwrap_or_default();
+        let reads_evaluations = ROOT_UNION_EVALUATION_READERS.iter().any(|reader| map.contains_key(*reader));
+        match map.get_mut("anyOf") {
+            Some(Value::Array(alternatives)) if reads_evaluations => alternatives.push(Value::Bool(true)),
+            _ => {
+                map.shift_remove("anyOf");
+            }
+        }
+        match map.get_mut("allOf") {
+            Some(Value::Array(all_of)) => all_of.push(arm.clone()),
+            // A non-array `allOf` fails to compile, as `root` itself does.
+            Some(_) => {}
+            None => {
+                map.insert("allOf".into(), Value::Array(vec![arm.clone()]));
+            }
+        }
+        map.entry("$schema")
+            .or_insert_with(|| Value::String(super::simplified::DRAFT_2020_12.to_string()));
+        return Value::Object(map);
+    }
+    let arm = super::scope::with_root_definitions(arm, root);
+    let mut map = arm.as_object().cloned().unwrap_or_default();
+    if !map.contains_key("$schema") {
+        map.insert(
+            "$schema".into(),
+            Value::String(super::simplified::DRAFT_2020_12.to_string()),
+        );
+    }
+    Value::Object(map)
+}
+
+/// Collects problems for a single already-selected root-union arm, tagging each
+/// with `arm_index`. Used to narrow a discriminated **root** union to the arm a
+/// shared literal discriminant selects, so only that arm's problems surface
+/// (instead of the closest-by-count arm the general union report picks).
+pub fn collect_arm_problems_with_anchors(
+    validator: &Validator,
+    instance: &Value,
+    anchors: FileRefAnchors<'_>,
+    arm_index: usize,
+) -> Vec<ValidationProblem> {
+    validator
+        .iter_errors(instance)
+        .flat_map(|err| build_problems(&err, Some(arm_index), anchors))
+        .collect()
+}
+
+/// Narrows discriminated unions to their selected arm, wherever they sit: a
+/// property union, an item union (`items.anyOf`), or a union nested in an
+/// object field or a selected arm.
+///
+/// For each union location whose instance value a shared literal discriminant
+/// selects unambiguously
+/// ([`super::discriminant::select_literal_discriminant_arm`]) and that has at
+/// least one problem at or under it, those problems are replaced with the
+/// result of validating the instance against a synthetic schema that carries
+/// only the chosen arm at that location — so only the matched arm's
+/// missing/unknown/type problems surface. Every other location keeps its
+/// original `anyOf` diagnostics byte-for-byte. A location without problems is
+/// left alone, so a value another arm accepts stays valid (`anyOf` acceptance
+/// is unchanged).
+///
+/// The synthetic schema mirrors the path (`properties` for a key,
+/// `prefixItems` for an index) and validates the whole instance, so problem
+/// paths keep the `/key/0/...` form the normal report uses and are located
+/// like it. Outer locations are narrowed before the unions inside their
+/// selected arm.
+///
+/// `schema` is the root: references (a recursive union at each level of a
+/// tree, a reference arm) are followed against it, and the synthetic schema
+/// carries its `$defs`. Assertions beside the union at its location (a
+/// reference's or nullable wrapper's siblings) apply with the chosen arm; a
+/// reference that names nothing leaves its location's report ordinary.
+pub fn narrow_discriminated_union_problems(
+    schema: &Value,
+    instance: &Value,
+    anchors: FileRefAnchors<'_>,
+    mut problems: Vec<ValidationProblem>,
+) -> Vec<ValidationProblem> {
+    let mut walk = DiscriminantWalk {
+        scope: SchemaScope::new(schema),
+        path: Vec::new(),
+        visited: HashSet::new(),
+        selections: Vec::new(),
+    };
+    walk.collect(schema, instance, Vec::new());
+    for Selection { path, arm, beside } in walk.selections {
+        let prefix: String = path.iter().map(PathStep::pointer_segment).collect();
+        if !problems.iter().any(|problem| path_is_under(&problem.path, &prefix)) {
+            continue;
+        }
+        let mut synthetic = arm_with_assertions_beside(arm, &beside);
+        for step in path.iter().rev() {
+            synthetic = match step {
+                PathStep::Key(key) => {
+                    let properties = Map::from_iter([(key.clone(), synthetic)]);
+                    Value::Object(Map::from_iter([("properties".to_string(), Value::Object(properties))]))
+                }
+                PathStep::Index(index) => {
+                    let mut prefix_items = vec![Value::Bool(true); *index];
+                    prefix_items.push(synthetic);
+                    Value::Object(Map::from_iter([("prefixItems".to_string(), Value::Array(prefix_items))]))
+                }
+            };
+        }
+        if let Some(object) = synthetic.as_object_mut() {
+            object.insert("$schema".into(), super::simplified::DRAFT_2020_12.into());
+            object.insert("type".into(), "object".into());
+        }
+        // The selected arm keeps its `#/$defs/…` references in the root's scope.
+        let synthetic = super::scope::with_root_definitions(&synthetic, schema);
+        let Ok(validator) = build_validator_with(&synthetic, &anchors.file_values()) else {
+            continue;
+        };
+        let narrowed: Vec<ValidationProblem> = validator
+            .iter_errors(instance)
+            .flat_map(|err| build_problems(&err, None, anchors))
+            .collect();
+        problems.retain(|problem| !path_is_under(&problem.path, &prefix));
+        problems.extend(narrowed);
+    }
+    problems
+}
+
+/// One instance-path step to a discriminated union location.
+#[derive(Clone)]
+enum PathStep {
+    Key(String),
+    Index(usize),
+}
+
+impl PathStep {
+    /// The escaped JSON-pointer segment, with its leading `/`.
+    fn pointer_segment(&self) -> String {
+        match self {
+            PathStep::Key(key) => json_pointer_segment(key),
+            PathStep::Index(index) => format!("/{index}"),
+        }
+    }
+}
+
+/// A union location whose instance value selects one arm by literal
+/// discriminant.
+struct Selection<'a> {
+    path: Vec<PathStep>,
+    arm: &'a Value,
+    /// The other schemas applying at the same location on the way to the
+    /// union: reference use sites and nullable wrappers.
+    beside: Vec<&'a Value>,
+}
+
+/// State of one [`DiscriminantWalk::collect`] pass.
+struct DiscriminantWalk<'a> {
+    scope: SchemaScope<'a>,
+    path: Vec<PathStep>,
+    /// `(schema, instance value)` pairs already walked. A recursive definition
+    /// is walked again for each deeper value; only the same schema at the same
+    /// value (a reference loop that consumes no instance) is skipped.
+    visited: HashSet<(*const Value, *const Value)>,
+    selections: Vec<Selection<'a>>,
+}
+
+impl<'a> DiscriminantWalk<'a> {
+    /// Collects, in pre-order, each union location below `node` whose instance
+    /// value selects one arm by literal discriminant, with that arm. Descends
+    /// through references, nullable wrappers, declared object properties
+    /// present in the instance, array items, and selected arms; an unselected
+    /// union is not descended, so its reporting stays ordinary. `beside` holds
+    /// the schemas already passed at this instance location.
+    fn collect(&mut self, node: &'a Value, value: &Value, beside: Vec<&'a Value>) {
+        let location = (std::ptr::from_ref(node), std::ptr::from_ref(value));
+        if value.is_null() || !self.visited.insert(location) {
+            return;
+        }
+        let Ok(hops) = self.scope.chain(node, "") else {
+            return;
+        };
+        for (position, hop) in hops.iter().enumerate() {
+            let mut at_location = beside.clone();
+            let others = hops.iter().enumerate().filter(|(other, _)| *other != position);
+            at_location.extend(others.map(|(_, hop)| *hop));
+            self.collect_hop(hop, value, at_location);
+        }
+    }
+
+    fn collect_hop(&mut self, hop: &'a Value, value: &Value, beside: Vec<&'a Value>) {
+        if let Some(arms) = hop.get("anyOf").and_then(Value::as_array) {
+            let mut non_null = arms.iter().filter(|arm| !is_null_schema(arm));
+            match (non_null.next(), non_null.next()) {
+                (Some(only), None) => {
+                    let mut beside = beside;
+                    beside.push(hop);
+                    self.collect(only, value, beside);
+                }
+                (Some(_), Some(_)) => {
+                    let scope = &self.scope;
+                    let selected = super::discriminant::select_literal_discriminant_arm_in(arms, value, scope);
+                    if let Some(idx) = selected {
+                        let arm = &arms[idx];
+                        let mut beside = beside;
+                        beside.push(hop);
+                        self.selections.push(Selection { path: self.path.clone(), arm, beside });
+                        self.collect(arm, value, Vec::new());
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        match value {
+            Value::Object(fields) => {
+                let Some(props) = hop.get("properties").and_then(Value::as_object) else {
+                    return;
+                };
+                for (key, prop_schema) in props {
+                    if let Some(field) = fields.get(key) {
+                        self.path.push(PathStep::Key(key.clone()));
+                        self.collect(prop_schema, field, Vec::new());
+                        self.path.pop();
+                    }
+                }
+            }
+            Value::Array(items) => {
+                let Some(item_schema) = hop.get("items").filter(|items| items.is_object()) else {
+                    return;
+                };
+                for (index, item) in items.iter().enumerate() {
+                    self.path.push(PathStep::Index(index));
+                    self.collect(item_schema, item, Vec::new());
+                    self.path.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Keywords that never fail a value, plus the applicators the narrowed
+/// location replaces. A schema beside a union made only of these adds nothing
+/// to the selected arm.
+const NON_ASSERTING_KEYWORDS: &[&str] = &[
+    "$ref",
+    "anyOf",
+    "$defs",
+    "$schema",
+    "$comment",
+    "description",
+    "title",
+    "default",
+    "examples",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+    "x-darkmatter-eager",
+    "x-darkmatter-example",
+    "x-darkmatter-generated",
+    "x-darkmatter-suggest",
+    "x-darkmatter-category",
+    "x-darkmatter-operands",
+];
+
+/// `arm` alone when nothing in `beside` asserts anything, else `arm` and each
+/// asserting schema in `beside` (stripped of its `$ref` and `anyOf`) under one
+/// `allOf`, so a reference's or wrapper's own constraints still apply at the
+/// narrowed location.
+fn arm_with_assertions_beside(arm: &Value, beside: &[&Value]) -> Value {
+    let asserting: Vec<Value> = beside
+        .iter()
+        .filter_map(|schema| {
+            let object = schema.as_object()?;
+            if object.keys().all(|key| NON_ASSERTING_KEYWORDS.contains(&key.as_str())) {
+                return None;
+            }
+            let mut object = object.clone();
+            object.remove("$ref");
+            object.remove("anyOf");
+            Some(Value::Object(object))
+        })
+        .collect();
+    if asserting.is_empty() {
+        return arm.clone();
+    }
+    let mut all_of = vec![arm.clone()];
+    all_of.extend(asserting);
+    Value::Object(Map::from_iter([("allOf".to_string(), Value::Array(all_of))]))
+}
+
+/// The escaped JSON-pointer segment (`/<escaped-key>`) for an object key.
+fn json_pointer_segment(key: &str) -> String {
+    format!("/{}", key.replace('~', "~0").replace('/', "~1"))
+}
+
+/// Whether `path` names the property at `prefix` or a descendant of it.
+fn path_is_under(path: &str, prefix: &str) -> bool {
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
+fn default_capacity() -> usize {
+    static CAP: OnceLock<usize> = OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var(CACHE_SIZE_ENV)
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|n| n.max(1))
+            .unwrap_or(DEFAULT_CACHE_SIZE)
+    })
+}
+
+/// Hash of a schema's canonical JSON: equal schemas share a hash whatever
+/// their object key order, while array order (`enum`, `required`, `anyOf`, ...)
+/// stays significant.
+pub(super) fn schema_content_hash(schema: &Value) -> u64 {
+    biscuit_hash::xx_hash_json(schema)
+}
+
+/// A schema's content hash, and whether it judges any file value.
+#[derive(Clone, Copy)]
+struct SchemaDigest {
+    hash: u64,
+    /// `false` only when the schema names neither the eager `darkmatter-file`
+    /// format nor the `match()` keyword, so no part of its verdict reads a
+    /// context. The lazy `darkmatter-file-reference` format checks syntax only
+    /// and does not count; the built-in baseline uses it, so counting it sent
+    /// every baseline-merged schema to a per-document validator. A mention
+    /// inside a description reads as `true`, which only costs a context-keyed
+    /// validator.
+    judges_files: bool,
+}
+
+fn schema_digest(schema: &Value) -> SchemaDigest {
+    let text = biscuit_hash::canonical_json(schema);
+    SchemaDigest {
+        hash: biscuit_hash::xx_hash_bytes(text.as_bytes()),
+        // Quoted, so the `darkmatter-file-reference` value does not match.
+        judges_files: text.contains(&format!("\"{}\"", super::format::DARKMATTER_FILE_FORMAT))
+            || text.contains(super::file_match::DARKMATTER_MATCH_KEYWORD),
+    }
+}
+
+/// xxHash (XXH64) of the canonicalised JSON Schema bytes plus both file-reference
+/// anchors (the document `base_dir` and the launch-area `fallback`) used as the
+/// cache key.
+///
+/// Both anchors are folded in because they parameterize the compiled
+/// `format: darkmatter-file` validator: the same schema validated for two
+/// documents in different directories — or under two different launch-area
+/// fallbacks — must not share a validator, or one document's `file` values
+/// would resolve against the other's directories. Keying on the fallback (not
+/// just baking it per-cache) is what lets a single process-wide cache serve
+/// every `DarkmatterSchemas` instance safely, regardless of its fallback.
+///
+/// A non-cryptographic hash suffices here: this is a cache identity, not a
+/// security boundary. An accidental collision could only serve a wrong
+/// validator, and XXH64's collision resistance over these small distinct inputs
+/// is more than adequate (repo convention — [`biscuit_hash`]).
+fn canonical_hash(
+    content: u64,
+    base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+    judged_in: &JudgedIn,
+) -> u64 {
+    let mut bytes = content.to_le_bytes().to_vec();
+    // Domain-separate each anchor from the schema hash (and from each other)
+    // so path bytes cannot alias a different (schema, base_dir, fallback)
+    // triple.
+    bytes.push(0xff);
+    if let Some(dir) = base_dir {
+        bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
+    }
+    bytes.push(0xff);
+    if let Some(dir) = fallback {
+        bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
+    }
+    // The repository anchors keep requests with and without a repository in
+    // separate slots, and structural validators apart from both; the full
+    // context is compared on lookup.
+    let context = match judged_in {
+        JudgedIn::Syntax => {
+            bytes.push(0xfe);
+            None
+        }
+        JudgedIn::Context(context, callers) => {
+            if !callers.is_empty() {
+                callers.key_bytes(&mut bytes);
+            }
+            Some(context.as_ref())
+        }
+    };
+    for anchor in [
+        context.and_then(biscuit_file::FileResolutionContext::repository_root),
+        context.and_then(biscuit_file::FileResolutionContext::package_area),
+    ] {
+        bytes.push(0xff);
+        if let Some(dir) = anchor {
+            bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
+        }
+    }
+    biscuit_hash::xx_hash_bytes(&bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn trivial_schema() -> Value {
+        json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        })
+    }
+
+    #[test]
+    fn cache_caches_validator_by_schema_identity() {
+        let cache = ValidatorCache::with_capacity(4);
+        let schema = trivial_schema();
+        let v1 = cache.structural_validator_for(&schema).unwrap();
+        let v2 = cache.structural_validator_for(&schema).unwrap();
+        assert!(Arc::ptr_eq(&v1, &v2));
+        assert_eq!(cache.len(), 1);
+    }
+
+    /// A validator compiled without a repository root must not answer for a
+    /// request that has one: the shared cache would otherwise drop the
+    /// repository tier of an implicit path for the rest of the process.
+    #[cfg(feature = "file")]
+    #[test]
+    fn cache_keeps_validators_for_different_resolution_contexts_apart() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        let base_dir = repo.path().join("prompts");
+        std::fs::create_dir_all(&base_dir).unwrap();
+        std::fs::create_dir_all(repo.path().join("fixes/x")).unwrap();
+        std::fs::write(repo.path().join("fixes/x/spec.md"), "# Spec\n").unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": { "spec": { "type": "string", "format": "darkmatter-file" } }
+        });
+        let instance = json!({ "spec": "fixes/x/spec.md" });
+
+        let cache = ValidatorCache::with_capacity(4);
+        let without_repository = biscuit_file::FileResolutionContext::new(&base_dir);
+        let with_repository = biscuit_file::FileResolutionContext::new(&base_dir)
+            .with_repository_root(repo.path());
+
+        let first = cache
+            .validator_for(&schema, Some(&base_dir), &without_repository)
+            .unwrap();
+        assert!(!first.is_valid(&instance), "the document directory alone lacks the file");
+        let second = cache
+            .validator_for(&schema, Some(&base_dir), &with_repository)
+            .unwrap();
+        assert!(second.is_valid(&instance), "the repository tier finds the file");
+        let third = cache
+            .validator_for(&schema, Some(&base_dir), &without_repository)
+            .unwrap();
+        assert!(
+            !third.is_valid(&instance),
+            "the repository-less request still judges without the repository",
+        );
+    }
+
+    /// A document and the child it transcludes share a key (only their
+    /// source paths differ), so alternating between them must reuse both
+    /// validators rather than recompile on each switch.
+    #[test]
+    fn cache_keeps_contexts_sharing_a_key_without_recompiling() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let schema = Arc::new(json!({
+            "type": "object",
+            "properties": { "spec": { "type": "string", "format": "darkmatter-file" } }
+        }));
+        let parent = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("parent.md"));
+        let child = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("child.md"));
+
+        let cache = ValidatorCache::with_capacity(4);
+        let parent_first = cache.validator_for_shared(&schema, Some(dir.path()), &parent).unwrap();
+        let child_first = cache.validator_for_shared(&schema, Some(dir.path()), &child).unwrap();
+        let parent_again = cache.validator_for_shared(&schema, Some(dir.path()), &parent).unwrap();
+        let child_again = cache.validator_for_shared(&schema, Some(dir.path()), &child).unwrap();
+
+        assert!(Arc::ptr_eq(&parent_first, &parent_again));
+        assert!(Arc::ptr_eq(&child_first, &child_again));
+        assert_eq!(cache.len(), 2);
+    }
+
+    /// A schema that judges no file value validates the same in every
+    /// context, so documents in different folders and contexts share one
+    /// compiled validator; one naming the eager file format or `match()` does
+    /// not.
+    #[test]
+    fn a_file_free_schema_shares_one_validator_across_contexts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first_dir = dir.path().join("first");
+        let second_dir = dir.path().join("second");
+        let first = biscuit_file::FileResolutionContext::new(&first_dir);
+        let second = biscuit_file::FileResolutionContext::new(&second_dir).with_repository_root(dir.path());
+        let cache = ValidatorCache::with_capacity(8);
+
+        let file_free = Arc::new(trivial_schema());
+        let a = cache.validator_for_shared(&file_free, Some(&first_dir), &first).unwrap();
+        let b = cache.validator_for_shared(&file_free, Some(&second_dir), &second).unwrap();
+        assert!(Arc::ptr_eq(&a, &b), "a file-free schema compiles once");
+        assert!(a.is_valid(&json!({"name": "x"})));
+        assert!(!a.is_valid(&json!({"name": ["x"]})));
+        assert_eq!(cache.len(), 1);
+
+        // The lazy reference format checks syntax only, so it reads no context.
+        let lazy = Arc::new(
+            json!({"type": "object", "properties": {"doc": {"type": "string", "format": "darkmatter-file-reference"}}}),
+        );
+        let a = cache.validator_for_shared(&lazy, Some(&first_dir), &first).unwrap();
+        let b = cache.validator_for_shared(&lazy, Some(&second_dir), &second).unwrap();
+        assert!(Arc::ptr_eq(&a, &b), "a reference-format schema compiles once");
+
+        for judging in [
+            json!({"type": "object", "properties": {"doc": {"type": "string", "format": "darkmatter-file"}}}),
+            json!({"type": "object", "properties": {"doc": {"type": "string", "x-darkmatter-match": ["*.md"]}}}),
+        ] {
+            let cache = ValidatorCache::with_capacity(8);
+            let judging = Arc::new(judging);
+            let a = cache.validator_for_shared(&judging, Some(&first_dir), &first).unwrap();
+            let b = cache.validator_for_shared(&judging, Some(&second_dir), &second).unwrap();
+            assert!(!Arc::ptr_eq(&a, &b), "a file-judging schema is keyed by context: {judging}");
+        }
+    }
+
+    /// Schemas parsed from JSON whose objects list the same keys in another
+    /// order, at the root and nested, and with an array (`enum`, `required`)
+    /// either kept or reordered.
+    fn key_order_schema_pair() -> (Value, Value, Value) {
+        let authored = r#"{"type":"object","required":["a","b"],"properties":{"a":{"type":"string","enum":["x","y"]},"b":{"type":"number"}}}"#;
+        let reordered = r#"{"properties":{"b":{"type":"number"},"a":{"enum":["x","y"],"type":"string"}},"required":["a","b"],"type":"object"}"#;
+        let array_reordered = r#"{"type":"object","required":["b","a"],"properties":{"a":{"type":"string","enum":["y","x"]},"b":{"type":"number"}}}"#;
+        let parse = |text: &str| serde_json::from_str::<Value>(text).unwrap();
+        let (authored, reordered, array_reordered) = (parse(authored), parse(reordered), parse(array_reordered));
+        let root_keys = |value: &Value| value.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+        assert_ne!(root_keys(&authored), root_keys(&reordered), "the fixture must differ in key order");
+        assert_eq!(authored, reordered);
+        (authored, reordered, array_reordered)
+    }
+
+    #[test]
+    fn reordered_schema_keys_share_a_structural_validator() {
+        let (authored, reordered, array_reordered) = key_order_schema_pair();
+        let cache = ValidatorCache::with_capacity(8);
+        let first = cache.structural_validator_for(&authored).unwrap();
+        let second = cache.structural_validator_for(&reordered).unwrap();
+        assert!(Arc::ptr_eq(&first, &second), "object key order is not schema identity");
+        assert_eq!(cache.len(), 1);
+
+        let third = cache.structural_validator_for(&array_reordered).unwrap();
+        assert!(!Arc::ptr_eq(&first, &third), "array order stays significant");
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn reordered_schema_keys_share_a_context_validator() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let (authored, reordered, array_reordered) = key_order_schema_pair();
+        let with_file = |mut schema: Value| {
+            schema["properties"]["doc"] = json!({"type": "string", "format": "darkmatter-file"});
+            schema
+        };
+        let (authored, reordered, array_reordered) =
+            (with_file(authored), with_file(reordered), with_file(array_reordered));
+
+        let cache = ValidatorCache::with_capacity(8);
+        let first = cache.validator_for(&authored, Some(dir.path()), &context).unwrap();
+        let second = cache.validator_for(&reordered, Some(dir.path()), &context).unwrap();
+        assert!(Arc::ptr_eq(&first, &second), "object key order is not schema identity");
+        assert_eq!(cache.len(), 1);
+
+        let third = cache.validator_for(&array_reordered, Some(dir.path()), &context).unwrap();
+        assert!(!Arc::ptr_eq(&first, &third), "array order stays significant");
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn cache_evicts_when_capacity_exceeded() {
+        let cache = ValidatorCache::with_capacity(2);
+        for i in 0..5 {
+            let schema = json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": { format!("p{i}"): { "type": "string" } }
+            });
+            cache.structural_validator_for(&schema).unwrap();
+        }
+        assert!(cache.len() <= 2);
+    }
+
+    #[test]
+    fn cache_zero_capacity_is_promoted_to_one() {
+        let cache = ValidatorCache::with_capacity(0);
+        let schema = trivial_schema();
+        cache.structural_validator_for(&schema).unwrap();
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn cache_eviction_keeps_recent_entry_alive() {
+        let cache = ValidatorCache::with_capacity(2);
+        let s1 = json!({"type":"object","properties":{"a":{"type":"string"}}});
+        let s2 = json!({"type":"object","properties":{"b":{"type":"string"}}});
+        let s3 = json!({"type":"object","properties":{"c":{"type":"string"}}});
+        let v1 = cache.structural_validator_for(&s1).unwrap();
+        cache.structural_validator_for(&s2).unwrap();
+        // Touch s1 so it's the more recent of the two existing entries.
+        let v1_again = cache.structural_validator_for(&s1).unwrap();
+        assert!(Arc::ptr_eq(&v1, &v1_again));
+        // Add s3 — s2 should be evicted as least-recently-used.
+        cache.structural_validator_for(&s3).unwrap();
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn classify_kind_maps_required_to_missing() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "title": { "type": "string" } },
+            "required": ["title"]
+        });
+        let validator = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(&validator, &json!({}), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Required error: {problems:?}");
+        assert_eq!(problems[0].kind, ValidationProblemKind::Missing);
+        assert_eq!(problems[0].property.as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn classify_kind_maps_type_to_type() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "count": { "type": "number" } }
+        });
+        let validator = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(
+            &validator,
+            &json!({ "count": "not-a-number" }),
+            &PositionMap::new(),
+        );
+        assert_eq!(problems.len(), 1, "expected one Type error: {problems:?}");
+        assert_eq!(problems[0].kind, ValidationProblemKind::Type);
+    }
+
+    #[test]
+    fn classify_kind_maps_other_constraints_to_invalid() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "name": { "type": "string", "minLength": 5 } }
+        });
+        let validator = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(
+            &validator,
+            &json!({ "name": "no" }),
+            &PositionMap::new(),
+        );
+        assert_eq!(problems.len(), 1, "expected one MinLength error: {problems:?}");
+        assert_eq!(problems[0].kind, ValidationProblemKind::Invalid);
+    }
+
+    #[test]
+    fn nullable_any_of_surfaces_nested_failing_subpath() {
+        // Mirrors the `convert` output for an optional inline-object property:
+        // `anyOf: [{ "type": "null" }, <object with required string field>]`.
+        // A non-null value that fails the typed arm must report the nested
+        // `/config/name` site, not the wrapper path `/config`.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "config": { "anyOf": [
+                    { "type": "null" },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"]
+                    }
+                ] }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "config": { "name": ["Ada", "Lovelace"] } });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert!(
+            problems.iter().any(|p| p.path == "/config/name"),
+            "expected a problem under /config/name, got {problems:?}"
+        );
+    }
+
+    #[test]
+    fn nullable_any_of_keeps_parent_when_no_arm_drills_deeper() {
+        // `[null, string]` against a wrong-typed scalar: every arm fails at the
+        // wrapper path itself, so there is no deeper site to point at. The
+        // typed arm's precise error is surfaced at the wrapper path (dropping
+        // the null sentinel's "expected null" type error) — a single problem at
+        // `/name`, not the opaque `anyOf` wrapper message.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "name": { "anyOf": [ { "type": "null" }, { "type": "string" } ] }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "name": 42 });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected the wrapper problem: {problems:?}");
+        assert_eq!(problems[0].path, "/name");
+        assert!(
+            !problems[0].message.contains("anyOf"),
+            "generic anyOf message should be replaced: {:?}",
+            problems[0].message
+        );
+    }
+
+    #[test]
+    fn optional_datetime_accepts_offset_less_value() {
+        // Mirrors `convert`'s optional-`datetime` output. The offset-less local
+        // datetime is valid ISO 8601 and must not error (it did under the
+        // built-in RFC 3339 `date-time` format).
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "created": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "string", "format": "darkmatter-datetime" }
+                ] }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "created": "2026-07-10T15:05:34" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert!(problems.is_empty(), "expected no problems, got {problems:?}");
+    }
+
+    #[test]
+    fn optional_datetime_reports_clean_message_for_garbage() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "created": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "string", "format": "darkmatter-datetime" }
+                ] }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "created": "2026-13-99T25:61:61" });
+        let problems = collect_problems(&v, &instance, &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one problem: {problems:?}");
+        assert_eq!(problems[0].path, "/created");
+        assert!(
+            problems[0].message.contains("is not an ISO-8601 datetime"),
+            "expected a reader-facing datetime message, got {:?}",
+            problems[0].message
+        );
+        assert!(
+            !problems[0].message.contains("anyOf"),
+            "generic anyOf message should be replaced: {:?}",
+            problems[0].message
+        );
+    }
+
+    #[test]
+    fn build_validator_accepts_simplified_output() {
+        let schema = json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+                "title": { "type": "string" }
+            },
+            "required": ["title"]
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        assert!(v.is_valid(&json!({ "title": "x" })));
+        assert!(!v.is_valid(&json!({})));
+    }
+
+    #[test]
+    fn build_validator_rejects_bad_schema() {
+        let schema = json!({ "type": 42 });
+        let err = build_structural_validator(&schema).unwrap_err();
+        let SchemaError::BuildValidator { message } = &err else {
+            panic!("expected BuildValidator, got {err:?}");
+        };
+        assert!(!message.is_empty());
+    }
+
+    #[test]
+    fn collect_problems_surfaces_path_and_message() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "n": { "type": "number" }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "n": "not-a-number" });
+        let positions = PositionMap::new();
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].path, "/n");
+        assert!(!problems[0].message.is_empty());
+    }
+
+    #[test]
+    fn collect_problems_populates_line_for_type_mismatch() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "n": { "type": "number" }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "n": "nope" });
+        let positions = build_position_map("title: x\nother: y\nn: nope\n");
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].line, Some(3));
+        assert_eq!(problems[0].column, Some(4));
+    }
+
+    #[test]
+    fn collect_problems_populates_property_for_missing_required() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" }
+            },
+            "required": ["title"]
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({});
+        let positions = PositionMap::new();
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].path, "");
+        assert_eq!(problems[0].property.as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn collect_problems_leaves_property_none_for_non_required_failures() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "n": { "type": "number" }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({ "n": "not-a-number" });
+        let positions = PositionMap::new();
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].property, None);
+    }
+
+    #[test]
+    fn collect_problems_populates_line_for_missing_required() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" }
+            },
+            "required": ["title"]
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let instance = json!({});
+        let positions = build_position_map("# leading comment\n\nauthor: me\n");
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!((problems[0].line, problems[0].column), (Some(3), Some(1)));
+    }
+
+    #[test]
+    fn root_union_picks_closest_arm() {
+        // Arm 0 needs `a` and `b`; arm 1 needs only `c`. An instance with
+        // only `c` produces 0 problems against arm 1 but 2 against arm 0 —
+        // arm 1 wins.
+        let arm0 = json!({
+            "$schema": super::super::simplified::DRAFT_2020_12,
+            "type":"object",
+            "properties": {"a":{"type":"string"},"b":{"type":"string"}},
+            "required":["a","b"]
+        });
+        let arm1 = json!({
+            "$schema": super::super::simplified::DRAFT_2020_12,
+            "type":"object",
+            "properties": {"c":{"type":"string"}},
+            "required":["c"]
+        });
+        let v0 = Arc::new(build_structural_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_structural_validator(&arm1).unwrap());
+        let instance = json!({"c": "x"});
+        let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert!(problems.is_empty(), "expected match: {problems:?}");
+    }
+
+    #[test]
+    fn root_union_tags_arm_index_when_no_arm_matches() {
+        let arm0 = json!({
+            "type":"object",
+            "properties": {"a":{"type":"string"}},
+            "required":["a"]
+        });
+        let arm1 = json!({
+            "type":"object",
+            "properties": {"b":{"type":"string"}},
+            "required":["b","c"]
+        });
+        let v0 = Arc::new(build_structural_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_structural_validator(&arm1).unwrap());
+        let instance = json!({});
+        let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert!(!problems.is_empty());
+        assert!(problems.iter().all(|p| p.arm_index == Some(0)));
+    }
+
+    /// One position map serves every arm; the selected arm's problems are
+    /// located without changing which arm is selected.
+    #[test]
+    fn root_union_problems_are_located_in_the_shared_map() {
+        let arm0 = json!({
+            "type": "object",
+            "properties": { "m": { "type": "object", "properties": { "a": { "type": "number" } } } },
+            "required": ["m"]
+        });
+        let arm1 = json!({ "type": "object", "required": ["x", "y"] });
+        let v0 = Arc::new(build_structural_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_structural_validator(&arm1).unwrap());
+        let instance = json!({ "title": "t", "m": { "a": "nope" } });
+        let positions = build_position_map("title: t\nm:\n  a: nope\n");
+        let located = collect_root_union_problems(&[v0.clone(), v1.clone()], &instance, &positions);
+        let source_free = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert_eq!(located.len(), 1);
+        assert_eq!(located[0].arm_index, Some(0));
+        assert_eq!(located[0].path, "/m/a");
+        assert_eq!((located[0].line, located[0].column), (Some(3), Some(6)));
+        assert_eq!((source_free.len(), source_free[0].arm_index), (1, Some(0)));
+        assert_eq!(source_free[0].path, located[0].path);
+    }
+
+    // The `darkmatter-file` format tests below resolve file values in a
+    // context whose `cwd` is a fresh temp directory, so relative references
+    // see a deterministic filesystem state.
+
+    fn resolving_validator(
+        schema: &Value,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Validator {
+        build_validator_in_context(schema, None, None, context).unwrap()
+    }
+
+    /// Problems with file-reference diagnostics re-resolved in `context`, the
+    /// context the validator was built in.
+    fn resolved_problems(
+        validator: &Validator,
+        instance: &Value,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Vec<ValidationProblem> {
+        collect_problems_with_anchors(
+            validator,
+            instance,
+            FileRefAnchors::Resolved { base_dir: None, fallback: None, context, excused: None },
+        )
+    }
+
+    fn darkmatter_file_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file" }
+            }
+        })
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn darkmatter_file_format_error_surfaces_no_match_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let instance = json!({ "doc": "./does-not-exist.md" });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert_eq!(problem.kind, ValidationProblemKind::Invalid);
+        assert!(
+            problem.message.contains("no existing file matched reference"),
+            "expected NoMatch-style message, got: {}",
+            problem.message,
+        );
+        assert!(
+            problem.message.contains("`./does-not-exist.md`"),
+            "expected instance value in message, got: {}",
+            problem.message,
+        );
+        assert!(
+            !problem.message.contains(r#"is not a "darkmatter-file""#),
+            "generic jsonschema message should have been replaced, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    fn darkmatter_file_format_error_surfaces_invalid_syntax_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        // An empty string is rejected at parse time.
+        let instance = json!({ "doc": "" });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert!(
+            problem.message.contains("is not a valid file reference"),
+            "expected InvalidSyntax message, got: {}",
+            problem.message,
+        );
+        assert!(
+            !problem.message.contains(r#"is not a "darkmatter-file""#),
+            "generic jsonschema message should have been replaced, got: {}",
+            problem.message,
+        );
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn darkmatter_file_format_succeeds_for_existing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("exists.md");
+        std::fs::write(&path, b"x").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let instance = json!({ "doc": "./exists.md" });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert!(
+            problems.is_empty(),
+            "expected no problems for existing file, got: {problems:?}",
+        );
+    }
+
+    #[test]
+    fn non_darkmatter_file_format_keeps_default_message() {
+        // A `format` other than `darkmatter-file` should not be intercepted
+        // by the substitution — the default `jsonschema` text must flow
+        // through unchanged.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "v": { "type": "string", "format": "email" }
+            }
+        });
+        let v = resolving_validator(&schema, &context);
+        let instance = json!({ "v": "not-an-email" });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert!(
+            problem.message.contains(r#"is not a "email""#),
+            "expected unmodified default message, got: {}",
+            problem.message,
+        );
+    }
+
+    #[cfg(feature = "file")]
+    fn darkmatter_file_match_schema() -> Value {
+        // A single schema never lowers `match(...)`, so the eager existence
+        // behavior here comes purely from `format: darkmatter-file`.
+        json!({
+            "type": "object",
+            "properties": {
+                "doc": {
+                    "type": "string",
+                    "format": "darkmatter-file"
+                }
+            }
+        })
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn darkmatter_file_match_missing_file_produces_one_file_reference_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_match_schema(), &context);
+        let instance = json!({ "doc": "./does-not-exist.md" });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected exactly one file-reference diagnostic, got: {problems:?}"
+        );
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert_eq!(problem.kind, ValidationProblemKind::Invalid);
+        assert!(
+            problem.message.contains("no existing file matched reference"),
+            "expected NoMatch-style message, got: {}",
+            problem.message,
+        );
+        assert!(
+            problem.message.contains("`./does-not-exist.md`"),
+            "expected instance value in message, got: {}",
+            problem.message,
+        );
+    }
+
+    #[test]
+    fn lazy_reference_format_missing_file_produces_no_diagnostic() {
+        // The lazy `darkmatter-file-reference` is syntax-only: a syntactically
+        // valid but not-yet-existing path validates, producing zero existence
+        // diagnostics (the eager case above produces one).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file-reference" }
+            }
+        });
+        let v = resolving_validator(&schema, &context);
+        let problems = resolved_problems(&v, &json!({ "doc": "./does-not-exist.md" }), &context);
+        assert!(
+            problems.is_empty(),
+            "lazy reference of a missing file must not produce a diagnostic, got: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn lazy_reference_format_malformed_input_produces_syntax_diagnostic() {
+        // A malformed reference (empty string) is fatal even for the lazy
+        // format, and the substituted message is the syntax error — never an
+        // existence/resolution message, since the lazy validator does not
+        // resolve.
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file-reference" }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(&v, &json!({ "doc": "" }), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        let problem = &problems[0];
+        assert_eq!(problem.path, "/doc");
+        assert!(
+            problem.message.contains("is not a valid file reference"),
+            "expected syntax message, got: {}",
+            problem.message,
+        );
+        assert!(
+            !problem.message.contains("no existing file matched reference"),
+            "lazy diagnostic must not resolve or report existence, got: {}",
+            problem.message,
+        );
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn darkmatter_file_format_error_retains_nested_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "doc": {
+                    "type": "object",
+                    "properties": {
+                        "cover": { "type": "string", "format": "darkmatter-file" }
+                    }
+                }
+            }
+        });
+        let v = resolving_validator(&schema, &context);
+        let instance = json!({ "doc": { "cover": "./missing.md" } });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(problems[0].path, "/doc/cover");
+        assert!(
+            problems[0].message.contains("no existing file matched reference"),
+            "expected improved message, got: {}",
+            problems[0].message,
+        );
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn darkmatter_file_format_error_retains_array_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "docs": {
+                    "type": "array",
+                    "items": { "type": "string", "format": "darkmatter-file" }
+                }
+            }
+        });
+        let v = resolving_validator(&schema, &context);
+        let instance = json!({ "docs": ["./missing.md"] });
+        let problems = resolved_problems(&v, &instance, &context);
+        assert_eq!(problems.len(), 1, "expected one Format problem: {problems:?}");
+        assert_eq!(problems[0].path, "/docs/0");
+        assert!(
+            problems[0].message.contains("no existing file matched reference"),
+            "expected improved message, got: {}",
+            problems[0].message,
+        );
+    }
+
+    /// A root `unevaluatedProperties` or `unevaluatedItems` keeps the
+    /// alternatives beside each wrapped arm, closed by a `true` alternative.
+    #[test]
+    fn root_union_arm_keeps_the_alternatives_an_unevaluated_restriction_reads() {
+        let arm = json!({"properties": {"name": {"type": "string"}}});
+        let other = json!({"properties": {"age": {"type": "number"}}});
+        for reader in ["unevaluatedProperties", "unevaluatedItems"] {
+            let root = json!({"anyOf": [arm, other], reader: false});
+
+            let wrapped = wrap_arm_as_root_schema(&arm, &root);
+
+            assert_eq!(wrapped["anyOf"], json!([arm, other, true]), "{reader}");
+            assert_eq!(wrapped["allOf"], json!([arm]), "{reader}");
+            assert_eq!(wrapped[reader], json!(false), "{reader}");
+        }
+        let without_reader = wrap_arm_as_root_schema(&arm, &json!({"anyOf": [arm, other], "required": ["name"]}));
+        assert!(without_reader.get("anyOf").is_none(), "{without_reader}");
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn root_union_preserves_arm_index_for_file_format_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let arm0 = wrap_arm_as_root_schema(&json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "string", "format": "darkmatter-file" }
+            },
+            "required": ["doc"]
+        }), &json!({}));
+        let arm1 = wrap_arm_as_root_schema(&json!({
+            "type": "object",
+            "properties": {
+                "doc": { "type": "number" }
+            },
+            "required": ["doc"]
+        }), &json!({}));
+        let v0 = Arc::new(resolving_validator(&arm0, &context));
+        let v1 = Arc::new(resolving_validator(&arm1, &context));
+        let instance = json!({ "doc": "./missing.md" });
+        let problems = collect_root_union_problems_with_anchors(
+            &[v0, v1],
+            &instance,
+            FileRefAnchors::Resolved { base_dir: None, fallback: None, context: &context, excused: None },
+        );
+        assert_eq!(
+            problems.len(),
+            1,
+            "expected one problem from the closest matching arm, got: {problems:?}"
+        );
+        let problem = &problems[0];
+        assert_eq!(problem.arm_index, Some(0));
+        assert_eq!(problem.path, "/doc");
+        assert!(
+            problem.message.contains("no existing file matched reference"),
+            "expected improved file-reference message in root-union arm, got: {}",
+            problem.message,
+        );
+    }
+
+    // --- description resolution (resolve_problem_description) ---
+
+    fn problem(
+        path: &str,
+        kind: ValidationProblemKind,
+        property: Option<&str>,
+        arm_index: Option<usize>,
+    ) -> ValidationProblem {
+        ValidationProblem {
+            path: path.to_string(),
+            message: "msg".to_string(),
+            kind,
+            property: property.map(str::to_string),
+            line: None,
+            column: None,
+            arm_index,
+            description: None,
+            code: ValidationProblemCode::ConstraintViolation,
+            instance_path: JsonPointer::parse(path),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
+            caller_file: None,
+        }
+    }
+
+    #[test]
+    fn resolve_top_level_type_reads_property_description() {
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "The headline" }
+            }
+        });
+        let p = problem("/title", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("The headline")
+        );
+    }
+
+    #[test]
+    fn resolve_missing_reads_through_properties_property() {
+        // A Required failure points its path at the parent object; the missing
+        // name lives in `property` (Decision #3).
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "The headline" }
+            },
+            "required": ["title"]
+        });
+        let p = problem("", ValidationProblemKind::Missing, Some("title"), None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("The headline")
+        );
+    }
+
+    #[test]
+    fn resolve_decodes_json_pointer_escapes() {
+        // A schema key containing literal `/` and `~` is addressed via `~1`/`~0`.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "a/b~c": { "type": "string", "description": "weird key" }
+            }
+        });
+        let p = problem("/a~1b~0c", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("weird key")
+        );
+    }
+
+    #[test]
+    fn resolve_nested_inline_object_unwraps_nullable_anyof() {
+        // `/config/name`: descend properties.config, unwrap the nullable
+        // wrapper, then descend properties.name (Decision #5).
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "config": { "anyOf": [
+                    { "type": "null" },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "the name" }
+                        }
+                    }
+                ] }
+            }
+        });
+        let p = problem("/config/name", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("the name")
+        );
+    }
+
+    #[test]
+    fn resolve_array_path_descends_through_items() {
+        // `/authors/0/name`: the numeric `0` descends into `items` (Decision #4).
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "authors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "author name" }
+                        }
+                    }
+                }
+            }
+        });
+        let p = problem("/authors/0/name", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("author name")
+        );
+    }
+
+    /// An optional `U[]` property: a nullable array whose `items.anyOf` holds a
+    /// scalar arm and two literal-tagged object arms that both declare `body`.
+    fn item_union_root() -> Value {
+        let tagged = |tag: &str, body: &str| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "kind": { "const": tag },
+                    "body": { "type": "string", "description": body },
+                    "rule": { "type": "string", "description": "the rule" }
+                },
+                "required": ["kind", "rule"]
+            })
+        };
+        json!({
+            "type": "object",
+            "properties": {
+                "list": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "array", "items": { "anyOf": [
+                        { "type": "string", "pattern": "^Evergreen$" },
+                        tagged("a", "a body"),
+                        tagged("b", "b body")
+                    ] } }
+                ] }
+            }
+        })
+    }
+
+    #[test]
+    fn resolve_missing_field_looks_through_item_alternatives() {
+        let p = problem("/list/1", ValidationProblemKind::Missing, Some("rule"), None);
+        let instance = json!({ "list": ["Evergreen", { "kind": "a" }] });
+        assert_eq!(
+            resolve_problem_description(&item_union_root(), &p, &instance).as_deref(),
+            Some("the rule")
+        );
+    }
+
+    #[test]
+    fn resolve_item_field_uses_the_discriminated_arm_and_refuses_to_guess() {
+        let root = item_union_root();
+        let p = problem("/list/0/body", ValidationProblemKind::Type, None, None);
+        let tagged = json!({ "list": [{ "kind": "b", "body": 1 }] });
+        assert_eq!(
+            resolve_problem_description(&root, &p, &tagged).as_deref(),
+            Some("b body")
+        );
+        // Untagged: two arms reach `body` with different descriptions.
+        let untagged = json!({ "list": [{ "body": 1 }] });
+        assert_eq!(resolve_problem_description(&root, &p, &untagged), None);
+    }
+
+    #[test]
+    fn resolve_nullable_optional_reads_wrapper_description() {
+        // The optional property's description sits on the outer nullable
+        // wrapper; it is read directly (Decision #5) — the lone non-null arm is
+        // not articulated as a union.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "tag": {
+                    "description": "an optional tag",
+                    "anyOf": [ { "type": "null" }, { "type": "string" } ]
+                }
+            }
+        });
+        let p = problem("/tag", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("an optional tag")
+        );
+    }
+
+    #[test]
+    fn resolve_union_single_description_used_verbatim() {
+        // Decision #6, |D| == 1: the lone description speaks for the union; no
+        // `a union type of:` wrapper.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "width": { "anyOf": [
+                    { "type": "number", "description": "the element width" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        let p = problem("/width", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("the element width")
+        );
+    }
+
+    #[test]
+    fn resolve_union_multiple_descriptions_articulated() {
+        // Decision #6, |D| >= 2: arms with a description use it; a third,
+        // description-less arm falls back to its type label.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "payload": { "anyOf": [
+                    { "type": "string", "description": "a raw message body" },
+                    { "type": "array", "description": "a list of templated messages" },
+                    { "type": "object" }
+                ] }
+            }
+        });
+        let p = problem("/payload", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("a union type of: a raw message body | a list of templated messages | object")
+        );
+    }
+
+    #[test]
+    fn resolve_union_no_descriptions_uses_type_labels() {
+        // Decision #6, |D| == 0: articulate from type labels alone.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "value": { "anyOf": [
+                    { "type": "number" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        let p = problem("/value", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("a union type of: number | string")
+        );
+    }
+
+    #[test]
+    fn resolve_union_excludes_null_sentinel() {
+        // The `{ "type": "null" }` sentinel is excluded from both the `D` count
+        // and the articulation — so a nullable two-arm union with one
+        // description reads that description verbatim, and a nullable two-arm
+        // union with no descriptions is a lone non-null arm (not articulated).
+        let described = json!({
+            "type": "object",
+            "properties": {
+                "value": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "number", "description": "a count" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        let p = problem("/value", ValidationProblemKind::Invalid, None, None);
+        assert_eq!(
+            resolve_problem_description(&described, &p, &Value::Null).as_deref(),
+            Some("a count"),
+            "null sentinel must not count toward D"
+        );
+
+        let labels_only = json!({
+            "type": "object",
+            "properties": {
+                "value": { "anyOf": [
+                    { "type": "null" },
+                    { "type": "number" },
+                    { "type": "string" }
+                ] }
+            }
+        });
+        assert_eq!(
+            resolve_problem_description(&labels_only, &p, &Value::Null).as_deref(),
+            Some("a union type of: number | string"),
+            "null sentinel must not appear in the articulation"
+        );
+    }
+
+    #[test]
+    fn resolve_property_without_description_is_none() {
+        let root = json!({
+            "type": "object",
+            "properties": { "title": { "type": "string" } }
+        });
+        let p = problem("/title", ValidationProblemKind::Type, None, None);
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
+    }
+
+    #[test]
+    fn resolve_additional_properties_failure_is_none() {
+        // Decision #10: the resolver must not reuse the parent object's
+        // description for an undeclared-key failure. The failure path points at
+        // the parent (`/config`), which *does* carry a description here.
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "description": "the config object",
+                    "additionalProperties": false,
+                    "properties": { "name": { "type": "string" } }
+                }
+            }
+        });
+        let mut p = problem("/config", ValidationProblemKind::Invalid, None, None);
+        p.message = "Additional properties are not allowed ('bogus' was unexpected)".to_string();
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
+    }
+
+    #[test]
+    fn resolve_unresolvable_path_is_none_no_panic() {
+        let root = json!({
+            "type": "object",
+            "properties": { "title": { "type": "string", "description": "x" } }
+        });
+        // Path descends into a property the schema does not declare.
+        let p = problem("/missing/deeper", ValidationProblemKind::Type, None, None);
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
+    }
+
+    #[test]
+    fn resolve_root_union_reads_winning_arm() {
+        // arm_index: Some(1) resolves against anyOf[1] (Decision: base schema).
+        let root = json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": { "doc": { "type": "string", "description": "arm 0 doc" } }
+                },
+                {
+                    "type": "object",
+                    "properties": { "doc": { "type": "number", "description": "arm 1 doc" } }
+                }
+            ]
+        });
+        let p = problem("/doc", ValidationProblemKind::Type, None, Some(1));
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("arm 1 doc")
+        );
+    }
+
+    // --- R-5 Priority 1/4: fine-grained code, parsed paths, offending key ---
+
+    #[test]
+    fn code_and_instance_path_populated_for_type_mismatch() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "count": { "type": "number" } }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(&v, &json!({ "count": "nope" }), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let p = &problems[0];
+        assert_eq!(p.code, ValidationProblemCode::TypeMismatch);
+        assert_eq!(p.instance_path.segments(), ["count"]);
+        assert!(p.schema_path.is_some(), "type mismatch should carry a schema path");
+        assert_eq!(p.offending_property, None);
+        assert_eq!(p.file_reference, None);
+    }
+
+    #[test]
+    fn code_missing_required_and_nested_instance_path() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "author": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(&v, &json!({ "author": {} }), &PositionMap::new());
+        let missing = problems
+            .iter()
+            .find(|p| p.code == ValidationProblemCode::MissingRequired)
+            .expect("missing-required problem");
+        // The path points at the parent object; the missing name is `property`.
+        assert_eq!(missing.instance_path.segments(), ["author"]);
+        assert_eq!(missing.property.as_deref(), Some("name"));
+    }
+
+    #[test]
+    fn unknown_key_code_and_offending_property() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "known": { "type": "string" } }
+        });
+        let v = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(
+            &v,
+            &json!({ "known": "x", "bogus": 1 }),
+            &PositionMap::new(),
+        );
+        let unknown = problems
+            .iter()
+            .find(|p| p.code == ValidationProblemCode::UnknownKey)
+            .expect("unknown-key problem");
+        assert_eq!(unknown.offending_property.as_deref(), Some("bogus"));
+    }
+
+    #[cfg(feature = "file")]
+    #[test]
+    fn file_reference_diagnostic_classifies_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let problems = resolved_problems(&v, &json!({ "doc": "./missing.md" }), &context);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        let p = &problems[0];
+        assert_eq!(p.code, ValidationProblemCode::InvalidFileReference);
+        match &p.file_reference {
+            Some(FileReferenceDiagnostic::NoMatch { raw, .. }) => {
+                assert_eq!(raw, "./missing.md");
+            }
+            other => panic!("expected NoMatch classification, got {other:?}"),
+        }
+        // The rendered message is unchanged by the added classification.
+        assert!(p.message.contains("no existing file matched reference"));
+    }
+
+    #[test]
+    fn file_reference_diagnostic_classifies_invalid_syntax() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+        let v = resolving_validator(&darkmatter_file_schema(), &context);
+        let problems = resolved_problems(&v, &json!({ "doc": "" }), &context);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        match &problems[0].file_reference {
+            Some(FileReferenceDiagnostic::InvalidSyntax { raw }) => assert_eq!(raw, ""),
+            other => panic!("expected InvalidSyntax classification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_pointer_round_trips_escaped_segments() {
+        let p = JsonPointer::parse("/a~1b~0c/2");
+        assert_eq!(p.segments(), ["a/b~c", "2"]);
+        assert_eq!(p.as_pointer_string(), "/a~1b~0c/2");
+        assert!(JsonPointer::parse("").is_empty());
+    }
+
+    // --- references in description lookup and narrowing ---
+
+    #[test]
+    fn resolve_reads_a_reference_sibling_before_its_target() {
+        let root = json!({
+            "type": "object",
+            "properties": {
+                "described": { "$ref": "#/$defs/text", "description": "the use site" },
+                "bare": { "$ref": "#/$defs/text" }
+            },
+            "$defs": { "text": { "type": "string", "description": "the body" } }
+        });
+        let at = |path: &str| {
+            let p = problem(path, ValidationProblemKind::Type, None, None);
+            resolve_problem_description(&root, &p, &Value::Null)
+        };
+        assert_eq!(at("/described").as_deref(), Some("the use site"));
+        assert_eq!(at("/bare").as_deref(), Some("the body"));
+    }
+
+    #[test]
+    fn resolve_descends_a_recursive_reference_at_each_level() {
+        let root = json!({
+            "type": "object",
+            "properties": { "tree": { "$ref": "#/$defs/item" } },
+            "$defs": { "item": {
+                "type": "object",
+                "properties": {
+                    "value": { "type": "string", "description": "the item value" },
+                    "child": { "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/item" } ] }
+                }
+            } }
+        });
+        let p = problem("/tree/child/child/child/value", ValidationProblemKind::Type, None, None);
+        assert_eq!(
+            resolve_problem_description(&root, &p, &Value::Null).as_deref(),
+            Some("the item value")
+        );
+    }
+
+    #[test]
+    fn resolve_through_a_missing_reference_target_is_none() {
+        let root = json!({
+            "type": "object",
+            "properties": { "tree": { "$ref": "#/$defs/missing" } },
+            "$defs": {}
+        });
+        let p = problem("/tree/value", ValidationProblemKind::Type, None, None);
+        assert_eq!(resolve_problem_description(&root, &p, &Value::Null), None);
+    }
+
+    #[test]
+    fn resolve_terminates_on_a_reference_loop_through_unions() {
+        // `a` and `b` reach each other through `anyOf` without consuming an
+        // instance segment; the lookup must stop rather than recurse forever.
+        let root = json!({
+            "type": "object",
+            "properties": { "x": { "$ref": "#/$defs/a" } },
+            "$defs": {
+                "a": { "anyOf": [ { "$ref": "#/$defs/b" }, { "type": "string" } ] },
+                "b": { "anyOf": [
+                    { "$ref": "#/$defs/a" },
+                    { "type": "object", "properties": { "y": { "description": "why" } } }
+                ] }
+            }
+        });
+        let instance = json!({ "x": { "y": 1 } });
+        let p = problem("/x/y", ValidationProblemKind::Type, None, None);
+        assert_eq!(resolve_problem_description(&root, &p, &instance).as_deref(), Some("why"));
+    }
+
+    /// A `node` union reached through a reference whose sibling asserts
+    /// `minProperties`; the arms disagree on `value`'s type.
+    fn referenced_union_with_sibling() -> Value {
+        json!({
+            "$schema": crate::simplified::DRAFT_2020_12,
+            "type": "object",
+            "properties": { "root": { "$ref": "#/$defs/node", "minProperties": 3 } },
+            "$defs": { "node": { "anyOf": [
+                {
+                    "type": "object",
+                    "properties": { "kind": { "const": "leaf" }, "value": { "type": "string" } },
+                    "required": ["kind", "value"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": { "kind": { "const": "pair" }, "value": { "type": "number" } },
+                    "required": ["kind", "value"],
+                    "additionalProperties": false
+                }
+            ] } }
+        })
+    }
+
+    #[test]
+    fn narrowing_follows_a_reference_and_keeps_its_sibling_assertion() {
+        let schema = referenced_union_with_sibling();
+        let instance = json!({ "root": { "kind": "leaf", "value": { "not": "text" } } });
+        let validator = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(&validator, &instance, &PositionMap::new());
+        assert!(
+            problems.iter().any(|problem| problem.path == "/root/kind"),
+            "the ordinary report names the other arm's tag: {problems:#?}"
+        );
+
+        let narrowed = narrow_discriminated_union_problems(
+            &schema,
+            &instance,
+            FileRefAnchors::Syntax,
+            problems,
+        );
+        let mut paths: Vec<&str> = narrowed.iter().map(|problem| problem.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["/root", "/root/value"], "{narrowed:#?}");
+        assert!(narrowed.iter().any(|problem| problem.message.contains("less than 3")), "{narrowed:#?}");
+        assert!(narrowed.iter().any(|problem| problem.message.contains("\"string\"")), "{narrowed:#?}");
+    }
+}

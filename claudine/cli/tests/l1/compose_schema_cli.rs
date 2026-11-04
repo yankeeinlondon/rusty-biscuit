@@ -35,20 +35,23 @@ use common::{strip_ansi, write_executable};
 // ============================================================================
 
 #[cfg(unix)]
-mod compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it {
+mod compose_and_inline_reject_a_bare_sidecar_without_a_schema_property {
     use super::*;
 
     #[test]
     fn compose() {
-        assert_advisory_renders_once_and_silent_suppresses_it("compose");
+        assert_bare_sidecar_is_rejected("compose");
     }
 
     #[test]
     fn inline_compose() {
-        assert_advisory_renders_once_and_silent_suppresses_it("inline-compose");
+        assert_bare_sidecar_is_rejected("inline-compose");
     }
 
-    fn assert_advisory_renders_once_and_silent_suppresses_it(subcommand: &str) {
+    /// A `$schema` target that is a bare map of SimplifiedSchema types (no
+    /// `$schema:` wrapper) is not a schema document: the run fails naming the
+    /// sidecar, and `--silent` does not turn the failure into success.
+    fn assert_bare_sidecar_is_rejected(subcommand: &str) {
         let fixture = CliProcessFixture::named("compose-schema-cli");
         let sidecar = fixture.cwd().join("schema.yaml");
         fs::write(
@@ -66,47 +69,55 @@ mod compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_i
         let inline_source =
             "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
         fs::write(&inline_file, inline_source).unwrap();
-        // `compose` ignores the stub's edit; `inline-compose` requires it, because
-        // the agent is the writer.
+        // Installed so a failure can only come from the schema, never from a
+        // missing provider.
         common::InlineAgentStub::new(&inline_file)
             .body("Updated body.\n")
             .install(fixture.bin_dir(), "goose");
 
-        let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
+        let run = |file: &std::path::Path, silent: bool| {
             let mut command = fixture.command();
             command.args([subcommand, "--goose"]);
             if silent {
                 command.arg("--silent");
             }
-            command.arg(file).assert().success().get_output().stderr.clone()
+            let output = command.arg(file).output().unwrap();
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            (output.status.code(), strip_ansi(&text))
         };
 
+        // The error renderer wraps long lines behind a gutter, splitting the
+        // path; compare with whitespace and the gutter removed.
+        let squash = |text: &str| -> String {
+            text.chars().filter(|c| !c.is_whitespace() && *c != '\u{2503}').collect()
+        };
         let file = if subcommand == "inline-compose" { &inline_file } else { &md_file };
-        let stderr = strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, false)));
-        assert_eq!(
-            stderr
-                .matches("looks like a SimplifiedSchema but has no envelope")
-                .count(),
-            1,
-            "the {subcommand} warning must render exactly once; stderr:\n{stderr}"
-        );
-        assert!(
-            stderr.contains(&sidecar.display().to_string()),
-            "{subcommand} stderr:\n{stderr}"
-        );
-
-        if subcommand == "inline-compose" {
+        for silent in [false, true] {
+            let (code, output) = run(file, silent);
+            assert_ne!(code, Some(0), "{subcommand} (silent={silent}) must fail; output:\n{output}");
+            let squashed = squash(&output);
             assert!(
-                fs::read_to_string(file).unwrap().contains("Updated body."),
-                "inline-compose must still persist the provider result"
+                squashed.contains(&squash(&sidecar.display().to_string())),
+                "{subcommand} (silent={silent}) must name the sidecar; output:\n{output}"
             );
-            fs::write(file, inline_source).unwrap();
+            assert!(
+                squashed.contains(&squash("is not a valid schema definition"))
+                    && squashed.contains(&squash("no `$schema` property")),
+                "{subcommand} (silent={silent}) must explain the rejection; output:\n{output}"
+            );
+            assert!(
+                !output.contains("looks like a SimplifiedSchema but has no envelope"),
+                "the retired advisory must not render; output:\n{output}"
+            );
         }
-        let silent_stderr =
-            strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, true)));
-        assert!(
-            !silent_stderr.contains("looks like a SimplifiedSchema but has no envelope"),
-            "--silent must suppress the {subcommand} warning; stderr:\n{silent_stderr}"
+        assert_eq!(
+            fs::read_to_string(&inline_file).unwrap(),
+            inline_source,
+            "the provider must never run against a rejected schema"
         );
     }
 }

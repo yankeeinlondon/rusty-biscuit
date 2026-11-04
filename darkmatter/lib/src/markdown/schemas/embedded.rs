@@ -15,7 +15,11 @@
 //! `{bundle}/{file name}` and confined to that bundle; the reserved namespace
 //! is the one way out of it.
 
-use crate::markdown::schemas::errors::SchemaError;
+pub(crate) use simplified_schema::embedded::{EmbeddedDocument, find, resolve_bundle_path};
+#[cfg(test)]
+use simplified_schema::embedded::resolve_path;
+use simplified_schema::embedded::{ShippedSources, is_plain_segment};
+use simplified_schema::errors::SchemaError;
 
 /// A host-supplied set of schema documents compiled into the host binary,
 /// offered to trigger discovery as a last-resort trigger location.
@@ -131,25 +135,6 @@ impl std::fmt::Debug for EmbeddedSchemaBundle {
     }
 }
 
-/// `true` for a non-empty single path segment that is not `.`/`..` and holds
-/// no separator, drive colon, or `biscuit-file` prefix character.
-fn is_plain_segment(value: &str) -> bool {
-    !value.is_empty()
-        && value != "."
-        && value != ".."
-        && value.trim() == value
-        && !value.contains(['/', '\\', ':', '*', '?', '[', ']', '{', '}'])
-        && !value.starts_with(['~', '&', '^', '$', '%', '@'])
-}
-
-/// One embedded schema document.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EmbeddedDocument<'a> {
-    /// Repository-relative path with `/` separators; the document's identity.
-    pub path: &'a str,
-    pub text: &'a str,
-}
-
 /// Virtual path of Content Policy's editor schema.
 pub(crate) const CONTENT_POLICY_PATH: &str = "content-policy/schemas/content-policy.yaml";
 
@@ -202,6 +187,29 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
     },
 ];
 
+/// Virtual path of Darkmatter's definition of `kind: schema-trigger`
+/// documents.
+pub(crate) const SCHEMA_TRIGGER_DEFINITION_PATH: &str = "darkmatter/schemas/schema-trigger.yaml";
+
+/// The shipped `kind: yaml-schema` definitions, keyed by repository-relative
+/// path: the library's two envelope definitions
+/// ([`simplified_schema::envelope::ENVELOPE_DEFINITIONS`]) and Darkmatter's
+/// trigger definition. They seed every YAML document-kind registry, and the
+/// key is the path a checkout copy must have to replace one (see
+/// [`super::yaml_documents`]). They reference each other by relative path
+/// only, so the slice is also the document set their imports resolve in.
+pub(crate) fn shipped_kind_definitions() -> &'static [EmbeddedDocument<'static>] {
+    static DEFINITIONS: std::sync::OnceLock<Vec<EmbeddedDocument<'static>>> = std::sync::OnceLock::new();
+    DEFINITIONS.get_or_init(|| {
+        let mut documents = simplified_schema::envelope::ENVELOPE_DEFINITIONS.to_vec();
+        documents.push(EmbeddedDocument {
+            path: SCHEMA_TRIGGER_DEFINITION_PATH,
+            text: include_str!("../../../../schemas/schema-trigger.yaml"),
+        });
+        documents
+    })
+}
+
 /// The reserved namespace of a named-type reference to one of Darkmatter's
 /// shipped partials: `Name@darkmatter:<stem>` names the type `Name` in the
 /// [`SHIPPED`] document `darkmatter/schemas/partials/<stem>.yaml`, whoever
@@ -210,94 +218,23 @@ pub(crate) const SHIPPED: &[EmbeddedDocument<'static>] = &[
 /// shipped documents.
 pub(crate) const SHIPPED_NAMESPACE: &str = "darkmatter:";
 
+/// Darkmatter's reserved namespace over [`SHIPPED`], the source set every
+/// Darkmatter resolution hands the library resolver.
+pub(crate) const SHIPPED_SOURCES: ShippedSources =
+    ShippedSources::new(SHIPPED_NAMESPACE, "darkmatter/schemas/partials", SHIPPED);
+
 /// The `<stem>` of a reference written in the reserved form
 /// `darkmatter:<stem>`, or `None` for any other reference.
-pub(crate) fn reserved_stem(reference: &str) -> Option<&str> {
-    reference.trim().strip_prefix(SHIPPED_NAMESPACE)
+#[cfg(test)]
+fn reserved_stem(reference: &str) -> Option<&str> {
+    SHIPPED_SOURCES.reserved_stem(reference)
 }
 
 /// The shipped partial `darkmatter:<stem>` names, or `None` when [`SHIPPED`]
 /// has no partial of that stem.
-pub(crate) fn shipped_partial(stem: &str) -> Option<EmbeddedDocument<'static>> {
-    if !is_plain_segment(stem) || stem.contains('.') {
-        return None;
-    }
-    find(SHIPPED, &format!("darkmatter/schemas/partials/{stem}.yaml"))
-}
-
-/// Looks up the document registered at `path`.
-pub(crate) fn find<'a>(documents: &[EmbeddedDocument<'a>], path: &str) -> Option<EmbeddedDocument<'a>> {
-    documents.iter().copied().find(|document| document.path == path)
-}
-
-/// Resolves `reference`, written in the embedded document at `importer`, to a
-/// virtual path.
-///
-/// Resolution is lexical: `reference` is joined to `importer`'s directory one
-/// `/`-separated segment at a time, `.` is dropped, and `..` removes the
-/// previous segment. The virtual root is the repository root, so `..` may
-/// leave the importer's directory but never the root.
-///
-/// ## Errors
-///
-/// A reason string when `reference` is empty, a URL, an absolute, drive, or
-/// UNC path, spelled with `\`, empty segments, glob characters, or a
-/// `biscuit-file` prefix (`~`, `&`, `^`, `$`, `%`, `@`), or when it climbs
-/// above the virtual root.
-pub(crate) fn resolve_path(importer: &str, reference: &str) -> Result<String, String> {
-    let reference = reference.trim();
-    if reference.is_empty() {
-        return Err("an embedded import names no document".into());
-    }
-    if reference.contains("://") {
-        return Err("an embedded import cannot be a URL".into());
-    }
-    if reference.starts_with('/') || reference.contains('\\') || reference.contains(':') {
-        return Err("an embedded import must be a relative path written with `/`".into());
-    }
-    if reference.starts_with(['~', '&', '^', '$', '%', '@']) {
-        return Err("an embedded import cannot use a root, home, or variable prefix".into());
-    }
-    if reference.contains(['*', '?', '[', ']', '{', '}']) {
-        return Err("an embedded import cannot be a glob".into());
-    }
-
-    let mut segments: Vec<&str> = importer.split('/').collect();
-    segments.pop();
-    for segment in reference.split('/') {
-        match segment {
-            "" => return Err("an embedded import cannot contain an empty path segment".into()),
-            "." => {}
-            ".." => {
-                if segments.pop().is_none() {
-                    return Err("an embedded import cannot climb above the repository root".into());
-                }
-            }
-            name => segments.push(name),
-        }
-    }
-    Ok(segments.join("/"))
-}
-
-/// Resolves `reference`, written in the bundle document `importer`, to a
-/// virtual path inside the bundle rooted at `root`.
-///
-/// The same lexical rules as [`resolve_path`]; the target must stay under
-/// `{root}/`.
-///
-/// ## Errors
-///
-/// A reason string for every [`resolve_path`] rejection, and when the target
-/// leaves the bundle.
-pub(crate) fn resolve_bundle_path(root: &str, importer: &str, reference: &str) -> Result<String, String> {
-    let leaves = || format!("an embedded import cannot leave bundle `{root}`");
-    let target = resolve_path(importer, reference).map_err(|reason| {
-        if reason.contains("climb above") { leaves() } else { reason }
-    })?;
-    match target.strip_prefix(root).and_then(|rest| rest.strip_prefix('/')) {
-        Some(rest) if !rest.is_empty() => Ok(target),
-        _ => Err(leaves()),
-    }
+#[cfg(test)]
+fn shipped_partial(stem: &str) -> Option<EmbeddedDocument<'static>> {
+    SHIPPED_SOURCES.partial(stem)
 }
 
 #[cfg(test)]
@@ -310,73 +247,6 @@ mod tests {
             resolve_path("darkmatter/schemas/partials/fm.yaml", "../../../content-policy/schemas/content-policy.yaml"),
             Ok(CONTENT_POLICY_PATH.to_string())
         );
-    }
-
-    #[test]
-    fn relative_forms_resolve_lexically() {
-        let importer = "a/b/schema.yaml";
-        for (reference, expected) in [
-            ("types.yaml", "a/b/types.yaml"),
-            ("./types.yaml", "a/b/types.yaml"),
-            ("../types.yaml", "a/types.yaml"),
-            ("../../types.yaml", "types.yaml"),
-            ("./c/../d/./types.yaml", "a/b/d/types.yaml"),
-            (" ./types.yaml ", "a/b/types.yaml"),
-        ] {
-            assert_eq!(resolve_path(importer, reference).as_deref(), Ok(expected), "{reference}");
-        }
-    }
-
-    #[test]
-    fn host_paths_urls_and_escapes_are_rejected() {
-        let importer = "a/b/schema.yaml";
-        for reference in [
-            "",
-            "   ",
-            "../../../types.yaml",
-            "../../../../types.yaml",
-            "/etc/types.yaml",
-            "C:/types.yaml",
-            "C:\\types.yaml",
-            "\\\\server\\share\\types.yaml",
-            "..\\types.yaml",
-            "https://example.com/types.yaml",
-            "file:///types.yaml",
-            "~/types.yaml",
-            "&types.yaml",
-            "^types.yaml",
-            "$HOME/types.yaml",
-            "%APPDATA%/types.yaml",
-            "@types.yaml",
-            "*.yaml",
-            "a//types.yaml",
-            "types.yaml/",
-        ] {
-            assert!(resolve_path(importer, reference).is_err(), "`{reference}` resolved");
-        }
-    }
-
-    #[test]
-    fn bundle_paths_resolve_inside_the_bundle_only() {
-        let importer = "host/trigger.yaml";
-        for (reference, expected) in [
-            ("lib.yaml", Ok("host/lib.yaml")),
-            ("./lib.yaml", Ok("host/lib.yaml")),
-            ("./nested/../lib.yaml", Ok("host/lib.yaml")),
-            ("../host/lib.yaml", Ok("host/lib.yaml")),
-            ("../other/lib.yaml", Err("leave bundle `host`")),
-            ("../lib.yaml", Err("leave bundle `host`")),
-            ("../../lib.yaml", Err("leave bundle `host`")),
-            ("..", Err("leave bundle `host`")),
-            ("~/lib.yaml", Err("prefix")),
-            ("/lib.yaml", Err("relative path")),
-        ] {
-            match (resolve_bundle_path("host", importer, reference), expected) {
-                (Ok(target), Ok(expected)) => assert_eq!(target, expected, "{reference}"),
-                (Err(reason), Err(expected)) => assert!(reason.contains(expected), "{reference}: {reason}"),
-                (result, expected) => panic!("{reference}: {result:?}, expected {expected:?}"),
-            }
-        }
     }
 
     #[test]
