@@ -1,0 +1,65 @@
+# Provider sandboxing research contract. Shared types live at the research root.
+$schema:
+    schema_revision: literal(1; required) -> Revision of the contract used to decide whether a report is current
+    provider: identifier(required)@../../_types.yaml -> Canonical roster slug matching this report's filename
+    created: date(required) -> Date the report was first written; preserved on refresh
+    last_updated: date(required) -> Date the researcher last checked the findings against current sources
+    contract_checked: date -> Date the fleet accepted both validation gates; never written by the researcher
+    agent: research_agent(required)@../../_types.yaml -> Agentic CLI assigned to research this provider by the fleet
+    model: research_model(required)@../../_types.yaml -> Exact model used for the research
+    reasoning_effort: research_effort(required)@../../_types.yaml -> Effort used by the researcher rather than a sandbox setting
+    versions_examined: version[](required)@../../_types.yaml -> Exact provider releases examined; empty when no release can be established, with a gap explaining why
+    evidence: evidence[](required)@../../_types.yaml -> Official documentation, pinned source, and sanitized observations supporting the findings
+    summary: string(required; not-empty) -> Plain-language answer to what isolation this provider supplies out of the box
+    support: enum(native,official_integration,policy_only,none,unknown; required) -> Native means the provider implements an enforced sandbox; official_integration means it invokes an external isolation runtime; policy_only means approvals without isolation; prefer native when both exist
+    default_profiles: default_profile[](required) -> Exactly eight clean-install cases covering four operating environments and both launch modes
+    mechanisms: mechanism[](required) -> Every shipped or officially supported isolation mechanism, including optional ones; empty for policy_only or none
+    controls: control[](required) -> Exact provider controls for enabling, restricting, relaxing, or bypassing isolation
+    gaps: gap[](required) -> Unresolved findings, each naming its location and the next check that could settle it
+    changes: string[](required) -> Findings added or corrected since the previous report; empty on first creation
+    requires_claudine_update: boolean(required) -> Whether these findings require a change in Claudine's implementation or metadata
+    reason: string(required; not-empty) -> Why Claudine does or does not need to change
+
+types:
+    environment: enum(macos,linux,windows,wsl2) -> Native Windows and Linux under WSL2 are separate research cases
+    default_profile:
+        id: identifier(required)@../../_types.yaml -> Stable case name used in gaps, such as macos-interactive
+        environment: environment(required)@this -> Operating environment of the provider process
+        launch_mode: launch_mode(required)@../../_types.yaml -> Interactive session or the provider's documented headless entry point
+        status: enum(enabled,disabled,unavailable,unknown; required) -> Whether enforced isolation applies on a clean install without user or project overrides; approval prompts alone count as disabled
+        mechanism_ids: identifier[](required)@../../_types.yaml -> Mechanisms active in this default case; empty unless isolation is enabled
+        notes: string(required; not-empty) -> Default invocation, trust or onboarding choices, account conditions, and what remains accessible
+        evidence_ids: identifier[](required)@../../_types.yaml -> Sources establishing this default, including negative findings
+
+    mechanism:
+        id: identifier(required)@../../_types.yaml -> Stable name referenced by profiles and controls
+        name: string(required; not-empty) -> Provider's exact name for the sandbox or isolation mode
+        enforcement: enum(os_sandbox,container,virtual_machine,remote_environment; required) -> Boundary that actually denies access rather than merely asking for approval
+        environments: environment[](required; min(1))@this -> Operating environments on which this mechanism is supported
+        backend: string(required; not-empty) -> Concrete OS facilities or runtime used, including required versions where established
+        prerequisites: string[](required) -> Separately installed runtimes, privileges, kernel features, account requirements, or optional components; empty when none are needed
+        activation: string(required; not-empty) -> How the mechanism is selected and whether it is default, opt-in, experimental, or conditional
+        filesystem: string(required; not-empty) -> Separate read and write boundaries, allowed roots, protected paths, temporary paths, and symlink behavior
+        network: string(required; not-empty) -> Egress and ingress restrictions, host or port filtering, DNS, loopback, proxy behavior, and model-transport exceptions
+        processes: string(required; not-empty) -> Subprocess inheritance, process or IPC isolation, environment and credential exposure, and remaining host access
+        coverage: string(required; not-empty) -> Whether shell, built-in file tools, hooks, extensions, subagents, and local or remote MCP execution fall inside the boundary
+        escape_hatches: string(required; not-empty) -> Unsandboxed retries, per-command exclusions, escalation, and whether bypassing approvals also disables isolation
+        failure_behavior: enum(fail_closed,fallback_unsandboxed,prompt,conditional,unknown; required) -> What happens when the backend cannot start or enforce policy
+        failure_notes: string(required; not-empty) -> Exact unavailable-backend and permission-denial behavior in interactive and headless sessions
+        evidence_ids: identifier[](required)@../../_types.yaml -> Sources for the boundary, coverage, and failure behavior
+
+    control:
+        id: identifier(required)@../../_types.yaml -> Stable name for this sandbox control
+        kind: enum(cli_flag,config_key,environment_variable,session_command,managed_policy; required) -> Surface on which the provider accepts the control
+        name: string(required; not-empty) -> Exact native flag, key, variable, or command copied from help, documentation, or source
+        values: string[](required) -> Accepted tokens or value grammar; empty for a valueless switch
+        effect: string(required; not-empty) -> What isolation changes and which operating environments or launch modes it affects
+        example: string(required; not-empty) -> Complete invocation or minimal configuration example, labeled when it relaxes isolation
+        precedence: string(required; not-empty) -> How this control combines with other settings, including administrator constraints and session-only scope
+        mechanism_ids: identifier[](required)@../../_types.yaml -> Mechanisms affected; empty only for an adjacent approval control whose separation is explained
+        evidence_ids: identifier[](required)@../../_types.yaml -> Sources establishing the spelling and behavior of this control
+
+    gap:
+        location: string(required; not-empty) -> Slash-separated finding path using record IDs, such as default_profiles/windows-interactive/status; an ancestor path covers its descendants
+        detail: string(required; not-empty) -> Specific unresolved question or conflicting evidence
+        next_check: string(required; not-empty) -> Concrete documentation, source, or disposable-host check that would settle it
