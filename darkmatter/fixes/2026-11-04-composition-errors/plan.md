@@ -251,19 +251,19 @@ These decisions settle the specification's remaining technical details. They app
 
 ### Wave 4 — Independent provenance and link work
 
-- [ ] **Reference provenance**
+- [x] **Reference provenance**
   - Own `compose/body_origin.rs`, `compose/context/report.rs`, pipeline handoff, `reference/{types,graph,snapshot,css}.rs`, and authored `when=` projection. Implement rules 9–12 and the producer map, including every extractor's constructors.
   - Reconstruct the spike fixtures under `lib/tests/fixtures/composition_errors/`. Pin root positions 9:5, 15:9, 22:13, 24:8, 28:1; directive line 26; child positions 7:9, 7:43, 11:1 and inserted 9:7. Add LF/CRLF/BOM, same-line/edge/adjacent producers, mixed authored/interpolated labels, CSS rebasing, frontmatter values, leading rule, duplicate/interpolated/removed headings, and in-memory tests.
   - Preserve prepared coordinates and verify existing file-tree matching and fragment snapshot freshness tests.
 
-- [ ] **Link migration**
+- [x] **Link migration**
   - Own `render/link.rs`, `markdown/render_tree/build_context.rs`, cleanup title migration, warning production, and link tests. Consume Phase 1's shared title classifier/metadata rather than adding another parser.
   - Preserve existing structured attributes and encoded package round-trips; migrate key=value titles using source spans so code fences and unrelated strings stay intact. Prove semantic parity and idempotence. Cover HTML query mapping, OSC 8 safe-parameter omission, Windows file URI text, and malformed/legacy warnings through the public result.
   - Wire the new warning codes into existing diagnostic and policy catalogs; leave Phase 2's reference-report files to the next wave.
 
 ### Wave 5 — Report integration
 
-- [ ] **Report data**
+- [x] **Report data**
   - Own `reference/validate.rs` and its new report builder module. Add graph document metadata, authored issue serialization, per-path trail traversal, and reason/construct phrase methods; replace the old grouped-by-kind rendering with ValidationReportView's structural output.
   - Cover two equal basenames, two-level/repeated-child trails, root/remote/in-memory groups, all reason/syntax variants, error/warning/info visibility, mixed/single reason tallies, detail rows, singular grammar, empty/all-ok summary, and identical common report bodies for graph and validate refs.
 
