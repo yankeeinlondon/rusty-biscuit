@@ -633,6 +633,12 @@ impl OverlayState {
             });
         }
 
+        // A Markdown body is prose, never a schema envelope: reading it as one
+        // would let a column-zero `$schema:` inside a fenced example claim the
+        // whole page.
+        if crate::graph::is_markdown_path(path) {
+            return None;
+        }
         self.envelope_overlay(uri, text, path, workspace_roots, resolution, timings, None)
     }
 
@@ -1727,6 +1733,27 @@ mod tests {
                 )
                 .is_none()
         );
+    }
+
+    /// A column-zero `$schema:` in a fenced example once made the lexical
+    /// envelope claim treat the whole page as a malformed schema document.
+    #[test]
+    fn markdown_without_frontmatter_is_never_a_standalone_schema() {
+        let state = OverlayState::default();
+        for text in [
+            "# Types\n\n```yaml\n$schema:\n    name: string\n```\n\nprose: more\n\n```yaml\na: 1\n---\nb: 2\n```\n",
+            "$schema:\n  name: string\n",
+        ] {
+            let overlay = state.for_document(
+                &uri("file:///w/types.md"),
+                text,
+                Path::new("/w/types.md"),
+                &DmlsConfig::default(),
+                &[PathBuf::from("/w")],
+                &crate::context::test_support::resolution_for(Path::new("/w/types.md")),
+            );
+            assert!(overlay.is_none(), "{text:?}");
+        }
     }
 
     #[test]
