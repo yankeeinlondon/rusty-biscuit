@@ -34,7 +34,7 @@ enum FileOutcome {
         problems: Vec<ValidationProblem>,
         advisories: Vec<SchemaAdvisory>,
         schema_label: Option<String>,
-        no_schema: bool,
+        applied: AppliedSchema,
     },
     /// The file argument did not open (it is not valid reference syntax,
     /// failed to resolve, or matched no file); reported with the parse
@@ -47,6 +47,18 @@ enum FileOutcome {
     YamlLoadError { message: String, location: Option<(usize, usize)> },
     /// Schema could not be resolved/built for this file.
     SchemaError(Box<SchemaError>),
+}
+
+/// Which schema layers judged a validated document; it chooses the pretty
+/// success wording.
+enum AppliedSchema {
+    /// No layer applied, so the document is valid by default.
+    None,
+    /// Only the baseline applied: no `$schema` and no matching trigger. The
+    /// path names a custom baseline; `None` is the embedded one.
+    Baseline(Option<PathBuf>),
+    /// A document `$schema` or a matching trigger applied.
+    Declared,
 }
 
 /// Run `md schema validate`.
@@ -125,16 +137,16 @@ pub fn run_validate(
 
     // YAML documents never use the baseline, so a YAML-only batch never
     // loads (or fails on) one.
-    let api = if opened.iter().any(|(_, yaml)| !*yaml) {
+    let loaded = if opened.iter().any(|(_, yaml)| !*yaml) {
         load_api(schema, no_baseline_schema, request)
     } else {
         request
             .launch_context()
-            .map(|context| DarkmatterSchemas::new(context.clone()))
+            .map(|context| (DarkmatterSchemas::new(context.clone()), Baseline::None))
             .map_err(|error| SchemaError::Baseline { message: format!("{error:#}"), source: None })
     };
-    let api = match api {
-        Ok(api) => api,
+    let (api, baseline) = match loaded {
+        Ok(loaded) => loaded,
         Err(err) => {
             emit_schema_error(&err);
             std::process::exit(2);
@@ -150,7 +162,7 @@ pub fn run_validate(
         let (outcome, timings, findings, document) = match opened {
             Ok(opened) if yaml => (validate_yaml(&api, &opened, request), None, Vec::new(), Some(opened.into_path())),
             Ok(opened) => {
-                let checked = validate_one(&api, &opened, &assignments, no_schema_triggers, request);
+                let checked = validate_one(&api, &baseline, &opened, &assignments, no_schema_triggers, request);
                 (checked.outcome, checked.timings, checked.findings, Some(opened.into_path()))
             }
             Err(err) => (FileOutcome::Unopened(err), None, Vec::new(), None),
@@ -189,7 +201,8 @@ pub fn run_validate(
 }
 
 /// Builds the [`DarkmatterSchemas`] entry point at the launch context with
-/// the selected baseline. Each file re-anchors it on its own context.
+/// the selected baseline, returned beside it. Each file re-anchors it on its
+/// own context.
 ///
 /// The first matching rule selects the baseline:
 ///
@@ -210,7 +223,7 @@ fn load_api(
     schema: Option<&Path>,
     no_baseline_schema: bool,
     request: &MdRequest,
-) -> Result<DarkmatterSchemas, SchemaError> {
+) -> Result<(DarkmatterSchemas, Baseline), SchemaError> {
     let env = request.snapshot().env();
     let selection = if no_baseline_schema {
         Baseline::None
@@ -229,17 +242,18 @@ fn load_api(
         source: None,
     })?;
     let api = DarkmatterSchemas::new(context.clone());
-    match selection {
-        Baseline::None => Ok(api),
+    let api = match &selection {
+        Baseline::None => api,
         Baseline::Custom(path) => {
-            let resolved = resolve_file_path(&path, context).map_err(|error| SchemaError::Baseline {
+            let resolved = resolve_file_path(path, context).map_err(|error| SchemaError::Baseline {
                 message: format!("could not load baseline from `{}`: {error:#}", path.display()),
                 source: None,
             })?;
-            api.with_baseline_from_file(resolved)
+            api.with_baseline_from_file(resolved)?
         }
-        Baseline::Embedded => api.with_darkmatter_baseline_json_schema(),
-    }
+        Baseline::Embedded => api.with_darkmatter_baseline_json_schema()?,
+    };
+    Ok((api, selection))
 }
 
 /// The baseline [`load_api`] selected.
@@ -266,6 +280,7 @@ struct CheckedFile {
 /// caller can map them to the spec's exit codes.
 fn validate_one(
     api: &DarkmatterSchemas,
+    baseline: &Baseline,
     opened: &OpenedArgument,
     assignments: &[Assignment],
     no_schema_triggers: bool,
@@ -332,7 +347,16 @@ fn validate_one(
             problems: report.problems,
             advisories: report.advisories,
             schema_label,
-            no_schema: !summary.has_schema,
+            applied: if summary.baseline_only {
+                AppliedSchema::Baseline(match baseline {
+                    Baseline::Custom(path) => Some(path.clone()),
+                    Baseline::Embedded | Baseline::None => None,
+                })
+            } else if summary.has_schema {
+                AppliedSchema::Declared
+            } else {
+                AppliedSchema::None
+            },
         },
         Err(err) => FileOutcome::SchemaError(Box::new(err)),
     };
@@ -394,14 +418,14 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             problems: Vec::new(),
             advisories: Vec::new(),
             schema_label: None,
-            no_schema: true,
+            applied: AppliedSchema::None,
         },
         Ok(YamlOutcome::Validated(validation)) => FileOutcome::Validated {
             report_valid: validation.report.valid,
             problems: validation.report.problems,
             advisories: validation.report.advisories,
             schema_label: Some(validation.definition),
-            no_schema: false,
+            applied: AppliedSchema::Declared,
         },
         Err(err) => FileOutcome::SchemaError(Box::new(err)),
     }
@@ -487,16 +511,23 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
         FileOutcome::Validated {
             report_valid: true,
             advisories,
-            no_schema,
+            applied,
             ..
         } => {
             if quiet {
                 return;
             }
-            let tail = if *no_schema {
-                "doesn't have a schema definition so is valid by default."
-            } else {
-                "has a schema definition and is valid."
+            let tail = match applied {
+                AppliedSchema::Declared => "has a schema definition and is valid.".to_string(),
+                AppliedSchema::Baseline(None) => {
+                    "does not have an explicit schema definition but it is valid based on the Darkmatter default schema."
+                        .to_string()
+                }
+                AppliedSchema::Baseline(Some(path)) => format!(
+                    "does not have an explicit schema definition but it is valid based on the baseline schema {}.",
+                    escape_prose(&path.display().to_string()),
+                ),
+                AppliedSchema::None => "doesn't have a schema definition so is valid by default.".to_string(),
             };
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");

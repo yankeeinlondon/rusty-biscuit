@@ -1092,7 +1092,7 @@ description string when one is resolved, or `null` when the property declares no
 description (or the description was suppressed because it was whitespace-only or
 byte-for-byte equal to the problem message).
 
-The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when the built-in or a custom baseline validated it; the pretty output still says such a document "has a schema definition", because its effective schema is the baseline.
+The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when the built-in or a custom baseline validated it. The pretty output distinguishes that case too: see [Behavior Without `$schema`](#behavior-without-schema).
 
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"`, `"yaml_parse"`, or `"schema"`) and an empty `problems` array; a `yaml_parse` entry also has the failure's `line` and `column`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
@@ -1179,8 +1179,11 @@ The same locations appear in `md compose`'s [schema-failure block](#error-render
 
 ### Behavior Without `$schema`
 
-- With a baseline, which is the built-in one unless [selected otherwise](#selecting-the-baseline), the document is validated against the baseline alone, and `pretty` mode says it has a schema definition.
-- Without a baseline and without `$schema`, validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
+- A matching [schema trigger](authoring-schemas.md) counts as a schema definition: `pretty` mode prints `has a schema definition and is valid.`
+- With no matching trigger, the document is validated against the baseline alone, which is the built-in one unless [selected otherwise](#selecting-the-baseline). `pretty` mode does not claim a schema definition; it names the baseline that judged the document:
+  - built-in: `does not have an explicit schema definition but it is valid based on the Darkmatter default schema.`
+  - custom: `does not have an explicit schema definition but it is valid based on the baseline schema ./my-baseline.yaml.`
+- Without a baseline and without `$schema` or a matching trigger, validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
 
 ## CLI: `md schema detect`
 

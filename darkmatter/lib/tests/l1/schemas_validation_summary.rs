@@ -115,6 +115,7 @@ fn no_schema_with_the_baseline_disabled_is_vacuously_valid_without_a_schema() {
     assert!(report.valid);
     assert!(report.problems.is_empty());
     assert!(!summary.has_schema);
+    assert!(!summary.baseline_only);
 }
 
 #[test]
@@ -129,6 +130,47 @@ fn baseline_only_has_a_schema() {
 
     assert!(report.valid, "{:?}", report.problems);
     assert!(summary.has_schema);
+    assert!(summary.baseline_only);
+}
+
+#[test]
+fn a_document_schema_over_the_baseline_is_not_baseline_only() {
+    let (_dir, root) = repository();
+    let doc = document(&root, "doc.md", "---
+$schema:
+  title: string
+title: plain
+---
+body
+");
+    let api = schemas(&root)
+        .with_darkmatter_baseline_json_schema()
+        .expect("embedded baseline");
+
+    let (report, summary) = summarize(&api, &doc, "baseline and document schema");
+
+    assert!(report.valid, "{:?}", report.problems);
+    assert!(summary.has_schema);
+    assert!(!summary.baseline_only);
+}
+
+#[test]
+fn a_matched_trigger_over_the_baseline_is_not_baseline_only() {
+    let (_dir, root) = repository();
+    let api = mode_triggers(&root)
+        .with_darkmatter_baseline_json_schema()
+        .expect("embedded baseline");
+    let doc = document(&root, "doc.md", "---
+mode: alpha
+alpha_field: x
+---
+");
+
+    let (report, summary) = summarize(&api, &doc, "baseline and trigger schema");
+
+    assert!(report.valid, "{:?}", report.problems);
+    assert!(summary.has_schema);
+    assert!(!summary.baseline_only);
 }
 
 #[test]
@@ -162,6 +204,7 @@ fn a_matched_trigger_has_a_schema() {
 
     assert!(report.valid, "{:?}", report.problems);
     assert!(summary.has_schema);
+    assert!(!summary.baseline_only);
 }
 
 #[test]

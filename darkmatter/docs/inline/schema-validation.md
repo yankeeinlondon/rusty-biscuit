@@ -278,7 +278,16 @@ for the full rules and fallbacks.
 | 3 | A file's frontmatter could not be parsed at all. |
 | 64 | Usage error. |
 
-A document with no `$schema` is validated against the baseline and reported as having a schema definition; in JSON output its `schema` field is still `null`, because the field names the document's own `$schema`. Only with the baseline turned off does such a document succeed vacuously (with a warning line in pretty mode).
+The pretty success line says which schema judged the document:
+
+| What applied | Pretty success line |
+| --- | --- |
+| A document `$schema`, or a matching schema trigger | `has a schema definition and is valid.` |
+| The built-in baseline alone | `does not have an explicit schema definition but it is valid based on the Darkmatter default schema.` |
+| A custom baseline (`--schema` or `BASELINE_SCHEMA`) alone | `does not have an explicit schema definition but it is valid based on the baseline schema <path>.` |
+| Nothing (baseline turned off, no `$schema`, no trigger) | `doesn't have a schema definition so is valid by default.` |
+
+In JSON output the `schema` field names the document's own `$schema`, so it is `null` whenever the document has none, whichever baseline judged it.
 
 ### Stage timings (`-vv`)
 

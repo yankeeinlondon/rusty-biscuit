@@ -432,6 +432,9 @@ fn pretty(
 }
 
 const NO_SCHEMA_CLAIM: &str = "doesn't have a schema definition";
+const EMBEDDED_BASELINE_CLAIM: &str =
+    "does not have an explicit schema definition but it is valid based on the Darkmatter default schema.";
+const DECLARED_SCHEMA_CLAIM: &str = "has a schema definition and is valid.";
 
 #[test]
 fn default_accepts_the_authoring_example() {
@@ -446,7 +449,49 @@ fn default_accepts_the_authoring_example() {
 
     let (code, stdout) = pretty(&process, &[], None, &document);
     assert_eq!(code, Some(0), "{stdout}");
-    assert!(stdout.contains("has a schema definition and is valid"), "{stdout}");
+    assert!(stdout.contains(EMBEDDED_BASELINE_CLAIM), "{stdout}");
+    assert!(!stdout.contains(DECLARED_SCHEMA_CLAIM), "{stdout}");
+}
+
+/// A document judged by a `--schema` baseline alone names that baseline
+/// rather than claiming a schema definition of its own.
+#[test]
+fn custom_baseline_alone_is_named_in_the_success_wording() {
+    let process = CliProcessFixture::new();
+    std::fs::write(process.cwd().join("flag.yaml"), FLAG_BASELINE).unwrap();
+    let document = process.cwd().join("doc.md");
+    std::fs::write(&document, "---
+flag_owner: Ken
+---
+Body
+").unwrap();
+
+    let (code, stdout) = pretty(&process, &["--schema", "./flag.yaml"], None, &document);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(
+        stdout.contains("does not have an explicit schema definition but it is valid based on the baseline schema"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("flag.yaml"), "{stdout}");
+}
+
+/// A document `$schema` layered over the embedded baseline is the document's
+/// own schema definition.
+#[test]
+fn document_schema_over_the_baseline_claims_a_schema_definition() {
+    let process = CliProcessFixture::new();
+    let document = process.cwd().join("doc.md");
+    std::fs::write(&document, "---
+$schema:
+  title: string(required)
+title: Hi
+---
+Body
+").unwrap();
+
+    let (code, stdout) = pretty(&process, &[], None, &document);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains(DECLARED_SCHEMA_CLAIM), "{stdout}");
 }
 
 #[test]
