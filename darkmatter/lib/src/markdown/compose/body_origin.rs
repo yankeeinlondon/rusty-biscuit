@@ -4,8 +4,9 @@
 //! instructions run:
 //!
 //! - [`BodyOrigin`] maps the current text back to the loaded document, so a
-//!   failing expression can be anchored to its authored span. It is advisory:
-//!   when it stops describing the text it is dropped.
+//!   failing expression or a reference can be anchored to its authored span,
+//!   or to the authored construct that wrote it. It is advisory: when it stops
+//!   describing the text it is dropped.
 //! - [`AuthoredBody`] maps it back to the body before any stage rewrote it, so
 //!   a shell command's placeholders can be read as authored. Advisory too.
 //! - [`DataRanges`] records which bytes are **data**: text an expression, a
@@ -84,17 +85,32 @@ struct Segment {
     len: usize,
 }
 
-/// Where each authored byte of a document's current body came from.
+/// A run of the current text a stage wrote, and the loaded-document range of
+/// the authored construct that wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProducedRun {
+    output: Range<usize>,
+    construct: Range<usize>,
+}
+
+/// Where each byte of a document's current body came from.
+///
+/// A byte is copied (a [`Segment`]), produced by an authored construct (a
+/// [`ProducedRun`]), or unknown; a byte past the point `capture` stopped
+/// aligning is unknown, and so is anything written over one.
 ///
 /// The map is only valid for the exact text it was built for; [`describes`]
 /// guards every use, so a body rewritten by an untracked path simply stops
 /// projecting rather than projecting wrongly.
 ///
 /// [`describes`]: Self::describes
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BodyOrigin {
     /// Sorted by `output`, non-overlapping.
     segments: Vec<Segment>,
+    /// Sorted by `output`, non-overlapping, and disjoint from `segments`.
+    /// Adjacent runs stay separate: each names its own construct.
+    produced: Vec<ProducedRun>,
     text_len: usize,
     text_hash: u64,
 }
@@ -135,6 +151,7 @@ impl BodyOrigin {
         push_segment(&mut segments, run_start, body_start + origin - (output - run_start), output - run_start);
         Some(Self {
             segments,
+            produced: Vec::new(),
             text_len: body.len(),
             text_hash: hash_text(body),
         })
@@ -146,6 +163,7 @@ impl BodyOrigin {
         push_segment(&mut segments, 0, 0, text.len());
         Self {
             segments,
+            produced: Vec::new(),
             text_len: text.len(),
             text_hash: hash_text(text),
         }
@@ -158,10 +176,15 @@ impl BodyOrigin {
 
     /// The map for `output`, the text a stage produced by applying `edits`
     /// (sorted and non-overlapping) to the text this map describes.
+    ///
+    /// Each edit's written text is charged to the construct its replaced
+    /// range resolves to in this map, so text rewritten inside produced text
+    /// keeps the original producer.
     pub(crate) fn after_edits(&self, edits: &[TextEdit], output: &str) -> Self {
         // Every kept run of the input lies after the previous one, so one
         // forward pass over the segments serves them all.
         let mut segments = Vec::new();
+        let mut produced = Vec::new();
         let mut next = 0;
         let mut copy = |from: Range<usize>, to: usize, segments: &mut Vec<Segment>| {
             while let Some(segment) = self.segments.get(next) {
@@ -179,12 +202,21 @@ impl BodyOrigin {
         let (mut input, mut written) = (0, 0);
         for edit in edits {
             copy(input..edit.range.start, written, &mut segments);
-            written += edit.range.start - input + edit.replacement_len;
+            self.copy_produced(input..edit.range.start, written, &mut produced);
+            written += edit.range.start - input;
+            if edit.replacement_len > 0
+                && let Some(construct) = self.construct_of(&edit.range)
+            {
+                produced.push(ProducedRun { output: written..written + edit.replacement_len, construct });
+            }
+            written += edit.replacement_len;
             input = edit.range.end;
         }
         copy(input..self.text_len, written, &mut segments);
+        self.copy_produced(input..self.text_len, written, &mut produced);
         Self {
             segments,
+            produced,
             text_len: output.len(),
             text_hash: hash_text(output),
         }
@@ -194,6 +226,7 @@ impl BodyOrigin {
     /// `splices` of the text this map describes.
     pub(crate) fn after_splices(&self, splices: &[Splice], output: &str) -> Self {
         let mut segments = Vec::new();
+        let mut produced = Vec::new();
         for splice in splices {
             let first = self.segments.partition_point(|segment| segment.output + segment.len <= splice.input.start);
             for segment in &self.segments[first..] {
@@ -211,12 +244,101 @@ impl BodyOrigin {
                     );
                 }
             }
+            self.copy_produced(splice.input.clone(), splice.output, &mut produced);
         }
         Self {
             segments,
+            produced,
             text_len: output.len(),
             text_hash: hash_text(output),
         }
+    }
+
+    /// Appends the produced runs inside `from` to `produced`, moved so `from`
+    /// starts at `to`.
+    fn copy_produced(&self, from: Range<usize>, to: usize, produced: &mut Vec<ProducedRun>) {
+        let first = self.produced.partition_point(|run| run.output.end <= from.start);
+        for run in &self.produced[first..] {
+            if run.output.start >= from.end {
+                break;
+            }
+            let start = from.start.max(run.output.start);
+            let end = from.end.min(run.output.end);
+            produced.push(ProducedRun {
+                output: to + (start - from.start)..to + (end - from.start),
+                construct: run.construct.clone(),
+            });
+        }
+    }
+
+    /// The loaded-document range a stage's replaced `range` of the current
+    /// text stands for: the authored bytes it replaced, the construct that
+    /// produced the text it replaced, or the hull of both when it straddles
+    /// them. `None` when any byte of it is unknown, and for an empty `range`
+    /// not strictly inside a produced run.
+    fn construct_of(&self, range: &Range<usize>) -> Option<Range<usize>> {
+        if range.is_empty() {
+            return self.produced_run_at(range.start).filter(|run| run.output.start < range.start).map(|run| run.construct.clone());
+        }
+        let mut hull: Option<Range<usize>> = None;
+        let mut cursor = range.start;
+        while cursor < range.end {
+            let (piece, end) = if let Some(run) = self.produced_run_at(cursor) {
+                (run.construct.clone(), run.output.end)
+            } else {
+                let segment = self.segment_at(cursor)?;
+                let end = range.end.min(segment.output + segment.len);
+                let start = segment.origin + (cursor - segment.output);
+                (start..start + (end - cursor), end)
+            };
+            hull = Some(match hull {
+                Some(hull) => hull.start.min(piece.start)..hull.end.max(piece.end),
+                None => piece,
+            });
+            cursor = end;
+        }
+        hull
+    }
+
+    fn segment_at(&self, offset: usize) -> Option<&Segment> {
+        let index = self.segments.partition_point(|segment| segment.output + segment.len <= offset);
+        self.segments.get(index).filter(|segment| segment.output <= offset)
+    }
+
+    fn produced_run_at(&self, offset: usize) -> Option<&ProducedRun> {
+        let index = self.produced.partition_point(|run| run.output.end <= offset);
+        self.produced.get(index).filter(|run| run.output.start <= offset)
+    }
+
+    /// The loaded-document range of the authored construct that wrote the
+    /// byte at `offset` of the current text: the `{{ … }}`, the `::shell`
+    /// directive, or the replaced key.
+    ///
+    /// `None` for a byte that was copied rather than written (see
+    /// [`project`](Self::project)), and for a byte whose producer is unknown.
+    pub(crate) fn producer_of(&self, offset: usize) -> Option<Range<usize>> {
+        self.produced_run_at(offset).map(|run| run.construct.clone())
+    }
+
+    /// The loaded-document range `range` of the current text was copied from,
+    /// when all of it was. Unlike [`project`](Self::project) it may cross a
+    /// `\r` that `capture` skipped in `loaded`, the text this map was captured
+    /// from, so a multi-line construct projects under either line ending.
+    pub(crate) fn project_whole(&self, range: &Range<usize>, loaded: &str) -> Option<Range<usize>> {
+        let first = self.segment_at(range.start)?;
+        let start = first.origin + (range.start - first.output);
+        let (mut cursor, mut end) = (range.start, start);
+        while cursor < range.end {
+            let segment = self.segment_at(cursor)?;
+            let from = segment.origin + (cursor - segment.output);
+            if from != end && !(from == end + 1 && loaded.as_bytes().get(end) == Some(&b'\r')) {
+                return None;
+            }
+            let run = (segment.output + segment.len).min(range.end) - cursor;
+            cursor += run;
+            end = from + run;
+        }
+        Some(start..end)
     }
 
     /// The loaded-document range `range` of the current text was copied from,
@@ -929,6 +1051,192 @@ mod tests {
             output,
         );
         assert_eq!(edited.project(&span_of(output, "{{ a b }}")), None);
+    }
+
+    mod producers {
+        use super::*;
+
+        /// Applies `(needle, replacement, origin)` edits, listed in body
+        /// order, to `origin`'s text.
+        fn edited(origin: &BodyOrigin, text: &str, edits: &[(&str, &str, EditOrigin)]) -> (BodyOrigin, String) {
+            let mut cursor = 0;
+            let mut output = String::new();
+            let mut applied = Vec::new();
+            for (needle, replacement, kind) in edits {
+                let start = cursor + text[cursor..].find(needle).expect("needle present");
+                output.push_str(&text[cursor..start]);
+                output.push_str(replacement);
+                cursor = start + needle.len();
+                applied.push(TextEdit { range: start..cursor, replacement_len: replacement.len(), origin: *kind });
+            }
+            output.push_str(&text[cursor..]);
+            (origin.after_edits(&applied, &output), output)
+        }
+
+        #[test]
+        fn an_interpolation_names_its_expression() {
+            let loaded = "---\na: 1\n---\nsee {{ link }} now\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (carried, output) =
+                edited(&origin, markdown.content(), &[("{{ link }}", "[x](./y.md)", EditOrigin::Data)]);
+            let inside = output.find("./y.md").unwrap();
+            assert_eq!(carried.producer_of(inside), Some(span_of(loaded, "{{ link }}")));
+            assert_eq!(carried.project(&(inside..inside + 1)), None);
+        }
+
+        #[test]
+        fn an_authored_byte_has_no_producer() {
+            let loaded = "see {{ link }} now\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (carried, output) = edited(&origin, markdown.content(), &[("{{ link }}", "x", EditOrigin::Data)]);
+            assert_eq!(carried.producer_of(output.find("see").unwrap()), None);
+            assert_eq!(carried.producer_of(output.find("now").unwrap()), None);
+            assert_eq!(carried.producer_of(output.len()), None);
+        }
+
+        #[test]
+        fn a_shell_directive_names_its_line_and_keeps_its_terminator_authored() {
+            let loaded = "::shell echo hi\nafter\n";
+            let mut content = loaded.to_string();
+            let (_, origin) = origin_of(loaded);
+            let edits = apply_replacements_with_edits(
+                &mut content,
+                vec![(span_of(loaded, "::shell echo hi\n"), "hi\n".to_string())],
+                EditOrigin::Data,
+            );
+            let carried = origin.after_edits(&edits, &content);
+            assert_eq!(carried.producer_of(0), Some(span_of(loaded, "::shell echo hi")));
+            assert_eq!(carried.project(&span_of(&content, "after")), Some(span_of(loaded, "after")));
+        }
+
+        #[test]
+        fn a_replaced_key_names_the_key_with_either_edit_origin() {
+            let loaded = "ZZ then WW\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (carried, output) = edited(
+                &origin,
+                markdown.content(),
+                &[("ZZ", "first", EditOrigin::Authored), ("WW", "second", EditOrigin::Data)],
+            );
+            assert_eq!(carried.producer_of(output.find("first").unwrap()), Some(0..2));
+            assert_eq!(carried.producer_of(output.find("second").unwrap()), Some(8..10));
+        }
+
+        #[test]
+        fn a_deletion_produces_nothing() {
+            let loaded = "keep\nDROP\ntail\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (carried, output) = edited(&origin, markdown.content(), &[("DROP\n", "", EditOrigin::Authored)]);
+            assert_eq!(output, "keep\ntail\n");
+            assert_eq!(carried.producer_of(5), None);
+            assert_eq!(carried.project(&(5..9)), Some(span_of(loaded, "tail")));
+        }
+
+        /// At either edge of the body one neighboring segment is missing, so
+        /// a gap between neighbors could not name these.
+        #[test]
+        fn replacements_at_both_body_edges_name_their_own_construct() {
+            let loaded = "---\na: 1\n---\n{{ a }} mid {{ b }}";
+            let (markdown, origin) = origin_of(loaded);
+            let (carried, output) = edited(
+                &origin,
+                markdown.content(),
+                &[("{{ a }}", "AAA", EditOrigin::Data), ("{{ b }}", "BBB", EditOrigin::Data)],
+            );
+            assert_eq!(carried.producer_of(0), Some(span_of(loaded, "{{ a }}")));
+            assert_eq!(carried.producer_of(output.len() - 1), Some(span_of(loaded, "{{ b }}")));
+        }
+
+        /// Two adjacent replacements share one gap between authored neighbors.
+        #[test]
+        fn adjacent_replacements_keep_separate_producers() {
+            let loaded = "<{{ a }}{{ b }}>\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (carried, _) = edited(
+                &origin,
+                markdown.content(),
+                &[("{{ a }}", "AA", EditOrigin::Data), ("{{ b }}", "BB", EditOrigin::Data)],
+            );
+            assert_eq!(carried.producer_of(1), Some(span_of(loaded, "{{ a }}")));
+            assert_eq!(carried.producer_of(2), Some(span_of(loaded, "{{ a }}")));
+            assert_eq!(carried.producer_of(3), Some(span_of(loaded, "{{ b }}")));
+            assert_eq!(carried.producer_of(4), Some(span_of(loaded, "{{ b }}")));
+        }
+
+        /// A later edit inside produced text inherits the original producer;
+        /// the produced text around it keeps that producer and later
+        /// offsets still line up.
+        #[test]
+        fn an_edit_inside_produced_data_inherits_the_original_producer() {
+            let loaded = "{{ value }} tail\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (first, text) = edited(&origin, markdown.content(), &[("{{ value }}", "aKEYb", EditOrigin::Data)]);
+            let (second, output) = edited(&first, &text, &[("KEY", "[x](./y.md)", EditOrigin::Authored)]);
+            assert_eq!(output, "a[x](./y.md)b tail\n");
+            let construct = Some(span_of(loaded, "{{ value }}"));
+            assert_eq!(second.producer_of(0), construct);
+            assert_eq!(second.producer_of(1), construct);
+            assert_eq!(second.producer_of(output.find('b').unwrap()), construct);
+            assert_eq!(second.project(&span_of(&output, "tail")), Some(span_of(loaded, "tail")));
+        }
+
+        /// Producers survive edits elsewhere, in later stages.
+        #[test]
+        fn a_producer_follows_edits_before_it() {
+            let loaded = "DROP\n{{ a }}\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (first, text) = edited(&origin, markdown.content(), &[("{{ a }}", "AA", EditOrigin::Data)]);
+            let (second, output) = edited(&first, &text, &[("DROP\n", "", EditOrigin::Authored)]);
+            assert_eq!(output, "AA\n");
+            assert_eq!(second.producer_of(0), Some(span_of(loaded, "{{ a }}")));
+        }
+
+        /// A replaced key spanning authored and produced text covers both.
+        #[test]
+        fn an_edit_straddling_authored_and_produced_text_names_their_hull() {
+            let loaded = "x{{ a }}Z y\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (first, text) = edited(&origin, markdown.content(), &[("{{ a }}", "Z", EditOrigin::Data)]);
+            let (second, output) = edited(&first, &text, &[("ZZ", "[x](./y.md)", EditOrigin::Authored)]);
+            assert_eq!(second.producer_of(output.find('[').unwrap()), Some(span_of(loaded, "{{ a }}Z")));
+        }
+
+        /// Text written over bytes the capture could not align stays unknown.
+        #[test]
+        fn a_replacement_past_the_alignment_has_no_producer() {
+            let (markdown, origin) = origin_of("abc\n");
+            let truncated = BodyOrigin {
+                segments: vec![Segment { output: 0, origin: 0, len: 1 }],
+                ..origin
+            };
+            let (carried, output) = edited(&truncated, markdown.content(), &[("bc", "XY", EditOrigin::Data)]);
+            assert_eq!(carried.producer_of(output.find('X').unwrap()), None);
+        }
+
+        #[test]
+        fn a_repeated_copy_keeps_its_producer() {
+            let loaded = "{{ a }}\n";
+            let (markdown, origin) = origin_of(loaded);
+            let (first, text) = edited(&origin, markdown.content(), &[("{{ a }}", "AA", EditOrigin::Data)]);
+            let splices = vec![Splice { input: 0..3, output: 0 }, Splice { input: 0..3, output: 3 }];
+            let repeated = format!("{text}{text}");
+            let carried = first.after_splices(&splices, &repeated);
+            assert_eq!(carried.producer_of(1), Some(span_of(loaded, "{{ a }}")));
+            assert_eq!(carried.producer_of(4), Some(span_of(loaded, "{{ a }}")));
+        }
+
+        #[test]
+        fn a_multi_line_range_projects_across_skipped_carriage_returns_only() {
+            let loaded = "---\r\na: 1\r\n---\r\none\r\ntwo\r\nDtail\r\n";
+            let (markdown, origin) = origin_of(loaded);
+            let span = span_of(markdown.content(), "one\ntwo\n");
+            assert_eq!(origin.project(&span), None);
+            assert_eq!(origin.project_whole(&span, loaded), Some(span_of(loaded, "one\r\ntwo\r\n")));
+
+            let (carried, output) = edited(&origin, markdown.content(), &[("D", "", EditOrigin::Authored)]);
+            let across = span_of(&output, "two\ntail");
+            assert_eq!(carried.project_whole(&across, loaded), None, "a deleted byte is not a line ending");
+        }
     }
 
     mod data_ranges {

@@ -529,7 +529,7 @@ fn composed(workspace: &LspWorkspace, path: &std::path::Path) -> Option<(String,
     let request = ComposeRequest::prepare(options, &snapshot).expect("request");
     let error = Markdown::try_from(path).expect("document loads").compose_with(&request).err()?;
     let first = error_diagnostics(&error).into_iter().next()?;
-    Some((first.code, first.source.map(|source| (source.line, source.column))))
+    Some((first.code, first.source.and_then(|source| source.line.zip(source.column))))
 }
 
 /// Library and editor agree on every static defect: the same code, at the

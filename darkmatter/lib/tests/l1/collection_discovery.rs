@@ -199,7 +199,7 @@ mod local_templates {
             assert!(matches!(error.without_iteration(), MarkdownError::ShellExpansion(_)), "{item}: {error:?}");
             let [record] = error_diagnostics(&error).try_into().expect("one record");
             assert_eq!(record.iteration_path.to_string(), "data[0]", "{item}: {record:?}");
-            assert_eq!(record.source.as_ref().map(|source| source.line), Some(7), "{item}: {record:?}");
+            assert_eq!(record.source.as_ref().and_then(|source| source.line), Some(7), "{item}: {record:?}");
         }
     }
 }

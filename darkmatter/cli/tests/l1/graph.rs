@@ -57,7 +57,8 @@ fn test_graph_validate_valid() {
         .assert()
         .success()
         .stdout(predicate::str::contains("valid"))
-        .stdout(predicate::str::contains("0 issues"));
+        .stdout(predicate::str::contains("all ok"))
+        .stdout(predicate::str::contains("scanned").not());
 }
 
 #[test]
@@ -85,7 +86,7 @@ fn test_graph_validate_invalid() {
         "expected [missing] suffix in output"
     );
     assert!(
-        stdout.contains("1 issues"),
+        stdout.contains("0 ok, 1 broken"),
         "expected issue count in summary"
     );
 }

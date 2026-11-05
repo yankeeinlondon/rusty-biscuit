@@ -181,6 +181,7 @@ fn failure_diagnostics(error: &Report) -> Vec<Diagnostic> {
                 actual_type: None,
                 span: None,
                 iteration_path: Default::default(),
+                reference_details: None,
             }];
         }
     }

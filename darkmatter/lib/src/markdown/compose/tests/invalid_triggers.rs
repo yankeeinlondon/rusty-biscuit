@@ -120,11 +120,11 @@ fn a_malformed_envelope_reports_the_trigger_file_at_its_yaml_error() {
     assert_eq!(record.severity, crate::markdown::compose::expression::Severity::Warning);
     assert_eq!(
         record.source,
-        Some(crate::markdown::compose::expression::DiagnosticSource {
-            file: Some(biscuit_file::canonicalize_simplified(&trigger).unwrap()),
-            line: 3,
-            column: 1,
-        })
+        Some(crate::markdown::compose::expression::DiagnosticSource::at(
+            Some(biscuit_file::canonicalize_simplified(&trigger).unwrap()),
+            3,
+            1,
+        ))
     );
     assert!(record.message.contains("at line 3, column 1"), "{}", record.message);
     let [warning] = trigger_warnings(&report.warnings)[..] else { unreachable!() };

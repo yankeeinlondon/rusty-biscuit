@@ -33,6 +33,17 @@ pub const REASSIGNED_FRONTMATTER_PROPERTY_CODE: &str = "dm.transclusion.reassign
 /// A shell command that timed out and was replaced by an empty string.
 pub const SHELL_TIMEOUT_CODE: &str = "dm.shell.timeout_recovered";
 
+/// A malformed structured link title, read as plain text.
+pub const LINK_MALFORMED_TITLE_CODE: &str = renderable::output::link_metadata::MALFORMED_STRUCTURED_TITLE;
+/// A leftover `key=value` link title, read as plain text.
+pub const LINK_LEGACY_TITLE_CODE: &str = renderable::output::link_metadata::LEGACY_STRUCTURED_TITLE;
+
+/// The diagnostic codes `md render` reports too, with what they report.
+pub const RENDER_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
+    (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
+    (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
+];
+
 /// The code of a missing reference target of `kind`, when a recovery
 /// governs that kind.
 pub fn missing_reference_code(kind: ReferenceKind) -> Option<&'static str> {
@@ -68,6 +79,8 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (INVALID_FRONTMATTER_ASSIGNMENT_CODE, "an invalid `set=` assignment on a `::file` directive"),
     (REASSIGNED_FRONTMATTER_PROPERTY_CODE, "a property a `::file` directive assigns twice"),
     (SHELL_TIMEOUT_CODE, "a shell command timeout replaced by an empty string"),
+    (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
+    (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
     (super::collection_blocks::diagnostics::MALFORMED_CODE, "a malformed `::map` / `::filter` region, header, or option"),
     (super::collection_blocks::diagnostics::UNTYPED_MAP_SOURCE_CODE, "a `::map` source with no iterable declaration"),
     (super::collection_blocks::diagnostics::UNTYPED_FILTER_SOURCE_CODE, "a `::filter` source with no iterable declaration"),

@@ -1218,6 +1218,22 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   text it describes, so a body rewritten by an untracked path stops
   projecting instead of projecting wrongly. A new stage that rewrites the body
   before interpolation must report its edits through `body_origin::advance`.
+  It also records the construct each written run came from
+  (`BodyOrigin::producer_of`), resolved through the map before the edit, so an
+  edit inside produced text keeps the original producer. Never infer a producer
+  from the gap between neighboring segments: adjacent replacements and
+  replacements at a body edge have no unique gap.
+- **References.** `reference/graph.rs` reads the map from
+  `ComposeReport::body_origin` and fills `ReferenceOrigin::authored`,
+  `ReferenceOrigin::section`, and `ReferenceInsertion::authored_directive_line`
+  (`AuthoredLocator`). `origin.line`, `origin.span`, and `directive_line` stay in
+  prepared space because the file-tree model matches in that frame. Only a
+  document with a `File` source and loaded text is located; an in-memory or
+  remote one has `authored: None` and still has a section.
+- **`when=` on a transclusion.** `TransclusionError::ConditionEval` carries the
+  loaded file as `ctx`, the authored `line`, and the opener as `authored`
+  (`site_scope::authored_opener`); without a proven opener `ctx` is the current
+  body and `authored` is `None`, which reports no diagnostic `source`.
 - **Frontmatter.** `interpolate_frontmatter_located` records the failing
   string's key/index path and the construct's span in it; the pipeline walks
   the crate-private `locate_frontmatter_value` (the schema locator's tolerant

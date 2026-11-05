@@ -699,15 +699,16 @@ mod shared_fields {
                 other => panic!("unexpected severity {other}"),
             },
             message: diagnostic["message"].as_str().unwrap().to_string(),
-            source: Some(DiagnosticSource {
-                file: Some(file.to_path_buf()),
-                line: start["line"].as_u64().unwrap() as usize + 1,
-                column: start["character"].as_u64().unwrap() as usize + 1,
-            }),
+            source: Some(DiagnosticSource::at(
+                Some(file.to_path_buf()),
+                start["line"].as_u64().unwrap() as usize + 1,
+                start["character"].as_u64().unwrap() as usize + 1,
+            )),
             expected_type: diagnostic["data"]["expected_type"].as_str().map(str::to_string),
             actual_type: diagnostic["data"]["actual_type"].as_str().map(str::to_string),
             span: None,
             iteration_path: Default::default(),
+            reference_details: None,
         }
     }
 
@@ -777,7 +778,7 @@ mod shared_fields {
             assert_eq!(error_diagnostics(&error), editor, "{label}: the report's records");
             let [record] = editor.as_slice() else { panic!("{label}: one record: {editor:#?}") };
             assert_eq!(record.code, INCOMPATIBLE, "{label}");
-            assert_eq!(record.source.as_ref().map(|source| source.line), Some(4), "{label}");
+            assert_eq!(record.source.as_ref().and_then(|source| source.line), Some(4), "{label}");
             assert_eq!(record.expected_type.as_deref(), Some("number"), "{label}");
             assert_eq!(record.actual_type.as_deref(), Some("literal true"), "{label}");
         }
@@ -824,7 +825,7 @@ mod shared_fields {
                 assert_eq!(record.severity, Severity::Error);
                 assert_eq!(
                     record.source,
-                    Some(DiagnosticSource { file: Some(workspace.path().join("doc.md")), line: $line, column: $column })
+                    Some(DiagnosticSource::at(Some(workspace.path().join("doc.md")), $line, $column))
                 );
                 assert_eq!(record.expected_type.as_deref(), Some("number"));
                 assert_eq!(record.actual_type.as_deref(), Some("literal true"));

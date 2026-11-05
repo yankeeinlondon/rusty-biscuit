@@ -373,7 +373,7 @@ fn check(name: &str, kind: CollectionKind) {
     assert_eq!(record.code, case.code, "{what}");
     let source = record.source.as_ref().unwrap_or_else(|| panic!("record source, {what}"));
     assert_eq!(source.file.as_deref().and_then(Path::file_name), Some("doc.md".as_ref()), "{what}");
-    assert_eq!(source.line, case.line, "record line, {what}");
+    assert_eq!(source.line, Some(case.line), "record line, {what}");
     let span = record.span.clone().unwrap_or_else(|| panic!("record span, {what}"));
     let span_line = document[..span.start].matches('\n').count() + 1;
     assert_eq!(span_line, case.line, "record span {span:?}, {what}");
@@ -383,7 +383,7 @@ fn check(name: &str, kind: CollectionKind) {
         let line = physical.strip_prefix("> ").unwrap_or(physical);
         let prefix = physical.len() - line.len();
         let start = line_start + prefix;
-        assert_eq!(source.column, prefix + 1, "command column, {what}");
+        assert_eq!(source.column, Some(prefix + 1), "command column, {what}");
         assert_eq!(span.start, start, "command byte start, {what}");
         assert!(span.end > start && span.end <= start + line.len(), "command extent {span:?}, {what}");
         assert!(line.starts_with(&document[span]), "authored command slice, {what}");
@@ -475,7 +475,7 @@ fn a_child_failure_under_a_repeated_file_joins_the_parent_and_child_paths() {
         assert_eq!(record.iteration_path.to_string(), "data[1] → d[0]", "{kind:?}: {record:?}");
         let source = record.source.as_ref().expect("the child's own site");
         assert_eq!(source.file.as_deref().and_then(Path::file_name), Some("bad.md".as_ref()), "{kind:?}");
-        assert_eq!(source.line, 6, "{kind:?}");
+        assert_eq!(source.line, Some(6), "{kind:?}");
     }
 }
 

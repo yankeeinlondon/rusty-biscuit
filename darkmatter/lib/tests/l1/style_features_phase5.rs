@@ -31,7 +31,7 @@ const MERMAID_DOC: &str = "```mermaid\ngraph TD; A --> B\n```\n";
 const TWO_MERMAID_DOC: &str =
     "```mermaid\ngraph TD; A --> B\n```\n\n```mermaid\nsequenceDiagram\n  A->>B: hi\n```\n";
 
-const PROMPTED_LINK_DOC: &str = "[Home](https://example.com \"prompt='go home'\")\n";
+const PROMPTED_LINK_DOC: &str = "[Home](https://example.com '{ prompt: \"go home\" }')\n";
 
 /// A code-block document with no feature request and default page layout — the
 /// standalone full-page fixture.
@@ -319,7 +319,7 @@ fn decorated_standalone_document_has_ordered_head_and_wrapper_only_body() {
 fn feature_bearing_standalone_document_places_feature_assets_in_head() {
     const MERMAID_AND_POPOVER_DOC: &str = concat!(
         "```mermaid\ngraph TD; A --> B\n```\n\n",
-        "[Home](https://example.com \"prompt='go home'\")\n",
+        "[Home](https://example.com '{ prompt: \"go home\" }')\n",
     );
 
     let md = Markdown::try_from_content(MERMAID_AND_POPOVER_DOC).expect("parse mermaid+popover doc");

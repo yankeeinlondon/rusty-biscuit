@@ -7,10 +7,12 @@
 //! failure, is classified by its
 //! typed error into a code of the same `dm.<family>.<kind>` taxonomy DMLS
 //! reports, with `source` and the types left `None` where the error holds no
-//! authored position. A failure inside a repeated `::map` / `::filter` copy
-//! also carries the typed `span` and `iteration_path` its error holds, so
-//! every host reports the same provenance. Classification reads only the
-//! error and warning values: it evaluates nothing and reads no file.
+//! authored position. A reference issue always has a `source`: its file, and
+//! its authored position when the document has one. A failure inside a
+//! repeated `::map` / `::filter` copy also carries the typed `span` and
+//! `iteration_path` its error holds, so every host reports the same
+//! provenance. Classification reads only the error and warning values: it
+//! evaluates nothing and reads no file.
 //!
 //! See `darkmatter/docs/cli/report-json.md` for the report shape.
 
@@ -21,8 +23,11 @@ use super::TransclusionError;
 use super::conditions::ConditionError;
 use super::context::report::ComposeWarning;
 use super::expression::iteration::IterationPath;
-use super::expression::{Diagnostic, DiagnosticSource, ExpressionError, Severity};
+use super::expression::{Diagnostic, DiagnosticSource, ExpressionError, ReferenceDetails, Severity};
 use super::page_blocks::PageBlockError;
+use super::ComposeSource;
+use crate::markdown::errors::resolution_failure_name;
+use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::validate::{ReferenceIssue, ReferenceIssueCode, ReferenceSeverity};
 use crate::markdown::types::{MarkdownError, SourceRef};
 
@@ -67,8 +72,9 @@ pub fn warning_diagnostic(warning: &ComposeWarning) -> Diagnostic {
 /// local target takes its kind's recovery code
 /// ([`missing_reference_code`](super::policy::missing_reference_code)).
 ///
-/// The validator records an issue's line but not its column, so `source` is
-/// `None`; the message names the target.
+/// `source` is never `None`. A document with no authored positions (built in
+/// memory or fetched) reports its name, or its URL, with a null line and
+/// column.
 pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
     let code = match issue.code {
         ReferenceIssueCode::MissingLocalTarget => {
@@ -81,7 +87,34 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         ReferenceSeverity::Warning => Severity::Warning,
         ReferenceSeverity::Info => Severity::Info,
     };
-    unlocated(code, severity, issue.message.clone())
+    let authored = issue.origin.authored.as_ref();
+    Diagnostic {
+        code: code.to_string(),
+        severity,
+        message: issue.message.clone(),
+        source: Some(DiagnosticSource {
+            file: match &issue.origin.source {
+                ComposeSource::File(path) => Some(path.clone()),
+                ComposeSource::Url(url) => Some(url.as_str().into()),
+                ComposeSource::Unknown => None,
+            },
+            line: authored.map(|location| location.line),
+            column: authored.map(|location| location.column),
+            section: issue.origin.section.clone(),
+            inserted: authored.is_some_and(|location| location.inserted),
+        }),
+        expected_type: None,
+        actual_type: None,
+        span: authored.map(|location| location.span.clone()),
+        iteration_path: IterationPath::empty(),
+        reference_details: Some(ReferenceDetails {
+            reason: Some(issue.code.reason_phrase().to_string()),
+            construct: Some(issue.origin.syntax.construct_phrase().trim_start_matches("in ").to_string()),
+            reference: Some(issue.reference_display.clone()),
+            failure: issue.resolution_failure().map(|failure| resolution_failure_name(failure).to_string()),
+            included_via: Some(issue.included_via.clone()),
+        }),
+    }
 }
 
 /// The diagnostics a failed composition reports for `error`, found anywhere
@@ -206,14 +239,15 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                 severity: Severity::Error,
                 message: problem.message.clone(),
                 source: problem.line.map(|line| DiagnosticSource {
-                    file: Some(path.clone()),
-                    line: line as usize,
-                    column: problem.column.map_or(1, |column| column as usize),
+                    line: Some(line as usize),
+                    column: problem.column.map(|column| column as usize),
+                    ..DiagnosticSource::file_only(Some(path.clone()))
                 }),
                 expected_type: None,
                 actual_type: None,
                 span: None,
                 iteration_path: IterationPath::empty(),
+                reference_details: None,
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
@@ -226,7 +260,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
 fn located(source: &SourceRef) -> Option<(DiagnosticSource, std::ops::Range<usize>)> {
     match source {
         SourceRef::OnDiskSpan { context, span } => Some((
-            DiagnosticSource { file: named(&context.display), line: span.line(), column: span.column() },
+            DiagnosticSource::at(named(&context.display), span.line(), span.column()),
             span.range(),
         )),
         _ => None,
@@ -244,15 +278,17 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
     let (code, source) = match error {
         MarkdownError::FrontmatterParse { ctx, source } => (
             FRONTMATTER_PARSE_CODE,
-            source.location().map(|location| DiagnosticSource {
-                file: named(&ctx.display),
-                line: frontmatter_file_line(ctx, location.line()),
-                column: location.column().max(1),
+            source.location().map(|location| {
+                DiagnosticSource::at(
+                    named(&ctx.display),
+                    frontmatter_file_line(ctx, location.line()),
+                    location.column().max(1),
+                )
             }),
         ),
         MarkdownError::FrontmatterFenceMismatch { ctx, line, .. } => (
             FRONTMATTER_PARSE_CODE,
-            Some(DiagnosticSource { file: named(&ctx.display), line: *line, column: 1 }),
+            Some(DiagnosticSource::at(named(&ctx.display), *line, 1)),
         ),
         MarkdownError::SchemaValidationFailed { .. } => (simplified_schema::SCHEMA_PREPARE_CODE, None),
         MarkdownError::FileLoad(_) | MarkdownError::UrlFetch(_) => (INPUT_READ_CODE, None),
@@ -263,7 +299,13 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
                 TransclusionError::ConditionEval { .. } => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
                 _ => TRANSCLUSION_FAILURE_CODE,
             },
-            None,
+            match inner.as_ref() {
+                TransclusionError::ConditionEval { ctx, authored: Some(authored), .. } => {
+                    span = Some(authored.range());
+                    Some(DiagnosticSource::at(named(&ctx.display), authored.line(), authored.column()))
+                }
+                _ => None,
+            },
         ),
         MarkdownError::PageBlock(inner) => (
             match inner.as_ref() {
@@ -277,7 +319,15 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         ),
         MarkdownError::Collection(inner) => (inner.code(), proven(inner.site().map(|site| site.source.as_ref()))),
         MarkdownError::ShellBlock(_) => (SHELL_FAILURE_CODE, None),
-        MarkdownError::Reference(_) => (REFERENCE_FAILURE_CODE, None),
+        MarkdownError::Reference(inner) => (
+            REFERENCE_FAILURE_CODE,
+            // The directive's line is in the prepared body, so only the file
+            // is authored.
+            match inner.as_ref() {
+                ReferenceError::ParseDirective { ctx, .. } => Some(DiagnosticSource::file_only(named(&ctx.display))),
+                _ => None,
+            },
+        ),
         MarkdownError::ParameterBinding { .. } | MarkdownError::CallerFileClassificationChanged { .. } => {
             (PARAMETER_BINDING_CODE, None)
         }
@@ -292,7 +342,23 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         actual_type: None,
         span,
         iteration_path: IterationPath::empty(),
+        reference_details: match error {
+            MarkdownError::Reference(inner) => reference_error_details(inner),
+            _ => None,
+        },
     }
+}
+
+/// What a reference check that could not run knows about its reference.
+fn reference_error_details(error: &ReferenceError) -> Option<ReferenceDetails> {
+    let failure = error.resolution_failure().map(|failure| resolution_failure_name(failure).to_string());
+    let (reason, reference) = match error {
+        ReferenceError::MissingSourceContext { reference, .. } => {
+            (Some(ReferenceIssueCode::MissingSourceContext.reason_phrase().to_string()), Some(reference.clone()))
+        }
+        _ => (None, None),
+    };
+    (failure.is_some() || reason.is_some()).then_some(ReferenceDetails { reason, reference, failure, ..Default::default() })
 }
 
 fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
@@ -377,5 +443,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         actual_type: None,
         span: None,
         iteration_path: IterationPath::empty(),
+        reference_details: None,
     }
 }

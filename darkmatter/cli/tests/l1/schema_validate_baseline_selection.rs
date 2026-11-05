@@ -434,7 +434,7 @@ fn pretty(
 const NO_SCHEMA_CLAIM: &str = "doesn't have a schema definition";
 const EMBEDDED_BASELINE_CLAIM: &str =
     "does not have an explicit schema definition but it is valid based on the Darkmatter default schema.";
-const DECLARED_SCHEMA_CLAIM: &str = "has a schema definition and is valid.";
+const DECLARED_SCHEMA_CLAIM: &str = "has a schema definition and is valid";
 
 #[test]
 fn default_accepts_the_authoring_example() {
@@ -491,7 +491,64 @@ Body
 
     let (code, stdout) = pretty(&process, &[], None, &document);
     assert_eq!(code, Some(0), "{stdout}");
-    assert!(stdout.contains(DECLARED_SCHEMA_CLAIM), "{stdout}");
+    assert!(
+        stdout.contains(
+            "has a schema definition and is valid based on its inline $schema and the Darkmatter default schema."
+        ),
+        "{stdout}"
+    );
+
+    let run = run_json(&process, Selection::default(), &[], &document);
+    assert_eq!(
+        run.record["layers"],
+        serde_json::json!({
+            "document": { "form": "inline" },
+            "triggers": [],
+            "baseline": { "form": "darkmatter" },
+        }),
+        "{}",
+        run.stdout
+    );
+}
+
+/// A file-reference `$schema` and a matching trigger over the embedded
+/// baseline are each named, in layering order: document, triggers, baseline.
+#[test]
+fn every_applied_layer_is_named() {
+    let process = CliProcessFixture::new();
+    assert!(process.initialize_repository());
+    let cwd = process.cwd();
+    std::fs::create_dir_all(cwd.join("schemas")).unwrap();
+    std::fs::write(
+        cwd.join("schemas/post.trigger.yaml"),
+        "kind: schema-trigger\nmatch:\n  mode: enum(post; required)\n$schema:\n  post_field: string(required)\n",
+    )
+    .unwrap();
+    std::fs::write(cwd.join("doc-schema.yaml"), "$schema:\n  title: string\n").unwrap();
+    let document = cwd.join("doc.md");
+    std::fs::write(
+        &document,
+        "---\n$schema: ./doc-schema.yaml\nmode: post\npost_field: x\ntitle: Hi\n---\nBody\n",
+    )
+    .unwrap();
+
+    let (code, stdout) = pretty(&process, &[], None, &document);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(
+        stdout.contains(
+            "has a schema definition and is valid based on its $schema ./doc-schema.yaml, \
+             the trigger schema post.trigger.yaml, and the Darkmatter default schema."
+        ),
+        "{stdout}"
+    );
+
+    let run = run_json(&process, Selection::default(), &[], &document);
+    let layers = &run.record["layers"];
+    assert_eq!(layers["document"], serde_json::json!({ "form": "reference", "reference": "./doc-schema.yaml" }));
+    assert_eq!(layers["baseline"], serde_json::json!({ "form": "darkmatter" }));
+    let triggers = layers["triggers"].as_array().expect("a trigger list");
+    assert_eq!(triggers.len(), 1, "{}", run.stdout);
+    assert!(triggers[0].as_str().unwrap().ends_with("post.trigger.yaml"), "{}", run.stdout);
 }
 
 #[test]

@@ -159,7 +159,8 @@ create-file fix except for a broken Markdown link). Compare failures only by `Re
 `MarkdownError::resolution_failure()` walks the cause chain (nested children,
 `TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
 `ComposeWarning::resolution_failure` carries it, and `md` renders it as a
-`failure: <kebab-class>` row on every block and warning
+`failure: <kebab-class>` row on every block and warning except the reference
+report, whose reason phrase states it
 (`darkmatter/docs/errors/file-reference-failures.md` is its user contract);
 Claudine's prompt-argument errors carry the same row
 (`CompositionError::resolution_failure`).

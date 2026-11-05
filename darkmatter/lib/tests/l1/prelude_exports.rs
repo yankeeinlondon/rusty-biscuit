@@ -92,14 +92,10 @@ fn prelude_exports_validation_report_view() {
     let view = ValidationReportView::new(report);
     let term = biscuit_terminal::terminal::Terminal::default();
 
-    // An empty validation report renders to empty output. The point of this
-    // assertion is that `.render(&term)` resolves through the prelude-imported
-    // `TerminalRenderable` trait.
+    // The point of this assertion is that `.render(&term)` resolves through
+    // the prelude-imported `TerminalRenderable` trait.
     let output = view.render(&term);
-    assert!(
-        output.is_empty(),
-        "empty validation report should render empty"
-    );
+    assert!(output.contains("all ok"), "{output}");
 }
 
 #[test]

@@ -42,6 +42,7 @@ impl From<ConditionError> for TransclusionError {
                 ctx,
                 expr,
                 line,
+                authored: None,
                 cause,
             },
         }

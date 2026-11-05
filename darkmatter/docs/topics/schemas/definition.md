@@ -1048,7 +1048,7 @@ tags:
 `md schema validate post.md draft.md` prints one block per file:
 
 ```
-- ✔ the document post.md has a schema definition and is valid.
+- ✔ the document post.md has a schema definition and is valid based on its $schema ./schemas/post.yaml and the Darkmatter default schema.
 - ✗ the document draft.md failed schema validation:
     - title is a required property (at line 2, column 1)
         The post's title
@@ -1074,8 +1074,8 @@ For root-union failures, problems are prefixed with `arm[N]`:
 ### JSON Output
 
 ```json
-{"file":"post.md","valid":true,"schema":"./schemas/post.yaml","problems":[]}
-{"file":"draft.md","valid":false,"schema":"./schemas/post.yaml","problems":[
+{"file":"post.md","valid":true,"schema":"./schemas/post.yaml","layers":{"document":{"form":"reference","reference":"./schemas/post.yaml"},"triggers":[],"baseline":{"form":"darkmatter"}},"problems":[]}
+{"file":"draft.md","valid":false,"schema":"./schemas/post.yaml","layers":{"document":{"form":"reference","reference":"./schemas/post.yaml"},"triggers":[],"baseline":{"form":"darkmatter"}},"problems":[
   {"path":"","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The post's title"},
   {"path":"/tags/1","property":null,"message":"42 is not of type \"string\"","kind":"type","line":6,"column":5,"arm_index":null,"description":null}
 ]}
@@ -1092,7 +1092,17 @@ description string when one is resolved, or `null` when the property declares no
 description (or the description was suppressed because it was whitespace-only or
 byte-for-byte equal to the problem message).
 
-The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when the built-in or a custom baseline validated it. The pretty output distinguishes that case too: see [Behavior Without `$schema`](#behavior-without-schema).
+The `schema` field names the document's own `$schema`. It is `null` for a document without one, even when a trigger or a baseline validated it.
+
+The `layers` object says which schema layers judged the document, so a consumer never has to infer it from `schema`:
+
+| Key | Value |
+| --- | --- |
+| `document` | `null` when the document has no schema of its own; otherwise `{"form": "inline"}`, `{"form": "union"}`, `{"form": "reference", "reference": "./schemas/post.yaml"}`, or, for a YAML document, `{"form": "definition", "reference": "<label>"}` |
+| `triggers` | the matching triggers that layered a schema, in layering order: a file trigger as its path, a bundled one as `embedded:{bundle}/{name}`; `[]` when none matched |
+| `baseline` | `null` when no baseline applied; otherwise `{"form": "darkmatter"}` for the built-in one or `{"form": "custom", "reference": "./my-baseline.yaml"}` |
+
+The pretty output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
 Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"`, `"yaml_parse"`, or `"schema"`) and an empty `problems` array; a `yaml_parse` entry also has the failure's `line` and `column`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
@@ -1179,11 +1189,14 @@ The same locations appear in `md compose`'s [schema-failure block](#error-render
 
 ### Behavior Without `$schema`
 
-- A matching [schema trigger](authoring-schemas.md) counts as a schema definition: `pretty` mode prints `has a schema definition and is valid.`
-- With no matching trigger, the document is validated against the baseline alone, which is the built-in one unless [selected otherwise](#selecting-the-baseline). `pretty` mode does not claim a schema definition; it names the baseline that judged the document:
-  - built-in: `does not have an explicit schema definition but it is valid based on the Darkmatter default schema.`
-  - custom: `does not have an explicit schema definition but it is valid based on the baseline schema ./my-baseline.yaml.`
-- Without a baseline and without `$schema` or a matching trigger, validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
+A document without `$schema` has no explicit schema definition, but matching [schema triggers](authoring-schemas.md) and the baseline (the built-in one unless [selected otherwise](#selecting-the-baseline)) still judge it. `pretty` mode says so and names each layer that applied:
+
+- trigger and baseline: `does not have an explicit schema definition but it is valid based on the trigger schema post.trigger.yaml and the Darkmatter default schema.`
+- built-in baseline alone: `does not have an explicit schema definition but it is valid based on the Darkmatter default schema.`
+- custom baseline alone: `does not have an explicit schema definition but it is valid based on the baseline schema ./my-baseline.yaml.`
+- nothing (no baseline, no matching trigger): validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
+
+A document with `$schema` opens with `has a schema definition and is valid based on` and names its own schema first (`its inline $schema`, `its $schema ./schemas/post.yaml`, or `its $schema union`), then the same trigger and baseline layers.
 
 ## CLI: `md schema detect`
 
@@ -1375,7 +1388,8 @@ instead; see [Validating from the Library](#validating-from-the-library).
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's winning declaration: document, referenced file, trigger, or baseline; see [Embedded trigger bundles](#embedded-trigger-bundles) for reading a trigger's source). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column` (see [Problem Locations](#problem-locations)), optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
-| `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: `has_schema` is `false` when no baseline, trigger, or `$schema` applied. |
+| `PreparationSummary`  | What the effective-schema resolution behind `DarkmatterSchemas::validate_summarized` found, returned beside its report: its `layers` and `has_schema()`, which is `false` when no baseline, trigger, or `$schema` applied. |
+| `SchemaLayers`        | Which layers an effective schema merged: `document` (the document's own `$schema`), `triggers` (the matching `TriggerSource`s that layered a payload), and `baseline`. Read from `PreparationSummary::layers` or `EffectiveSchema::layers()`. |
 | `ValidationTimings`   | Stage breakdown of one validation, from `DarkmatterSchemas::validate_timed` (same result as `validate`, timings on failure too) or `ValidationTimings::record(|| ...)`: per-`ValidationStage` durations (`discover`, `match`, `resolve`, `compile`, `validate`), `total()`, `unassigned()`, `compile_cache()` (`CompileCache::Hit` / `Miss` / `NotRequested`), and `matched_triggers()`. See [Stage timings](../../inline/schema-validation.md#stage-timings--vv). |
 | `PositionMap`         | Opaque source positions for one frontmatter snapshot, passed to `validate_with_positions`. `PositionMap::new()` (also `Default`) is empty and source-free; `is_empty()` reports whether any position can be given; `validate::build_position_map(yaml)` builds one from bare YAML. |
 | `ValidationProblemCode` | Fine-grained problem taxonomy: `MissingRequired`, `TypeMismatch`, `ConstraintViolation`, `UnknownKey`, `InvalidFileReference`, and `KindCheck` (a YAML document's [kind check](#kind-checks)). |

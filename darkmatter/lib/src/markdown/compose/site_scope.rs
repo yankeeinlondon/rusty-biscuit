@@ -181,6 +181,22 @@ pub(crate) fn scope_failure(
     }
 }
 
+/// The loaded file of `markdown` and the opener of the directive occupying
+/// `span` of the current body in it, past the directive's indentation. No
+/// stage writes an opener, so only a lost map leaves it unlocated.
+pub(crate) fn authored_opener(
+    markdown: &Markdown,
+    origin: Option<&BodyOrigin>,
+    span: &Range<usize>,
+) -> Option<(biscuit_terminal::errors::SourceContext, AuthoredSpan)> {
+    let context = markdown.loaded_source_context_for_errors()?;
+    let directive = markdown.content().get(span.clone())?;
+    let start = span.end - directive.trim_start_matches([' ', '\t']).len();
+    let opener = origin?.project(&(start..start + 1))?;
+    let located = AuthoredSpan::locate(&context.content, opener)?;
+    Some((context, located))
+}
+
 /// Where `span` of the current body sits in `markdown`'s loaded file: the
 /// whole span when every byte of it is authored, otherwise its opener (the
 /// directive marker no stage writes), otherwise the file alone.

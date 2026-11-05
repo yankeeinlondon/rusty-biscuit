@@ -154,6 +154,7 @@ fn condition_eval_shows_expr_and_state_hint() {
         ctx: Box::new(test_ctx_lines(15, "doc.md")),
         expr: "length(items) > 0".into(),
         line: 10,
+        authored: None,
         cause: Box::new(ExpressionError::Other {
             function: "length".into(),
             message: "items not found".into(),

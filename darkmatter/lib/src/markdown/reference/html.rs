@@ -93,12 +93,13 @@ fn collect_from_html_nodes(
 
     let line_index = super::local::LineIndex::new(content);
     let mut records = Vec::new();
-    walk_html_nodes(&root, source, &line_index, classifier, &mut records);
+    walk_html_nodes(&root, content, source, &line_index, classifier, &mut records);
     records
 }
 
 fn walk_html_nodes(
     node: &Node,
+    content: &str,
     source: &ComposeSource,
     line_index: &super::local::LineIndex,
     classifier: fn(&str, &ComposeSource, usize, usize, usize) -> Option<ReferenceRecord>,
@@ -119,13 +120,19 @@ fn walk_html_nodes(
         if lines.len() > 1 {
             let mut offset = span_start;
             for (li, tag_line) in lines.iter().enumerate() {
-                let line_end = offset + tag_line.len();
-                if let Some(record) = classifier(tag_line, source, base_line + li, offset, line_end)
+                // The node's value omits what its lines carry in `content`
+                // but it does not: a `\r` and any container prefix.
+                let line_start = content
+                    .get(offset..)
+                    .and_then(|rest| rest.find(tag_line))
+                    .map_or(offset, |found| offset + found);
+                let line_end = line_start + tag_line.len();
+                if let Some(record) =
+                    classifier(tag_line, source, base_line + li, line_start, line_end)
                 {
                     records.push(record);
                 }
-                // +1 for the newline character
-                offset = line_end + 1;
+                offset = line_end;
             }
         } else if let Some(record) =
             classifier(&html_node.value, source, base_line, span_start, span_end)
@@ -136,7 +143,7 @@ fn walk_html_nodes(
 
     if let Some(children) = node.children() {
         for child in children {
-            walk_html_nodes(child, source, line_index, classifier, records);
+            walk_html_nodes(child, content, source, line_index, classifier, records);
         }
     }
 }
@@ -173,6 +180,8 @@ fn classify_a_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlAnchor,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -217,6 +226,8 @@ fn classify_img_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlImage,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -243,6 +254,8 @@ fn classify_video_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlVideoTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -269,6 +282,8 @@ fn classify_audio_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlAudioTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -295,6 +310,8 @@ fn classify_source_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlSourceTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -321,6 +338,8 @@ fn classify_iframe_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlIframeTag,
+            authored: None,
+            section: None,
         },
         attributes: serde_json::Map::new(),
     })
@@ -351,6 +370,8 @@ fn classify_style_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlStyleTag,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -378,6 +399,8 @@ fn classify_script_tag(
                 line,
                 span: span_start..span_end,
                 syntax: ReferenceSyntax::HtmlScriptTag,
+                authored: None,
+                section: None,
             },
             attributes: serde_json::Map::new(),
         })
@@ -398,6 +421,8 @@ fn classify_script_tag(
                 line,
                 span: span_start..span_end,
                 syntax: ReferenceSyntax::HtmlScriptTag,
+                authored: None,
+                section: None,
             },
             attributes,
         })
@@ -454,6 +479,8 @@ fn classify_link_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlLinkTag,
+            authored: None,
+            section: None,
         },
         attributes,
     })
@@ -498,6 +525,8 @@ fn classify_meta_tag(
             line,
             span: span_start..span_end,
             syntax: ReferenceSyntax::HtmlMetaTag,
+            authored: None,
+            section: None,
         },
         attributes,
     })

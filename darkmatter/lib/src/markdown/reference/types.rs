@@ -79,40 +79,6 @@ pub enum ReferenceKind {
     MetaTag,
 }
 
-impl ReferenceKind {
-    /// Human-readable category label used when grouping validation issues.
-    pub fn validation_category_label(self) -> &'static str {
-        match self {
-            ReferenceKind::Hyperlink => "Invalid Hyperlink(s)",
-            ReferenceKind::Image => "Invalid Image Reference(s)",
-            ReferenceKind::HtmlVideo
-            | ReferenceKind::HtmlAudio
-            | ReferenceKind::HtmlSource => "Invalid Media Reference(s)",
-            ReferenceKind::HtmlIframe => "Invalid Iframe(s)",
-            ReferenceKind::Transclusion => "Invalid Transclusion Target(s)",
-            ReferenceKind::CssImport | ReferenceKind::InlineCss => "Invalid CSS Import(s)",
-            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => "Invalid Script Import(s)",
-            ReferenceKind::FontImport => "Invalid Font Import(s)",
-            ReferenceKind::MetaTag => "Invalid Meta Tag(s)",
-        }
-    }
-
-    /// Stable ordering key used when grouping validation issues by kind.
-    pub fn validation_order(self) -> u8 {
-        match self {
-            ReferenceKind::Transclusion => 0,
-            ReferenceKind::Hyperlink => 1,
-            ReferenceKind::Image => 2,
-            ReferenceKind::HtmlVideo | ReferenceKind::HtmlAudio | ReferenceKind::HtmlSource => 3,
-            ReferenceKind::HtmlIframe => 4,
-            ReferenceKind::CssImport | ReferenceKind::InlineCss => 5,
-            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => 6,
-            ReferenceKind::FontImport => 7,
-            ReferenceKind::MetaTag => 8,
-        }
-    }
-}
-
 /// The syntactic form in which a reference appears.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -162,6 +128,31 @@ pub enum ReferenceSyntax {
 }
 
 impl ReferenceSyntax {
+    /// The construct a problem is reported in: `in hyperlink`, `in ::code`.
+    pub fn construct_phrase(self) -> &'static str {
+        match self {
+            Self::MarkdownLink | Self::HtmlAnchor => "in hyperlink",
+            Self::MarkdownImage | Self::HtmlImage => "in image",
+            Self::HtmlVideoTag => "in <video>",
+            Self::HtmlAudioTag => "in <audio>",
+            Self::HtmlSourceTag => "in <source>",
+            Self::HtmlIframeTag => "in <iframe>",
+            Self::DirectiveFile => "in ::file",
+            Self::DirectiveCode => "in ::code",
+            Self::DirectiveUrl => "in ::url",
+            Self::DirectiveTocLinking => "in ::toc-linking",
+            Self::DirectiveFileLinks => "in ::file-links",
+            Self::FrontmatterPrologue => "in prologue:",
+            Self::FrontmatterEpilogue => "in epilogue:",
+            Self::HtmlLinkTag => "in <link>",
+            Self::HtmlScriptTag => "in <script>",
+            Self::HtmlStyleTag => "in <style>",
+            Self::CssAtImport => "in CSS @import",
+            Self::CssFontFaceSrc => "in CSS @font-face",
+            Self::HtmlMetaTag => "in <meta>",
+        }
+    }
+
     /// Returns `true` if this syntax kind represents a transclusion that can
     /// be expanded into a nested `FileTree` subtree.
     ///
@@ -237,17 +228,53 @@ pub fn classify_target(raw: &str) -> ReferenceTarget {
 
 // ── Provenance ──────────────────────────────────────────────────────
 
+/// Where a reference sits in the file its document was loaded from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AuthoredReferenceLocation {
+    /// 1-based line of `span`'s first byte in the file.
+    pub line: usize,
+    /// 1-based character column of `span`'s first byte. A byte-order mark does
+    /// not count.
+    pub column: usize,
+    /// Byte range in the file, frontmatter included.
+    ///
+    /// Covers the whole reference when all of it was authored, and only its
+    /// first character when a stage wrote part of it. When `inserted`, it
+    /// covers the construct that wrote the reference.
+    pub span: Range<usize>,
+    /// Whether an expression, a shell step, or a `replace:` value wrote the
+    /// reference's first character, so this location names that construct
+    /// rather than the reference.
+    pub inserted: bool,
+}
+
 /// Records where a reference was found.
+///
+/// `line` and `span` are in the frame the record was extracted from, for a
+/// reference graph the prepared body: frontmatter removed and every
+/// preparation stage applied. The file-tree model matches insertions in that
+/// frame. Prologue and epilogue records have no place in it and keep the
+/// sentinel lines `0` and `usize::MAX`. Report a position from `authored`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReferenceOrigin {
     /// The compose source (file, URL, or unknown).
     pub source: ComposeSource,
-    /// 1-based line number.
+    /// 1-based line number in the prepared body.
     pub line: usize,
-    /// Byte-offset span in the source content.
+    /// Byte-offset span in the prepared body.
     pub span: Range<usize>,
     /// Syntactic form of the reference.
     pub syntax: ReferenceSyntax,
+    /// The authored position, filled by reference-graph construction for a
+    /// document loaded from a file. `None` for an in-memory or remote document,
+    /// for a record extracted outside a graph, and when the position cannot
+    /// be proven; a prepared-body number is never used in its place.
+    pub authored: Option<AuthoredReferenceLocation>,
+    /// The final composed anchor slug of the innermost heading at or before
+    /// the reference in the prepared body, filled by reference-graph
+    /// construction. `None` above the first heading and for a prologue or
+    /// epilogue record.
+    pub section: Option<String>,
 }
 
 // ── Record ──────────────────────────────────────────────────────────
@@ -392,13 +419,38 @@ pub struct ReferenceInsertionContext {
     pub section_heading_level: Option<HeadingLevel>,
 }
 
+/// One step of the inclusion path that reached a reported reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReferenceTrailStep {
+    /// The including document.
+    pub file: ComposeSource,
+    /// The authored line of its including directive, when the document has
+    /// authored positions.
+    pub line: Option<usize>,
+}
+
+/// One inclusion of a document in a reference-graph traversal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReferenceReportDocument {
+    /// The included document.
+    pub source: ComposeSource,
+    /// The inclusion path that reached this copy, outermost first; empty for
+    /// the root.
+    pub included_via: Vec<ReferenceTrailStep>,
+}
+
 /// Records a child document insertion within a graph node.
 #[derive(Debug, Clone)]
 pub struct ReferenceInsertion {
     /// ID of the child node in the graph.
     pub child_node_id: NodeId,
-    /// Line number of the directive that triggers insertion.
+    /// Line of the directive that triggers insertion, in the prepared body
+    /// (`0` for a prologue and `usize::MAX` for an epilogue).
     pub directive_line: usize,
+    /// The directive's line in the file its document was loaded from, or the
+    /// line of a prologue or epilogue value. `None` under the same conditions
+    /// as [`ReferenceOrigin::authored`].
+    pub authored_directive_line: Option<usize>,
     /// Order among sibling insertions (0-based).
     pub insertion_order: usize,
     /// Links this insertion to its corresponding [`ReferenceRecord::id`].
@@ -470,6 +522,9 @@ pub struct ReferenceGraph {
     /// The skipped-trigger warnings (`dm.schema.invalid_trigger`) the build's
     /// node preparations reported, once per trigger, in discovery order.
     trigger_warnings: Vec<crate::markdown::compose::ComposeWarning>,
+    /// The warnings a validation that fails hands back: see
+    /// [`ComposeOptions::take_preflight_failure_warnings`](crate::markdown::compose::ComposeOptions::take_preflight_failure_warnings).
+    earlier_warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 impl std::fmt::Debug for ReferenceGraph {
@@ -632,6 +687,7 @@ impl ReferenceGraph {
             provenance,
             prepared_headings,
             trigger_warnings: Vec::new(),
+            earlier_warnings: Vec::new(),
         }
     }
 
@@ -641,6 +697,15 @@ impl ReferenceGraph {
     ) -> Self {
         self.trigger_warnings = warnings;
         self
+    }
+
+    pub(crate) fn with_earlier_warnings(mut self, warnings: Vec<crate::markdown::compose::ComposeWarning>) -> Self {
+        self.earlier_warnings = warnings;
+        self
+    }
+
+    pub(crate) fn earlier_warnings(&self) -> &[crate::markdown::compose::ComposeWarning] {
+        &self.earlier_warnings
     }
 
     /// The skipped-trigger warnings the build's node preparations reported.
@@ -1102,6 +1167,8 @@ mod tests {
                         line: 1,
                         span: 0..10,
                         syntax: ReferenceSyntax::MarkdownLink,
+                        authored: None,
+                        section: None,
                     },
                     attributes: serde_json::Map::new(),
                 },
@@ -1116,6 +1183,8 @@ mod tests {
                         line: 2,
                         span: 10..20,
                         syntax: ReferenceSyntax::MarkdownImage,
+                        authored: None,
+                        section: None,
                     },
                     attributes: serde_json::Map::new(),
                 },
@@ -1152,6 +1221,8 @@ mod tests {
                 line: 3,
                 span: 0..10,
                 syntax: ReferenceSyntax::MarkdownLink,
+                authored: None,
+                section: None,
             },
             attributes: serde_json::Map::new(),
         };
@@ -1190,6 +1261,7 @@ mod tests {
                     section_heading_text: None,
                     section_heading_level: None,
                 },
+                authored_directive_line: None,
             }],
         };
         let graph = ReferenceGraph::from_build(
@@ -1245,6 +1317,7 @@ mod tests {
                     section_heading_text: None,
                     section_heading_level: None,
                 },
+                authored_directive_line: None,
             }],
         };
         let graph = ReferenceGraph::from_build(

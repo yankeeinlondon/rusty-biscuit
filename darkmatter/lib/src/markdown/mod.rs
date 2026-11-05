@@ -328,6 +328,29 @@ impl Markdown {
         self.loaded.as_deref()
     }
 
+    /// The warnings of this document's link titles: a malformed structured
+    /// title, or a leftover `key=value` title. A host that renders without
+    /// composing delivers these; composition reports them itself.
+    ///
+    /// Read before anything rewrites the body: a body the document's loaded
+    /// text no longer describes has no authored position to report.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    ///
+    /// let md: Markdown = "[Docs](./a.md \"class='x'\")\n".into();
+    /// let warnings = md.link_title_warnings();
+    /// assert_eq!(warnings[0].code.as_deref(), Some("dm.link.legacy_structured_title"));
+    /// assert!(warnings[0].message.contains("md clean"));
+    /// ```
+    #[must_use]
+    pub fn link_title_warnings(&self) -> Vec<compose::ComposeWarning> {
+        let origin = compose::body_origin::BodyOrigin::capture(self);
+        compose::link_title_warnings::link_title_warnings(self, origin.as_ref())
+    }
+
     /// The exact text this document was parsed from, or `None` for a document
     /// constructed in memory. Later edits to the frontmatter or body do not
     /// change it, so a writer can splice its edits into the original bytes
@@ -1203,7 +1226,7 @@ title: Test
     /// emitted as a `data-prompt` transport attribute.
     #[test]
     fn as_html_preserves_structured_link_metadata() {
-        let md: Markdown = r#"[Read docs](https://example.com "class='btn' target='_blank' prompt='Read docs' data-id='42'")"#.into();
+        let md: Markdown = r#"[Read docs](https://example.com '{ class: "btn", target: "_blank", prompt: "Read docs", "data-id": "42" }')"#.into();
         let html = md
             .as_html(output::HtmlOptions::default())
             .expect("structured link must render");
@@ -1236,7 +1259,7 @@ title: Test
     #[test]
     fn as_html_preserves_structured_link_inline_style() {
         let md: Markdown =
-            r#"[Click here](https://example.com "class='btn' style='color:red'")"#.into();
+            r#"[Click here](https://example.com '{ class: "btn", style: "color:red" }')"#.into();
         let html = md
             .as_html(output::HtmlOptions::default())
             .expect("structured link must render");
@@ -1424,7 +1447,7 @@ title: Test
     #[test]
     fn test_markdown_links_extract_structured_metadata() {
         let md: Markdown =
-            r#"[Click](https://example.com "class='btn' prompt='Read docs'")"#.into();
+            r#"[Click](https://example.com '{ class: "btn", prompt: "Read docs" }')"#.into();
         let links = md.links();
 
         assert_eq!(links.len(), 1);

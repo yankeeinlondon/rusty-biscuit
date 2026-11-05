@@ -60,7 +60,7 @@ fn a_shipped_sidecar_judges_its_document_alike_in_darkmatter_and_the_library() {
     assert_eq!(*effective.json_schema, *library.to_json_schema().expect("lowered"), "one lowering");
 
     let (report, summary) = api.validate_summarized(&markdown).expect("report");
-    assert!(summary.has_schema);
+    assert!(summary.has_schema());
     assert!(report.valid, "{:#?}", report.problems);
     let data = frontmatter(&markdown);
     assert!(library.validate_soft(&data).is_ok(), "{:?}", library.validate_soft(&data).err());

@@ -72,6 +72,8 @@ fn extract_inline_refs(
                         line,
                         span,
                         syntax: ReferenceSyntax::MarkdownLink,
+                        authored: None,
+                        section: None,
                     },
                     attributes,
                 });
@@ -100,6 +102,8 @@ fn extract_inline_refs(
                         line,
                         span,
                         syntax: ReferenceSyntax::MarkdownImage,
+                        authored: None,
+                        section: None,
                     },
                     attributes,
                 });

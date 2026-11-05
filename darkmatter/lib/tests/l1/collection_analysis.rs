@@ -178,7 +178,7 @@ fn only_an_unknown_source_is_recoverable_and_the_warning_is_reported_once() {
     assert_eq!(analysis.recovered.len(), 2);
     assert_eq!(&source[analysis.recovered[0].span.clone()], "nope");
     let position = analysis.diagnostics[0].source.as_ref().expect("located");
-    assert_eq!((position.line, position.column), (2, 7));
+    assert_eq!((position.line, position.column), (Some(2), Some(7)));
 
     // A recovery never excuses a known scalar.
     let scalar = "::map s \"x => x\"\nb\n::end-map\n";
@@ -474,7 +474,7 @@ fn composition_reports_static_collection_defects_with_their_codes() {
         let error = compose(&root, &format!("{PEOPLE_DOCUMENT}{tail}"), |options| options).expect_err(name);
         assert_eq!(codes(&error), [code], "{name}: {error}");
         let diagnostic = &error_diagnostics(&error)[0];
-        let line = diagnostic.source.as_ref().map(|source| source.line);
+        let line = diagnostic.source.as_ref().and_then(|source| source.line);
         assert!(line.is_some_and(|line| line >= 7), "{name}: the finding is located in the file, got {line:?}");
     }
 }

@@ -376,7 +376,11 @@ pub enum TransclusionError {
     ConditionEval {
         ctx: Box<SourceContext>,
         expr: String,
+        /// The directive's line in `ctx`.
         line: usize,
+        /// The directive's opener when `ctx` is its loaded file, which makes
+        /// `line` an authored line; `None` when `ctx` is the current body.
+        authored: Option<crate::markdown::types::AuthoredSpan>,
         #[source]
         cause: Box<crate::markdown::compose::expression::ExpressionError>,
     },
@@ -621,6 +625,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 expr,
                 line,
                 cause,
+                ..
             } => {
                 let body = vec![
                     Prose::new(format!(

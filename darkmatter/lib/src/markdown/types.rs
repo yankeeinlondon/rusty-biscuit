@@ -372,7 +372,11 @@ impl From<crate::markdown::compose::ShellBlockError> for MarkdownError {
 
 impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
     fn from(err: crate::markdown::reference::ReferenceError) -> Self {
-        MarkdownError::Reference(Box::new(err))
+        match err {
+            // Stays the error it was, so every host classifies it the same.
+            crate::markdown::reference::ReferenceError::Compose(inner) => *inner,
+            other => MarkdownError::Reference(Box::new(other)),
+        }
     }
 }
 

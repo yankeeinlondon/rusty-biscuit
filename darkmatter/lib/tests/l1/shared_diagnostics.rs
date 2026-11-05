@@ -43,7 +43,7 @@ fn position_of(text: &str, needle: &str, nth: usize) -> (usize, usize) {
 }
 
 fn at(path: &Path, (line, column): (usize, usize)) -> Option<DiagnosticSource> {
-    Some(DiagnosticSource { file: Some(path.to_path_buf()), line, column })
+    Some(DiagnosticSource::at(Some(path.to_path_buf()), line, column))
 }
 
 /// Criterion 20, severity part: a category 3 call composes, and each such
@@ -68,6 +68,7 @@ fn a_category_3_call_composes_with_a_located_warning() {
         actual_type: Some("string | null".to_string()),
         span: None,
         iteration_path: Default::default(),
+        reference_details: None,
     };
     assert_eq!(found, [&expected(position_of(content, "label, 9", 0)), &expected(position_of(content, "label, 5", 0))]);
     let warning = report.warnings.iter().find(|warning| warning.diagnostic.is_some()).unwrap();
@@ -212,7 +213,10 @@ fn a_transcluded_child_warning_is_located_in_the_child() {
     let source = found[0].source.as_ref().expect("located");
     let file = source.file.as_deref().expect("a file");
     assert_eq!(file.file_name(), child_path.file_name(), "{file:?}");
-    assert_eq!((source.line, source.column), position_of(child, "label, 5", 0));
+    assert_eq!((source.line, source.column), {
+        let (line, column) = position_of(child, "label, 5", 0);
+        (Some(line), Some(column))
+    });
 }
 
 // ── collection sites ─────────────────────────────────────────────────────

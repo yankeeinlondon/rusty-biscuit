@@ -116,6 +116,7 @@ pub mod policy;
 pub mod report_diagnostics;
 pub(crate) mod pipeline;
 pub(crate) mod schema_validation;
+pub(crate) mod link_title_warnings;
 pub(crate) mod site_scope;
 pub use schema_validation::effective_schema_for;
 pub mod subtree;
@@ -307,16 +308,6 @@ impl Markdown {
         Ok((result, report))
     }
 
-    /// Composes the document over a request derived from an entry point's
-    /// request, for an inline pass inside that entry point.
-    pub(crate) fn compose_with_options(
-        &self,
-        options: ComposeRequest,
-    ) -> MarkdownResult<(Markdown, ComposeReport)> {
-        let mut result = self.clone();
-        let report = result.run_root_pipeline(options)?;
-        Ok((result, report))
-    }
 }
 
 #[cfg(test)]

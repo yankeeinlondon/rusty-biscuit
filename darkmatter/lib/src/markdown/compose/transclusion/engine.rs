@@ -675,15 +675,31 @@ impl<'a> TransclusionEngine<'a> {
                     watch.check(report)?;
                 }
                 let mut missing = Vec::new();
+                // A failure names the file line, not the rewritten body's.
+                let authored = crate::markdown::compose::site_scope::authored_opener(
+                    self.markdown,
+                    origin,
+                    &directive.span,
+                );
+                let (condition_context, condition_line) = match &authored {
+                    Some((context, span)) => (context.clone(), span.line()),
+                    None => (self.markdown.source_context_for_errors(), directive.line),
+                };
                 let should_include =
                     crate::markdown::compose::conditions::evaluate_condition_observed(
                         expr,
                         &lookup,
-                        directive.line,
-                        self.markdown.source_context_for_errors(),
+                        condition_line,
+                        condition_context,
                         &mut missing,
                     )
-                    .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
+                    .map_err(|error| {
+                        let mut error = transclusion::TransclusionError::from(error);
+                        if let transclusion::TransclusionError::ConditionEval { authored: slot, .. } = &mut error {
+                            *slot = authored.as_ref().map(|(_, span)| span.clone());
+                        }
+                        in_scope(error.into())
+                    })?;
                 report.add_unknown_root_candidates("condition", missing, |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,

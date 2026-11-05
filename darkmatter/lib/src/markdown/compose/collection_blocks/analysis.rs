@@ -263,15 +263,13 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
             "`{reference}` has no declared iterable type; `::{}` discovers its entries at runtime because the untyped-source recovery is allowed",
             plan.kind.opener()
         ),
-        source: one_based_position(source, span.start).map(|(line, column)| DiagnosticSource {
-            file: path.map(Path::to_path_buf),
-            line,
-            column,
-        }),
+        source: one_based_position(source, span.start)
+            .map(|(line, column)| DiagnosticSource::at(path.map(Path::to_path_buf), line, column)),
         expected_type: None,
         actual_type: None,
         span: None,
         iteration_path: Default::default(),
+        reference_details: None,
     };
     RecoveredSource { kind: plan.kind, reference, span, diagnostic }
 }

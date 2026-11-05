@@ -40,8 +40,8 @@ const MERMAID_DOC: &str = "```mermaid\ngraph TD; A --> B\n```\n";
 /// Two prompted links, identical target and prompt — the fixture behind the
 /// Phase 4 "repeated identical links get unique IDs" criterion.
 const TWO_PROMPTED_LINKS_DOC: &str = concat!(
-    "[Home](https://example.com \"prompt='go home'\")\n\n",
-    "[Home](https://example.com \"prompt='go home'\")\n",
+    "[Home](https://example.com '{ prompt: \"go home\" }')\n\n",
+    "[Home](https://example.com '{ prompt: \"go home\" }')\n",
 );
 
 fn page(width: u32) -> DarkmatterPage {
@@ -133,7 +133,7 @@ fn bare_body_render_has_no_wrapper_and_no_feature_assets() {
 // Prompted-link tree path (Phase 4)
 // ---------------------------------------------------------------------------
 
-/// A `prompt='…'` structured link lowers to the accessible wrapper/anchor/prompt
+/// A structured `prompt` link lowers to the accessible wrapper/anchor/prompt
 /// structure in the production tree path: the internal `data-prompt` transport is
 /// consumed (never emitted), the anchor keeps its real `href` and gains
 /// `interestfor` / `aria-describedby`, the prompt is a `popover="hint"` element
@@ -141,7 +141,7 @@ fn bare_body_render_has_no_wrapper_and_no_feature_assets() {
 #[test]
 fn prompted_link_tree_path_emits_accessible_popover() {
     let md = Markdown::try_from_content(
-        "[Click](https://example.com \"prompt='hi <b> & bye'\")\n",
+        "[Click](https://example.com '{ prompt: \"hi <b> & bye\" }')\n",
     )
     .expect("parse prompted link");
     let html = md.as_html(HtmlOptions::default()).expect("as_html");

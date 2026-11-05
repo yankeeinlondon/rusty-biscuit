@@ -350,7 +350,11 @@ pub fn run_compose(
     // A lifecycle run checks references after `initialize`, which may create
     // the files the body includes.
     let deferred_report = if resolved_input.is_some() && lifecycle.is_none() {
-        match check_references(&md, &prepare_request(options.clone())?, policy) {
+        let check_request = prepare_request(options.clone())?;
+        let check = check_references(&md, &check_request, policy).inspect_err(|error| {
+            deliver_check_failure_warnings(error, &check_request, &mut pending_triggers, sink, &term_cell);
+        })?;
+        match check {
             ReferenceCheck::Clean => None,
             ReferenceCheck::Report(report) => {
                 pending_triggers.hold(&report.trigger_warnings);
@@ -367,7 +371,7 @@ pub fn run_compose(
                     return Err(ReportedExit(2).into());
                 }
                 let term = term_cell.get_or_init(Terminal::default);
-                eprint!("{}", render_reference_report(&report, term));
+                eprint!("{}", render_reference_report(&report, &launch_dir, term));
                 eprint!("{}", render_reference_warnings(&report, term));
                 std::process::exit(2);
             }
@@ -505,6 +509,7 @@ pub fn run_compose(
             request: compose_request,
             config,
             source_path: lifecycle_source,
+            launch_dir: launch_dir.clone(),
             approval_handler: preflight_handler,
             check_references: is_file_input.then_some(policy),
             document,
@@ -624,7 +629,7 @@ pub fn run_compose(
         }
     })?;
     if sink.is_none() {
-        report_compose_diagnostics(&report, deferred_report.as_ref(), &term_cell);
+        report_compose_diagnostics(&report, deferred_report.as_ref(), &launch_dir, &term_cell);
     }
 
     // Emit perf report to stderr (after all other diagnostics)
@@ -733,8 +738,12 @@ pub(crate) enum ReferenceCheck {
 /// running one here would be an effect ahead of the shell-approval walk and
 /// its policy stop (a lifecycle request already carries the document's
 /// whitelist), and would run it again when the document composes.
-pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> ReferenceCheck {
-    use darkmatter::markdown::compose::ComposeOperation;
+///
+/// ## Errors
+///
+/// The check could not run: a document it had to prepare failed, or a file
+/// reference is invalid. That is a composition failure, never a clean result.
+pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: &ResolvedPolicy) -> Result<ReferenceCheck> {
     use darkmatter::markdown::compose::expression::Severity;
     use darkmatter::markdown::compose::policy::missing_reference_code;
     use darkmatter::markdown::reference::ReferenceGraphOptions;
@@ -742,18 +751,16 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         ReferenceIssueCode, ReferenceSeverity, ReferenceValidationOptions,
     };
 
-    let passive = request.clone().map_options(|options| options.disable(ComposeOperation::ShellExpansion));
+    let passive = request.clone().map_options(ComposeOptions::for_reference_check);
     let val_options = ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&passive));
-    let Ok(report) = md.validate_references(val_options) else {
-        return ReferenceCheck::Clean;
-    };
+    let report = md.validate_references(val_options).map_err(compose_error)?;
     let has_errors = report.issues.iter().any(|i| i.severity == ReferenceSeverity::Error);
     if report
         .issues
         .iter()
         .any(|i| i.severity == ReferenceSeverity::Error && !recovers_missing(policy, i.kind))
     {
-        return ReferenceCheck::Refused(report);
+        return Ok(ReferenceCheck::Refused(report));
     }
     // Warnings (such as a missing link inside inserted data) never fail the
     // run unless denied; report them after the content.
@@ -773,12 +780,35 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
         blocking.blocks(code, severity)
     });
     if blocked {
-        return ReferenceCheck::Refused(report);
+        return Ok(ReferenceCheck::Refused(report));
     }
     if has_errors || has_warnings {
-        return ReferenceCheck::Report(report);
+        return Ok(ReferenceCheck::Report(report));
     }
-    ReferenceCheck::Clean
+    Ok(ReferenceCheck::Clean)
+}
+
+/// Delivers what the failed reference check `error` had found before it
+/// stopped: the warnings held so far and those of the documents it prepared.
+pub(crate) fn deliver_check_failure_warnings(
+    error: &color_eyre::eyre::Report,
+    request: &ComposeRequest,
+    pending_triggers: &mut PendingTriggerWarnings,
+    sink: Option<&ReportSink>,
+    term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
+) {
+    let mut warnings = request.options().take_preflight_failure_warnings();
+    pending_triggers.merge_into(&mut warnings);
+    match sink {
+        Some(sink) => sink.warnings(&warnings),
+        None => {
+            let blocking = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<darkmatter::markdown::MarkdownError>())
+                .and_then(darkmatter::markdown::MarkdownError::blocked_diagnostics);
+            report_failure_trigger_warnings(&warnings, blocking, term_cell);
+        }
+    }
 }
 
 /// Fails with the warnings of `warnings` that `blocking` selects, carrying
@@ -808,13 +838,22 @@ pub(crate) fn blocked_diagnostics(
     }))
 }
 
+/// The report of `report`'s broken references, empty when it has none: compose
+/// has no success case to announce, and warnings are reported line by line by
+/// [`render_reference_warnings`].
 pub(crate) fn render_reference_report(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
+    launch_dir: &Path,
     term: &biscuit_terminal::terminal::Terminal,
 ) -> String {
     use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use darkmatter::markdown::reference::validate::ValidationReportView;
-    ValidationReportView::new(report.clone()).render(term)
+    if report.error_count() == 0 {
+        return String::new();
+    }
+    let mut rendered = ValidationReportView::new(report.clone()).with_launch_dir(launch_dir).render(term);
+    rendered.push('\n');
+    rendered
 }
 
 /// Maps a composition failure to the report `md` prints.
@@ -987,6 +1026,7 @@ pub(crate) fn preflight_blocked(
 pub(crate) fn report_compose_diagnostics(
     report: &darkmatter::markdown::compose::ComposeReport,
     deferred_report: Option<&darkmatter::markdown::reference::validate::ReferenceValidationReport>,
+    launch_dir: &Path,
     term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
 ) {
     use biscuit_terminal::terminal::Terminal;
@@ -1010,7 +1050,7 @@ pub(crate) fn report_compose_diagnostics(
     // Emit deferred validation issues to stderr (allowed but still reported)
     if let Some(report) = deferred_report {
         let term = term_cell.get_or_init(Terminal::default);
-        let formatted = render_reference_report(report, term);
+        let formatted = render_reference_report(report, launch_dir, term);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }
@@ -1018,9 +1058,9 @@ pub(crate) fn report_compose_diagnostics(
     }
 }
 
-/// The report's warnings, one row each: the reference view lists errors
+/// The report's warnings, one row each: compose's reference view lists errors
 /// only, so a warning (a missing link inside text an expression inserted) is
-/// reported line by line.
+/// reported line by line, located at the construct that inserted the text.
 pub(crate) fn render_reference_warnings(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
     term: &biscuit_terminal::terminal::Terminal,
@@ -1031,10 +1071,13 @@ pub(crate) fn render_reference_warnings(
     for issue in report.issues.iter().filter(|i| {
         i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
     }) {
+        let location = issue.origin.authored.as_ref().map_or_else(
+            || "inside inserted text".to_string(),
+            |authored| format!("line {}, column {}, inside inserted text", authored.line, authored.column),
+        );
         let markup = format!(
-            "{} <dim>(line {}, inside inserted text)</dim>",
+            "{} <dim>({location})</dim>",
             Prose::escape_text_outside_code_spans(&issue.message),
-            issue.origin.line,
         );
         rendered.push_str(&warning_rows(&markup, term));
         rendered.push('\n');

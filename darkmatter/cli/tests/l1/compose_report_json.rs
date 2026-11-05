@@ -1,6 +1,6 @@
 //! `md compose --output report-json` end to end (criteria 19, 22, 28, 29, 39):
 //! every parsed invocation writes exactly one JSON object to stdout, with
-//! `outcome`, every diagnostic with all eight fields, and the document only on
+//! `outcome`, every diagnostic with all eight shared fields, and the document only on
 //! success; failures exit non-zero with `document: null` and nothing on
 //! stderr that repeats the report. Other commands reject the format before
 //! any work.
@@ -28,14 +28,19 @@ fn report_of(output: &std::process::Output) -> Value {
     assert_eq!(keys, ["outcome", "diagnostics", "document"], "{report:#}");
     for diagnostic in report["diagnostics"].as_array().expect("an array") {
         let keys: Vec<&str> = diagnostic.as_object().expect("an object").keys().map(String::as_str).collect();
+        let (shared, details) = keys.split_at(8);
         assert_eq!(
-            keys,
+            shared,
             ["code", "severity", "message", "source", "expected_type", "actual_type", "span", "iteration_path"],
             "{diagnostic:#}"
         );
+        assert!(
+            details.iter().all(|key| ["reason", "construct", "reference", "failure", "included_via"].contains(key)),
+            "{diagnostic:#}"
+        );
         if let Some(source) = diagnostic["source"].as_object() {
-            let keys: Vec<&str> = source.keys().map(String::as_str).collect();
-            assert_eq!(keys, ["file", "line", "column"], "{diagnostic:#}");
+            let keys: Vec<&str> = source.keys().map(String::as_str).filter(|key| *key != "section").collect();
+            assert_eq!(keys, ["file", "line", "column", "inserted"], "{diagnostic:#}");
         }
     }
     report
@@ -104,7 +109,7 @@ fn a_category_3_warning_is_reported_once_with_every_field() {
             "code": "dm.expression.uncertain_call",
             "severity": "warning",
             "message": report["diagnostics"][0]["message"],
-            "source": { "file": given(&document), "line": 6, "column": 13 },
+            "source": { "file": given(&document), "line": 6, "column": 13, "inserted": false },
             "expected_type": "number",
             "actual_type": "string | null",
             "span": null,
@@ -137,7 +142,7 @@ fn a_rejected_call_reports_the_shared_record() {
     assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
     assert_eq!(report["diagnostics"][0]["expected_type"], "number");
     assert_eq!(report["diagnostics"][0]["actual_type"], "boolean");
-    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 6, "column": 13 }));
+    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 6, "column": 13, "inserted": false }));
 }
 
 /// The lifecycle leg of criterion 19: a lifecycle rejection reports the
@@ -177,7 +182,7 @@ fn a_rejected_lifecycle_call_reports_the_shared_record() {
     assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
     assert_eq!(report["diagnostics"][0]["expected_type"], "number");
     assert_eq!(report["diagnostics"][0]["actual_type"], "literal true");
-    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 3, "column": 37 }));
+    assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": 3, "column": 37, "inserted": false }));
     assert!(!document.with_file_name("marker").exists(), "no lifecycle effect ran");
 }
 
@@ -212,7 +217,7 @@ fn schema_and_parse_failures_are_located_in_the_frontmatter() {
         let report = report_of(&output);
         assert_eq!(report["document"], Value::Null, "{name}");
         assert_eq!(codes(&report), [code], "{name}: {report:#}");
-        assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": line, "column": column }), "{name}");
+        assert_eq!(report["diagnostics"][0]["source"], json!({ "file": given(&document), "line": line, "column": column, "inserted": false }), "{name}");
     }
 }
 
@@ -228,7 +233,7 @@ fn an_earlier_warning_survives_a_runtime_failure() {
     let report = report_of(&output);
     assert_eq!(report["document"], Value::Null);
     assert_eq!(codes(&report), ["dm.expression.uncertain_call", "dm.expression.evaluation_failure"], "{report:#}");
-    assert_eq!(report["diagnostics"][1]["source"], json!({ "file": given(&document), "line": 8, "column": 1 }));
+    assert_eq!(report["diagnostics"][1]["source"], json!({ "file": given(&document), "line": 8, "column": 1, "inserted": false }));
     assert_eq!(report["diagnostics"][1]["expected_type"], Value::Null);
 }
 
@@ -295,7 +300,11 @@ fn transcluded_findings_are_located_in_the_child() {
         let report = report_of(&run_report(&fixture, &parent));
         assert_eq!(report["outcome"], outcome, "{report:#}");
         assert_eq!(codes(&report), [code], "{report:#}");
-        assert_eq!(report["diagnostics"][0]["source"], json!({ "file": resolved(&child), "line": 6, "column": 13 }), "{report:#}");
+        // The reference check names a child by its reference, which composition
+        // canonicalizes; they differ under a symlinked directory.
+        let source = &report["diagnostics"][0]["source"];
+        assert_eq!(resolved(Path::new(source["file"].as_str().unwrap())), resolved(&child), "{report:#}");
+        assert_eq!((&source["line"], &source["column"], &source["inserted"]), (&json!(6), &json!(13), &json!(false)), "{report:#}");
     }
 }
 
@@ -317,26 +326,26 @@ fn a_rejected_child_keeps_its_parent_warnings_first() {
         assert_eq!(output.status.code(), Some(1), "{name}");
         let report = report_of(&output);
         assert_eq!(report["outcome"], "failure", "{name}: {report:#}");
-        let records: Vec<(&str, &str, u64)> = report["diagnostics"]
+        let records: Vec<(&str, String, u64)> = report["diagnostics"]
             .as_array()
             .unwrap()
             .iter()
             .map(|diagnostic| {
                 (
                     diagnostic["code"].as_str().unwrap(),
-                    diagnostic["source"]["file"].as_str().unwrap(),
+                    resolved(Path::new(diagnostic["source"]["file"].as_str().unwrap())),
                     diagnostic["source"]["line"].as_u64().unwrap(),
                 )
             })
             .collect();
-        let (parent, child) = (given(&parent), resolved(&child));
+        let (parent, child) = (resolved(&parent), resolved(&child));
         assert_eq!(
             records,
             [
-                ("dm.expression.always_false_call", parent.as_str(), 1 + offset),
-                ("dm.expression.always_false_call", parent.as_str(), 5 + offset),
-                ("dm.expression.always_false_call", child.as_str(), 1),
-                ("dm.expression.incompatible_call", child.as_str(), 3),
+                ("dm.expression.always_false_call", parent.clone(), 1 + offset),
+                ("dm.expression.always_false_call", parent.clone(), 5 + offset),
+                ("dm.expression.always_false_call", child.clone(), 1),
+                ("dm.expression.incompatible_call", child.clone(), 3),
             ],
             "{name}: {report:#}"
         );

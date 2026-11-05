@@ -267,7 +267,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             )?;
         }
         CliCommand::Validate { target } => {
-            validate::run_validate(target, request)?;
+            validate::run_validate(target, cli.verbose, request)?;
         }
         CliCommand::Graph {
             input,
@@ -275,7 +275,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             validate,
             json,
         } => {
-            graph::run_graph(&input, follow, validate, json, request)?;
+            graph::run_graph(&input, follow, validate, json, cli.verbose, request)?;
         }
         CliCommand::CodeBlock {
             input,

@@ -1167,7 +1167,7 @@ mod tests {
         let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
             .unwrap();
         let md: Markdown =
-            "[x](https://example.com \"style='color: green'\")".into();
+            "[x](https://example.com '{ style: \"color: green\" }')".into();
         let html = page.render_to_browser(&md).unwrap();
 
         assert!(

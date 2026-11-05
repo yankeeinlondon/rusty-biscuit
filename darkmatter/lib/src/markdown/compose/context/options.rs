@@ -1075,9 +1075,29 @@ impl ComposeOptions {
     /// holds for a failed composition, plus the skipped triggers of documents
     /// the walk finished before the one that failed. An approval run that
     /// fails on policy after a successful walk leaves that walk's
-    /// skipped-trigger warnings. Empty after a successful run.
+    /// skipped-trigger warnings. A reference validation that could not build
+    /// its graph leaves the warnings of the documents it prepared. Empty after
+    /// a successful run.
     pub fn take_preflight_failure_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
         self.preflight_failure_warnings.take()
+    }
+
+    /// The options of a reference check that runs ahead of composition and
+    /// never instead of it.
+    ///
+    /// Body `::shell` directives stay unexpanded. Like the shell-approval
+    /// walk, the check does not hold the values a later stage produces, so a
+    /// value still waiting on a command and an expression it cannot finish are
+    /// left to the composition that owns their verdict. A failure the check
+    /// can prove on its own (a rejected call, a schema violation, an invalid
+    /// file reference) still fails it.
+    #[must_use]
+    pub fn for_reference_check(mut self) -> Self {
+        self.enabled_operations.remove(ComposeOperation::ShellExpansion);
+        self.defer_shell_pending_schema_problems = true;
+        self.defer_missing_runtime_context = true;
+        self.defer_expression_failures = true;
+        self
     }
 
     /// Restricts composition to the effective frontmatter surface: frontmatter

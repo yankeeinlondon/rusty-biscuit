@@ -99,6 +99,12 @@ pub struct ComposeReport {
     /// instructions must skip them. Never merged from a child report.
     pub(crate) body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
 
+    /// Where each byte of the composed body came from, under the same
+    /// condition as [`Self::body_data`]: reference analysis projects its
+    /// prepared-body records through it. `None` when the document has no map.
+    /// Never merged from a child report.
+    pub(crate) body_origin: Option<crate::markdown::compose::body_origin::BodyOrigin>,
+
     /// The repeated copies of the composed body ([`Self::body_data`]'s
     /// counterpart for `::map` / `::filter`), and the body before any stage
     /// rewrote it. Read by pre-flight discovery to attribute a directive to
@@ -672,6 +678,15 @@ pub(crate) enum WarningSubject {
         scope: Option<String>,
         origin: ExpressionOrigin,
     },
+    /// One link's title, once per source document however many times a pass
+    /// reaches it (a repeated `::map` copy, a second scan of the same body).
+    LinkTitle {
+        /// Source document; `None` until the document's pipeline attributes it.
+        document: Option<PathBuf>,
+        /// Where the link starts in that document's authored text, or the
+        /// construct that wrote it.
+        start: usize,
+    },
 }
 
 /// Where an expression was observed in a scanned text.
@@ -688,7 +703,7 @@ impl WarningSubject {
     fn attribute_to(&mut self, source_document: &std::path::Path) {
         match self {
             Self::Path(_) | Self::Embedded { .. } => {}
-            Self::Root { document, .. } | Self::Expression { document, .. } => {
+            Self::Root { document, .. } | Self::Expression { document, .. } | Self::LinkTitle { document, .. } => {
                 if document.is_none() {
                     *document = Some(source_document.to_path_buf());
                 }
@@ -713,6 +728,9 @@ impl ComposeWarning {
     /// because its target lies outside the file tree. Shared by
     /// `find_files()` and `::file-links`.
     pub const GLOB_SKIPPED_SYMLINK_CODE: &'static str = "dm.glob.skipped_symlink";
+
+    /// Producer of the link-title warnings.
+    pub const LINK_TITLE_SOURCE: &'static str = "darkmatter.link";
 
     /// Creates a new warning.
     pub fn new(stage: impl Into<String>, message: impl Into<String>) -> Self {
@@ -795,12 +813,13 @@ impl ComposeWarning {
             severity: crate::markdown::compose::expression::Severity::Warning,
             message: message.clone(),
             source: path.as_ref().zip(finding.position()).map(|(file, (line, column))| {
-                crate::markdown::compose::expression::DiagnosticSource { file: Some(file.clone()), line, column }
+                crate::markdown::compose::expression::DiagnosticSource::at(Some(file.clone()), line, column)
             }),
             expected_type: None,
             actual_type: None,
             span: None,
             iteration_path: Default::default(),
+            reference_details: None,
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -812,6 +831,64 @@ impl ComposeWarning {
             path,
             consumer: Some(consumer.into()),
             resolution_failure: None,
+            diagnostic: Some(Box::new(diagnostic)),
+        }
+    }
+
+    /// A link whose title raised `notice`, at `location` when its document has
+    /// authored positions. `start` is the link's identity (see
+    /// [`WarningSubject::LinkTitle`]).
+    pub(crate) fn from_link_title(
+        notice: &renderable::output::link_metadata::LinkTitleNotice,
+        link: &str,
+        start: usize,
+        location: Option<(PathBuf, crate::markdown::reference::types::AuthoredReferenceLocation)>,
+    ) -> Self {
+        use renderable::output::link_metadata::LinkTitleNotice;
+        let message = match notice {
+            LinkTitleNotice::Malformed { reason } => {
+                format!("the link {link} has a malformed structured title, read as plain text: {reason}")
+            }
+            LinkTitleNotice::Legacy => format!(
+                "the link {link} has a legacy `key=value` title, read as plain text with no attributes applied; run `md clean` to migrate it to JSON5"
+            ),
+        };
+        let (path, line_number, source, span) = match location {
+            Some((file, location)) => (
+                Some(file.clone()),
+                Some(location.line),
+                Some(crate::markdown::compose::expression::DiagnosticSource {
+                    file: Some(file),
+                    line: Some(location.line),
+                    column: Some(location.column),
+                    section: None,
+                    inserted: location.inserted,
+                }),
+                Some(location.span),
+            ),
+            None => (None, None, None, None),
+        };
+        let diagnostic = crate::markdown::compose::expression::Diagnostic {
+            code: notice.code().to_string(),
+            severity: crate::markdown::compose::expression::Severity::Warning,
+            message: message.clone(),
+            source,
+            expected_type: None,
+            actual_type: None,
+            span,
+            iteration_path: Default::default(),
+            reference_details: None,
+        };
+        Self {
+            stage: "link_titles".to_string(),
+            message,
+            line_number,
+            source: Some(Self::LINK_TITLE_SOURCE.to_string()),
+            code: Some(notice.code().to_string()),
+            path,
+            consumer: None,
+            resolution_failure: None,
+            identity: Some(WarningIdentity { subject: WarningSubject::LinkTitle { document: None, start } }),
             diagnostic: Some(Box::new(diagnostic)),
         }
     }
@@ -832,7 +909,7 @@ impl ComposeWarning {
                 bundle: bundle.clone(),
                 name: name.clone(),
             }),
-            WarningSubject::Root { .. } | WarningSubject::Expression { .. } => None,
+            WarningSubject::Root { .. } | WarningSubject::Expression { .. } | WarningSubject::LinkTitle { .. } => None,
         }
     }
 

@@ -230,6 +230,8 @@ Graph methods follow transclusion directives recursively and collect references 
 
 **`transclusion_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a transclusion-only graph (no link/image extraction at leaf nodes).
 
+Each graph record's `origin` has two coordinate frames. `line` and `span` index the prepared body (frontmatter removed, `replace:` values, `{{ … }}`, and `::block` regions applied). `authored` is the position in the loaded file: `line`, character `column`, byte `span`, and `inserted`, which is `true` when an expression, a shell step, or a `replace:` value wrote the reference, so the position names that construct. For example, a `[x](./x.md)` that `{{ link }}` wrote on line 9, column 7 reports `authored: { line: 9, column: 7, inserted: true }`. `authored` is `None` for a document built in memory or fetched from a URL. `section` is the final anchor slug of the nearest heading at or before the reference, and is available for those documents too.
+
 **`reference_graph(options) -> MarkdownResult<ReferenceGraph>`** builds a full reference graph (transclusions + all reference types at each node).
 
 This includes `::toc-linking` as a dependency source and surfaces the generated markdown links those directives add to the effective composed document.

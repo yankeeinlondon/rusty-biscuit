@@ -264,7 +264,7 @@ fn char_structured_link_attributes() {
     // a `prompt` (consumed into the Phase-4 popover structure), and a custom
     // data-* attribute.
     let md = Markdown::try_from_content(
-        "[Click](https://example.com \"class='btn' style='color: blue;' target='_blank' title='Go' prompt='Run it' data-id='42'\")\n",
+        "[Click](https://example.com '{ class: \"btn\", style: \"color: blue;\", target: \"_blank\", title: \"Go\", prompt: \"Run it\", \"data-id\": \"42\" }')\n",
     )
     .expect("parse structured link");
     let body = render_as_html_body(&md);

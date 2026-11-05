@@ -3,15 +3,20 @@
 use crate::args::{GraphFormat, ValidateOutputFormat, ValidateTarget};
 use crate::io::open_argument;
 use crate::request::MdRequest;
+use biscuit_terminal::output::{OutputTarget, render_output};
+use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource};
 use darkmatter::markdown::reference::ReferenceGraphOptions;
-use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
+use darkmatter::markdown::reference::validate::{
+    ReferenceReportVisibility, ReferenceValidationOptions, ValidationReportView,
+};
+use renderable::output::{CommandOutput, OutputOptions, Width};
 use tracing::{info, instrument};
 
 #[instrument(skip_all, fields(command = "validate"))]
-pub(crate) fn run_validate(target: ValidateTarget, request: &MdRequest) -> Result<()> {
+pub(crate) fn run_validate(target: ValidateTarget, verbosity: u8, request: &MdRequest) -> Result<()> {
     info!("starting reference validation");
 
     match target {
@@ -61,84 +66,47 @@ pub(crate) fn run_validate(target: ValidateTarget, request: &MdRequest) -> Resul
                 .validate_references(options)
                 .wrap_err("Reference validation failed")?;
 
+            let is_valid = report.is_valid();
+            let error_count = report.error_count();
+            let mut view = ValidationReportView::new(report)
+                .with_root_source(ComposeSource::File(opened.path().to_path_buf()))
+                .with_launch_dir(request.launch_dir())
+                .with_visibility(ReferenceReportVisibility::All);
+            if show_all {
+                view = view.with_reference_listing();
+            }
+
             match format {
                 ValidateOutputFormat::Text => {
-                    print_validation_report_text(&report, &input, show_all);
+                    println!("{}", terminal_report(&view, &Terminal::default(), verbosity)?);
                 }
                 ValidateOutputFormat::Json => {
-                    // Serialize the library `ReferenceValidationReport`
-                    // directly. This is the same serde shape emitted by
-                    // `md graph --validate --json`'s `validation` block,
-                    // so the two CLI surfaces share one contract and
-                    // cannot drift (review-2 finding #2). The shape is
-                    // pinned by the baseline fixtures under
-                    // `darkmatter/features/2026-06-17-cli-atheist/baseline/json/`.
-                    println!("{}", serde_json::to_string_pretty(&report)?);
+                    // The data form is the library `ReferenceValidationReport`,
+                    // the same serde shape as `md graph --validate --json`'s
+                    // `validation` block (plus `references` under `--show-all`),
+                    // so the two CLI surfaces cannot drift. The shape is pinned
+                    // by the `2026-06-17-cli-atheist` baseline fixtures.
+                    println!("{}", serde_json::to_string_pretty(&view.as_data())?);
                 }
             }
 
-            if report.is_valid() {
+            if is_valid {
                 Ok(())
             } else {
-                Err(eyre!("{} error(s) found", report.error_count()))
+                Err(eyre!("{error_count} error(s) found"))
             }
         }
     }
 }
 
-/// Prints the validation report in the legacy plain-text shape.
+/// `view`'s `terminal` output for `term`, which degrades to `plain` off a
+/// color terminal.
 ///
-/// `md validate refs`'s text output is the *primary* per-issue report: it
-/// lists every issue (not just errors), it includes the scan/valid/issue
-/// counts at the top, and it stays readable in CI logs that strip ANSI.
-/// That is a different role from
-/// [`ValidationReportView`](darkmatter::markdown::reference::validate::ValidationReportView),
-/// which is a styled error-only summary used as a footer by
-/// `md graph --validate`. Routing `--format text` through the view would
-/// silently drop warnings, info-severity issues, the count header, and
-/// the success case (`ValidationReportView` renders empty when there are
-/// no errors), so the two surfaces are intentionally separate.
-fn print_validation_report_text(
-    report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
-    input: &std::path::Path,
-    show_all: bool,
-) {
-    use darkmatter::markdown::reference::validate::ReferenceSeverity;
-
-    println!("References scanned: {}", report.references_scanned);
-    println!("Valid: {}", report.references_valid);
-    println!("Issues: {}", report.issues.len());
-
-    if !report.issues.is_empty() {
-        println!();
-    }
-
-    for issue in &report.issues {
-        let severity = match issue.severity {
-            ReferenceSeverity::Error => "ERROR",
-            ReferenceSeverity::Warning => "WARN ",
-            ReferenceSeverity::Info => "INFO ",
-        };
-
-        let source = match &issue.origin.source {
-            darkmatter::markdown::compose::ComposeSource::File(p) => p
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| input.display().to_string()),
-            _ => input.display().to_string(),
-        };
-
-        println!(
-            "{severity}  {source}:{line}  {message}",
-            line = issue.origin.line,
-            message = issue.message
-        );
-    }
-
-    if show_all && !report.warnings.is_empty() {
-        println!();
-        for warning in &report.warnings {
-            println!("WARN   {warning}");
-        }
-    }
+/// Full `--output`/`--width` selection is not wired to these commands yet.
+pub(crate) fn terminal_report(view: &ValidationReportView, term: &Terminal, verbosity: u8) -> Result<String> {
+    let width = term.detected_columns().and_then(Width::columns).unwrap_or(Width::Unlimited);
+    let options = OutputOptions::new(width, term.output_profile()).with_verbosity(verbosity);
+    let rendered = render_output(view, OutputTarget::Terminal, &options)
+        .wrap_err("Failed to render the reference report")?;
+    Ok(rendered.text)
 }

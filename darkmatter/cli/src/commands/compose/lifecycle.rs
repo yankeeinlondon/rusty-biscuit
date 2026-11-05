@@ -45,6 +45,7 @@ use crate::args::policy::ResolvedPolicy;
 
 use super::{
     DocumentOutput, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
+    deliver_check_failure_warnings,
     open_output_artifact, preflight_approval_error, render_reference_report, render_reference_warnings,
     report_compose_diagnostics,
 };
@@ -121,6 +122,7 @@ pub(super) struct LifecycleCompose<'a> {
     pub(super) request: ComposeRequest,
     pub(super) config: LifecycleConfig,
     pub(super) source_path: PathBuf,
+    pub(super) launch_dir: PathBuf,
     pub(super) approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     /// The policy, when the root is a file whose references are checked.
     pub(super) check_references: Option<&'a ResolvedPolicy>,
@@ -322,6 +324,7 @@ struct ComposeHost<'a> {
     request: ComposeRequest,
     config: LifecycleConfig,
     source_path: PathBuf,
+    launch_dir: PathBuf,
     approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     check_references: Option<&'a ResolvedPolicy>,
     document: DocumentOutput<'a>,
@@ -368,6 +371,7 @@ impl<'a> ComposeHost<'a> {
             request: compose.request,
             config: compose.config,
             source_path: compose.source_path,
+            launch_dir: compose.launch_dir,
             approval_handler: compose.approval_handler,
             check_references: compose.check_references,
             document: compose.document,
@@ -403,7 +407,13 @@ impl<'a> ComposeHost<'a> {
 
     fn try_prepare(&mut self) -> std::result::Result<(), (&'static str, Report)> {
         if let Some(allow) = self.check_references {
-            match check_references(self.md, &self.request, allow) {
+            let check = check_references(self.md, &self.request, allow).map_err(|error| {
+                let term_cell = OnceCell::new();
+                let _ = term_cell.set(self.effects.term.clone());
+                deliver_check_failure_warnings(&error, &self.request, &mut self.pending_triggers, self.document.sink, &term_cell);
+                ("references", error)
+            })?;
+            match check {
                 ReferenceCheck::Clean => {}
                 ReferenceCheck::Report(report) => {
                     self.pending_triggers.hold(&report.trigger_warnings);
@@ -420,7 +430,7 @@ impl<'a> ComposeHost<'a> {
                     match self.document.sink {
                         Some(sink) => sink.references(&report),
                         None => {
-                            eprint!("{}", render_reference_report(&report, self.effects.term));
+                            eprint!("{}", render_reference_report(&report, &self.launch_dir, self.effects.term));
                             eprint!("{}", render_reference_warnings(&report, self.effects.term));
                         }
                     }
@@ -534,7 +544,7 @@ impl<'a> ComposeHost<'a> {
         }
         let term_cell = OnceCell::new();
         let _ = term_cell.set(self.effects.term.clone());
-        report_compose_diagnostics(report, self.deferred_report.as_ref(), &term_cell);
+        report_compose_diagnostics(report, self.deferred_report.as_ref(), &self.launch_dir, &term_cell);
         Ok(())
     }
 }

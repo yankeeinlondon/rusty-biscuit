@@ -221,14 +221,26 @@ impl Markdown {
         // at the edge of the 2 MiB test stack.
         let mut report = new_document_report();
         let result = (|| {
+            // Passive and first, so a later failure keeps these warnings and
+            // a blocking one stops the document before anything runs.
+            report_link_titles(self, BodyProvenance::capture(self).origin.as_ref(), &options, &mut report)?;
             let prepared = self.prepare_document(&mut options, runtime, &mut report, &mut hook, nested.as_ref())?;
             let PreparedDocument { mut perf, provenance, prepared_schemas, effective_state } = *prepared;
 
             let mut transclusion_ran = false;
+            let mut produced_titles_checked = false;
             // Body provenance lives until the transclusion directive parse,
             // the last stage that scans this body for instructions.
             let mut body = Some(BodyProvenance::capture(self));
             for operation in ComposeOperation::default_order() {
+                // The inline stages are done, so a link one of them wrote is
+                // in the body now. Before the `is_enabled` check: this runs
+                // once however the request narrowed the stages.
+                if !produced_titles_checked && operation.phase() != ComposePhase::InlinePre {
+                    produced_titles_checked = true;
+                    let origin = body.as_ref().and_then(|body| body.origin.as_ref());
+                    report_link_titles(self, origin, &options, &mut report)?;
+                }
                 trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
                 if !options.is_enabled(*operation) {
                     continue;
@@ -321,6 +333,7 @@ impl Markdown {
             }
 
             if let Some(body) = body {
+                report.body_origin = body.origin;
                 report.body_data = Some(body.data);
                 report.body_sites = super::body_origin::BodySites { scopes: body.scopes, authored: body.authored };
             }
@@ -727,6 +740,22 @@ impl Markdown {
 
         Ok(Box::new(PreparedDocument { perf, provenance, prepared_schemas, effective_state }))
     }
+}
+
+/// Adds the warnings of `markdown`'s link titles and stops the document when
+/// one blocks. A discovery pass reports none (the real run owns them), and a
+/// frontmatter-only compose never reads the body.
+fn report_link_titles(
+    markdown: &Markdown,
+    origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
+    options: &super::ComposeRequest,
+    report: &mut ComposeReport,
+) -> MarkdownResult<()> {
+    if options.defer_expression_failures || options.is_frontmatter_surface_only() {
+        return Ok(());
+    }
+    report.add_warnings(crate::markdown::compose::link_title_warnings::link_title_warnings(markdown, origin));
+    stop_if_blocked(report, options, None)
 }
 
 /// What makes an undeclared-property candidate's verdict final: the

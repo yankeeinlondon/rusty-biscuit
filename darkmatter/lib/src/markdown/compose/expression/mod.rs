@@ -123,7 +123,8 @@ pub use catalog::{
 pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
 pub use diagnostics::{
-    Diagnostic, DiagnosticSource, ExpressionDiagnostic, INCOMPATIBLE_CALL_CODE, Severity, UNCERTAIN_CALL_CODE,
+    Diagnostic, DiagnosticSource, ExpressionDiagnostic, INCOMPATIBLE_CALL_CODE, ReferenceDetails, Severity,
+    UNCERTAIN_CALL_CODE,
     call_severity, expression_call_diagnostics, one_based_position,
 };
 pub use host::{

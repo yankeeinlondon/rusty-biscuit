@@ -9,9 +9,10 @@
 //! - [`ExpressionDiagnostic`] is a finding of one analyzed expression, ranged
 //!   in that expression's text. [`expression_call_diagnostics`] and
 //!   [`CallCheck::diagnostics`] produce it.
-//! - [`Diagnostic`] is the same finding located in its authored file, with
-//!   one-based line and character column ([`ExpressionDiagnostic::locate`]).
-//!   An editor translates the position to its own coordinates.
+//! - [`Diagnostic`] is a finding located in its authored file, with one-based
+//!   line and character column ([`ExpressionDiagnostic::locate`]), and the
+//!   record every family reports through. An editor translates the position to
+//!   its own coordinates.
 //!
 //! Severity is a property of the finding, not of a command's policy: a
 //! blocking policy changes a command's outcome, never a diagnostic's code or
@@ -28,6 +29,7 @@ use super::call_check::{ALWAYS_FALSE_CALL_CODE, ArgumentCategory, CallCheck, che
 use super::iteration::IterationPath;
 use super::host::{INCOMPLETE_ANALYSIS_CODE, IncompleteHostCall, incomplete_host_calls};
 use super::scope::TypeScope;
+use crate::markdown::reference::types::ReferenceTrailStep;
 use crate::markdown::span::SourceSpan;
 
 /// A call the design-time check proves wrong: argument category 5, a wrong
@@ -96,11 +98,12 @@ impl ExpressionDiagnostic {
             code: self.code.to_string(),
             severity: self.severity,
             message: self.message.clone(),
-            source: position.map(|(line, column)| DiagnosticSource { file, line, column }),
+            source: position.map(|(line, column)| DiagnosticSource::at(file, line, column)),
             expected_type: self.expected_type.clone(),
             actual_type: self.actual_type.clone(),
             span: None,
             iteration_path: IterationPath::empty(),
+            reference_details: None,
         }
     }
 
@@ -128,17 +131,63 @@ pub struct Diagnostic {
     /// failed, outermost first. Empty for a static finding, a warning, or a
     /// failure outside every `::map` / `::filter` body.
     pub iteration_path: IterationPath,
+    /// What a reference finding adds, written beside the fields above; `None`
+    /// for every other family.
+    #[serde(flatten)]
+    pub reference_details: Option<ReferenceDetails>,
 }
 
 /// The start of a diagnostic's authored range.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiagnosticSource {
-    /// The authored file; `None` for input with no named origin.
+    /// The authored file, or a remote document's URL; `None` for input with no
+    /// named origin.
     pub file: Option<PathBuf>,
-    /// One-based line.
-    pub line: usize,
-    /// One-based column, in characters.
-    pub column: usize,
+    /// One-based authored line; `None` when `file` has no position to point
+    /// at, such as a document built in memory. Never a placeholder number.
+    pub line: Option<usize>,
+    /// One-based authored column, in characters; `None` as for `line`.
+    pub column: Option<usize>,
+    /// The composed anchor slug of the innermost heading at or before the
+    /// problem; omitted above the first heading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    /// An expression, a shell step, or a `replace:` value wrote the problem's
+    /// text, so `line` and `column` name that construct.
+    pub inserted: bool,
+}
+
+impl DiagnosticSource {
+    /// An authored position with no section, in text the document wrote.
+    pub fn at(file: Option<PathBuf>, line: usize, column: usize) -> Self {
+        Self { file, line: Some(line), column: Some(column), section: None, inserted: false }
+    }
+
+    /// `file` when nothing narrower is known.
+    pub fn file_only(file: Option<PathBuf>) -> Self {
+        Self { file, line: None, column: None, section: None, inserted: false }
+    }
+}
+
+/// The reference a [`Diagnostic`] is about. Each field is omitted when absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ReferenceDetails {
+    /// The reason phrase, such as `file not found`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The construct phrase, such as `hyperlink` or `::code`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub construct: Option<String>,
+    /// The reference as written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    /// The file-reference failure class, such as `no-match`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
+    /// The inclusion path to the reference's document, outermost first; empty
+    /// for the root document, `None` for a failure with no one reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub included_via: Option<Vec<ReferenceTrailStep>>,
 }
 
 /// The one-based line and character column of byte `offset` in `text`;

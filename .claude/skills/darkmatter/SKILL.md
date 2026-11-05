@@ -273,6 +273,29 @@ the last stages' warnings are checked by the CLI before writing. A new coded war
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
 naming the codes it governs.
 
+Link titles (`dm.link.malformed_structured_title`,
+`dm.link.legacy_structured_title`) are interpreted only by
+`renderable::output::link_metadata::parse_link_title`; `Link` stores the notice
+(`title_notice`) and never prints. Composition reports them from
+`compose::link_title_warnings`, keyed by the link's authored start: once before
+anything runs (so a failed run keeps them and `--deny` stops first) and once
+after the inline stages (a link a stage wrote). `md render`, which does not
+compose, reads `Markdown::link_title_warnings` before cleanup and names the
+same codes through `RENDER_DIAGNOSTIC_CODES`.
+
+The reference report is `reference/validate.rs::ValidationReportView`, built in
+`reference/report.rs`, implementing `CommandOutput`. `ReferenceValidationReport`
+keeps `documents` (one entry per inclusion, depth-first, empty documents
+included) so grouping by `(source, included_via)` and the document count never
+infer scope from issues; neither `documents` nor `references` is serialized, and
+issue JSON reports authored `line`/`column`, `section`, `inserted`, and
+`included_via`, null where unknown. `as_prose()` is the Markdown/HTML document;
+`render_terminal` rebuilds the same structure with bare `file://` URIs
+and `heading` as a link parameter. Compose and `md graph --validate` show errors
+(compose prints nothing when there are none), `md validate refs` shows all
+severities. Reasons and constructs live only in
+`ReferenceIssueCode::reason_phrase` and `ReferenceSyntax::construct_phrase`.
+
 `md compose --output report-json` (compose only; `ComposeOutputFormat`)
 prints one `{outcome, diagnostics, document}` object for every parsed
 invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
@@ -293,7 +316,16 @@ a failing document keeps the triggers its `as_markdown` children and gate
 found (`NestedCompose::finish` → `PipelineRuntime::record_failed_triggers`).
 `md compose`'s reference check is passive: its graph preparation runs no
 `::shell` (`prepare_content` never re-enables an operation the request
-disabled). Skipped-trigger
+disabled), and `ComposeOptions::for_reference_check` defers what only
+composition can judge (values waiting on a frontmatter command, an expression
+it cannot finish). A check that still fails (`check_references` returns
+`Result`) is a composition failure with status 1, reported through
+`error_diagnostics`; its graph build leaves its warnings for
+`take_preflight_failure_warnings`. A `Diagnostic`'s `source.line`/`column` are
+`Option` (null for a document with no authored positions, never a placeholder)
+and `source.inserted` marks a construct that wrote the text; only a reference
+record has `reference_details`, flattened into `reason`, `construct`,
+`reference`, `failure`, and `included_via`. Skipped-trigger
 warnings found by a pass that runs ahead of the delivering report (reference
 validation via `ReferenceValidationReport::trigger_warnings`, which prepares
 each transcluded child in its own context; the lifecycle call check via

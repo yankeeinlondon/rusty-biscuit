@@ -334,7 +334,7 @@ fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advis
         let mut diagnostic = found.diagnostic;
         if let Some(source) = diagnostic.source.as_mut() {
             source.file = document.clone();
-            source.line = line;
+            source.line = Some(line);
         }
         let location = match display.as_deref() {
             Some(document) => format!(" at {document}:{line}"),

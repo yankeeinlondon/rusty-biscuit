@@ -140,7 +140,7 @@ style:
 1. First
 2. Second
 
-[Click](https://example.com \"class='btn' style='color: blue;' target='_blank' prompt='Run it' data-id='42'\")
+[Click](https://example.com '{ class: \"btn\", style: \"color: blue;\", target: \"_blank\", prompt: \"Run it\", \"data-id\": \"42\" }')
 
 ![A](./local.png \"style='color: green;'\")
 

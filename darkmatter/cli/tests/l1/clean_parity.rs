@@ -64,6 +64,7 @@ macro_rules! parity_case_tests {
 }
 
 parity_case_tests! {
+    legacy_link_title => "legacy-link-title",
     repairable_frontmatter => "repairable-frontmatter",
     repair_disabled => "repair-disabled",
     repair_disabled_invalid_yaml => "repair-disabled-invalid-yaml",

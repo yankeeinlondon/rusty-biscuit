@@ -10,7 +10,11 @@
       "kind": "hyperlink",
       "reference": "./missing.md",
       "line": 3,
-      "source": "<TMP>/errors.md"
+      "column": 1,
+      "section": "errors",
+      "inserted": false,
+      "source": "<TMP>/errors.md",
+      "included_via": []
     }
   ],
   "warnings": []

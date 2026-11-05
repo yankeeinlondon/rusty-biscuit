@@ -55,7 +55,7 @@ fn a_claimed_shipped_kind_validates_against_its_definition() {
         .arg(&doc)
         .assert()
         .success()
-        .stdout(predicate::str::contains("has a schema definition and is valid."));
+        .stdout(predicate::str::contains("has a schema definition and is valid based on its definition"));
 }
 
 #[test]

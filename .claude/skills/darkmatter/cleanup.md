@@ -22,6 +22,15 @@ The user-facing record is the area's `docs/` tree.
   File's `yaml.tab-indentation` repair applies), its rules are read from that mapping, and the
   body is cleaned; the strict `yaml.parse` finding stays report-only. Empty frontmatter blocks and BOMs without
   frontmatter are kept; a BOM before frontmatter is an applied repair.
+- `clean_document` (never `clean_body`, so compose's cleanup and `md`
+  rendering do not migrate) rewrites legacy `key=value` link titles to JSON5
+  first: `cleanup::link_titles::migrate`, by source span, with its own guard
+  because `clean_body`'s comparison would call a changed title a changed
+  meaning. It covers inline links and reference definitions; an image title,
+  a definition an image also uses, and a title holding `{{ … }}` stay as
+  authored. A legacy title with no supported key (`"Run x=1 first"`) becomes
+  `{ title: "…" }` so its text is not lost. The same module's `scan` is what
+  the `dm.link.*` warnings read, so the two agree on what is a link title.
 - String wrappers: `cleanup_content` (defaults) and
   `cleanup_content_with(&MarkdownRuleOverrides)` (overrides at CLI level),
   plus `Markdown::cleanup`/`cleanup_with`. They return the input on refusal.

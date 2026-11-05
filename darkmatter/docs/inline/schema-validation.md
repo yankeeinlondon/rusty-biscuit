@@ -255,7 +255,7 @@ md schema validate <file>... [--schema <path> | --disable baseline-schema] [--di
 Pretty output (the default) renders one styled block per file:
 
 ```
-- ✔ the document post.md has a schema definition and is valid.
+- ✔ the document post.md has a schema definition and is valid based on its $schema ./schemas/post.yaml and the Darkmatter default schema.
 - ✗ the document draft.md failed schema validation:
     - title is a required property (at line 2, column 1)
     - tags/1 42 is not of type "string" (at line 6, column 5)
@@ -278,16 +278,27 @@ for the full rules and fallbacks.
 | 3 | A file's frontmatter could not be parsed at all. |
 | 64 | Usage error. |
 
-The pretty success line says which schema judged the document:
+A document can be judged by up to three schema layers, merged in this order: the baseline, any matching schema triggers, then the document's own `$schema`. The pretty success line names every layer that applied, in the order document, triggers, baseline:
 
-| What applied | Pretty success line |
+| Layer | Named as |
 | --- | --- |
-| A document `$schema`, or a matching schema trigger | `has a schema definition and is valid.` |
-| The built-in baseline alone | `does not have an explicit schema definition but it is valid based on the Darkmatter default schema.` |
-| A custom baseline (`--schema` or `BASELINE_SCHEMA`) alone | `does not have an explicit schema definition but it is valid based on the baseline schema <path>.` |
-| Nothing (baseline turned off, no `$schema`, no trigger) | `doesn't have a schema definition so is valid by default.` |
+| An inline `$schema` mapping | `its inline $schema` |
+| A `$schema` file reference or bare name | `its $schema ./schemas/post.yaml` |
+| A `$schema` root union | `its $schema union` |
+| Matching schema triggers | `the trigger schema post.trigger.yaml` (or `the trigger schemas a.trigger.yaml and b.trigger.yaml`) |
+| The built-in baseline | `the Darkmatter default schema` |
+| A custom baseline (`--schema` or `BASELINE_SCHEMA`) | `the baseline schema ./my-baseline.yaml` |
 
-In JSON output the `schema` field names the document's own `$schema`, so it is `null` whenever the document has none, whichever baseline judged it.
+The line opens with `has a schema definition and is valid based on …` when the document has its own `$schema`, and with `does not have an explicit schema definition but it is valid based on …` when only triggers or the baseline applied:
+
+```
+- ✔ the document post.md has a schema definition and is valid based on its $schema ./schemas/post.yaml, the trigger schema post.trigger.yaml, and the Darkmatter default schema.
+- ✔ the document README.md does not have an explicit schema definition but it is valid based on the Darkmatter default schema.
+```
+
+With no layer at all (baseline turned off, no `$schema`, no matching trigger) the line is `doesn't have a schema definition so is valid by default.`
+
+JSON output carries the same facts in each validated record's `layers` object (see [JSON Output](../topics/schemas/definition.md#json-output)). Its `schema` field still names only the document's own `$schema`, so it is `null` whenever the document has none.
 
 ### Stage timings (`-vv`)
 
@@ -298,7 +309,7 @@ single `-v` changes nothing, and neither `--debug` nor `RUST_LOG` is needed.
 
 ```console
 $ md schema validate docs/prompt.md -vv
-- ✔ the document docs/prompt.md has a schema definition and is valid.
+- ✔ the document docs/prompt.md does not have an explicit schema definition but it is valid based on the trigger schema prompt.trigger.yaml and the Darkmatter default schema.
 Validation timings for docs/prompt.md
 matched triggers: prompt.trigger.yaml
 compile cache: miss
@@ -341,8 +352,8 @@ parsed get no breakdown.
 
 The breakdown covers all of the document's schema work, not just the final
 check. Without assignments the schema is resolved once: that one resolution
-produces the report and also decides whether the document "has a schema
-definition". With `key=value` assignments, `md` first resolves the schema to
+produces the report and also decides which schema layers the success line
+names. With `key=value` assignments, `md` first resolves the schema to
 coerce the assigned values, then resolves it again after assigning them,
 because an assignment can change which triggers match; the second resolution
 alone decides the report and the wording. Both resolutions are counted, so a
@@ -350,7 +361,7 @@ validator first built while preparing the assignments is still a `miss`:
 
 ```console
 $ md schema validate --disable baseline-schema review_counter=2 doc.md -vv
-- ✔ the document doc.md has a schema definition and is valid.
+- ✔ the document doc.md has a schema definition and is valid based on its inline $schema.
 Validation timings for doc.md
 matched triggers: none
 compile cache: miss
@@ -762,14 +773,20 @@ if !report.valid {
 
 `validate_summarized(&Markdown)` returns the same report as `validate`
 together with a `PreparationSummary` from the same schema resolution. Its
-`has_schema` is `false` when no baseline, trigger, or `$schema` applied (the
-report is then vacuously valid). Use it instead of calling `effective_for`
-again just to learn whether a schema applied:
+`layers` (a `SchemaLayers`) says which layers applied: `document` (the
+document's own `$schema`), `triggers` (the matching triggers that layered a
+payload, as `TriggerSource`s in layering order), and `baseline`.
+`has_schema()` is `false` when none did, and the report is then vacuously
+valid. Use it instead of calling `effective_for` again just to learn which
+schema applied; an `EffectiveSchema` you already hold answers the same through
+`layers()`:
 
 ```rust
 let (report, summary) = api.validate_summarized(&markdown)?;
-if report.valid && !summary.has_schema {
+if report.valid && !summary.has_schema() {
     println!("no schema applies; valid by default");
+} else if !summary.layers.document {
+    println!("judged only by {} trigger(s) and the baseline", summary.layers.triggers.len());
 }
 ```
 

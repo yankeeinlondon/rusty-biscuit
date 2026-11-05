@@ -653,7 +653,11 @@ impl DarkmatterSchemas {
         // there is a single layer, it is shared directly (an `Arc` refcount bump)
         // rather than materialized (F29).
         let doc_json: Option<Value> = resolved.as_ref().map(|r| r.json_schema.clone());
-        let baseline_only = self.baseline.is_some() && trigger_layers.is_empty() && doc_json.is_none();
+        let layers = SchemaLayers {
+            document: doc_json.is_some(),
+            triggers: trigger_layers.iter().map(|layer| layer.source.clone()).collect(),
+            baseline: self.baseline.is_some(),
+        };
 
         let merged_json: Arc<Value> = match (&self.baseline, trigger_layers.is_empty(), doc_json) {
             // Baseline only — share the Arc, no deep clone.
@@ -694,7 +698,7 @@ impl DarkmatterSchemas {
                 .filter(|layer| !layer.definitions.is_empty())
                 .map(|layer| Arc::clone(&layer.definitions))
                 .collect(),
-            baseline_only,
+            layers,
             json_schema: merged_json,
             origins,
             validators,
@@ -805,10 +809,10 @@ impl DarkmatterSchemas {
     /// [`Self::validate`], also returning what preparing the effective schema
     /// found, from the same preparation.
     ///
-    /// A caller that words its outcome by which schema applied (`md schema
-    /// validate`'s "doesn't have a schema definition") reads
-    /// [`PreparationSummary`] instead of preparing the schema a second time
-    /// with [`Self::effective_for`].
+    /// A caller that words its outcome by which schema layers applied (`md
+    /// schema validate`'s success line) reads [`PreparationSummary::layers`]
+    /// instead of preparing the schema a second time with
+    /// [`Self::effective_for`].
     ///
     /// ## Errors
     ///
@@ -863,8 +867,7 @@ impl DarkmatterSchemas {
         let positions = ProblemPositions::deferred(source);
         let effective = self.effective_for(source)?;
         let summary = PreparationSummary {
-            has_schema: effective.is_some(),
-            baseline_only: effective.as_ref().is_some_and(|effective| effective.baseline_only),
+            layers: effective.as_ref().map(|effective| effective.layers.clone()).unwrap_or_default(),
         };
         let mut report = match (effective, phase) {
             (Some(effective), None) => {
@@ -961,9 +964,8 @@ pub struct EffectiveSchema {
     /// The non-empty definition tables of the matching trigger payloads,
     /// searched by [`Self::definition`] after [`Self::definitions`].
     trigger_definitions: Vec<Arc<DefinitionTable>>,
-    /// Whether the baseline is the only layer: no document `$schema` and no
-    /// matching trigger payload.
-    baseline_only: bool,
+    /// The layers merged into [`Self::json_schema`].
+    layers: SchemaLayers,
     /// The final Draft 2020-12 JSON Schema used by the validator.
     ///
     /// Held as `Arc<Value>` so the common baseline-only effective schema is
@@ -1114,6 +1116,13 @@ impl EffectiveSchema {
         &self.dependencies
     }
 
+    /// The layers merged into this schema: the document's own schema, the
+    /// matching triggers, and the baseline.
+    #[must_use]
+    pub fn layers(&self) -> &SchemaLayers {
+        &self.layers
+    }
+
     /// Non-fatal findings discovered while resolving this effective schema.
     pub fn advisories(&self) -> &[SchemaAdvisory] {
         &self.advisories
@@ -1224,7 +1233,7 @@ impl EffectiveSchema {
             simplified: resolved.simplified,
             trigger_shapes: Vec::new(),
             trigger_definitions: Vec::new(),
-            baseline_only: false,
+            layers: SchemaLayers { document: true, ..SchemaLayers::default() },
             json_schema,
             origins,
             validators,
@@ -1389,7 +1398,7 @@ impl EffectiveSchema {
             definitions,
             trigger_shapes: self.trigger_shapes.clone(),
             trigger_definitions: self.trigger_definitions.clone(),
-            baseline_only: self.baseline_only,
+            layers: self.layers.clone(),
             json_schema,
             origins: self.origins.clone(),
             validators,
@@ -1709,15 +1718,44 @@ pub struct ValidationReport {
 /// What preparing a document's effective schema found, returned beside the
 /// [`ValidationReport`] the same preparation produced (see
 /// [`DarkmatterSchemas::validate_summarized`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PreparationSummary {
-    /// Whether any schema layer (baseline, matching trigger, or document
-    /// `$schema`) applied. When `false` the report is vacuously valid.
-    pub has_schema: bool,
-    /// Whether the baseline was the only layer that applied: no document
-    /// `$schema` and no matching trigger payload. Implies `has_schema`.
-    pub baseline_only: bool,
+    /// The layers that applied; empty when no schema did.
+    pub layers: SchemaLayers,
+}
+
+impl PreparationSummary {
+    /// Whether any schema layer applied. When `false` the report is vacuously
+    /// valid.
+    #[must_use]
+    pub fn has_schema(&self) -> bool {
+        !self.layers.is_empty()
+    }
+}
+
+/// The layers merged into an [`EffectiveSchema`], so a caller can say which
+/// schema judged a document.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SchemaLayers {
+    /// The document's own schema applied: its `$schema` (an inline mapping,
+    /// a file reference or bare name, or a root union), or a YAML document's
+    /// claimed definition.
+    pub document: bool,
+    /// The matching triggers that layered a payload, in layering order. A
+    /// matcher-only trigger layers nothing and is absent.
+    pub triggers: Vec<TriggerSource>,
+    /// The configured baseline applied.
+    pub baseline: bool,
+}
+
+impl SchemaLayers {
+    /// Whether no layer applied.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.document && self.triggers.is_empty() && !self.baseline
+    }
 }
 
 impl ValidationReport {

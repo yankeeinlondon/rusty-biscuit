@@ -14,7 +14,9 @@ use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, InvalidTriggerFinding, LoadedYamlDocument, YamlOutcome};
+use darkmatter::markdown::schemas::{
+    DarkmatterSchemas, InvalidTriggerFinding, LoadedYamlDocument, SchemaLayers, TriggerSource, YamlOutcome,
+};
 use simplified_schema::{
     SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
 };
@@ -34,7 +36,7 @@ enum FileOutcome {
         problems: Vec<ValidationProblem>,
         advisories: Vec<SchemaAdvisory>,
         schema_label: Option<String>,
-        applied: AppliedSchema,
+        layers: AppliedLayers,
     },
     /// The file argument did not open (it is not valid reference syntax,
     /// failed to resolve, or matched no file); reported with the parse
@@ -49,16 +51,119 @@ enum FileOutcome {
     SchemaError(Box<SchemaError>),
 }
 
-/// Which schema layers judged a validated document; it chooses the pretty
-/// success wording.
-enum AppliedSchema {
-    /// No layer applied, so the document is valid by default.
-    None,
-    /// Only the baseline applied: no `$schema` and no matching trigger. The
-    /// path names a custom baseline; `None` is the embedded one.
-    Baseline(Option<PathBuf>),
-    /// A document `$schema` or a matching trigger applied.
-    Declared,
+/// The schema layers that judged a validated document, kept apart so the
+/// output can say which of them applied. All empty means none did.
+#[derive(Default)]
+struct AppliedLayers {
+    document: Option<DocumentSchema>,
+    /// The matching triggers that layered a payload, in layering order.
+    triggers: Vec<TriggerSource>,
+    baseline: Option<AppliedBaseline>,
+}
+
+/// The form of the document's own schema.
+enum DocumentSchema {
+    /// An inline `$schema` mapping.
+    Inline,
+    /// A `$schema` file reference or bare name.
+    Reference(String),
+    /// A `$schema` root union (a sequence of arms).
+    Union,
+    /// A YAML document's selected definition: its claimed `kind`'s label or
+    /// the `$schema` it named.
+    Definition(String),
+}
+
+/// The baseline that applied.
+enum AppliedBaseline {
+    Embedded,
+    Custom(PathBuf),
+}
+
+impl AppliedLayers {
+    /// The layers a Markdown document's preparation reported. `md` is the
+    /// validated document, whose `$schema` value tells the document layer's
+    /// form; `baseline` is the selection that produced the baseline layer.
+    fn for_markdown(layers: SchemaLayers, md: &Markdown, baseline: &Baseline) -> Self {
+        let document = layers.document.then(|| match md.frontmatter().as_map().get("$schema") {
+            Some(serde_json::Value::String(reference)) => DocumentSchema::Reference(reference.clone()),
+            Some(serde_json::Value::Array(_)) => DocumentSchema::Union,
+            _ => DocumentSchema::Inline,
+        });
+        let baseline = match (layers.baseline, baseline) {
+            (true, Baseline::Custom(path)) => Some(AppliedBaseline::Custom(path.clone())),
+            (true, _) => Some(AppliedBaseline::Embedded),
+            (false, _) => None,
+        };
+        Self { document, triggers: layers.triggers, baseline }
+    }
+
+    /// The pretty success line's tail, naming every layer that applied.
+    fn success_tail(&self) -> String {
+        let mut named = Vec::new();
+        named.extend(self.document.as_ref().map(|document| match document {
+            DocumentSchema::Inline => "its inline $schema".to_string(),
+            DocumentSchema::Reference(reference) => format!("its $schema {reference}"),
+            DocumentSchema::Union => "its $schema union".to_string(),
+            DocumentSchema::Definition(label) => format!("its definition {label}"),
+        }));
+        if !self.triggers.is_empty() {
+            let names: Vec<String> = self.triggers.iter().map(trigger_display_name).collect();
+            let noun = if names.len() == 1 { "trigger schema" } else { "trigger schemas" };
+            named.push(format!("the {noun} {}", join_names(&names)));
+        }
+        named.extend(self.baseline.as_ref().map(|baseline| match baseline {
+            AppliedBaseline::Embedded => "the Darkmatter default schema".to_string(),
+            AppliedBaseline::Custom(path) => format!("the baseline schema {}", path.display()),
+        }));
+        if named.is_empty() {
+            return "doesn't have a schema definition so is valid by default.".to_string();
+        }
+        let head = if self.document.is_some() {
+            "has a schema definition and is valid based on"
+        } else {
+            "does not have an explicit schema definition but it is valid based on"
+        };
+        format!("{head} {}.", escape_prose(&join_names(&named)))
+    }
+
+    /// The JSON record's `layers` object.
+    fn to_json(&self) -> serde_json::Value {
+        let document = self.document.as_ref().map(|document| match document {
+            DocumentSchema::Inline => serde_json::json!({ "form": "inline" }),
+            DocumentSchema::Reference(reference) => serde_json::json!({ "form": "reference", "reference": reference }),
+            DocumentSchema::Union => serde_json::json!({ "form": "union" }),
+            DocumentSchema::Definition(label) => serde_json::json!({ "form": "definition", "reference": label }),
+        });
+        let baseline = self.baseline.as_ref().map(|baseline| match baseline {
+            AppliedBaseline::Embedded => serde_json::json!({ "form": "darkmatter" }),
+            AppliedBaseline::Custom(path) => serde_json::json!({ "form": "custom", "reference": path.display().to_string() }),
+        });
+        serde_json::json!({
+            "document": document,
+            "triggers": self.triggers.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "baseline": baseline,
+        })
+    }
+}
+
+/// A trigger's file name, or its full `embedded:{bundle}/{name}` identity
+/// for a bundle document, whose bare name would hide the bundle.
+fn trigger_display_name(trigger: &TriggerSource) -> String {
+    match (trigger.path(), trigger.file_name()) {
+        (Some(_), Some(name)) => name.to_string(),
+        _ => trigger.to_string(),
+    }
+}
+
+/// Joins names as prose: `a`, `a and b`, `a, b, and c`.
+fn join_names(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
 }
 
 /// Run `md schema validate`.
@@ -347,16 +452,7 @@ fn validate_one(
             problems: report.problems,
             advisories: report.advisories,
             schema_label,
-            applied: if summary.baseline_only {
-                AppliedSchema::Baseline(match baseline {
-                    Baseline::Custom(path) => Some(path.clone()),
-                    Baseline::Embedded | Baseline::None => None,
-                })
-            } else if summary.has_schema {
-                AppliedSchema::Declared
-            } else {
-                AppliedSchema::None
-            },
+            layers: AppliedLayers::for_markdown(summary.layers, &md, baseline),
         },
         Err(err) => FileOutcome::SchemaError(Box::new(err)),
     };
@@ -418,14 +514,17 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             problems: Vec::new(),
             advisories: Vec::new(),
             schema_label: None,
-            applied: AppliedSchema::None,
+            layers: AppliedLayers::default(),
         },
         Ok(YamlOutcome::Validated(validation)) => FileOutcome::Validated {
             report_valid: validation.report.valid,
             problems: validation.report.problems,
             advisories: validation.report.advisories,
+            layers: AppliedLayers {
+                document: Some(DocumentSchema::Definition(validation.definition.clone())),
+                ..AppliedLayers::default()
+            },
             schema_label: Some(validation.definition),
-            applied: AppliedSchema::Declared,
         },
         Err(err) => FileOutcome::SchemaError(Box::new(err)),
     }
@@ -520,24 +619,13 @@ fn emit_pretty(
         FileOutcome::Validated {
             report_valid: true,
             advisories,
-            applied,
+            layers,
             ..
         } => {
             if quiet {
                 return;
             }
-            let tail = match applied {
-                AppliedSchema::Declared => "has a schema definition and is valid.".to_string(),
-                AppliedSchema::Baseline(None) => {
-                    "does not have an explicit schema definition but it is valid based on the Darkmatter default schema."
-                        .to_string()
-                }
-                AppliedSchema::Baseline(Some(path)) => format!(
-                    "does not have an explicit schema definition but it is valid based on the baseline schema {}.",
-                    escape_prose(&path.display().to_string()),
-                ),
-                AppliedSchema::None => "doesn't have a schema definition so is valid by default.".to_string(),
-            };
+            let tail = layers.success_tail();
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
             println!("{}", Prose::new(line).with_verbosity(verbose).render(terminal));
@@ -725,7 +813,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
             problems,
             advisories,
             schema_label,
-            ..
+            layers,
         } => {
             let problems_json: Vec<serde_json::Value> = problems
                 .iter()
@@ -754,6 +842,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
+                "layers": layers.to_json(),
                 "problems": problems_json,
             })
         }
