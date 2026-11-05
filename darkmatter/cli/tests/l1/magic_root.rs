@@ -44,7 +44,8 @@ const ROUTES: [(&[&str], Observable); 14] = [
     }),
     (&["validate", "refs", "main.md"], |out, _| out.contains("Valid: 1")),
     (&["validate", "refs", "--graph", "mermaid", "@doc.md"], |out, _| out.contains("roots_doc_md")),
-    (&["schema", "validate", "@doc.md"], |out, _| out.contains("roots/doc.md") || out.contains("roots\\doc.md")),
+    // `-v`: a piped link prints its resolved destination only when verbose.
+    (&["-v", "schema", "validate", "@doc.md"], |out, _| out.contains("roots/doc.md") || out.contains("roots\\doc.md")),
     (&["schema", "detect", "@doc.md"], |out, _| out.contains("title:")),
     (&["code-block", "--file", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["code-block", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),

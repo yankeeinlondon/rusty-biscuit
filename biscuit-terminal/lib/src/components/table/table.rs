@@ -410,6 +410,29 @@ impl Table {
         self.layout.available_width(terminal_width)
     }
 
+    /// The narrowest render width at which no column wraps: the border
+    /// overhead plus each visible column's unwrapped width (a fixed column's
+    /// own width). The render tree plans an unbounded-width table at this
+    /// width, so the table hugs its content.
+    pub fn natural_render_width(&self) -> u32 {
+        let visible = self.visible_column_indices(u32::MAX);
+        let Ok(measurements) = self.measure_widths_for_indices(usize::MAX, &visible) else {
+            return 1;
+        };
+        let content: usize = measurements
+            .columns
+            .iter()
+            .map(|column| {
+                column
+                    .fixed_width
+                    .map_or(column.columnar_width_requirement, |_| column.resolved_width)
+            })
+            .sum();
+        u32::try_from(measurements.border_overhead + content)
+            .unwrap_or(u32::MAX)
+            .max(1)
+    }
+
     /// Measure the currently visible columns without dropping any columns.
     pub fn measure_widths(
         &self,

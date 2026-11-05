@@ -256,11 +256,8 @@ fn level2_recent_commits_styles_and_links_map_to_their_spans_in_tmux() {
     // The four run assertions above already leave the brackets outside every
     // styled run; what remains is that the hash's URL sits immediately around
     // the bold span rather than anywhere in the frame.
-    let (opening, closing) = if osc8 {
-        ("- [", "] ".to_string())
-    } else {
-        ("- [[", format!("]({})] ", fixture.commit_url))
-    };
+    // Without OSC 8 the link prints its text alone, so both shapes match.
+    let (opening, closing) = ("- [", "] ".to_string());
     assert_eq!(
         header.text[..hash.start].to_string(),
         opening,
@@ -354,10 +351,10 @@ fn level2_recent_commits_styles_and_links_map_to_their_spans_in_tmux() {
     } else {
         assert_eq!(
             file_row.text.trim(),
-            format!("- added: [src/main.rs]({})", fixture.file_url),
-            "the file path degrades to the documented [path](url) fallback:\n{raw}"
+            "- added: src/main.rs",
+            "the file path degrades to its text alone:\n{raw}"
         );
-        proofs.push("file URL as the documented [path](url) fallback");
+        proofs.push("file path as its text alone without OSC 8");
     }
 
     // A capability gate that grew a third, assert-nothing branch would land

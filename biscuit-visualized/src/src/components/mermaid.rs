@@ -1006,7 +1006,9 @@ impl MermaidDiagram {
     /// with the plain code block (no highlighter).
     fn render_nodes(&self, nodes: &[RenderNode], term: &biscuit_terminal::terminal::Terminal) -> String {
         let mut options = TerminalRenderOptions::new(term, RenderStrictness::Lossy);
-        options.context = options.context.with_width(self.text_columns(term.width()));
+        options.context = options
+            .context
+            .with_width(renderable::output::Width::Columns(self.text_columns(term.width())));
         render_terminal_node(&RenderNode::root(nodes.to_vec()), &options)
             .map(|rendered| rendered.output)
             .unwrap_or_else(|_| self.fallback_code_block())

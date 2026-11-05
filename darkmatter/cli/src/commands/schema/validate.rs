@@ -180,7 +180,7 @@ pub fn run_validate(
             }
             FileOutcome::Validated { .. } => {}
         }
-        emit_outcome(file, document.as_deref(), &outcome, &findings, format, quiet, &terminal);
+        emit_outcome(file, document.as_deref(), &outcome, &findings, format, quiet, verbose, &terminal);
         if verbose > 1
             && let Some(timings) = &timings
         {
@@ -485,6 +485,7 @@ fn schema_label_from(md: &Markdown) -> Option<String> {
         .map(String::from)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_outcome(
     file: &Path,
     document: Option<&Path>,
@@ -492,19 +493,27 @@ fn emit_outcome(
     findings: &[InvalidTriggerFinding],
     format: SchemaValidateFormat,
     quiet: bool,
+    verbose: u8,
     terminal: &Terminal,
 ) {
     match format {
         SchemaValidateFormat::Pretty => {
             // Warnings, so `--quiet` (which hides successes) keeps them.
             emit_warnings(findings, terminal);
-            emit_pretty(file, document, outcome, quiet, terminal);
+            emit_pretty(file, document, outcome, quiet, verbose, terminal);
         }
         SchemaValidateFormat::Json => emit_json(file, outcome, findings),
     }
 }
 
-fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quiet: bool, terminal: &Terminal) {
+fn emit_pretty(
+    file: &Path,
+    document: Option<&Path>,
+    outcome: &FileOutcome,
+    quiet: bool,
+    verbose: u8,
+    terminal: &Terminal,
+) {
     let link = document_link(file, document);
 
     match outcome {
@@ -531,7 +540,7 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             };
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
-            println!("{}", Prose::new(line).render(terminal));
+            println!("{}", Prose::new(line).with_verbosity(verbose).render(terminal));
             for advisory in advisories {
                 emit_advisory_bullet(advisory, terminal);
             }
@@ -545,7 +554,7 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>failed schema validation:</dim>_"
             );
-            println!("{}", Prose::new(header).render(terminal));
+            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
             for problem in problems {
                 emit_problem_bullet(problem, terminal);
             }
@@ -557,7 +566,7 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>could not be opened:</dim>_"
             );
-            println!("{}", Prose::new(header).render(terminal));
+            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
             match unopened_argument(err) {
                 Some(argument) => println!("{}", argument.status_block(terminal).render(terminal)),
                 None => {
@@ -570,7 +579,7 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has unparseable frontmatter:</dim>_"
             );
-            println!("{}", Prose::new(header).render(terminal));
+            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
             let bullet = format!("    - {}", escape_prose(message));
             println!("{}", Prose::new(bullet).render(terminal));
         }
@@ -578,7 +587,7 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>is not a valid YAML document:</dim>_"
             );
-            println!("{}", Prose::new(header).render(terminal));
+            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
             let suffix = match location {
                 Some((line, column)) => format!(" <dim>(at line {line}, column {column})</dim>"),
                 None => String::new(),
@@ -590,7 +599,7 @@ fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quie
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has a schema definition error:</dim>_"
             );
-            println!("{}", Prose::new(header).render(terminal));
+            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
             let block = err.status_block(terminal);
             println!("{}", block.render(terminal));
         }
@@ -687,7 +696,8 @@ fn strip_pointer_prefix(pointer: &str) -> &str {
 /// visible label is the argument as the user spelled it; the underlying
 /// `file://` href is the absolute file it opened (`document`), so `@doc.md`
 /// links to the file it found. An argument that opened nothing links to its
-/// own absolute spelling.
+/// own absolute spelling. Without OSC 8 support the row shows the label
+/// alone, and `label <file://…>` at `-v`.
 fn document_link(file: &Path, document: Option<&Path>) -> String {
     let target = document.unwrap_or(file);
     let absolute = std::path::absolute(target).unwrap_or_else(|_| target.to_path_buf());

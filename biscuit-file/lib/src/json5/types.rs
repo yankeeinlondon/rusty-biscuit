@@ -128,6 +128,26 @@ impl Json5 {
         })
     }
 
+    /// Wraps an already-built value, so it can be written in another format
+    /// without a parse round trip. The raw text is the value's compact JSON.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_file::Json5;
+    ///
+    /// let j = Json5::from_value(serde_json::json!({ "key": "value" }));
+    /// assert_eq!(j.as_json5_compact(), "{key: 'value'}");
+    /// ```
+    #[must_use]
+    pub fn from_value(value: serde_json::Value) -> Self {
+        Self {
+            source: Json5Source::Inline,
+            raw: value.to_string(),
+            value,
+        }
+    }
+
     /// Parse JSON5 from raw bytes.
     ///
     /// ## Errors

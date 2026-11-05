@@ -277,6 +277,32 @@ cell, `InlineContent`, a `StatusBlock` body). A link node built by other code,
 such as a darkmatter document, reaches the terminal with its destination
 unchanged, because its producer owns the base directory.
 
+**Links a terminal cannot click.** Without OSC 8 support, and always in plain
+output, a link prints its text only; with `-v` (a render verbosity of 1 or
+more) it prints `text <url>`. A link whose text is its URL prints the URL
+once. An image prints `IMAGE[alt]`, or `image: alt <path>` with `-v`. A URL
+printed this way is one unbreakable word: when it does not fit it moves to a
+line of its own, and when it is wider than the line it overflows rather than
+being split.
+
+```text
+See the docs <https://example.com/a/very/long/path/to/the/documentation.html>
+```
+
+**Structured titles.** A link title that is a JSON5 object is structured data,
+read by `renderable::output::link_metadata::parse_link_title`; any other title
+is a tooltip. Its `qp` object carries query parameters, which an OSC 8 link
+writes as parameters (`line=14:column=83:heading=intro`) beside a bare
+`file://` URI with no query or fragment:
+
+```md
+[types.md:14:83](/repo/types.md#intro '{ qp: { line: 14, column: 83 } }')
+```
+
+A title that starts with `{` but is not a JSON5 object, or a leftover
+`key=value` title, stays a tooltip; the problem is recorded on the link for
+the caller to report, never printed.
+
 ### Code spans
 
 A backtick run opens a code span when a later run of the same length closes

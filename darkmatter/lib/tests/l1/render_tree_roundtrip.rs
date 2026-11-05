@@ -437,6 +437,7 @@ fn unsupported_node_strictness() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Strict,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let strict_result = renderable::tree::render_markdown_node(&tree, &strict);
     assert!(
@@ -449,6 +450,7 @@ fn unsupported_node_strictness() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Warn,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let warn_rendered =
         renderable::tree::render_markdown_node(&tree, &warn).expect("Warn mode must succeed");
@@ -462,6 +464,7 @@ fn unsupported_node_strictness() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Lossy,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let lossy_rendered =
         renderable::tree::render_markdown_node(&tree, &lossy).expect("Lossy mode must succeed");
@@ -484,6 +487,7 @@ fn lossy_html_fixture_strictness() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Strict,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let strict_result = render_markdown_document(&doc, &strict);
     assert!(
@@ -495,6 +499,7 @@ fn lossy_html_fixture_strictness() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Warn,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let warn_rendered = render_markdown_document(&doc, &warn).expect("Warn mode must succeed");
     assert!(
@@ -506,6 +511,7 @@ fn lossy_html_fixture_strictness() {
         dialect: MarkdownDialect::Markdown,
         strictness: RenderStrictness::Lossy,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let lossy_rendered = render_markdown_document(&doc, &lossy).expect("Lossy mode must succeed");
     assert!(

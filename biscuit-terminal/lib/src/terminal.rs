@@ -525,6 +525,37 @@ impl Terminal {
         self.fixed_width.unwrap_or_else(terminal_width)
     }
 
+    /// The terminal's column count when it is actually known.
+    ///
+    /// Unlike [`width`](Self::width), this never falls back to 80: it is the
+    /// fixed width set through the builder, else the measured width of
+    /// stdout when stdout is a terminal, else `None`. Output-width
+    /// resolution reads this so an unknown width becomes
+    /// [`Width::Unlimited`](renderable::output::Width::Unlimited) rather than
+    /// a guess.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    ///
+    /// assert_eq!(Terminal::new_optimistic(72).detected_columns(), Some(72));
+    /// ```
+    #[must_use]
+    pub fn detected_columns(&self) -> Option<u32> {
+        use std::io::IsTerminal;
+
+        if let Some(width) = self.fixed_width {
+            return Some(width);
+        }
+        if !std::io::stdout().is_terminal() {
+            return None;
+        }
+        terminal_size::terminal_size_of(std::io::stdout())
+            .map(|(terminal_size::Width(columns), _)| u32::from(columns))
+            .filter(|&columns| columns > 0)
+    }
+
     /// Get the terminal height in rows.
     ///
     /// If a fixed height was set via the builder, returns that value.

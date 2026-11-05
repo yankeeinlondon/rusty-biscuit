@@ -9,28 +9,22 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use renderable::layout::Layout as RenderableLayout;
+use renderable::output::{OutputOptions, TerminalProfile, Width};
 use renderable::tree::{
     CodeRenderer, GraphicsMode, NodeAttrs, RenderNode, RenderStrictness, TerminalMermaidMode,
 };
 
-/// How an image renders when no raster form is emitted (graphics off / vector,
-/// or a failed protocol render).
-///
-/// The default [`Bracket`](Self::Bracket) form (`[alt]`) is the generic
-/// renderable fallback. The darkmatter decorated document pipeline opts into
-/// [`Block`](Self::Block) (`▉ IMAGE[alt]`) to match its legacy
-/// `for_terminal_with_layout` placeholder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImagePlaceholder {
-    /// `[alt]` — the generic inline fallback.
-    #[default]
-    Bracket,
-    /// `▉ IMAGE[alt]` — the darkmatter legacy block placeholder.
-    Block,
-}
-
-use crate::discovery::detection::{ColorDepth, ColorMode};
+use crate::discovery::detection::{ColorDepth, ColorMode, GraphicsRoute, ImageSupport, UnderlineSupport};
 use crate::terminal::Terminal;
+
+const NO_UNDERLINE: UnderlineSupport = UnderlineSupport {
+    straight: false,
+    double: false,
+    curly: false,
+    dotted: false,
+    dashed: false,
+    colored: false,
+};
 use crate::utils::layout::Layout;
 
 /// The terminal state the render-tree renderer consults.
@@ -51,14 +45,20 @@ use crate::utils::layout::Layout;
 ///
 /// let term = Terminal::new_optimistic(80);
 /// let ctx = TerminalRenderContext::from_terminal(&term);
-/// assert_eq!(ctx.width, 80);
-/// assert_eq!(ctx.available_width, 80);
+/// assert_eq!(ctx.width, Width::Columns(80));
+/// assert_eq!(ctx.available_width, Width::Columns(80));
 /// assert_eq!(ctx.current_indent, 0);
+/// # use renderable::output::Width;
 /// ```
 #[derive(Debug, Clone)]
 pub struct TerminalRenderContext {
-    /// The usable terminal width in columns.
-    pub width: u32,
+    /// The output width of the whole render.
+    ///
+    /// Under [`Width::Columns`] prose wraps and fills (rules, code bands,
+    /// table plans) reach that many columns; under [`Width::Unlimited`] and
+    /// [`Width::Source`] nothing wraps and every fill renders at its natural
+    /// width.
+    pub width: Width,
     /// The color depth the terminal advertises.
     pub color_depth: ColorDepth,
     /// The terminal light/dark mode.
@@ -83,13 +83,18 @@ pub struct TerminalRenderContext {
     pub layout: Layout,
     /// The detected [`Terminal`], retained so components can render with
     /// faithful capabilities.
+    ///
+    /// Its `fixed_width` mirrors [`available_width`](Self::available_width)
+    /// only under [`Width::Columns`]; under an unbounded width the
+    /// render-tree paths read `available_width` and never size output from
+    /// this snapshot's width.
     pub terminal: Terminal,
     /// The available rendering width after margins and indentation.
     ///
     /// Initially equal to `width`, this tracks the current renderable width
     /// as the renderer descends into nested structures that consume horizontal
-    /// space.
-    pub available_width: u32,
+    /// space. An unbounded width stays unbounded.
+    pub available_width: Width,
     /// Current indentation level in characters.
     ///
     /// Tracks how far from the left margin the current content should be
@@ -157,12 +162,17 @@ pub struct TerminalRenderContext {
     /// The darkmatter Markdown document pipeline sets `"▐   "` so block quotes
     /// match the legacy `for_terminal` renderer's quarter-block bar.
     pub blockquote_prefix: Option<String>,
-    /// How an image renders when no raster form is emitted.
+    /// The global `-v` count. Above zero, a link or image that cannot be
+    /// clickable also prints its destination.
+    pub verbosity: u8,
+    /// Whether this render is pinned to the plain profile.
     ///
-    /// [`ImagePlaceholder::Bracket`] (the default) emits `[alt]`. The darkmatter
-    /// decorated document pipeline sets [`ImagePlaceholder::Block`] so the
-    /// fallback matches the legacy `▉ IMAGE[alt]` block placeholder.
-    pub image_placeholder: ImagePlaceholder,
+    /// Set by [`from_profile`](Self::from_profile) for a plain profile and by
+    /// [`pin_plain`](Self::pin_plain). A plain render writes no escape byte
+    /// and no trailing whitespace, and prints structure as text: block quotes
+    /// as `> `, rules as `---`, headings without `#` markers, and disclosure
+    /// bodies as ordinary blocks.
+    pub plain: bool,
 }
 
 impl TerminalRenderContext {
@@ -174,7 +184,7 @@ impl TerminalRenderContext {
     /// terminal width and `current_indent` to 0.
     #[must_use]
     pub fn from_terminal(term: &Terminal) -> Self {
-        let width = term.width();
+        let width = Width::Columns(term.width().max(1));
         Self {
             width,
             color_depth: term.color_depth,
@@ -198,8 +208,111 @@ impl TerminalRenderContext {
             code_theme: None,
             line_numbers: false,
             blockquote_prefix: None,
-            image_placeholder: ImagePlaceholder::default(),
+            verbosity: 0,
+            plain: false,
         }
+    }
+
+    /// Builds a context from an output profile and width, with no ambient
+    /// detection.
+    ///
+    /// A plain profile ([`TerminalProfile::is_plain`]) pins the context with
+    /// [`pin_plain`](Self::pin_plain).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::render_tree::TerminalRenderContext;
+    /// use renderable::output::{TerminalProfile, Width};
+    ///
+    /// let ctx = TerminalRenderContext::from_profile(&TerminalProfile::plain(), Width::Unlimited);
+    /// assert!(ctx.plain);
+    /// assert_eq!(ctx.available_width, Width::Unlimited);
+    /// assert!(!ctx.hyperlinks);
+    /// ```
+    #[must_use]
+    pub fn from_profile(profile: &TerminalProfile, width: Width) -> Self {
+        let mut term = Terminal::new_optimistic(width.as_columns().unwrap_or(80));
+        term.color_depth = profile.color_depth.into();
+        term.color_mode = profile.color_mode.into();
+        term.text_color = profile.text_color.map(|(r, g, b)| crate::discovery::osc_queries::RgbValue { r, g, b });
+        term.background_color =
+            profile.background_color.map(|(r, g, b)| crate::discovery::osc_queries::RgbValue { r, g, b });
+        term.is_tty = profile.is_tty;
+        term.osc_link_support = profile.hyperlinks;
+        term.supports_italic = profile.italics;
+        if !profile.underline {
+            term.underline_support = NO_UNDERLINE;
+        }
+        if !profile.graphics {
+            term.graphics_route = GraphicsRoute::from(ImageSupport::None);
+        }
+        term.supports_unicode = profile.unicode;
+
+        let mut ctx = Self::from_terminal(&term);
+        ctx.width = width;
+        ctx.available_width = width;
+        if profile.is_plain() {
+            ctx.pin_plain();
+        }
+        ctx
+    }
+
+    /// Builds a context from the options every output path receives: the
+    /// profile, width, and verbosity.
+    #[must_use]
+    pub fn from_output_options(options: &OutputOptions) -> Self {
+        let mut ctx = Self::from_profile(&options.terminal_profile, options.width);
+        ctx.verbosity = options.verbosity;
+        ctx
+    }
+
+    /// The profile this context renders with.
+    #[must_use]
+    pub fn profile(&self) -> TerminalProfile {
+        if self.plain {
+            return TerminalProfile::plain();
+        }
+        let underline = &self.terminal.underline_support;
+        TerminalProfile {
+            color_depth: self.color_depth.into(),
+            color_mode: self.color_mode.into(),
+            text_color: self.page_text_color,
+            background_color: self.page_background_color,
+            is_tty: self.terminal.is_tty,
+            hyperlinks: self.hyperlinks,
+            italics: self.terminal.supports_italic,
+            underline: underline.straight
+                || underline.double
+                || underline.curly
+                || underline.dotted
+                || underline.dashed,
+            graphics: self.terminal.image_support() != ImageSupport::None,
+            unicode: self.supports_unicode,
+        }
+    }
+
+    /// Pins this context to the plain profile.
+    ///
+    /// Call it after every other option has been applied: it turns off
+    /// color, OSC 8 links, italics, underline, and images on both the context
+    /// and its terminal snapshot, so no later capability check can emit an
+    /// escape sequence. Width, verbosity, and layout are kept.
+    pub fn pin_plain(&mut self) {
+        self.plain = true;
+        self.color_depth = ColorDepth::None;
+        self.hyperlinks = false;
+        self.inline_code_color = None;
+        self.inline_code_background = None;
+        self.graphics_mode = GraphicsMode::Off;
+        self.force_graphics = false;
+        self.mermaid_mode = TerminalMermaidMode::Code;
+        self.terminal.color_depth = ColorDepth::None;
+        self.terminal.osc_link_support = false;
+        self.terminal.supports_italic = false;
+        self.terminal.underline_support = NO_UNDERLINE;
+        self.terminal.graphics_route = GraphicsRoute::from(ImageSupport::None);
+        self.terminal.is_tty = false;
     }
 
     /// Builds a fallback context for an 80-column modern terminal.
@@ -216,7 +329,9 @@ impl TerminalRenderContext {
     ///
     /// Used when rendering nested content that needs reduced width.
     /// The `indent_delta` is added to `current_indent` and both
-    /// `indent_delta` and `width_delta` are subtracted from `available_width`.
+    /// `indent_delta` and `width_delta` are subtracted from a bounded
+    /// `available_width` (never below one column); an unbounded width stays
+    /// unbounded.
     ///
     /// ## Examples
     ///
@@ -224,16 +339,17 @@ impl TerminalRenderContext {
     /// use biscuit_terminal::render_tree::TerminalRenderContext;
     ///
     /// let ctx = TerminalRenderContext::fallback();
-    /// assert_eq!(ctx.available_width, 80);
+    /// assert_eq!(ctx.available_width, Width::Columns(80));
     /// assert_eq!(ctx.current_indent, 0);
     ///
     /// let child = ctx.for_child(4, 0);
-    /// assert_eq!(child.available_width, 76);
+    /// assert_eq!(child.available_width, Width::Columns(76));
     /// assert_eq!(child.current_indent, 4);
     ///
     /// let grandchild = child.for_child(2, 2);
-    /// assert_eq!(grandchild.available_width, 72);
+    /// assert_eq!(grandchild.available_width, Width::Columns(72));
     /// assert_eq!(grandchild.current_indent, 6);
+    /// # use renderable::output::Width;
     /// ```
     #[must_use]
     pub fn for_child(&self, indent_delta: u32, width_delta: u32) -> Self {
@@ -257,12 +373,13 @@ impl TerminalRenderContext {
     /// use biscuit_terminal::render_tree::TerminalRenderContext;
     ///
     /// let ctx = TerminalRenderContext::fallback();
-    /// let narrow = ctx.with_width(40);
-    /// assert_eq!(narrow.available_width, 40);
-    /// assert_eq!(narrow.width, 80); // root width unchanged
+    /// let narrow = ctx.with_width(Width::Columns(40));
+    /// assert_eq!(narrow.available_width, Width::Columns(40));
+    /// assert_eq!(narrow.width, Width::Columns(80)); // root width unchanged
+    /// # use renderable::output::Width;
     /// ```
     #[must_use]
-    pub fn with_width(&self, available_width: u32) -> Self {
+    pub fn with_width(&self, available_width: Width) -> Self {
         Self {
             available_width,
             ..self.clone()
@@ -357,6 +474,25 @@ impl TerminalRenderOptions {
         }
     }
 
+    /// Builds options for an output profile and width (see
+    /// [`TerminalRenderContext::from_output_options`]).
+    #[must_use]
+    pub fn from_output_options(options: &OutputOptions, strictness: RenderStrictness) -> Self {
+        Self {
+            context: TerminalRenderContext::from_output_options(options),
+            strictness,
+            code_renderer: None,
+            diagram_renderer: None,
+        }
+    }
+
+    /// Pins the render to the plain profile (see
+    /// [`TerminalRenderContext::pin_plain`]). Installed hooks stay installed
+    /// but are handed a colorless context.
+    pub fn pin_plain(&mut self) {
+        self.context.pin_plain();
+    }
+
     /// Sets the optional code-block render hook.
     #[must_use]
     pub fn with_code_renderer(mut self, code_renderer: Rc<dyn CodeRenderer>) -> Self {
@@ -443,8 +579,9 @@ pub struct DiagramRenderRequest<'a> {
     /// The capability snapshot to render against, with
     /// [`TerminalRenderContext::force_graphics`] already applied.
     pub terminal: &'a Terminal,
-    /// The columns available at the fence's position.
-    pub available_width: u32,
+    /// The width available at the fence's position. A text answer laid out
+    /// under an unbounded width is never measured against it.
+    pub available_width: Width,
     /// The render's fidelity ceiling: `Rich` or `Vector`, never `Off`.
     pub graphics_mode: GraphicsMode,
     /// The promotion mode that offered the fence: `Image` (only at `Rich`)
@@ -488,8 +625,65 @@ mod tests {
         let term = Terminal::new_optimistic(120);
         let ctx = TerminalRenderContext::from_terminal(&term);
 
-        assert_eq!(ctx.width, 120);
-        assert_eq!(ctx.available_width, 120);
+        assert_eq!(ctx.width, Width::Columns(120));
+        assert_eq!(ctx.available_width, Width::Columns(120));
+    }
+
+    #[test]
+    fn for_child_keeps_an_unbounded_width_unbounded() {
+        let mut ctx = TerminalRenderContext::fallback();
+        ctx.available_width = Width::Unlimited;
+        assert_eq!(ctx.for_child(10, 5).available_width, Width::Unlimited);
+    }
+
+    #[test]
+    fn from_profile_maps_capabilities_and_width() {
+        use renderable::color::ColorDepth as ProfileDepth;
+
+        let mut profile = TerminalProfile::plain();
+        profile.color_depth = ProfileDepth::Basic;
+        profile.hyperlinks = true;
+        profile.is_tty = true;
+        let ctx = TerminalRenderContext::from_profile(&profile, Width::Columns(40));
+        assert!(!ctx.plain);
+        assert_eq!(ctx.color_depth, ColorDepth::Basic);
+        assert!(ctx.hyperlinks && ctx.terminal.osc_link_support);
+        assert_eq!(ctx.width, Width::Columns(40));
+        assert_eq!(ctx.terminal.fixed_width, Some(40));
+        assert_eq!(ctx.profile(), profile);
+    }
+
+    #[test]
+    fn a_plain_profile_pins_the_context() {
+        let ctx = TerminalRenderContext::from_profile(&TerminalProfile::plain(), Width::Source);
+        assert!(ctx.plain);
+        assert_eq!(ctx.color_depth, ColorDepth::None);
+        assert_eq!(ctx.terminal.color_depth, ColorDepth::None);
+        assert!(!ctx.hyperlinks && !ctx.terminal.osc_link_support);
+        assert_eq!(ctx.profile(), TerminalProfile::plain());
+        assert_eq!(ctx.available_width, Width::Source);
+    }
+
+    #[test]
+    fn pin_plain_overrides_capabilities_set_earlier() {
+        let mut options = TerminalRenderOptions::new(&Terminal::new_optimistic(80), RenderStrictness::Warn);
+        options.context.hyperlinks = true;
+        options.context.inline_code_background = Some((1, 2, 3));
+        options.context.graphics_mode = GraphicsMode::Rich;
+        options.pin_plain();
+        assert!(options.context.plain);
+        assert!(!options.context.hyperlinks);
+        assert!(options.context.inline_code_background.is_none());
+        assert_eq!(options.context.graphics_mode, GraphicsMode::Off);
+        assert!(!options.context.terminal.supports_italic);
+    }
+
+    #[test]
+    fn from_output_options_carries_verbosity() {
+        let options = OutputOptions::new(Width::Unlimited, TerminalProfile::plain()).with_verbosity(2);
+        let ctx = TerminalRenderContext::from_output_options(&options);
+        assert_eq!(ctx.verbosity, 2);
+        assert_eq!(ctx.width, Width::Unlimited);
     }
 
     #[test]
@@ -528,8 +722,8 @@ mod tests {
     fn fallback_initializes_new_fields_correctly() {
         let ctx = TerminalRenderContext::fallback();
 
-        assert_eq!(ctx.width, 80);
-        assert_eq!(ctx.available_width, 80);
+        assert_eq!(ctx.width, Width::Columns(80));
+        assert_eq!(ctx.available_width, Width::Columns(80));
         assert_eq!(ctx.current_indent, 0);
         assert!(ctx.active_layout.is_none());
         assert_eq!(ctx.graphics_mode, GraphicsMode::Rich);
@@ -540,7 +734,8 @@ mod tests {
         assert!(ctx.code_theme.is_none());
         assert!(!ctx.line_numbers);
         assert!(ctx.blockquote_prefix.is_none());
-        assert_eq!(ctx.image_placeholder, ImagePlaceholder::Bracket);
+        assert_eq!(ctx.verbosity, 0);
+        assert!(!ctx.plain);
     }
 
     #[test]
@@ -556,7 +751,7 @@ mod tests {
         let ctx = TerminalRenderContext::fallback();
         let child = ctx.for_child(4, 2);
 
-        assert_eq!(child.available_width, 80 - 4 - 2);
+        assert_eq!(child.available_width, Width::Columns(80 - 4 - 2));
     }
 
     #[test]
@@ -575,15 +770,15 @@ mod tests {
         let ctx = TerminalRenderContext::fallback();
         let child = ctx.for_child(10, 5);
 
-        assert_eq!(child.width, 80);
+        assert_eq!(child.width, Width::Columns(80));
     }
 
     #[test]
-    fn for_child_saturates_at_zero_width() {
+    fn for_child_saturates_at_one_column() {
         let ctx = TerminalRenderContext::fallback();
         let child = ctx.for_child(100, 100);
 
-        assert_eq!(child.available_width, 0);
+        assert_eq!(child.available_width, Width::Columns(1));
         assert_eq!(child.current_indent, 100);
     }
 
@@ -605,27 +800,27 @@ mod tests {
     #[test]
     fn with_width_sets_specific_width() {
         let ctx = TerminalRenderContext::fallback();
-        let narrow = ctx.with_width(40);
+        let narrow = ctx.with_width(Width::Columns(40));
 
-        assert_eq!(narrow.available_width, 40);
+        assert_eq!(narrow.available_width, Width::Columns(40));
     }
 
     #[test]
     fn with_width_preserves_root_width() {
         let ctx = TerminalRenderContext::fallback();
-        let narrow = ctx.with_width(40);
+        let narrow = ctx.with_width(Width::Columns(40));
 
-        assert_eq!(narrow.width, 80);
+        assert_eq!(narrow.width, Width::Columns(80));
     }
 
     #[test]
     fn with_width_preserves_current_indent() {
         let ctx = TerminalRenderContext::fallback();
         let indented = ctx.for_child(5, 0);
-        let narrow = indented.with_width(30);
+        let narrow = indented.with_width(Width::Columns(30));
 
         assert_eq!(narrow.current_indent, 5);
-        assert_eq!(narrow.available_width, 30);
+        assert_eq!(narrow.available_width, Width::Columns(30));
     }
 
     #[test]
@@ -674,8 +869,8 @@ mod tests {
         };
         let with_layout = indented.with_layout(Some(layout));
 
-        assert_eq!(with_layout.width, 80);
-        assert_eq!(with_layout.available_width, 72);
+        assert_eq!(with_layout.width, Width::Columns(80));
+        assert_eq!(with_layout.available_width, Width::Columns(72));
         assert_eq!(with_layout.current_indent, 5);
     }
 }

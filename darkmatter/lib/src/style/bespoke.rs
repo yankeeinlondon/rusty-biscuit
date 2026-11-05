@@ -1674,14 +1674,14 @@ mod tests {
         let output = page.render(&md).unwrap();
 
         // The tree path shapes the *complete* placeholder (width 40, Right):
-        // `▉ IMAGE[a]` is right-aligned within the 40-cell field, so the padding
+        // `IMAGE[a]` is right-aligned within the 40-cell field, so the padding
         // precedes the placeholder and the alt inside the brackets is untouched.
         let fallback_line = output
             .lines()
-            .find(|l| l.contains("▉ IMAGE["))
+            .find(|l| l.contains("IMAGE["))
             .unwrap_or_else(|| panic!("fallback line missing in output={output:?}"));
         let inner = fallback_line
-            .split_once("▉ IMAGE[")
+            .split_once("IMAGE[")
             .and_then(|(_, rest)| rest.split_once(']'))
             .map(|(inner, _)| inner)
             .unwrap_or("");

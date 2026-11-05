@@ -631,26 +631,23 @@ mod tests {
     }
 
     #[test]
-    fn test_osc8_link_unsupported_emits_markdown_fallback() {
+    fn test_osc8_link_unsupported_prints_the_link_text() {
         let term = Terminal::builder().osc_link_support(false).build();
         let prose = Prose::new("<a href=\"https://example.com\">click here</a>");
         let result = prose.render(&term);
-        assert!(
-            result.contains("[click here](https://example.com)"),
-            "got: {result:?}"
-        );
+        assert!(result.contains("click here"), "got: {result:?}");
+        assert!(!result.contains("[click here]"), "got: {result:?}");
+        assert!(!result.contains("https://example.com"), "got: {result:?}");
         assert!(!result.contains("\x1b]8;;"), "got: {result:?}");
     }
 
     #[test]
-    fn link_markdown_fallback_escapes_bracket_in_description() {
+    fn link_without_osc8_prints_its_description_unescaped() {
         let term = Terminal::builder().osc_link_support(false).build();
         let prose = Prose::new(r#"<a href="https://example.com">array[0]</a>"#);
         let result = prose.render(&term);
-        assert!(
-            result.contains(r"[array[0\]](https://example.com)"),
-            "got: {result:?}"
-        );
+        assert!(result.contains("array[0]"), "got: {result:?}");
+        assert!(!result.contains("https://example.com"), "got: {result:?}");
         assert!(!result.contains("\x1b]8;;"), "got: {result:?}");
     }
 

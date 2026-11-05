@@ -203,10 +203,9 @@ fn terminal_keeps_urls_with_a_scheme_unchanged() {
 }
 
 #[test]
-fn terminal_fallback_without_osc8_shows_the_resolved_destination() {
+fn terminal_without_osc8_prints_the_link_text_alone() {
     for (component, output) in terminal_outputs(&format!("[x]({MISSING})"), &fallback_term()) {
-        let expected = url::Url::from_file_path(std::path::absolute(MISSING).unwrap()).unwrap();
-        assert_eq!(output.trim_end(), format!("[x]({expected})"), "{component}");
+        assert_eq!(output.trim_end(), "x", "{component}");
     }
 }
 

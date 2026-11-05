@@ -5759,16 +5759,18 @@ fn test_repo_hash_and_git_status_link_only_remote_contained_commits() {
         String::from_utf8(output).unwrap()
     };
 
-    assert!(stdout(&["repo", "hash", &pushed]).contains(&pushed_url));
-    assert!(!stdout(&["repo", "hash", &unpushed]).contains("github.com/o/r/commit"));
+    // `-v`: piped, a commit link prints its URL only when verbose.
+    assert!(stdout(&["-v", "repo", "hash", &pushed]).contains(&pushed_url));
+    assert!(!stdout(&["-v", "repo", "hash", &unpushed]).contains("github.com/o/r/commit"));
+    assert!(!stdout(&["repo", "hash", &pushed]).contains(&pushed_url));
 
-    // Rendered links wrap at the terminal width, so match the short-hash label
-    // and the start of its link target rather than the full URL.
+    // Piped, a link cannot be clickable and prints its text alone, so
+    // git-status shows both short hashes and no commit URL; which commits link
+    // is proven by `repo hash` above.
     let status = stdout(&["repo", "git-status"]);
-    let linked = |sha: &str| format!("[{}](https://github.com/o/r/commit/", &sha[..7]);
-    assert!(status.contains(&linked(&pushed)), "{status}");
-    assert!(!status.contains(&linked(&unpushed)), "{status}");
+    assert!(status.contains(&format!("[{}]", &pushed[..7])), "{status}");
     assert!(status.contains(&format!("[{}]", &unpushed[..7])), "{status}");
+    assert!(!status.contains("github.com/o/r/commit"), "{status}");
 }
 
 /// Corrupt the HEAD commit object of a freshly-built test repo and return its
@@ -7018,7 +7020,8 @@ fn test_recent_commits_terminal_output_renders_library_prose() {
         "commit text must not be read as markup: {stdout}"
     );
     assert!(stdout.contains("Files Impacted:"), "{stdout}");
-    assert!(stdout.contains("src/main.rs](file://"), "file link: {stdout}");
+    // Piped, a link prints its text alone.
+    assert!(stdout.contains("src/main.rs") && !stdout.contains("](file://"), "file link: {stdout}");
     for leaked in ["<bold>", "<italic>", "<blue>", "\\[", "**"] {
         assert!(!stdout.contains(leaked), "{leaked:?} leaked: {stdout}");
     }
@@ -9309,7 +9312,7 @@ fn test_git_status_from_linked_worktree_renders_case_a() {
     // The main worktree is the parent directory, so its visible label is
     // relative (`..`) rather than an absolute or home-abbreviated path.
     assert!(
-        stdout.contains("[..](file://") || stdout.contains("located at .."),
+        stdout.contains("located at .."),
         "main worktree path label is relative to the current worktree: {stdout}"
     );
 

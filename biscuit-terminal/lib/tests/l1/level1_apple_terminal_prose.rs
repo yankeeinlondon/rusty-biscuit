@@ -52,7 +52,7 @@ fn drain(session: &mut expectrl::session::OsSession) -> String {
 }
 
 #[test]
-fn apple_terminal_link_falls_back_to_markdown() {
+fn apple_terminal_link_prints_its_text_alone() {
     let mut session = spawn_with_env(&[
         ("PROBE", "prose"),
         ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
@@ -69,8 +69,8 @@ fn apple_terminal_link_falls_back_to_markdown() {
         "expected prose probe markers, got: {output:?}"
     );
     assert!(
-        output.contains("[click here](https://example.com)"),
-        "expected markdown link fallback, got: {output:?}"
+        output.contains("click here") && !output.contains("https://example.com"),
+        "expected the link text alone, got: {output:?}"
     );
     assert!(
         !output.contains("\x1b]8;;"),

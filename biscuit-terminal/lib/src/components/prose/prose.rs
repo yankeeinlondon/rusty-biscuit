@@ -78,6 +78,9 @@ pub struct Prose {
     pub(super) layout: Layout,
     pub(super) line_breaks: LineBreaks,
     pub(super) tag: ProseTag,
+    /// The `-v` count the terminal fold uses for links and images that
+    /// cannot be clickable.
+    pub(super) verbosity: u8,
 }
 
 /// The HTML element used for each paragraph of a [`Prose`].
@@ -143,6 +146,27 @@ impl Prose {
     /// Set what a single newline means in every paragraph.
     pub fn with_line_breaks(mut self, line_breaks: LineBreaks) -> Self {
         self.line_breaks = line_breaks;
+        self
+    }
+
+    /// Set the verbosity of the terminal output. Above zero, a link that
+    /// cannot be clickable (no OSC 8 support) prints `text <url>` instead of
+    /// its text alone, and an image prints `image: alt <path>`.
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::prose::Prose;
+    /// use biscuit_terminal::components::renderable::TerminalRenderable;
+    /// use biscuit_terminal::terminal::Terminal;
+    ///
+    /// let mut term = Terminal::new_optimistic(80);
+    /// term.osc_link_support = false;
+    /// let prose = Prose::new("[docs](https://example.com/docs)");
+    /// assert_eq!(prose.render(&term).trim(), "docs");
+    /// let verbose = prose.with_verbosity(1).render(&term);
+    /// assert!(verbose.contains("docs <https://example.com/docs>"), "{verbose}");
+    /// ```
+    pub fn with_verbosity(mut self, verbosity: u8) -> Self {
+        self.verbosity = verbosity;
         self
     }
 

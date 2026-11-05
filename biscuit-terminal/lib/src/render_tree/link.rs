@@ -46,6 +46,74 @@ pub(super) fn terminal_link_url<'a>(link: &RenderNode, url: &'a str) -> Cow<'a, 
     }
 }
 
+/// The OSC 8 URI and parameter field for a link node whose authored
+/// destination is `url`.
+///
+/// A link without [`link_metadata`](renderable::tree::NodeAttrs::link_metadata)
+/// keeps today's destination ([`terminal_link_url`], fragment included) and
+/// an empty parameter field. A link with metadata gets the bare URI (query
+/// and fragment removed) and its metadata as colon-separated `key=value`
+/// pairs: `line`, `column`, and `heading` first, in that order, then every
+/// other key sorted. `heading` is the destination's fragment unless the
+/// metadata names one. A pair whose key or value contains `:`, `;`, or a
+/// control character (or whose key is empty or contains `=`) is omitted,
+/// because the OSC 8 parameter field cannot carry it.
+pub(super) fn osc8_target(link: &RenderNode, url: &str) -> (String, String) {
+    let Some(metadata) = link.attrs.link_metadata() else {
+        return (terminal_link_url(link, url).into_owned(), String::new());
+    };
+    let (bare, fragment) = split_destination(url);
+    let uri = terminal_link_url(link, bare).into_owned();
+
+    let query = &metadata.query;
+    let mut pairs: Vec<(String, String)> = Vec::with_capacity(query.len() + 1);
+    for key in ["line", "column"] {
+        if let Some(value) = query.get(key) {
+            pairs.push((key.to_string(), value.to_transport()));
+        }
+    }
+    match (query.get("heading"), fragment.filter(|f| !f.is_empty())) {
+        (Some(value), _) => pairs.push(("heading".to_string(), value.to_transport())),
+        (None, Some(fragment)) => pairs.push(("heading".to_string(), fragment.to_string())),
+        (None, None) => {}
+    }
+    let mut rest: Vec<(String, String)> = query
+        .iter()
+        .filter(|(key, _)| !matches!(*key, "line" | "column" | "heading"))
+        .map(|(key, value)| (key.to_string(), value.to_transport()))
+        .collect();
+    rest.sort();
+    pairs.extend(rest);
+
+    let params = pairs
+        .into_iter()
+        .filter(|(key, value)| {
+            !key.is_empty() && !key.contains('=') && osc8_param_safe(key) && osc8_param_safe(value)
+        })
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    (uri, params)
+}
+
+/// Whether `text` can sit in an OSC 8 parameter field.
+fn osc8_param_safe(text: &str) -> bool {
+    !text.chars().any(|ch| ch == ':' || ch == ';' || ch.is_control())
+}
+
+/// Splits a destination into its bare part (no query, no fragment) and its
+/// fragment.
+fn split_destination(url: &str) -> (&str, Option<&str>) {
+    let (before_fragment, fragment) = match url.split_once('#') {
+        Some((before, fragment)) => (before, Some(fragment)),
+        None => (url, None),
+    };
+    let bare = before_fragment
+        .split_once('?')
+        .map_or(before_fragment, |(bare, _)| bare);
+    (bare, fragment)
+}
+
 /// Resolves an authored destination to a `file://` URL with
 /// [`FileReference`]'s grammar: `./x` against the working directory, a bare
 /// `x` against the working directory then the repository root, and `~`, `@`,
@@ -130,6 +198,57 @@ mod tests {
         }
         let absolute = std::path::absolute("/usr/local/bin/test").unwrap();
         assert_eq!(path_of(&file_url("/usr/local/bin/test").unwrap()), absolute);
+    }
+
+    fn metadata_link(url: &str, pairs: &[(&str, renderable::output::link_metadata::QueryValue)]) -> RenderNode {
+        use renderable::output::link_metadata::{LinkMetadata, QueryParams};
+        let mut link = RenderNode::link(url, None, vec![RenderNode::text("x")]);
+        link.attrs.set_link_metadata(LinkMetadata {
+            query: pairs.iter().cloned().collect::<QueryParams>(),
+        });
+        link
+    }
+
+    #[test]
+    fn a_link_without_metadata_keeps_its_destination_and_no_params() {
+        let link = RenderNode::link("https://e.com/a?b=1#c", None, vec![RenderNode::text("x")]);
+        assert_eq!(
+            osc8_target(&link, "https://e.com/a?b=1#c"),
+            ("https://e.com/a?b=1#c".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn metadata_params_are_ordered_and_the_uri_is_bare() {
+        let link = metadata_link(
+            "https://e.com/doc.md?x=1#setup",
+            &[
+                ("zeta", "z".into()),
+                ("column", 7_u64.into()),
+                ("alpha", true.into()),
+                ("line", 14_u64.into()),
+            ],
+        );
+        let (uri, params) = osc8_target(&link, "https://e.com/doc.md?x=1#setup");
+        assert_eq!(uri, "https://e.com/doc.md");
+        assert_eq!(params, "line=14:column=7:heading=setup:alpha=true:zeta=z");
+    }
+
+    #[test]
+    fn a_metadata_heading_wins_over_the_fragment_and_unsafe_pairs_are_omitted() {
+        let link = metadata_link(
+            "https://e.com/#frag",
+            &[
+                ("heading", "intro".into()),
+                ("bad", "a:b".into()),
+                ("semi", "a;b".into()),
+                ("ctl", "a\u{7}b".into()),
+                ("ok", "v".into()),
+            ],
+        );
+        let (uri, params) = osc8_target(&link, "https://e.com/#frag");
+        assert_eq!(uri, "https://e.com/");
+        assert_eq!(params, "heading=intro:ok=v");
     }
 
     #[test]

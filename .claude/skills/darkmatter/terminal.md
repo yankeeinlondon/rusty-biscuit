@@ -55,6 +55,16 @@ For page-framed terminal output (margins, padding, page background, `style:`
 frontmatter), use `DarkmatterPage::render(&md)` instead — see the darkmatter
 skill's *Common Entry Points*.
 
+The generic terminal fold now owns the link and image fallbacks: without OSC 8
+a link prints its text (`text <url>` at `-v`, through
+`Prose::with_verbosity` or `TerminalRenderContext::verbosity`), and an image
+prints `IMAGE[alt]`; the old `▉ IMAGE[alt]` block placeholder and
+`[text](url)` fallback are gone. `md schema validate` forwards its `-v` count
+to its linked document rows, so a piped run shows `doc.md <file://…>` only at
+`-v`. Darkmatter's `TerminalOptions` still carries a `u16` `max_width` and an
+unread `hyperlink_mode` until the page path moves to `renderable::Width` and
+the shared `TerminalProfile`.
+
 ## Theme Pairs
 
 Themes come in light/dark pairs with automatic mode detection:

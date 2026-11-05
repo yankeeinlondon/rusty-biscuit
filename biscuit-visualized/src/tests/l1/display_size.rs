@@ -209,7 +209,7 @@ fn the_hook_sizes_a_nested_fence_to_its_available_columns() {
 fn the_hook_sizes_to_the_available_columns_not_the_terminal_width() {
     let term = terminal(TerminalApp::Kitty, ImageSupport::Kitty, 40);
     let mut opts = promoting(&term);
-    opts.context = opts.context.with_width(24);
+    opts.context = opts.context.with_width(renderable::output::Width::Columns(24));
     let fence = RenderNode::code(Some("mermaid".to_string()), None, WIDE_FLOW);
 
     let output = render_terminal_node(&fence, &opts).expect("render").output;

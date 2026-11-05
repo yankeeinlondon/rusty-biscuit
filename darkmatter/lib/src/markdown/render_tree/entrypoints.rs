@@ -32,7 +32,7 @@ use std::rc::Rc;
 
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::render_tree::{
-    ImagePlaceholder, TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
+    TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
 use biscuit_terminal::terminal::Terminal;
 use biscuit_visualized::components::TerminalDiagramRenderer;
@@ -406,10 +406,6 @@ pub fn render_tree_terminal(
 /// with component policies, page colors, hyperlink / image styles, and HR
 /// defaults baked into every node during construction.
 ///
-/// The image fallback placeholder is set to [`ImagePlaceholder::Block`] — only
-/// the page-decorated path uses the `▉ IMAGE[alt]` block form; the direct
-/// [`render_tree_terminal`] keeps the generic `[alt]`.
-///
 /// ## Errors
 ///
 /// Propagates any fatal [`RenderError`] from [`render_terminal_document`].
@@ -419,8 +415,7 @@ pub(crate) fn render_tree_terminal_with_context(
     build_ctx: &super::build_context::TreeBuildContext,
 ) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
     let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
-    let mut term_opts = terminal_options_from_terminal_options(options);
-    term_opts.context.image_placeholder = ImagePlaceholder::Block;
+    let term_opts = terminal_options_from_terminal_options(options);
     let rendered = render_terminal_document(&doc, &term_opts)?;
     Ok(PipelineResult::new(
         rendered.output,
@@ -483,9 +478,8 @@ pub(crate) fn render_page_terminal_document(
     // independent of the capability profile selected above.
     let width = u32::from(content_width);
     term_opts.context.terminal.fixed_width = Some(width);
-    term_opts.context.width = width;
-    term_opts.context.available_width = width;
-    term_opts.context.image_placeholder = ImagePlaceholder::Block;
+    term_opts.context.width = renderable::output::Width::Columns(width);
+    term_opts.context.available_width = renderable::output::Width::Columns(width);
     let rendered = render_terminal_document(doc, &term_opts)
         .map_err(crate::markdown::MarkdownError::RenderTree)?;
     Ok(PipelineResult::new(
@@ -527,6 +521,7 @@ pub(crate) fn render_tree_markdown_plus_with_context(
         dialect: MarkdownDialect::MarkdownPlus,
         strictness: RenderStrictness::Warn,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let rendered = render_markdown_document(&doc, &opts)?;
     Ok(PipelineResult::new(
@@ -552,6 +547,7 @@ pub fn render_tree_markdown_dialect(
         dialect,
         strictness: RenderStrictness::Warn,
         style: None,
+        width: renderable::output::Width::Source,
     };
     let rendered = render_markdown_document(&doc, &opts)?;
     Ok(PipelineResult::new(

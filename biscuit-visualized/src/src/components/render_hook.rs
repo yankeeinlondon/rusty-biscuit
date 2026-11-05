@@ -73,9 +73,14 @@ impl DiagramRenderer for TerminalDiagramRenderer {
         request: &DiagramRenderRequest<'_>,
     ) -> Result<DiagramOutcome, DiagramRenderError> {
         // Size the diagram to the fence's columns (a list item's or quote's
-        // inner width), not the whole terminal.
+        // inner width), not the whole terminal. An unbounded fence leaves an
+        // image at the terminal snapshot's width and puts no cap on a text
+        // drawing, which is never wider than it needs to be.
         let mut terminal = request.terminal.clone();
-        terminal.fixed_width = Some(request.available_width.max(1));
+        let columns = request.available_width.as_columns();
+        if let Some(columns) = columns {
+            terminal.fixed_width = Some(columns.max(1));
+        }
         let diagram = MermaidDiagram::new(request.source);
 
         let image = match request.mermaid_mode {
@@ -95,7 +100,7 @@ impl DiagramRenderer for TerminalDiagramRenderer {
         if request.mermaid_mode != TerminalMermaidMode::Automatic {
             return Ok(DiagramOutcome::Declined);
         }
-        match diagram.text_nodes(request.available_width, text_charset(&terminal), self.fallback.resolve()) {
+        match diagram.text_nodes(columns.unwrap_or(u32::MAX), text_charset(&terminal), self.fallback.resolve()) {
             Ok(Some(nodes)) => Ok(DiagramOutcome::Nodes(nodes)),
             Ok(None) => Ok(DiagramOutcome::Declined),
             Err(error) => Err(DiagramRenderError::new(error)),

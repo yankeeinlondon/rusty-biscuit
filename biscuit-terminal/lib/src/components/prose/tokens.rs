@@ -106,8 +106,9 @@ pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(Strin
 enum TagResolution {
     /// A styled span.
     Styled(ProseStyle),
-    /// A hyperlink carrying the raw href.
-    Link(String),
+    /// A hyperlink carrying the raw href and, for a Markdown link with a
+    /// title, the `title-ref` placeholder naming its lifted destination.
+    Link(String, Option<String>),
     /// A fenced code block with an optional language hint.
     Code(Option<String>),
     /// A tag whose styling is handled outside the rendering pipeline
@@ -115,6 +116,47 @@ enum TagResolution {
     Transparent,
     /// Not a recognized tag — the declaration becomes literal text.
     Unknown,
+}
+
+/// The authored title of the lifted destination a `title-ref` placeholder
+/// names.
+fn lifted_title<'a>(title_ref: &str, lifted: &'a [Lifted]) -> Option<&'a str> {
+    let chars: Vec<char> = title_ref.chars().collect();
+    if chars.first() != Some(&LIFT_MARK) {
+        return None;
+    }
+    let (index, next) = parse_lift_placeholder(&chars, 0)?;
+    match lifted.get(index) {
+        Some(Lifted::Destination { title: Some(title), .. }) if next == chars.len() => {
+            Some(title.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// Interprets a link's authored title with the one structured-title reader.
+///
+/// A JSON5 object title becomes the link's typed metadata (its `qp` query
+/// parameters) and its `title` property the tooltip; any other title stays
+/// the tooltip. A notice the title raised is stored on the link (hint
+/// `biscuit_terminal.link.title_notice`, its warning code), never printed.
+fn apply_link_title(link: &mut RenderNode, raw: &str) {
+    use renderable::output::link_metadata::parse_link_title;
+
+    let parsed = parse_link_title(raw);
+    if let Some(structured) = parsed.structured() {
+        link.attrs.set_link_metadata(structured.link_metadata());
+    }
+    if let renderable::tree::NodeKind::Link { title, .. } = &mut link.kind {
+        *title = parsed.tooltip().map(str::to_owned);
+    }
+    if let Some(notice) = &parsed.notice {
+        link.attrs.set_hint(
+            renderable::tree::HintNamespace("biscuit_terminal.link"),
+            "title_notice",
+            serde_json::Value::String(notice.code().to_owned()),
+        );
+    }
 }
 
 /// Whether the raw declaration content (between `<` and `>`) opens a tag the
@@ -161,7 +203,11 @@ fn resolve_tag(tag_name: &str, attrs: &[(String, String)]) -> TagResolution {
                 .find(|(k, _)| k == "href")
                 .map(|(_, v)| v.clone())
                 .unwrap_or_default();
-            Link(href)
+            let title_ref = attrs
+                .iter()
+                .find(|(k, _)| k == "title-ref")
+                .map(|(_, v)| v.clone());
+            Link(href, title_ref)
         }
         "clipboard" => Transparent,
         "code-block" => {
@@ -476,11 +522,16 @@ fn parse_nodes(content: &str, lifted: &[Lifted], opts: InlineOptions) -> Vec<Ren
                             let children = parse_nodes(&inner, lifted, opts);
                             split_around_blocks(children, &mut nodes, |run| project_span(&style, run));
                         }
-                        TagResolution::Link(href) => {
+                        TagResolution::Link(href, title_ref) => {
                             flush_render_text(&mut text, &mut nodes);
                             let children = parse_nodes(&inner, lifted, opts);
+                            let title = title_ref.as_deref().and_then(|r| lifted_title(r, lifted));
                             split_around_blocks(children, &mut nodes, |run| {
-                                file_reference_link(href.clone(), run)
+                                let mut link = file_reference_link(href.clone(), run);
+                                if let Some(title) = title {
+                                    apply_link_title(&mut link, title);
+                                }
+                                link
                             });
                         }
                         TagResolution::Transparent => {

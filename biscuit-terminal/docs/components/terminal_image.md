@@ -206,8 +206,7 @@ let output = image.render_with_route(&term)?;
 | An image column in `TwoColumn` | Half-block rows beside the text column, else alt text |
 | `bt image` | Half-blocks, else alt text |
 | `MermaidDiagram`, `GraphExpression` (`biscuit-visualized`) | The diagram's source code block (they call `render_with_route`) |
-| Markdown images in the render tree | The `[alt]` or block placeholder, at every `GraphicsMode` |
-| Darkmatter's legacy terminal output | Its `▉ IMAGE[...]` placeholder |
+| Markdown images in the render tree, Darkmatter documents included | `IMAGE[alt]` (`image: alt <path>` at `-v`), at every `GraphicsMode` |
 
 The image access policy (`TerminalImageOptions`: base path, size limit, remote URLs) is applied when the `TerminalImage` is constructed, so half-blocks never read anything the policy refused. The image is decoded only to draw it, under the `image` crate's default decode limits.
 

@@ -2,9 +2,10 @@
 
 use crate::{
     components::renderable::TerminalRenderable,
-    render_tree::{TerminalRenderOptions, render_terminal_node},
+    render_tree::TerminalRenderOptions,
+    render_tree::render::render_terminal_node_keeping_unbreakable,
     terminal::Terminal,
-    utils::block_constraint::{sanitize_wrapped_lines, wrap_lines},
+    utils::block_constraint::{sanitize_wrapped_lines, strip_unbreakable_markers, wrap_lines},
     utils::layout::{Layout, WordWrap},
 };
 use renderable::tree::{RenderStrictness, TreeRenderable};
@@ -42,8 +43,11 @@ impl Prose {
     /// Renders this `Prose` through the canonical render tree.
     fn render_via_tree(&self, term: &Terminal) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
-        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
-        let output = match render_terminal_node(&node, &opts) {
+        let mut opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        opts.context.verbosity = self.verbosity;
+        // Printed URLs keep their unbreakable markers through the wrap below;
+        // they are removed once it has run.
+        let output = match render_terminal_node_keeping_unbreakable(&node, &opts) {
             Ok(rendered) => rendered.output,
             Err(error) => {
                 tracing::error!(
@@ -58,7 +62,7 @@ impl Prose {
         // Apply word wrap from the layout when configured. The tree renderer
         // handles margins and alignment but does not fold lines; post-process
         // wrapping restores the behavior Prose provided on the bespoke path.
-        match &self.layout.word_wrap {
+        let output = match &self.layout.word_wrap {
             WordWrap::None => output,
             strategy => {
                 // `split`, not `lines`: trailing empty rows are the bottom
@@ -69,6 +73,7 @@ impl Prose {
                 let sanitized = sanitize_wrapped_lines(wrapped);
                 sanitized.join("\n")
             }
-        }
+        };
+        strip_unbreakable_markers(&output)
     }
 }

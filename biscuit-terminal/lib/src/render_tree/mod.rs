@@ -8,6 +8,8 @@
 //!
 //! - [`render_terminal_node`] / [`render_terminal_document`] — render a tree
 //!   or whole document to a terminal string.
+//! - [`render_terminal_output`] — the generic `terminal`/`plain` fold of a
+//!   document for an [`OutputOptions`](renderable::output::OutputOptions).
 //! - [`TreeComponent`] — adapts any
 //!   [`TreeRenderable`](renderable::tree::TreeRenderable) into a
 //!   [`TerminalRenderable`](crate::components::renderable::TerminalRenderable).
@@ -40,8 +42,8 @@ pub(crate) mod style;
 pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;
 pub use options::{
-    DiagramOutcome, DiagramRenderError, DiagramRenderRequest, DiagramRenderer, ImagePlaceholder,
+    DiagramOutcome, DiagramRenderError, DiagramRenderRequest, DiagramRenderer,
     TerminalRenderContext, TerminalRenderOptions,
 };
 pub use projection::{ProjectionResult, TreeProjectionContext};
-pub use render::{render_terminal_document, render_terminal_node};
+pub use render::{render_terminal_document, render_terminal_node, render_terminal_output};

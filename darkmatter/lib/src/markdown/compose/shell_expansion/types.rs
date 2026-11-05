@@ -2393,9 +2393,11 @@ mod tests {
             rendered.contains("test.md"),
             "linked path missing from rendered diagnostic: {rendered}"
         );
+        // A terminal without OSC 8 prints the link text alone, never a
+        // `[text](url)` fallback.
         assert!(
-            rendered.contains(if cfg!(windows) { "file:///C:/test.md" } else { "file:///test.md" }),
-            "file link missing from rendered diagnostic: {rendered}"
+            !rendered.contains("](file://"),
+            "no Markdown link fallback in a rendered diagnostic: {rendered}"
         );
     }
 

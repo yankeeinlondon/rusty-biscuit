@@ -115,7 +115,7 @@ fn single_render_emits_styles_and_osc8_links_when_supported() {
 }
 
 #[test]
-fn links_fall_back_to_markdown_without_osc8_support() {
+fn links_print_their_text_without_osc8_support() {
     let mut terminal = wide_terminal();
     terminal.osc_link_support = false;
     let rendered = report_prose().render(&terminal);
@@ -123,7 +123,7 @@ fn links_fall_back_to_markdown_without_osc8_support() {
     assert!(!rendered.contains("\x1b]8;;"), "{rendered:?}");
     let visible = strip_escape_codes(&rendered);
     assert!(
-        visible.contains(&format!("- [[abc1234]({COMMIT_URL})] feat(sniff)")),
+        visible.contains("- [abc1234] feat(sniff)") && !visible.contains(COMMIT_URL),
         "{visible}"
     );
     assert!(visible.contains("- [def5678] fix at"), "unlinked hash: {visible}");

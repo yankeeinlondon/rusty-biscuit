@@ -7,7 +7,27 @@
 //! fit — [`Table`], [`BlockQuote`], and [`HorizontalRule`] — rather than
 //! re-implementing terminal formatting. Headings, sections, and lists are
 //! rendered natively. Inline subtrees are lowered directly to ANSI SGR
-//! escapes, OSC8 hyperlinks, and markdown fallback syntax.
+//! escapes and OSC8 hyperlinks; a link or image that cannot be clickable
+//! prints its text (and, at verbosity one, its destination as one
+//! unbreakable word).
+//!
+//! ## Width
+//!
+//! [`TerminalRenderContext::available_width`](super::TerminalRenderContext::available_width)
+//! is a [`Width`]. Under [`Width::Columns`] prose wraps and fills (rules,
+//! code bands, table plans, layout boxes) reach the width; under
+//! [`Width::Unlimited`] and [`Width::Source`] nothing wraps and every fill
+//! renders at its natural width, while margins, padding, and indentation
+//! still apply. `Source` also keeps authored soft breaks.
+//!
+//! ## Plain
+//!
+//! A context pinned to the plain profile
+//! ([`TerminalRenderContext::pin_plain`](super::TerminalRenderContext::pin_plain))
+//! prints structure as text — `> ` quotes, a `---` rule, headings without
+//! `#`, disclosure bodies as ordinary blocks, fenced code that is never cut —
+//! and its output is normalized to contain no escape byte and no trailing
+//! whitespace.
 //!
 //! ## Strictness
 //!
@@ -31,6 +51,7 @@
 //! ```
 
 use renderable::color::TerminalCodeContext;
+use renderable::output::{OutputOptions, Width};
 use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, GraphicsMode, HrAlignment, HrKind,
@@ -42,7 +63,6 @@ use renderable::tree::{ValidationError, ValidationMode, is_html_comment_only, va
 
 use crate::components::block_quote::BlockQuote;
 use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
-use crate::components::prose::{LineBreaks, Prose};
 use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
 use crate::components::table::cell::pad_cell;
@@ -55,12 +75,13 @@ use crate::components::table::{
 };
 use crate::discovery::detection::ColorDepth;
 use crate::utils::block_constraint::{
-    split_lines, split_trailing_escapes, visible_width, wrap_lines,
+    normalize_plain, sanitize_wrapped_lines, split_lines, split_trailing_escapes,
+    strip_unbreakable_markers, unbreakable, visible_width, wrap_lines,
 };
 use crate::utils::layout::{Alignment, WordWrap};
 use crate::utils::word_wrap::truncate;
 
-use super::options::{DiagramOutcome, DiagramRenderRequest, ImagePlaceholder, TerminalRenderOptions};
+use super::options::{DiagramOutcome, DiagramRenderRequest, TerminalRenderOptions};
 use super::style;
 
 /// Maximum size of an inline terminal image at [`GraphicsMode::Rich`], matching
@@ -70,6 +91,16 @@ const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 /// The ellipsis used when typed [`TextLayoutHints`] truncate a link label or
 /// image placeholder that exceeds its resolved field.
 const ELLIPSIS: &str = "…";
+
+/// The horizontal rule of a plain render, at every width.
+const PLAIN_RULE: &str = "---";
+
+/// The glyph count of a styled horizontal rule under an unbounded width.
+const UNBOUNDED_RULE_GLYPHS: u32 = 3;
+
+/// The left border of a block quote (and a disclosure body) rendered without
+/// the [`BlockQuote`] component, which wraps to a bounded width.
+const QUOTE_BORDER: &str = "│ ";
 
 /// Renders a render-tree node to a terminal string.
 ///
@@ -95,6 +126,23 @@ pub fn render_terminal_node(
     node: &RenderNode,
     opts: &TerminalRenderOptions,
 ) -> Result<Rendered<String>, RenderError> {
+    let mut rendered = render_terminal_node_keeping_unbreakable(node, opts)?;
+    rendered.output = if opts.context.plain {
+        normalize_plain(&rendered.output)
+    } else {
+        strip_unbreakable_markers(&rendered.output)
+    };
+    Ok(rendered)
+}
+
+/// [`render_terminal_node`] without the final pass: printed URLs keep their
+/// unbreakable-run markers so a caller that wraps the output again (such as
+/// [`Prose`](crate::components::prose::Prose)) cannot split them. That caller
+/// strips the markers after its wrap.
+pub(crate) fn render_terminal_node_keeping_unbreakable(
+    node: &RenderNode,
+    opts: &TerminalRenderOptions,
+) -> Result<Rendered<String>, RenderError> {
     let report = validate(node, ValidationMode::Full);
     if report.has_errors() {
         return Err(ValidationError {
@@ -107,6 +155,7 @@ pub fn render_terminal_node(
         opts,
         diagnostics: Vec::new(),
         inherited: InheritedStyle::root(),
+        uncut_code: false,
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -158,6 +207,46 @@ pub fn render_terminal_document(
     render_terminal_node(&doc.root, opts)
 }
 
+/// Renders a [`Document`] for the `terminal` and `plain` outputs.
+///
+/// This is the generic terminal fold every command's `as_prose()` reaches
+/// when it has no terminal override. The context is built from
+/// `options.terminal_profile`, `options.width`, and `options.verbosity`; top
+/// level prose wraps at a [`Width::Columns`] width. A plain profile is pinned
+/// after every other option, so the output then contains no escape byte and
+/// no trailing whitespace.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::render_tree::render_terminal_output;
+/// use renderable::output::{OutputOptions, TerminalProfile, Width};
+/// use renderable::tree::{Document, RenderNode, RenderStrictness};
+///
+/// let doc = Document::new(RenderNode::root(vec![RenderNode::paragraph(vec![
+///     RenderNode::strong(vec![RenderNode::text("Hello")]),
+/// ])]));
+/// let options = OutputOptions::new(Width::Columns(40), TerminalProfile::plain());
+/// let text = render_terminal_output(&doc, &options, RenderStrictness::Warn).unwrap();
+/// assert_eq!(text, "Hello");
+/// ```
+///
+/// ## Errors
+///
+/// Propagates every error from [`render_terminal_node`].
+pub fn render_terminal_output(
+    document: &Document,
+    options: &OutputOptions,
+    strictness: RenderStrictness,
+) -> Result<String, RenderError> {
+    let mut opts = TerminalRenderOptions::from_output_options(options, strictness);
+    opts.context.wrap_prose = true;
+    if options.terminal_profile.is_plain() {
+        opts.pin_plain();
+    }
+    Ok(render_terminal_document(document, &opts)?.output)
+}
+
 /// Deserialized payload for the `"icon"` extension token.
 #[derive(serde::Deserialize)]
 struct IconPayload {
@@ -196,6 +285,10 @@ struct Writer<'a> {
     /// [`Writer::render_styled`]) so descendant paragraphs and inline spans see
     /// the ancestor color/emphasis.
     inherited: InheritedStyle,
+    /// Whether code rows are left whole even in a styled terminal: set while
+    /// a diagram fragment renders, because the fragment is measured against
+    /// the fence's width before it is accepted.
+    uncut_code: bool,
 }
 
 impl Writer<'_> {
@@ -229,12 +322,7 @@ impl Writer<'_> {
         };
 
         let overhead = style::border_horizontal_overhead(style);
-        let inner_width = self
-            .opts
-            .context
-            .available_width
-            .saturating_sub(overhead)
-            .max(1);
+        let inner_width = self.opts.context.available_width.saturating_sub(overhead);
 
         // The painted padding box. `render_with_layout` already subtracted the
         // horizontal padding from the content width, so painting it back here
@@ -272,7 +360,7 @@ impl Writer<'_> {
     /// whole terminal cells, against the current available width. Returns
     /// [`style::Padding::ZERO`] when the node carries no layout.
     fn resolve_padding(&self, node: &RenderNode) -> style::Padding {
-        let available = self.opts.context.available_width;
+        let available = self.percent_basis();
         match node.attrs.layout_ref() {
             Some(layout) => style::Padding {
                 top: resolve_cells(&layout.padding.top, available),
@@ -292,20 +380,36 @@ impl Writer<'_> {
     fn render_kind_in_width(
         &mut self,
         node: &RenderNode,
-        width: u32,
+        width: Width,
     ) -> Result<String, RenderError> {
-        let mut narrowed = self.opts.clone();
-        narrowed.context.available_width = width;
-        narrowed.context.width = width;
-        narrowed.context.terminal.fixed_width = Some(width);
+        let narrowed = self.narrowed_opts(width);
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
             inherited: self.inherited.clone(),
+            uncut_code: self.uncut_code,
         };
         let result = sub.render_kind(node);
         self.diagnostics.append(&mut sub.diagnostics);
         result
+    }
+
+    /// These options narrowed to `width` for a sub-render. The terminal
+    /// snapshot's width follows only a bounded width.
+    fn narrowed_opts(&self, width: Width) -> TerminalRenderOptions {
+        let mut narrowed = self.opts.clone();
+        narrowed.context.available_width = width;
+        narrowed.context.width = width;
+        if let Some(columns) = width.as_columns() {
+            narrowed.context.terminal.fixed_width = Some(columns);
+        }
+        narrowed
+    }
+
+    /// The column count a percentage resolves against: the available width,
+    /// or zero when it is unbounded (a percentage of nothing is nothing).
+    fn percent_basis(&self) -> u32 {
+        self.opts.context.available_width.as_columns().unwrap_or(0)
     }
 
     /// Renders `node`'s content within `content_width` and paints its `Style`
@@ -321,16 +425,18 @@ impl Writer<'_> {
     fn render_painted(
         &mut self,
         node: &RenderNode,
-        content_width: u32,
+        content_width: Width,
         padding: style::Padding,
     ) -> Result<String, RenderError> {
+        // An unbounded content box hugs its content: nothing fills.
+        let paint_width = content_width.as_columns();
         let Some(style) = node.attrs.style_ref().filter(|s| !s.is_empty()) else {
             let content = self.render_kind_in_width(node, content_width)?;
             return Ok(style::apply_style_with_padding(
                 &content,
                 &Style::default(),
                 &self.opts.context.terminal,
-                Some(content_width),
+                paint_width,
                 padding,
             ));
         };
@@ -350,7 +456,7 @@ impl Writer<'_> {
             &content,
             style,
             &self.opts.context.terminal,
-            Some(content_width),
+            paint_width,
             padding,
         ))
     }
@@ -365,7 +471,9 @@ impl Writer<'_> {
         node: &RenderNode,
         layout: &renderable::layout::Layout,
     ) -> Result<String, RenderError> {
-        let available = self.opts.context.available_width;
+        let Some(available) = self.opts.context.available_width.as_columns() else {
+            return self.render_with_layout_unbounded(node, layout);
+        };
         let left = resolve_cells(&layout.margin.left, available);
         let right = resolve_cells(&layout.margin.right, available);
         let top = resolve_cells(&layout.margin.top, available);
@@ -423,7 +531,7 @@ impl Writer<'_> {
         // Render the content at exactly `content_width` and paint the `Style`,
         // `padding` band, and border around it. Padding is reserved and painted
         // even when the node carries no `Style`.
-        let content = self.render_painted(node, content_width, padding)?;
+        let content = self.render_painted(node, Width::Columns(content_width), padding)?;
 
         // Place the painted box within the content area between the margins
         // (`available − margin`). The painted box is `content_width` plus the
@@ -468,6 +576,46 @@ impl Writer<'_> {
         Ok(out)
     }
 
+    /// [`Self::render_with_layout`] under an unbounded width.
+    ///
+    /// Margins and padding resolve from their `ch` lengths (a percentage of
+    /// an unbounded width is zero). A fill (`Auto`, `FitContent`) is the
+    /// content's natural width; a `ch` width or `max_width` still caps it.
+    /// There is no area to align within, so no alignment offset applies.
+    fn render_with_layout_unbounded(
+        &mut self,
+        node: &RenderNode,
+        layout: &renderable::layout::Layout,
+    ) -> Result<String, RenderError> {
+        let left = resolve_cells(&layout.margin.left, 0);
+        let top = resolve_cells(&layout.margin.top, 0);
+        let bottom = resolve_cells(&layout.margin.bottom, 0);
+        let padding = self.resolve_padding(node);
+
+        let mut content_width = self.opts.context.available_width;
+        if let renderable::layout::Width::Fixed(tv) = &layout.width {
+            content_width = content_width.capped_at(resolve_cells(tv, 0));
+        }
+        if let Some(mw) = &layout.max_width {
+            content_width = content_width.capped_at(resolve_cells(mw, 0));
+        }
+        let content = self.render_painted(node, content_width, padding)?;
+
+        let lead = " ".repeat(left as usize);
+        let mut out = "\n".repeat(top as usize);
+        for (idx, line) in content.split('\n').enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            if !line.is_empty() {
+                out.push_str(&lead);
+                out.push_str(line);
+            }
+        }
+        out.push_str(&"\n".repeat(bottom as usize));
+        Ok(out)
+    }
+
     /// Measures the natural content-box width for a [`Width::FitContent`] node.
     ///
     /// Renders the node's content once at `cap` — the largest permitted
@@ -485,14 +633,12 @@ impl Writer<'_> {
     ///
     /// [`Width::FitContent`]: renderable::layout::Width::FitContent
     fn measure_fit_content(&self, node: &RenderNode, cap: u32) -> Result<u32, RenderError> {
-        let mut narrowed = self.opts.clone();
-        narrowed.context.available_width = cap;
-        narrowed.context.width = cap;
-        narrowed.context.terminal.fixed_width = Some(cap);
+        let narrowed = self.narrowed_opts(Width::Columns(cap));
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
             inherited: self.inherited.clone(),
+            uncut_code: self.uncut_code,
         };
         let rendered = sub.render_kind(node)?;
         Ok(rendered.split('\n').map(visible_width).max().unwrap_or(0))
@@ -573,13 +719,17 @@ impl Writer<'_> {
                     // is already narrowed by the border overhead at this
                     // point (see `render_styled`).
                     let inner = self.render_blocks(children)?;
-                    let lines = split_lines(&inner);
-                    let wrapped = wrap_lines(
-                        lines,
-                        &WordWrap::WrapProse(Some(8), None),
-                        self.opts.context.available_width,
-                    );
-                    Ok(wrapped.join("\n"))
+                    match self.opts.context.available_width.as_columns() {
+                        Some(columns) => {
+                            let lines = split_lines(&inner);
+                            let wrapped =
+                                wrap_lines(lines, &WordWrap::WrapProse(Some(8), None), columns);
+                            Ok(wrapped.join("\n"))
+                        }
+                        None => Ok(inner),
+                    }
+                } else if self.opts.context.plain {
+                    self.render_blockquote_with_prefix(children, "> ")
                 } else if let Some(prefix) = self.opts.context.blockquote_prefix.clone() {
                     // The darkmatter document pipeline asks for its own quarter-
                     // block bar (`▐   `) instead of the component's `│ ` border.
@@ -588,10 +738,14 @@ impl Writer<'_> {
                     // recurse and prepend their own bar, matching the legacy
                     // renderer's per-depth `"▐   ".repeat(depth)`.
                     Ok(self.render_blockquote_with_prefix(children, &prefix)?)
-                } else {
+                } else if self.opts.context.available_width.is_bounded() {
                     let inner = self.render_blocks(children)?;
                     let quote = BlockQuote::from(inner.as_str());
                     Ok(quote.render(&self.opts.context.terminal))
+                } else {
+                    // The component wraps to the terminal width; an unbounded
+                    // quote only needs its border on every line.
+                    self.render_blockquote_with_prefix(children, QUOTE_BORDER)
                 }
             }
             NodeKind::List {
@@ -611,7 +765,20 @@ impl Writer<'_> {
                 self.render_code_node(lang.as_deref(), value, meta.as_deref(), &node.attrs)
             }
             NodeKind::ThematicBreak => {
+                if self.opts.context.plain {
+                    return Ok(PLAIN_RULE.to_string());
+                }
                 let rule = horizontal_rule_from_attrs(&node.attrs);
+                if !self.opts.context.available_width.is_bounded() {
+                    // Nothing fills under an unbounded width: a short fixed
+                    // rule, never an image sized to a guessed width.
+                    let mut term = self.opts.context.terminal.clone();
+                    term.fixed_width = Some(UNBOUNDED_RULE_GLYPHS);
+                    return Ok(rule
+                        .width(UNBOUNDED_RULE_GLYPHS.to_string())
+                        .alignment(RuleAlignment::Left)
+                        .render_text_tier(&term));
+                }
                 let term = self.effective_terminal();
                 // The terminal has no vector HR form, so `Vector` coincides with
                 // `Off` (Unicode / ASCII). Only `Rich` rasterizes to an image.
@@ -684,7 +851,8 @@ impl Writer<'_> {
     }
 
     /// Renders a disclosure block: the summary is shown normally and the body is
-    /// rendered as a block quote whose text is dim and italic.
+    /// rendered as a block quote whose text is dim and italic. A plain render
+    /// prints the body as ordinary blocks beneath the summary.
     fn render_disclosure(
         &mut self,
         summary: &[RenderNode],
@@ -696,6 +864,10 @@ impl Writer<'_> {
 
         let body = if children.is_empty() {
             String::new()
+        } else if self.opts.context.plain {
+            // Nothing in plain output can be expanded: the contents are
+            // ordinary blocks beneath the summary, with no bar.
+            self.render_blocks(children)?
         } else {
             let dim_italic = Style {
                 emphasis: TextEmphasis {
@@ -715,7 +887,11 @@ impl Writer<'_> {
             // `render_styled` does), so paint the appearance onto every line
             // before wrapping it as a block quote.
             let styled = style::apply_style(&rendered, &dim_italic, &self.opts.context.terminal);
-            BlockQuote::from(styled.as_str()).render(&self.opts.context.terminal)
+            if self.opts.context.available_width.is_bounded() {
+                BlockQuote::from(styled.as_str()).render(&self.opts.context.terminal)
+            } else {
+                prefix_lines(&styled, QUOTE_BORDER)
+            }
         };
 
         match (summary_line.is_empty(), body.is_empty()) {
@@ -803,7 +979,9 @@ impl Writer<'_> {
         let split = hints.left_count.min(children.len());
         let (left_children, right_children) = children.split_at(split);
 
-        let total = self.opts.context.available_width;
+        let Some(total) = self.opts.context.available_width.as_columns() else {
+            return self.render_columns_unbounded(left_children, right_children, hints);
+        };
 
         // Too narrow to host both columns plus the gap: stack vertically.
         let stackable = hints.stack_below;
@@ -831,8 +1009,9 @@ impl Writer<'_> {
         // renderer, which wraps every column with `WrapProse`; without it a
         // paragraph (whose `Layout` default is `WordWrap::None`) would overrun
         // a narrow column instead of flowing onto extra rows.
-        let left = self.render_blocks_in_width(left_children, left_width.max(1))?;
-        let right = self.render_blocks_in_width(right_children, right_width.max(1))?;
+        let left = self.render_blocks_in_width(left_children, Width::Columns(left_width.max(1)))?;
+        let right =
+            self.render_blocks_in_width(right_children, Width::Columns(right_width.max(1)))?;
         let left = wrap_column_lines(&left, left_width.max(1));
         let right = wrap_column_lines(&right, right_width.max(1));
 
@@ -855,6 +1034,44 @@ impl Writer<'_> {
                 " ".repeat(left_pad as usize),
                 " ".repeat(right_pad as usize),
             ));
+        }
+        Ok(out.join("\n"))
+    }
+
+    /// Renders two columns under an unbounded width.
+    ///
+    /// Each group renders at its natural width. The left column is a `ch`
+    /// width when the hint fixes one, else its widest line; it is padded to
+    /// that width so the gutter aligns. The right column is never padded:
+    /// there is nothing to fill to.
+    fn render_columns_unbounded(
+        &mut self,
+        left_children: &[RenderNode],
+        right_children: &[RenderNode],
+        hints: &renderable::tree::ColumnsHints,
+    ) -> Result<String, RenderError> {
+        let left = self.render_blocks(left_children)?;
+        let right = self.render_blocks(right_children)?;
+        let left_width = match hints.left_width {
+            renderable::tree::ColumnWidthKind::Fixed(chars) => chars,
+            renderable::tree::ColumnWidthKind::Percent(_) => {
+                left.split('\n').map(visible_width).max().unwrap_or(0)
+            }
+        };
+        let left_lines: Vec<&str> = left.split('\n').collect();
+        let right_lines: Vec<&str> = right.split('\n').collect();
+        let rows = left_lines.len().max(right_lines.len());
+        let gutter = " ".repeat(hints.gap as usize);
+        let mut out = Vec::with_capacity(rows);
+        for i in 0..rows {
+            let l = left_lines.get(i).copied().unwrap_or("");
+            let r = right_lines.get(i).copied().unwrap_or("");
+            if r.is_empty() {
+                out.push(l.to_string());
+                continue;
+            }
+            let left_pad = left_width.saturating_sub(visible_width(l));
+            out.push(format!("{l}{}{gutter}{r}", " ".repeat(left_pad as usize)));
         }
         Ok(out.join("\n"))
     }
@@ -882,16 +1099,14 @@ impl Writer<'_> {
     fn render_blocks_in_width(
         &mut self,
         children: &[RenderNode],
-        width: u32,
+        width: Width,
     ) -> Result<String, RenderError> {
-        let mut narrowed = self.opts.clone();
-        narrowed.context.available_width = width;
-        narrowed.context.width = width;
-        narrowed.context.terminal.fixed_width = Some(width);
+        let narrowed = self.narrowed_opts(width);
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
             inherited: self.inherited.clone(),
+            uncut_code: self.uncut_code,
         };
         let result = sub.render_blocks(children);
         self.diagnostics.append(&mut sub.diagnostics);
@@ -906,15 +1121,13 @@ impl Writer<'_> {
     /// indented (e.g. a nested list inside a list item): the child must wrap to
     /// the width left *after* that indent, or its lines overrun the terminal by
     /// the indent amount and the terminal hard-wraps the overflow.
-    fn render_in_width(&mut self, node: &RenderNode, width: u32) -> Result<String, RenderError> {
-        let mut narrowed = self.opts.clone();
-        narrowed.context.available_width = width;
-        narrowed.context.width = width;
-        narrowed.context.terminal.fixed_width = Some(width);
+    fn render_in_width(&mut self, node: &RenderNode, width: Width) -> Result<String, RenderError> {
+        let narrowed = self.narrowed_opts(width);
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
             inherited: self.inherited.clone(),
+            uncut_code: self.uncut_code,
         };
         let result = sub.render(node);
         self.diagnostics.append(&mut sub.diagnostics);
@@ -926,38 +1139,29 @@ impl Writer<'_> {
     /// [`BlockQuote`] component's `│ ` border.
     ///
     /// The children render at the width left after the prefix so inner prose
-    /// wraps inside the bar; each produced line is then prefixed with the bar
-    /// painted in the legacy gray foreground. Nested block quotes recurse
-    /// through the same path and prepend their own bar, reproducing the legacy
-    /// renderer's per-depth `"▐   ".repeat(depth)`.
+    /// wraps inside the bar; each produced line is then prefixed with the bar,
+    /// painted in the legacy gray foreground unless the render has no color.
+    /// Nested block quotes recurse through the same path and prepend their own
+    /// bar, reproducing the legacy renderer's per-depth `"▐   ".repeat(depth)`.
+    /// A plain render passes `> `.
     fn render_blockquote_with_prefix(
         &mut self,
         children: &[RenderNode],
         prefix: &str,
     ) -> Result<String, RenderError> {
         let prefix_width = visible_width(prefix);
-        let child_width = self
-            .opts
-            .context
-            .available_width
-            .saturating_sub(prefix_width)
-            .max(1);
+        let child_width = self.opts.context.available_width.saturating_sub(prefix_width);
         let inner = self.render_blocks_in_width(children, child_width)?;
 
         // Gray foreground for the bar, matching the legacy renderer's
-        // `\x1b[38;2;100;100;100m` quarter-block. The page-frame post-pass owns
-        // the subtle background band, so the bar itself only carries its fg.
-        let colored_prefix = format!("\x1b[38;2;100;100;100m{prefix}\x1b[39m");
-
-        let mut out = String::new();
-        for (idx, line) in inner.split('\n').enumerate() {
-            if idx > 0 {
-                out.push('\n');
-            }
-            out.push_str(&colored_prefix);
-            out.push_str(line);
-        }
-        Ok(out)
+        // quarter-block. The page-frame post-pass owns the subtle background
+        // band, so the bar itself only carries its fg.
+        let colored_prefix = if self.opts.context.color_depth == ColorDepth::None {
+            prefix.to_string()
+        } else {
+            format!("\x1b[38;2;100;100;100m{prefix}\x1b[39m")
+        };
+        Ok(prefix_lines(&inner, &colored_prefix))
     }
 
     /// Renders a sequence of inline nodes into terminal SGR output.
@@ -994,7 +1198,7 @@ impl Writer<'_> {
     /// and [`truncate`], so the tree's own text is never mutated; only this
     /// rendered projection is padded or shortened.
     fn apply_text_layout(&self, content: String, hints: &TextLayoutHints) -> String {
-        let available = self.opts.context.available_width;
+        let available = self.percent_basis();
         let resolve = |tv: &renderable::layout::TargetValue<renderable::layout::Length>| {
             let cells = resolve_cells(tv, available);
             (cells > 0).then_some(cells)
@@ -1157,14 +1361,22 @@ impl Writer<'_> {
                     Some(hints) => self.apply_text_layout(styled, hints),
                     None => styled,
                 };
-                let url = super::link::terminal_link_url(node, url);
                 if url.is_empty() {
-                    Ok(styled)
-                } else if term.osc_link_support {
-                    Ok(format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, styled))
+                    return Ok(styled);
+                }
+                if term.osc_link_support && !self.opts.context.plain {
+                    let (uri, params) = super::link::osc8_target(node, url);
+                    return Ok(format!("\x1b]8;{params};{uri}\x1b\\{styled}\x1b]8;;\x1b\\"));
+                }
+                // Not clickable: the text alone, the URL once when the text
+                // already is the URL, and `text <url>` at verbosity one.
+                let text = crate::utils::escape_codes::strip_escape_codes(styled.as_str());
+                if text.trim() == url {
+                    Ok(unbreakable(url))
+                } else if self.opts.context.verbosity > 0 {
+                    Ok(format!("{styled} {}", unbreakable(&format!("<{url}>"))))
                 } else {
-                    let desc = styled.replace(']', "\\]");
-                    Ok(format!("[{desc}]({url})"))
+                    Ok(styled)
                 }
             }
             NodeKind::Image { url, alt, .. } => {
@@ -1176,9 +1388,10 @@ impl Writer<'_> {
                     // Build the complete placeholder from the intact source alt;
                     // the tree's `Image.alt` is never mutated, only this
                     // projection.
-                    let placeholder = match self.opts.context.image_placeholder {
-                        ImagePlaceholder::Bracket => format!("[{alt}]"),
-                        ImagePlaceholder::Block => format!("▉ IMAGE[{alt}]"),
+                    let placeholder = if self.opts.context.verbosity > 0 {
+                        format!("image: {alt} {}", unbreakable(&format!("<{url}>")))
+                    } else {
+                        format!("IMAGE[{alt}]")
                     };
                     let styled = match node.attrs.style_ref().filter(|s| !s.is_empty()) {
                         Some(img_style) => {
@@ -1194,8 +1407,8 @@ impl Writer<'_> {
                         None => placeholder,
                     };
                     // Typed `text_layout` shapes the *complete visible
-                    // placeholder* — brackets or `▉ IMAGE[..]` framing included —
-                    // so `width` establishes the exact rendered placeholder
+                    // placeholder*, its `IMAGE[..]` framing included, so
+                    // `width` establishes the exact rendered placeholder
                     // width per the spec, not the bare alt run. Mirrors the link
                     // path, which shapes the styled label after its SGR wrap.
                     match node.attrs.text_layout_ref() {
@@ -1216,7 +1429,13 @@ impl Writer<'_> {
             NodeKind::FootnoteReference { identifier } => {
                 Ok(format!("[^{identifier}]"))
             }
-            NodeKind::SoftBreak => Ok(" ".to_string()),
+            // `Source` keeps authored line breaks; every other width joins
+            // them so prose can be wrapped (or left whole) by width.
+            NodeKind::SoftBreak => Ok(if self.opts.context.available_width == Width::Source {
+                "\n".to_string()
+            } else {
+                " ".to_string()
+            }),
             NodeKind::HardBreak => Ok("\n".to_string()),
             // Built-in tokens lower to direct SGR: `mark` highlights via
             // reverse video (SGR 7) and `dim` dims (SGR 2), mirroring the
@@ -1269,7 +1488,8 @@ impl Writer<'_> {
     }
 
     /// Word-wraps already-SGR-rendered inline `markup` to the post-margin
-    /// content width ([`available_width`](TerminalRenderContext::available_width)).
+    /// content width ([`available_width`](super::TerminalRenderContext::available_width)).
+    /// An unbounded width leaves the markup unwrapped.
     ///
     /// Uses the SGR-aware [`wrap_lines`] primitive directly — the same one the
     /// styled-blockquote and two-column paths use — so top-level paragraphs
@@ -1281,10 +1501,9 @@ impl Writer<'_> {
     /// [`render_terminal_node`], which re-enters this very paragraph path —
     /// using `Prose` here would recurse infinitely.
     fn wrap_prose(&self, markup: &str) -> String {
-        let width = self.opts.context.available_width;
-        if width == 0 {
+        let Some(width) = self.opts.context.available_width.as_columns() else {
             return markup.to_string();
-        }
+        };
         let lines = split_lines(markup);
         let wrapped = wrap_lines(lines, &WordWrap::WrapProse(None, None), width);
         wrapped.join("\n")
@@ -1296,8 +1515,12 @@ impl Writer<'_> {
     /// heading's declared [`Style`] — bold for depths 1-3, italic for depths
     /// 4-5, and plain for depth 6. The renderer consumes the declared
     /// [`TextEmphasis`](renderable::style::TextEmphasis) through
-    /// [`style::apply_style`] rather than splicing SGR strings directly.
+    /// [`style::apply_style`] rather than splicing SGR strings directly. A
+    /// plain render prints the title alone.
     fn render_heading_line(&self, depth: u8, markup: &str) -> String {
+        if self.opts.context.plain {
+            return self.render_prose(markup);
+        }
         let prefix = match depth {
             1 => "# ",
             2 => "## ",
@@ -1559,8 +1782,11 @@ impl Writer<'_> {
         // and the field, not between the field and the rendered content. A
         // `Left`/no-field alignment yields no pad and falls through to the inline
         // rendering below.
-        if let Some(hints) = node.attrs.text_layout_ref() {
-            let available = self.opts.context.available_width;
+        // An unbounded width has no surplus to place the body within.
+        if let (Some(hints), Some(available)) = (
+            node.attrs.text_layout_ref(),
+            self.opts.context.available_width.as_columns(),
+        ) {
             let field = hints
                 .width
                 .as_ref()
@@ -1639,12 +1865,7 @@ impl Writer<'_> {
                 // it at the width left *after* that indent so a nested list (or
                 // other block) wraps within bounds instead of overrunning the
                 // terminal by `indent_children` cells.
-                let inner_width = self
-                    .opts
-                    .context
-                    .available_width
-                    .saturating_sub(indent_children)
-                    .max(1);
+                let inner_width = self.opts.context.available_width.saturating_sub(indent_children);
                 let body = self.render_in_width(child, inner_width)?;
                 out.push_str(&indent_block(&body, indent_children));
                 idx += 1;
@@ -1662,30 +1883,41 @@ impl Writer<'_> {
 
     /// Renders prefixed, hanging-indented text for an inline list item.
     ///
-    /// The inline `markup` is wrapped at `term_width - prefix_width`; the
-    /// first line carries the `prefix`, and continuation lines are padded
-    /// by the prefix width when `hanging_indent` is set.
+    /// The inline `markup` is wrapped at `available_width - prefix_width`
+    /// (not at all under an unbounded width); the first line carries the
+    /// `prefix`, and continuation lines are padded by the prefix width when
+    /// `hanging_indent` is set. Every newline already in `markup` is a hard
+    /// break.
     fn render_list_text(&self, prefix: &str, markup: &str, hanging_indent: bool) -> String {
         let prefix_width = visible_width(prefix);
-        let term = &self.opts.context.terminal;
-        let child_width = term.width().saturating_sub(prefix_width);
-
-        let hang = if hanging_indent {
-            Some(prefix_width)
-        } else {
-            None
+        let hang = hanging_indent.then_some(prefix_width);
+        let lines = split_lines(markup);
+        let rendered = match self.opts.context.available_width.as_columns() {
+            Some(columns) => {
+                let child_width = columns.saturating_sub(prefix_width);
+                sanitize_wrapped_lines(wrap_lines(
+                    lines,
+                    &WordWrap::WrapProse(None, hang),
+                    child_width,
+                ))
+                .join("\n")
+            }
+            None => {
+                let pad = " ".repeat(hang.unwrap_or(0) as usize);
+                lines
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, line)| {
+                        if idx == 0 || line.is_empty() {
+                            line.clone()
+                        } else {
+                            format!("{pad}{line}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
         };
-        // Escape Prose-special characters so literal `<b>` etc. in the
-        // rendered inline output are not mis-parsed as tags during wrap. A
-        // colorless terminal keeps inline code as a backtick span, which the
-        // re-parse reads literally, so its contents must stay unescaped.
-        // Soft breaks are already spaces here; every remaining newline is a
-        // hard break (or raw text's own line) and must survive the re-parse.
-        let safe = Prose::escape_text_outside_code_spans(markup);
-        let prose = Prose::new(safe)
-            .with_line_breaks(LineBreaks::Hard)
-            .with_word_wrap(WordWrap::WrapProse(None, hang));
-        let rendered = prose.render_in_width(term, child_width);
 
         let mut out = String::new();
         for (idx, line) in rendered.split('\n').enumerate() {
@@ -1798,10 +2030,40 @@ impl Writer<'_> {
             .with_line_numbers(self.opts.context.line_numbers);
             if let Some(rendered) = renderer.render_terminal_code(lang, value, meta, attrs, context)
             {
-                return Ok(rendered);
+                return Ok(self.cut_code_lines(rendered));
             }
         }
-        Ok(self.render_code(lang, value))
+        Ok(self.cut_code_lines(self.render_code(lang, value)))
+    }
+
+    /// Cuts every code row wider than a bounded width in a styled terminal.
+    ///
+    /// Code is never wrapped. A styled terminal cuts a too-long row at the
+    /// width; a plain or colorless render, and any unbounded width, prints
+    /// every row whole.
+    fn cut_code_lines(&self, output: String) -> String {
+        let context = &self.opts.context;
+        let Some(columns) = context.available_width.as_columns() else {
+            return output;
+        };
+        if self.uncut_code || context.plain || context.color_depth == ColorDepth::None {
+            return output;
+        }
+        if !output.split('\n').any(|row| visible_width(row) > columns) {
+            return output;
+        }
+        output
+            .split('\n')
+            .map(|row| {
+                if visible_width(row) <= columns {
+                    return row.to_string();
+                }
+                let (body, trailing) = split_trailing_escapes(row);
+                let (head, _) = crate::utils::block_constraint::split_at_visible_width(body, columns);
+                format!("{head}{trailing}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Lays out a [`DiagramOutcome::Nodes`] fragment where the fence stood,
@@ -1818,14 +2080,17 @@ impl Writer<'_> {
     fn render_diagram_fragment(&mut self, nodes: &[RenderNode]) -> Result<Option<String>, RenderError> {
         let mut unpromoted = self.opts.clone();
         unpromoted.context.mermaid_mode = TerminalMermaidMode::Code;
+        // The fragment's rows are measured whole, so its code is not cut.
         let mut sub = Writer {
             opts: &unpromoted,
             diagnostics: Vec::new(),
             inherited: self.inherited.clone(),
+            uncut_code: true,
         };
         let output = sub.render_blocks(nodes)?;
-        let limit = self.opts.context.available_width;
-        if output.split('\n').any(|row| visible_width(row) > limit) {
+        if let Some(limit) = self.opts.context.available_width.as_columns()
+            && output.split('\n').any(|row| visible_width(row) > limit)
+        {
             tracing::debug!(limit, "diagram fragment is wider than its fence; rendering the fence as code");
             return Ok(None);
         }
@@ -2055,7 +2320,15 @@ impl Writer<'_> {
         }
 
         // ── Pass 1: width planning ─────────────────────────────────────────
-        let available = self.opts.context.available_width.max(1);
+        // An unbounded width plans at the table's natural width: no column
+        // fills and no cell wraps.
+        let available = match self.opts.context.available_width.as_columns() {
+            Some(columns) => columns.max(1),
+            None => {
+                table.layout_mut().width = renderable::layout::Width::Auto;
+                table.natural_render_width()
+            }
+        };
         let plan = match table.plan_widths(available) {
             Ok(plan) => plan,
             // Width planning failed (table cannot fit): degrade to the
@@ -2465,6 +2738,14 @@ fn indent_block(body: &str, indent: u32) -> String {
     let pad = " ".repeat(indent as usize);
     body.split('\n')
         .map(|line| format!("{pad}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Prepends `prefix` to every line of `body`.
+fn prefix_lines(body: &str, prefix: &str) -> String {
+    body.split('\n')
+        .map(|line| format!("{prefix}{line}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -3608,10 +3889,7 @@ mod render_tree_tests {
         let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
         let stripped = strip_escape_codes(&out.output);
         // The 20-column field is padded left-aligned inside the link label.
-        assert_eq!(
-            stripped,
-            format!("[HI{}](https://example.com)", " ".repeat(18))
-        );
+        assert_eq!(stripped, format!("HI{}", " ".repeat(18)));
     }
 
     #[test]
@@ -3628,7 +3906,7 @@ mod render_tree_tests {
         );
         let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
         let stripped = strip_escape_codes(&out.output);
-        assert_eq!(stripped, "[A very …](https://example.com)");
+        assert_eq!(stripped, "A very …");
         // The visible label is exactly the 8-column cap.
         assert_eq!(visible_width("A very …"), 8);
     }
@@ -3716,17 +3994,18 @@ mod render_tree_tests {
         // visible placeholder fills exactly the field — framing included.
         assert_eq!(visible_width(&stripped), 10, "{stripped:?}");
         assert!(stripped.ends_with('…'), "{stripped:?}");
-        assert!(stripped.starts_with("[a very"), "{stripped:?}");
+        assert!(stripped.starts_with("IMAGE[a v"), "{stripped:?}");
     }
 
     #[test]
     fn render_tree_image_text_layout_exact_width_includes_bracket_framing() {
         use renderable::layout::{Alignment, Length, TargetValue};
-        // A six-column exact width must produce a six-column *visible*
-        // placeholder — the brackets count toward the field, not on top of it.
+        // A twelve-column exact width must produce a twelve-column *visible*
+        // placeholder — the `IMAGE[..]` framing counts toward the field, not
+        // on top of it.
         let mut image = RenderNode::image("pic.png", None, "ab");
         image.attrs.set_text_layout(&TextLayoutHints {
-            width: Some(TargetValue::universal(Length::ch(6))),
+            width: Some(TargetValue::universal(Length::ch(12))),
             // Right alignment pads on the left so the assertion is robust to any
             // trailing-whitespace trimming in block rendering.
             alignment: Alignment::Right,
@@ -3735,30 +4014,8 @@ mod render_tree_tests {
         let node = RenderNode::paragraph(vec![image]);
         let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
         let stripped = strip_escape_codes(&out.output);
-        assert_eq!(visible_width(&stripped), 6, "{stripped:?}");
-        assert!(stripped.ends_with("[ab]"), "{stripped:?}");
-    }
-
-    #[test]
-    fn render_tree_image_text_layout_exact_width_includes_block_framing() {
-        use renderable::layout::{Alignment, Length, TargetValue};
-        use super::super::options::ImagePlaceholder;
-        // The block placeholder `▉ IMAGE[ab]` is 11 columns wide; a 16-column
-        // exact width pads it (right-aligned) to fill the field, framing
-        // included, rather than padding only the alt inside the brackets.
-        let mut image = RenderNode::image("pic.png", None, "ab");
-        image.attrs.set_text_layout(&TextLayoutHints {
-            width: Some(TargetValue::universal(Length::ch(16))),
-            alignment: Alignment::Right,
-            ..Default::default()
-        });
-        let node = RenderNode::paragraph(vec![image]);
-        let mut opts = no_osc_opts(60);
-        opts.context.image_placeholder = ImagePlaceholder::Block;
-        let out = render_terminal_node(&node, &opts).expect("render");
-        let stripped = strip_escape_codes(&out.output);
-        assert_eq!(visible_width(&stripped), 16, "{stripped:?}");
-        assert!(stripped.ends_with("▉ IMAGE[ab]"), "{stripped:?}");
+        assert_eq!(visible_width(&stripped), 12, "{stripped:?}");
+        assert!(stripped.ends_with("IMAGE[ab]"), "{stripped:?}");
     }
 
     #[test]
@@ -5386,6 +5643,7 @@ mod render_tree_tests {
             opts: &options,
             diagnostics: Vec::new(),
             inherited: InheritedStyle::root(),
+            uncut_code: false,
         };
         let out = writer.render(&cell).expect("render cell");
         assert!(

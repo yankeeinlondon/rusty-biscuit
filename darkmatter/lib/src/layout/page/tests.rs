@@ -1225,7 +1225,7 @@ fn render_image_center_aligned() {
     let image_line = plain.lines().find(|l| l.contains("IMAGE")).unwrap_or("");
     // The tree fold keeps the raw alt (`alt text|20`) rather than parsing
     // the legacy `|20` width directive, so the placeholder is
-    // `▉ IMAGE[alt text|20]`; centered in 80 this leaves ~30 leading spaces.
+    // `IMAGE[alt text|20]`; centered in 80 this leaves ~31 leading spaces.
     let leading = image_line.chars().take_while(|c| *c == ' ').count();
     assert!(
         leading >= 28,

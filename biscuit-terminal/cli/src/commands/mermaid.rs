@@ -183,7 +183,9 @@ fn lay_out_presentation(diagram: &MermaidDiagram, presentation: MermaidPresentat
     };
     let mut options =
         TerminalRenderOptions::new(term, RenderStrictness::Lossy).with_code_renderer(darkmatter_code_renderer(term));
-    options.context = options.context.with_width(diagram.text_columns(term.width()));
+    options.context = options
+        .context
+        .with_width(renderable::output::Width::Columns(diagram.text_columns(term.width())));
     let output = render_terminal_node(&RenderNode::root(nodes), &options)
         .map(|rendered| rendered.output)
         .unwrap_or_else(|_| diagram.fallback_code_block());

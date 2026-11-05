@@ -43,6 +43,20 @@ fn validate(fixture: &CliProcessFixture, args: &[&str], document: &Path) -> Outp
         .expect("run md schema validate")
 }
 
+/// Stdout without the document links' ` <file://…>` destinations, which a
+/// verbose run prints because a piped link cannot be clickable.
+fn pretty_stdout(output: &Output) -> String {
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let mut kept = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find(" <file://") {
+        kept.push_str(&rest[..start]);
+        rest = rest[start..].split_once('>').map_or("", |(_, after)| after);
+    }
+    kept.push_str(rest);
+    kept
+}
+
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
@@ -62,7 +76,7 @@ fn double_verbose_adds_a_stage_report_to_stderr_only() {
     let verbose = validate(&fixture, &["-vv"], &document);
 
     assert_eq!(verbose.status.code(), quiet.status.code());
-    assert_eq!(verbose.stdout, quiet.stdout, "stdout is unchanged");
+    assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet), "stdout is unchanged but for link destinations");
     assert!(!stderr(&quiet).contains("Validation timings"), "without -v nothing is added");
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the report follows the existing output");
@@ -79,7 +93,10 @@ fn single_verbose_output_is_unchanged() {
     let verbose = validate(&fixture, &["-v"], &document);
 
     assert_eq!(verbose.status.code(), quiet.status.code());
-    assert_eq!(verbose.stdout, quiet.stdout);
+    assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
+    let (quiet_text, verbose_text) = (String::from_utf8_lossy(&quiet.stdout), String::from_utf8_lossy(&verbose.stdout));
+    assert!(!quiet_text.contains("file://"), "a piped link prints its text alone: {quiet_text}");
+    assert!(verbose_text.contains(" <file://"), "-v adds the destination: {verbose_text}");
     assert_eq!(verbose.stderr, quiet.stderr);
     for label in ["Validation timings", "compile cache:", "unassigned"] {
         assert!(!stderr(&verbose).contains(label), "`{label}` under one -v");
@@ -109,7 +126,7 @@ fn unresolvable_schema_keeps_its_error_and_reports_partial_timings() {
 
     assert_eq!(quiet.status.code(), Some(2), "a schema that does not resolve exits 2");
     assert_eq!(verbose.status.code(), Some(2));
-    assert_eq!(verbose.stdout, quiet.stdout);
+    assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
     assert_stage_report(&report);
@@ -138,7 +155,7 @@ fn a_cold_assignment_request_reports_its_compile_miss() {
 
     assert_eq!(quiet.status.code(), Some(0), "{}", stderr(&quiet));
     assert_eq!(verbose.status.code(), Some(0));
-    assert_eq!(verbose.stdout, quiet.stdout);
+    assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     let report = stderr(&verbose);
     assert_stage_report(&report);
     assert!(report.contains("compile cache: miss"), "the validator built while preparing assignments is a miss:\n{report}");
@@ -155,7 +172,7 @@ fn a_failing_assignment_preparation_keeps_its_error_and_reports_partial_timings(
 
     assert_eq!(quiet.status.code(), Some(2), "a schema that does not resolve exits 2");
     assert_eq!(verbose.status.code(), Some(2));
-    assert_eq!(verbose.stdout, quiet.stdout);
+    assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     assert!(String::from_utf8_lossy(&quiet.stdout).contains("schema definition error"));
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
@@ -197,7 +214,7 @@ fn a_discovery_failure_keeps_its_error_and_reports_partial_timings() {
 
     assert_eq!(quiet.status.code(), Some(2), "an unreadable schema-root file exits 2");
     assert_eq!(verbose.status.code(), Some(2));
-    assert_eq!(verbose.stdout, quiet.stdout);
+    assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     assert!(String::from_utf8_lossy(&quiet.stdout).contains("I/O failure"), "{}", String::from_utf8_lossy(&quiet.stdout));
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
