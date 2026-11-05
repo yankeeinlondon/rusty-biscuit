@@ -154,6 +154,8 @@ pub struct Table {
     block_style: Style,
     /// See [`Table::with_min_width`].
     min_width: Option<usize>,
+    /// See [`Table::borderless`].
+    borderless: bool,
 }
 
 impl Table {
@@ -225,6 +227,18 @@ impl Table {
     /// alignment, and row fill.
     pub fn prefer_cursor_alignment(mut self) -> Self {
         self.prefer_cursor_alignment = true;
+        self
+    }
+
+    /// Draw the data rows alone: columns still align, but there are no box
+    /// lines and no header row in the terminal. A row with text only in its
+    /// first cell runs across the columns without widening them. The Markdown
+    /// and browser outputs are unaffected, since a GFM table cannot omit its
+    /// header.
+    ///
+    /// Cursor alignment ([`Self::prefer_cursor_alignment`]) keeps its borders.
+    pub fn borderless(mut self) -> Self {
+        self.borderless = true;
         self
     }
 
@@ -401,6 +415,7 @@ impl Table {
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
             block_style: self.block_style.clone(),
+            borderless: self.borderless,
             min_width: self.min_width,
         })
     }
@@ -1733,6 +1748,7 @@ impl Table {
             stripe_text: self.style.stripe_text,
             highlight_row: self.style.highlight_row,
             min_width: self.min_width.and_then(|w| u32::try_from(w).ok()),
+            borderless: self.borderless,
         });
 
         // Carry the consolidated layout when it differs from the default.

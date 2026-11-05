@@ -738,6 +738,12 @@ pub struct TableTerminalHints {
     /// width still caps it. Omitted from the serialized form when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_width: Option<u32>,
+    /// Whether the terminal fold draws the data rows alone, with aligned
+    /// columns and no box lines or header row; a row with text only in its
+    /// first cell spans the columns. Omitted from the serialized form when
+    /// `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub borderless: bool,
 }
 
 /// A terminal-only highlight for one data row of a [`NodeKind::Table`] node.
@@ -3301,9 +3307,11 @@ mod tests {
                 bg: crate::color::Color::BasicColor(crate::color::BasicColor::Black),
             }),
             min_width: Some(60),
+            borderless: true,
         });
         let hints = attrs.table_terminal_hints();
         assert!(hints.prefer_cursor_alignment);
+        assert!(hints.borderless);
         assert!(hints.alternate_background);
         assert!(!hints.alternate_text_color);
         assert_eq!(

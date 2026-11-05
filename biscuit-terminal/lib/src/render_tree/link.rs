@@ -13,6 +13,7 @@
 use std::borrow::Cow;
 
 use biscuit_file::{FileReference, FileReferenceKind};
+use renderable::output::link_metadata::LinkMetadata;
 use renderable::tree::{HintNamespace, RenderNode};
 
 const LINK_HINTS: HintNamespace = HintNamespace("biscuit_terminal.link");
@@ -52,18 +53,37 @@ pub(super) fn terminal_link_url<'a>(link: &RenderNode, url: &'a str) -> Cow<'a, 
 /// A link without [`link_metadata`](renderable::tree::NodeAttrs::link_metadata)
 /// keeps today's destination ([`terminal_link_url`], fragment included) and
 /// an empty parameter field. A link with metadata gets the bare URI (query
-/// and fragment removed) and its metadata as colon-separated `key=value`
-/// pairs: `line`, `column`, and `heading` first, in that order, then every
-/// other key sorted. `heading` is the destination's fragment unless the
-/// metadata names one. A pair whose key or value contains `:`, `;`, or a
-/// control character (or whose key is empty or contains `=`) is omitted,
-/// because the OSC 8 parameter field cannot carry it.
+/// and fragment removed) and its [`osc8_parameters`].
 pub(super) fn osc8_target(link: &RenderNode, url: &str) -> (String, String) {
     let Some(metadata) = link.attrs.link_metadata() else {
         return (terminal_link_url(link, url).into_owned(), String::new());
     };
+    let (bare, params) = osc8_parameters(url, metadata);
+    (terminal_link_url(link, bare).into_owned(), params)
+}
+
+/// The destination of a link carrying `metadata` without its query and
+/// fragment, and the OSC 8 parameter field that replaces them.
+///
+/// The field holds colon-separated `key=value` pairs: `line`, `column`, and
+/// `heading` first, in that order, then every other key sorted. `heading` is
+/// the destination's fragment unless the metadata names one. A pair whose key
+/// or value contains `:`, `;`, or a control character (or whose key is empty
+/// or contains `=`) is omitted, because the field cannot carry it.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::render_tree::osc8_parameters;
+/// use renderable::output::link_metadata::{LinkMetadata, QueryParams};
+///
+/// let metadata = LinkMetadata { query: QueryParams::from_iter([("line", 14_u64)]) };
+/// let (uri, params) = osc8_parameters("file:///a.md#setup", &metadata);
+/// assert_eq!((uri, params.as_str()), ("file:///a.md", "line=14:heading=setup"));
+/// ```
+#[must_use]
+pub fn osc8_parameters<'a>(url: &'a str, metadata: &LinkMetadata) -> (&'a str, String) {
     let (bare, fragment) = split_destination(url);
-    let uri = terminal_link_url(link, bare).into_owned();
 
     let query = &metadata.query;
     let mut pairs: Vec<(String, String)> = Vec::with_capacity(query.len() + 1);
@@ -93,7 +113,7 @@ pub(super) fn osc8_target(link: &RenderNode, url: &str) -> (String, String) {
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>()
         .join(":");
-    (uri, params)
+    (bare, params)
 }
 
 /// Whether `text` can sit in an OSC 8 parameter field.

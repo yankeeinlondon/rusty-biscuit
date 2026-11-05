@@ -736,9 +736,7 @@ impl ImageRef {
     /// Creates an image and parses the title segment as a title or structured
     /// directive.
     ///
-    /// Parallel to
-    /// [`Link::with_title_parsed`](crate::render::Link::with_title_parsed): a
-    /// `key='value'` title (e.g. `style='color: blue'`) populates typed
+    /// A `key='value'` title (e.g. `style='color: blue'`) populates typed
     /// `style` / `class` / `title` / `data-*` attrs rather than being stored as
     /// literal title text; an encoded metadata package is decoded; any other
     /// title is kept verbatim.
@@ -766,8 +764,7 @@ impl ImageRef {
         if let Some(metadata) = decode_markdown_metadata(parsed_title) {
             self.apply_markdown_metadata(metadata);
         } else if is_structured_image_title(parsed_title) {
-            // A `key='value'` title is a structured directive (parallel to
-            // `Link::with_title_parsed`): parse `style` / `class` / `title` /
+            // A `key='value'` title is a structured directive: parse `style` / `class` / `title` /
             // `data-*` into typed attrs instead of leaking the raw syntax as a
             // literal `title`.
             parse_structured_image_props(self, parsed_title);
@@ -1462,8 +1459,7 @@ fn extract_markdown_url(content: &str) -> (String, &str) {
 /// Whether a markdown image title is a structured `key='value'` directive
 /// rather than plain title text.
 ///
-/// Mirrors the hyperlink directive heuristic
-/// ([`Link::with_title_parsed`](crate::render::Link::with_title_parsed)): a bare
+/// A bare
 /// `key=` token (the key being alphanumeric plus `-`/`_`) outside any quoted
 /// run marks structured mode.
 fn is_structured_image_title(content: &str) -> bool {
@@ -1472,9 +1468,7 @@ fn is_structured_image_title(content: &str) -> bool {
 
 /// Parses a structured `key='value'` image title into typed [`ImageRef`] attrs.
 ///
-/// Recognizes `style`, `class`, `title`, and `data-*` (the image-relevant subset
-/// of the hyperlink directive vocabulary). Unknown keys are ignored. The shared
-/// tokenizer matches `parse_structured_props` in [`Link`](crate::render::Link).
+/// Recognizes `style`, `class`, `title`, and `data-*`. Unknown keys are ignored.
 fn parse_structured_image_props(image: &mut ImageRef, content: &str) {
     reference_parse::parse_structured(content, |key, value| {
         apply_structured_image_prop(image, key, value);

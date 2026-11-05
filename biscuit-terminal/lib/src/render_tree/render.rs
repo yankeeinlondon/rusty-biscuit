@@ -2302,9 +2302,16 @@ impl Writer<'_> {
             .attrs
             .table_terminal_hints_ref()
             .unwrap_or(&default_terminal_hints);
+        // A borderless spanning row must not widen the columns, so only the
+        // other rows are planned.
+        let planned_data: Vec<Vec<TableCellContent>> = if terminal_hints.borderless {
+            data.iter().filter(|row| !is_spanning_row(row)).cloned().collect()
+        } else {
+            data.clone()
+        };
         let mut table = Table::new()
             .with_columns(columns.clone())
-            .with_data(data.clone());
+            .with_data(planned_data);
         table.expand_tabs_in_place(self.opts.context.terminal.tab_width);
 
         // Carry only the content-box `width` from the node's layout onto the
@@ -2335,6 +2342,11 @@ impl Writer<'_> {
             // structured error message, matching the bespoke component.
             Err(error) => return Ok(error.to_string()),
         };
+
+        if terminal_hints.borderless {
+            let span_width = self.opts.context.available_width.as_columns();
+            return Ok(emit_borderless_table(table.columns(), &data, &plan, span_width));
+        }
 
         // ── Pass 2: native emit ────────────────────────────────────────────
         // Striping degrades with the terminal's color depth through the
@@ -2995,6 +3007,67 @@ fn currency_from_token(token: &str) -> Option<crate::components::table::Currency
 /// row highlight (`highlight` is the data row index and its background
 /// escape) that survive SGR resets inside cells — without calling
 /// `Table::render`.
+/// Whether a borderless table's row has text only in its first cell.
+fn is_spanning_row(row: &[TableCellContent]) -> bool {
+    row.iter().skip(1).all(|cell| cell.to_string().is_empty())
+}
+
+/// Writes a borderless table's data rows: the planned columns, two spaces
+/// apart, with no padding after the last. A spanning row runs across the
+/// columns, wrapped only at `span_width`.
+fn emit_borderless_table(
+    columns: &[TableColumn],
+    data: &[Vec<TableCellContent>],
+    plan: &TableWidthPlan,
+    span_width: Option<u32>,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for row in data {
+        if is_spanning_row(row) {
+            let text = row.first().map(ToString::to_string).unwrap_or_default();
+            match span_width {
+                Some(width) => lines.extend(wrap_cell_content(
+                    &text,
+                    &WordWrap::default(),
+                    width as usize,
+                )),
+                None => lines.push(text),
+            }
+            continue;
+        }
+        let cells: Vec<Vec<String>> = plan
+            .columns
+            .iter()
+            .map(|planned| {
+                let strategy = columns
+                    .get(planned.original_index)
+                    .map(TableColumn::effective_word_wrap)
+                    .unwrap_or(WordWrap::None);
+                let content = row
+                    .get(planned.original_index)
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
+                wrap_cell_content(&content, &strategy, planned.resolved_width)
+            })
+            .collect();
+        let height = cells.iter().map(Vec::len).max().unwrap_or(1);
+        for line_index in 0..height {
+            let mut line = String::new();
+            for (column_index, planned) in plan.columns.iter().enumerate() {
+                let text = cells[column_index].get(line_index).map_or("", String::as_str);
+                if column_index + 1 == plan.columns.len() {
+                    line.push_str(text);
+                } else {
+                    line.push_str(&pad_cell(text, planned.resolved_width, Alignment::Left, None));
+                    line.push_str("  ");
+                }
+            }
+            lines.push(line.trim_end().to_string());
+        }
+    }
+    lines.join("\n")
+}
+
 fn emit_table(
     columns: &[TableColumn],
     data: &[Vec<TableCellContent>],
@@ -4151,6 +4224,26 @@ mod render_tree_tests {
         // (ch), so the outputs match and the tree is untouched.
         assert_eq!(narrow.output, wide.output);
         assert_eq!(node, pristine, "rendering must not mutate the tree");
+    }
+
+    #[test]
+    fn a_borderless_table_aligns_its_rows_without_box_lines_or_a_header() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("hidden"), TableColumn::new("also")])
+            .with_data(vec![
+                vec!["one".into(), "a".into()],
+                vec!["longer".into(), "b".into()],
+                vec!["a row with text only in its first cell".into(), "".into()],
+            ])
+            .borderless();
+        let node = <Table as renderable::tree::TreeRenderable>::render_tree(&table);
+
+        let out = render_terminal_node(&node, &TerminalRenderOptions::default()).unwrap().output;
+
+        assert_eq!(
+            strip_escape_codes(&out),
+            "one     a\nlonger  b\na row with text only in its first cell"
+        );
     }
 
     #[test]

@@ -41,6 +41,7 @@ pub(crate) mod style;
 
 pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;
+pub use link::osc8_parameters;
 pub use options::{
     DiagramOutcome, DiagramRenderError, DiagramRenderRequest, DiagramRenderer,
     TerminalRenderContext, TerminalRenderOptions,

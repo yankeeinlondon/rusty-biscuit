@@ -1535,10 +1535,7 @@ impl Writer<'_> {
                     query: metadata.query.clone(),
                     ..StructuredTitle::default()
                 };
-                Some(format!(
-                    "'{}'",
-                    escape_link_title(&structured.to_json5(), '\'')
-                ))
+                Some(structured.to_markdown_title())
             }
             None => title.map(|title| format!("\"{}\"", escape_link_title(title, '"'))),
         };
@@ -2863,7 +2860,7 @@ fn escape_literal_backslashes(text: &str) -> String {
 /// are the only ones a reader decodes, and after the backslash escape, which
 /// doubles a `\\` before a line ending so it cannot escape the reference's
 /// `&`.
-fn escape_link_title(title: &str, quote: char) -> String {
+pub(crate) fn escape_link_title(title: &str, quote: char) -> String {
     encode_line_endings(
         &escape_references(&escape_literal_backslashes(title))
             .replace(quote, &format!("\\{quote}")),

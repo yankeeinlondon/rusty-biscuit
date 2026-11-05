@@ -32,6 +32,13 @@ pub fn run_render(
     // the argument opened, not beside its spelling (`@doc.md` has no parent).
     let input = resolved.as_ref();
 
+    // Before cleanup: a rewritten body has no authored position to report.
+    let link_warnings = md.link_title_warnings();
+    super::compose::blocked_diagnostics(&policy.blocking_policy(), &link_warnings, &[])?;
+    for warning in &link_warnings {
+        eprintln!("{}", warning_row(warning));
+    }
+
     // Guarded cleanup under the default rules, with `--indent` (which only
     // parses 2, 4, or 8) as an explicit override.
     md.cleanup_with(&MarkdownRuleOverrides {
@@ -75,4 +82,17 @@ pub fn run_render(
     }
 
     Ok(())
+}
+
+fn warning_row(warning: &darkmatter::markdown::compose::ComposeWarning) -> String {
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
+    use biscuit_terminal::prelude::{Status, StatusState};
+    let location = warning.path.as_ref().zip(warning.line_number).map_or_else(String::new, |(path, line)| {
+        format!("{}:{line}: ", biscuit_file::to_portable_string(path))
+    });
+    Status::from_prose(format!("{location}{}", Prose::escape_text_outside_code_spans(&warning.message)))
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Warning)
+        .render(&Terminal::new())
 }

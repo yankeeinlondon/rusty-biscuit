@@ -296,6 +296,127 @@ impl StructuredTitle {
         out.push_str(if entries.is_empty() { "}" } else { " }" });
         out
     }
+
+    /// [`Self::to_json5`] as a Markdown link title, delimiters included: a
+    /// reader unescapes it back to exactly that JSON5 text.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::output::link_metadata::StructuredTitle;
+    ///
+    /// let title = StructuredTitle { target: Some("_blank".into()), ..StructuredTitle::default() };
+    /// assert_eq!(title.to_markdown_title(), r#"'{ target: "_blank" }'"#);
+    /// ```
+    #[must_use]
+    pub fn to_markdown_title(&self) -> String {
+        format!("'{}'", crate::tree::render::markdown::escape_link_title(&self.to_json5(), '\''))
+    }
+}
+
+/// The `href` of a link carrying `metadata`: its `#fragment` and `qp` entries
+/// move into the query string.
+///
+/// The destination's own query pairs come first, in order, except a key the
+/// metadata sets (the metadata wins). Then come `heading` (the fragment,
+/// unless `qp` sets `heading` itself), `line`, `column`, and the remaining
+/// `qp` keys sorted by name. The path is never rewritten and the result has
+/// no fragment.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::output::link_metadata::{query_href, LinkMetadata, QueryParams};
+///
+/// let metadata = LinkMetadata { query: QueryParams::from_iter([("line", 14_u64)]) };
+/// assert_eq!(query_href("./a.md?x=1#setup", &metadata), "./a.md?x=1&heading=setup&line=14");
+/// ```
+#[must_use]
+pub fn query_href(url: &str, metadata: &LinkMetadata) -> String {
+    let (rest, fragment) = match url.split_once('#') {
+        Some((rest, fragment)) => (rest, Some(fragment)),
+        None => (url, None),
+    };
+    let (path, query) = match rest.split_once('?') {
+        Some((path, query)) => (path, Some(query)),
+        None => (rest, None),
+    };
+    let query_params = &metadata.query;
+    let heading = fragment
+        .filter(|fragment| !fragment.is_empty() && query_params.get("heading").is_none())
+        .map(percent_decode);
+    let sets =
+        |key: &str| query_params.get(key).is_some() || (key == "heading" && heading.is_some());
+
+    let mut kept: Vec<&str> = Vec::new();
+    for pair in query
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+    {
+        let key = url::form_urlencoded::parse(pair.as_bytes())
+            .next()
+            .map(|(key, _)| key.into_owned())
+            .unwrap_or_default();
+        if !sets(&key) {
+            kept.push(pair);
+        }
+    }
+
+    let mut added = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(heading) = &heading {
+        added.append_pair("heading", heading);
+    }
+    let mut ordered: Vec<(&str, String)> = query_params
+        .iter()
+        .map(|(key, value)| (key, value.to_transport()))
+        .collect();
+    let rank = |key: &str| match key {
+        "heading" => 0,
+        "line" => 1,
+        "column" => 2,
+        _ => 3,
+    };
+    // A stable sort, so `heading`, `line`, and `column` need no tiebreak.
+    ordered.sort_by_key(|(key, _)| (rank(key), if rank(key) == 3 { *key } else { "" }));
+    for (key, value) in &ordered {
+        added.append_pair(key, value);
+    }
+    let added = added.finish();
+
+    let mut href = String::from(path);
+    let mut separator = '?';
+    for pair in kept
+        .iter()
+        .copied()
+        .chain((!added.is_empty()).then_some(added.as_str()))
+    {
+        href.push(separator);
+        href.push_str(pair);
+        separator = '&';
+    }
+    href
+}
+
+/// Decodes `%XX` escapes in a URL fragment; an invalid escape stays as
+/// written, and invalid UTF-8 is replaced.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = |at: usize| bytes.get(at).and_then(|b| (*b as char).to_digit(16));
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (hex(index + 1), hex(index + 2))
+        {
+            out.push((high * 16 + low) as u8);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// How a link title was interpreted.
