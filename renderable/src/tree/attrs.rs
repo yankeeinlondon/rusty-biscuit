@@ -1662,6 +1662,11 @@ pub struct NodeAttrs {
     /// [`NodeKind::ThematicBreak`](crate::tree::NodeKind::ThematicBreak) node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thematic_break: Option<Box<ThematicBreakAttrs>>,
+    /// Typed link transport metadata (`qp` query parameters); valid only on a
+    /// [`NodeKind::Link`](crate::tree::NodeKind::Link) node. Each fold lowers
+    /// it in its own form, never as browser `data-*` attributes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_metadata: Option<Box<crate::output::link_metadata::LinkMetadata>>,
     /// Extension-namespace structured data keyed by name. Carries only opaque
     /// package-local hints (e.g. a custom `myapp.custom.*` namespace), not
     /// first-class `renderable.*` presentation.
@@ -2471,6 +2476,32 @@ impl NodeAttrs {
         if self.browser.as_deref().is_some_and(BrowserAttrs::is_empty) {
             self.browser = None;
         }
+    }
+
+    /// Stores link transport metadata, or clears it when `metadata` is empty.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::output::link_metadata::{LinkMetadata, QueryParams};
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_link_metadata(LinkMetadata {
+    ///     query: QueryParams::from_iter([("line", 14_u64)]),
+    /// });
+    /// assert_eq!(attrs.link_metadata().unwrap().query.len(), 1);
+    /// attrs.set_link_metadata(LinkMetadata::default());
+    /// assert!(attrs.link_metadata().is_none());
+    /// ```
+    pub fn set_link_metadata(&mut self, metadata: crate::output::link_metadata::LinkMetadata) {
+        self.link_metadata = (!metadata.is_empty()).then(|| Box::new(metadata));
+    }
+
+    /// The link transport metadata on this node, if any.
+    #[must_use]
+    pub fn link_metadata(&self) -> Option<&crate::output::link_metadata::LinkMetadata> {
+        self.link_metadata.as_deref()
     }
 
     /// Stores [`ThematicBreakAttrs`] as the typed

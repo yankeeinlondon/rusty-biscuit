@@ -34,6 +34,7 @@ fn render(node: &RenderNode, dialect: MarkdownDialect) -> String {
         dialect,
         strictness: RenderStrictness::Lossy,
         style: None,
+        width: renderable::output::Width::Source,
     };
     render_markdown_node(node, &options)
         .unwrap_or_else(|e| panic!("render failed: {e}"))

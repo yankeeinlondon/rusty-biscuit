@@ -280,9 +280,18 @@ pin its behavior with a test. Details: `renderable/docs/tree-rendering.md`
 
 - **Markdown** — `render_markdown_node` / `render_markdown_document` with
   `MarkdownRenderOptions` and `MarkdownDialect` (`Markdown` / `MarkdownPlus`).
+  `MarkdownRenderOptions::width` (`renderable::output::Width`, default
+  `Source`): `Unlimited` joins soft breaks, `Columns(n)` also wraps
+  paragraphs at `n` display columns (never code, tables, headings, link
+  tails, or a line that would start a block). A `Link` with
+  `NodeAttrs::link_metadata` writes a single-quoted JSON5 `qp` title.
 - **Browser** — `render_browser_node` / `render_browser_document` with
   `BrowserRenderOptions` and `RawHtmlPolicy` (`Allow` / `Escape` / `Reject`;
   a comment-only `Html` node renders as nothing under `Escape`/`Reject`).
+  `BrowserRenderOptions::width` = `Columns(n)` adds one zero-specificity
+  `max-width: {n}ch` page rule for prose blocks; a `Link` with link metadata
+  gets its `qp` and fragment (as `heading=`) in the `href` query string.
+  See `renderable/docs/tree-rendering.md` (Output width, Link query metadata).
   `render_browser_document_html(doc, opts)` is the direct `Document` → final
   HTML `String` path: it streams the tree into one buffer (no fragment per
   node) and emits bytes identical to

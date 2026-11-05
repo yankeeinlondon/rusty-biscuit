@@ -166,6 +166,7 @@ fn raw_html_line_endings_survive_container_prefixes_and_stay_inside() {
                     dialect,
                     strictness: RenderStrictness::Lossy,
                     style: None,
+                    width: renderable::output::Width::Source,
                 };
                 let markdown = render_markdown_node(&node, &options)
                     .unwrap_or_else(|e| panic!("{case}: render failed: {e}"))
@@ -211,6 +212,7 @@ fn a_raw_crlf_ending_a_list_item_keeps_its_carriage_return() {
             dialect,
             strictness: RenderStrictness::Lossy,
             style: None,
+            width: renderable::output::Width::Source,
         };
         let markdown = render_markdown_node(&list, &options)
             .unwrap_or_else(|e| panic!("{dialect:?}: render failed: {e}"))

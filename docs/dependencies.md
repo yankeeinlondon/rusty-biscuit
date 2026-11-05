@@ -7,6 +7,15 @@
 
 ## Recent Dependency Notes
 
+- `renderable` adds `json-five` 0.3 (2026-11-05) for structured link titles
+  (`renderable::output::link_metadata`): one JSON5 interpretation of a title
+  that Prose and Darkmatter share. It is the parser `biscuit-file` already
+  uses (the lockfile resolves 0.3.1), so the graph gains one edge and no
+  package, and `renderable` does not take a `biscuit-file` dependency.
+- `renderable` adds `unicode-width` 0.2 (2026-11-05) so the Markdown fold
+  measures display columns when it wraps paragraphs for an output width
+  (`Width::Columns`). Many workspace crates already use it (the lockfile
+  resolves 0.2.2), so the graph gains one edge and no package.
 - `simplified-schema/lib` is a new workspace crate (2026-10-30) that owns the
   SimplifiedSchema language, extracted from Darkmatter. It depends on
   `biscuit-file` (`yaml`, `json5`, `file-reference-syntax`; full

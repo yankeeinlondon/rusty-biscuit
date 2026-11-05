@@ -32,6 +32,7 @@ fn render_in(node: &RenderNode, dialect: MarkdownDialect) -> String {
         dialect,
         strictness: RenderStrictness::Lossy,
         style: None,
+        width: renderable::output::Width::Source,
     };
     render_markdown_node(node, &opts).expect("render").output
 }

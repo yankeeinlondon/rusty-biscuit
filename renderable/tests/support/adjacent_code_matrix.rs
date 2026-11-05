@@ -41,6 +41,7 @@ pub fn opts(dialect: MarkdownDialect, strictness: RenderStrictness) -> MarkdownR
         dialect,
         strictness,
         style: None,
+        width: renderable::output::Width::Source,
     }
 }
 

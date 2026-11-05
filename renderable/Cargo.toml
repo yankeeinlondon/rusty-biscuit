@@ -22,9 +22,14 @@ hint-access-counter = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+# JSON5 structured link titles (`output::link_metadata`); the same parser
+# biscuit-file uses.
+json-five = "0.3"
 serde_json = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
+# Display width of a line when the Markdown fold wraps paragraphs.
+unicode-width = "0.2"
 url = "2.5"
 
 # CLI argument parsing (optional, for ValueEnum derive)

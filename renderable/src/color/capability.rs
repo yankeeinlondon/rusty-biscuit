@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::output::Width;
+
 /// The color depth a terminal supports.
 ///
 /// Describes the palette size / precision available for rendering. Code
@@ -91,9 +93,10 @@ pub enum ColorMode {
 ///
 /// ```
 /// use renderable::color::{ColorDepth, ColorMode, TerminalCodeContext};
+/// use renderable::output::Width;
 ///
-/// let ctx = TerminalCodeContext::new(120, ColorDepth::TrueColor, ColorMode::Dark);
-/// assert_eq!(ctx.width(), 120);
+/// let ctx = TerminalCodeContext::new(Width::Columns(120), ColorDepth::TrueColor, ColorMode::Dark);
+/// assert_eq!(ctx.width(), Width::Columns(120));
 /// assert_eq!(ctx.color_depth(), ColorDepth::TrueColor);
 /// assert_eq!(ctx.color_mode(), ColorMode::Dark);
 /// ```
@@ -108,7 +111,7 @@ pub enum ColorMode {
 /// [`CodeRenderer`]: crate::tree::CodeRenderer
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalCodeContext {
-    width: u32,
+    width: Width,
     color_depth: ColorDepth,
     color_mode: ColorMode,
     code_theme_name: Option<String>,
@@ -125,12 +128,14 @@ impl TerminalCodeContext {
     ///
     /// ## Arguments
     ///
-    /// - `width`: Available width in columns for the code block.
+    /// - `width`: The output width available to the code block. Under
+    ///   [`Width::Unlimited`] or [`Width::Source`] a code band is padded only
+    ///   to its own longest line, never to a fill width.
     /// - `color_depth`: The terminal's color capability.
     /// - `color_mode`: The terminal's background color mode.
     #[inline]
     #[must_use]
-    pub const fn new(width: u32, color_depth: ColorDepth, color_mode: ColorMode) -> Self {
+    pub const fn new(width: Width, color_depth: ColorDepth, color_mode: ColorMode) -> Self {
         Self {
             width,
             color_depth,
@@ -216,10 +221,10 @@ impl TerminalCodeContext {
         self.code_theme_name.as_deref()
     }
 
-    /// Returns the available width in columns.
+    /// Returns the output width available to the code block.
     #[inline]
     #[must_use]
-    pub const fn width(&self) -> u32 {
+    pub const fn width(&self) -> Width {
         self.width
     }
 
@@ -254,9 +259,9 @@ mod tests {
 
     #[test]
     fn terminal_code_context_accessors() {
-        let ctx = TerminalCodeContext::new(80, ColorDepth::Enhanced, ColorMode::Light)
+        let ctx = TerminalCodeContext::new(Width::Columns(80), ColorDepth::Enhanced, ColorMode::Light)
             .with_page_surface(Some((10, 20, 30)), Some((40, 50, 60)));
-        assert_eq!(ctx.width(), 80);
+        assert_eq!(ctx.width(), Width::Columns(80));
         assert_eq!(ctx.color_depth(), ColorDepth::Enhanced);
         assert_eq!(ctx.color_mode(), ColorMode::Light);
         assert_eq!(ctx.page_text_color(), Some((10, 20, 30)));

@@ -230,6 +230,13 @@ impl HtmlPage {
         self
     }
 
+    /// Appends `rule` to the page stylesheet, after the rules
+    /// [`PageOptions::stylesheet`] supplied.
+    pub(crate) fn push_page_rule(&mut self, rule: crate::stylesheet::CssRule) -> &mut HtmlPage {
+        self.stylesheet.push(rule);
+        self
+    }
+
     /// Dedups the page's own `<link>` tags **and** the dependency links
     /// pulled from every composed fragment, returning the unified list in
     /// first-seen order.
