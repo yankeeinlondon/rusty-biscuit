@@ -61,7 +61,8 @@ invalid SimplifiedSchema for property os:
 expected `,`, `;`, or `)` in enum members, found `a`
 ```
 
-`parse_enum_members` (`simplified/grammar.rs`) accepts only literal members,
+`parse_enum_members` (`simplified-schema/lib/src/simplified/grammar.rs`)
+accepts only literal members,
 and schema handling is deliberately passive: parsing, validation, trigger
 matching, completion, and hover perform no I/O and evaluate no expressions.
 With 2026-11-04-loading-data, the intended spelling becomes:
@@ -85,7 +86,7 @@ each one or replace it with something equally strong:
    few schemas and relies on this.
 3. **DMLS latency.** Completion, hover, and diagnostics run on every edit and
    must not wait on file reads or expression evaluation on the hot path.
-4. **The extraction boundary.** 2026-10-28-extract-simplified-schema moves the
+4. **The extraction boundary.** 2026-10-28-extract-simplified-schema moved the
    schema language into the host-neutral `simplified-schema` library. That
    library owns the *passive* expression parser but has **no evaluator**:
    evaluation, function registration, and lookup stay in Darkmatter.
@@ -176,9 +177,10 @@ material win over resolving the whole schema up front.
 ### S7. Extraction boundary
 
 Specify the resolver trait in `simplified-schema` and the template type it
-operates on, and coordinate the sequencing with
-2026-10-28-extract-simplified-schema. This spec should land after that
-extraction, or define its hook in a form the extraction can adopt unchanged.
+operates on. The extraction (2026-10-28-extract-simplified-schema) has landed
+in code, so the hook is added to that library's public surface and must keep
+it host-neutral: no Darkmatter types and no dependency from
+`simplified-schema` back to Darkmatter.
 
 ### S8. Breadth
 
