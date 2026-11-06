@@ -21,13 +21,20 @@ use tracing::instrument;
 
 #[instrument(skip_all)]
 pub(crate) fn run_graph(input: &Path, follow: bool, validate: bool, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
-    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
-    let result = graph_value(input, follow, validate, request);
+    let mut run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
+    let result = graph_value(&mut run, input, follow, validate, request);
     run.finish(result)
 }
 
-fn graph_value(input: &Path, follow: bool, validate: bool, request: &MdRequest) -> Result<Completed<CommandValue<Value>>> {
+fn graph_value(
+    run: &mut CommandRun,
+    input: &Path,
+    follow: bool,
+    validate: bool,
+    request: &MdRequest,
+) -> Result<Completed<CommandValue<Value>>> {
     let opened = open_argument(input, request)?;
+    run.set_document(opened.path());
     // The graph resolves through the document's own context: one derived from
     // the launch context, or built at the document for a document in another
     // repository (a launch-anchored request rejects such a document).

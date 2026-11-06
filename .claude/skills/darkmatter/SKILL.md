@@ -279,7 +279,8 @@ Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
 `CommandRun::begin` (target, `--width`, default width, `DataShape`), build a
 `CommandValue` (`markdown::output::command`: the data struct, a `Document` for
 the generic folds, optional terminal, Markdown, and HTML overrides), then
-`run.finish(result)`. A handler returns `Completed::success` or
+`run.finish(result)`; a leaf working on one document calls
+`run.set_document` so a failure with no file of its own still names it. A handler returns `Completed::success` or
 `Completed::failure` (a report that is the deliverable), or `Err` (no result),
 which `finish` turns into a payload for a data output and leaves to `main` for a
 formatted one. `DataShape` adds the run status: `Typed` always, `Object` only
@@ -330,7 +331,10 @@ severities. Reasons and constructs live only in
 `ReferenceIssueCode::reason_phrase` and `ReferenceSyntax::construct_phrase`.
 HTML discovery (`reference/html.rs`) reads one Markdown HTML node as any number of
 elements with `scan_elements`, and `LineMap` carries each back to the source past
-line breaks and container prefixes; never classify an HTML node line by line. See
+line breaks and container prefixes; never classify an HTML node line by line.
+`visit_html_elements` walks a document's HTML nodes in order, so a raw-text element
+split across nodes is one element, and every reader drops what starts in its
+`inert_ranges`; never decide inertness in one consumer. See
 `docs/cli/validate.md#html-and-css-references`.
 
 `md compose` accepts its Markdown default and the data family; `md render` both

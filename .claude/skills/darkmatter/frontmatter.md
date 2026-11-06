@@ -367,6 +367,12 @@ text-preserving writer. Do not build another YAML editor.
   (anchor, alias, tag, or `<<` merge), or `UnsupportedShape` (a plain
   flow-collection item, a multi-line flow collection, or a nested sequence).
   Report the line rather than falling back to re-serializing the document.
+- Those refusals are about replacing bytes, not about where a value sits.
+  `locate_frontmatter_value` reads every flow item, across lines and past
+  comments. `hash::locate_frontmatter_value_range` (crate-private) answers
+  where a `prologue:`/`epilogue:` value was typed, for a plain flow item too,
+  and is `None` unless the node decodes to the expected text; a reference's
+  location comes from it after the leaf locator refuses, never from its key.
 
 ## `style:` Frontmatter
 

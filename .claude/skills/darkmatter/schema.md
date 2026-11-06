@@ -317,8 +317,9 @@ validation report, shared by every problem and root-union arm):
   node.
 - The alignment witness: `PositionMap::project` accepts the locator's tree
   only when its mappings match the parsed `MappingOrders` and it holds no
-  alias. Otherwise (aliases, `<<`, unquoted `{{ }}`, multi-line or
-  commented flow collections) it falls back to top-level key line, column 1.
+  alias. Otherwise (aliases, `<<`, unquoted `{{ }}`) it falls back to
+  top-level key line, column 1. The tolerant locator reads a flow collection
+  across lines and past its comments.
   Positions never change validity.
 - `positions_for(&Markdown)` needs loaded text (parsed from text or a file);
   a constructed `Markdown` is located in its serialized YAML view.

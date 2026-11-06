@@ -32,7 +32,7 @@ pub(crate) fn run_validate(target: ValidateTarget, cli: &Cli, request: &MdReques
     info!("starting reference validation");
 
     let ValidateTarget::Refs { input, remote, fragments, timeout, fail_fast, output, show_all, graph } = target;
-    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
+    let mut run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
 
     let prepared = (|| {
         let opened = open_argument(&input, request)?;
@@ -42,6 +42,9 @@ pub(crate) fn run_validate(target: ValidateTarget, cli: &Cli, request: &MdReques
             .wrap_err("Failed to prepare the validation request")?;
         Ok::<_, color_eyre::Report>((opened, md, validation_request))
     })();
+    if let Ok((opened, ..)) = &prepared {
+        run.set_document(opened.path());
+    }
 
     // `--graph` prints the diagram alone, with no validation.
     if let Some(format) = graph {

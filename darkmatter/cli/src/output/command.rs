@@ -13,11 +13,13 @@
 use biscuit_terminal::output::{OutputTarget, WidthRequest, render_output};
 use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
+use darkmatter::markdown::compose::report_diagnostics::with_document_fallback;
 use darkmatter::markdown::output::command::empty_document;
 use renderable::CommandOutput;
 use renderable::tree::Document;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use std::path::{Path, PathBuf};
 
 use super::report::{INTERRUPTED, ReportedExit, failure_diagnostics};
 use super::{OutputEnvironment, ResolvedOutput, SERIALIZATION_CODE, output_diagnostic, resolve_output, stderr_warning, width_warning_diagnostic, write_stdout_text};
@@ -121,6 +123,7 @@ pub struct CommandRun {
     ending: TextEnding,
     compact: bool,
     diagnostics: Vec<Diagnostic>,
+    document: Option<PathBuf>,
 }
 
 impl CommandRun {
@@ -147,7 +150,7 @@ impl CommandRun {
                 stderr_warning(warning);
             }
         }
-        Ok(Self { output, shape, ending: TextEnding::Terminated, compact: false, diagnostics })
+        Ok(Self { output, shape, ending: TextEnding::Terminated, compact: false, diagnostics, document: None })
     }
 
     /// A document command: its Markdown keeps its exact bytes, and everything
@@ -163,6 +166,12 @@ impl CommandRun {
     pub fn compact_json(mut self, compact: bool) -> Self {
         self.compact = compact;
         self
+    }
+
+    /// Names the one document this run works on, so a failure whose typed
+    /// error holds no file still reports it.
+    pub fn set_document(&mut self, document: &Path) {
+        self.document = Some(document.to_path_buf());
     }
 
     /// The resolved output.
@@ -199,7 +208,9 @@ impl CommandRun {
             Err(error) if !self.is_data() => Err(error),
             Err(error) => {
                 let mut diagnostics = self.diagnostics.clone();
-                diagnostics.extend(failure_diagnostics(&error));
+                let mut failure = failure_diagnostics(&error);
+                with_document_fallback(&mut failure, self.document.as_deref());
+                diagnostics.extend(failure);
                 self.write_data(None, false, diagnostics)
             }
             Ok(completed) if self.is_data() => {

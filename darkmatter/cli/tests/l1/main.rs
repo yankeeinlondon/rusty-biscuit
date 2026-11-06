@@ -116,6 +116,7 @@ mod spawn_site_guard;
 mod standalone_baseline;
 mod output_commands;
 mod output_envelope;
+mod output_width_overrides;
 mod test_layout;
 mod toc;
 mod validate_refs;

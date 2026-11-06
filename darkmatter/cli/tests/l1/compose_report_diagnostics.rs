@@ -141,6 +141,7 @@ fn other_families_report_their_positions_and_no_reference_details() {
         ("transclusion.md", "::file ./cycle.md\n", "dm.transclusion.failure", Some("cycle.md"), None, None),
         ("shell.md", "::shell not-a-real-command --flag\n", "dm.shell.failure", Some("shell.md"), None, None),
         ("frontmatter_shell.md", "---\nx: \"$(echo hello)\"\n---\nbody\n", "dm.shell.failure", Some("frontmatter_shell.md"), Some(2), None),
+        ("lifecycle_shell.md", "---\ncomposed:\n  - shell: \"false\"\n---\nbody\n", "dm.shell.failure", Some("lifecycle_shell.md"), None, None),
         // Names nothing a document wrote: a lifecycle `error:` is a message.
         ("lifecycle.md", "---\ncomposed:\n  - error: boom\n---\nbody\n", "dm.lifecycle.failure", None, None, None),
     ] {
@@ -213,6 +214,24 @@ fn warnings_and_a_typeless_failure_name_the_document() {
     assert_eq!(record["code"], "dm.transclusion.failure", "{record:#}");
     assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), "includes.md", "{record:#}");
     assert_eq!(record["source"]["line"], Value::Null, "{record:#}");
+}
+
+/// `md render` delivers the same fallback for a record about its document.
+#[test]
+fn a_render_style_warning_names_the_document() {
+    let fixture = CliProcessFixture::named("report_render_style");
+    let document = fixture.write_file("cwd/styled.md", "---\nstyle:\n  bogus_key: 1\n---\n# T\n");
+
+    let output = fixture.command().args(["render", "--output", "json"]).arg(&document).output().unwrap();
+
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let [record] = value["diagnostics"].as_array().unwrap().as_slice() else {
+        panic!("one record: {value:#}");
+    };
+    assert_eq!(record["code"], "dm.style.unknown_key", "{record:#}");
+    assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), "styled.md", "{record:#}");
+    assert_eq!(record["source"]["line"], Value::Null, "{record:#}");
+    assert_eq!(record["source"]["column"], Value::Null, "{record:#}");
 }
 
 /// Input with no file reports positions with a null file, and otherwise a null
@@ -342,4 +361,41 @@ fn the_check_runs_no_shell_directive() {
     assert_eq!(status, Some(1), "{report:#}");
     assert_eq!(codes(&report), ["dm.shell.failure"], "{report:#}");
     assert!(!marker.exists(), "the reference check ran a shell directive");
+}
+
+/// A reference the file-reference grammar rejects: the graph build fails with
+/// a typed error that holds no file, on a document the command opened itself.
+const UNPARSEABLE_PROLOGUE: &str = "---\ntitle: x\nprologue: \"{{ title }}.md\"\n---\n# Top\n";
+
+fn failure_source(fixture: &CliProcessFixture, args: &[&str], document: &Path) -> Value {
+    let output = fixture.command().args(args).arg(document).args(["--output", "json"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("one JSON payload");
+    let diagnostics = payload["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 1, "{payload:#}");
+    diagnostics[0]["source"].clone()
+}
+
+#[test]
+fn validate_refs_names_its_document_on_a_failure_with_no_file() {
+    let fixture = CliProcessFixture::named("report_validate_refs_fallback");
+    let document = fixture.write_file("doc.md", UNPARSEABLE_PROLOGUE);
+
+    let source = failure_source(&fixture, &["validate", "refs"], &document);
+
+    assert_eq!(file_of(&source["file"]).file_name().unwrap(), "doc.md");
+    assert_eq!(source["line"], Value::Null);
+    assert_eq!(source["column"], Value::Null);
+}
+
+#[test]
+fn graph_names_its_document_on_a_failure_with_no_file() {
+    let fixture = CliProcessFixture::named("report_graph_fallback");
+    let document = fixture.write_file("doc.md", UNPARSEABLE_PROLOGUE);
+
+    let source = failure_source(&fixture, &["graph"], &document);
+
+    assert_eq!(file_of(&source["file"]).file_name().unwrap(), "doc.md");
+    assert_eq!(source["line"], Value::Null);
+    assert_eq!(source["column"], Value::Null);
 }

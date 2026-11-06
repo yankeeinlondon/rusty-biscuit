@@ -36,15 +36,17 @@ pub fn run_triggers(file: &Path, output: OutputTarget, cli: &Cli, request: &MdRe
         skipped: Vec::new(),
         triggers: Vec::new(),
     };
-    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::typed(&skeleton))?;
-    let result = triggers_value(file, run.is_data(), request);
+    let mut run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::typed(&skeleton))?;
+    let result = triggers_value(&mut run, file, request);
     run.finish(result)
 }
 
-fn triggers_value(file: &Path, is_data: bool, request: &MdRequest) -> Result<Completed<CommandValue<TriggersData>>> {
+fn triggers_value(run: &mut CommandRun, file: &Path, request: &MdRequest) -> Result<Completed<CommandValue<TriggersData>>> {
+    let is_data = run.is_data();
     // The argument resolves first, so a tree escape or malformed reference is
     // `InvalidReference` rather than a later missing-repository error.
     let opened = open_argument(file, request)?;
+    run.set_document(opened.path());
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived repository root lacks.
     let document_path = biscuit_file::canonicalize_simplified(opened.path())

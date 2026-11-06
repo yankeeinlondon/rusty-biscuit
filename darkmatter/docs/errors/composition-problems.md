@@ -85,7 +85,7 @@ broken `::code` target on line 9, and `types.md` pulled it in on line 8:
 
 | Field | Meaning |
 | --- | --- |
-| `source.line`, `source.column` | The authored position. Both are 1-based and count the complete file, frontmatter included. For a reference, the column counts characters rather than bytes, and CRLF line endings do not change either number. `null` when no position is proven: the document has no authored positions (built in memory or fetched from a URL), or the producer knows only the file. Never a placeholder. |
+| `source.line`, `source.column` | The authored position. Both are 1-based and count the complete file, frontmatter included. For a reference, the column counts characters rather than bytes, and CRLF line endings do not change either number. A `prologue:` or `epilogue:` reference reports its own value, so each entry of a list has its own position: in `prologue: [./a.md, ./b.md]`, `./b.md` is at column 20, and an entry on a later line of a multi-line list is on that line. `null` when no position is proven: the document has no authored positions (built in memory or fetched from a URL), or the producer knows only the file. Never a placeholder. |
 | `source.inserted` | `true` when an expression, a shell step, or a `replace:` value wrote the reference. It has no authored text of its own, so `line` and `column` name the construct that wrote it: the `{{ … }}`, the `$( … )`, or the replaced key. |
 | `source.section` | The composed anchor slug of the innermost heading at or before the problem. `# Intro {{ title }}` with `title: Root` gives `intro-root`, the anchor that exists in the composed document. |
 | `reason`, `construct`, `reference`, `failure` | Reference problems only: the report's phrase, the construct, the reference as written, and the [failure class](./file-reference-failures.md). |
@@ -113,7 +113,7 @@ What each family reports:
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
 | A `::file` directive that does not parse, or a malformed `::block` | the file |
 | A transclusion cycle | the document holding the directive that closes the cycle, which may be a child rather than the named document |
-| An undeclared property | the file and the line of its first read; the column is `null` |
+| An undeclared property | the file and the line of its first read (for a read in frontmatter, its key's line); the column is `null` |
 | Another warning | the document that reported it |
 | Any other failure that holds no file, such as a caller's `--set` value that could not bind | the document named on the command line |
 

@@ -165,6 +165,16 @@ report, whose reason phrase states it
 Claudine's prompt-argument errors carry the same row
 (`CompositionError::resolution_failure`).
 
+## Reference report in a real terminal
+
+`cli/tests/level2/level2_reference_report.rs` proves what a pane shows on each
+route that prints the report: `md validate refs`, `md graph --validate`, and a
+`md compose` refusal on stderr with stdout redirected. Style is read per cell by
+replaying the capture's SGR. tmux gets the owned, resized panes; its capture
+carries no hyperlinks, so the location's OSC 8 link is checked on WezTerm, which
+orders link parameters itself. Byte contracts (plain, data, exit codes) stay in
+Level 1 (`lib/tests/l1/reference_report.rs`, `cli/tests/l1/reference_report.rs`).
+
 ## DMLS full-graph oracle
 
 `dmls/tests/common/oracle.rs` builds one `WorkspaceGraph` over every Markdown

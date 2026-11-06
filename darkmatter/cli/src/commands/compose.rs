@@ -1422,7 +1422,6 @@ fn format_compose_perf_report(
     };
 
     // ── Title ────────────────────────────────────────────────────────
-    // Its columns fill their width, so it stays a page wide when stderr has none.
     let mut terminal = terminal.clone();
     terminal.fixed_width = terminal.fixed_width.map(|width| width.min(PERF_REPORT_MAX_COLUMNS));
     let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render(&terminal);
