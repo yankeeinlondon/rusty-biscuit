@@ -70,10 +70,10 @@ impl OutputEnvironment {
     #[must_use]
     pub fn stderr_terminal(&self) -> Terminal {
         let mut terminal = Terminal {
-            fixed_width: Some(self.stderr_columns.unwrap_or(UNBOUNDED_COMPONENT_COLUMNS)),
             is_tty: self.stderr_is_terminal,
             ..Terminal::default()
         };
+        terminal.set_output_width(resolve_stderr_width(self.stderr_columns));
         if !self.stderr_is_terminal {
             terminal.color_depth = ColorDepth::None;
             terminal.osc_link_support = false;
@@ -82,10 +82,6 @@ impl OutputEnvironment {
         terminal
     }
 }
-
-/// The columns stderr's components wrap at when stderr has no width: they take
-/// a number, and none of those rendered to stderr fills it.
-const UNBOUNDED_COMPONENT_COLUMNS: u32 = 1 << 20;
 
 /// The [`Terminal`] for what this process renders to stderr.
 #[must_use]

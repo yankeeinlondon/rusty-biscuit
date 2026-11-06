@@ -84,10 +84,9 @@ pub struct TerminalRenderContext {
     /// The detected [`Terminal`], retained so components can render with
     /// faithful capabilities.
     ///
-    /// Its `fixed_width` mirrors [`available_width`](Self::available_width)
-    /// only under [`Width::Columns`]; under an unbounded width the
-    /// render-tree paths read `available_width` and never size output from
-    /// this snapshot's width.
+    /// Its [`output_width`](Terminal::output_width) follows
+    /// [`available_width`](Self::available_width) through every narrowing, so
+    /// a component rendered from this snapshot sees the same width state.
     pub terminal: Terminal,
     /// The available rendering width after margins and indentation.
     ///
@@ -181,10 +180,11 @@ impl TerminalRenderContext {
     /// Width, color depth, hyperlink support, and Unicode
     /// support are copied from the terminal; the layout defaults to
     /// [`Layout::default`]. The `available_width` is initialized to the
-    /// terminal width and `current_indent` to 0.
+    /// terminal's [`output_width`](Terminal::output_width) and `current_indent`
+    /// to 0.
     #[must_use]
     pub fn from_terminal(term: &Terminal) -> Self {
-        let width = Width::Columns(term.width().max(1));
+        let width = term.output_width();
         Self {
             width,
             color_depth: term.color_depth,
@@ -232,7 +232,8 @@ impl TerminalRenderContext {
     /// ```
     #[must_use]
     pub fn from_profile(profile: &TerminalProfile, width: Width) -> Self {
-        let mut term = Terminal::new_optimistic(width.as_columns().unwrap_or(80));
+        let mut term = Terminal::new_optimistic(0);
+        term.set_output_width(width);
         term.color_depth = profile.color_depth.into();
         term.color_mode = profile.color_mode.into();
         term.text_color = profile.text_color.map(|(r, g, b)| crate::discovery::osc_queries::RgbValue { r, g, b });
@@ -250,8 +251,6 @@ impl TerminalRenderContext {
         term.supports_unicode = profile.unicode;
 
         let mut ctx = Self::from_terminal(&term);
-        ctx.width = width;
-        ctx.available_width = width;
         if profile.is_plain() {
             ctx.pin_plain();
         }

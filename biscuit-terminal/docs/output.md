@@ -432,12 +432,41 @@ let text = Prose::new("Hello").with_verbosity(options.verbosity).render(&termina
 The reverse direction is `Terminal::output_profile`, which copies what detection
 found into a `TerminalProfile`.
 
-Components take a number of columns, so under `Unlimited` or `Source` this bridge
-gives the terminal 1,048,576 columns. Content with a natural size never reaches it.
-A component that fills to its terminal does: a directly rendered `HorizontalRule`,
-or anything centered or right-aligned against the terminal, would span those
-columns. To print fills under an unbounded width, render through the tree with
-`render_terminal_output`, which has a natural-width form of each.
+The terminal keeps the width's state, not a number standing in for it. Under
+`Unlimited` or `Source` it has no columns: `terminal.columns()` is `None` and
+`terminal.output_width()` returns the variant. A component that receives this
+terminal renders at its natural size, the same as `render_terminal_output` would.
+
+| Component | With `Columns(40)` | With `Unlimited` or `Source` |
+|---|---|---|
+| `HorizontalRule` | 40 glyphs | `---` in a plain profile; 3 glyphs in a styled one, never an image |
+| `Table` | fitted to 40, cells wrap | natural column widths, no cell wraps |
+| `Prose`, `Status`, `BlockQuote`, lists | wrapped at 40 | not wrapped |
+| anything centered or right-aligned | placed within 40 | placed at the left, with no padding |
+| `TerminalImage`, `MermaidDiagram` | sized against 40 | their natural size |
+
+```rust
+use biscuit_terminal::components::horizontal_rule::HorizontalRule;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
+use renderable::{OutputOptions, TerminalProfile, Width};
+
+let options = OutputOptions::new(Width::Unlimited, TerminalProfile::plain());
+let terminal = Terminal::from_output_options(&options);
+assert_eq!(terminal.columns(), None);
+assert_eq!(HorizontalRule::new().render(&terminal), "---");
+```
+
+A component that fills or wraps reads `columns()`. `Terminal::width()` only answers
+when a number is all a caller needs: on a terminal with no width it returns 80, the
+same answer as a terminal whose size cannot be determined. Three things still size
+themselves from that number, because they need a concrete budget before they can
+measure anything: a `TwoColumn` holding a `TerminalImage` (its cursor overlay needs a
+column grid), a `GraphExpression` image, and a `GitGraph` viewport.
+
+Setting `fixed_width` on such a terminal narrows it to that number of columns, which
+is how a container gives a child a real width. A terminal from `Terminal::new()` or a
+builder always has columns; only an output route produces one without.
 
 ## See also
 

@@ -73,9 +73,9 @@ impl DiagramRenderer for TerminalDiagramRenderer {
         request: &DiagramRenderRequest<'_>,
     ) -> Result<DiagramOutcome, DiagramRenderError> {
         // Size the diagram to the fence's columns (a list item's or quote's
-        // inner width), not the whole terminal. An unbounded fence leaves an
-        // image at the terminal snapshot's width and puts no cap on a text
-        // drawing, which is never wider than it needs to be.
+        // inner width), not the whole terminal. An unbounded fence draws an
+        // image at its natural size and puts no cap on a text drawing, which is
+        // never wider than it needs to be.
         let mut terminal = request.terminal.clone();
         let columns = request.available_width.as_columns();
         if let Some(columns) = columns {

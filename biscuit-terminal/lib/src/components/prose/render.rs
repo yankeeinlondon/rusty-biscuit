@@ -62,13 +62,12 @@ impl Prose {
         // Apply word wrap from the layout when configured. The tree renderer
         // handles margins and alignment but does not fold lines; post-process
         // wrapping restores the behavior Prose provided on the bespoke path.
-        let output = match &self.layout.word_wrap {
-            WordWrap::None => output,
-            strategy => {
+        let output = match (&self.layout.word_wrap, term.columns()) {
+            (WordWrap::None, _) | (_, None) => output,
+            (strategy, Some(width)) => {
                 // `split`, not `lines`: trailing empty rows are the bottom
                 // margin and must survive the wrap pass.
                 let lines = output.split('\n').map(String::from).collect();
-                let width = term.width();
                 let wrapped = wrap_lines(lines, strategy, width);
                 let sanitized = sanitize_wrapped_lines(wrapped);
                 sanitized.join("\n")

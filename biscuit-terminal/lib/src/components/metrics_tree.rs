@@ -597,7 +597,8 @@ impl TerminalRenderable for MetricsTree {
     }
 
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width() as usize;
+        // With no width, no label has anything to be truncated to.
+        let width = term.columns().map_or(usize::MAX, |columns| columns as usize);
         // See `render_optimistic`: propagate the outer Layout so the fold
         // applies the box model.
         let mut prose =

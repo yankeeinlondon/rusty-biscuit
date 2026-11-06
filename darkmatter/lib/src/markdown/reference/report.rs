@@ -423,7 +423,11 @@ impl TerminalRenderable for ValidationReportView {
 
     /// The `terminal` output for `term` at verbosity zero.
     fn render(&self, term: &Terminal) -> String {
-        let width = term.detected_columns().and_then(Width::columns).unwrap_or(Width::Unlimited);
+        let width = term
+            .unbounded_width
+            .map(Width::from)
+            .or_else(|| term.detected_columns().and_then(Width::columns))
+            .unwrap_or(Width::Unlimited);
         let options = OutputOptions::new(width, term.output_profile());
         match render_output(self, OutputTarget::Terminal, &options) {
             Ok(rendered) => rendered.text,
@@ -502,9 +506,11 @@ fn group_for<'g, 'a>(
 fn rows_table(rows: Vec<RenderNode>, links: LinkStyle) -> RenderNode {
     let mut table = Table::new()
         // A reference and a location are copied as written, so a width that
-        // cannot hold them stacks the row rather than split them.
+        // cannot hold them stacks the row rather than split them. A hint in
+        // the first column breaks only between words, keeping `::file-links`
+        // whole.
         .with_columns(vec![
-            TableColumn::new(""),
+            TableColumn::new("").with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None)),
             TableColumn::new("").with_word_wrap(WordWrap::None),
             TableColumn::new("").with_word_wrap(WordWrap::None),
         ])

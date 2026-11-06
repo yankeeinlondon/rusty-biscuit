@@ -785,7 +785,7 @@ impl MermaidDiagram {
     ) -> Result<MermaidRenderResult, MermaidRenderError> {
         let (output, png_path, cache_hit, width_cells) = self.render_to_image(term)?;
         // The image escapes are block-cohesive — align as a block.
-        let output = self.layout.apply_block_layout(&output, term.width());
+        let output = self.layout.apply_block_layout_on(&output, term);
 
         Ok(MermaidRenderResult {
             output,
@@ -856,7 +856,7 @@ impl MermaidDiagram {
                 Err(_) => MermaidPresentation::Source(self.titled_source()),
             };
         }
-        match self.text_attempt(self.text_columns(term.width()), text_charset(term), policy) {
+        match self.text_attempt(self.text_cap(term), text_charset(term), policy) {
             Ok(TextAttempt::Drawn { nodes, shows_title }) => MermaidPresentation::Text(self.titled(nodes, shows_title)),
             Ok(TextAttempt::Refused | TextAttempt::Unrequested) | Err(_) => MermaidPresentation::Source(self.titled_source()),
         }
@@ -894,7 +894,7 @@ impl MermaidDiagram {
         if TerminalImage::route_has_pixels(term) {
             return self.try_render(term).map(MermaidPresentation::Image);
         }
-        match self.text_attempt(self.text_columns(term.width()), text_charset(term), self.fallback.resolve())? {
+        match self.text_attempt(self.text_cap(term), text_charset(term), self.fallback.resolve())? {
             TextAttempt::Drawn { nodes, shows_title } => Ok(MermaidPresentation::Text(self.titled(nodes, shows_title))),
             TextAttempt::Unrequested | TextAttempt::Refused => {
                 self.renderer.diagram.validate_renderable()?;
@@ -1002,13 +1002,21 @@ impl MermaidDiagram {
         TerminalImage::resolve_scaled_dimensions_for(&self.width, &self.layout, term_width, None, None).image_width
     }
 
+    /// The widest text drawing `term` takes: no cap on a terminal with no
+    /// width, since a drawing is never wider than it needs to be.
+    fn text_cap(&self, term: &biscuit_terminal::terminal::Terminal) -> u32 {
+        term.columns().map_or(u32::MAX, |columns| self.text_columns(columns))
+    }
+
     /// Lays out `nodes` for `term` at [`text_columns`](Self::text_columns),
     /// with the plain code block (no highlighter).
     fn render_nodes(&self, nodes: &[RenderNode], term: &biscuit_terminal::terminal::Terminal) -> String {
         let mut options = TerminalRenderOptions::new(term, RenderStrictness::Lossy);
-        options.context = options
-            .context
-            .with_width(renderable::output::Width::Columns(self.text_columns(term.width())));
+        if let Some(columns) = term.columns() {
+            options.context = options
+                .context
+                .with_width(renderable::output::Width::Columns(self.text_columns(columns)));
+        }
         render_terminal_node(&RenderNode::root(nodes.to_vec()), &options)
             .map(|rendered| rendered.output)
             .unwrap_or_else(|_| self.fallback_code_block())
@@ -1024,7 +1032,15 @@ impl MermaidDiagram {
         term: &biscuit_terminal::terminal::Terminal,
     ) -> Result<(String, PathBuf, bool, u32), MermaidRenderError> {
         let cell = term.cell_size();
-        let dims = self.resolve_dimensions(term.width(), cell)?;
+        let dims = match term.columns() {
+            Some(columns) => self.resolve_dimensions(columns, cell)?,
+            None => TerminalImage::resolve_unbounded_dimensions_for(
+                &self.width,
+                &self.layout,
+                self.renderer.natural_size()?.width,
+                cell,
+            ),
+        };
         let (target_width_px, row_height_px) = display_pixels(dims.image_width, cell);
 
         let (png_path, cache_hit) = self
@@ -1109,7 +1125,7 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for MermaidDia
             // `try_render` has applied the layout already.
             MermaidPresentation::Image(result) => result.output,
             MermaidPresentation::Text(nodes) | MermaidPresentation::Source(nodes) => {
-                self.layout.apply_block_layout(&self.render_nodes(&nodes, term), term.width())
+                self.layout.apply_block_layout_on(&self.render_nodes(&nodes, term), term)
             }
         }
     }

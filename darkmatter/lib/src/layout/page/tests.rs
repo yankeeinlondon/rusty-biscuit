@@ -94,6 +94,13 @@ fn captures_terminal_width() {
 }
 
 #[test]
+fn a_page_keeps_a_terminal_with_no_width_unbounded() {
+    let options = renderable::OutputOptions::new(Width::Source, renderable::TerminalProfile::plain());
+    let page = DarkmatterPage::new(&Terminal::from_output_options(&options));
+    assert_eq!(page.terminal_width(), Width::Source);
+}
+
+#[test]
 fn margin_shorthand_then_specific_overrides() {
     let page = page().with_margin(2).with_margin_top(0);
     let m = page.page_margin();

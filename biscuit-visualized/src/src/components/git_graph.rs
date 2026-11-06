@@ -230,6 +230,9 @@ pub struct GraphViewport {
 impl GraphViewport {
     /// The viewport for `term`, after `layout`'s margins. An unknown cell size
     /// uses [`CellSize::FALLBACK`].
+    ///
+    /// The plan trims to these columns rather than filling them, so a terminal
+    /// with no width takes `Terminal::width`'s number as its budget.
     pub fn for_terminal(term: &Terminal, layout: &Layout) -> Self {
         let dims = TerminalImage::resolve_dimensions_for(&ImageWidth::Fill, layout, term.width());
         Self {

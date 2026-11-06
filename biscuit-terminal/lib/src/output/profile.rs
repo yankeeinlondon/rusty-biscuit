@@ -8,11 +8,6 @@ use crate::discovery::detection::{GraphicsRoute, ImageSupport, UnderlineSupport}
 use crate::discovery::osc_queries::types::RgbValue;
 use crate::terminal::Terminal;
 
-/// The columns a component is given when the output has no width: components
-/// take a number, and this one is never reached by content that has a natural
-/// size.
-const UNBOUNDED_COMPONENT_COLUMNS: u32 = 1 << 20;
-
 impl Terminal {
     /// The capabilities of this terminal as an output profile.
     ///
@@ -53,7 +48,10 @@ impl Terminal {
     /// renders to a [`Terminal`] rather than through the render tree.
     ///
     /// Nothing is detected, so the result depends only on `options`, and a
-    /// `plain` profile cannot pick up a capability from the host.
+    /// `plain` profile cannot pick up a capability from the host. The width
+    /// keeps its state: under [`Width::Unlimited`](renderable::Width::Unlimited)
+    /// and [`Width::Source`](renderable::Width::Source) the terminal has no
+    /// [`columns`](Terminal::columns), so its components neither fill nor wrap.
     ///
     /// ## Examples
     ///
@@ -72,7 +70,8 @@ impl Terminal {
     pub fn from_output_options(options: &OutputOptions) -> Terminal {
         let profile = &options.terminal_profile;
         let rgb = |(r, g, b): (u8, u8, u8)| RgbValue { r, g, b };
-        let mut terminal = Terminal::new_optimistic(options.width.as_columns().unwrap_or(UNBOUNDED_COMPONENT_COLUMNS));
+        let mut terminal = Terminal::new_optimistic(0);
+        terminal.set_output_width(options.width);
         terminal.color_depth = profile.color_depth.into();
         terminal.color_mode = profile.color_mode.into();
         terminal.text_color = profile.text_color.map(rgb);

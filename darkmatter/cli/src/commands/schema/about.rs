@@ -115,8 +115,8 @@ fn about_markdown(data: &AboutData, verbose: bool) -> String {
 
 struct SchemaAboutReport<'a> {
     terminal: &'a Terminal,
-    /// The columns components are laid out in.
-    width: u32,
+    /// The columns components are laid out in, when the report has any.
+    width: Option<u32>,
     /// The output width, which `width` cannot express when there is none.
     output_width: Width,
     profile: renderable::TerminalProfile,
@@ -128,11 +128,8 @@ struct SchemaAboutReport<'a> {
 impl<'a> SchemaAboutReport<'a> {
     fn new(terminal: &'a Terminal, options: &OutputOptions, code_block_mode: CodeBlockMode) -> Self {
         let margin_width = LEFT_MARGIN_CH + RIGHT_MARGIN_CH;
-        let width = terminal.width().saturating_sub(margin_width).max(1);
-        let output_width = match options.width {
-            Width::Columns(_) => Width::Columns(width),
-            other => other,
-        };
+        let width = terminal.columns().map(|columns| columns.saturating_sub(margin_width).max(1));
+        let output_width = width.map_or(options.width, Width::Columns);
         Self {
             terminal,
             width,
@@ -289,7 +286,7 @@ In this example, constraints are added to a string, a number, and an array of st
             "Constraints go inside `(...)` after a type, separated by commas or semicolons. \
              They narrow what a value may contain or provide metadata such as defaults.",
         )?;
-        let wide = self.width >= 120;
+        let wide = self.width.is_none_or(|width| width >= 120);
         let use_min_width = if wide { 26 } else { 20 };
         let applies_to_max_width = if wide { 24 } else { 16 };
         let meaning_min_width = if wide { 42 } else { 26 };
@@ -422,8 +419,8 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn prose<T: Into<String>>(&mut self, text: T) {
         let rendered = Prose::new(text.into())
-            .with_word_wrap(WordWrap::WrapProse(Some(8), None))
-            .render_in_width(self.terminal, self.width);
+            .with_word_wrap(WordWrap::WrapProse(Some(8), None));
+        let rendered = self.fit(&rendered);
         self.block(&rendered);
     }
 
@@ -471,7 +468,8 @@ In this example, constraints are added to a string, a number, and an array of st
                     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
             );
         }
-        self.block(&list.render_in_width(self.terminal, self.width));
+        let rendered = self.fit(&list);
+        self.block(&rendered);
         self.blank();
         Ok(())
     }
@@ -489,8 +487,9 @@ In this example, constraints are added to a string, a number, and an array of st
             .with_columns(columns.clone())
             .with_data(rows.clone())
             .alternate_background_color();
-        if table.plan_widths(self.width).is_ok() {
-            self.block(&table.render_in_width(self.terminal, self.width));
+        if self.width.is_none_or(|width| table.plan_widths(width).is_ok()) {
+            let rendered = self.fit(&table);
+            self.block(&rendered);
         } else {
             self.stacked_rows(&columns, &rows);
         }
@@ -514,7 +513,17 @@ In this example, constraints are added to a string, a number, and an array of st
                     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
             );
         }
-        self.block(&list.render_in_width(self.terminal, self.width));
+        let rendered = self.fit(&list);
+        self.block(&rendered);
+    }
+
+    /// `component` inside the report's margins, which an unbounded report does
+    /// not have to fit.
+    fn fit(&self, component: &impl TerminalRenderable) -> String {
+        match self.width {
+            Some(width) => component.render_in_width(self.terminal, width),
+            None => component.render(self.terminal),
+        }
     }
 
     fn block(&mut self, rendered: &str) {

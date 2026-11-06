@@ -674,15 +674,10 @@ fn base_render_context(opts: &TerminalOptions, captured: Option<&Terminal>) -> T
         },
         None => detected,
     };
-    if let Some(columns) = opts.width.and_then(Width::as_columns) {
-        term.fixed_width = Some(columns);
-    }
-    let mut context = TerminalRenderContext::from_terminal(&term);
     if let Some(width) = opts.width {
-        context.width = width;
-        context.available_width = width;
+        term.set_output_width(width);
     }
-    context
+    TerminalRenderContext::from_terminal(&term)
 }
 
 /// Maps [`TerminalOptions`] to [`TerminalRenderOptions`], with capabilities

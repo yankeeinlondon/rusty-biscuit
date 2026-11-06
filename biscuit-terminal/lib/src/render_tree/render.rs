@@ -92,12 +92,6 @@ const MAX_TERMINAL_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 /// image placeholder that exceeds its resolved field.
 const ELLIPSIS: &str = "…";
 
-/// The horizontal rule of a plain render, at every width.
-const PLAIN_RULE: &str = "---";
-
-/// The glyph count of a styled horizontal rule under an unbounded width.
-const UNBOUNDED_RULE_GLYPHS: u32 = 3;
-
 /// The left border of a block quote (and a disclosure body) rendered without
 /// the [`BlockQuote`] component, which wraps to a bounded width.
 const QUOTE_BORDER: &str = "│ ";
@@ -394,15 +388,12 @@ impl Writer<'_> {
         result
     }
 
-    /// These options narrowed to `width` for a sub-render. The terminal
-    /// snapshot's width follows only a bounded width.
+    /// These options narrowed to `width` for a sub-render.
     fn narrowed_opts(&self, width: Width) -> TerminalRenderOptions {
         let mut narrowed = self.opts.clone();
         narrowed.context.available_width = width;
         narrowed.context.width = width;
-        if let Some(columns) = width.as_columns() {
-            narrowed.context.terminal.fixed_width = Some(columns);
-        }
+        narrowed.context.terminal.set_output_width(width);
         narrowed
     }
 
@@ -766,18 +757,11 @@ impl Writer<'_> {
             }
             NodeKind::ThematicBreak => {
                 if self.opts.context.plain {
-                    return Ok(PLAIN_RULE.to_string());
+                    return Ok(crate::components::horizontal_rule::PLAIN_RULE.to_string());
                 }
                 let rule = horizontal_rule_from_attrs(&node.attrs);
                 if !self.opts.context.available_width.is_bounded() {
-                    // Nothing fills under an unbounded width: a short fixed
-                    // rule, never an image sized to a guessed width.
-                    let mut term = self.opts.context.terminal.clone();
-                    term.fixed_width = Some(UNBOUNDED_RULE_GLYPHS);
-                    return Ok(rule
-                        .width(UNBOUNDED_RULE_GLYPHS.to_string())
-                        .alignment(RuleAlignment::Left)
-                        .render_text_tier(&term));
+                    return Ok(rule.render_unbounded(&self.opts.context.terminal));
                 }
                 let term = self.effective_terminal();
                 // The terminal has no vector HR form, so `Vector` coincides with
@@ -3007,13 +2991,6 @@ fn currency_from_token(token: &str) -> Option<crate::components::table::Currency
     }
 }
 
-/// Emits the table body from a resolved [`TableWidthPlan`] (pass 2).
-///
-/// Mirrors the bespoke `Table::render_content` emit logic — borders, a
-/// multi-line header, vertically aligned data rows, and striping plus the
-/// row highlight (`highlight` is the data row index and its background
-/// escape) that survive SGR resets inside cells — without calling
-/// `Table::render`.
 /// Whether a borderless table's row has text only in its first cell.
 fn is_spanning_row(row: &[TableCellContent]) -> bool {
     row.iter().skip(1).all(|cell| cell.to_string().is_empty())
@@ -3021,7 +2998,7 @@ fn is_spanning_row(row: &[TableCellContent]) -> bool {
 
 /// Writes a borderless table's data rows: the planned columns, two spaces
 /// apart, with no padding after the last. A spanning row runs across the
-/// columns, wrapped only at `span_width`.
+/// columns, wrapped only at `span_width` by its first column's policy.
 fn emit_borderless_table(
     columns: &[TableColumn],
     data: &[Vec<TableCellContent>],
@@ -3035,7 +3012,7 @@ fn emit_borderless_table(
             match span_width {
                 Some(width) => lines.extend(wrap_cell_content(
                     &text,
-                    &WordWrap::default(),
+                    &columns.first().map_or_else(WordWrap::default, TableColumn::effective_word_wrap),
                     width as usize,
                 )),
                 None => lines.push(text),
@@ -3094,6 +3071,13 @@ fn emit_stacked_rows(data: &[Vec<TableCellContent>], width: u32) -> String {
     lines.join("\n")
 }
 
+/// Emits the table body from a resolved [`TableWidthPlan`] (pass 2).
+///
+/// Mirrors the bespoke `Table::render_content` emit logic — borders, a
+/// multi-line header, vertically aligned data rows, and striping plus the
+/// row highlight (`highlight` is the data row index and its background
+/// escape) that survive SGR resets inside cells — without calling
+/// `Table::render`.
 fn emit_table(
     columns: &[TableColumn],
     data: &[Vec<TableCellContent>],
@@ -4287,6 +4271,27 @@ mod render_tree_tests {
         };
         assert_eq!(at(natural), "reason-text  ./some-long-name.md");
         assert_ne!(at(natural - 1), "reason-text  ./some-long-name.md");
+    }
+
+    #[test]
+    fn a_spanning_row_wraps_by_its_first_columns_policy() {
+        let spanning_text = "aaaa bbbb cc-dd";
+        let render = |first_column: TableColumn| {
+            let table = Table::new()
+                .with_columns(vec![first_column, TableColumn::new("").with_word_wrap(WordWrap::None)])
+                .with_data(vec![vec!["a".into(), "b".into()], vec![spanning_text.into(), "".into()]])
+                .borderless();
+            let node = <Table as renderable::tree::TreeRenderable>::render_tree(&table);
+            let mut options = TerminalRenderOptions::default();
+            options.context.available_width = renderable::output::Width::Columns(13);
+            strip_escape_codes(&render_terminal_node(&node, &options).unwrap().output)
+        };
+
+        assert_eq!(render(TableColumn::new("")), "a  b\naaaa bbbb cc-\ndd");
+        assert_eq!(
+            render(TableColumn::new("").with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None))),
+            "a  b\naaaa bbbb\ncc-dd"
+        );
     }
 
     #[test]

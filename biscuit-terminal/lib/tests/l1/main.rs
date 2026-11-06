@@ -57,6 +57,7 @@ mod prose_opacity;
 mod render_comparison;
 mod render_terminal_output;
 mod render_tree_code_context;
+mod output_component_bridge;
 mod output_dispatch;
 mod render_tree_comment_nodes;
 mod render_tree_component_parity;

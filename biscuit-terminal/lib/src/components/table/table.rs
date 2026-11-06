@@ -471,8 +471,15 @@ impl Table {
         &self,
         term: &Terminal,
     ) -> Result<TableWidthPlan, TableWidthError> {
-        let (table, _) = self.prepare_for_terminal(term);
-        table.plan_widths(term.width())
+        let (mut table, _) = self.prepare_for_terminal(term);
+        match term.columns() {
+            Some(columns) => table.plan_widths(columns),
+            // No width to fill, wrap, or subtract margins from.
+            None => {
+                table.layout_mut().width = renderable::layout::Width::Auto;
+                table.plan_widths_for_render_width(table.natural_render_width() as usize)
+            }
+        }
     }
 
     /// Return whether this table would need wrapping or truncation at the given width.
@@ -1879,7 +1886,9 @@ impl Table {
     #[doc(hidden)]
     pub fn render_bespoke_instrumented(&self, term: &Terminal) -> (String, usize) {
         let (table, resolved) = self.prepare_for_terminal(term);
-        let width = term.width();
+        let Some(width) = term.columns() else {
+            return (self.render_via_tree(term), resolved);
+        };
         let (stripe_bg, stripe_fg) =
             table.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
         let output = if table.prefer_cursor_alignment && term.is_tty {
@@ -1942,9 +1951,10 @@ impl TerminalRenderable for Table {
     /// keeps emitting ANSI column-move sequences (`CSI N G`) rather than
     /// silently degrading to tree-rendered space padding. Non-TTY destinations
     /// (pipes, file redirects, capture buffers) always take the tree path so
-    /// captured output stays free of cursor-control bytes.
+    /// captured output stays free of cursor-control bytes, as does a terminal
+    /// with no width, which has no column to move to and no fill to align.
     fn render(&self, term: &Terminal) -> String {
-        if self.prefer_cursor_alignment && term.is_tty {
+        if self.prefer_cursor_alignment && term.is_tty && term.columns().is_some() {
             self.render_bespoke(term)
         } else {
             self.render_via_tree(term)

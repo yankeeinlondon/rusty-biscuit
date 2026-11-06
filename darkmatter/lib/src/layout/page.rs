@@ -149,7 +149,7 @@ impl DarkmatterPage {
     /// and full component fill.
     pub fn new(terminal: &Terminal) -> Self {
         Self {
-            terminal_width: Width::Columns(terminal.width().max(1)),
+            terminal_width: terminal.output_width(),
             terminal: terminal.clone(),
             terminal_color_mode: terminal.color_mode,
             terminal_color_depth: ColorDepth::from(terminal.color_depth),

@@ -304,6 +304,7 @@ the width, depending on the value.
 | table | fitted to `N`, cells wrap | natural column widths |
 | horizontal rule | `N` glyphs in a styled terminal; `---` in `plain` | a short rule in a styled terminal; `---` in `plain` |
 | `md graph` line | cut off with `…` | never cut |
+| image or Mermaid image in a styled terminal | sized against `N` | its natural size |
 
 In `html`, `--width N` adds a `max-width: Nch` rule to prose elements and leaves
 code blocks and tables alone. Markdown tables and code blocks are never reflowed.

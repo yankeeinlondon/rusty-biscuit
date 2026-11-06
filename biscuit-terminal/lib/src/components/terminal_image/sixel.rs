@@ -144,7 +144,7 @@ impl TerminalImage {
     /// for this image.
     pub(super) fn render_sixel_for_terminal(&self, term: &Terminal) -> Result<SixelImageOutput, TerminalImageError> {
         let pixels = self.pixels()?;
-        let dims = self.resolve_dimensions_for_image(term.width().max(1), term.cell_size(), pixels.size().0);
+        let dims = self.dimensions_on(term, pixels.size().0);
         self.render_sixel(pixels, dims.image_width, dims.x_offset, term)
     }
 }

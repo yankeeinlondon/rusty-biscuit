@@ -33,6 +33,11 @@ See the `renderable` skill's *Tree Module* topic for the tree model itself
   `from_profile(&TerminalProfile, Width)` / `from_output_options`.
   `pin_plain()` applies the plain profile after every other option; a pinned
   render writes no escape byte and no trailing whitespace.
+  `from_terminal` reads `Terminal::output_width`, so a bridge terminal
+  (`Terminal::from_output_options`) folds at its `Unlimited`/`Source` state.
+  A bespoke component reads `Terminal::columns()` (`None` under those) rather
+  than `Terminal::width()`, and places a block with
+  `LayoutTerminalExt::apply_block_layout_on`.
   Fork helpers — `for_child(indent_delta, width_delta)`, `with_width`,
   `with_layout` — narrow width and accumulate indent for nested content.
   (`active_layout` is currently a carried-but-unread field; the renderer

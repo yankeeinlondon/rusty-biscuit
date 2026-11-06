@@ -53,6 +53,7 @@ pub struct Terminal {
 
     // Fixed dimensions (for testing or explicit overrides)
     pub fixed_width: Option<u32>,
+    pub unbounded_width: Option<UnboundedWidth>, // output with no width; `fixed_width` outranks it
     pub fixed_height: Option<u32>,
     pub tab_width: usize,          // terminfo init_tabs, default 8
 }
@@ -66,7 +67,13 @@ These query current state that can change at runtime:
 let term = Terminal::new();
 
 // Terminal dimensions (recalculated on each call, or fixed if set via builder)
-let width = term.width();   // Returns 80 if detection fails
+let width = term.width();   // Returns 80 if detection fails, or the terminal has no width
+
+// What fills or wraps reads these instead: `None` means nothing fills or wraps.
+let columns = term.columns();            // Option<u32>
+let state = term.output_width();         // renderable::Width
+// Terminal::from_output_options and `set_output_width` carry Unlimited/Source;
+// `Terminal::new()` and builders are always numeric.
 let height = term.height(); // Returns 24 if detection fails
 let tab_width = term.tab_width; // Detected once, defaults to 8
 

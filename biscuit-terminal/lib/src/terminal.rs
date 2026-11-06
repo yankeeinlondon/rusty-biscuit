@@ -17,6 +17,29 @@ use crate::discovery::os_detection::{
 use crate::discovery::detection::color::color_mode_for_background;
 use crate::discovery::osc_queries::query::heuristic_color;
 use crate::discovery::osc_queries::{ColorSource, RgbValue, bg_color_with_source, text_color};
+use renderable::output::Width;
+
+/// What [`Terminal::width`] answers for a terminal with no width. It is the
+/// same answer a terminal whose size cannot be determined gives.
+const NO_WIDTH_NUMERIC_COLUMNS: u32 = 80;
+
+/// The width states with no column count: nothing fills and nothing wraps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnboundedWidth {
+    /// Join soft breaks ([`Width::Unlimited`]).
+    Unlimited,
+    /// Keep authored line breaks ([`Width::Source`]).
+    Source,
+}
+
+impl From<UnboundedWidth> for Width {
+    fn from(value: UnboundedWidth) -> Self {
+        match value {
+            UnboundedWidth::Unlimited => Self::Unlimited,
+            UnboundedWidth::Source => Self::Source,
+        }
+    }
+}
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
 fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -99,6 +122,7 @@ fn detect_terminal(probe_mode: ProbeMode, route: Option<GraphicsRoute>) -> Termi
         char_encoding: CharEncoding::default(),
         locale: TerminalLocale::default(),
         fixed_width: None,
+        unbounded_width: None,
         fixed_height: None,
         tab_width: tab_width(),
         // Keep live terminal queries lazy. Eager CSI 14t probing here leaks
@@ -280,6 +304,13 @@ pub struct Terminal {
     /// When `None`, width is queried dynamically via `terminal_width()`.
     pub fixed_width: Option<u32>,
 
+    /// Set when this terminal renders output that has no width, so nothing
+    /// fills or wraps. A [`fixed_width`](Self::fixed_width) outranks it: a
+    /// caller narrowing a sub-render states a real width. Only an output route
+    /// sets this ([`set_output_width`](Self::set_output_width)); a detected
+    /// terminal is always numeric.
+    pub unbounded_width: Option<UnboundedWidth>,
+
     /// Fixed terminal height (rows). When `Some`, this overrides dynamic detection.
     /// When `None`, height is queried dynamically via `terminal_height()`.
     pub fixed_height: Option<u32>,
@@ -345,6 +376,7 @@ impl From<&Terminal> for Terminal {
             char_encoding: value.char_encoding.clone(),
             locale: value.locale.clone(),
             fixed_width: value.fixed_width,
+            unbounded_width: value.unbounded_width,
             fixed_height: value.fixed_height,
             tab_width: value.tab_width,
             cell_size: value.cell_size,
@@ -492,6 +524,7 @@ impl Terminal {
             char_encoding: CharEncoding::default(),
             locale: TerminalLocale::default(),
             fixed_width: Some(width),
+            unbounded_width: None,
             fixed_height: None,
             tab_width: DEFAULT_TAB_WIDTH,
             cell_size: None,
@@ -512,6 +545,10 @@ impl Terminal {
     /// Otherwise, queries the terminal dynamically.
     /// Returns 80 as a fallback if the terminal size cannot be determined.
     ///
+    /// A terminal with [no width](Self::unbounded_width) also answers 80, for a
+    /// caller that only needs a number. Anything that fills or wraps reads
+    /// [`columns`](Self::columns) instead, which says there is none.
+    ///
     /// ## Examples
     ///
     /// ```
@@ -522,7 +559,48 @@ impl Terminal {
     /// println!("Terminal is {} columns wide", width);
     /// ```
     pub fn width(&self) -> u32 {
-        self.fixed_width.unwrap_or_else(terminal_width)
+        match (self.fixed_width, self.unbounded_width) {
+            (Some(width), _) => width,
+            (None, Some(_)) => NO_WIDTH_NUMERIC_COLUMNS,
+            (None, None) => terminal_width(),
+        }
+    }
+
+    /// The width this terminal renders at, with its unbounded states intact.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    /// use renderable::{OutputOptions, TerminalProfile, Width};
+    ///
+    /// assert_eq!(Terminal::new_optimistic(72).output_width(), Width::Columns(72));
+    ///
+    /// let options = OutputOptions::new(Width::Source, TerminalProfile::plain());
+    /// assert_eq!(Terminal::from_output_options(&options).output_width(), Width::Source);
+    /// ```
+    #[must_use]
+    pub fn output_width(&self) -> Width {
+        match (self.fixed_width, self.unbounded_width) {
+            (Some(width), _) => Width::Columns(width.max(1)),
+            (None, Some(unbounded)) => unbounded.into(),
+            (None, None) => Width::Columns(terminal_width().max(1)),
+        }
+    }
+
+    /// The columns to fill or wrap to, or `None` when nothing fills or wraps.
+    #[must_use]
+    pub fn columns(&self) -> Option<u32> {
+        self.output_width().as_columns()
+    }
+
+    /// Makes this terminal render at `width`, replacing any width it had.
+    pub fn set_output_width(&mut self, width: Width) {
+        (self.fixed_width, self.unbounded_width) = match width {
+            Width::Columns(columns) => (Some(columns), None),
+            Width::Unlimited => (None, Some(UnboundedWidth::Unlimited)),
+            Width::Source => (None, Some(UnboundedWidth::Source)),
+        };
     }
 
     /// The terminal's column count when it is actually known.
@@ -532,7 +610,8 @@ impl Terminal {
     /// stdout when stdout is a terminal, else `None`. Output-width
     /// resolution reads this so an unknown width becomes
     /// [`Width::Unlimited`](renderable::output::Width::Unlimited) rather than
-    /// a guess.
+    /// a guess. A terminal with [no width](Self::unbounded_width) has none to
+    /// report, whatever stdout measures.
     ///
     /// ## Examples
     ///
@@ -548,7 +627,7 @@ impl Terminal {
         if let Some(width) = self.fixed_width {
             return Some(width);
         }
-        if !std::io::stdout().is_terminal() {
+        if self.unbounded_width.is_some() || !std::io::stdout().is_terminal() {
             return None;
         }
         terminal_size::terminal_size_of(std::io::stdout())
@@ -853,6 +932,7 @@ impl TerminalBuilder {
             is_ci: self.is_ci.unwrap_or(detected.is_ci),
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
             fixed_width: self.fixed_width,
+            unbounded_width: None,
             fixed_height: self.fixed_height,
             tab_width: self.tab_width.unwrap_or(detected.tab_width),
             // Fields that aren't overridable via builder (OS/system detection)
