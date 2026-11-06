@@ -1,3 +1,11 @@
+---
+kind: canonical-documentation
+classification: technical/symbol
+blast-radius: 
+    symbols:
+        - SimplifiedSchema
+---
+
 # The `SimplifiedSchema` Struct
 
 > [SimplifiedSchema](simplified-schema/lib/src/schema/mod.rs)
@@ -8,12 +16,12 @@ The `SimplifiedSchema` struct provides the focus for this schema and the functio
 - validate values
 - layer other schemas on top or under it
 - ask it about it's types
-- export it
-
-is the one object most callers need. Build it from text
-or a file, then validate values, layer other schemas into it, ask it about
-its types, and export it. There is no compile step to call: the first
-validation prepares the schema, and later validations reuse that work.
+- export it as a 
+    - serialized `SimplifiedSchema` representation, or 
+    - as a JSON schema!
+- there is no compile step to call: 
+    - the first validation prepares the schema, and 
+    - later validations reuse that work
 
 ```rust
 use serde_json::json;
