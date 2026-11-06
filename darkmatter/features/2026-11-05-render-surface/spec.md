@@ -71,9 +71,8 @@ are not approvals to change behavior. In particular, removing fill behavior,
 adding new presentation keys, accepting style files, and adding a theme-list
 command require the choices described there before implementation.
 
-The behavior inventory below is the drafter’s snapshot. The current source
-already gives `md render` a `--max-width` and a CLI-wide `--width`; do not
-reintroduce the older width stub described in that inventory. The current
+The behavior inventory below was refreshed on 2026-11-06, after
+`2026-11-04-composition-errors` completed. The current
 [output and width contract](../../docs/cli/output-and-width.md) and
 [data-output contract](../../docs/cli/data-contracts.md) remain authoritative.
 
@@ -84,10 +83,10 @@ reintroduce the older width stub described in that inventory. The current
 | `darkmatter-cli` | the root/`render` argument definitions, dispatch, `--style` parsing, generated hidden aliases, removal of the old flags |
 | `darkmatter` | the style model the CLI lowers into (`CliStyleClaims` is replaced by a `style:` layer, **Proposed**), and any shorthand keys added to the `style:` schema |
 
-**Out of scope.** `--width` and `--output` are owned by
+**Out of scope.** `--width` and `--output` were delivered by
 `2026-11-04-composition-errors` (width is a CLI-wide constraint, output is
-CLI-wide selection). This spec moves neither and designs neither; where an
-inventory below mentions them, it is only to say where they sit today.
+CLI-wide selection). This spec redesigns neither; where an inventory below
+mentions them, it is only to say where they sit today.
 
 ## Terms
 
@@ -147,8 +146,8 @@ The general rule that a root alias shares one subcommand’s behavior applies to
 ### How dispatch works
 
 `Cli` (`cli/src/args/cli.rs`) flattens `RenderOptions`
-(`cli/src/args/render.rs`: `[INPUT]`, `--output`, `--show`, `--indent`,
-`--deny`, `--feature`) at the root, and `Command::Render` holds a second copy
+(`cli/src/args/render.rs`: `[INPUT]`, `--output`, `--show`, `--max-width`,
+`--indent`, `--deny`, `--feature`) at the root, and `Command::Render` holds a second copy
 of the same `RenderOptions`. Everything else that affects rendering (themes,
 margins, alignment, ...) is a field of `Cli` itself, so it exists **only at
 the root**.
@@ -173,25 +172,27 @@ flowchart TD
 `run_render` reads the style flags from the root `Cli`
 (`style_claims::cli_style_claims(cli)`, `cli.theme`, `cli.mermaid`,
 `cli.line_numbers`, ...), never from the `render` subcommand. That is why the
-explicit form cannot take them.
+explicit form cannot take them. It also reads `cli.width` and `cli.verbose` to
+resolve its output, so removing `&Cli` has to carry those across.
 
 ### Divergences between `md` and `md render`
 
-Observed 2026-11-05 with the installed `md 0.1.0` and confirmed against the
-source.
+Observed 2026-11-05 with the installed `md 0.1.0`, confirmed against the source,
+and rechecked 2026-11-06. Rows 3 and 10 are kept, marked resolved, so that row
+numbers cited elsewhere stay stable.
 
 | # | Divergence | `md …` | `md render …` | Where |
 |---|---|---|---|---|
 | 1 | Style, theme, and layout flags (the [inventory](#root-style-flags) below) are root-only | `md doc.md --margin 4` works | `md render doc.md --margin 4` fails: `unexpected argument '--margin'` | `cli.rs` fields; `render.rs`, `style_claims.rs` read `Cli` |
-| 2 | The same flags are accepted **before** the subcommand and silently ignored by most subcommands | `md --margin 4 toc doc.md` succeeds and ignores `--margin` | n/a | `validate_subcommand_usage` (`commands/mod.rs`) checks only six options |
-| 3 | …except `md compose --output html\|markdown-plus`, which honors them | `md --margin 4 compose doc.md --output html` applies the margin | n/a | `commands/compose.rs` passes `&Cli` to `html_artifact` |
+| 2 | The same flags are accepted **before** the subcommand and silently ignored by every subcommand, including `--max-width`, which is a `RenderOptions` field | `md --margin 4 toc doc.md` and `md --max-width 40 toc doc.md` succeed and ignore the flag | n/a | `validate_subcommand_usage` (`commands/mod.rs`) checks only six options |
+| 3 | **Resolved by `2026-11-04-composition-errors`.** `md compose` accepts only Markdown and the data family, so `md compose --output html` is a usage error and no compose path reads style flags | n/a | n/a | `args/output.rs::COMPOSE_TARGETS` |
 | 4 | `--save` makes bare `md` a **clean**, not a render | `md --save doc.md` = `md clean --save doc.md` | `md render doc.md --save` fails | `main.rs` (`cli.save` branch) |
 | 5 | `--list-themes` is root-only and is not a render | `md --list-themes` lists themes | `md render --list-themes` fails | `main.rs` |
-| 6 | No input on a terminal | `md` prints `md --help` and exits 0 | `md render` fails: "No input file provided" | `main.rs` vs `io::load_document` |
+| 6 | No input on a terminal | `md` prints `md --help` and exits 0, even with `--output json`, where the data contract promises one value | `md render` fails: "No input file provided" | `main.rs` vs `io::load_document` |
 | 7 | `--feature` is accepted in both places and the lists are **combined** | `md --feature a render doc.md --feature b` turns on both | — | `Cli::command_or_render` |
 | 8 | The other `RenderOptions` given at the root **and** with a subcommand are a usage error | `md --output html render doc.md` fails | — | `validate_subcommand_usage` |
 | 9 | Help shows different options | `md --help` lists every style flag | `md render --help` lists only `RenderOptions` and global options | clap derive |
-| 10 | `--width` stub is root-only (always an error) | `md doc.md --width 80` → "not supported" | `md render doc.md --width 80` → unknown argument | `parsers::reject_width_flag` (owned by the fix) |
+| 10 | **Resolved by `2026-11-04-composition-errors`.** `--width` is a real global option and behaves the same in both forms | n/a | n/a | `args/cli.rs` |
 
 Rows 7 and 8 contradict each other: one root render option merges with the
 subcommand's, the others conflict with it.
@@ -199,13 +200,6 @@ subcommand's, the others conflict with it.
 `docs/cli/render.md` describes the style flags as "Global Flags Relevant to
 `render`". They are not global in clap's sense (only `--code-block` is), so
 the page is wrong today: `md render doc.md --theme dracula` fails.
-
-**Adjacent defect found while researching.** `md code-block` reads
-`cli.render.show` (`commands/code_block.rs`), the root's `--show`. That value
-can never be true: `md --show code-block …` is rejected by
-`validate_subcommand_usage`, and `code-block` declares no `--show` of its own.
-The code path is unreachable. It is caused by the same root-option sharing
-this spec removes, so this spec fixes it (see the “What else reads the root today” open question).
 
 ### Root style flags
 
@@ -230,8 +224,8 @@ frontmatter key each one overrides. "None" means no frontmatter key exists.
 | `--pr` (`--padding-right`) | cells | `page.right-padding` | |
 | `--page-bg` (`--page-background`) | `transparent\|subtle\|pronounced` | `page.background` | |
 | `--page-bg-color` | color | `page.bg-color` | |
-| `--max-width` | cells, > 0 | `page.max-width` | frontmatter also accepts `ch`, `%` |
-| `--width` | — | none | always an error; owned by `2026-11-04-composition-errors` |
+| `--max-width` | cells, > 0 | `page.max-width` | a `RenderOptions` field, so also on `md render`; frontmatter also accepts `ch`, `%` |
+| `--width` | width | none | a real global option delivered by `2026-11-04-composition-errors`; stays; not a style flag |
 | `--line-numbers [BOOL]` | bool | none | code-block gutters |
 | `--alignment` | `left\|center\|right` | `page.alignment` | broadcast to every component |
 | `--align-images` | alignment | `images.alignment` | |
@@ -249,7 +243,9 @@ frontmatter key each one overrides. "None" means no frontmatter key exists.
 | `--mermaid` | — | none | render behavior, not presentation |
 | `--save` | — | not render | `md clean --save` |
 
-That is 43 root fields, 38 of them style or layout. `--feature`, the other
+When drafted that was 43 root fields, 38 of them style or layout; `--max-width`
+has since moved to `RenderOptions` and `--width` has become a shared control, so
+treat this table, not the count, as the migration list. `--feature`, the other
 render behavior switch, already lives in `RenderOptions`.
 
 The CLI value grammar is narrower than the frontmatter's: CLI margins and
@@ -268,17 +264,21 @@ Inside the flags, the more specific one wins: `--margin` is applied first,
 then `--mx`/`--my`, then `--mt`/`--ml`/..., and likewise for alignment and
 fill.
 
+`--max-width` has two paths today, and the replacement must retire both: the
+root value through `style_claims.rs` into `CliStyleClaims`, and the explicit
+subcommand's value applied directly after `style:` in `commands/render.rs`.
+
 ## Problem
 
 1. **The alias is not an alias.** A user who learns `md doc.md --margin 4`
    and then writes `md render doc.md --margin 4` in a script gets a usage
-   error (rows 1, 9, 10). The documentation says the two are the same.
+   error (rows 1, 9). The documentation says the two are the same.
 2. **Bare `md` does things that are not rendering.** `--save` cleans and
    writes a file; `--list-themes` lists themes (rows 4, 5). A user cannot
    predict from `md render --help` what `md` will do.
 3. **Root flags leak into other commands.** Style flags before any subcommand
-   are accepted and silently ignored (row 2), except by `compose`'s HTML
-   output (row 3). A silently ignored flag looks like it worked.
+   are accepted and silently ignored (row 2). A silently ignored flag looks like
+   it worked.
 4. **The flag surface does not scale.** Each new style property means one or
    more new flags, a new `CliStyleClaims` field, an override bit, and
    documentation in two places. 38 flags already cover only part of what
@@ -509,7 +509,8 @@ prefixed `--style-` and joined with `-`:
 | `--theme`, `--code-theme`, `--mermaid`, `--line-numbers`, `--code-block` | on `md render`, as `--style` keys or as plain render flags | 1 |
 | `--save` | removed; `md clean --save` | 7 |
 | `--list-themes` | not a root flag | 7 |
-| `--width` | wherever `2026-11-04-composition-errors` puts it | — |
+| `--max-width` | removed; `--style "{ 'max-width': N }"` or `--style-max-width N` (Decided 3 and 5) | 8 |
+| `--width` | unchanged: a global option on the root | — |
 | `-v`, `--debug`, `--magic-root`, `--completions` | unchanged placement rules; magic roots and completion generation stay root-only | — |
 
 Removed flags use a command-aware extension of the existing `darkmatter-cli`
@@ -785,25 +786,16 @@ no generated flag collides with an existing one. Two risks remain:
 
 ### 9. What else reads the root today
 
-- **`md compose --output html|markdown-plus`** honors root style flags
-  (row 3) and root `--feature`. The owner reserves style options for
-  `md render`. **Option A:** compose uses only the document's `style:`;
-  a pipe such as `md compose doc.md | md render - --output html --style …`
-  provides rendering overrides, subject to the asset-context limitation below.
-  **Option B:** compose also takes `--style`. A’s cost: a Markdown pipe cannot
-  preserve the original document path
-  or render-only CLI overrides. Stdin still has the request’s launch context,
-  but that may differ from the source document’s directory; relative assets
-  may resolve differently or fail. Documentation must explain that limitation.
-  **Recommendation: A,** and the open question in
-  `2026-11-04-composition-errors` about compose's human outputs decides
-  whether that cost is acceptable. A pipeline is not a transparent replacement
-  for a file-backed render unless its asset context is preserved.
-- **`md code-block`** reads the unreachable root `--show`. **Recommendation:**
-  delete the read; whether `code-block` gets its own `--show` belongs with
-  that fix's `--output` work.
-- **`md schema about`** reads global `--code-block`. Covered by open
-  the “Which flags fold into `--style`?” open question.
+- **`md compose`** no longer has an HTML or `markdown-plus` output
+  (`2026-11-04-composition-errors` decided compose always writes Markdown), so
+  it takes no `--style`. Rendering a composed document with overrides is a pipe:
+  `md compose doc.md | md render - --output html --style …`. That decision
+  leaves one cost for this spec's documentation to state: a Markdown pipe cannot
+  preserve the original document path. Stdin has the request's launch context,
+  which may differ from the source document's directory, so relative assets may
+  resolve differently or fail.
+- **`md schema about`** reads global `--code-block`. Covered by the “Which flags
+  fold into `--style`?” open question.
 
 ### 10. Bare `md` with no arguments, and help
 
@@ -957,7 +949,7 @@ performance gate is required by this feature.
 - **`darkmatter/cli/README.md`:** examples.
 - **`.claude/skills/darkmatter/cli.md`, `rendering.md`, `terminal.md`:** the
   `RenderOptions` and `CliStyleClaims` paragraphs.
-- **`.claude/skills/cli/`:** the owner’s general rule: one subcommand owns
-  default behavior, its root alias shares that behavior exactly, and shared
-  controls keep their documented placement rules. Use the parity test to
-  enforce it; do not refactor unrelated CLIs in this change.
+- **`.claude/skills/cli/`:** the root-alias rule is already recorded there and
+  in `docs/cli-best-practices.md`. Add that shared controls keep their documented
+  placement rules, and point at the parity test as the way to enforce it; do not
+  refactor unrelated CLIs in this change.
