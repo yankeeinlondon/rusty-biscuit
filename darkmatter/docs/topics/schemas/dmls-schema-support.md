@@ -230,7 +230,7 @@ the route's failure to prepare, published once on its token as in Markdown
 frontmatter. A bare name resolves in the inline `$schema` alone: a sibling
 `types` key is data, never a library of named types, so a `$schema`
 property naming one of its entries is a `dm.schema.invalid_type_definition`
-error on that name, as `md schema validate` reports it (exit `2`). Write the
+error on that name, as `md schema validate` reports it (exit `1`). Write the
 file as `kind: schema` to give it a `types` table.
 
 Values are judged softly, as `md` judges them: `port: "8080"` satisfies

@@ -187,8 +187,8 @@ match markdown.compose_with_warnings(&request) {
 }
 ```
 
-`md compose --output report-json` uses it to list every diagnostic of a
-failed run (see [`report-json` output](../cli/report-json.md)).
+`md compose --output json` uses it to list every diagnostic of a
+failed run (see [Data contracts](../cli/data-contracts.md)).
 
 ## When a request cannot be built
 

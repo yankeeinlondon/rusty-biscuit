@@ -27,8 +27,8 @@ md render guide.md
 md render guide.md --output html > guide.html
 ```
 
-The first command uses terminal rendering when stdout is a terminal; its
-default output when piped is Markdown. See [Render](../cli/render.md).
+The first command prints terminal output, which off a color terminal is the
+same text as `--output plain`. See [Render](../cli/render.md).
 
 To make an image itself a link, put the image inside a Markdown link:
 
@@ -40,7 +40,7 @@ The outer link's metadata controls navigation; the inner image's metadata
 controls the preview. For example:
 
 ```md
-[![Pipeline overview](./images/thumbnail.png "class='thumbnail'")](./images/full-size.png "target='_blank' title='Open the full-size image'")
+[![Pipeline overview](./images/thumbnail.png "class='thumbnail'")](./images/full-size.png '{ target: "_blank", title: "Open the full-size image" }')
 ```
 
 ## Add a native tooltip
@@ -104,7 +104,9 @@ explicit:
 ```
 
 JSON and JSON5 objects are not accepted as author-supplied image metadata
-today. The encoded metadata package used by the Rust serializer is a
+today, so an image title keeps this `key=value` syntax even though a
+[link title](./hyperlinking.md#put-structured-attributes-in-the-title) is a
+JSON5 object, and `md clean` leaves it as written. The encoded metadata package used by the Rust serializer is a
 different mechanism.
 
 ## Style previews across a document

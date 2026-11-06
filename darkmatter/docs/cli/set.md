@@ -23,6 +23,9 @@ md set doc.md title "New Title" | md set - version 2 | md set - draft true
 md set doc.md tags '["rust","markdown"]'
 md set doc.md count 42
 md set doc.md draft false
+
+# Report the result as data, for a script
+md set doc.md title "New Title" --output json
 ```
 
 ## Arguments
@@ -33,15 +36,42 @@ md set doc.md draft false
 
 ## Options
 
-- `--save`: Write the change back to the source file. Produces no output on success. Not compatible with stdin input.
+- `--save`: Write the change back to the source file. A formatted output prints nothing on success. With stdin input it fails with exit status 1.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: What to print (default: `markdown`). See [Output Behavior](#output-behavior).
+- `--width <N|N%|auto|source|unlimited>`: Wrap the printed document. With no `--width`, the document keeps its authored line breaks whatever the terminal size or `OUTPUT_COLUMNS`. Given a width, each authored line wraps at it and the breaks between them stay. See [Output and Width](./output-and-width.md).
 
 ## Output Behavior
+
+`md set` accepts both output families. Its default is `markdown`, on a terminal and
+on a pipe alike, because its deliverable is the Markdown document.
 
 **Default (no `--save`)**
 
 - Prints the full document (frontmatter + body) with the property updated to stdout.
 - The source file is not modified.
 - Frontmatter key order is preserved from the original document.
+
+**Other formatted outputs (`terminal`, `plain`, `markdown-plus`, `html`)**
+
+- Print the edited document rendered in that form, to stdout.
+
+**Data outputs (`json`, `json5`, `yaml`, `toml`)**
+
+- Print one value to stdout and nothing to stderr, with or without `--save`.
+  `document` is the resulting Markdown, and `saved` says whether the file was
+  written. See [Data Contracts](./data-contracts.md#other-commands).
+
+```json
+{
+  "file": "doc.md",
+  "property": "title",
+  "value": "New Title",
+  "document": "---\ntitle: New Title\n---\n# Doc\n",
+  "saved": false,
+  "outcome": "success",
+  "diagnostics": []
+}
+```
 
 ## Formatting Is Preserved
 
@@ -67,13 +97,16 @@ in place.
 **With `--save`**
 
 - Updates the source file in place.
-- Produces no output on success (exit code 0).
-- Returns a non-zero exit code on failure.
+- A formatted output prints nothing on success (exit status 0).
+- A data output prints the value, with `saved: true`.
+- Returns exit status 1 on failure, with the error on stderr, or in the value for a
+  data output.
 
 **Stdin (`-`)**
 
-- Modified document is always written to stdout.
-- `--save` is not supported with stdin and returns an error.
+- The modified document is written to stdout.
+- `--save` with stdin fails with exit status 1. A data output reports it in
+  `diagnostics`.
 
 ## Lessons Learned
 

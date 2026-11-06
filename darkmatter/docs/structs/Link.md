@@ -40,6 +40,8 @@ assert_eq!(link.href(), "https://example.com");
 | `title` | `Option<String>` | Optional title/tooltip text |
 | `prompt` | `Option<String>` | Optional prompt text (`data-prompt`) |
 | `data` | `BTreeMap<String, String>` | `data-*` attributes (stored without `data-` prefix) |
+| `metadata` | `LinkMetadata` | Query parameters from a title's `qp` key |
+| `title_notice` | `Option<LinkTitleNotice>` | The warning a title raised, if any; `Link` never prints it |
 
 ## Types
 
@@ -92,8 +94,8 @@ assert!(Link::new("x", "   ").is_err());
 `with_title_parsed` parses a Markdown title segment as either:
 
 - plain title text, or
-- structured metadata (`class=... style=... target=... prompt=... data-*`), or
-- a lossless metadata payload (base64 JSON package used by `to_markdown(false)`)
+- a JSON or JSON5 object (`title`, `class`, `style`, `target`, `prompt`, `data-*`, `qp`), or
+- the older base64 JSON metadata package, which is still read
 
 ```rust
 use darkmatter::render::{Link, LinkTarget};
@@ -101,7 +103,7 @@ use darkmatter::render::{Link, LinkTarget};
 let link = Link::with_title_parsed(
     "Submit",
     "https://example.com/form",
-    "class='btn' target='_blank' prompt='Continue'",
+    r#"{ class: "btn", target: "_blank", prompt: "Continue" }"#,
 )
 .unwrap();
 
@@ -109,6 +111,28 @@ assert_eq!(link.class(), Some("btn"));
 assert_eq!(link.target(), Some(&LinkTarget::Blank));
 assert_eq!(link.prompt(), Some("Continue"));
 ```
+
+A title that was meant to be structured but is not stays plain text and sets
+`title_notice()`. `LinkTitleNotice::Malformed` (code
+`dm.link.malformed_structured_title`) covers a title that starts with `{` but is
+not a JSON5 object, and an object with a value that had to be ignored.
+`LinkTitleNotice::Legacy` (code `dm.link.legacy_structured_title`) covers the
+removed `key=value` syntax, whose attributes are not applied; `md clean`
+migrates it. A valid JSON5 value that is not an object (`42`, `[1, 2]`) is plain
+text with no notice.
+
+```rust
+use darkmatter::render::Link;
+use renderable::output::link_metadata::LinkTitleNotice;
+
+let legacy = Link::with_title_parsed("Docs", "./a.md", "class='docs'").unwrap();
+assert_eq!(legacy.class(), None);
+assert_eq!(legacy.title(), Some("class='docs'"));
+assert_eq!(legacy.title_notice(), Some(&LinkTitleNotice::Legacy));
+```
+
+See [Hyperlinking](../topics/hyperlinking.md#put-structured-attributes-in-the-title)
+for the authoring rules.
 
 ### Tuple conversions
 
@@ -150,6 +174,7 @@ Notable setters:
 - `with_target(LinkTarget) -> Self`
 - `with_target_str(...) -> Result<Self, LinkError>`
 - `with_data_map(BTreeMap<String, String>) -> Self`
+- `with_link_metadata(LinkMetadata) -> Self`
 
 ## Parsing (`TryFrom`)
 
@@ -183,7 +208,7 @@ let title_mode = Link::try_from(r#"[Example](https://example.com "Visit example"
 assert_eq!(title_mode.title(), Some("Visit example"));
 
 let structured = Link::try_from(
-    r#"[X](https://example.com class='btn' prompt='go' data-id=42)"#
+    r#"[X](https://example.com '{ class: "btn", prompt: "go", "data-id": 42 }')"#
 ).unwrap();
 assert_eq!(structured.class(), Some("btn"));
 assert_eq!(structured.prompt(), Some("go"));
@@ -228,6 +253,26 @@ assert!(forced.starts_with("\x1b]8;;https://github.com\x07"));
 assert!(forced.ends_with("\x1b]8;;\x07"));
 ```
 
+A link with `qp` metadata writes a bare URI (no query or fragment) and carries
+`line`, `column`, `heading`, then the remaining keys sorted by name, as OSC 8
+parameters. An entry holding `:`, `;`, or a control character is left out.
+
+```rust
+use darkmatter::render::Link;
+
+let link = Link::with_title_parsed(
+    "doc",
+    "https://example.com/doc.md#setup",
+    "{ qp: { zeta: 'z', line: 14 } }",
+)
+.unwrap();
+
+assert_eq!(
+    link.to_terminal_unchecked(),
+    "\x1b]8;line=14:heading=setup:zeta=z;https://example.com/doc.md\x07doc\x1b]8;;\x07"
+);
+```
+
 ### HTML
 
 Canonical renderer: `to_html()`
@@ -247,6 +292,18 @@ let link = Link::new("Submit", "https://example.com/form")
 let html = link.to_html();
 assert!(html.contains("href=\"https://example.com/form\""));
 assert!(html.contains("target=\"_blank\""));
+```
+
+`qp` metadata moves into the query string: the destination's own parameters,
+except a key `qp` sets; then `heading` (the fragment, unless `qp` sets it),
+`line`, `column`, and the remaining keys sorted by name. The result has no
+fragment.
+
+```rust
+use darkmatter::render::Link;
+
+let link = Link::with_title_parsed("Docs", "./a.md", "{ class: 'x', qp: { line: 14 } }").unwrap();
+assert_eq!(link.to_html(), r#"<a href="./a.md?line=14" class="x">Docs</a>"#);
 ```
 
 `display` and `title` are sanitized for HTML output via `display_plain()` and `title_plain()`.
@@ -287,7 +344,7 @@ assert!(plain.to_html_with_popover().is_none());
 - If `with_inline == true`: emits inline HTML.
 - Else if `LINK_METADATA=inline`: emits inline HTML.
 - Else if `LINK_METADATA=strip`: emits idiomatic Markdown and drops extended metadata.
-- Else (default): emits idiomatic Markdown with a lossless metadata payload in the title field.
+- Else (default): emits idiomatic Markdown with a JSON5 structured title, which parses back to the same link.
 
 ```rust
 use darkmatter::render::{Link, LinkTarget};

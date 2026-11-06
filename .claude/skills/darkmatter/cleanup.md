@@ -96,7 +96,7 @@ The user-facing record is the area's `docs/` tree.
   variant differs for equal values); `compare::tag_key`/`event_key` spell
   fields out.
 - User-facing docs: `darkmatter/docs/topics/markdown-formatting.md` (every
-  rule, list spacing, precedence), `docs/cli/clean.md`, `docs/inline/cleaning.md`
+  rule, legacy link titles, list spacing, precedence), `docs/cli/clean.md`, `docs/inline/cleaning.md`
   (compose's step), and `dmls/docs/editors/README.md` (DMLS formatting and
   `formatting.markdown`). Regenerate their examples from `md clean -` rather
   than writing them by hand.

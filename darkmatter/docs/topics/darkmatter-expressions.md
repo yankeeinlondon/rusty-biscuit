@@ -17,7 +17,7 @@ Before evaluating a document, Darkmatter checks calls against the available
 schema declarations and enclosing guards. The [call-check guide](../inline/call-check.md)
 explains which calls are rejected and which receive warnings. For command-line
 control of those warnings, see [diagnostic policy](../cli/policy.md); scripts
-can collect the result with [composition reports](../cli/report-json.md).
+can collect the result with a [data output](../cli/data-contracts.md).
 
 ### Availability across every surface
 

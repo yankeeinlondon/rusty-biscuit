@@ -653,8 +653,8 @@ sorting. Static authoring errors are reported once; runtime failures identify
 the iteration that exposed them, whichever stage failed: a callback, a `when=`
 gate, a `{{ }}` expression, a shell argument or its output, a `::file` target,
 condition, or child, or an allowance. The library's typed error and
-`md compose --output report-json` carry the same fields; see
-[the report](../cli/report-json.md#failures-inside-map-and-filter-bodies).
+`md compose --output json` carry the same fields; see
+[Data contracts](../cli/data-contracts.md#failures-inside-map-and-filter-bodies).
 
 ## Markdown Boundaries
 

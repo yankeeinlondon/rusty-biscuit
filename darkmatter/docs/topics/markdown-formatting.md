@@ -266,6 +266,36 @@ An existing label is never changed. `""` adds nothing. A value containing a
 line break, a control character, or a backtick is rejected, because it could
 break the fence.
 
+## Legacy link titles
+
+`md clean` rewrites a link title in the removed `key=value` syntax to the
+[JSON5 object](./hyperlinking.md#put-structured-attributes-in-the-title) that
+says the same thing. A document that has not been migrated still renders, but
+its links lose their attributes and raise the
+`dm.link.legacy_structured_title` warning, so this is the one edit cleanup makes
+to a title. No setting controls it.
+
+```md
+<!-- before -->
+[Docs](https://example.com/docs "class='docs-link' target='_blank' data-section='help'")
+
+<!-- after -->
+[Docs](https://example.com/docs '{ class: "docs-link", target: "_blank", "data-section": "help" }')
+```
+
+It covers inline links and reference definitions, in `md clean`, `md FILE --save`,
+and DMLS formatting. Composition's cleaning step and rendering do not migrate.
+Some titles need a closer look:
+
+| Title | Result |
+| --- | --- |
+| No supported key, such as `"Run x=1 first"` | `'{ title: "Run x=1 first" }'`, so the text survives |
+| Holds an expression, such as `"class='{{ c }}'"` | Left as written, because escaping could break the expression |
+| An image title, or a reference definition an image also uses | Left as written, because image titles keep their `key=value` syntax |
+| Already a JSON5 object, or plain text with no `=` | Left as written |
+
+A link inside code, or in a directive line, is not a link and is never touched.
+
 ## List spacing
 
 Three settings control blank lines around and inside lists. Each one owns a
@@ -445,10 +475,12 @@ flowchart TD
 - `false`, `preserve`, and `""` are real values that stop the search. Only a
   missing key or `null` falls through.
 - The CLI flags are `--indent` (`indentation`), `--compact` and `--loose`
-  (`list-item-padding`), `--fixed-width N` (`fixed-width`, which implies
-  `unwrap`), and `--ignore-incidental-newlines` (`unwrap: false` and
-  `fixed-width: false`, overriding a document width). A flag you did not
-  pass does not override anything.
+  (`list-item-padding`), and `--width`: `--width N` sets `fixed-width`, which
+  implies `unwrap`; `--width unlimited` sets `unwrap: true` and
+  `fixed-width: false`; and `--width source` sets `unwrap: false` and
+  `fixed-width: false`, overriding a document width. A flag you did not pass
+  does not override anything. See
+  [Output and width](../cli/output-and-width.md).
 - DMLS reads workspace settings from `[formatting.markdown]` in
   `.dmls.toml`, with the same keys. See the [DMLS editor
   setup](../../dmls/docs/editors/README.md#root-marker-and-configuration).

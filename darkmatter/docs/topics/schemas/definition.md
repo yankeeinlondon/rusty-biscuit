@@ -12,7 +12,7 @@ This topic covers how Darkmatter applies schemas: the `$schema` property, the ba
 - A `$schema` frontmatter property that can hold an inline schema, point at a YAML/JSON file, or list a root-level union.
 - A **baseline schema** that every document inherits. Darkmatter ships a built-in one, compiled into the library, which `md compose`, `md schema validate`, and DMLS apply by default.
 - Validation of whole **YAML documents** (`.yaml`, `.yml`), selected by the document's `kind` or its root `$schema`; see [YAML Documents](#yaml-documents).
-- A `md schema validate` CLI subcommand with `pretty` and `json` output.
+- A `md schema validate` CLI subcommand with terminal, document, and data output.
 - A `md schema detect` CLI subcommand that infers a SimplifiedSchema from existing documents.
 - A library API ([`DarkmatterSchemas`](#library-api)) for embedding the same behavior.
 - Schema-aware completion hints for downstream shell-completion tooling.
@@ -533,7 +533,7 @@ Both environment variables are read from the environment the command was
 started with. A custom path, from `--schema` or `BASELINE_SCHEMA`, takes the
 same reference forms as a file argument and resolves from the directory the
 command was started in, not from the document. A custom baseline that cannot
-be found or loaded exits `2` and never falls back to the built-in baseline or
+be found or loaded exits `1` and never falls back to the built-in baseline or
 to none.
 
 Opting out removes only the baseline. A document's own `$schema` and matching
@@ -864,7 +864,8 @@ was judged, valid or not, is `Ok(YamlOutcome::Validated(..))`.
 A referenced schema file that fails to load is also a
 `SchemaError::SchemaDocument`, so to tell the document's own load error from
 its schema's, load and validate in two steps. `md schema validate` does this
-to exit `3` for the first and `2` for the second:
+to report `"error": "yaml_parse"` for the first and `"error": "schema"` for the
+second:
 
 ```rust
 use darkmatter::markdown::schemas::LoadedYamlDocument;
@@ -889,7 +890,7 @@ if let Some(contract) = contract {
 ## CLI: `md schema validate`
 
 ```
-md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--format pretty|json] [--quiet]
+md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--output <target>] [--quiet]
 ```
 
 | Flag                       | Effect                                                                                                 |
@@ -898,8 +899,8 @@ md schema validate <FILE_OR_PROP=VALUE>... [--schema <path> | --disable baseline
 | `--schema <path>`          | Custom baseline replacing the built-in one, used even when `DARKMATTER_NO_BASELINE_SCHEMA` is set. See [Selecting the Baseline](#selecting-the-baseline). |
 | `--disable baseline-schema`| Validate with no baseline, ignoring `BASELINE_SCHEMA`. Conflicts with `--schema`. See [Policy Flags](../../cli/policy.md). |
 | `--disable schema-triggers`| Do not discover or apply [trigger schemas](#repository-trigger-schemas). The baseline is unaffected.   |
-| `--format pretty`          | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). |
-| `--format json`            | Newline-delimited JSON, one object per file. Pipe-friendly.                                            |
+| `--output terminal`        | Default. Human-readable, Prose-styled output. One block per file; each problem names its [source location](#problem-locations). `plain`, `markdown`, `markdown-plus`, and `html` print the same report in that form. See [Output and width](../../cli/output-and-width.md). |
+| `--output json`            | One JSON document with one record per file; `json5`, `yaml`, and `toml` carry the same data. See [JSON Output](#json-output). |
 | `--quiet`                  | Suppress success lines; only failures print.                                                           |
 
 ### YAML Documents on the Command Line
@@ -920,19 +921,19 @@ md schema validate schemas/roster.yaml data/platforms.yaml
   `--disable schema-triggers` are accepted and change nothing for YAML.
 - **No assignments and no `--schema`.** Both concern Markdown frontmatter.
   Every argument is opened before anything is validated, and a batch with a
-  YAML file and either one is a usage error (exit `64`) that prints nothing
+  YAML file and either one is a usage error (exit `2`) that prints nothing
   on stdout.
 - **No schema is not an error.** A YAML file with no claimed `kind` and no
   `$schema`, or whose root is not a mapping, is reported like a Markdown file
   without one: "doesn't have a schema definition so is valid by default", and
   `"schema": null` in JSON.
-- **Load errors exit `3`.** A file that is not one admissible YAML document
+- **Load errors exit `1`.** A file that is not one admissible YAML document
   (malformed YAML, a duplicate key, a second document) is reported as "is not
   a valid YAML document" with its location, and in JSON with
   `"error": "yaml_parse"` plus `line` and `column`. A `$schema` naming a file
-  that fails to load is a schema error of the document (exit `2`), not a load
-  error.
-- **Selection errors exit `2`.** A kind claimed by two definitions, or by a
+  that fails to load is a schema error of the document (`"error": "schema"`),
+  not a load error.
+- **Selection errors exit `1`.** A kind claimed by two definitions, or by a
   definition that fails, is a schema error naming the definition files.
 - **Kind checks.** A problem from the checks Darkmatter's own kinds carry
   beyond their definitions (for example a category used in `types` that
@@ -985,7 +986,7 @@ md schema validate a.md b.md c.md title=shared
 | `user={n: Ken}`       | object `{ "n": "Ken" }`                     |
 | `title=`              | empty string `""` (not YAML null)           |
 
-Malformed YAML on the right-hand side (e.g. `user={broken`) is reported as a **usage error** with exit code `64` rather than silently treated as a file path. Bare strings with special YAML characters (commas in flow context, leading `&`, etc.) should be quoted in the shell.
+Malformed YAML on the right-hand side (e.g. `user={broken`) is reported as a **usage error** with exit code `2` rather than silently treated as a file path. Bare strings with special YAML characters (commas in flow context, leading `&`, etc.) should be quoted in the shell.
 
 **Schema-aware coercion.** When the effective schema declares a top-level property as a string-shaped scalar (`string`, `date`, `datetime`, `time`, `url`, `email`, `enum`, `file`, or `alphanumeric`), the raw right-hand side is stored verbatim as a string instead of being run through the YAML scalar parser. This lets `bar=true` validate against `bar: string(required)`, and `slug=123` against `slug: alphanumeric`, without the shell-quoting acrobatics that would otherwise be needed to keep the literal `"`. Property-level unions follow the same rule when **any** non-array arm is a string-shaped type — the string variant wins so the value is preserved losslessly. A property typed by a [recursive named type](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#recursive-named-types) is judged by that type's definition: given `node: [string(min(4)), { children: node[] }]` and `label: node`, `label=1.20` stays the text `"1.20"`.
 
@@ -1022,12 +1023,10 @@ user:
 | Code | Meaning                                                                                |
 |------|----------------------------------------------------------------------------------------|
 | 0    | All files validated successfully.                                                       |
-| 1    | One or more files failed validation.                                                    |
-| 2    | Schema or baseline could not be loaded (CLI baseline **or** a per-document `$schema`). |
-| 3    | At least one file could not be opened, its frontmatter could not be parsed, or a YAML file is not valid YAML. |
-| 64   | Usage error (bad flags, malformed `<prop>=<value>` YAML, no files supplied, or an assignment or `--schema` with a YAML file). |
+| 1    | The command ran and failed: a file failed validation, could not be opened, had frontmatter that could not be parsed, or is not valid YAML; or a schema or baseline could not be loaded (CLI baseline **or** a per-document `$schema`). |
+| 2    | Usage error (bad flags, malformed `<prop>=<value>` YAML, no files supplied, or an assignment or `--schema` with a YAML file). Nothing ran. |
 
-When multiple kinds of failure occur in the same invocation, the more specific failure wins: parse error (`3`) outranks schema-load failure (`2`), which outranks validation failure (`1`).
+To tell the failures apart in a script, read each record's `error` field in a [data output](#json-output).
 
 Passing both `--schema` and `--disable baseline-schema` is rejected as a usage error before any document is read, which exits `2` with a "cannot be used with" message on stderr and nothing on stdout.
 
@@ -1073,12 +1072,20 @@ For root-union failures, problems are prefixed with `arm[N]`:
 
 ### JSON Output
 
+`--output json` prints one document with one record per file, in argument order. The example is condensed; the real output is indented with sorted keys. A failed run also has `outcome` and `diagnostics` beside `files`, and `json5`, `yaml`, and `toml` carry the same data. The contract is `darkmatter/cli/schemas/output/schema-validate.yaml`; see [Data contracts](../../cli/data-contracts.md).
+
 ```json
-{"file":"post.md","valid":true,"schema":"./schemas/post.yaml","layers":{"document":{"form":"reference","reference":"./schemas/post.yaml"},"triggers":[],"baseline":{"form":"darkmatter"}},"problems":[]}
-{"file":"draft.md","valid":false,"schema":"./schemas/post.yaml","layers":{"document":{"form":"reference","reference":"./schemas/post.yaml"},"triggers":[],"baseline":{"form":"darkmatter"}},"problems":[
-  {"path":"","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The post's title"},
-  {"path":"/tags/1","property":null,"message":"42 is not of type \"string\"","kind":"type","line":6,"column":5,"arm_index":null,"description":null}
-]}
+{
+  "files": [
+    {"file":"post.md","valid":true,"schema":"./schemas/post.yaml","layers":{"document":{"form":"reference","reference":"./schemas/post.yaml"},"triggers":[],"baseline":{"form":"darkmatter"}},"problems":[]},
+    {"file":"draft.md","valid":false,"schema":"./schemas/post.yaml","layers":{"document":{"form":"reference","reference":"./schemas/post.yaml"},"triggers":[],"baseline":{"form":"darkmatter"}},"problems":[
+      {"path":"","property":"title","message":"\"title\" is a required property","kind":"missing","line":2,"column":1,"arm_index":null,"description":"The post's title"},
+      {"path":"/tags/1","property":null,"message":"42 is not of type \"string\"","kind":"type","line":6,"column":5,"arm_index":null,"description":null}
+    ]}
+  ],
+  "outcome": "failure",
+  "diagnostics": []
+}
 ```
 
 Each problem carries a `path` (a JSON pointer; a missing property's `path` is the
@@ -1102,9 +1109,9 @@ The `layers` object says which schema layers judged the document, so a consumer 
 | `triggers` | the matching triggers that layered a schema, in layering order: a file trigger as its path, a bundled one as `embedded:{bundle}/{name}`; `[]` when none matched |
 | `baseline` | `null` when no baseline applied; otherwise `{"form": "darkmatter"}` for the built-in one or `{"form": "custom", "reference": "./my-baseline.yaml"}` |
 
-The pretty output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
+The terminal output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
-Parse errors and schema-load failures emit JSON entries with an `error` key (`"frontmatter_parse"`, `"yaml_parse"`, or `"schema"`) and an empty `problems` array; a `yaml_parse` entry also has the failure's `line` and `column`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
+A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, or `"schema"`), a `message`, and an empty `problems` array; a `yaml_parse` record also has the failure's `line` and `column`, and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 
@@ -1194,29 +1201,30 @@ A document without `$schema` has no explicit schema definition, but matching [sc
 - trigger and baseline: `does not have an explicit schema definition but it is valid based on the trigger schema post.trigger.yaml and the Darkmatter default schema.`
 - built-in baseline alone: `does not have an explicit schema definition but it is valid based on the Darkmatter default schema.`
 - custom baseline alone: `does not have an explicit schema definition but it is valid based on the baseline schema ./my-baseline.yaml.`
-- nothing (no baseline, no matching trigger): validation succeeds vacuously and `pretty` mode prints `doesn't have a schema definition so is valid by default.`
+- nothing (no baseline, no matching trigger): validation succeeds vacuously and the terminal output prints `doesn't have a schema definition so is valid by default.`
 
 A document with `$schema` opens with `has a schema definition and is valid based on` and names its own schema first (`its inline $schema`, `its $schema ./schemas/post.yaml`, or `its $schema union`), then the same trigger and baseline layers.
 
 ## CLI: `md schema detect`
 
 ```
-md schema detect <file>... [--format yaml|json] [--merge]
+md schema detect <file>... [--output <target>] [--merge]
 ```
 
 | Flag             | Effect                                                                                                                      |
 |------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `--format yaml`  | Default. Emits SimplifiedSchema YAML.                                                                                       |
-| `--format json`  | Emits the equivalent Draft 2020-12 JSON Schema.                                                                             |
+| `--output terminal` | Default. Prints SimplifiedSchema YAML in a fenced `yaml` block. `plain`, `markdown`, `markdown-plus`, and `html` print the same block in that form. |
+| `--output yaml`  | Prints the bare SimplifiedSchema YAML, ready to save: `md schema detect post.md --output yaml > schema.yaml`.               |
+| `--output json-schema` | Prints the equivalent Draft 2020-12 JSON Schema.                                                                      |
+| `--output json`  | Prints the SimplifiedSchema as JSON; `json5` and `toml` work the same way.                                                  |
 | `--merge`        | When multiple files are given, union detections: a property is required only if present in every file; types widen to common ancestors. |
 
-Without `--merge`, multiple inputs emit one schema per file with a header comment.
+Without `--merge`, multiple inputs emit one schema per file: the fenced block separates them with a `# --- file ---` comment, and a data output lists them under `files`, each with its `file` and `schema`.
 
 Each document's references are judged from the document itself, the way `md compose` and `md schema validate` resolve them, not from the directory you ran `md` in. A document in another repository finds `./`, bare, `&`, and `^` references in its own repository and `@` references in the launch scope; a document outside every repository keeps the `~` you opened it through; and two spellings of the same path (such as macOS `/var/…` and `/private/var/…`) give the same result. For example, `~/other-repo/docs/plan.md` declares `diagram: './flow.md'` (beside it) and `readme: '&README.md'` (at its repository's root). Run from `~/work/app`, a different repository:
 
 ```text
-$ md schema detect ~/other-repo/docs/plan.md
-# detected from: /Users/me/other-repo/docs/plan.md
+$ md schema detect ~/other-repo/docs/plan.md --output yaml
 $schema:
   diagram: file
   readme: file
@@ -1278,8 +1286,8 @@ $schema:
 | Code | Meaning                                          |
 |------|--------------------------------------------------|
 | 0    | Success.                                         |
-| 2    | Conversion to JSON Schema failed (`--format json` only). |
-| 3    | At least one file's frontmatter could not be parsed. |
+| 1    | A file could not be opened, its frontmatter could not be parsed, or conversion to JSON Schema failed (`--output json-schema` only). |
+| 2    | Usage error. Nothing ran.                        |
 
 ## CLI: `md schema about`
 
@@ -1322,8 +1330,8 @@ The report is rendered from a typed descriptor catalog in
 `coercion_rule_descriptors()`, and `validation_behavior_descriptors()`. This
 ensures the CLI report and the public descriptor surface cannot drift apart.
 
-The command is **documentation-only** and intentionally has no input files and
-no format flags of its own. The **global** `--verbose` flag expands the report
+The command is **documentation-only** and intentionally has no input files. It
+takes the shared `--output` and `--width`. The **global** `--verbose` flag expands the report
 with the inline-object rules, coercion rules, validation behavior, the `ctx.*`
 context-variable catalog, and expression-function signatures; the global
 `--code-block` flag affects how embedded code blocks render. It performs no
@@ -1428,7 +1436,7 @@ From `darkmatter::markdown::schemas`:
 - `detect_from_document(&Markdown, &FileResolutionContext)` — single-document detection (returns a `SchemaShape`).
 
 Detection is passive: it derives the supplied context to each document and never discovers a repository. A reference that does not resolve is a `string`, and so is every value when that derivation is invalid, so pass a context that admits the document: the request's for a document inside its tree, otherwise the one prepared for that document (in another repository, in none, or opened through another spelling of its path). `md schema detect` passes each argument's document context.
-- `schema_to_yaml(&SchemaRoot)` — serialize a schema back to SimplifiedSchema YAML (used by `md schema detect --format yaml`).
+- `schema_to_yaml(&SchemaRoot)` — serialize a schema back to SimplifiedSchema YAML (used by `md schema detect --output yaml`).
 - `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (the global catalog's `fm`, authored in `schemas/partials/fm.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SchemaRoot` with no definition table: every acyclic type is expanded at each use.
 - `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value, each repeated structured type stored once under its root `$defs`.
 - `GlobalCatalog::baseline()` — a catalog's `fm` as a `SchemaRoot` with the definition table its references point into; lower the pair with `to_json_schema_with_definitions`.

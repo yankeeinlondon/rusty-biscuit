@@ -35,7 +35,7 @@ and repeating the same selection is harmless.
 | Command | `--allow` | `--deny` | `--disable` |
 |---|---|---|---|
 | `md compose` | every recovery, `host=HOST`, `all` | every recovery, `style`, a diagnostic code, `all` | `baseline-schema`, `schema-triggers`, `collection-blocks` |
-| `md render`, `md FILE` | — | `style`, `all` | — |
+| `md render`, `md FILE` | — | `style`, the `dm.link.*` codes, `all` | — |
 | `md clean` | — | — | `baseline-schema`, `schema-triggers` |
 | `md schema validate` | — | — | `baseline-schema`, `schema-triggers` |
 
@@ -58,8 +58,9 @@ them.
 | `untyped-map-variables` | a `::map` source with no iterable declaration is accepted with a warning | `dm.collection.untyped_map_source` |
 | `untyped-filter-variables` | a `::filter` source with no iterable declaration is accepted with a warning | `dm.collection.untyped_filter_source` |
 
-A recovered problem is still reported on stderr as a warning carrying its
-code. Without the allowance the problem fails the command.
+A recovered problem is still reported, carrying its code: on stderr in a Markdown
+run, and in `diagnostics` in a [data output](./data-contracts.md). Without the
+allowance the problem fails the command.
 
 `--allow all` turns on every recovery above. It never grants a host and never
 authorizes a shell command: shell approval and host consent are separate.
@@ -95,14 +96,15 @@ says. See
 ### Diagnostics (`--deny`)
 
 - **`style`**: unknown or deprecated `style:` keys, and deprecated inline
-  horizontal-rule styles in the body, fail rendering (`md FILE`, `md render`,
-  and `md compose --output html|markdown-plus`). Informational notices never
-  block.
+  horizontal-rule styles in the body, fail rendering (`md FILE` and `md render`).
+  Informational notices never block.
 - **A recovery identifier**: that recovery does not apply, and its warning
   blocks.
-- **A diagnostic code** (`md compose` only), such as
-  `dm.expression.uncertain_call` or `dm.expression.undeclared_property`: a
-  warning with that code blocks. `md compose --help` lists every code.
+- **A diagnostic code**, such as `dm.expression.uncertain_call` or
+  `dm.expression.undeclared_property`: a warning with that code blocks.
+  `md compose --help` lists every code; `md render` takes
+  `dm.link.malformed_structured_title`, `dm.link.legacy_structured_title`,
+  `dm.style.unknown_key`, and `dm.style.deprecated`.
 - **`all`**: every reported warning and error blocks, except a recovery named
   by `--allow`.
 
@@ -191,7 +193,7 @@ flowchart TD
 
 - **Passive checks** read the document without running it. A blocking
   finding there fails the command before `initialize`, any shell, or any
-  expression runs. A blocking reference issue exits with status 2, like an
+  expression runs. A blocking reference issue exits with status 1, like an
   unrecovered missing reference.
 - **Shell preparation** walks every document the composition could reach,
   a `::file` whose `when=` is false included, before any shell command is
@@ -239,7 +241,9 @@ md compose doc.md --deny all   # fails on dm.expression.undeclared_property; no 
 ```
 
 A failed command never writes the composed document to stdout, in any
-`--output` mode, and never opens a viewer for `--show`.
+`--output` mode, and exits with status 1. With `--show`, a failed Markdown run opens
+no viewer; a failed data output still opens its failure value, which holds no
+document. See [Exit status](./output-and-width.md#exit-status).
 
 ## Removed flags
 

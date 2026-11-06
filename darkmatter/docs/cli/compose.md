@@ -22,8 +22,16 @@ Unlike `read`, `compose` focuses on transformed content, not display rendering d
 Markdown output exports `::file-links` as readable linked lists without internal
 render-tree metadata comments. Local `file:` URLs use the same portable-link
 normalization as absolute paths: verified bare tree-root links first, then nearby
-relative links and repository references such as `&docs/standards/mode-1004.md`. Terminal, HTML, and JSON
-output retain the component's styling and absolute hyperlink targets.
+relative links and repository references such as `&docs/standards/mode-1004.md`.
+
+`md compose` always writes Markdown, or the same result as data. To see a composed
+document in a terminal, as plain text, or as HTML, pipe it to
+[`md render`](./render.md):
+
+```sh
+md compose doc.md | md
+md compose doc.md | md render --output html > doc.html
+```
 
 ## Reporting
 
@@ -52,14 +60,14 @@ md compose - name=Alice draft=false
 md compose doc.md --frontmatter
 md compose doc.md --fm
 
-# Render composed output as HTML or JSON
-md compose doc.md --output html
+# One value: the outcome, every diagnostic, and the document
 md compose doc.md --output json
+md compose doc.md --output yaml
 
-# One JSON object: the outcome, every diagnostic, and the document
-md compose doc.md --output report-json
+# Reflow the document's prose at 80 columns
+md compose doc.md --width 80
 
-# Show output via temp artifact
+# Print the output and open it in the default app
 md compose doc.md --show
 
 # Report shell commands that compose could execute, without running them
@@ -72,6 +80,7 @@ Positional arguments matching `key=value` are treated as override setters, equiv
 
 ```bash
 md compose doc.md iteration=1 draft=false name=Alice
+md compose iteration=1 doc.md   # setters can come before the path too
 ```
 
 **Value parsing**: Values are parsed as JSON5 with a string fallback. This means:
@@ -91,12 +100,15 @@ md compose doc.md iteration=1 draft=false name=Alice
 ### Options
 
 - `--state <JSON>`: default values as JSON or JSON5; fills in null/missing frontmatter keys without overriding existing values.
+- `--set <JSON>`: override values as JSON or JSON5; overwrites existing frontmatter keys.
+- `--timeout <SECONDS>`: global shell command timeout (default: 10). Pair it with `--allow shell-timeout` to turn a timed-out command into an empty string and a warning.
 - `--frontmatter` / `--fm`: include frontmatter in the output (default: body only).
-- `--output <markdown|text|markdown-plus|html|browser|json|ast|auto|report-json>`: output format (default: `markdown`). `report-json` prints the [composition report](./report-json.md) instead of the document, and cannot be combined with `--show` or `--shell`.
-- `--show`: open output via temp artifact.
+- `--output <markdown|json|json5|yaml|toml>`: what to print (default: `markdown`). See [Output Behavior](#output-behavior) and [Output and Width](./output-and-width.md). A data output cannot be combined with `--shell`.
+- `--width <N|N%|auto|source|unlimited>`: how the document's prose is reflowed. See [Width](#width).
+- `--show`: print the output and open it in the default app, through a temp file. See [Opening the output in an app](./output-and-width.md#opening-the-output-in-an-app). It cannot be combined with `--shell`, which composes nothing to open (a usage error).
 - `--allow <ID|all>`: permit a recovery, or reads from an explicitly named host. Repeatable. `all` permits every recovery but never grants a host or authorizes a shell command. See [Policy Flags](./policy.md) for precedence and conflicts.
-    - `missing-hyperlinks`, `missing-image-refs`: keep the content when a hyperlink or image target is missing; issues are reported on stderr and the exit code is 0.
-    - `missing-transclusions`: remove a transclusion directive whose target is missing; issues are reported on stderr and the exit code is 0.
+    - `missing-hyperlinks`, `missing-image-refs`: keep the content when a hyperlink or image target is missing; issues are still reported (on stderr, or in `diagnostics` in a data output) and the exit status is 0.
+    - `missing-transclusions`: remove a transclusion directive whose target is missing; issues are still reported and the exit status is 0.
     - `ctx-override`: replace a non-object `ctx` frontmatter value with the runtime context. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error; this allowance downgrades the error to a warning.
     - `invalid-frontmatter-assignment`, `reassigned-frontmatter-property`: recover from an invalid or duplicated `set` assignment on a `::file` directive (see [Block Transclusion](../transclusion/block-transclusion.md)).
     - `shell-timeout`: replace a timed-out shell command's output with an empty string and a warning.
@@ -110,7 +122,7 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--max-iteration-visits <N>`: how many source items one compose request may visit across every `::map` and `::filter`, nested directives and child compositions included. Rejected items count. `N` is a positive integer (zero, a sign, or a value beyond 64 bits is a usage error with exit status 2). When omitted, the library default (100,000) applies; there is no unlimited setting and no recovery for exhaustion.
 - `--max-expansion-bytes <N>`: how many bytes of `::map` and `::filter` expansion one request may materialize, nested copies included. Same value rules as `--max-iteration-visits`; the library default is 16,777,216 (16 MiB).
 - `--shell`: report the effects discovered in the compose tree and exit without performing them. The report includes body `::shell` directives, top-level frontmatter `$(...)` shell expressions, and the root document's [lifecycle](#lifecycle-events) `shell` actions, including commands discovered through markdown transclusions, followed by the `ping`/`ping_under` probes the tree could send and whether an `--allow host=HOST` entry already grants each one. No command runs and no packet is sent. A [schema trigger skipped as invalid](../topics/schemas/schema-triggers.md#invalid-discovered-triggers) is reported on stderr after the report.
-- `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
+- `--perf`: report how long compose took, as command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. A Markdown run prints the report to stderr, after any compose warnings and deferred validation issues. A data output puts the timings in the value's [`perf`](./data-contracts.md#timings) field and writes nothing to stderr.
 - `--allow host=HOST`: grant network access to a host or address. Repeat for multiple entries. The default policy is deny-all, and the entry's shape decides which capability it grants:
     - a hostname or `*.wildcard` pattern allows remote URL reads from that host, and grants no ICMP;
     - an exact IP literal allows remote URL reads from that exact host **and** grants `ping`/`ping_under` to that address (an IPv6 zone constrains the ICMP grant to that interface, spelled the way the host spells it — the interface name on macOS and Linux (`fe80::1%en0`), the numeric interface index on Windows (`fe80::1%12`));
@@ -123,38 +135,60 @@ md compose doc.md iteration=1 draft=false name=Alice
 - `--remote-freshness <strict|fallback|optimistic>`: choose stale-cache behavior for remote artifacts. Defaults to `fallback`, which serves the stale cached body when revalidation fails on the network. `strict` fails instead; `optimistic` serves any cached body without revalidation. A `no-cache` response is always revalidated and never served stale.
 - `--cache-root <DIR>`: the transport-artifact cache root. It persists raw remote URL response bodies only, under `<DIR>/.darkmatter/cache/v1/`, so `--remote-ttl`, `--remote-refresh`, and `--remote-freshness` apply across CLI runs. Semantic results (composed documents, `::file` children, `::code` and `::toc-linking` results, and document snapshots) are never persisted; every run recomposes local content. Nothing is created on disk until a storable remote response is written, and a cache root never authorizes a host. See [Caching](../topics/caching.md).
 
-### Compose Warnings
-
-Compose warnings (context merge collisions, partial runtime capture failures, etc.) are printed to stderr after the composed content is written to stdout.
-
 ### Output Behavior
 
-**Default (`--output markdown`)**
+`md compose` accepts Markdown and the data family, and nothing else. Composition
+is Markdown to Markdown, so the formatted alternatives belong to `md render`.
 
-- Prints composed markdown content.
-- Frontmatter is consumed as pipeline input and stripped from output unless `--frontmatter` is specified.
+| `--output` | stdout | stderr |
+|---|---|---|
+| `markdown` (default) | the composed Markdown; nothing on failure | warnings, the problem report, lifecycle output, `--perf`, `-v` summaries |
+| `json`, `json5`, `yaml`, `toml` | one [envelope](./data-contracts.md#md-compose-and-md-render) holding the document and every problem | nothing |
 
-**`--frontmatter` / `--fm`**
+The default is the same on a terminal and on a pipe, so `md compose doc.md > out.md`
+always writes Markdown.
 
-- Includes frontmatter in the markdown output, reflecting any values filled in by `--state`.
-- Key order is preserved from the source document; new keys appear at the end.
+```sh
+$ md compose doc.md --output yaml
+file: doc.md
+outcome: success
+document: |-
+  # Notes
+  ...
+diagnostics: []
+summary:
+  references: 3
+  documents: 1
+  ok: 3
+  broken: 0
+lifecycle_output: []
+```
 
-**`--output auto`**
+Frontmatter is consumed as pipeline input and stripped from the output unless
+`--frontmatter` (`--fm`) is given. With it, the output includes the frontmatter,
+reflecting any values filled in by `--state`; key order is preserved from the
+source document, and new keys appear at the end. A data output's `document` honors
+the flag the same way.
 
-- Treated the same as markdown for compose.
+`--show` prints the output and also opens it. A failed Markdown run opens nothing;
+a failed data run still opens its failure value.
 
-**`--output html|json`**
+### Width
 
-- Emits HTML or AST JSON from the composed document.
+`md compose` ignores `OUTPUT_COLUMNS` and the terminal size unless you ask for them,
+so the bytes it writes do not depend on where it ran.
 
-**`--output report-json`**
+| `--width` | The composed prose |
+|---|---|
+| (none) | never wraps; a paragraph's single line breaks are joined into one line |
+| `source` | keeps authored line breaks |
+| `N` | joined, then wrapped at `N` columns |
+| `auto`, `N%` | as `N`, resolved from `OUTPUT_COLUMNS` or the terminal; no wrapping when neither is known |
+| `unlimited` | joined, never wrapped |
 
-- Prints one JSON object with `outcome`, `diagnostics`, and `document` (the Markdown, or `null` on failure), and nothing else on stdout. Warnings are in the object rather than on stderr. See [Composition Report](./report-json.md).
-
-**`--show` behavior**
-
-- For markdown/auto: prints composed content and opens markdown artifact.
-- For html/json: opens artifact instead of printing to stdout.
+Code blocks and tables are never reflowed. A data output's `document` gets the same
+treatment. `--width` does not affect stderr. See
+[Choosing a width](./output-and-width.md#choosing-a-width).
 
 ### Precedence
 
@@ -181,19 +215,23 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
 ### Validation and Errors
 
-- **Reference validation** runs automatically before composition when input is a file path. If any references (hyperlinks, images, transclusions, CSS imports, etc.) point to missing targets, compose reports grouped errors and exits with code 2. It is passive: body `::shell` directives are not run for it, so a reference only a command's output would contain is checked when the document composes.
+- **Reference validation** runs automatically before composition when input is a file path. If any references (hyperlinks, images, transclusions, CSS imports, etc.) point to missing targets, compose prints the [reference report](./validate.md#the-reference-report) on stderr, grouped by the document that holds each problem, and exits with status 1. It is passive: body `::shell` directives are not run for it, so a reference only a command's output would contain is checked when the document composes.
 
+  ```text
+  Broken references in broken.md
+
+  broken.md
+    file not found in hyperlink  `./missing.md`  broken.md:3:5
+
+  child.md (transcluded at broken.md:5)
+    file not found in image  `./nope.png`  child.md:2:1
+
+  Checked 4 references across 2 documents: 2 ok, 2 broken
   ```
-  Invalid Hyperlink(s)
-  - the preparation.md reference to @darkmatter/docs/text-replacement.md is not valid
-  - the preparation.md reference to @darkmatter/docs/interpolation.md is not valid
 
-  19 references scanned, 17 valid, 2 issues
-  ```
+  A data output reports the same problems in `diagnostics`, with the document as `null`.
 
-  Issues are grouped by category (hyperlinks, images, transclusions, etc.) with the source document shown as a clickable link and broken targets in red.
-
-- **`--allow` allowances** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit code is 0. If any errors remain in non-allowed categories, compose still blocks with exit code 2.
+- **`--allow` allowances** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit status is 0. If any errors remain in non-allowed categories, compose still blocks with exit status 1.
 
   ```bash
   # Compose despite broken links — content to stdout, warnings to stderr
@@ -237,11 +275,12 @@ finalize:
 - **Order.** `initialize`, then composition, then `composed`, then the
   document is written, then `finalize`. When composition or preflight fails,
   `failed` runs instead of `composed`, then `finalize`.
-- **Output.** `stdout` actions and lifecycle command output go to stdout in
-  run order, so output from `composed` precedes the document and output from
-  `finalize` follows it. `stderr`, `info`, `warn`, `success`, and `message`
-  write to stderr. Under `--output report-json` stdout holds only the report,
-  so `stdout` actions and command output go to stderr too.
+- **Output.** In a Markdown run, stdout holds only the document: every
+  communication action (`stdout`, `stderr`, `info`, `warn`, `success`, `message`)
+  and all lifecycle command output go to stderr, in run order. A `stdout` action's
+  text is rendered there as prose. In a data output, the same output is captured
+  as written into the value's
+  [`lifecycle_output`](./data-contracts.md#lifecycle-output), and stderr stays empty.
 - **`skip`** in `initialize` writes no document, runs no `finalize`, and
   exits 0.
 - **Other hosts' actions.** A verb `md` does not run (Claudine's `say`,
@@ -255,13 +294,14 @@ finalize:
   without running any stack.
 - **Errors.** An error in `initialize` or a preflight failure runs `failed`
   then `finalize`. An error in `composed` or a failed document write runs
-  `finalize` only. Either way the exit is non-zero (2 for unresolved
-  references, otherwise 1).
+  `finalize` only. Either way the exit status is 1.
 - **Ctrl-C** stops the run, runs `cancelled` (when authored) and `finalize`,
-  and exits 130; a second Ctrl-C exits at once.
+  and exits 130; a second Ctrl-C exits at once. An interrupted data output prints
+  no value.
 
-A lifecycle run does not print the `--perf` report or the verbose compose
-summary. There is no dry-run mode; `--shell` is the only report-only mode.
+A lifecycle run in Markdown mode does not print the `--perf` report or the verbose
+compose summary; a data output still carries `perf`. There is no dry-run mode;
+`--shell` is the only report-only mode.
 
 ### Remote URL Examples
 
@@ -281,6 +321,17 @@ md compose doc.md \
   --cache-root . \
   --remote-refresh
 ```
+
+### Removed spellings
+
+These are usage errors (exit status 2).
+
+| Removed | Use instead |
+|---|---|
+| `--output markdown-plus`, `--output html`, `--output browser` | `md compose doc.md \| md render --output ...` |
+| `--output text`, `--output auto` | `--output markdown`, or no `--output` |
+| `--output json` as the document AST, `--output ast` | no replacement: the document AST is not an output |
+| `--output report-json` | `--output json` |
 
 ## Lessons Learned
 

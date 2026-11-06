@@ -71,7 +71,7 @@ with the rejection:
 
 The pre-flight walk that `md compose` runs before approving shell commands
 checks the same surfaces, so it rejects the same call with the same earlier
-warnings ([Report output](../cli/report-json.md#which-diagnostics-in-which-order)).
+warnings ([Data contracts](../cli/data-contracts.md#which-diagnostics-in-which-order)).
 
 ## The five argument categories
 

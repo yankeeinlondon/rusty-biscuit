@@ -10,14 +10,14 @@ on feature unification from other crates:
   `as_json5`, and SimplifiedSchema → JSON Schema output keep the order the
   author wrote. Cargo unifies the feature into every package that links
   `darkmatter`. Outputs that publish alphabetical keys sort explicitly:
-  `md schema validate --format json`, Claudine's OpenCode/Kilo inline config,
+  `md schema validate --output json`, Claudine's OpenCode/Kilo inline config,
   and `sniff`'s JSON output. Hashes that must ignore key order (see
   [Canonical JSON Hashing](#canonical-json-hashing)) sort through
   `biscuit-hash` instead. Insertion order is not always source order: a map a function
   builds keeps the order it was built in. A new consumer that needs a stable
   order sorts explicitly rather than relying on the map.
   - Written order is intentional where a reader sees it:
-    `md schema detect --format json` lists properties in the order the
+    `md schema detect --output json-schema` lists properties in the order the
     documents wrote them (with `$schema` first), a mapping converted to text
     for a `json`/`yaml` property or a `json` parameter keeps its key order
     (`{ b: 1, a: 2 }` becomes `{"b":1,"a":2}`), and `keys()`/`values()`
@@ -281,7 +281,7 @@ protocol-focused:
 
 ## CLI (`darkmatter/cli`)
 
-- `serde` (`derive`) — the `md clean --json` diagnostic envelope. The
+- `serde` (`derive`) — the `md clean --output json` diagnostic envelope. The
   per-diagnostic body is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so
   the wire format stays pinned to the shared diagnostic vocabulary; the derive
   is only needed for the CLI-local envelope and stage tag that wrap it.

@@ -78,10 +78,10 @@
   `research`, `sniff-cli`, `playa-cli`, `biscuit-icon-cli`,
   `biscuit-speaks-cli`), so `serde_json` maps there keep insertion order.
   Outputs with an alphabetical-key contract sort explicitly (`sniff`'s JSON
-  output, `md schema validate --format json`, the `md hash` frontmatter hash,
+  output, `md schema validate --output json`, the `md hash` frontmatter hash,
   Claudine's OpenCode/Kilo inline config); any new consumer that needs a
   stable order must sort too. Written order is intended elsewhere:
-  `md schema detect --format json` and JSON text produced for `json`-typed
+  `md schema detect --output json-schema` and JSON text produced for `json`-typed
   values keep the order the author wrote. No crate is added. See
   `darkmatter/docs/dependencies.md`, which also covers how Darkmatter's
   custom JSON Schema formats read in other validators.

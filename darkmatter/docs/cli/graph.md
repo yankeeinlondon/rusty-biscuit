@@ -6,15 +6,27 @@ references (links, images, imports) and transclusion directives (`::file`,
 
 ## Usage
 
-```
-md graph <FILE> [--follow] [--validate] [--json]
+```text
+md graph <FILE> [--follow] [--validate] [--output <TARGET>] [--width <WIDTH>]
 ```
 
 | Flag         | Description                                              |
 | ------------ | -------------------------------------------------------- |
 | `--follow`   | Recursively expand followable transclusions (composed view). Alias: `--compose` |
-| `--validate` | Validate references and show inline status with exit code 2 on errors |
-| `--json`     | Output the graph as JSON instead of a terminal tree (always exits 0) |
+| `--validate` | Validate references, show inline status, and exit with status 1 on errors |
+| `--output`   | What to print: `terminal` (default), `plain`, `markdown`, `markdown-plus`, `html` (alias `browser`), `json`, `json5`, `yaml`, or `toml`. See [Output and Width](./output-and-width.md) |
+| `--width`    | Width lines are cut off at. See [Line Truncation](#line-truncation) |
+
+## Output
+
+`md graph` accepts both output families, and everything it prints is its deliverable,
+so it goes to stdout.
+
+| `--output` | What you get |
+|---|---|
+| `terminal` (default), `plain` | the tree described below; `terminal` falls back to the `plain` bytes on a pipe |
+| `markdown`, `markdown-plus`, `html` | the tree as a code block, then with `--validate` the report in that form |
+| `json`, `json5`, `yaml`, `toml` | [the graph as data](#data-output) |
 
 ## Mental Model
 
@@ -239,28 +251,34 @@ When `--validate` is enabled:
   cyan (info).
 - A suffix is appended to invalid references: `[missing]`, `[invalid url]`,
   `[unreachable]`, `[unsupported]`, `[missing fragment]`, or `[issue]`.
-- After the tree, error-severity issues are printed grouped by category with
-  the source document as a clickable link (OSC 8) and the broken target in red:
+- After the tree, error-severity issues are printed as the
+  [reference report](./validate.md#the-reference-report), the same report
+  `md validate refs` and `md compose` print:
 
+  ```text
+      ╭── 📄 ./missing.md [missing]
+      │
+  📄 broken.md
+
+  Broken references in broken.md
+
+  broken.md
+    file not found in hyperlink  `./missing.md`  broken.md:3:5
+
+  Checked 1 reference across 1 document: 0 ok, 1 broken
   ```
-  Invalid Hyperlink(s)
-  - the preparation.md reference to @darkmatter/docs/text-replacement.md is not valid
-  - the preparation.md reference to @darkmatter/docs/interpolation.md is not valid
 
-  19 references scanned, 17 valid, 2 issues
-  ```
+- Exit status 1 is returned if any validation errors exist.
 
-  Categories include: Invalid Hyperlink(s), Invalid Image Reference(s),
-  Invalid Transclusion Target(s), Invalid CSS Import(s), Invalid Script
-  Import(s), Invalid Font Import(s), and Invalid Meta Tag(s).
-- A summary footer shows `N references scanned, M valid, K issues`.
-- Exit code 2 is returned if any validation errors exist.
+## Data Output
 
-## JSON Output Mode (`--json`)
-
-When `--json` is passed, the graph is emitted as structured JSON to stdout
-instead of a terminal tree. The exit code is always 0 — validation status is
-conveyed via the `validation.valid` boolean.
+A data output prints the graph to stdout as one value. Validation status is in
+`validation.valid`, and the exit status agrees: 0 without `--validate` or when the
+document is valid, and 1 when `--validate` finds errors. A failing run also has
+`outcome: "failure"` and one entry in `diagnostics` per problem, in the
+[diagnostic format](./data-contracts.md#diagnostics). A file that cannot be read has
+no graph to print, so it is
+`{ "outcome": "failure", "diagnostics": [...], "value": null }`.
 
 ### Structure
 
@@ -327,7 +345,7 @@ conveyed via the `validation.valid` boolean.
 
 ## TTY Formatting
 
-When outputting to a terminal (TTY detected):
+On a color terminal, `--output terminal` uses these styles:
 
 | Element                | Style                                                    |
 | ---------------------- | -------------------------------------------------------- |
@@ -339,10 +357,29 @@ When outputting to a terminal (TTY detected):
 | Prologue/epilogue desc | Dim + italic (literal) or dim + italic + blue (file ref) |
 | Validation errors      | Red (error), yellow (warning), cyan (info)               |
 
-When piped (non-TTY): plain text with no ANSI escape codes.
+Anywhere else, including on a pipe, the output is `plain`: no ANSI escape codes.
 
 ## Line Truncation
 
-Lines exceeding the terminal width are truncated with an ellipsis (`…`).
+A tree line longer than the resolved [width](./output-and-width.md#choosing-a-width)
+is cut off with an ellipsis (`…`) rather than wrapped, so the line art stays aligned.
 Truncation is ANSI-aware (escape sequences don't count toward the column
 budget) and Unicode-aware (multi-byte characters measured by display width).
+
+On a pipe with no `--width` and no `OUTPUT_COLUMNS`, nothing is cut off.
+
+```text
+$ md graph broken.md --width 20
+    ╭── 📄 ./missin…
+    ├── 📄 #setup
+    │
+📄 broken.md
+    │
+    ╰◀─ 📄 ./child.…
+```
+
+## Removed spellings
+
+| Removed | Use instead |
+|---|---|
+| `--json` | `--output json` |

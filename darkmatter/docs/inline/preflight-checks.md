@@ -500,8 +500,14 @@ When Darkmatter is used through an external orchestrator (such as Claudine), the
 ```md
 ::code &src/main.rs                     resolved; recorded in the report's graph
 ::toc-linking "&missing.md | false"     suppressed; no error
-::toc-linking &missing.md               fails pre-flight with `failure: no-match`
+::toc-linking &missing.md               fails pre-flight with the class `no-match`
 ```
+
+The library returns that failure as a typed error, whose block ends in a
+`failure: no-match` row. `md compose` finds the same target in its earlier
+reference check and lists it in the
+[reference report](../errors/file-reference-failures.md#the-reference-report), whose
+data outputs carry the class in `failure`.
 
 Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightReport::preflight_graph` as a `PreflightTargetEdge` on its document's node (`targets`), separate from the `::file` edges that composition reuses.
 

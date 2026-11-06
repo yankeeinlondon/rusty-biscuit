@@ -20,6 +20,12 @@
     - All styling is provided via CSS and we use CSS variables where we can (_see [CSS Variables](css-variables.md) document for more details_)
     - The CSS will be embedded inline into the page
     - In cases where some rendering features require [Javascript](./inline-javascript.md) to achieve their outcome, we will transparently add the required Javascript inline to the HTML as well.
-- **AST**
-    - We can export in the [MDAST](https://github.com/syntax-tree/mdast) AST format (which uses a JSON payload)
+- **Plain**
+    - The text of the terminal output with no color, styling, or clickable links, for pipes and files
+- **Data**
+    - JSON, JSON5, YAML, or TOML describing the run: the document plus every diagnostic (see [Data contracts](../cli/data-contracts.md))
+
+Choose one with `--output`; see [Output and width](../cli/output-and-width.md).
+
+The library can also export the [MDAST](https://github.com/syntax-tree/mdast) AST (`Markdown::as_ast`).
 

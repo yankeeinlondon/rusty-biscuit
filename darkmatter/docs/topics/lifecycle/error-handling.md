@@ -18,7 +18,7 @@ The short version for `md compose`:
 | The lifecycle itself is malformed, or the root cannot be read | none | no | 1 |
 | An error in `initialize` | `failed`, `finalize` | no | 1 |
 | Preflight: a refused shell command | `failed`, `finalize` | no | 1 |
-| Preflight: unresolved references (a missing include, a broken link) | `failed`, `finalize` | no | 2 |
+| Preflight: unresolved references (a missing include, a broken link) | `failed`, `finalize` | no | 1 |
 | An error in `composed` | `finalize` | no | 1 |
 | Writing the document (for example a closed stdout pipe) | `finalize` | partly, never repeated | 1 |
 | An error in `failed` or `finalize` | see [Errors inside cleanup](#errors-inside-cleanup) | — | 1 |
@@ -38,7 +38,7 @@ flowchart TD
     W -->|write failed| Z
     W --> Z[finalize]
     F --> Z
-    Z --> E[exit: 0 on success, 1 or 2 on failure]
+    Z --> E[exit: 0 on success, 1 on failure]
 ```
 
 ### Before the run starts
@@ -72,8 +72,8 @@ Shells are still locked in that `failed` and `finalize`: preflight never
 succeeded, so a `shell` action there is refused, and the refusal becomes the
 run's error.
 
-Unresolved references exit with status 2, as they do without a lifecycle.
-If a cleanup error replaces that refusal as the selected error, the exit is 1.
+Unresolved references exit with status 1, as they do without a lifecycle.
+Status 2 means only that the command line itself was wrong, and nothing ran.
 
 ### `composed` and the document write: `finalize` without `failed`
 

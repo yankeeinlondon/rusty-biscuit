@@ -18,10 +18,16 @@ md get doc.md title author tags
 # Read from stdin
 cat doc.md | md get - title
 
-# Alternate output formats
-md get doc.md title --yaml
-md get doc.md title --json5
-md get doc.md title count --toml
+# Raw values for the shell: strings unquoted, null as empty
+TITLE=$(md get doc.md title --output plain)
+
+# Alternate data formats
+md get doc.md title --output yaml
+md get doc.md title --output json5
+md get doc.md title count --output toml
+
+# Arrays and objects on one line
+md get doc.md tags --compact
 ```
 
 ### Arguments
@@ -31,9 +37,9 @@ md get doc.md title count --toml
 
 ### Options
 
-- `--json5`: output as JSON5.
-- `--yaml`: output as YAML.
-- `--toml`: output as TOML.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: what to print (default: `json`). See [Output Behavior](#output-behavior).
+- `--compact`: print arrays and objects on a single line. Valid only with `--output json` or `--output json5`; with any other output it is a usage error (exit status 2).
+- `--width <N|N%|auto|source|unlimited>`: accepted like on every command. It has no effect, because `md get` prints no prose.
 
 ### Output Behavior
 
@@ -47,18 +53,53 @@ md get doc.md title count --toml
 - Returns an object/map containing requested keys.
 - Missing keys are included with empty-string values.
 
-**Default format**
+**Default output**
 
-- Pretty-printed JSON.
+- Pretty-printed JSON, on a terminal and on a pipe.
 
-### Format Selection Notes
+**`--output plain`**
 
-- If multiple format flags are passed, precedence is:
-    - `--json5` first
-    - then `--yaml`
-    - then `--toml`
-    - otherwise JSON
-- TOML output wraps scalar single-property values under `value = ...` because TOML requires a table root.
+- The raw value, for shell use: a string unquoted, `null` as empty, a list as one
+  item per line, an object as `key: value` lines. `terminal` prints the same text.
+  `markdown`, `markdown-plus`, and `html` carry the same text in that form.
+
+```text
+$ md get doc.md tags
+[
+  "a",
+  "b"
+]
+
+$ md get doc.md tags --output plain
+a
+b
+
+$ md get doc.md title count --output plain
+title: Notes
+count: 3
+```
+
+**Data outputs**
+
+- A clean success is the bare value, because the keys are yours and a property
+  called `outcome` must not collide with anything. A TOML output wraps a value that
+  is not an object as `value = ...`, because TOML requires a table root.
+- A run with something to say wraps the value. A failure has `value: null` and a
+  warning keeps the value:
+
+```text
+$ md get doc.md title --width 72.9
+{
+  "outcome": "success",
+  "diagnostics": [{ "code": "dm.output.fractional_width", "...": "..." }],
+  "value": "Notes"
+}
+```
+
+A failure is status 1. The default output prints that wrapped value on stdout, and a
+formatted output writes the error to stderr. See
+[Output and Width](./output-and-width.md) and
+[Data Contracts](./data-contracts.md#other-commands).
 
 ### Property Lookup Scope
 
@@ -69,8 +110,15 @@ md get doc.md title count --toml
 
 - Returning empty strings for missing keys keeps shell usage simple and predictable.
 - Multi-property output shape is stable for script consumption.
-- JSON5/YAML/TOML output options make interop with config tooling easier.
+- JSON5, YAML, and TOML outputs make interop with config tooling easier.
 
 ## Issues
 
 - Missing and intentionally-empty string values are indistinguishable in CLI output.
+
+## Removed spellings
+
+| Removed | Use instead |
+|---|---|
+| `--raw` | `--output plain` |
+| `--json5`, `--yaml`, `--toml` | `--output json5`, `--output yaml`, `--output toml` |

@@ -18,11 +18,11 @@ It analyzes:
 # Human-readable report
 md delta base.md updated.md
 
-# JSON report
-md delta base.md updated.md --json
+# Data for a script
+md delta base.md updated.md --output json
 
-# Verbose report (root-level flag)
-md -v delta base.md updated.md
+# Verbose report
+md delta base.md updated.md -v
 ```
 
 ### Arguments
@@ -32,7 +32,19 @@ md -v delta base.md updated.md
 
 ### Options
 
-- `--json`: emit structured JSON instead of text report.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: what to print (default: `terminal`).
+- `--width <N|N%|auto|source|unlimited>`: accepted like on every command; the report's rows are not wrapped.
+
+### Output
+
+`md delta` accepts both output families. The report is plain text and holds no
+escape codes on a pipe. `markdown`, `markdown-plus`, and `html` print the same text
+as one code block. A data output prints one value, and writes nothing to stderr. A
+failure, such as a file that cannot be read, is status 1: a formatted output writes
+the error to stderr, and a data output prints
+`{ "outcome": "failure", "diagnostics": [...], "value": null }`. See
+[Output and Width](./output-and-width.md) and
+[Data Contracts](./data-contracts.md#other-commands).
 
 ### Classification Header
 
@@ -65,7 +77,7 @@ The header includes a content-change percentage.
 
 ### Verbose Mode
 
-Use `md -v delta ...`.
+Use `md delta ... -v` or `md -v delta ...`. It applies to formatted outputs only.
 
 Verbose output adds:
 
@@ -73,9 +85,9 @@ Verbose output adds:
 - line numbers where available
 - visual diff blocks for changed frontmatter/content sections
 
-### JSON Output
+### Data Output
 
-JSON includes the same core analysis in machine-readable form, including:
+A data output includes the same core analysis in machine-readable form, including:
 
 - `classification`
 - `statistics`
@@ -99,3 +111,9 @@ JSON includes the same core analysis in machine-readable form, including:
 ## Issues
 
 - There is no built-in filter to limit report categories (for example, only links or only frontmatter).
+
+## Removed spellings
+
+| Removed | Use instead |
+|---|---|
+| `--json` | `--output json` |

@@ -124,7 +124,7 @@ feature layer.
   reports (the frontmatter YAML parse error, the `dm.schema.*` codes, and the
   expression call codes such as `dm.expression.incompatible_call`) is defined
   once in the `darkmatter` library, and `codes.rs` re-exports it. So
-  `md compose`, `md compose --output report-json`, and the editor always spell
+  `md compose`, `md compose --output json`, and the editor always spell
   it the same way.
 - **Adding a code.** Add a documented constant to `codes.rs` and a row to the
   layer table below. When composition reports the same condition, define the
@@ -265,7 +265,7 @@ content_policy:
   - action: archive  # data: {"instance_path": "/content_policy/2"}
 ```
 
-The pointer is the same one `md schema validate --format json` reports as
+The pointer is the same one `md schema validate --output json` reports as
 `path`: a missing or unknown key's pointer names the parent object, and the
 message names the key. A file-reference failure carries both keys,
 `{"instance_path": "/spec", "resolution_failure": "NoMatch"}`.

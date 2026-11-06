@@ -116,7 +116,7 @@ Full doc: `darkmatter/docs/rendering/mermaid.md#embedded-font`.
   frontmatter key. `md --feature
   embed-mermaid-font` (`args::Feature`, lowered by
   `render::apply_features` inside `artifact::html_page`) sets it on every
-  HTML page `md` builds (`render`, implicit render, `compose --output html`);
+  HTML page `md` builds (`render`, implicit render);
   `md`'s HTML is never static SVG today, so the output is unchanged.
 - `code_renderer.rs` renders each static diagram with
   `with_embedded_font(true)` + `render_to_svg_with_font` and collects its

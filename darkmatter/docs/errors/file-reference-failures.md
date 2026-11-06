@@ -3,11 +3,12 @@ kind: canonical-documentation
 ---
 # File Reference Failures
 
-When a file reference cannot be resolved, `md` says **why** in one stable
-row: `failure: <class>`. Read that row, not the message, when you script
-against `md` output or decide how to fix a reference. The message names the
-reference and the directories it searched, and its wording may change; the
-row does not.
+When a file reference cannot be resolved, `md` says **why** with one stable
+class: a `failure: <class>` row in an error block, or a `failure` field in a
+[data output](../cli/data-contracts.md). Read the class, not the message, when
+you decide how to fix a reference, and read the data output's field when you
+script against `md`. The message names the reference and the directories it
+searched, and its wording may change; the class does not.
 
 ```text
 ⤫ TransclusionError: file reference failure
@@ -34,9 +35,11 @@ The rows are the kebab-case names of biscuit-file's `ResolutionFailure`
 classes (`NoMatch`, `InvalidReference`, `MissingContext`, `Io`,
 `UnsupportedRemote`).
 
-## Where the row appears
+## Where the class appears
 
-Every surface that reports a failed file reference carries the row.
+Every surface that reports a failed file reference names the class. The
+[reference report](#the-reference-report) states it as a reason phrase and in
+its data; the other surfaces print the row.
 
 A **`md` argument** that resolves to nothing:
 
@@ -49,12 +52,12 @@ $ md compose '&/nothing.md'
 ┃ failure: no-match
 ```
 
-Every command that reads a file argument reports it this way (see
+Commands that read a file argument report it this way (see
 [Every file argument uses this grammar](../cli/index.md#every-file-argument-uses-this-grammar)),
 including a malformed one:
 
 ```text
-$ md schema detect '@'
+$ md toc '@'
 ⤫ FileReferenceError: file argument not resolved
 ┃
 ┃ The argument @ did not resolve to a file.
@@ -66,19 +69,14 @@ $ md schema detect '@'
 ```
 
 `md schema validate` prints the same block under the file's
-`could not be opened` line, and its `--format json` record carries
+`could not be opened` line, and its `--output json` record carries
 `"error": "file_reference"` and `"failure": "<class>"`. `md schema triggers`
 on a document outside every repository prints `failure: missing-context`.
 
-A **transclusion** (`::file`, `::code`, `::toc-linking <file>`) found invalid
-before composition:
-
-```text
-Invalid Transclusion Target(s)
-- the guide.md reference to ./missing.md is not valid
-
-  failure: no-match
-```
+`md schema detect`'s formatted output is the exception: it prints
+`Error: Failed to load file: "@"` with no row. In a data output, every other command
+reports such an argument as a `dm.input.read_failure` diagnostic whose `failure` field
+is the class and whose `reference` field is the argument as written.
 
 A **schema `file` value**, both in `md compose`'s error block and in
 `md schema validate`, here for a `docs/schema.md` whose fourth line is
@@ -93,7 +91,9 @@ A **schema `file` value**, both in `md compose`'s error block and in
 ```
 
 A **tolerated failure**, where composition replaced the content with a
-notice and carried on, prints the same row under its warning on stderr.
+notice and carried on, prints the same row under its warning on stderr. A library
+caller that composes without the reference check gets the row at the end of the
+typed error's block (`TocLinkingError::Unresolved`, a transclusion error).
 
 A **glob reference** reports the class its pattern's prefix would give a
 single file reference. `::file-links <glob>` prints the row under its
@@ -117,6 +117,42 @@ that actually failed, however deep it is.
 `claudine compose`, `inline-compose`, and `sequence` print the same row:
 on a failed transclusion, on a schema `file` value (one row per failing
 value, below the problem list), and under a tolerated failure's warning.
+
+### The reference report
+
+`md compose` checks the references in a document and everything it transcludes
+before composing, and prints every broken one together. `md validate refs` and
+`md graph --validate` print the same report. Problems are grouped by the document
+that holds them, and each row gives the reason, the construct, the reference as
+written, and where it is:
+
+```text
+$ md compose guide.md
+Broken references in guide.md
+
+guide.md
+  file not found in hyperlink  `./missing.md`  guide.md:3:5
+
+shared/intro.md (transcluded at guide.md:8)
+  file not found in `::code`  `./examples/basic.rs`  intro.md:9:1
+
+Checked 5 references across 2 documents: 3 ok, 2 broken
+```
+
+The report has no `failure:` row, because its reason phrase says the same thing
+in plain words. To script against it, ask for a data output and read each
+diagnostic's `failure` field, which holds the class in the table above:
+
+```text
+$ md compose guide.md --output json | jq -r '.diagnostics[] | "\(.failure) \(.reference)"'
+no-match ./missing.md
+no-match ./examples/basic.rs
+```
+
+A diagnostic's `line` and `column` are
+[authored positions](./composition-problems.md#how-a-problem-is-located).
+References are collected before anything stops; see
+[What stops a run](./composition-problems.md#what-stops-a-run).
 
 ## A miss that looks like a glob
 

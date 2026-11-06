@@ -79,7 +79,8 @@ built from a `RequestSnapshot`. A source-derived file reference must resolve
 against a context derived from that one. User-facing docs:
 `darkmatter/docs/topics/compose-requests.md` (API, builder, Mermaid),
 `topics/file-referencing.md` (forms and tree rule), and
-`errors/file-reference-failures.md` (the `failure:` row).
+`errors/file-reference-failures.md` (the `failure:` row and data field), and
+`errors/composition-problems.md` (stopping rules, authored positions).
 
 The root compose pipeline is ordered: the passive call check (a proven-bad
 call in any branch rejects the document before anything runs); frontmatter
@@ -242,9 +243,10 @@ themes, disclosure blocks, browser safety, or the render-tree fold.
 
 ## CLI orientation
 
-The binary is `md`: `compose`, `clean`, `read`, `toc`, `delta`, `schema
-validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter),
-`code-block`, `graph`, and reference commands.
+The binary is `md`: `render`, `compose`, `clean`, `toc`, `delta`, `schema
+validate|detect|about|triggers`, `hash`, `get|set|rm` (frontmatter), `edit`,
+`code-block`, `graph`, and `validate refs`. Users' contract:
+`docs/cli/output-and-width.md` and `docs/cli/data-contracts.md`.
 
 Checks are relaxed or tightened only through three verbs: `--allow <id|all>`
 (a recovery, or `host=HOST`), `--deny <id|all>` (make diagnostics blocking),
@@ -297,9 +299,14 @@ that spell the schema path inside each `#[test]`;
 named types are closed, unlike its root object, so a type must list every field.
 A schema root is an object: a scalar result is judged under `value`.
 
-Link titles (`dm.link.malformed_structured_title`,
-`dm.link.legacy_structured_title`) are interpreted only by
-`renderable::output::link_metadata::parse_link_title`; `Link` stores the notice
+Link titles are JSON5 objects or plain text (`docs/topics/hyperlinking.md`); a
+leftover `key=value` title is plain text with a warning until `md clean`
+migrates it (`cleanup::link_titles`, see [cleanup.md](cleanup.md)). Image titles
+keep their own syntax (`render/image_ref.rs`). Titles
+(`dm.link.malformed_structured_title`, `dm.link.legacy_structured_title`) are
+interpreted only by
+`renderable::output::link_metadata::parse_link_title`, which reports a neutral
+notice; `compose::policy::link_title_code` gives its code. `Link` stores the notice
 (`title_notice`) and never prints. Composition reports them from
 `compose::link_title_warnings`, keyed by the link's authored start: once before
 anything runs (so a failed run keeps them and `--deny` stops first) and once
@@ -313,7 +320,9 @@ keeps `documents` (one entry per inclusion, depth-first, empty documents
 included) so grouping by `(source, included_via)` and the document count never
 infer scope from issues; neither `documents` nor `references` is serialized, and
 issue JSON reports authored `line`/`column`, `section`, `inserted`, and
-`included_via`, null where unknown. `as_prose()` is the Markdown/HTML document;
+`included_via`, null where unknown (`ReferenceOrigin::line`/`span` stay prepared
+coordinates, for graph walkers only; `origin.authored` is the projection).
+`as_prose()` is the Markdown/HTML document;
 `render_terminal` rebuilds the same structure with bare `file://` URIs
 and `heading` as a link parameter. Compose and `md graph --validate` show errors
 (compose prints nothing when there are none), `md validate refs` shows all

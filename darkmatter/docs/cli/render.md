@@ -1,6 +1,13 @@
 ## Overview
 
-The `render` command renders markdown documents for terminal viewing or export formats.
+The `render` command renders markdown documents for terminal viewing or export
+formats, and is where any Markdown, including the output of
+[`md compose`](./compose.md), turns into something else:
+
+```bash
+md compose doc.md | md
+md compose doc.md | md render --output html > doc.html
+```
 
 `render` is functionally equivalent to running `md` with no subcommand:
 
@@ -27,12 +34,17 @@ md README.md
 md render -
 cat README.md | md render
 
-# Select output format
+# Select an output
+md render README.md --output plain
 md render README.md --output markdown
 md render README.md --output html
 md render README.md --output json
 
-# Open selected output via temp artifact
+# Wrap prose at 72 columns, or at 80% of the terminal
+md render README.md --width 72
+md render README.md --width 80%
+
+# Open the selected output in the default app
 md render README.md --output html --show
 
 # Override list indentation
@@ -49,14 +61,17 @@ md render README.md --code-block same    # match the terminal's mode
 
 ### Options
 
-- `--output <auto|markdown|text|html|json|ast>`: Output format (default: `auto`).
-- `--show`: Write output to a temp file and open it with the system default app.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: What to print (default: `terminal`). See [Output Behavior](#output-behavior).
+- `--width <N|N%|auto|source|unlimited>`: Width the output is wrapped to (default: `auto`). See [Output and Width](./output-and-width.md#choosing-a-width).
+- `--max-width <N>`: Cap the content width inside `--width`. It exists only on this command and `md FILE`; zero is a usage error.
+- `--show`: Write output to a temp file and open it with the system default app. See [Opening the Output](#opening-the-output).
 - `--indent <#>`: Enforce a nested-list indentation step of 2, 4, or 8 spaces per level. Default: 4. For an eight-space step, cleanup uses CommonMark-valid marker padding on parent items when needed to preserve the same list tree.
 
 ### Global Flags Relevant to `render`
 
 These are top-level flags (not render-specific) but affect `render` behavior:
 
+- `--list-themes`: list the available theme names and exit
 - `--theme <NAME>`: prose theme
 - `--code-theme <NAME>`: code theme override (selects *which* theme pair, e.g. `dracula`)
 - `--code-block <inverse|dark|light|same>`: selects *which variant* of the code
@@ -69,6 +84,8 @@ These are top-level flags (not render-specific) but affect `render` behavior:
     - `same`: match the terminal's own mode.
   The panel's light/dark choice is derived from the terminal (the same source as
   the page), so it stays consistent regardless of environment color detection.
+  A theme name is mode-agnostic, because every theme is a light and dark pair.
+  HTML output always uses the `inverse` variant.
 - `--line-numbers`: include code line numbers in terminal rendering
 - `--mermaid`: in terminal output, render Mermaid diagrams in automatic mode: an
   image where the terminal shows images, otherwise a text drawing when the
@@ -77,12 +94,17 @@ These are top-level flags (not render-specific) but affect `render` behavior:
   and JSON output ignore it.
 - `--feature <NAME>`: turn on a named feature (see [Features](#features) below)
 
+### Environment
+
+- `OUTPUT_COLUMNS`: the width used when `--width` is absent; see [How the width is decided](./output-and-width.md#how-the-width-is-decided).
+- `TERMINAL_IMAGES`: terminal image output. A truthy value (`true`, `1`, `yes`, `on`) forces protocol image output attempts, a falsy one (`false`, `0`, `no`, `off`) disables it, and anything else uses capability detection.
+
 ### Features
 
 `--feature <NAME>` turns on an opt-in by name. It is accepted at the top level
 (`md --feature NAME doc.md`, before a subcommand) and on `render`
 (`md render doc.md --feature NAME`); both lists are combined. The top-level
-form also reaches `md --feature NAME compose doc.md --output html`.
+form is also accepted before other subcommands (`md --feature NAME compose doc.md`).
 
 - Repeatable and comma-separated: `--feature a --feature b` is the same as
   `--feature a,b`.
@@ -167,28 +189,87 @@ md --mermaid render flow.md --feature no-mermaid-partial-warning   # drawing, no
 
 ### Output Behavior
 
-**`--output auto` (default)**
+`md render` accepts both output families. Its default, `terminal`, is styled text
+on a color terminal and the same bytes as `plain` everywhere else, including on a
+pipe. A script that wants Markdown asks for it by name.
 
-- If stdout is a TTY: renders styled terminal output.
-- If stdout is not a TTY: emits markdown text.
+| `--output` | stdout | stderr |
+|---|---|---|
+| `terminal` (default), `plain`, `markdown`, `markdown-plus`, `html` | the rendered document | style and link-title warnings |
+| `json`, `json5`, `yaml`, `toml` | one [envelope](./data-contracts.md#md-compose-and-md-render) | nothing |
 
-**`--output markdown|html|json`**
+Warnings about unknown or deprecated `style:` keys (`dm.style.unknown_key`,
+`dm.style.deprecated`) and link titles are written to stderr in a formatted output
+and appear in `diagnostics` in a data output. `--deny style` makes both block, and
+`--deny <code>` makes just that one block, for every output. `--output markdown`
+builds no page, so it does not otherwise report the `style:` warnings. `md render` runs no reference check,
+so the envelope's `summary` is `null`. To check references, use
+[`md validate refs`](./validate.md).
 
-- Emits selected format to stdout.
+````text
+$ md render notes.md --output plain
+Notes
 
-**`--show` behavior**
+This is bold text with `inline code` and a link.
 
-- In explicit format modes, output is opened from a temp file; the artifact is not printed to stdout.
-- In `auto` mode on a TTY, terminal rendering is still printed, and markdown artifact is opened.
-- `MD_DRY_RUN=1` writes the temp artifact but skips launching the viewer.
+```yaml
+name: string(required)
+```
+````
+
+See [What `plain` keeps](./output-and-width.md#what-plain-keeps) for how each element
+prints, and [Links and images that cannot be clickable](./output-and-width.md#links-and-images-that-cannot-be-clickable)
+for what `-v` adds.
+
+### Width
+
+`--width` wraps prose in every formatted output. With no `--width`, the width comes
+from `OUTPUT_COLUMNS`, then a real terminal; on a pipe with neither, nothing wraps.
+
+```bash
+md render notes.md --width 72 --output plain     # paragraphs wrap at 72 columns
+md render notes.md --width unlimited             # one line per paragraph, nothing padded
+md render notes.md --width source --output plain # keep the authored line breaks
+```
+
+`--output markdown` and a data output's `document` are the document's source text.
+With no known width they keep the source lines. Given a width, each authored line
+wraps at that width and the breaks between them stay; `--width unlimited` joins a
+paragraph's lines.
+
+### Opening the Output
+
+| Run | stdout | Opened |
+|---|---|---|
+| `--output markdown`, `markdown-plus`, or `html` | nothing | that output |
+| `terminal`, `plain` | the text | the document's Markdown |
+| a data output | the value | the value, as a file of that type |
+
+`MD_DRY_RUN=1` writes the temp file but skips launching the viewer. A failure to
+open the file fails the run with status 1. See
+[Opening the output in an app](./output-and-width.md#opening-the-output-in-an-app).
+
+### Removed spellings
+
+These are usage errors (exit status 2).
+
+| Removed | Use instead |
+|---|---|
+| `--output auto` | no `--output`: `terminal` falls back to `plain` by itself |
+| `--output text` | `--output markdown` |
+| `--output json` as the document AST, `--output ast` | no replacement: the document AST is not an output, and `--output json` prints the envelope |
+| `md render --save` | `md clean --save`, or the shorthand `md FILE --save` |
+| `--html`, `--show-html` | `--output html`, `--output html --show` |
+| `--ast`, top-level `--json` | `--output json` for the envelope; the document AST is not an output |
+| `--no-images` | `TERMINAL_IMAGES=0` |
+| top-level `--toc`, `--delta` | [`md toc`](./toc.md), [`md delta`](./delta.md) |
 
 ## Lessons Learned
 
-- `auto` mode gives good defaults for both interactive terminals and pipelines.
+- A single `terminal` default that falls back to `plain` gives good results for both interactive terminals and pipelines.
 - `render` and implicit `md [INPUT]` share the same core path, so behavior remains aligned.
 - Theme and rendering controls are intentionally global CLI flags.
 
 ## Issues
 
 - `render` has no command-local theme flags; theming is configured at root CLI level.
-- `--show` behavior differs slightly in `auto` TTY mode versus explicit format modes.

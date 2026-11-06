@@ -10,42 +10,49 @@ Use `md --help` to see all available options.
 Usage: md [OPTIONS] [INPUT] [COMMAND]
 
 Commands:
-  render   Render a markdown document (same as default behavior without a subcommand)
-  clean    Clean up markdown formatting
-  compose  Compose a document through the compose pipeline
-  toc      Show markdown table of contents
-  delta    Compare two markdown documents
-  get      Get frontmatter properties from a markdown document
-  set      Set a frontmatter property on a markdown document
-  rm       Remove one or more frontmatter properties from a markdown document
-  edit     Open a markdown file in your preferred editor
-  validate Validate references in a markdown document
-  hash     Hash a markdown document's frontmatter and body
-  graph    Visualize a markdown file's dependency graph
+  render      Render a markdown document (same as default behavior without a subcommand)
+  clean       Clean up markdown formatting
+  compose     Compose a document through the compose pipeline
+  toc         Show markdown table of contents
+  delta       Compare two markdown documents
+  get         Get frontmatter properties from a markdown document
+  set         Set a frontmatter property on a markdown document
+  rm          Remove one or more frontmatter properties from a markdown document
+  edit        Open a markdown file in your preferred editor
+  validate    Validate references in a markdown document
+  hash        Hash a markdown document's frontmatter and body
+  schema      Schema authoring and validation commands
+  graph       Visualize a markdown file's dependency graph
+  code-block  Render a single code block from a file or literal content
 
 Arguments:
-  [INPUT]  Input file path (reads from stdin if not provided, use "-" for explicit stdin)
+  [INPUT]  Input file path (use "-" for stdin)
 ```
 
-Commands that have a policy choice share three verbs, `--allow`, `--deny`, and `--disable`; see [Policy Flags](./policy.md).
+Three things work the same way on every command:
 
-`md compose --output report-json` prints the outcome, every diagnostic, and the document as one JSON object; see [Composition Report](./report-json.md).
+- **[Output and Width](./output-and-width.md)**: one `--output` selector with two families (formatted and data), one `--width`, one rule for where things are written, and one meaning for exit statuses 0, 1, and 2.
+- **[Data Contracts](./data-contracts.md)**: the value each command prints with `--output json`, `json5`, `yaml`, or `toml`, including every diagnostic.
+- **[Policy Flags](./policy.md)**: commands that have a policy choice share three verbs, `--allow`, `--deny`, and `--disable`.
 
 ## Subcommands
 
 > Use the links to move into a more detailed description of each of the commands
 
-- [`render <file-reference>`](./render.md) - renders a Markdown file into one of the supported formats; if no `--output <output>` is specified then the format defaults to being the Terminal (aka, using escape codes to make the Markdown look nice)
+- [`render <file-reference>`](./render.md) - renders a Markdown file into one of the supported outputs; if no `--output <target>` is specified then it uses `terminal` (escape codes to make the Markdown look nice), which falls back to `plain` on a pipe
 - [`clean <file-reference>`](./clean.md) - cleans up the Markdown file by ensuring good headings structure, consistent indent levels, use of proper vertical spacing. Sends fixed file to STDOUT unless the `--save` switch is used
-- [`compose <file-reference>`](./compose.md) - runs the referenced Markdown file through the [composition pipeline](../darkmatter-compose-pipeline.md) and returns the composed result to STDOUT as plain text Markdown content
+- [`compose <file-reference>`](./compose.md) - runs the referenced Markdown file through the [composition pipeline](../darkmatter-compose-pipeline.md) and returns the composed Markdown to STDOUT, or the document and every problem as data; pipe it to `md render` for any other output
 - [`toc <file-ref>`](./toc.md) - shows the table of contents for the file referenced
 - [`delta <file-ref> <file-ref>`](./delta.md) - describes the changes found between the two Markdown files. Uses a structured analysis to describe semantically what's changed. Adds visual diffing if you use the `--verbose` flag.
 - [`get <file-ref> <prop>`](./get.md) - extracts a property from the Markdown file referenced
-- [`set <file-ref> <prop> <value>`](./set.md) - sets a frontmatter property on the referenced Markdown file; also supports the syntax `set <file-ref> <json5>` to set a dictionary of values.
+- [`set <file-ref> <prop> <value>`](./set.md) - sets a frontmatter property on the referenced Markdown file
 - [`rm <file-ref> <prop>`](./rm.md) - removes a Frontmatter property on the referenced Markdown file
 - [`edit <file-ref>`](./edit.md) - opens the referenced Markdown file and blocks until the user closes that file in their editor.
-- [`validate <file-ref>`](./validate.md) - validates references (links, images, transclusions) in the document.
+- [`validate refs <file-ref>`](./validate.md) - validates references (links, images, transclusions) in the document and prints the reference report.
+- [`hash <file-ref>`](./hash.md) - computes Markdown-aware hashes, stores them, and reports drift from a stored hash.
 - [`graph <file-ref>`](./graph.md) - visualizes the dependency graph of the document.
+- [`schema <subcommand>`](./schema.md) - validates frontmatter and YAML documents against a schema, detects a schema from documents, explains schema triggers, and prints the schema language reference.
+- [`code-block <input>`](./code-block.md) - renders one code block from a file or from literal content.
 
 ## File References
 
@@ -88,11 +95,11 @@ An argument is parsed before anything is read, so text that is not valid referen
 ```text
 $ ls
 @   doc.md
-$ md get @ title            # a bare `@` is an introducer with no path
+$ md get @ title --output plain   # a bare `@` is an introducer with no path
 ⤫ FileReferenceError: file argument not resolved
 ┃ failure: invalid-reference
-$ md get ./@ title          # `./` names the literal file
-"Literal"
+$ md get ./@ title --output plain # `./` names the literal file
+Literal
 ```
 
 The same holds for a bare `&` or `^`, and for the removed `!` sigil (`md get '!old.md' title`). Spell a file whose name starts with one of these characters with `./` in front.
@@ -103,15 +110,39 @@ A few commands add a rule of their own:
 - **`md hash <directory>`** names its directory with the same grammar (`md hash '&docs'`); a relative directory may not leave the repository. The first place the reference looks that holds a file or a directory decides between hashing one document and a tree, so `md hash notes.md` hashes a nearer `notes.md` file before a repository-root `notes.md/` directory, and a place that cannot be checked fails with `failure: io`.
 - **`md edit <file>`** creates the file when the reference matches nothing, at the first place the reference would look: beside you for `./new.md` or `new.md`, at the repository root for `&new.md`. A malformed reference or a path leaving the repository is refused before any file is created or editor opened.
 - **`md schema triggers <file>`** inspects a document inside a repository and prints the file it opened on its `Document:` line, listing any trigger it [skipped as invalid](../topics/schemas/schema-triggers.md#invalid-discovered-triggers) under "Skipped invalid triggers" (the warning itself goes to stderr); a document outside every repository fails with `failure: missing-context`, and a schema root it cannot inspect (such as one below a folder without search permission) fails with an I/O error naming that root instead of listing the roots.
-- **`md schema validate`** reports an argument that does not open on that file's line (`could not be opened`, with its `failure:` row) and exits `3`, as for a file whose frontmatter cannot be parsed. Whether an argument is a whole YAML document is judged on the file it opened, so `md schema validate '@service.yaml'` validates YAML (see [YAML documents on the command line](../topics/schemas/definition.md#yaml-documents-on-the-command-line)).
+- **`md schema validate`** reports an argument that does not open on that file's line (`could not be opened`, with its `failure:` row) and exits `1`, as for a file whose frontmatter cannot be parsed. Whether an argument is a whole YAML document is judged on the file it opened, so `md schema validate '@service.yaml'` validates YAML (see [YAML documents on the command line](../topics/schemas/definition.md#yaml-documents-on-the-command-line)).
 
 To search more directories for `@` references, pass `--magic-root <DIR>` before the subcommand (`md --magic-root shared compose '@notes.md'`); it is repeatable and applies to every route. See [Magic Paths](../topics/magic-paths.md#from-the-md-command-line).
 
 The canonical reference for the full grammar — including the error vocabulary and the `resolve_detailed()` diagnostics — is [File References in `biscuit-file`](../../../biscuit-file/docs/topics/file-references.md). For how darkmatter injects its own `@` search roots, see [Magic Paths](../topics/magic-paths.md).
 
-All subcommands can consume STDIN as their (first) file reference:
+`render`, `compose`, `clean`, `toc`, `get`, `set`, and `hash` can consume STDIN as their (first) file reference; the other commands work on named files:
 
 ```sh
 # composes the file and then passes STDIN to `md` which to renders the Markdown for the terminal
 md compose foobar.md | md
 ```
+
+## Shell Completions
+
+`md` completes subcommands, flags, Markdown files (`.md`, `.dm`), and directories. Add the line for your shell to its startup file:
+
+```bash
+# Bash (~/.bashrc)
+source <(COMPLETE=bash md)
+
+# Zsh (~/.zshrc)
+source <(COMPLETE=zsh md)
+
+# Fish (~/.config/fish/config.fish)
+COMPLETE=fish md | source
+
+# PowerShell ($PROFILE)
+$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
+```
+
+`md --completions <SHELL>` prints the setup command for your shell, for `bash`, `elvish`, `fish`, `powershell`, or `zsh`.
+
+## Working on the CLI
+
+If you are changing `md` itself, see [Developing the CLI](./developing.md) for where the code lives and how its tests launch the binary.

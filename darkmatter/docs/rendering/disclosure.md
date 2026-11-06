@@ -31,9 +31,9 @@ Disclosure blocks are recognized during the render-tree fold and lowered differe
 |---|---|
 | `markdown` | DSL emitted verbatim: `::disclosure`, `::details`, `::end-disclosure`. |
 | `markdown-plus` | `<details><summary>…</summary>`, a blank line, the body as Markdown, then `</details>`. The summary line is raw HTML, which a reader does not parse as Markdown, so the summary is written as HTML: `License _terms_` becomes `<summary>License <em>terms</em></summary>`, and inline code becomes an escaped `<code>` element. Raw HTML in the summary is kept byte for byte; raw HTML holding a blank line would end the summary's HTML block, so it is lossy content (rejected under `Strict`, reported under `Warn`). |
-| `html` / `browser` | Native HTML `<details>` / `<summary>` elements; no JavaScript. |
+| `html` | Native HTML `<details>` / `<summary>` elements; no JavaScript. |
 | `terminal` | Summary rendered normally; body rendered as a block quote with dim and italic text. |
-| `json` / `ast` | Native `NodeKind::Disclosure` node in the render tree. |
+| the render tree (`Markdown::as_document`) | Native `NodeKind::Disclosure` node. |
 
 Use `--output markdown-plus` to render disclosures as inline HTML while keeping the rest of the document as Markdown. Use `--output html` for full HTML output.
 

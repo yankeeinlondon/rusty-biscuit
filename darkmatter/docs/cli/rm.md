@@ -12,36 +12,50 @@ md rm doc.md draft
 md rm doc.md draft wip temp
 
 # Verbose output (to stderr)
-md -v rm doc.md draft
+md rm doc.md draft -v
 
-# JSON output (to stdout)
-md rm doc.md draft --json
+# Report the result as data (to stdout)
+md rm doc.md draft --output json
 ```
 
 ## Arguments
 
-- `<INPUT>`: Markdown file path (supports `@` file references).
+- `<INPUT>`: Markdown file path (supports `@` file references). `md rm` edits a file in place, so it does not read stdin.
 - `<PROP>...`: One or more frontmatter property names to remove (required).
 
 ## Options
 
-- `--json`: Output result as JSON with `removed`, `remaining`, and `filename` fields.
+- `--output <terminal|plain|markdown|markdown-plus|html|browser|json|json5|yaml|toml>`: What to print (default: `terminal`). A data output reports the `removed`, `remaining`, and `filename` fields.
+- `--width <N|N%|auto|source|unlimited>`: Accepted like on every command. It has no effect, because `md rm` prints no prose.
 
 ## Output Behavior
 
-**Default (silent)**
+`md rm` accepts both output families. See
+[Output and Width](./output-and-width.md).
 
-- No output on success. Exit code 0.
-- If any requested property is not found, returns exit code 1 with an error message to stderr.
+**`terminal` (default) and `plain`: silent**
+
+- No output on success. Exit status 0.
+- If any requested property is not found, returns exit status 1 with an error
+  message on stderr.
+
+**`markdown`, `markdown-plus`, `html`: one sentence**
+
+- Asking for a document form by name prints one sentence on stdout:
+
+  ```text
+  $ md rm doc.md wip --output markdown
+  Removed `wip` from the frontmatter. Remaining: `title`, `draft`.
+  ```
 
 **Verbose (`-v`)**
 
-- Prints a human-readable summary to stderr:
-  `- removed the "prop" property from frontmatter (remaining: key1, key2)`
+- In a formatted output, also prints a human-readable summary to stderr:
+  `- removed the wip property from frontmatter (remaining: title, draft)`
 
-**JSON (`--json`)**
+**Data outputs (`json`, `json5`, `yaml`, `toml`)**
 
-- Outputs structured JSON to stdout:
+- Print one value to stdout and nothing to stderr:
 
 ```json
 {
@@ -51,9 +65,14 @@ md rm doc.md draft --json
 }
 ```
 
+The object gains `outcome` and `diagnostics` only when the run has a warning. A
+failure has no result, so it is
+`{ "outcome": "failure", "diagnostics": [...], "value": null }`. See
+[Data Contracts](./data-contracts.md#other-commands).
+
 ## Validation and Errors
 
-- If any requested property does not exist in frontmatter, the command fails with a non-zero exit code and reports the missing properties.
+- If any requested property does not exist in frontmatter, the command fails with exit status 1 and reports the missing properties.
 - The file is only written if all requested properties are found and removed.
 
 ## Formatting Is Preserved
@@ -67,5 +86,11 @@ whole frontmatter block in Darkmatter's standard YAML style.
 ## Lessons Learned
 
 - Silent-by-default keeps `rm` well-behaved in scripts.
-- `--json` output supports programmatic consumption in pipelines and CI.
+- Data outputs support programmatic consumption in pipelines and CI.
 - Key order is preserved in the resulting file thanks to insertion-order frontmatter storage.
+
+## Removed spellings
+
+| Removed | Use instead |
+|---|---|
+| `--json` | `--output json` |

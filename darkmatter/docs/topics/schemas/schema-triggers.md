@@ -161,14 +161,14 @@ instead and does not repeat it on stderr.
 
 | Command | Ordinary output | Report mode |
 | --- | --- | --- |
-| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output report-json`](../../cli/report-json.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at the [failure's position](#where-a-failure-is-positioned), else `null` |
-| `md schema validate` | stderr, before the file's result (also with `--quiet`) | `--format json`: a row in the `warnings` of the first file that discovers the trigger |
+| `md compose` | stderr, after the document (after the report for `--shell`); on a failure, before the error | [`--output json`](../../cli/data-contracts.md#codes): a `dm.schema.invalid_trigger` diagnostic whose `source` is the trigger file at the [failure's position](#where-a-failure-is-positioned), else `null` |
+| `md schema validate` | stderr, before the file's result (also with `--quiet`) | `--output json`: a row in the `warnings` of the first file that discovers the trigger |
 | `md schema triggers` | stderr; the trace on stdout names each skipped trigger and its code in a "Skipped invalid triggers" section, between the shadowed envelopes and the triggers, without repeating the warning | — |
-| `md clean` | stderr; on a schema failure, before the error | [`--json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array, also in the envelope a schema failure prints |
+| `md clean` | stderr; on a schema failure, before the error | [`--output json`](../../cli/clean.md#version-1-json-envelope): the top-level `warnings` array, also in the envelope a schema failure prints |
 | DMLS | a warning diagnostic on the trigger file, at the start of the line of the [failure's position](#where-a-failure-is-positioned) when it has one; see [Failures](../../lsp/indexing.md#failures) | — |
 
-A JSON row has the same four fields everywhere it appears outside
-`report-json`:
+A JSON row has the same four fields everywhere it appears outside the
+`diagnostics` of `md compose`:
 
 ```json
 {

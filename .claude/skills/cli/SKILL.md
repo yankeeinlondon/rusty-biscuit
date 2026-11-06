@@ -27,6 +27,8 @@ No business logic lives in the CLI crate. The CLI handles I/O only.
 
 For CLIs with many subcommands, use a `commands/` directory with one file per subcommand.
 
+**Root command:** a CLI that has subcommands never has a separate root command. A root alias is fine for ergonomics, but it must be an exact alias of one named subcommand.
+
 ## Argument Parsing with clap
 
 Use the **Derive API** (covers 90% of cases). See [clap.md](clap.md) for full reference including Builder API, custom validation, environment variable fallback, enum value selection, subcommand patterns, and shell completion generation.
@@ -95,17 +97,38 @@ See [cli-best-practices.md](cli-best-practices.md) for the full standards refere
 
 ### Output Formats
 
-- `--json` and `--plain` are **mandatory** output flags
-- Default output is terminal-optimized (colors, bold, dim, italics via `biscuit-terminal`)
-- `--plain` strips all escape codes for piped/non-TTY contexts
+Every output comes from one of two sources on the result: implement `renderable::CommandOutput` ([trait](../../../renderable/docs/command-output.md)) and print with `biscuit_terminal::output::write_output` ([dispatch](../../../biscuit-terminal/docs/output.md)), never a hand-written renderer per output.
+
+| Family | `--output` values | Source |
+|--------|-------------------|--------|
+| formatted | `terminal`, `plain`, `markdown`, `markdown-plus`, `html` (alias `browser`) | `as_prose()` |
+| data | `json`, `json5`, `yaml`, `toml` | `as_data()` |
+
+- `--output <target>` is the **one** output selector. Do not add `--json`, `--plain`, `--format`, or per-format flags
+- A command accepts whole families (both, or data only) plus any command-specific extras its `--help` lists; never part of a family
+- Every command declares its default in `--help`, and there is no `auto`. An explicit `--output` always wins
+    - a command whose deliverable is a Markdown document defaults to `markdown` and **always** writes Markdown, whatever stdout is
+    - every other command defaults to `terminal`, which degrades to the same bytes as `plain` when stdout is not a terminal or the terminal has no color
+- `plain` removes styling, not meaning: no escape byte ever, but code keeps its backticks and fences and tables keep their borders
 - Respect `NO_COLOR` env var; support `FORCE_COLOR=1` for CI
+
+### `--width`
+
+- `--width <N | N% | auto | source | unlimited>` is the CLI-wide width option; every command has it, with no effect where no prose prints
+- `auto` is `OUTPUT_COLUMNS`, else the terminal's columns, else unlimited, never a guessed 80; a Markdown-document command defaults to `source`
+- Resolve it with `biscuit_terminal::output::{parse_width_request, resolve_width}`. `--max-width` is **not** a general pattern
 
 ### STDOUT vs STDERR
 
-- **STDOUT** = data (what downstream tools consume)
-- **STDERR** = metadata (progress, status, warnings, diagnostics)
-- `--json` mode: STDOUT must be valid JSON only
-- Errors always go to STDERR, even in `--json` mode
+- **STDOUT** holds the deliverable, in the requested format
+- **Data output**: STDOUT is exactly one value, on success and on failure, and STDERR is **empty**. Warnings, timings, and problems are fields in the value, or are not said
+- **Formatted output**: anything that is not the deliverable goes to STDERR, as `terminal` with the `plain` fallback, judged by STDERR's own TTY and color detection
+- When a report is what the command was run to produce, it is the deliverable and goes to STDOUT
+- STDERR has its own width (`resolve_stderr_width`): its terminal's columns, or unlimited. `--width` and `OUTPUT_COLUMNS` never apply to it
+
+### Typed data outputs
+
+Every command's data output has a schema file enforced by tests (per-command conformance, a guard that fails on a command with no schema, format parity), so a new command cannot ship an untyped data output. Reference: `darkmatter/cli/schemas/output/`.
 
 ### Verbosity
 
@@ -116,11 +139,14 @@ See [cli-best-practices.md](cli-best-practices.md) for the full standards refere
 | `--silent` | Nothing to STDOUT; errors to STDERR only |
 | `--no-output` | Suppresses both STDOUT and STDERR |
 
-Conflicting combinations (e.g. `--json --no-output`) should produce a clear error.
+Conflicting combinations (e.g. `--output json --no-output`) should produce a clear error. `-v` only affects formatted outputs.
 
 ### Exit Codes
 
-- `0` = success, `1` = general error, `2` = usage error (bad args)
+- `0` = the command ran and succeeded
+- `1` = the command ran and failed; a data output still holds the one value, with its failure outcome on STDOUT
+- `2` = a usage error, and nothing else: the arguments could not be used, no command ran, the message is on STDERR, and STDOUT is empty. This is the one exception to an empty STDERR in data mode
+- A script decides what happened from the exit status, never from STDERR. A check that finds a problem exits 1, not 2
 - Use clap's built-in exit code handling for parse errors
 
 ## Error Handling

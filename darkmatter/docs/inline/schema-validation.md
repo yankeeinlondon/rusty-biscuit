@@ -215,7 +215,7 @@ enforces.
 
 `--disable baseline-schema` and `--schema` cannot be combined (a usage error, exit
 `2`). A custom path resolves from the directory you ran the command in, and a
-custom baseline that cannot be loaded exits `2`; it never falls back. Opting
+custom baseline that cannot be loaded exits `1`; it never falls back. Opting
 out removes only the baseline: the document's own `$schema` and matching
 trigger schemas still apply, and `--disable schema-triggers` controls triggers
 separately. See
@@ -249,10 +249,10 @@ Because a whole property is replaced when both sides declare it, replacing a bas
 ## CLI: `md schema validate`
 
 ```bash
-md schema validate <file>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--format pretty|json] [--quiet] [-vv]
+md schema validate <file>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--output <target>] [--quiet] [-vv]
 ```
 
-Pretty output (the default) renders one styled block per file:
+Terminal output (the default) renders one styled block per file:
 
 ```
 - ✔ the document post.md has a schema definition and is valid based on its $schema ./schemas/post.yaml and the Darkmatter default schema.
@@ -268,15 +268,13 @@ item of a block list on line 6, so its value starts at column 5, after the
 `- `. See [Problem Locations](../topics/schemas/definition.md#problem-locations)
 for the full rules and fallbacks.
 
-`--format json` emits newline-delimited JSON (one object per file) for piping into other tools, and `--quiet` suppresses the success lines.
+`--output json` prints one JSON document with one record per file under `files`, for piping into other tools (`json5`, `yaml`, and `toml` carry the same data), and `--quiet` suppresses the success lines.
 
 | Exit code | Meaning |
 |-----------|---------|
 | 0 | All files valid. |
-| 1 | One or more files failed validation. |
-| 2 | Schema or baseline could not be loaded. |
-| 3 | A file's frontmatter could not be parsed at all. |
-| 64 | Usage error. |
+| 1 | A file failed validation, could not be opened or parsed, or a schema or baseline could not be loaded. |
+| 2 | Usage error. |
 
 A document can be judged by up to three schema layers, merged in this order: the baseline, any matching schema triggers, then the document's own `$schema`. The pretty success line names every layer that applied, in the order document, triggers, baseline:
 
@@ -304,7 +302,7 @@ JSON output carries the same facts in each validated record's `layers` object (s
 
 To see where a slow validation spends its time, pass `-v` twice. After each
 document's normal output, `md` prints a stage breakdown to **stderr**; stdout
-(pretty or JSON) and the exit code are exactly what they are without it. A
+(terminal or data) and the exit code are exactly what they are without it. A
 single `-v` changes nothing, and neither `--debug` nor `RUST_LOG` is needed.
 
 ```console
@@ -409,7 +407,14 @@ Elapsed-time comparisons are development measurements, not test thresholds.
 `detect` is a productivity aid for adopting schemas on an existing corpus — it infers a starting SimplifiedSchema from real documents.
 
 ```bash
-md schema detect <file>... [--format yaml|json] [--merge]
+md schema detect <file>... [--output <target>] [--merge]
+```
+
+The default prints the schema in a fenced `yaml` block. To save it as a file, ask
+for the bare schema:
+
+```bash
+md schema detect post.md --output yaml > schema.yaml
 ```
 
 It infers only **base types** from each value (e.g. an integer → `number(integer)`, an ISO date string → `date`, a resolvable path → `file`). It never synthesises constraints, and every detected property is marked optional — a single sample cannot prove requiredness. With `--merge` across several files, a property is required only if present in *every* file, disagreeing types widen to a common ancestor (or become a union when genuinely disjoint), and enum members accumulate. Treat the output as a draft to refine, not a finished schema.
