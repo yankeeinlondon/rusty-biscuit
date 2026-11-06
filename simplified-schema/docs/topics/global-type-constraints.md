@@ -11,3 +11,6 @@ Every **type** in `SimplifiedSchema` can use the following _type constraints_:
 
 
 ## `default(value)`
+
+
+## `suggest(v1,v2,v3,...)`

@@ -5,7 +5,11 @@ classification: schema/types
 
 # Simplified Schema Types
 
-The _types_ which `SimplifiedSchema` provides will be broken up into the following categories:
+The _types_ provided by `SimplifiedSchema` are organized into categories and in this document we will introduce each category, provide the inventory of types in that category, and provide links to get further details on this type category including .
+
+
+
+provides will be broken up into the following categories:
 
 1. **Basic Types** - _the basic primitive types you'd expect in a schema grammar_
 2. **Ergonomic Helper Types** - _types added due to their high reuse potential, their ability to express a type pattern that would otherwise be hard to express, or both_
@@ -28,7 +32,7 @@ Basic types provide an informal 80/20 rule for the type system. They aren't the 
 - `number`
 - `numberlike`
 - `boolean`
-- `unknown` _or_ `any` (these two are the same type)
+- `unknown` _or_ `any` (_both are the same type_)
 - `enum`
 - and `null`
 
@@ -57,6 +61,8 @@ Being able to have date, time, or datetime _types_ is a convenience worth having
 - `time`
 - `datetime`
 
+For details on these **date/time** types you should read: [Date/Time types in Simplifed Schema](./types/date-time-types.md).
+
 ## Other Ergonomic Types
 
 - `email`
@@ -67,6 +73,11 @@ Being able to have date, time, or datetime _types_ is a convenience worth having
 ## Container Types
 
 Array, object, and tuple.
+
+## Union Types
+
+
+## Functions
 
 
 ## Meta Types

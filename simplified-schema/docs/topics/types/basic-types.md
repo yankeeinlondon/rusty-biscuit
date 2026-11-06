@@ -55,13 +55,21 @@ We will not cover the constraints that are common to _all_ types but let's make 
 
 When we are interacting with HTML, the terminal, and other forms of input it is not uncommon to get numeric values expressed as strings (e.g., "4", "999", etc.). The `numberlike` type expresses that both explicit numeric types and numeric strings are valid.
 
-### `boolean`
+### `boolean` _and_ `boolish`
+
+
 
 ### `enum(v1,v2,v3,...)`
+
+An enumeration offers a discrete set of literal variants to choose from and at runtime a value assigned to the enum type must match exactly one of these variants.
+
+### `unknown` / `any`
+
+When a variable is not assigned a _type_ then it's type defaults to `unknown` (or `any`). Both `unknown` and `any` types are identical and represent the union of ALL types. In addition to _defaulting_ to the `unknown` type, schemas can explicitly define a property to have the `unknown` type.
 
 ### `null`
 
 
 ## Related Docs
 
-- [Types Overview for Simplified Schema](../types.md)
+- [Types in Simplified Schema](../types.md)

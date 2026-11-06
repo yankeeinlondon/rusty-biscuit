@@ -1,31 +1,40 @@
 # Simplified Schema (`SimplifiedSchema`)
 
-The simplified schema was initially designed to provide a compact and ergonomic way for authors to create a JSON schema using YAML syntax. Today it not only provides that _ergonomic_ goal but has increased in power to include many features that plain old JSON Schema does not, however, every simplified schema retains the ability to be converted to JSON schema on demand (even if it might be lossy when the advanced features of simplified schema are employed).
+The simplified schema was initially designed to provide a compact and ergonomic way for authors to create a JSON schema using YAML syntax. Today it not only provides _ergonomic_ modeling but now also has a much improved feature set including many features that plain old JSON Schema does not support. Simplified Schema retains the ability to be converted to JSON schema on demand (even if it might be lossy when the advanced features of simplified schema are employed).
 
-When you use the [Darkmatter](darkmatter/README.md), [Claudine](claudine/README.md), or the [DMLS](darkmatter/dmls/README.md) LSP in your editor you can take full advantage of simplified schemas either for the Frontmatter of your Markdown documents or on YAML files too.
+The simplified schema library is used by [Darkmatter](darkmatter/README.md), [Claudine](claudine/README.md), and the [DMLS](darkmatter/dmls/README.md) LSP to provide rich schema support to Frontmatter in Markdown documents as well as YAML files.
+
+In addition, the simplified schema _package area_ also include a simple CLI that allows for schema validation:
+
+```sh
+# 1. describe the schema layers involved for a particular file
+# 2. the merged schema contract (across layers)
+# 3. validate whether the document meets the schema constraints which are defined for it
+schema <file>
+```
 
 ## Types and Constraints
 
-The `SimplifiedSchema` uses both **types** and **constraints** (_of types_) in a manner that is structurally identical to how JSON Schema's use types and constraints:
+The `SimplifiedSchema` grammar uses both **types** and **constraints** (_of types_) in a manner that is structurally identical to how JSON Schema's use types and constraints:
 
 - every property in the schema must have a **type**
 - each **type** can be further narrowed with **constraints**
 
-### Types
+To get started with simplified schemas you should read:
 
-The **types** which `SimplifiedSchema` provides to authors overlaps with types found JSON Schema but is not exactly the same. You can refer to the [Simplified Schema's Types](simplified-schema/docs/topics/types.md) documentation to get a full list of _types_ you can use but there are many that are semantically obvious by name alone like:
+- [Defining Schema and Schema Target Files]()
+- [Simplified Schema Types](./docs/topics/types.md)
+- [Global Constraints available in all Types](./docs/topics/global-type-constraints.md)
+- [Adding Prose Descriptions to Schemas](./docs/topics/using-prose-in-schemas.md)
 
-- `string`
-- `number`
-- `boolean`
+For details on the different _types_ in the grammar along with the constraints specific to each type you can read any of the following docs:
 
-There are some other types, however, which have been added to `SimplifiedSchema` that were added for ergonomic benefits but that JSON schema would have required using "constraints" for, these include types like:
+- [Basic Types](./docs/topics/types/basic-types.md) - `string`, `number`, etc.
+- [Serializable Data Types](./docs/topics/types/serializable-types.md) - `json`, `yaml`, etc.
+- [Date/Time Types](./docs/topics/types/date-time-types.md) - `date`, `time`, `datetime`
+- [Ergonomic Types](./docs/topics/types/ergonomic-types.md) - `email`, `phone`, etc.
+- 
 
-- `integer` / `float` - _while these are indeed **constraints** of a numeric type, they are so common to schemas that it was felt they should be included as a base type_
-- `email` - _email is indeed a **constraint** of the `string` type but again it is just so common in schema requirements that it was felt that it should just be included as a type_
-- `enum(a,b,c)` - _and enumeration of allowed values_
-
-There are plenty more that fit into this category so please refer to the 
 
 ## A Simple Example
 
@@ -46,7 +55,7 @@ $schema:
 > - the `employed-since` property must be a **date** type _if_ defined but since it wasn't declared as "required" it is _optional_ by default
 > - the `favorite-color` property to be an **enumerated** types and by declaring both **required** and **eager** we are saying that it MUST be set _before_ composition can take place
 
-## Types, Composition and Lifecycle
+## Schema Lifecycle
 
 Unlike most static type grammars, the `SimplifiedSchema` grammar has a sense of a _lifecycle_:
 
