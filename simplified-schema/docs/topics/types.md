@@ -36,9 +36,37 @@ We will not cover the constraints that are common to _all_ types but let's make 
     - this can be useful as metadata to downstream consumers like [DMLS](darkmatter/docs/topics/dmls.md) which can now auto-complete these suggestions for users but also knows that _any_ **string** is a valid type for the property with this type
     - this kind of _constraint_ doesn't strictly "constrain" the type but it provides context and examples to consumers when a downstream system leverages this metadata
 - `min_length(#)` _and_ `max_length(#)`
+    - we often want to constrain how long (or short) a string is
+    - the `min_length` and `max_length` constraints allow us to use one or both to apply these constraints.
 - `starts_with(prefix)`, `ends_with(postfix)`, `pattern(regex)`
-- `not-empty`
+    - all three of these constraints narrow the string type by making some portion of the string be a "string literal"
+    - because we often want to ensure that a string _starts with_ or _ends with_ a string literal we have an ergonomic way to express this
+    - example:
 
+        ```yaml
+        $schema:
+            secret: string(starts_with(_); ends_with(. Tell no one!))
+        ```
+    
+      > the `secret` property must now be a type of `_${string}. Tell no one!` (using Typescript nomenclature)
+    - if you want to create a union type for the string literal, this too can be done by leveraging the `|` operator symbol:
+
+        ```yaml
+        $schema:
+            name: string(starts_with(Mr.|Mrs.|Ms.))
+        ```
+
+        > In this example the type of the `name` property is 
+        > 
+        > `${"Mr." | "Mrs." | "Ms."}${string}`
+
+    - if the `starts_with(prefix)` and `ends_with(postfix)` constraints don't give you enough precision on the constrained string you want to create you can leverage the `pattern(regex)` constraint:
+        - this constraint allows for any valid regex expression to be used to establish 
+
+- `not-empty`
+    - a normal "string" type can be any string and that includes an _empty_ string
+    - adding the `not-empty` constraint makes an _empty_ string invalid
+    - it also invalidates a string that _only_ contains whitespace
 
 ### `number`
 
