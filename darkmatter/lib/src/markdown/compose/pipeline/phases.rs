@@ -176,16 +176,25 @@ impl Markdown {
                 // run; a document's own `style.markdown` is not consulted.
                 // A width implies unwrapping, so `fixed_width` re-wraps
                 // canonical unwrapped prose even under `Preserve`.
-                let overrides = cleanup::rules::MarkdownRuleOverrides {
-                    unwrap: cleanup::rules::Leaf::Value(
-                        options.incidental_newline_mode == cleanup::IncidentalNewlineMode::Strip,
+                let columns = |width: usize| {
+                    cleanup::rules::FixedWidth::Columns(u16::try_from(width).unwrap_or(u16::MAX))
+                };
+                let unwrap_by_mode =
+                    options.incidental_newline_mode == cleanup::IncidentalNewlineMode::Strip;
+                let (unwrap, fixed_width) = match options.output_width {
+                    None => (
+                        unwrap_by_mode,
+                        options.fixed_width.map_or(cleanup::rules::FixedWidth::Off, columns),
                     ),
-                    fixed_width: cleanup::rules::Leaf::Value(match options.fixed_width {
-                        Some(width) => cleanup::rules::FixedWidth::Columns(
-                            u16::try_from(width).unwrap_or(u16::MAX),
-                        ),
-                        None => cleanup::rules::FixedWidth::Off,
-                    }),
+                    Some(renderable::output::Width::Columns(width)) => {
+                        (unwrap_by_mode, columns(width.max(1) as usize))
+                    }
+                    Some(renderable::output::Width::Unlimited) => (true, cleanup::rules::FixedWidth::Off),
+                    Some(renderable::output::Width::Source) => (false, cleanup::rules::FixedWidth::Off),
+                };
+                let overrides = cleanup::rules::MarkdownRuleOverrides {
+                    unwrap: cleanup::rules::Leaf::Value(unwrap),
+                    fixed_width: cleanup::rules::Leaf::Value(fixed_width),
                     indentation: cleanup::rules::Leaf::Value(options.indentation),
                     list_item_padding: cleanup::rules::Leaf::Value(options.list_spacing),
                     ..cleanup::rules::MarkdownRuleOverrides::default()

@@ -231,7 +231,7 @@ fn no_mermaid_rendering_keeps_the_markdown_and_json_mermaid_fence() {
 
     let json = spawn(&fixture, &doc, &[&["--output", "json"][..], &feature].concat());
     let value: serde_json::Value = serde_json::from_str(&json).expect("json output");
-    let text = value.to_string();
-    assert!(text.contains(r#""mermaid""#) && text.contains("flowchart LR"), "{json}");
+    let document = value["document"].as_str().expect("the envelope's document");
+    assert!(document.contains("```mermaid\nflowchart LR\n    Alpha --> Beta\n```"), "{json}");
     assert_eq!(json, spawn(&fixture, &doc, &["--output", "json"]));
 }

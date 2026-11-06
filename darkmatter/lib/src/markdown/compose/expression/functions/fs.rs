@@ -1112,7 +1112,7 @@ pub fn markdown_title_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resul
         [] => Ok(Value::Null),
         [single] => Ok(Value::String(single.clone())),
         [first, ..] => {
-            eprintln!("markdown_title(): multiple H1 headings in {raw:?}; using the first");
+            tracing::warn!("markdown_title(): multiple H1 headings in {raw:?}; using the first");
             Ok(Value::String(first.clone()))
         }
     }

@@ -425,7 +425,7 @@ fn the_call_check_names_a_recursive_argument_by_its_type_name() {
 
     let stderr = common::unwrapped(&String::from_utf8_lossy(&output.stderr));
     assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("min: argument 1 (a) is item, expected number"), "{stderr}");
+    assert!(stderr.contains("min: argument 1 (`a`) is item, expected number"), "{stderr}");
 }
 
 // ── md schema about ───────────────────────────────────────────────────────

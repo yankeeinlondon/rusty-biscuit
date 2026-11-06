@@ -1,0 +1,52 @@
+$schema:
+    file: string -> the file as given; null for stdin
+    outcome: enum(success,failure;required)
+    document: string -> the rendered Markdown; null on failure
+    diagnostics: diagnostic[](required)
+    summary: summary
+    perf: perf -> present only with --perf
+    lifecycle_output: output-entry[](required) -> lifecycle and shell step output, in run order
+types:
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.reference.missing_hyperlink
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no position is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null for a document built in memory
+        column: number -> 1-based authored column, in characters; null for a document built in memory
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory
+    summary:
+        references: number(required)
+        documents: number(required)
+        ok: number(required)
+        broken: number(required)
+    perf:
+        stages: perf-stage[](required) -> command-level and pipeline stages, in run order
+    perf-stage:
+        name: string(required)
+        milliseconds: number(required)
+    output-entry:
+        stage: string(required) -> the lifecycle stage, e.g. composed
+        step: string(required) -> the action or command that printed it, e.g. stdout, info, or the shell command
+        text: string(required) -> what it printed

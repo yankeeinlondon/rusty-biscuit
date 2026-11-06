@@ -119,18 +119,6 @@ pub fn parse_max_width(s: &str) -> Result<u16, String> {
     }
 }
 
-/// Reject `--width` outright. Width is derived from the captured `Terminal`
-/// and the configured `--max-width`; a separate `--width` flag would shadow
-/// those for no reason. Callers should use `--max-width` for content-width
-/// control.
-pub fn reject_width_flag(_s: &str) -> Result<u16, String> {
-    Err(
-        "--width is not supported: page width is captured from the terminal; \
-         use --max-width to cap the content box."
-            .to_string(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,12 +187,6 @@ mod tests {
     #[test]
     fn parse_max_width_rejects_negative() {
         assert!(parse_max_width("-1").is_err());
-    }
-
-    #[test]
-    fn reject_width_flag_always_errors() {
-        assert!(reject_width_flag("80").is_err());
-        assert!(reject_width_flag("0").is_err());
     }
 
     #[test]

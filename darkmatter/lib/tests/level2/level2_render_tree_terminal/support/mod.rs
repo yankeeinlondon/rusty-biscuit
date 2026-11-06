@@ -746,7 +746,7 @@ pub(super) fn render_public_as_terminal_to_tempfile(
 ) -> (tempfile::TempDir, std::path::PathBuf) {
     let md: Markdown = body.into();
     let mut opts = TerminalOptions::default();
-    opts.max_width = Some(120);
+    opts.width = Some(renderable::output::Width::Columns(120));
     opts.color_depth = Some(ColorDepth::TrueColor);
     let rendered = md
         .as_terminal(opts)

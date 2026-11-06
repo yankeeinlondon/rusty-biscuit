@@ -8,7 +8,7 @@ use std::io::Write;
 fn default_render_is_an_alias_with_the_same_options() {
     let fixture = CliProcessFixture::named("render-alias-options");
     let path = fixture.write_file("cwd/doc.md", "# Alias\n\n- parent\n    - child\n");
-    for format in ["auto", "markdown", "markdown-plus", "html", "json"] {
+    for format in ["terminal", "plain", "markdown", "markdown-plus", "html", "json"] {
         let mut outputs = Vec::new();
         for prefix in [&[][..], &["render"][..]] {
             let output = fixture
@@ -25,7 +25,7 @@ fn default_render_is_an_alias_with_the_same_options() {
             outputs.push(output.stdout);
         }
         assert_eq!(outputs[0], outputs[1], "format: {format}");
-        if matches!(format, "auto" | "markdown") {
+        if format == "markdown" {
             assert!(String::from_utf8_lossy(&outputs[0]).contains("- parent\n  - child"));
         }
     }
@@ -51,15 +51,16 @@ fn render_features_are_combined_once_during_normalization() {
 }
 
 #[test]
-fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
-    let fixture = CliProcessFixture::named("test_stdin_rendering_auto_non_tty_outputs_markdown");
+fn test_stdin_rendering_on_a_pipe_outputs_plain_text() {
+    let fixture = CliProcessFixture::named("test_stdin_rendering_on_a_pipe_outputs_plain_text");
     fixture
         .command()
         .arg("-")
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("Hello"))
+        .stdout(predicate::str::contains("# Hello").not())
         .stdout(predicate::str::contains("World"));
 }
 
@@ -71,6 +72,7 @@ fn test_file_rendering() {
     fixture
         .command()
         .arg(tmp.path())
+        .args(["--output", "markdown"])
         .assert()
         .success()
         .stdout(predicate::str::contains("# Test File"));
@@ -87,15 +89,16 @@ fn test_file_not_found() {
 }
 
 #[test]
-fn test_output_markdown_alias_text() {
-    let fixture = CliProcessFixture::named("test_output_markdown_alias_text");
+fn test_output_text_alias_is_removed() {
+    let fixture = CliProcessFixture::named("test_output_text_alias_is_removed");
     fixture
         .command()
         .args(["--output", "text", "-"])
         .write_stdin("# Alias Test")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("# Alias Test"));
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value 'text'"));
 }
 
 #[test]
@@ -143,20 +146,16 @@ fn test_output_markdown_plus_renders_disclosure_as_html_details() {
 }
 
 #[test]
-fn test_output_json_alias_ast() {
-    let fixture = CliProcessFixture::named("test_output_json_alias_ast");
-    // `--output ast` serializes the render-tree `Document` (`md.as_document()`),
-    // whose node discriminant is `kind` (not `type`); `root` is the top-level
-    // document node.
+fn test_output_ast_value_is_removed() {
+    let fixture = CliProcessFixture::named("test_output_ast_value_is_removed");
     fixture
         .command()
         .args(["--output", "ast", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
-        .success()
-        .stdout(predicate::str::contains("\"root\""))
-        .stdout(predicate::str::contains("\"kind\""))
-        .stdout(predicate::str::contains("\"heading\""));
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("invalid value 'ast'"));
 }
 
 #[test]
@@ -181,7 +180,8 @@ fn test_render_explicit() {
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("Hello"))
+        .stdout(predicate::str::contains("# Hello").not())
         .stdout(predicate::str::contains("World"));
 }
 
@@ -197,7 +197,8 @@ fn test_render_default_backward_compat() {
         .arg(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("# Backward"));
+        .stdout(predicate::str::contains("Backward"))
+        .stdout(predicate::str::contains("# Backward").not());
 }
 
 #[test]

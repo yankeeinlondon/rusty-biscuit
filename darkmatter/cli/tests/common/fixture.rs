@@ -773,6 +773,7 @@ pub fn inherited_scrub_keys() -> Vec<OsString> {
         "HASH_IGNORE_PROPERTIES",
         "BASELINE_SCHEMA",
         "SCHEMAS_DIR",
+        "OUTPUT_COLUMNS",
     ];
     let mut keys: Vec<OsString> = std::env::vars_os()
         .map(|(key, _)| key)

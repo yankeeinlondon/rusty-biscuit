@@ -1,4 +1,4 @@
-//! What `md compose --output report-json` says about each problem family:
+//! What `md compose --output json` says about each problem family:
 //! reference details and authored positions, null positions, inserted
 //! provenance, and a reference check that could not run.
 
@@ -15,7 +15,7 @@ const CHILD: &str = include_str!("../../../lib/tests/fixtures/composition_errors
 const WARNS: &str = "$schema:\n  label: string\nlabel: \"7\"\n";
 
 fn report(fixture: &CliProcessFixture, document: &Path) -> (Option<i32>, Value) {
-    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(document).output().unwrap();
+    let output = fixture.command().args(["compose", "--output", "json"]).arg(document).output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.is_empty(), "the report holds everything: {stderr}");
     (output.status.code(), serde_json::from_slice(&output.stdout).expect("one JSON report"))
@@ -55,7 +55,7 @@ fn reference_diagnostics_are_authored_under_either_line_ending() {
 
         let (status, report) = report(&fixture, &root);
 
-        assert_eq!(status, Some(2), "{name}");
+        assert_eq!(status, Some(1), "{name}");
         assert_eq!(report["outcome"], "failure", "{name}");
 
         let typed = about(&report, "./missing-one.md");
@@ -119,7 +119,7 @@ fn a_prologue_problem_is_reported_at_its_value() {
 
     let (status, report) = report(&fixture, &document);
 
-    assert_eq!(status, Some(2));
+    assert_eq!(status, Some(1));
     let found = about(&report, "./nope.md");
     assert_eq!((&found["source"]["line"], &found["source"]["column"]), (&json!(2), &json!(11)), "{found:#}");
     assert_eq!(found["construct"], "prologue:");

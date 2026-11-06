@@ -96,7 +96,7 @@ fn zero_config_prose_snapshot() {
     // the zero-config render above resolves the *ambient* terminal, whose color
     // depth and tty state vary between a real terminal and a piped test process.
     let mut pinned_opts = TerminalOptions::default();
-    pinned_opts.max_width = Some(120);
+    pinned_opts.width = Some(renderable::output::Width::Columns(120));
     pinned_opts.color_depth = Some(ColorDepth::TrueColor);
     let pinned = md.as_terminal(pinned_opts).unwrap();
     insta::assert_snapshot!(pinned);

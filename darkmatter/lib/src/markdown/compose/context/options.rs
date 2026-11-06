@@ -370,6 +370,10 @@ pub struct ComposeOptions {
     /// Optional fixed column width for cleanup reflow. Default: `None`.
     pub(crate) fixed_width: Option<usize>,
 
+    /// The explicit `--width` of the composed output, which outranks both
+    /// [`fixed_width`](Self::fixed_width) and the unwrap rule. Default: `None`.
+    pub(crate) output_width: Option<renderable::output::Width>,
+
     /// The cleanup stage's nested-list `indentation`. Default: `Four`.
     pub(crate) indentation: crate::markdown::cleanup::rules::Indentation,
 
@@ -702,6 +706,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("list_spacing", &self.list_spacing)
             .field("incidental_newline_mode", &self.incidental_newline_mode)
             .field("fixed_width", &self.fixed_width)
+            .field("output_width", &self.output_width)
             .field("indentation", &self.indentation)
             .field("cache_access_mode", &self.cache_access_mode)
             .field("cache_root", &self.cache_root)
@@ -982,6 +987,7 @@ impl ComposeOptions {
             list_spacing: crate::markdown::cleanup::rules::ListItemPadding::Preserve,
             incidental_newline_mode: crate::markdown::cleanup::IncidentalNewlineMode::Strip,
             fixed_width: None,
+            output_width: None,
             indentation: crate::markdown::cleanup::rules::Indentation::Four,
             cache_access_mode: CacheAccessMode::default(),
             cache_root: None,
@@ -1325,6 +1331,23 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_fixed_width(mut self, width: usize) -> Self {
         self.fixed_width = Some(width.max(1));
+        self
+    }
+
+    /// Sets the explicit output width of the composed document.
+    ///
+    /// It decides the cleanup stage's unwrap and fixed-width rules, winning
+    /// over [`with_fixed_width`](Self::with_fixed_width) and
+    /// [`with_incidental_newline_mode`](Self::with_incidental_newline_mode):
+    ///
+    /// | Width | Prose |
+    /// |---|---|
+    /// | `Columns(n)` | as [`with_fixed_width`](Self::with_fixed_width)`(n)` |
+    /// | `Unlimited` | unwrapped, no fixed width |
+    /// | `Source` | line breaks kept as authored |
+    #[must_use]
+    pub fn with_output_width(mut self, width: renderable::output::Width) -> Self {
+        self.output_width = Some(width);
         self
     }
 
@@ -2972,6 +2995,7 @@ impl ComposeOptions {
             list_spacing,
             incidental_newline_mode,
             fixed_width,
+            output_width,
             indentation,
             cache_access_mode,
             cache_root,
@@ -3254,6 +3278,16 @@ impl ComposeOptions {
                 enc.u64(*width as u64);
             }
             None => enc.tag(0),
+        }
+        enc.field("output_width");
+        match output_width {
+            None => enc.tag(0),
+            Some(renderable::output::Width::Columns(columns)) => {
+                enc.tag(1);
+                enc.u64(u64::from(*columns));
+            }
+            Some(renderable::output::Width::Unlimited) => enc.tag(2),
+            Some(renderable::output::Width::Source) => enc.tag(3),
         }
         enc.field("indent_size");
         enc.u64(indentation.spaces().unwrap_or(0) as u64);
@@ -4066,6 +4100,25 @@ mod tests {
     /// The compose-cache fingerprint of `options` under the neutral context.
     fn fp(options: &ComposeOptions) -> u64 {
         options.compose_cache_fingerprint(&neutral_context())
+    }
+
+    #[test]
+    fn every_output_width_has_its_own_options_fingerprint() {
+        use renderable::output::Width;
+
+        let mut fingerprints: Vec<u64> = [
+            ComposeOptions::new(),
+            ComposeOptions::new().with_output_width(Width::Columns(40)),
+            ComposeOptions::new().with_output_width(Width::Columns(80)),
+            ComposeOptions::new().with_output_width(Width::Unlimited),
+            ComposeOptions::new().with_output_width(Width::Source),
+        ]
+        .iter()
+        .map(|options| options.classify_options(&neutral_context()).graph_value_fingerprint)
+        .collect();
+        fingerprints.sort_unstable();
+        fingerprints.dedup();
+        assert_eq!(fingerprints.len(), 5);
     }
 
     /// Options over a deterministic fixed context.

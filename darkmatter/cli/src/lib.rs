@@ -11,9 +11,10 @@ pub mod artifact;
 pub mod collection_failure;
 pub mod commands;
 pub mod io;
+pub mod output;
 pub mod render;
 pub mod request;
 pub mod style_claims;
 
 // Re-export CLI types for programmatic access
-pub use args::{Cli, Command as CliCommand, OutputFormat};
+pub use args::{Cli, Command as CliCommand};

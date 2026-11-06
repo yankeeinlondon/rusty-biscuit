@@ -940,7 +940,12 @@ fn lower_max_width(length: &Length, page: &DarkmatterPage) -> Result<u16, StyleA
         Length::Zero => Ok(0),
         Length::Ch(n) => Ok(u16::try_from(*n).unwrap_or(u16::MAX)),
         Length::Percent(p) => {
-            let terminal_width = page.terminal_width();
+            // Without a width there is no base for the percent and nothing to
+            // reject; the frame resolves it to no cap.
+            let Some(columns) = page.terminal_width().as_columns() else {
+                return Ok(u16::MAX);
+            };
+            let terminal_width = u16::try_from(columns).unwrap_or(u16::MAX);
             let consumed = edges_horizontal_ch(page.page_margin(), terminal_width)
                 .saturating_add(edges_horizontal_ch(page.page_padding(), terminal_width));
             let content = terminal_width.saturating_sub(consumed);

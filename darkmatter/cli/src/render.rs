@@ -21,7 +21,6 @@ use darkmatter::style::{
     from_frontmatter, hr_style_overrides_from_claims, into_strict,
     list_style_overrides_from_claims, page_style_overrides_from_claims,
 };
-use std::io::{self, Write};
 use std::path::PathBuf;
 
 /// Resolved theme configuration for an output path that needs one.
@@ -48,29 +47,6 @@ impl ResolvedTheme {
             color_mode,
         }
     }
-}
-
-/// Render Markdown to the terminal using CLI flags, `style:` frontmatter, and
-/// `features`.
-pub fn render_terminal_output(
-    md: &Markdown,
-    input_path: Option<&PathBuf>,
-    cli: &Cli,
-    term: Terminal,
-    strict_style: bool,
-    features: &[Feature],
-) -> Result<()> {
-    let output = terminal_page(md, input_path, cli, &term, strict_style, features)?
-        .render(md)
-        .context("Failed to render markdown for terminal")?;
-
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    handle
-        .write_all(output.as_bytes())
-        .context("Failed to write terminal output")?;
-
-    Ok(())
 }
 
 /// Build the page that renders terminal output: CLI flags (`--mermaid` selects
@@ -222,23 +198,53 @@ fn denied_style_issues(warnings: Vec<StyleWarning>, md: &Markdown) -> (Vec<Style
     (schema, informational)
 }
 
-/// Log non-fatal style warnings via `tracing`.
+/// The stable code and message of a warning a reader should see, or `None` for
+/// a notice that stays in the debug log.
+fn style_warning_report(warning: &StyleWarning) -> Option<(&'static str, String)> {
+    match &warning.kind {
+        StyleWarningKind::UnknownKey => Some(("dm.style.unknown_key", format!("unknown style key `{}`", warning.path))),
+        StyleWarningKind::Deprecated { replacement } => Some((
+            "dm.style.deprecated",
+            format!("deprecated style key `{}`; use `{replacement}`", warning.path),
+        )),
+        StyleWarningKind::KnownButInactive { .. } => None,
+    }
+}
+
+/// The `style:` warnings of `md` as a data output's diagnostics.
 ///
-/// `KnownButInactive` is informational; `UnknownKey` and `Deprecated` are
-/// warnings (but only when not promoted to errors by `--deny style`).
+/// A data output builds no page, but it reports what a page would. Unparseable
+/// `style:` frontmatter is no diagnostic here: the document it carries is the
+/// source text, which never reads it.
+///
+/// ## Errors
+///
+/// `strict_style` (`--deny style`) refuses a schema issue, as a page does.
+pub fn style_diagnostics(md: &Markdown, strict_style: bool) -> Result<Vec<darkmatter::markdown::compose::expression::Diagnostic>> {
+    let Ok((style, warnings)) = from_frontmatter(md.frontmatter()) else {
+        return Ok(Vec::new());
+    };
+    if strict_style {
+        let (schema, _) = denied_style_issues(warnings.clone(), md);
+        into_strict((style, schema)).context("`style:` frontmatter rejected by --deny style")?;
+    }
+    use darkmatter::markdown::compose::expression::Severity;
+    Ok(warnings
+        .iter()
+        .filter_map(style_warning_report)
+        .map(|(code, message)| crate::output::output_diagnostic(code, Severity::Warning, &message))
+        .collect())
+}
+
+/// Reports non-fatal style warnings on stderr; `KnownButInactive` notices stay
+/// in the debug log. Warnings `--deny style` promoted never reach here.
 fn log_style_warnings(warnings: &[StyleWarning]) {
     for w in warnings {
+        if let Some((_, message)) = style_warning_report(w) {
+            crate::output::stderr_warning(&message);
+        }
         match &w.kind {
-            StyleWarningKind::UnknownKey => {
-                tracing::warn!(path = %w.path, "unknown style key");
-            }
-            StyleWarningKind::Deprecated { replacement } => {
-                tracing::warn!(
-                    path = %w.path,
-                    replacement = %replacement,
-                    "deprecated style key",
-                );
-            }
+            StyleWarningKind::UnknownKey | StyleWarningKind::Deprecated { .. } => {}
             StyleWarningKind::KnownButInactive { sub_spec } => {
                 tracing::info!(
                     path = %w.path,

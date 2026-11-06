@@ -9,7 +9,7 @@ mod tests {
     fn terminal_snapshot_options() -> TerminalOptions {
         let mut options = TerminalOptions::default();
         options.image_mode = TerminalImageMode::Never;
-        options.max_width = Some(80);
+        options.width = Some(renderable::output::Width::Columns(80));
         options.color_depth = Some(ColorDepth::TrueColor);
         options
     }

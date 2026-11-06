@@ -25,6 +25,7 @@ const ALLOWLIST: &[Allowance] = &[
         "`DARKMATTER_NO_BASELINE_SCHEMA` switches the embedded baseline schema off (a feature switch, not a path)",
     ),
     allow(Gate::AmbientState, "commands/hash.rs", "std::env::var", 2, "`HASH_PROPERTY` / `HASH_IGNORE_PROPERTIES` hash configuration"),
+    allow(Gate::AmbientState, "output/mod.rs", "std::env::var", 2, "`COLUMNS` / `OUTPUT_COLUMNS` output width"),
     allow(Gate::AmbientState, "render.rs", "std::env::var", 1, "`TERMINAL_IMAGES` image rendering mode (rendering)"),
 ];
 

@@ -3,11 +3,8 @@
 //! performance report.
 
 use crate::args::policy::ResolvedPolicy;
-use crate::args::{Cli, OutputFormat};
-use crate::artifact::{
-    OutputArtifact, html_artifact, json_artifact, markdown_plus_artifact,
-    open_output_artifact,
-};
+use crate::args::Cli;
+use crate::artifact::{OutputArtifact, open_output_artifact};
 use crate::io::{load_markdown, open_argument, resolve_file_path};
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
@@ -18,9 +15,12 @@ use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
 mod lifecycle;
-pub(crate) mod report;
 
-use report::{ClassifiedFailure, ReportSink, ReportedExit};
+use crate::output::report::{ClassifiedFailure, ReportSink, ReportedExit};
+use crate::output::{ResolvedOutput, stderr_report, stderr_terminal};
+use biscuit_terminal::output::OutputTarget;
+use darkmatter::markdown::output::command::ReferenceSummary;
+use renderable::Width;
 
 /// Whether `policy` recovers a missing target of `kind`.
 fn recovers_missing(policy: &ResolvedPolicy, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
@@ -141,22 +141,32 @@ pub(crate) fn build_remote_read_config(
     }
 }
 
-/// Refuses `--show` and `--shell` beside `--output report-json`: the report
-/// is the command's only output.
+/// Refuses `--shell` beside a data output: `--shell` is a report of its own
+/// and the data value is the command's only output.
 ///
 /// ## Errors
 ///
 /// A clap `ArgumentConflict` usage error.
-pub(crate) fn reject_report_conflicts(show: bool, shell: bool) -> Result<()> {
-    let conflict = [(show, "--show"), (shell, "--shell")].into_iter().find_map(|(set, flag)| set.then_some(flag));
-    match conflict {
-        Some(flag) => Err(crate::args::policy::usage_error(
-            crate::args::policy::PolicyCommand::Compose,
-            clap::error::ErrorKind::ArgumentConflict,
-            format!("the argument '--output report-json' cannot be used with '{flag}'"),
-        )
-        .into()),
-        None => Ok(()),
+pub(crate) fn reject_report_conflicts(output: OutputTarget, shell: bool) -> Result<()> {
+    if !shell {
+        return Ok(());
+    }
+    Err(crate::args::policy::usage_error(
+        crate::args::policy::PolicyCommand::Compose,
+        clap::error::ErrorKind::ArgumentConflict,
+        format!("the argument '--output {output}' cannot be used with '--shell'"),
+    )
+    .into())
+}
+
+/// The width composition reflows at, when `--width` asked for one. Without it,
+/// composition's output is what it always was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComposeOutputWidth(Option<Width>);
+
+impl ComposeOutputWidth {
+    pub(crate) fn from_resolved(resolved: &ResolvedOutput) -> Self {
+        Self(resolved.explicit_width.then_some(resolved.options.width))
     }
 }
 
@@ -188,7 +198,7 @@ pub fn run_compose(
     state_json: Option<&str>,
     set_json: Option<&str>,
     shorthand_setters: serde_json::Map<String, serde_json::Value>,
-    output: OutputFormat,
+    output_width: ComposeOutputWidth,
     show: bool,
     include_frontmatter: bool,
     list_spacing: ListItemPadding,
@@ -220,6 +230,11 @@ pub fn run_compose(
     // a process-global `LazyLock`, so tests and library hosts that change the
     // cwd/env/attached streams within one process still detect afresh.
     let term_cell: std::cell::OnceCell<Terminal> = std::cell::OnceCell::new();
+    let perf_stage = |name: &str, elapsed: std::time::Duration| {
+        if let Some(sink) = sink {
+            sink.perf_stage(name, elapsed);
+        }
+    };
 
     let launch_dir = request.launch_dir().to_path_buf();
 
@@ -235,6 +250,7 @@ pub fn run_compose(
     };
     let resolved_input = opened_input.as_ref().map(|opened| opened.path().to_path_buf());
     let resolve_input_dur = resolve_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("resolve input", resolve_input_dur);
 
     let load_start = perf.then(Instant::now);
     let md = if let Some(ref resolved) = resolved_input {
@@ -244,6 +260,7 @@ pub fn run_compose(
         load_markdown(None, request)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("load input", load_input_dur);
     // One context for validation, pre-flight, and compose: the document's own
     // (derived from the launch context, or built at the document when it lies
     // in another repository), or the launch context itself for stdin. It
@@ -268,6 +285,10 @@ pub fn run_compose(
     let ctx_start = perf.then(Instant::now);
     let mut options = ComposeOptions::for_document(&launch_dir, &md);
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("capture context", capture_context_dur);
+    if let Some(width) = output_width.0 {
+        options = options.with_output_width(width);
+    }
     if lifecycle.is_some() {
         options = options.with_exclude_keys(lifecycle::event_keys());
     }
@@ -341,6 +362,15 @@ pub fn run_compose(
             .wrap_err("Failed to prepare the compose request")
     };
 
+    // The check prepares the document, and a failed preparation fails the run,
+    // so it must judge the document under the same recoveries as composition.
+    options = options.with_allow_ctx_override(policy.recovers("ctx-override"));
+    options = options.with_allow_missing_transclusions(policy.recovers("missing-transclusions"));
+    options = options
+        .with_allow_invalid_frontmatter_assignment(policy.recovers("invalid-frontmatter-assignment"));
+    options = options
+        .with_allow_reassigned_frontmatter_property(policy.recovers("reassigned-frontmatter-property"));
+
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
     // Uses the same options (including --state/--set) so interpolation
@@ -355,7 +385,12 @@ pub fn run_compose(
             deliver_check_failure_warnings(error, &check_request, &mut pending_triggers, sink, &term_cell);
         })?;
         match check {
-            ReferenceCheck::Clean => None,
+            ReferenceCheck::Clean(summary) => {
+                if let Some(sink) = sink {
+                    sink.summary(summary);
+                }
+                None
+            }
             ReferenceCheck::Report(report) => {
                 pending_triggers.hold(&report.trigger_warnings);
                 if let Some(sink) = sink {
@@ -368,18 +403,20 @@ pub fn run_compose(
                 pending_triggers.deliver(sink, None, &term_cell);
                 if let Some(sink) = sink {
                     sink.references(&report);
-                    return Err(ReportedExit(2).into());
+                    perf_stage("validate references", val_start.map(|s| s.elapsed()).unwrap_or_default());
+                    return Err(ReportedExit(1).into());
                 }
-                let term = term_cell.get_or_init(Terminal::default);
-                eprint!("{}", render_reference_report(&report, &launch_dir, term));
+                let term = term_cell.get_or_init(stderr_terminal);
+                eprint!("{}", render_reference_report(&report, &launch_dir));
                 eprint!("{}", render_reference_warnings(&report, term));
-                std::process::exit(2);
+                return Err(ReportedExit(1).into());
             }
         }
     } else {
         None
     };
     let validate_refs_dur = val_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("validate references", validate_refs_dur);
 
     // Set source file for relative transclusion resolution
     if let Some(ref resolved) = resolved_input {
@@ -421,7 +458,8 @@ pub fn run_compose(
     // so we can hand it to `compose_preflight_approvals` (and reuse it on
     // the off-chance a future re-preflight needs to run in the same flow).
     let preflight_handler: Option<Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>> =
-        if is_file_input && crate::approval::can_prompt_interactively() {
+        // A data output owns stderr, so nothing may prompt on it.
+        if is_file_input && sink.is_none() && crate::approval::can_prompt_interactively() {
             Some(Arc::new(crate::approval::CliShellApprovalHandler))
         } else {
             None
@@ -430,12 +468,6 @@ pub fn run_compose(
         options = options.with_allow_shell_timeout(true);
     }
     options = options.with_list_spacing(list_spacing);
-    options = options.with_allow_ctx_override(policy.recovers("ctx-override"));
-    options = options.with_allow_missing_transclusions(policy.recovers("missing-transclusions"));
-    options = options
-        .with_allow_invalid_frontmatter_assignment(policy.recovers("invalid-frontmatter-assignment"));
-    options = options
-        .with_allow_reassigned_frontmatter_property(policy.recovers("reassigned-frontmatter-property"));
     options = options.with_perf(perf);
     options = options.with_remote_read_config(remote_config);
     options = options.with_allow_remote_transclusion(true);
@@ -453,6 +485,7 @@ pub fn run_compose(
     options = options.with_shared_remote_fetch();
     let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("build options", build_options_dur);
     let lifecycle_warnings = match &lifecycle {
         Some(config) => {
             lifecycle::reject_incompatible_calls(&md, config, &lifecycle_source, &compose_request, &mut pending_triggers)
@@ -492,15 +525,7 @@ pub fn run_compose(
         return Ok(());
     }
 
-    let document = DocumentOutput {
-        output,
-        show,
-        include_frontmatter,
-        strict_style: policy.denies("style"),
-        cli,
-        input,
-        sink,
-    };
+    let document = ComposedDocument { show, include_frontmatter, sink };
 
     if let Some(config) = lifecycle {
         drop(options_ctx_ref);
@@ -516,6 +541,7 @@ pub fn run_compose(
             verbose: cli.verbose,
             call_warnings: lifecycle_warnings,
             pending_triggers,
+            started: cmd_start,
         });
     }
 
@@ -540,7 +566,7 @@ pub fn run_compose(
                 // A trigger only a child composition skips holds is reported
                 // by this walk alone.
                 pending_triggers.hold(&approvals.warnings);
-                if cli.verbose > 0 {
+                if cli.verbose > 0 && sink.is_none() {
                     eprintln!(
                         "pre-flight: {} discovered, {} whitelisted, {} approved",
                         approvals.stats.total_discovered,
@@ -580,6 +606,9 @@ pub fn run_compose(
     pending_triggers.merge_into(&mut report.warnings);
     if let Some(sink) = sink {
         sink.warnings(&report.warnings);
+        if let Some(perf_report) = &report.perf {
+            sink.perf_pipeline(perf_report);
+        }
     }
     // The lifecycle surfaces' call warnings lead: their check ran first.
     report.warnings.splice(0..0, lifecycle_warnings);
@@ -589,12 +618,13 @@ pub fn run_compose(
     // command here, before the document is written. Effects are not undone.
     blocked_diagnostics(&blocking, &report.warnings, &[])?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("compose pipeline", compose_pipeline_dur);
 
     // Verbose compose summary
-    if cli.verbose > 0 {
+    if cli.verbose > 0 && sink.is_none() {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
-        let terminal = term_cell.get_or_init(Terminal::default);
+        let terminal = term_cell.get_or_init(stderr_terminal);
         let status = Status::from_prose(format!(
             "Composed <b>{}</b> transclusions, <b>{}</b> interpolations, <b>{}</b> replacements",
             report.transclusions_applied,
@@ -606,11 +636,12 @@ pub fn run_compose(
     }
 
     if cli.verbose > 1
+        && sink.is_none()
         && let Some(perf_report) = &report.perf
     {
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::Status;
-        let terminal = term_cell.get_or_init(Terminal::default);
+        let terminal = term_cell.get_or_init(stderr_terminal);
         for metric in &perf_report.metrics {
             let status = Status::from_prose(format!(
                 "<dim>{:20}</dim> {:>8.2}ms",
@@ -632,9 +663,10 @@ pub fn run_compose(
         report_compose_diagnostics(&report, deferred_report.as_ref(), &launch_dir, &term_cell);
     }
 
+    let elapsed = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
+    perf_stage("elapsed", elapsed);
     // Emit perf report to stderr (after all other diagnostics)
-    if perf {
-        let elapsed = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
+    if perf && sink.is_none() {
         let cli_perf = CliComposePerfReport {
             load_input: load_input_dur,
             resolve_input: resolve_input_dur,
@@ -645,7 +677,7 @@ pub fn run_compose(
             compose_pipeline: compose_pipeline_dur,
             elapsed,
         };
-        let rendered = format_compose_perf_report(&cli_perf, report.perf.as_ref());
+        let rendered = format_compose_perf_report(&cli_perf, report.perf.as_ref(), term_cell.get_or_init(stderr_terminal));
         eprint!("\n{rendered}");
     }
 
@@ -656,61 +688,37 @@ pub fn run_compose(
 }
 
 /// How `md compose` writes the composed document.
-pub(crate) struct DocumentOutput<'a> {
-    pub(crate) output: OutputFormat,
+pub(crate) struct ComposedDocument<'a> {
     pub(crate) show: bool,
     pub(crate) include_frontmatter: bool,
-    /// `--deny style`: the HTML and MarkdownPlus artifacts reject the
-    /// `style:` issues it selects.
-    pub(crate) strict_style: bool,
-    pub(crate) cli: &'a Cli,
-    pub(crate) input: Option<&'a PathBuf>,
-    /// `--output report-json`: the document goes into the report instead of
-    /// stdout, and the warnings into its diagnostics.
+    /// A data output: the document goes into its envelope instead of stdout,
+    /// and the warnings into its diagnostics.
     pub(crate) sink: Option<&'a ReportSink>,
 }
 
-impl DocumentOutput<'_> {
-    /// The composed document in the requested format.
-    pub(crate) fn artifact(&self, composed: &Markdown) -> Result<OutputArtifact> {
-        match self.output {
-            OutputFormat::Auto | OutputFormat::Markdown => {
-                let content = if self.include_frontmatter {
-                    composed.as_string()
-                } else {
-                    // Frontmatter drives the pipeline; once composition is complete, discard it.
-                    composed.content().to_string()
-                };
-                Ok(OutputArtifact {
-                    content: darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content),
-                    extension: "md",
-                    label: "markdown",
-                })
-            }
-            // `markdown-plus` routes the composed document through the
-            // MarkdownPlus fold so disclosure blocks emit `<details>` /
-            // `<summary>` inline HTML rather than the DSL verbatim.
-            OutputFormat::MarkdownPlus => markdown_plus_artifact(composed, self.cli, self.input, self.strict_style),
-            OutputFormat::Html => html_artifact(composed, self.cli, self.input, self.strict_style, &self.cli.render.features),
-            OutputFormat::Json => json_artifact(composed),
+impl ComposedDocument<'_> {
+    /// The composed Markdown, which is what every output carries.
+    pub(crate) fn artifact(&self, composed: &Markdown) -> OutputArtifact {
+        let content = if self.include_frontmatter {
+            composed.as_string()
+        } else {
+            // Frontmatter drives the pipeline; once composition is complete, discard it.
+            composed.content().to_string()
+        };
+        OutputArtifact {
+            content: darkmatter::markdown::render_tree::embedded::without_embedded_metadata(&content),
+            extension: "md",
+            label: "markdown",
         }
     }
 
-    /// Whether the document is printed: always for Markdown, and for the
-    /// other formats only when it is not shown instead.
-    pub(crate) fn prints(&self) -> bool {
-        matches!(self.output, OutputFormat::Auto | OutputFormat::Markdown) || !self.show
-    }
-
     fn emit(&self, composed: &Markdown) -> Result<()> {
-        let artifact = self.artifact(composed)?;
+        let artifact = self.artifact(composed);
         if let Some(sink) = self.sink {
             sink.document(artifact.content);
             return Ok(());
         }
-        if self.prints() {
-            println!("{}", artifact.content);
-        }
+        println!("{}", artifact.content);
         if self.show {
             open_output_artifact(&artifact)?;
         }
@@ -720,7 +728,8 @@ impl DocumentOutput<'_> {
 
 /// The outcome of reference validation before composition.
 pub(crate) enum ReferenceCheck {
-    Clean,
+    /// Nothing to report; the totals of what it checked.
+    Clean(ReferenceSummary),
     /// Issues that never fail the run, reported after the content.
     Report(darkmatter::markdown::reference::validate::ReferenceValidationReport),
     /// An error no recovery covers, or a reported issue the deny policy
@@ -785,7 +794,7 @@ pub(crate) fn check_references(md: &Markdown, request: &ComposeRequest, policy: 
     if has_errors || has_warnings {
         return Ok(ReferenceCheck::Report(report));
     }
-    Ok(ReferenceCheck::Clean)
+    Ok(ReferenceCheck::Clean(ReferenceSummary::from_report(&report)))
 }
 
 /// Delivers what the failed reference check `error` had found before it
@@ -838,20 +847,18 @@ pub(crate) fn blocked_diagnostics(
     }))
 }
 
-/// The report of `report`'s broken references, empty when it has none: compose
-/// has no success case to announce, and warnings are reported line by line by
-/// [`render_reference_warnings`].
+/// The report of `report`'s broken references for stderr, empty when it has
+/// none: compose has no success case to announce, and warnings are reported
+/// line by line by [`render_reference_warnings`].
 pub(crate) fn render_reference_report(
     report: &darkmatter::markdown::reference::validate::ReferenceValidationReport,
     launch_dir: &Path,
-    term: &biscuit_terminal::terminal::Terminal,
 ) -> String {
-    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use darkmatter::markdown::reference::validate::ValidationReportView;
     if report.error_count() == 0 {
         return String::new();
     }
-    let mut rendered = ValidationReportView::new(report.clone()).with_launch_dir(launch_dir).render(term);
+    let mut rendered = stderr_report(&ValidationReportView::new(report.clone()).with_launch_dir(launch_dir));
     rendered.push('\n');
     rendered
 }
@@ -859,7 +866,7 @@ pub(crate) fn render_reference_report(
 /// Maps a composition failure to the report `md` prints.
 ///
 /// A shell failure is worded here, so it keeps the shared diagnostics of the
-/// typed error ([`ClassifiedFailure`]) for `--output report-json`.
+/// typed error ([`ClassifiedFailure`]) for a data output.
 pub(crate) fn compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyre::eyre::Report {
     use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
     if matches!(e, darkmatter::markdown::MarkdownError::ShellExpansion(_)) {
@@ -947,7 +954,7 @@ pub(crate) fn report_failure_trigger_warnings(
         if warning.code.as_deref() == Some(SCHEMA_INVALID_TRIGGER_CODE)
             && !blocking.iter().any(|shown| shown.code == warning.code && shown.message == warning.message)
         {
-            let term = term_cell.get_or_init(biscuit_terminal::terminal::Terminal::default);
+            let term = term_cell.get_or_init(stderr_terminal);
             eprintln!("{}", warning_rows(&warning.message, term));
         }
     }
@@ -1029,10 +1036,8 @@ pub(crate) fn report_compose_diagnostics(
     launch_dir: &Path,
     term_cell: &std::cell::OnceCell<biscuit_terminal::terminal::Terminal>,
 ) {
-    use biscuit_terminal::terminal::Terminal;
-
     if !report.warnings.is_empty() {
-        let term = term_cell.get_or_init(Terminal::default);
+        let term = term_cell.get_or_init(stderr_terminal);
         for warning in &report.warnings {
             // A tolerated file-reference failure keeps its stable class row.
             let prose = match warning.resolution_failure {
@@ -1049,8 +1054,8 @@ pub(crate) fn report_compose_diagnostics(
 
     // Emit deferred validation issues to stderr (allowed but still reported)
     if let Some(report) = deferred_report {
-        let term = term_cell.get_or_init(Terminal::default);
-        let formatted = render_reference_report(report, launch_dir, term);
+        let term = term_cell.get_or_init(stderr_terminal);
+        let formatted = render_reference_report(report, launch_dir);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }
@@ -1334,10 +1339,14 @@ fn format_metric_line(name: &str, elapsed: std::time::Duration, calls: usize) ->
     }
 }
 
+/// The widest the two-column perf report renders.
+const PERF_REPORT_MAX_COLUMNS: u32 = 120;
+
 /// Builds the full perf report string for the compose command.
 fn format_compose_perf_report(
     cli_perf: &CliComposePerfReport,
     compose_perf: Option<&darkmatter::markdown::compose::ComposePerfReport>,
+    terminal: &biscuit_terminal::terminal::Terminal,
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::{LineBreaks, Prose};
@@ -1402,7 +1411,10 @@ fn format_compose_perf_report(
     };
 
     // ── Title ────────────────────────────────────────────────────────
-    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render_optimistic(None);
+    // Its columns fill their width, so it stays a page wide when stderr has none.
+    let mut terminal = terminal.clone();
+    terminal.fixed_width = terminal.fixed_width.map(|width| width.min(PERF_REPORT_MAX_COLUMNS));
+    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render(&terminal);
 
     // ── Two-column layout ────────────────────────────────────────────
     let columns = TwoColumn::new(
@@ -1412,14 +1424,14 @@ fn format_compose_perf_report(
         .with_left_percent(0.5)
         .with_gap(2);
 
-    let body = columns.render_optimistic(None);
+    let body = columns.render(&terminal);
 
     // ── Wrap in a styled block quote ─────────────────────────────────
     let content = format!("{title}\n{body}");
     let mut rendered = BlockQuote::from(content.trim_end())
         .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
         .with_border("▌ ")
-        .render_optimistic(None);
+        .render(&terminal);
     if !rendered.ends_with('\n') {
         rendered.push('\n');
     }
@@ -1620,7 +1632,7 @@ mod tests {
             ..Default::default()
         };
 
-        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf));
+        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf), &biscuit_terminal::terminal::Terminal::new_optimistic(120));
 
         assert!(rendered.contains("Command Setup"));
         assert!(rendered.contains("Compose Pipeline"));
@@ -1645,7 +1657,7 @@ mod tests {
             elapsed: std::time::Duration::from_millis(1),
         };
 
-        let rendered = format_compose_perf_report(&cli_perf, None);
+        let rendered = format_compose_perf_report(&cli_perf, None, &biscuit_terminal::terminal::Terminal::new_optimistic(120));
 
         assert!(rendered.contains("Command Setup"));
         assert!(!rendered.contains("Compose Pipeline"));

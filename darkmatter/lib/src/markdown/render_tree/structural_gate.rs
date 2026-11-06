@@ -307,7 +307,7 @@ fn styled_terminal_path_does_zero_renderable_owned_hint_roundtrips() {
     let hr_owned = resolve_hr_defaults(&md, &page.hr_defaults());
     let ctx = build_context(&page, &hr_owned);
     let opts = TerminalOptions {
-        max_width: Some(80),
+        width: Some(renderable::output::Width::Columns(80)),
         ..TerminalOptions::default()
     };
 

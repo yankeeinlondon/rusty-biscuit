@@ -380,9 +380,19 @@ In this example, constraints are added to a string, a number, and an array of st
 
     fn markdown_options(&self) -> TerminalOptions {
         let mut options = TerminalOptions::default();
-        options.max_width = Some(self.width.min(u16::MAX as u32) as u16);
+        options.width = Some(renderable::output::Width::Columns(self.width.max(1)));
         options.color_mode = markdown_color_mode_from_terminal(self.terminal.color_mode());
         options.code_block_mode = self.code_block_mode;
+        // This report stays styled on a pipe, which a width alone no longer
+        // selects. The explicit profile means what it paints never depends on
+        // ambient detection.
+        let mut profile = if self.terminal.is_tty {
+            self.terminal.output_profile()
+        } else {
+            Terminal::new_optimistic(self.width).output_profile()
+        };
+        profile.graphics = self.terminal.output_profile().graphics;
+        options.output_profile = Some(profile);
         options
     }
 
@@ -974,7 +984,7 @@ mod tests {
 
             assert_eq!(options.color_mode, markdown_mode);
             assert_eq!(options.color_depth, None);
-            assert_eq!(options.max_width, Some(117));
+            assert_eq!(options.width, Some(renderable::output::Width::Columns(117)));
         }
     }
 

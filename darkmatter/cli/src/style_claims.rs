@@ -32,7 +32,7 @@ pub fn cli_style_claims(cli: &Cli) -> CliStyleClaims {
 
         page_background: cli.page_bg.map(Into::into),
         page_bg_color: cli.page_bg_color,
-        max_width: cli.max_width,
+        max_width: cli.render.max_width,
 
         alignment: cli.alignment.map(Into::into),
         align_images: cli.align_images.map(Into::into),

@@ -169,7 +169,7 @@ fn data_reports_authored_positions_and_the_trail() {
     assert!(issue["section"].is_null(), "{issue}");
     assert_eq!(issue["inserted"], false);
     assert_eq!(issue["included_via"][0]["line"], 7, "{issue}");
-    assert_eq!(issue["included_via"][0]["file"], input.to_str().unwrap());
+    assert_eq!(std::path::Path::new(issue["included_via"][0]["file"].as_str().unwrap()), input);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn compose_reports_broken_references_on_stderr_without_the_old_wording() {
         .arg("compose")
         .arg(&input)
         .assert()
-        .code(2)
+        .code(1)
         .stdout("")
         .stderr(predicate::str::contains("Broken references in doc.md"))
         .stderr(predicate::str::contains("file not found in hyperlink"))

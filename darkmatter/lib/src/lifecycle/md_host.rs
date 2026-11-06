@@ -508,6 +508,17 @@ pub trait CommandOutput: Sync {
     fn stdout(&self, text: &str);
     /// The command's standard error.
     fn stderr(&self, text: &str);
+    /// One finished command's captured output. A host that keeps a command's
+    /// output together overrides this; by default each non-empty stream goes
+    /// to its method, stdout first.
+    fn command(&self, _command: &str, stdout: &str, stderr: &str) {
+        if !stdout.is_empty() {
+            self.stdout(stdout);
+        }
+        if !stderr.is_empty() {
+            self.stderr(stderr);
+        }
+    }
 }
 
 /// Runs an approved lifecycle command for `md`.
@@ -567,12 +578,7 @@ impl MdShellRunner<'_> {
             None,
         )
         .map_err(|source| ShellRunError::Value { source })?;
-        if !outcome.stdout.is_empty() {
-            self.output.stdout(&outcome.stdout);
-        }
-        if !outcome.stderr.is_empty() {
-            self.output.stderr(&outcome.stderr);
-        }
+        self.output.command(raw, &outcome.stdout, &outcome.stderr);
         match outcome.status {
             ShellStatus::Exited(code) => Ok(code),
             ShellStatus::TimedOut => Err(ShellRunError::Value {

@@ -71,7 +71,7 @@ fn a_proven_bad_call_in_a_dead_branch_rejects_before_any_evaluation() {
     let stderr = biscuit_test_harness::strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
     assert!(output.stdout.is_empty(), "no document on stdout: {}", String::from_utf8_lossy(&output.stdout));
-    for part in ["min: argument 1 (a) is boolean, expected number", "true ? 'ok' : min(flag, 5)", "Expression at line: 7, column: 1"] {
+    for part in ["min: argument 1 (`a`) is boolean, expected number", "true ? 'ok' : min(flag, 5)", "Expression at line: 7, column: 1"] {
         assert!(stderr.contains(part), "{part:?} missing from:\n{stderr}");
     }
     assert!(!sentinel.exists(), "the frontmatter command ran before the rejection");

@@ -331,21 +331,19 @@ fn layout_page_bg_color_invalid_rejected() {
 }
 
 #[test]
-fn layout_width_flag_rejected() {
-    let fixture = CliProcessFixture::named("layout_width_flag_rejected");
-    let tmp = md_file("# Hello\n");
-    let output = rendering_command(&fixture)
-        .arg(tmp.path())
-        .arg("--width")
-        .arg("80")
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("--width") || stderr.contains("max-width"),
-        "--width should be rejected with a helpful error; got: {stderr}"
-    );
+fn layout_width_flag_wraps_prose_at_its_columns() {
+    let fixture = CliProcessFixture::named("layout_width_flag_wraps_prose_at_its_columns");
+    let tmp = md_file("one two three four five six seven eight nine ten\n");
+    let run = |width: &str| {
+        let output = rendering_command(&fixture).arg(tmp.path()).args(["--width", width]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let wide = run("80");
+    assert_eq!(wide.trim_end().lines().count(), 1, "{wide}");
+    let narrow = run("20");
+    assert!(narrow.trim_end().lines().count() > 1, "{narrow}");
+    assert!(narrow.lines().all(|line| line.chars().count() <= 20), "{narrow}");
 }
 
 #[test]

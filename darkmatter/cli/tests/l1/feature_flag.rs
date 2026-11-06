@@ -9,7 +9,7 @@ use clap::{Parser, ValueEnum};
 use common::{CliProcessFixture, md_file};
 use darkmatter::markdown::Markdown;
 use darkmatter_cli::args::{Command, Feature};
-use darkmatter_cli::artifact::{html_artifact, html_page};
+use darkmatter_cli::artifact::html_page;
 use darkmatter_cli::Cli;
 use std::ffi::OsString;
 
@@ -185,8 +185,8 @@ fn no_frontmatter_key_turns_on_embedding() {
 
     assert!(!html_page(&with_keys, &cli, None, false, &cli.render.features).unwrap().embed_mermaid_font());
     assert_eq!(
-        html_artifact(&with_keys, &cli, None, false, &cli.render.features).unwrap().content,
-        html_artifact(&plain, &cli, None, false, &cli.render.features).unwrap().content
+        html_page(&with_keys, &cli, None, false, &cli.render.features).unwrap().render_to_browser_document(&with_keys).unwrap(),
+        html_page(&plain, &cli, None, false, &cli.render.features).unwrap().render_to_browser_document(&plain).unwrap()
     );
 }
 

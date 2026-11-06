@@ -21,15 +21,15 @@ pub enum PageRenderError {
     #[error("margins ({required} cols) meet or exceed terminal width ({terminal_width} cols)")]
     MarginsExceedTerminalWidth {
         /// Width of the underlying terminal in columns.
-        terminal_width: u16,
+        terminal_width: u32,
         /// Total required horizontal columns for margin + padding.
-        required: u16,
+        required: u32,
     },
 
     /// A caller set `max_width = Some(0)` via the library API.
     ///
     /// The CLI rejects `--max-width 0` at parse time and never produces this
-    /// variant, but the library API accepts arbitrary `u16` values and
+    /// variant, but the library API accepts arbitrary values and
     /// surfaces zero through this error.
     #[error("max_width must be greater than zero")]
     MaxWidthZero,

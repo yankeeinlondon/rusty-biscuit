@@ -90,7 +90,7 @@ fn defaults_match_spec() {
 #[test]
 fn captures_terminal_width() {
     let page = page();
-    assert_eq!(page.terminal_width(), 120);
+    assert_eq!(page.terminal_width(), Width::Columns(120));
 }
 
 #[test]
@@ -280,25 +280,23 @@ fn captures_terminal_color_mode() {
 
 #[test]
 #[serial]
-fn zero_config_render_ignores_captured_terminal_width() {
-    // Construct a DarkmatterPage from a Terminal whose captured width
-    // differs from TerminalOptions::default() auto-detection. The page
-    // must NOT leak that captured width into component width resolution;
-    // output must remain byte-for-byte identical to the default
-    // `as_terminal()` render. Without the `is_default_layout()` short-circuit in
-    // `render`, image/list/blockquote/table/code component paths would
-    // resolve widths against the captured Terminal width and diverge.
+fn zero_config_render_uses_the_width_it_was_given() {
+    // A zero-config page is `as_terminal` at the page's width: it never
+    // re-detects the ambient one.
     for width in [40u32, 100, 200] {
         let term = Terminal::new_optimistic(width);
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "# Heading\n\n- List item\n\n> Quoted prose\n\n```rust\nfn main() {}\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n".into();
 
-        let page_out = page.render(&md).unwrap();
-        let direct_out = md.as_terminal(TerminalOptions::default()).unwrap();
+        let direct = TerminalOptions {
+            width: Some(Width::Columns(width)),
+            ..TerminalOptions::default()
+        };
 
         assert_eq!(
-            page_out, direct_out,
-            "zero-config render with captured_width={width} must equal the default as_terminal render",
+            page.render(&md).unwrap(),
+            md.as_terminal(direct).unwrap(),
+            "zero-config render at {width} columns must equal as_terminal at that width",
         );
     }
 }
@@ -634,27 +632,16 @@ fn page_frame_chrome_ignores_component_policy_content() {
     );
 }
 
-/// Review-2 finding 2: the page-frame width cap must key off frame geometry
-/// alone, never component-policy presence. With the captured terminal wider
-/// than the ambient auto-detected width and a document line long enough to
-/// wrap at the ambient width, an *unmatched* component policy on an
-/// otherwise zero-geometry page must produce byte-identical output to a
-/// no-policy page: both render the content box at the ambient width.
-///
-/// This is discriminating where the 80==80 parity test was not: before the
-/// fix, the unmatched policy made the page non-default, capping `max_width`
-/// to the captured 200-wide terminal so the long line would *not* wrap,
-/// while the no-policy page wrapped at the ambient width — the two diverged.
+/// An *unmatched* component policy on an otherwise zero-geometry page must
+/// produce byte-identical output to a no-policy page: both render the content
+/// box at the page's width.
 #[test]
-fn terminal_unmatched_policy_does_not_cap_width_to_captured_terminal() {
+fn terminal_unmatched_policy_does_not_change_the_content_width() {
     use renderable::color::{Color, Tailwind};
     use renderable::style::PaintColor;
 
-    // Captured terminal far wider than the ambient (~80) auto-detect, with no
-    // frame geometry: width must stay ambient-driven for both pages.
-    let term = Terminal::new_optimistic(200);
-    // A long single-paragraph line that wraps at ~80 columns but fits on one
-    // line at 200. No table, so the Tables policy is unmatched.
+    let term = Terminal::new_optimistic(40);
+    // No table, so the Tables policy is unmatched.
     let md: Markdown = "The quick brown fox jumps over the lazy dog, and then the \
             quick brown fox jumps over the lazy dog once more for good wrapping measure."
         .into();
@@ -668,17 +655,10 @@ fn terminal_unmatched_policy_does_not_cap_width_to_captured_terminal() {
         .render(&md)
         .unwrap();
 
-    assert_eq!(
-        no_policy, unmatched,
-        "an unmatched policy must not cap the content box to the captured terminal width",
-    );
-    // Guard the test's own premise: the no-policy render wrapped at the
-    // ambient width (more than one line), so a 200-wide cap *would* have
-    // changed it — proving this test can discriminate the regression.
-    assert!(
-        no_policy.lines().filter(|l| !l.trim().is_empty()).count() > 1,
-        "test premise: the long line must wrap at the ambient width; got:\n{no_policy}",
-    );
+    assert_eq!(no_policy, unmatched);
+    let plain = crate::testing::strip_ansi_codes(&no_policy);
+    assert!(plain.lines().count() > 1, "must wrap at the page's width: {plain}");
+    assert!(plain.lines().all(|line| line.chars().count() <= 40), "{plain}");
 }
 
 /// Review-4 finding 1: capability selection (renderer-wide color depth) must
@@ -2433,15 +2413,15 @@ fn page_frame_stores_renderable_types() {
 fn length_to_cells_resolves_percent_against_base() {
     use renderable::layout::{Length, TargetValue};
     assert_eq!(
-        length_to_cells(&TargetValue::universal(Length::Percent(10.0)), 80),
+        length_to_cells(&TargetValue::universal(Length::Percent(10.0)), Width::Columns(80)),
         8
     );
     assert_eq!(
-        length_to_cells(&TargetValue::universal(Length::ch(4)), 80),
+        length_to_cells(&TargetValue::universal(Length::ch(4)), Width::Columns(80)),
         4
     );
     assert_eq!(
-        length_to_cells(&TargetValue::universal(Length::Zero), 80),
+        length_to_cells(&TargetValue::universal(Length::Zero), Width::Columns(80)),
         0
     );
 }

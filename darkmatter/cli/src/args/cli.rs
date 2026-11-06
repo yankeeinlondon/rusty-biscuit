@@ -2,9 +2,10 @@ use clap::Parser;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::{
     CliFill, CodeBlockArg, PageAlignmentArg, PageBackgroundArg,
-    complete_theme_names, parse_cli_fill, parse_max_width,
-    parse_theme_name, reject_width_flag,
+    complete_theme_names, parse_cli_fill,
+    parse_theme_name,
 };
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use darkmatter::markdown::highlighting::ThemePair;
 use renderable::style::PaintColor;
 use std::path::PathBuf;
@@ -122,18 +123,11 @@ pub struct Cli {
     #[arg(long, value_name = "COLOR", value_parser = PaintColor::from_css_str)]
     pub page_bg_color: Option<PaintColor>,
 
-    /// Max content width in columns (0 rejected)
-    #[arg(long, value_name = "N", value_parser = parse_max_width)]
-    pub max_width: Option<u16>,
-
-    /// Intentionally unsupported width shorthand.
-    ///
-    /// The terminal-cell width is determined from the captured `Terminal`
-    /// and the configured `--max-width`; a plain `--width` flag would
-    /// shadow those for no reason. The flag is rejected with a clear
-    /// error so callers know to use `--max-width` instead.
-    #[arg(long, value_name = "N", value_parser = reject_width_flag)]
-    pub width: Option<u16>,
+    /// Width the output is wrapped to: N columns, N%, `auto` (`OUTPUT_COLUMNS`,
+    /// else the terminal, else unlimited), `source` (keep authored line
+    /// breaks), or `unlimited`. `--max-width` caps content inside it.
+    #[arg(long, value_name = "WIDTH", value_parser = crate::args::output::parse_width, global = true)]
+    pub width: Option<WidthRequest>,
 
     /// Include line numbers in code blocks
     ///
@@ -258,6 +252,18 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Whether this invocation prints a data output, which owns stderr too:
+    /// nothing may be written there.
+    pub fn requests_data_output(&self) -> bool {
+        let target: Option<OutputTarget> = match &self.command {
+            Some(crate::args::Command::Compose { output, .. }) => Some(*output),
+            Some(crate::args::Command::Render(options)) => options.output,
+            Some(_) => None,
+            None => self.render.output,
+        };
+        target.is_some_and(OutputTarget::is_data)
+    }
+
     /// Normalizes default rendering to `render`, combining top-level and
     /// subcommand features once before dispatch.
     pub fn command_or_render(&self) -> crate::args::Command {

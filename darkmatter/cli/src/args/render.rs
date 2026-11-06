@@ -1,9 +1,9 @@
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
-use crate::args::{
-    Feature, OutputFormat, complete_indent_values, complete_markdown_files, parse_indent_size,
-};
+use crate::args::output::{ALL_TARGETS, target_parser};
+use crate::args::{Feature, complete_indent_values, complete_markdown_files, parse_indent_size, parse_max_width};
+use biscuit_terminal::output::OutputTarget;
 use std::path::PathBuf;
 
 /// Options shared by default rendering and the explicit `render` subcommand.
@@ -13,13 +13,20 @@ pub struct RenderOptions {
     #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
     pub input: Option<PathBuf>,
 
-    /// Output format
-    #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
-    pub output: OutputFormat,
+    /// What to print [default: terminal, which is the same text as `plain` off
+    /// a color terminal]
+    #[arg(long, value_name = "TARGET", value_parser = target_parser(ALL_TARGETS))]
+    pub output: Option<OutputTarget>,
 
-    /// Open output in the default app using a temp file
+    /// Open output in the default app using a temp file; a data output is also
+    /// printed, and a terminal output opens the document's Markdown
     #[arg(long)]
     pub show: bool,
+
+    /// Max content width in columns (0 rejected); it caps the content inside
+    /// `--width`
+    #[arg(long, value_name = "N", value_parser = parse_max_width)]
+    pub max_width: Option<u16>,
 
     /// Normalize nested list indentation width (spaces per level)
     #[arg(

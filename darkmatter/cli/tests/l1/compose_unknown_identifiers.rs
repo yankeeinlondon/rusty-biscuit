@@ -81,20 +81,22 @@ fn compose_reports_only_the_schema_failure_for_an_unset_required_root() {
     assert!(!run.stderr.contains("undeclared"), "one issue, one message: {}", run.stderr);
 }
 
-/// `--output json` stays document-only; the warning is still on stderr.
+/// `--output json` carries the warning as one diagnostic; stderr stays empty.
 #[test]
-fn compose_json_output_carries_no_warning() {
+fn compose_json_output_carries_the_warning_as_one_diagnostic() {
     let run = compose(
-        "compose_json_output_carries_no_warning",
+        "compose_json_output_carries_the_warning_as_one_diagnostic",
         "doc.md",
         UNDECLARED,
         &["--output", "json"],
     );
 
     assert_eq!(run.code, Some(0), "stderr: {}", run.stderr);
-    serde_json::from_str::<serde_json::Value>(&run.stdout).expect("stdout is one JSON document");
-    assert!(!run.stdout.contains("undeclared"), "{}", run.stdout);
-    assert_eq!(run.stderr.matches("undeclared").count(), 1, "{}", run.stderr);
+    let envelope: serde_json::Value = serde_json::from_str(&run.stdout).expect("stdout is one JSON document");
+    let diagnostics = envelope["diagnostics"].as_array().expect("diagnostics");
+    assert_eq!(diagnostics.len(), 1, "{envelope:#}");
+    assert_eq!(diagnostics[0]["code"], "dm.expression.undeclared_property", "{envelope:#}");
+    assert!(run.stderr.is_empty(), "{}", run.stderr);
 }
 
 /// The message is rendered as Prose; the underscores of a partial's path are
@@ -137,5 +139,5 @@ fn deny_all_accepts_a_direct_nullable_argument_and_blocks_a_nested_one() {
     assert_ne!(nested.code, Some(0), "stdout: {}", nested.stdout);
     let stderr = common::unwrapped(&nested.stderr);
     assert!(stderr.contains("dm.expression.undeclared_property"), "{stderr}");
-    assert!(stderr.contains("w at"), "the nested read names `w`: {stderr}");
+    assert!(stderr.contains("`w` at"), "the nested read names `w`: {stderr}");
 }

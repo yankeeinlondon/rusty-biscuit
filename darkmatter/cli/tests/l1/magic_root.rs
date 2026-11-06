@@ -42,7 +42,7 @@ const ROUTES: [(&[&str], Observable); 14] = [
             })
         })
     }),
-    (&["validate", "refs", "main.md"], |out, _| out.contains("Valid: 1")),
+    (&["validate", "refs", "main.md"], |out, _| out.contains("across 2 documents")),
     (&["validate", "refs", "--graph", "mermaid", "@doc.md"], |out, _| out.contains("roots_doc_md")),
     // `-v`: a piped link prints its resolved destination only when verbose.
     (&["-v", "schema", "validate", "@doc.md"], |out, _| out.contains("roots/doc.md") || out.contains("roots\\doc.md")),

@@ -190,7 +190,7 @@ pub fn apply_cli_claims(mut page: DarkmatterPage, claims: &CliStyleClaims) -> Da
 
     // Max width.
     if let Some(n) = claims.max_width {
-        page = page.with_max_width(n);
+        page = page.with_max_width(u32::from(n));
     }
 
     // Alignment precedence: global > component-specific.

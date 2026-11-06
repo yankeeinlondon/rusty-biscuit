@@ -25,7 +25,7 @@ fn terminal(language: &str, source: &str) -> String {
     options.prose_theme = ThemePair::OneHalf;
     options.color_mode = ColorMode::Dark;
     options.color_depth = Some(ColorDepth::TrueColor);
-    options.max_width = Some(80);
+    options.width = Some(renderable::output::Width::Columns(80));
     fenced(language, source).as_terminal(options).expect("terminal render")
 }
 

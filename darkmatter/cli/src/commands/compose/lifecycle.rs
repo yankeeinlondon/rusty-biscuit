@@ -7,15 +7,16 @@
 //! `finalize`. The run itself is [`darkmatter::lifecycle::md_host::drive`];
 //! this module performs its requests on the terminal and the filesystem.
 //!
-//! - `stdout` actions and lifecycle command output share stdout with the
-//!   document, in run order; every other terminal verb writes to stderr.
+//! - Stdout holds only the deliverable. In Markdown mode, every communication
+//!   action and lifecycle command's output goes to stderr; in a data output
+//!   they are collected, in run order, into the payload's `lifecycle_output`.
 //! - Every step reuses the invocation's one [`ComposeRequest`]: nothing here
 //!   captures a context of its own.
 //! - The first Ctrl-C cancels the run (cleanup still runs, exit 130); a
 //!   second one exits at once.
 
 use std::cell::OnceCell;
-use std::io::{IsTerminal as _, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -44,12 +45,13 @@ use serde_json::{Map, Value};
 use crate::args::policy::ResolvedPolicy;
 
 use super::{
-    DocumentOutput, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
+    ComposedDocument, PendingTriggerWarnings, ReferenceCheck, blocked_diagnostics, check_references, compose_error,
     deliver_check_failure_warnings,
     open_output_artifact, preflight_approval_error, render_reference_report, render_reference_warnings,
     report_compose_diagnostics,
 };
-use super::report::ReportedExit;
+use crate::output::report::{ClassifiedFailure, ReportSink, ReportedExit};
+use crate::output::stderr_terminal;
 
 /// The root document's lifecycle under the `md` profile, or `None` when it
 /// authors none of `md`'s events.
@@ -126,31 +128,31 @@ pub(super) struct LifecycleCompose<'a> {
     pub(super) approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     /// The policy, when the root is a file whose references are checked.
     pub(super) check_references: Option<&'a ResolvedPolicy>,
-    pub(super) document: DocumentOutput<'a>,
+    pub(super) document: ComposedDocument<'a>,
     pub(super) verbose: u8,
     /// The lifecycle surfaces' call warnings ([`reject_incompatible_calls`]),
     /// reported ahead of composition's own.
     pub(super) call_warnings: Vec<ComposeWarning>,
     /// The skipped triggers the call check found, which the bootstrap adds to.
     pub(super) pending_triggers: PendingTriggerWarnings,
+    /// When the command started, when timings were asked for.
+    pub(super) started: Option<Instant>,
 }
 
-/// Runs the lifecycle and exits with its status when it did not succeed.
+/// Runs the lifecycle.
 ///
 /// ## Errors
 ///
-/// A bootstrap failure, before `initialize` runs.
+/// A bootstrap failure, before `initialize` runs, and [`ReportedExit`] with the
+/// run's status when it did not succeed.
 pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
     let sink = compose.document.sink;
     let bootstrap = bootstrap_frontmatter(compose.md, &compose.request, &mut compose.pending_triggers, sink)?;
     let interrupted = install_interrupt_handler();
     ignore_broken_pipe_signal();
-    let term = Terminal::default();
-    let effects = TerminalEffects {
-        term: &term,
-        stdout_is_terminal: std::io::stdout().is_terminal(),
-        stdout_is_report: sink.is_some(),
-    };
+    let term = stderr_terminal();
+    let started = compose.started;
+    let effects = TerminalEffects { term: &term, sink, stage: Mutex::new("") };
     let mut host = ComposeHost::new(compose, bootstrap, &effects, interrupted);
     let config = host.config.clone();
     let end = md_host::drive(&mut host, &config);
@@ -167,20 +169,13 @@ pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
             None => effects.status(StatusState::Error, &error.msg),
         }
     }
-    let code = match end.exit_code() {
-        // Only while the refusal is still the selected error; a cleanup error
-        // that replaced it exits as any other failure.
-        1 if host.refused_references && end.error.as_ref().map(|error| &error.msg) == host.reported.as_ref() => 2,
-        code => code,
-    };
-    if code != 0 {
-        if sink.is_some() {
-            return Err(ReportedExit(code).into());
-        }
-        let _ = std::io::stderr().flush();
-        std::process::exit(code);
+    if let (Some(sink), Some(started)) = (sink, started) {
+        sink.perf_stage("elapsed", started.elapsed());
     }
-    Ok(())
+    match end.exit_code() {
+        0 => Ok(()),
+        code => Err(ReportedExit(code).into()),
+    }
 }
 
 /// The shell-free frontmatter bootstrap `initialize` reads: the frontmatter
@@ -193,7 +188,7 @@ fn bootstrap_frontmatter(
     md: &Markdown,
     request: &ComposeRequest,
     pending_triggers: &mut PendingTriggerWarnings,
-    sink: Option<&super::report::ReportSink>,
+    sink: Option<&ReportSink>,
 ) -> Result<Map<String, Value>> {
     let bootstrap = request.clone().map_options(|options| {
         options
@@ -240,15 +235,13 @@ fn ignore_broken_pipe_signal() {
 #[cfg(not(unix))]
 fn ignore_broken_pipe_signal() {}
 
-/// Lifecycle communication on the terminal.
+/// Lifecycle communication: on stderr, or into a data output's payload.
 struct TerminalEffects<'t> {
     term: &'t Terminal,
-    /// Off a terminal, stdout carries the Markdown document, so a `stdout`
-    /// action's line joins it as authored rather than styled.
-    stdout_is_terminal: bool,
-    /// `--output report-json`: stdout carries only the report, so a `stdout`
-    /// action's line and a command's output go to stderr.
-    stdout_is_report: bool,
+    /// A data output collects what every step prints; nothing reaches a stream.
+    sink: Option<&'t ReportSink>,
+    /// The event being evaluated, which names the stage of collected output.
+    stage: Mutex<&'static str>,
 }
 
 impl TerminalEffects<'_> {
@@ -259,39 +252,51 @@ impl TerminalEffects<'_> {
     fn prose_to_stderr(&self, text: &str) {
         eprintln!("{}", render_prose_line(text, self.term));
     }
+
+    /// Collects `text` for `step`; false when nothing collects, and the caller
+    /// delivers it.
+    fn collected(&self, step: &str, text: &str) -> bool {
+        let Some(sink) = self.sink else { return false };
+        sink.lifecycle_output(&self.stage.lock().expect("stage lock"), step, text);
+        true
+    }
 }
 
 impl LifecycleEffects for TerminalEffects<'_> {
     fn stdout(&self, text: &str) {
-        if self.stdout_is_report {
+        if !self.collected("stdout", text) {
             self.prose_to_stderr(text);
-            return;
         }
-        let mut stdout = std::io::stdout().lock();
-        // A closed stdout fails the document write, which the run reports;
-        // an action's own line is not an operation of its own.
-        let line = if self.stdout_is_terminal { render_prose_line(text, self.term) } else { text.to_string() };
-        let _ = writeln!(stdout, "{line}").and_then(|()| stdout.flush());
     }
 
     fn stderr(&self, _signal: LifecycleSignal, text: &str) {
-        self.prose_to_stderr(text);
+        if !self.collected("stderr", text) {
+            self.prose_to_stderr(text);
+        }
     }
 
     fn info(&self, text: &str) {
-        self.status(StatusState::Info, text);
+        if !self.collected("info", text) {
+            self.status(StatusState::Info, text);
+        }
     }
 
     fn warn(&self, text: &str) {
-        self.status(StatusState::Warning, text);
+        if !self.collected("warn", text) {
+            self.status(StatusState::Warning, text);
+        }
     }
 
     fn success(&self, text: &str) {
-        self.status(StatusState::Success, text);
+        if !self.collected("success", text) {
+            self.status(StatusState::Success, text);
+        }
     }
 
     fn message(&self, text: &str) {
-        self.prose_to_stderr(text);
+        if !self.collected("message", text) {
+            self.prose_to_stderr(text);
+        }
     }
 
     // `md` parses `say`, `effect`, and `notify` as ignored actions, so these
@@ -305,16 +310,23 @@ impl LifecycleEffects for TerminalEffects<'_> {
 
 impl CommandOutput for TerminalEffects<'_> {
     fn stdout(&self, text: &str) {
-        if self.stdout_is_report {
-            let _ = std::io::stderr().write_all(text.as_bytes());
-            return;
-        }
-        let mut stdout = std::io::stdout().lock();
-        let _ = stdout.write_all(text.as_bytes()).and_then(|()| stdout.flush());
+        let _ = std::io::stderr().write_all(text.as_bytes());
     }
 
     fn stderr(&self, text: &str) {
         let _ = std::io::stderr().write_all(text.as_bytes());
+    }
+
+    /// A data output keeps a command's output as one entry: stdout, then
+    /// stderr, as they would be delivered.
+    fn command(&self, command: &str, stdout: &str, stderr: &str) {
+        if stdout.is_empty() && stderr.is_empty() {
+            return;
+        }
+        if !self.collected(command, &format!("{stdout}{stderr}")) {
+            CommandOutput::stdout(self, stdout);
+            CommandOutput::stderr(self, stderr);
+        }
     }
 }
 
@@ -327,7 +339,7 @@ struct ComposeHost<'a> {
     launch_dir: PathBuf,
     approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     check_references: Option<&'a ResolvedPolicy>,
-    document: DocumentOutput<'a>,
+    document: ComposedDocument<'a>,
     verbose: u8,
     call_warnings: Vec<ComposeWarning>,
     /// Delivered with the first report or failure of the composition pass,
@@ -347,9 +359,6 @@ struct ComposeHost<'a> {
     /// The message of the failure already rendered in full, so the run's end
     /// does not repeat it.
     reported: Option<String>,
-    /// Unresolved references refused the document; the failed run keeps the
-    /// non-lifecycle path's exit status 2.
-    refused_references: bool,
 }
 
 impl<'a> ComposeHost<'a> {
@@ -390,7 +399,6 @@ impl<'a> ComposeHost<'a> {
             composed: None,
             deferred_report: None,
             reported: None,
-            refused_references: false,
         }
     }
 
@@ -414,7 +422,11 @@ impl<'a> ComposeHost<'a> {
                 ("references", error)
             })?;
             match check {
-                ReferenceCheck::Clean => {}
+                ReferenceCheck::Clean(summary) => {
+                    if let Some(sink) = self.document.sink {
+                        sink.summary(summary);
+                    }
+                }
                 ReferenceCheck::Report(report) => {
                     self.pending_triggers.hold(&report.trigger_warnings);
                     if let Some(sink) = self.document.sink {
@@ -430,12 +442,13 @@ impl<'a> ComposeHost<'a> {
                     match self.document.sink {
                         Some(sink) => sink.references(&report),
                         None => {
-                            eprint!("{}", render_reference_report(&report, &self.launch_dir, self.effects.term));
+                            eprint!("{}", render_reference_report(&report, &self.launch_dir));
                             eprint!("{}", render_reference_warnings(&report, self.effects.term));
                         }
                     }
-                    self.refused_references = true;
-                    return Err(("references", eyre!("the document has unresolved references")));
+                    // The sink already holds each broken reference's diagnostic;
+                    // this sentence only drives the `failed` stack.
+                    return Err(("references", ClassifiedFailure::report(eyre!("the document has unresolved references"), Vec::new())));
                 }
             }
         }
@@ -478,7 +491,7 @@ impl<'a> ComposeHost<'a> {
             // A trigger only a child composition skips holds is reported by
             // this walk alone, whatever the bootstrap found.
             self.pending_triggers.hold(&approvals.warnings);
-            if self.verbose > 0 {
+            if self.verbose > 0 && self.document.sink.is_none() {
                 eprintln!(
                     "pre-flight: {} discovered, {} whitelisted, {} approved",
                     approvals.stats.total_discovered, approvals.stats.already_whitelisted, approvals.stats.user_approved
@@ -509,6 +522,9 @@ impl<'a> ComposeHost<'a> {
         self.pending_triggers.merge_into(&mut report.warnings);
         if let Some(sink) = self.document.sink {
             sink.warnings(&report.warnings);
+            if let Some(perf_report) = &report.perf {
+                sink.perf_pipeline(perf_report);
+            }
         }
         report.warnings.splice(0..0, self.call_warnings.iter().cloned());
         // Composition stops at a blocking warning before its next effect; one
@@ -528,17 +544,16 @@ impl<'a> ComposeHost<'a> {
 
     fn try_write(&self) -> Result<()> {
         let (composed, report) = self.composed.as_ref().expect("the run writes only after a preparation");
-        let artifact = self.document.artifact(composed)?;
+        let artifact = self.document.artifact(composed);
         if let Some(sink) = self.document.sink {
             sink.document(artifact.content);
             return Ok(());
         }
-        if self.document.prints() {
-            let mut stdout = std::io::stdout().lock();
-            writeln!(stdout, "{}", artifact.content)
-                .and_then(|()| stdout.flush())
-                .map_err(|error| eyre!("failed to write the composed document: {error}"))?;
-        }
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{}", artifact.content)
+            .and_then(|()| stdout.flush())
+            .map_err(|error| eyre!("failed to write the composed document: {error}"))?;
+        drop(stdout);
         if self.document.show {
             open_output_artifact(&artifact)?;
         }
@@ -551,6 +566,7 @@ impl<'a> ComposeHost<'a> {
 
 impl MdRunHost for ComposeHost<'_> {
     fn event(&mut self, event: MdEvent) -> LifecycleEventOutcome {
+        *self.effects.stage.lock().expect("stage lock") = event.name;
         let interrupted = Arc::clone(&self.interrupted);
         let probe = move || interrupted.load(Ordering::SeqCst);
         let timing = LifecycleTiming::from_instants(self.started, Some(self.started), Instant::now());
@@ -611,11 +627,7 @@ impl MdRunHost for ComposeHost<'_> {
 /// in its chain, or the chain's messages.
 fn render_report(report: &Report) -> String {
     if let Some(block) = report.chain().find_map(darkmatter::markdown::errors::as_block_error) {
-        return if std::io::stderr().is_terminal() {
-            block.report_block_error(&Terminal::new())
-        } else {
-            block.report_block_error_optimistic(None)
-        };
+        return block.report_block_error(&stderr_terminal());
     }
     let mut rows = vec![format!("Error: {report}")];
     let mut seen = report.to_string();

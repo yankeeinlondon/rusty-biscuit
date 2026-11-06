@@ -20,8 +20,8 @@ fn style_fixture_cli_pipe_smoke_passes() {
     let fixture = CliProcessFixture::named("style_fixture_cli_pipe_smoke_passes");
     // Smoke check that `md style-prop.md` exits successfully and emits a
     // non-empty stdout when stdout is a pipe (the CLI test runner captures
-    // stdout, so `OutputFormat::Auto` takes the markdown pass-through path
-    // here — this test does NOT exercise the terminal renderer). Terminal
+    // stdout, so the default `terminal` target prints what `plain` prints
+    // here — this test does NOT exercise a styled terminal). Terminal
     // layout coverage lives in the Level 2 WezTerm pane tests
     // (`darkmatter/cli/tests/level2_layout.rs::level2_style_fixture_*`).
     let output = rendering_command(&fixture)

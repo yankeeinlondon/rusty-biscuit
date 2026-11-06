@@ -1,8 +1,10 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
+use crate::args::output::{COMPOSE_TARGETS, target_parser};
+use biscuit_terminal::output::OutputTarget;
 use crate::args::{
-    CodeBlockOutput, ComposeOutputFormat, HashKind, RemoteFreshness, SchemaTarget, ValidateTarget,
+    CodeBlockOutput, HashKind, RemoteFreshness, SchemaTarget, ValidateTarget,
     complete_compose_args, complete_fixed_width_values, complete_indent_values,
     complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size, parse_positive_limit,
     parse_theme_name,
@@ -102,11 +104,12 @@ pub enum Command {
         #[arg(long, value_name = "JSON")]
         set: Option<String>,
 
-        /// Output format (default: markdown; `report-json` prints the composition report)
-        #[arg(long, value_enum, default_value_t = ComposeOutputFormat::Markdown)]
-        output: ComposeOutputFormat,
+        /// What to print: the composed Markdown, or the envelope (the document and
+        /// every problem) in a data format; `md render` turns Markdown into anything else
+        #[arg(long, value_name = "TARGET", default_value = "markdown", value_parser = target_parser(COMPOSE_TARGETS))]
+        output: OutputTarget,
 
-        /// Render composed content to stdout AND open in default app
+        /// Print the output AND open it in the default app
         #[arg(long)]
         show: bool,
 

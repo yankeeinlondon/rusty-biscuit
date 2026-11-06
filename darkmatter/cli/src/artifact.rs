@@ -1,20 +1,16 @@
-//! Output artifact plumbing for the `md` CLI.
-//!
-//! Builds, emits, opens, and writes the temporary files produced by
-//! non-terminal output paths (Markdown, MarkdownPlus, HTML, JSON).
+//! Output artifact plumbing for the `md` CLI: the page behind HTML and
+//! MarkdownPlus output, and the temporary files `--show` opens.
 
 use crate::args::{Cli, Feature};
-use crate::render::{
-    ResolvedTheme, apply_cli_layout_flags, apply_features, apply_style_frontmatter,
-};
+use crate::render::{ResolvedTheme, apply_cli_layout_flags, apply_features, apply_style_frontmatter};
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// An output artifact produced by a non-terminal render path.
+/// A rendered output on its way to a file.
 #[derive(Debug)]
 pub struct OutputArtifact {
     pub content: String,
@@ -22,17 +18,8 @@ pub struct OutputArtifact {
     pub label: &'static str,
 }
 
-/// Build a Markdown artifact from the already-cleaned document.
-pub fn markdown_artifact(md: &Markdown) -> OutputArtifact {
-    OutputArtifact {
-        content: md.as_string(),
-        extension: "md",
-        label: "markdown",
-    }
-}
-
-/// Build the page that renders HTML output: CLI layout flags, `style:`
-/// frontmatter, then `features`.
+/// Build the page that renders HTML and MarkdownPlus output: CLI layout flags,
+/// `style:` frontmatter, then `features`.
 pub fn html_page(
     md: &Markdown,
     cli: &Cli,
@@ -54,94 +41,64 @@ pub fn html_page(
     Ok(apply_features(page, features))
 }
 
-/// Build an HTML artifact.
-pub fn html_artifact(
-    md: &Markdown,
-    cli: &Cli,
-    input_path: Option<&PathBuf>,
-    strict_style: bool,
-    features: &[Feature],
-) -> Result<OutputArtifact> {
-    let content = html_page(md, cli, input_path, strict_style, features)?
-        .render_to_browser_document(md)
-        .context("Failed to convert to HTML")?;
-
-    Ok(OutputArtifact {
-        content,
-        extension: "html",
-        label: "html",
-    })
+/// How an artifact reaches the host's default application.
+pub trait ArtifactOpener {
+    /// Opens `path`.
+    ///
+    /// ## Errors
+    ///
+    /// The host could not open it (for example, no default application).
+    fn open(&self, path: &Path) -> std::io::Result<()>;
 }
 
-/// Build a MarkdownPlus artifact.
-pub fn markdown_plus_artifact(
-    md: &Markdown,
-    cli: &Cli,
-    input_path: Option<&PathBuf>,
-    strict_style: bool,
-) -> Result<OutputArtifact> {
-    let term = Terminal::new_optimistic(120);
-    let theme = ResolvedTheme::from_cli(cli, &term);
-    let mut page = apply_cli_layout_flags(
-        DarkmatterPage::new(&term)
-            .with_prose_theme(theme.prose.kebab_name())
-            .with_code_theme(theme.code.kebab_name())
-            .with_color_mode(theme.color_mode),
-        cli,
-    );
-
-    page = apply_style_frontmatter(page, md, cli, input_path, strict_style)?;
-
-    let content = page
-        .render_to_markdown_plus(md)
-        .context("Failed to convert to MarkdownPlus")?;
-
-    Ok(OutputArtifact {
-        content,
-        extension: "md",
-        label: "markdown-plus",
-    })
+/// The running process's opener.
+///
+/// `MD_DRY_RUN` stops any application launching, so a test never takes focus:
+/// any value succeeds without opening anything, and `fail` reports what a host
+/// with no default application reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessOpener {
+    dry_run: Option<String>,
 }
 
-/// Build a JSON artifact from the render-tree document.
-pub fn json_artifact(md: &Markdown) -> Result<OutputArtifact> {
-    let document = md.as_document().context("Failed to fold to render tree document")?;
-    let content = serde_json::to_string_pretty(&document)?;
-    Ok(OutputArtifact {
-        content,
-        extension: "json",
-        label: "json",
-    })
+impl ProcessOpener {
+    /// The opener this process's environment selects.
+    #[must_use]
+    pub fn detect() -> Self {
+        Self { dry_run: std::env::var("MD_DRY_RUN").ok().filter(|value| !value.is_empty()) }
+    }
 }
 
-/// Print an artifact to stdout, or open it in the system default app when
-/// `--show` is set.
-pub fn emit_or_show_artifact(artifact: OutputArtifact, show: bool) -> Result<()> {
-    if show {
-        open_output_artifact(&artifact)
-    } else {
-        println!("{}", artifact.content);
-        Ok(())
+impl ArtifactOpener for ProcessOpener {
+    fn open(&self, path: &Path) -> std::io::Result<()> {
+        match self.dry_run.as_deref() {
+            Some("fail") => Err(std::io::Error::other("no default application")),
+            Some(_) => Ok(()),
+            None => open::that(path),
+        }
     }
 }
 
 /// Open an artifact in the system default application via a temporary file.
+///
+/// ## Errors
+///
+/// The file could not be written, or the host could not open it; the error
+/// names the file so the output is still reachable.
 pub fn open_output_artifact(artifact: &OutputArtifact) -> Result<()> {
+    open_artifact_with(artifact, &ProcessOpener::detect())
+}
+
+/// [`open_output_artifact`] through `opener`.
+///
+/// ## Errors
+///
+/// See [`open_output_artifact`].
+pub fn open_artifact_with(artifact: &OutputArtifact, opener: &dyn ArtifactOpener) -> Result<()> {
     let temp_path = write_output_artifact_file(artifact)?;
-
-    // MD_DRY_RUN=1 writes the temp file but skips launching the viewer.
-    // Useful in tests and CI where opening a GUI app is undesirable.
-    if std::env::var("MD_DRY_RUN").is_ok_and(|v| !v.is_empty()) {
-        return Ok(());
-    }
-
-    // Non-blocking open, graceful error handling
-    if let Err(error) = open::that(&temp_path) {
-        eprintln!("Failed to open {} output: {}", artifact.label, error);
-        eprintln!("Preview available at: {}", temp_path.display());
-    }
-
-    Ok(())
+    opener.open(&temp_path).map_err(|error| {
+        eyre!("Failed to open {} output at {}: {error}", artifact.label, temp_path.display())
+    })
 }
 
 fn write_output_artifact_file(artifact: &OutputArtifact) -> Result<PathBuf> {

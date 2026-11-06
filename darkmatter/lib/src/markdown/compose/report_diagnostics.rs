@@ -1,5 +1,5 @@
 //! A composition's warnings and its failure as shared [`Diagnostic`]
-//! records: what `md compose --output report-json` reports.
+//! records: what `md compose`'s data outputs report.
 //!
 //! Every record keeps the code, severity, and message its producer gave it.
 //! A warning that carries a shared record (a call finding or a skipped
@@ -13,8 +13,6 @@
 //! `iteration_path` its error holds, so every host reports the same
 //! provenance. Classification reads only the error and warning values: it
 //! evaluates nothing and reads no file.
-//!
-//! See `darkmatter/docs/cli/report-json.md` for the report shape.
 
 use std::error::Error;
 

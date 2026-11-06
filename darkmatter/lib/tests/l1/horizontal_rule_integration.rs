@@ -236,7 +236,7 @@ mod tests {
         let markdown = "--- { style: dashes, alignment: full }\n";
         let md: Markdown = markdown.into();
         let mut options = terminal_text_options();
-        options.max_width = Some(20);
+        options.width = Some(renderable::output::Width::Columns(20));
         let result = md.as_terminal(options).unwrap();
 
         // Find the line that contains the rule body (Unicode ╌ or ASCII -).
@@ -487,7 +487,7 @@ mod tests {
         let md: Markdown = markdown.into();
         let mut options = TerminalOptions::default();
         options.image_mode = TerminalImageMode::Never;
-        options.max_width = Some(40);
+        options.width = Some(renderable::output::Width::Columns(40));
         options.color_depth = Some(ColorDepth::TrueColor);
 
         let output = md.as_terminal(options).unwrap();
@@ -517,7 +517,7 @@ mod tests {
         let md: Markdown = markdown.into();
         let mut options = TerminalOptions::default();
         options.image_mode = TerminalImageMode::Force;
-        options.max_width = Some(80);
+        options.width = Some(renderable::output::Width::Columns(80));
         options.color_depth = Some(ColorDepth::TrueColor);
 
         let output = md.as_terminal(options).unwrap();

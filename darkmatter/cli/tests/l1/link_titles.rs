@@ -25,13 +25,13 @@ fn diagnostic<'a>(report: &'a Value, code: &str) -> &'a Value {
 }
 
 #[test]
-fn report_json_locates_both_warnings_and_succeeds() {
+fn json_output_locates_both_warnings_and_succeeds() {
     let fixture = CliProcessFixture::named("link-title-report");
     let path = fixture.write_file(
         "cwd/doc.md",
         "---\nkey: value\n---\n\n[Docs](https://example.com/a \"class='x'\")\n\nThen [Bad](https://example.com/b \"{ class: \").\n",
     );
-    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&path).output().unwrap();
+    let output = fixture.command().args(["compose", "--output", "json"]).arg(&path).output().unwrap();
     let report = report_of(&output);
     assert_eq!(report["outcome"], "success", "{report:#}");
 
@@ -50,7 +50,7 @@ fn report_json_locates_both_warnings_and_succeeds() {
 fn a_failing_composition_reports_the_warning_too() {
     let fixture = CliProcessFixture::named("link-title-failure");
     let path = fixture.write_file("cwd/doc.md", "[Docs](https://example.com/a \"class='x'\")\n\n{{ 1 / 0 }}\n");
-    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&path).output().unwrap();
+    let output = fixture.command().args(["compose", "--output", "json"]).arg(&path).output().unwrap();
     assert!(!output.status.success());
     let report = report_of(&output);
     assert_eq!(report["document"], Value::Null);
@@ -79,7 +79,8 @@ fn render_warns_on_stderr_and_deny_blocks_it() {
 
     let rendered = fixture.command().args(["render", "--output", "markdown"]).arg(&path).output().unwrap();
     assert!(rendered.status.success(), "{rendered:?}");
-    let stderr = String::from_utf8_lossy(&rendered.stderr);
+    // The row wraps at the terminal width, and a long temp path moves its breaks.
+    let stderr = String::from_utf8_lossy(&rendered.stderr).split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(stderr.contains("md clean") && stderr.contains(":1:"), "{stderr}");
     assert!(String::from_utf8_lossy(&rendered.stdout).contains("[Docs]"), "{rendered:?}");
 
@@ -109,7 +110,7 @@ fn clean_migrates_once_and_leaves_code_alone() {
     assert!(again.status.success(), "{again:?}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "a second clean is byte-identical");
 
-    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&path).output().unwrap();
+    let output = fixture.command().args(["compose", "--output", "json"]).arg(&path).output().unwrap();
     let report = report_of(&output);
     assert!(
         report["diagnostics"].as_array().unwrap().iter().all(|diagnostic| diagnostic["code"] != LEGACY),

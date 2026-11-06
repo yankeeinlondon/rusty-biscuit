@@ -51,6 +51,7 @@ mod union_fixtures;
 mod content_policy_fixtures;
 
 mod absent_property_contract;
+mod plain_corpus;
 mod fm_namespace_contract;
 mod hashing_guard;
 mod host_globals_compose;

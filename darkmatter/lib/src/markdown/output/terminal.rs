@@ -38,6 +38,8 @@ use biscuit_terminal::components::terminal_image::{
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
+use renderable::color::ColorMode as RenderColorMode;
+use renderable::output::{OutputOptions, TerminalProfile, Width};
 use std::path::{Path, PathBuf};
 use syntect::highlighting::Color;
 
@@ -255,7 +257,8 @@ pub enum DimMode {
 ///
 /// OSC 8 hyperlinks allow terminals to display clickable links, but not all
 /// terminals support them. This enum controls whether to emit OSC 8 sequences
-/// or use a fallback format.
+/// or print the non-clickable form. No mode can restore OSC 8 under a plain
+/// [`TerminalProfile`], which is applied after every other option.
 ///
 /// ## Examples
 ///
@@ -269,7 +272,7 @@ pub enum DimMode {
 /// // Force OSC8 hyperlinks (for pre-rendering to known-capable terminals)
 /// options.hyperlink_mode = HyperlinkMode::Always;
 ///
-/// // Force fallback format: "text [url]"
+/// // Print links without OSC 8 (see `Never`)
 /// options.hyperlink_mode = HyperlinkMode::Never;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -289,8 +292,9 @@ pub enum HyperlinkMode {
 
     /// Never emit OSC 8 hyperlink escape codes.
     ///
-    /// Use fallback format `text [url]` which is readable in all terminals.
-    /// Use this for dumb terminals or when OSC 8 is causing issues.
+    /// A link prints its text, and `text <url>` at
+    /// [`TerminalOptions::verbosity`] 1 or more. Use this for dumb terminals or
+    /// when OSC 8 is causing issues.
     Never,
 }
 
@@ -543,13 +547,13 @@ impl ImageRenderer {
         // Reject remote URLs (biscuit-terminal also checks, but we fail early)
         if image_path.starts_with("http://") || image_path.starts_with("https://") {
             tracing::warn!(image.path = %image_path, "Remote image URLs not supported");
-            return format!("▉ IMAGE[{}]\n", alt_text);
+            return format!("IMAGE[{}]\n", alt_text);
         }
 
         // Security: Reject absolute paths to prevent directory traversal
         if Path::new(image_path).is_absolute() {
             tracing::warn!(image.path = %image_path, "Rejected absolute image path");
-            return format!("▉ IMAGE[{}]\n", alt_text);
+            return format!("IMAGE[{}]\n", alt_text);
         }
 
         // Resolve relative path against base_path
@@ -567,7 +571,7 @@ impl ImageRenderer {
                 resolved = %canonical_full.display(),
                 "Image path escapes base directory"
             );
-            return format!("▉ IMAGE[{}]\n", alt_text);
+            return format!("IMAGE[{}]\n", alt_text);
         }
         // If canonical_full fails, the file doesn't exist - handled below
         // If canonical_base fails, we can't verify containment but proceed
@@ -576,14 +580,14 @@ impl ImageRenderer {
         // Check file exists before attempting to create TerminalImage
         if !full_path.exists() {
             tracing::warn!(image.path = %full_path.display(), "Image file not found");
-            return format!("▉ IMAGE[{}]\n", alt_text);
+            return format!("IMAGE[{}]\n", alt_text);
         }
 
         // Fallback if graphics unsupported
         if !self.should_attempt_protocol_render() {
             tracing::debug!("Graphics protocol not available");
             // No warning here - this is expected behavior on terminals without graphics
-            return format!("▉ IMAGE[{}]\n", alt_text);
+            return format!("IMAGE[{}]\n", alt_text);
         }
 
         // Create TerminalImage from the path
@@ -591,7 +595,7 @@ impl ImageRenderer {
             Ok(img) => img.with_alt_text(alt_text),
             Err(e) => {
                 tracing::warn!(image.path = %image_path, error = %e, "Failed to load image");
-                return format!("▉ IMAGE[{}]\n", alt_text);
+                return format!("IMAGE[{}]\n", alt_text);
             }
         };
 
@@ -610,13 +614,13 @@ impl ImageRenderer {
                 image.size_bytes = metadata.len(),
                 "Image file too large"
             );
-            return format!("▉ IMAGE[{}]\n", alt_text);
+            return format!("IMAGE[{}]\n", alt_text);
         }
 
         let render_terminal = self.render_terminal();
         match term_image.render_with_route(&render_terminal) {
             Ok(ImageOutput::Pixels(output)) if !output.is_empty() => output,
-            _ => format!("▉ IMAGE[{}]\n", alt_text),
+            _ => format!("IMAGE[{}]\n", alt_text),
         }
     }
 }
@@ -694,11 +698,13 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit dim escape codes (for pre-rendering)
     /// - `Never`: Never emit dim escape codes
     pub dim_mode: DimMode,
-    /// Maximum line width for text wrapping.
+    /// The output width.
     ///
-    /// If `None` (default), auto-detects from terminal size (defaults to 80 if detection fails).
-    /// Set this to override for testing or pre-rendering at a specific width.
-    pub max_width: Option<u16>,
+    /// `None` (default) auto-detects from the terminal size (80 when detection
+    /// fails). A width is layout only: it never selects capabilities, so
+    /// pre-rendering styled output also needs [`color_depth`](Self::color_depth)
+    /// or an [`output_profile`](Self::output_profile).
+    pub width: Option<Width>,
     /// Controls how Mermaid diagrams are rendered.
     ///
     /// - `Off` (default): Show mermaid blocks as syntax-highlighted code
@@ -715,8 +721,18 @@ pub struct TerminalOptions {
     ///
     /// - `Auto` (default): Detect terminal capability via `supports_hyperlinks` crate
     /// - `Always`: Always emit OSC 8 escape codes (for pre-rendering)
-    /// - `Never`: Never emit OSC 8 codes; use fallback format `text [url]`
+    /// - `Never`: Never emit OSC 8 codes; a link prints as its text (see
+    ///   [`verbosity`](Self::verbosity))
     pub hyperlink_mode: HyperlinkMode,
+    /// The global `-v` count. Above zero, a link or image that cannot be
+    /// clickable also prints its destination.
+    pub verbosity: u8,
+    /// The capabilities to render with instead of detecting them.
+    ///
+    /// When set, nothing reads ambient color or hyperlink support. A plain
+    /// profile ([`TerminalProfile::is_plain`]) is pinned after every other
+    /// option, so no field here can restore a capability it removes.
+    pub output_profile: Option<TerminalProfile>,
     /// Resolved HR defaults from `style.hr` frontmatter (or `DarkmatterPage`
     /// builder calls). When present, terminal rendering uses these as the
     /// default horizontal-rule style instead of reading the deprecated top-level
@@ -753,13 +769,60 @@ impl Default for TerminalOptions {
             base_path: None,
             italic_mode: ItalicMode::default(),
             dim_mode: DimMode::default(),
-            max_width: None,
+            width: None,
             mermaid_mode: MermaidMode::default(),
             mermaid_fallback_policy: MermaidFallbackPolicy::default(),
             hyperlink_mode: HyperlinkMode::default(),
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: CodeBlockMode::default(),
         }
+    }
+}
+
+impl TerminalOptions {
+    /// Applies the options a shared output path received: width, verbosity,
+    /// and every capability of the profile.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::output::TerminalOptions;
+    /// use renderable::output::{OutputOptions, TerminalProfile, Width};
+    ///
+    /// let options = OutputOptions::new(Width::Columns(40), TerminalProfile::plain());
+    /// let text = Markdown::from("> quoted")
+    ///     .as_terminal(TerminalOptions::default().with_output_options(&options))
+    ///     .unwrap();
+    /// assert!(text.starts_with("> quoted"));
+    /// ```
+    #[must_use]
+    pub fn with_output_options(mut self, options: &OutputOptions) -> Self {
+        let profile = &options.terminal_profile;
+        self.width = Some(options.width);
+        self.verbosity = options.verbosity;
+        self.color_depth = Some(ColorDepth::from(TerminalColorDepth::from(profile.color_depth)));
+        // An unknown mode says nothing about the page, so the chosen themes stay.
+        if profile.color_mode != RenderColorMode::Unknown {
+            self.color_mode = profile.color_mode.into();
+        }
+        self.hyperlink_mode = if profile.hyperlinks {
+            HyperlinkMode::Always
+        } else {
+            HyperlinkMode::Never
+        };
+        self.italic_mode = if profile.italics {
+            ItalicMode::Always
+        } else {
+            ItalicMode::Never
+        };
+        if !profile.graphics {
+            self.image_mode = TerminalImageMode::Never;
+        }
+        self.output_profile = Some(profile.clone());
+        self
     }
 }
 
@@ -811,7 +874,7 @@ pub(crate) fn format_header_row(
     language: &str,
     bg_color: Color,
     color_mode: ColorMode,
-    terminal_width: u16,
+    terminal_width: u32,
 ) -> String {
     let text_color = header_text_color(color_mode);
 
@@ -934,10 +997,12 @@ mod tests {
             base_path: None,
             italic_mode: ItalicMode::Always,
             dim_mode: DimMode::Always,
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             mermaid_mode: MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: CodeBlockMode::default(),
         }
@@ -1867,7 +1932,7 @@ mod tests {
         let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("http://example.com/image.png", "Alt", None);
 
-        assert!(result.contains("▉ IMAGE[Alt]"));
+        assert!(result.contains("IMAGE[Alt]"));
     }
 
     #[test]
@@ -1875,7 +1940,7 @@ mod tests {
         let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("https://example.com/image.png", "Alt", None);
 
-        assert!(result.contains("▉ IMAGE[Alt]"));
+        assert!(result.contains("IMAGE[Alt]"));
     }
 
     #[test]
@@ -1883,7 +1948,7 @@ mod tests {
         let renderer = ImageRenderer::new(Some(&std::env::temp_dir()), TerminalImageMode::Auto);
         let result = renderer.render_image("nonexistent_file_12345.png", "Missing", None);
 
-        assert!(result.contains("▉ IMAGE[Missing]"));
+        assert!(result.contains("IMAGE[Missing]"));
     }
 
     #[test]
@@ -1892,7 +1957,7 @@ mod tests {
         // This file doesn't exist, so we get fallback, but path is resolved correctly
         let result = renderer.render_image("subdir/image.png", "Test", None);
 
-        assert!(result.contains("▉ IMAGE[Test]"));
+        assert!(result.contains("IMAGE[Test]"));
     }
 
     #[test]
@@ -1900,7 +1965,7 @@ mod tests {
         let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("http://example.com/x.png", "", None);
 
-        assert!(result.contains("▉ IMAGE[]"));
+        assert!(result.contains("IMAGE[]"));
     }
 
     #[test]
@@ -1918,7 +1983,7 @@ mod tests {
         // 1. graphics_supported is false, or
         // 2. the image fails to decode
         assert!(
-            result.contains("▉ IMAGE[Test]"),
+            result.contains("IMAGE[Test]"),
             "Expected fallback placeholder for invalid image data"
         );
 
@@ -1942,7 +2007,7 @@ mod tests {
 
         // Should return fallback (path escapes base) even though the file exists
         assert!(
-            result.contains("▉ IMAGE[Outside]"),
+            result.contains("IMAGE[Outside]"),
             "Path traversal should be blocked: {}",
             result
         );
@@ -1962,7 +2027,7 @@ mod tests {
         let result = renderer.render_image("../../../etc/passwd", "Passwd", None);
 
         assert!(
-            result.contains("▉ IMAGE[Passwd]"),
+            result.contains("IMAGE[Passwd]"),
             "Deep path traversal should be blocked: {}",
             result
         );
@@ -1983,7 +2048,7 @@ mod tests {
             renderer.render_image(absolute_file.to_str().unwrap(), "AbsoluteExisting", None);
 
         assert!(
-            result.contains("▉ IMAGE[AbsoluteExisting]"),
+            result.contains("IMAGE[AbsoluteExisting]"),
             "Absolute paths should be blocked: {}",
             result
         );
@@ -2001,7 +2066,7 @@ mod tests {
         // On Unix, this won't be detected as absolute by std::path::Path::is_absolute()
         // but it's still suspicious - the file won't exist anyway
         // Just verify we get a fallback (either from absolute check or file-not-found)
-        assert!(result.contains("▉ IMAGE[WinAbs]"));
+        assert!(result.contains("IMAGE[WinAbs]"));
     }
 
     #[test]
@@ -2016,7 +2081,7 @@ mod tests {
         let result = renderer.render_image("subdir/image.png", "ValidRelative", None);
 
         // Should return fallback because file doesn't exist, not because path is invalid
-        assert!(result.contains("▉ IMAGE[ValidRelative]"));
+        assert!(result.contains("IMAGE[ValidRelative]"));
 
         std::fs::remove_dir_all(&base_dir).ok();
     }
@@ -2039,7 +2104,7 @@ mod tests {
 
         // The path is valid and stays within base, so we'll get a graphics-related fallback
         // (since tests don't have graphics support) rather than a security rejection
-        assert!(result.contains("▉ IMAGE[StaysInBase]"));
+        assert!(result.contains("IMAGE[StaysInBase]"));
 
         std::fs::remove_dir_all(&base_dir).ok();
     }

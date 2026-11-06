@@ -1,8 +1,11 @@
 //! Subcommand dispatch for the `md` CLI.
 
 use crate::args::policy::{self, PolicyCommand};
-use crate::args::{Cli, Command as CliCommand, ComposeOutputFormat, OutputFormat, SchemaTarget};
+use crate::args::{Cli, Command as CliCommand, SchemaTarget};
 use crate::io::load_markdown;
+use crate::output::report::ReportSink;
+use crate::output::{OutputEnvironment, resolve_output, stderr_warning};
+use biscuit_terminal::output::WidthRequest;
 use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
@@ -11,7 +14,7 @@ use darkmatter::markdown::toc::TocTree;
 use tracing::instrument;
 
 mod code_block;
-mod compose;
+pub(crate) mod compose;
 mod clean;
 mod frontmatter;
 mod graph;
@@ -22,12 +25,12 @@ mod trigger_findings;
 mod validate;
 
 use code_block::run_code_block;
-use compose::{CollectionLimits, build_remote_read_config, parse_compose_positionals, run_compose};
+use compose::{CollectionLimits, ComposeOutputWidth, build_remote_read_config, parse_compose_positionals, run_compose};
 use frontmatter::{run_edit, run_get, run_rm, run_set};
 use hash::run_hash;
 
 pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
-pub use compose::report::ReportedExit;
+pub use crate::output::report::ReportedExit;
 use render::run_render;
 
 /// Validates that top-level CLI options are not combined with subcommands.
@@ -37,7 +40,7 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     if cli.render.input.is_some() {
         conflicts.push("[INPUT]");
     }
-    if cli.render.output != OutputFormat::Auto {
+    if cli.render.output.is_some() {
         conflicts.push("--output");
     }
     if cli.render.indent.is_some() {
@@ -129,7 +132,6 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             remote_freshness,
             cache_root,
         } => {
-            let parsed = parse_compose_positionals(&args)?;
             let mode = clean::resolve_list_spacing(compact, loose)
                 .unwrap_or(darkmatter::markdown::cleanup::rules::ListItemPadding::Preserve);
             let policy = policy::resolve_for(
@@ -146,33 +148,53 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 remote_refresh,
                 remote_freshness,
             );
-            let report = output == ComposeOutputFormat::ReportJson;
-            if report {
-                compose::reject_report_conflicts(show, shell)?;
+            let resolved = resolve_output(
+                output,
+                cli.width,
+                WidthRequest::Source,
+                cli.verbose,
+                &OutputEnvironment::detect(),
+            )?;
+            if output.is_data() {
+                compose::reject_report_conflicts(output, shell)?;
             }
-            let sink = report.then(compose::report::ReportSink::default);
-            let result = run_compose(
-                parsed.input.as_ref(),
-                state.as_deref(),
-                set.as_deref(),
-                parsed.shorthand_setters,
-                output.document_format(),
-                show,
-                frontmatter,
-                mode,
-                indent,
-                &policy,
-                baseline_schema.as_ref(),
-                timeout,
-                CollectionLimits { max_iteration_visits, max_expansion_bytes },
-                shell,
-                perf,
-                remote_config,
-                cache_root.as_ref(),
-                cli,
-                request,
-                sink.as_ref(),
-            );
+            let sink = output.is_data().then(|| {
+                let file = parse_compose_positionals(&args)
+                    .ok()
+                    .and_then(|parsed| parsed.input)
+                    .filter(|path| path.to_str() != Some("-"))
+                    .map(|path| path.display().to_string());
+                ReportSink::new(&resolved, file, show, perf)
+            });
+            if sink.is_none()
+                && let Some(warning) = &resolved.width_warning
+            {
+                stderr_warning(warning);
+            }
+            let result = parse_compose_positionals(&args).and_then(|parsed| {
+                run_compose(
+                    parsed.input.as_ref(),
+                    state.as_deref(),
+                    set.as_deref(),
+                    parsed.shorthand_setters,
+                    ComposeOutputWidth::from_resolved(&resolved),
+                    show,
+                    frontmatter,
+                    mode,
+                    indent,
+                    &policy,
+                    baseline_schema.as_ref(),
+                    timeout,
+                    CollectionLimits { max_iteration_visits, max_expansion_bytes },
+                    shell,
+                    perf,
+                    remote_config,
+                    cache_root.as_ref(),
+                    cli,
+                    request,
+                    sink.as_ref(),
+                )
+            });
             match sink {
                 Some(sink) => sink.finish(result)?,
                 None => result?,

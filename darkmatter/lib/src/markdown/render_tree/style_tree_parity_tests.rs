@@ -148,7 +148,9 @@ fn oracle_doc(md: &Markdown, mutate: impl FnOnce(&mut RenderNode)) -> Document {
 }
 
 fn render_terminal(doc: &Document) -> String {
-    render_page_terminal_document(doc, Vec::new(), &term_opts(), WIDTH, true)
+    let terminal = Terminal::new_optimistic(u32::from(WIDTH));
+    let width = renderable::output::Width::Columns(u32::from(WIDTH));
+    render_page_terminal_document(doc, Vec::new(), &term_opts(), width, Some(&terminal))
         .expect("terminal render")
         .output
 }

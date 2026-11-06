@@ -2,6 +2,7 @@ mod cli;
 mod command;
 mod completion;
 mod enums;
+pub mod output;
 mod parsers;
 mod render;
 pub mod policy;
@@ -17,12 +18,12 @@ pub use completion::{
     complete_theme_names,
 };
 pub use enums::{
-    CodeBlockOutput, ComposeOutputFormat, Feature, GraphFormat, HashKind, OutputFormat, RemoteFreshness,
+    CodeBlockOutput, Feature, GraphFormat, HashKind, RemoteFreshness,
     SchemaDetectFormat, SchemaValidateFormat, ValidateOutputFormat,
 };
 pub use parsers::{
     parse_bool_str, parse_cli_fill, parse_cli_length, parse_fixed_width, parse_indent_size,
-    parse_max_width, parse_positive_limit, parse_theme_name, reject_width_flag,
+    parse_max_width, parse_positive_limit, parse_theme_name,
 };
 pub use target::{SchemaTarget, ValidateTarget};
 pub use wrappers::{CliFill, CodeBlockArg, PageAlignmentArg, PageBackgroundArg};

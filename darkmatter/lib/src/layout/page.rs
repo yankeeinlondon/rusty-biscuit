@@ -11,6 +11,7 @@ use renderable::browser::feature::{
     FeatureAssets, FeatureContext, FeatureResolver, PageFeature, resolve_features,
     serialize_features_body, serialize_features_head,
 };
+use renderable::output::{OutputOptions, TerminalProfile, Width};
 use renderable::target::RenderTarget;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -60,8 +61,8 @@ pub struct ComponentPolicy {
 ///
 /// The builder is consuming (`self -> Self`) for ergonomic chaining. With no
 /// builder calls, [`DarkmatterPage::render`] matches
-/// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) with
-/// default options whenever the captured terminal's color mode agrees with the
+/// [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal) at the
+/// page's width whenever the captured terminal's color mode agrees with the
 /// detected default (or the terminal reports `Unknown`). When a real terminal
 /// reports a different mode, the page honors *that* mode — the terminal is the
 /// source of truth (Decision #4), which `Markdown::as_terminal` cannot observe
@@ -84,7 +85,10 @@ pub struct ComponentPolicy {
 /// ```
 #[derive(Debug, Clone)]
 pub struct DarkmatterPage {
-    terminal_width: u16,
+    terminal_width: Width,
+    /// The terminal the page was built with. A framed page styles with its
+    /// capabilities rather than the ambient ones (see [`Self::render`]).
+    terminal: Terminal,
     terminal_color_mode: TerminalColorMode,
     /// Color depth captured from the [`Terminal`] at construction, projected
     /// onto darkmatter's [`ColorDepth`] palette via the same thresholds as
@@ -93,8 +97,13 @@ pub struct DarkmatterPage {
     /// set one explicitly, so a page built from `Terminal::new_optimistic`
     /// renders with that terminal's reported depth regardless of the ambient
     /// environment. The zero-config path deliberately leaves this unset to
-    /// preserve byte-for-byte parity with `Markdown::as_terminal(default)`.
+    /// preserve byte-for-byte parity with `Markdown::as_terminal`.
     terminal_color_depth: ColorDepth,
+    /// Set by [`Self::with_output_options`]; applied at render time, so a plain
+    /// profile outranks every builder called before or after it.
+    output_options: Option<OutputOptions>,
+    /// The prose constraint of a browser render; see [`Self::with_browser_width`].
+    browser_width: Width,
     page_margin: renderable::layout::Edges,
     page_padding: renderable::layout::Edges,
     page_background: PageBackground,
@@ -140,9 +149,12 @@ impl DarkmatterPage {
     /// and full component fill.
     pub fn new(terminal: &Terminal) -> Self {
         Self {
-            terminal_width: clamp_width(terminal.width()),
+            terminal_width: Width::Columns(terminal.width().max(1)),
+            terminal: terminal.clone(),
             terminal_color_mode: terminal.color_mode,
             terminal_color_depth: ColorDepth::from(terminal.color_depth),
+            output_options: None,
+            browser_width: Width::Source,
             page_margin: renderable::layout::Edges::default(),
             page_padding: renderable::layout::Edges::default(),
             page_background: PageBackground::Transparent,
@@ -169,8 +181,9 @@ impl DarkmatterPage {
         }
     }
 
-    /// Captured terminal width in columns.
-    pub fn terminal_width(&self) -> u16 {
+    /// The width this page renders at: the captured terminal's columns, or
+    /// what [`Self::with_output_options`] set.
+    pub fn terminal_width(&self) -> Width {
         self.terminal_width
     }
 
@@ -220,24 +233,69 @@ impl DarkmatterPage {
     /// Configured max width resolved to terminal cells, if any.
     ///
     /// A percentage `max-width` resolves against the post-margin/post-padding
-    /// content width; the authored [`Length`](renderable::layout::Length) is
+    /// content width (under an unbounded width it has no base, and caps
+    /// nothing); the authored [`Length`](renderable::layout::Length) is
     /// retained on the frame so the browser wrapper can emit it as `%`.
-    pub fn max_width(&self) -> Option<u16> {
+    pub fn max_width(&self) -> Option<u32> {
         let content = self.frame_content_width();
         self.page_max_width
             .as_ref()
-            .map(|tv| length_to_cells(tv, content))
+            .and_then(|tv| max_width_to_cells(tv, content))
     }
 
     /// Terminal content width after horizontal page margins and padding are
     /// removed. The percent base for `max-width`.
-    fn frame_content_width(&self) -> u16 {
+    fn frame_content_width(&self) -> Width {
         let margin_x = length_to_cells(&self.page_margin.left, self.terminal_width)
             .saturating_add(length_to_cells(&self.page_margin.right, self.terminal_width));
         let padding_x = length_to_cells(&self.page_padding.left, self.terminal_width)
             .saturating_add(length_to_cells(&self.page_padding.right, self.terminal_width));
         self.terminal_width
             .saturating_sub(margin_x.saturating_add(padding_x))
+    }
+
+    /// The profile set explicitly, if any.
+    fn explicit_profile(&self) -> Option<&TerminalProfile> {
+        self.output_options
+            .as_ref()
+            .map(|options| &options.terminal_profile)
+            .or(self.options.output_profile.as_ref())
+    }
+
+    /// The options the zero-config and framed terminal paths both start from.
+    fn resolved_terminal_options(&self, render_color_mode: ColorMode) -> TerminalOptions {
+        let mut options = self.options.clone();
+        options.include_line_numbers = self.line_numbers;
+        options.color_mode = render_color_mode;
+        options.hr_defaults = self.hr_defaults();
+        options.code_block_mode = self.code_block_mode;
+        if let Some(theme) = self.page_code_theme {
+            options.code_theme = theme;
+        }
+        if let Some(output) = &self.output_options {
+            options.width = Some(output.width);
+            options.verbosity = output.verbosity;
+            options.output_profile = Some(output.terminal_profile.clone());
+        }
+        options
+    }
+
+    /// Folds `md` with the page's construction-time context (component
+    /// policies, page colors, hyperlink/image styles, HR defaults).
+    pub(crate) fn render_document(&self, md: &Markdown) -> Result<renderable::tree::Document, PageRenderError> {
+        let hr_defaults = self.hr_defaults();
+        let build_ctx = crate::markdown::render_tree::build_context::TreeBuildContext {
+            component_policies: &self.component_policies,
+            page_color: self.page_color,
+            page_bg_color: self.page_bg_color,
+            hyperlink_style: self.hyperlink_style.as_ref(),
+            local_hyperlink_style: self.local_hyperlink_style.as_ref(),
+            local_image_style: self.local_image_style.as_ref(),
+            hr_defaults: hr_defaults.as_ref(),
+        };
+        crate::markdown::render_tree::entrypoints::to_render_document_with_context(md, &build_ctx)
+            .map(|(document, _)| document)
+            .map_err(|e| PageRenderError::Render(e.to_string()))
     }
 
     /// Whether line numbers are enabled for code blocks.
@@ -406,9 +464,9 @@ impl DarkmatterPage {
         // cell mirror stays meaningful; vertical sides are always `Ch` rows.
         let base = self.terminal_width;
         let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
-            TargetValue::universal(Length::ch(u32::from(
+            TargetValue::universal(Length::ch(
                 length_to_cells(a, base).saturating_add(length_to_cells(b, base)),
-            )))
+            ))
         };
         self.layout.margin = RMargin {
             top: sum(&self.page_margin.top, &self.page_padding.top),
@@ -577,9 +635,9 @@ impl DarkmatterPage {
     }
 
     /// Cap the content width at `max_width` columns.
-    pub fn with_max_width(mut self, max_width: u16) -> Self {
+    pub fn with_max_width(mut self, max_width: u32) -> Self {
         self.page_max_width = Some(renderable::layout::TargetValue::universal(
-            renderable::layout::Length::ch(u32::from(max_width)),
+            renderable::layout::Length::ch(max_width),
         ));
         self.rebuild_layout();
         self
@@ -712,6 +770,57 @@ impl DarkmatterPage {
         self
     }
 
+    // ---------- Output options ----------
+
+    /// Renders with the options a shared output path received: their width,
+    /// verbosity, color depth, color mode, OSC 8 links, italics, underline, and
+    /// graphics. Nothing reads the ambient terminal's color afterward.
+    ///
+    /// A plain profile ([`TerminalProfile::is_plain`]) is applied at render
+    /// time, so no builder called before or after this one can restore a
+    /// capability it removes. Under any other profile a later builder still
+    /// refines the individual option it sets.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    /// use darkmatter::layout::DarkmatterPage;
+    /// use darkmatter::markdown::Markdown;
+    /// use renderable::output::{OutputOptions, TerminalProfile, Width};
+    ///
+    /// let options = OutputOptions::new(Width::Unlimited, TerminalProfile::plain());
+    /// let text = DarkmatterPage::new(&Terminal::new_optimistic(80))
+    ///     .with_output_options(&options)
+    ///     .with_margin_x(2)
+    ///     .render(&Markdown::from("> quoted"))
+    ///     .unwrap();
+    /// assert_eq!(text, "  > quoted\n");
+    /// ```
+    #[must_use]
+    pub fn with_output_options(mut self, options: &OutputOptions) -> Self {
+        let profile = &options.terminal_profile;
+        self.terminal_width = options.width;
+        self.terminal_color_depth =
+            ColorDepth::from(biscuit_terminal::discovery::detection::ColorDepth::from(profile.color_depth));
+        if profile.color_mode != renderable::color::ColorMode::Unknown {
+            self.terminal_color_mode = profile.color_mode.into();
+        }
+        self.options = self.options.with_output_options(options);
+        self.output_options = Some(options.clone());
+        self.rebuild_layout();
+        self
+    }
+
+    /// Caps browser prose at a [`Width::Columns`] width, as the generic HTML
+    /// fold does for `BrowserRenderOptions::width`. The default adds no
+    /// constraint.
+    #[must_use]
+    pub(crate) fn with_browser_width(mut self, width: Width) -> Self {
+        self.browser_width = width;
+        self
+    }
+
     // ---------- TerminalOptions passthrough ----------
 
     /// Replace the entire underlying [`TerminalOptions`] in one call.
@@ -837,12 +946,13 @@ impl DarkmatterPage {
     /// therefore renders byte-for-byte equal to `CodeBlock::rust(...).render()`
     /// for the same code, language, and metadata.
     ///
-    /// When all layout fields are at their defaults, this matches
-    /// `Markdown::as_terminal(default)` as long as the captured terminal color
-    /// mode agrees with the detected default (or is `Unknown`); a real terminal
-    /// reporting a different mode wins, since the terminal is the source of truth
-    /// (Decision #4). The decorated path threads a `LayoutContext` into the same
-    /// render-tree terminal renderer and then decorates the rendered rows.
+    /// The page renders at the width it was given. When all layout fields are
+    /// at their defaults, this matches `Markdown::as_terminal` at that width as
+    /// long as the captured terminal color mode agrees with the detected default
+    /// (or is `Unknown`); a real terminal reporting a different mode wins, since
+    /// the terminal is the source of truth (Decision #4). The decorated path
+    /// threads a `LayoutContext` into the same render-tree terminal renderer and
+    /// then decorates the rendered rows.
     ///
     /// ## Errors
     ///
@@ -855,7 +965,7 @@ impl DarkmatterPage {
     /// renderer fails.
     pub fn render(&self, md: &Markdown) -> Result<String, PageRenderError> {
         crate::style::bespoke::validate_terminal_inline_lengths(self)?;
-        let ctx = LayoutContext::from_page(
+        let mut ctx = LayoutContext::from_page(
             self.terminal_width,
             self.page_margin.clone(),
             self.page_padding.clone(),
@@ -866,22 +976,12 @@ impl DarkmatterPage {
             self.page_color,
             self.page_bg_color,
         )?;
-
-        // Build derived TerminalOptions. `max_width` is deliberately left unset:
-        // it would select the optimistic pre-render terminal (its capabilities
-        // *and* width). The page keeps width and capability selection independent
-        // — width is pinned below via the page-frame geometry decision, color
-        // depth rides `options.color_depth` (review-4 finding 1).
-        let mut options = self.options.clone();
-        options.include_line_numbers = self.line_numbers;
-        options.color_mode = ctx.render_color_mode;
-        options.hr_defaults = self.hr_defaults();
-        options.code_block_mode = self.code_block_mode;
-
-        // Apply page-level code theme override if set via frontmatter.
-        if let Some(theme) = self.page_code_theme {
-            options.code_theme = theme;
+        let profile = self.explicit_profile().cloned();
+        if profile.as_ref().is_some_and(TerminalProfile::is_plain) {
+            ctx.background_color = None;
         }
+
+        let mut options = self.resolved_terminal_options(ctx.render_color_mode);
 
         // Build construction-time context for the context-aware fold. HR
         // defaults come from explicit page options, including values projected
@@ -901,10 +1001,9 @@ impl DarkmatterPage {
         };
 
         let result = if self.is_default_layout() {
-            // Zero-config path: byte-for-byte parity with
-            // `Markdown::as_terminal(default)`. No build context is threaded —
-            // doing so would leak the page's captured width into component width
-            // resolution and break that equivalence.
+            // Zero-config path: `Markdown::as_terminal` at the page's width, so
+            // no build context is threaded.
+            options.width = options.width.or(Some(self.terminal_width));
             crate::markdown::render_tree::entrypoints::render_tree_terminal(md, &options)
         } else {
             // Build the typed Document ONCE (acceptance criterion 3: one tree
@@ -916,7 +1015,6 @@ impl DarkmatterPage {
                     md, &build_ctx,
                 )?;
 
-            let paints = self.paints_construction_color(&doc);
             // Honor the captured terminal's color depth only when this page
             // actually paints construction-time color. Page-level color always
             // paints; a *matched* component / link / image color paints only when
@@ -924,38 +1022,33 @@ impl DarkmatterPage {
             // nothing, so it must leave the depth unset and render unrelated
             // content at ambient detection — keeping capability selection
             // independent of policy presence (review-3/4). An explicit
-            // `with_color_depth` wins.
-            if options.color_depth.is_none() && paints {
+            // `with_color_depth` or output profile wins.
+            if profile.is_none() && options.color_depth.is_none() && self.paints_construction_color(&doc) {
                 options.color_depth = Some(self.terminal_color_depth);
             }
 
             let has_geometry = self.has_frame_geometry();
-            // Width follows page-frame geometry only: the captured
-            // `effective_width` when the frame defines its own geometry,
-            // otherwise the ambient width (so an unmatched policy cannot widen
-            // the content box — review-2 finding 2).
+            // The frame's own width when it defines geometry; otherwise the
+            // page's width, so an unmatched policy cannot widen the content box
+            // (review-2 finding 2).
             let content_width = if has_geometry {
                 ctx.effective_width
             } else {
-                ambient_terminal_width()
+                self.terminal_width
             };
-            // The optimistic (TrueColor + OSC8) capability profile is selected by
-            // page-frame geometry alone — a *deliberate* frame configuration —
-            // never by a matched component policy. A matched layout / text-layout
-            // policy (e.g. a centered table) bakes its attr onto its own node and
-            // is resolved there by the target fold; it must not promote the whole
-            // document to optimistic capabilities and so hand unrelated content
-            // TrueColor or OSC8 the ambient terminal never advertised
-            // (review-5 finding 1). Painted construction color still pins the
-            // captured color *depth* above via `paints`, independent of this
-            // profile.
-            let optimistic_capabilities = has_geometry;
+            // The page's own terminal styles a framed page: a *deliberate* frame
+            // configuration, never a matched component policy. A matched layout /
+            // text-layout policy (e.g. a centered table) bakes its attr onto its
+            // own node and is resolved there by the target fold; it must not hand
+            // unrelated content capabilities the ambient terminal never advertised
+            // (review-5 finding 1).
+            let captured = has_geometry.then_some(&self.terminal);
             crate::markdown::render_tree::entrypoints::render_page_terminal_document(
                 &doc,
                 fold_diagnostics,
                 &options,
                 content_width,
-                optimistic_capabilities,
+                captured,
             )
         }
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
@@ -974,7 +1067,7 @@ impl DarkmatterPage {
         // (no constant document-tail offset) and no interior run of >=2 blank
         // lines survives. Runs only on the decorated path; the zero-config path
         // returned above keeps byte-for-byte equivalence with
-        // `Markdown::as_terminal(default)`.
+        // `Markdown::as_terminal`.
         let body = normalize_body_rhythm(&result.output);
 
         Ok(apply_row_decoration(&body, &ctx))
@@ -1225,6 +1318,7 @@ impl DarkmatterPage {
             Rc::clone(&resolver),
             feature_context.clone(),
             graphics_mode,
+            self.browser_width,
         )
         .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
@@ -1355,14 +1449,11 @@ impl DarkmatterPage {
     /// hyperlink/image styles, HR defaults). An unmatched component policy
     /// therefore cannot change frame width behavior (review-2 finding 2): it
     /// still threads the build context, but the frame renders at the same width
-    /// it would with no policy. The zero-config (no-geometry) path leaves
-    /// `max_width` unset, preserving byte-for-byte parity with
-    /// `Markdown::as_terminal(default)`.
+    /// it would with no policy.
     ///
-    /// The optimistic terminal capability profile (TrueColor + OSC8) keys off
-    /// this too (review-5 finding 1): only deliberate frame geometry — never a
-    /// matched component policy — promotes the whole document to optimistic
-    /// capabilities, so a matched layout (e.g. a centered table) cannot hand
+    /// Styling with the page's own terminal keys off this too (review-5
+    /// finding 1): only deliberate frame geometry — never a matched component
+    /// policy — does so, so a matched layout (e.g. a centered table) cannot hand
     /// unrelated content color or hyperlinks the ambient terminal never offered.
     fn has_frame_geometry(&self) -> bool {
         !edges_is_zero(&self.page_margin)
@@ -1375,8 +1466,8 @@ impl DarkmatterPage {
     /// Whether all layout fields are at their defaults.
     ///
     /// When `true`, downstream rendering can short-circuit row decoration and
-    /// emit byte-for-byte the same output as `Markdown::as_terminal(default)`
-    /// (the zero-config render-tree terminal path).
+    /// emit byte-for-byte the same output as `Markdown::as_terminal` at the
+    /// page's width (the zero-config render-tree terminal path).
     #[allow(dead_code)]
     pub(crate) fn is_default_layout(&self) -> bool {
         edges_is_zero(&self.page_margin)
@@ -1405,14 +1496,17 @@ impl DarkmatterPage {
     /// combined horizontal margin + padding meets or exceeds the terminal
     /// width.
     pub fn validate_horizontal_space(&self) -> Result<(), PageRenderError> {
+        let Some(columns) = self.terminal_width.as_columns() else {
+            return Ok(());
+        };
         let margin_x = length_to_cells(&self.page_margin.left, self.terminal_width)
             .saturating_add(length_to_cells(&self.page_margin.right, self.terminal_width));
         let padding_x = length_to_cells(&self.page_padding.left, self.terminal_width)
             .saturating_add(length_to_cells(&self.page_padding.right, self.terminal_width));
         let required = margin_x.saturating_add(padding_x);
-        if required >= self.terminal_width {
+        if required >= columns {
             Err(PageRenderError::MarginsExceedTerminalWidth {
-                terminal_width: self.terminal_width,
+                terminal_width: columns,
                 required,
             })
         } else {
@@ -1490,107 +1584,74 @@ fn normalize_body_rhythm(body: &str) -> String {
 }
 
 /// Wrap rendered markdown body with margin/padding rows and background fill.
+///
+/// With no background there is nothing for a right margin, right padding, or a
+/// blank row to paint, so they emit nothing and no line gains trailing
+/// whitespace. Under an unbounded width there is nothing to fill to: the right
+/// margin and the background band are omitted, while the left margin and the
+/// padding still apply.
 fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
-    let mut output = String::new();
+    let base = ctx.terminal_width;
+    let cells = |tv| length_to_cells(tv, base) as usize;
+    let margin_left = " ".repeat(cells(&ctx.page_margin.left));
+    let padding_left = " ".repeat(cells(&ctx.page_padding.left));
+    let rows_above = cells(&ctx.page_margin.top) + cells(&ctx.page_padding.top);
+    let rows_below = cells(&ctx.page_padding.bottom) + cells(&ctx.page_margin.bottom);
 
-    let bg = ctx.background_color;
+    let Some(background) = ctx.background_color else {
+        let mut output = "\n".repeat(rows_above);
+        for line in body.lines() {
+            if !line.trim().is_empty() {
+                output.push_str(&margin_left);
+                output.push_str(&padding_left);
+                output.push_str(line);
+            }
+            output.push('\n');
+        }
+        output.push_str(&"\n".repeat(rows_below));
+        return output;
+    };
+
+    let bounded = base.is_bounded();
+    let fill_width = if bounded {
+        ctx.effective_width.as_columns().unwrap_or(0) as usize
+    } else {
+        0
+    };
+    let margin_right = if bounded {
+        " ".repeat(cells(&ctx.page_margin.right))
+    } else {
+        String::new()
+    };
+    let padding_right = " ".repeat(cells(&ctx.page_padding.right));
+    let open = background.ansi_bg();
     let reset = "\x1b[0m";
 
-    // Build repeated cell strings. Percent sides resolve against the captured
-    // terminal width; vertical sides are `Ch` rows.
-    let base = ctx.terminal_width;
-    let margin_left = " ".repeat(length_to_cells(&ctx.page_margin.left, base) as usize);
-    let margin_right = " ".repeat(length_to_cells(&ctx.page_margin.right, base) as usize);
-    let padding_left = " ".repeat(length_to_cells(&ctx.page_padding.left, base) as usize);
-    let padding_right = " ".repeat(length_to_cells(&ctx.page_padding.right, base) as usize);
+    let margin_row = format!("{margin_left}{margin_right}\n");
+    let padding_row = format!(
+        "{margin_left}{open}{padding_left}{fill}{padding_right}{reset}{margin_right}\n",
+        fill = " ".repeat(fill_width),
+    );
 
-    let bg_open = bg.as_ref().map(|c| c.ansi_bg());
-    let bg_reset = bg.as_ref().map(|_| reset);
-
-    // Top margin: transparent empty rows.
-    for _ in 0..length_to_cells(&ctx.page_margin.top, base) {
-        output.push_str(&margin_left);
-        output.push_str(&margin_right);
-        output.push('\n');
-    }
-
-    // Top padding: bg-filled rows.
-    for _ in 0..length_to_cells(&ctx.page_padding.top, base) {
-        output.push_str(&margin_left);
-        if let Some(ref open) = bg_open {
-            output.push_str(open);
-        }
-        output.push_str(&padding_left);
-        // Fill to effective_width.
-        if bg_open.is_some() {
-            let fill = " ".repeat(ctx.effective_width as usize);
-            output.push_str(&fill);
-        }
-        output.push_str(&padding_right);
-        if let Some(r) = bg_reset {
-            output.push_str(r);
-        }
-        output.push_str(&margin_right);
-        output.push('\n');
-    }
-
-    // Content rows.
+    let mut output = margin_row.repeat(cells(&ctx.page_margin.top));
+    output.push_str(&padding_row.repeat(cells(&ctx.page_padding.top)));
     for line in body.lines() {
         output.push_str(&margin_left);
-        if let Some(open) = &bg_open {
-            output.push_str(open);
-        }
+        output.push_str(&open);
         output.push_str(&padding_left);
         output.push_str(line);
-        // Pad to effective_width with background fill if needed.
-        // Only pad when there is an actual background color; otherwise
-        // transparent padding is unnecessary and would make lines longer
-        // than their natural width.
-        if bg_open.is_some() {
-            let visible_len =
-                biscuit_terminal::utils::block_constraint::visible_width(line) as usize;
-            if visible_len < ctx.effective_width as usize {
-                let fill = " ".repeat(ctx.effective_width as usize - visible_len);
-                if let Some(open) = &bg_open {
-                    output.push_str(open);
-                }
-                output.push_str(&fill);
-            }
+        let visible = biscuit_terminal::utils::block_constraint::visible_width(line) as usize;
+        if visible < fill_width {
+            output.push_str(&open);
+            output.push_str(&" ".repeat(fill_width - visible));
         }
         output.push_str(&padding_right);
-        if let Some(r) = bg_reset {
-            output.push_str(r);
-        }
+        output.push_str(reset);
         output.push_str(&margin_right);
         output.push('\n');
     }
-
-    // Bottom padding: bg-filled rows.
-    for _ in 0..length_to_cells(&ctx.page_padding.bottom, base) {
-        output.push_str(&margin_left);
-        if let Some(open) = &bg_open {
-            output.push_str(open);
-        }
-        output.push_str(&padding_left);
-        if bg_open.is_some() {
-            let fill = " ".repeat(ctx.effective_width as usize);
-            output.push_str(&fill);
-        }
-        output.push_str(&padding_right);
-        if let Some(r) = bg_reset {
-            output.push_str(r);
-        }
-        output.push_str(&margin_right);
-        output.push('\n');
-    }
-
-    // Bottom margin: transparent empty rows.
-    for _ in 0..length_to_cells(&ctx.page_margin.bottom, base) {
-        output.push_str(&margin_left);
-        output.push_str(&margin_right);
-        output.push('\n');
-    }
-
+    output.push_str(&padding_row.repeat(cells(&ctx.page_padding.bottom)));
+    output.push_str(&margin_row.repeat(cells(&ctx.page_margin.bottom)));
     output
 }
 
@@ -1601,22 +1662,34 @@ fn apply_row_decoration(body: &str, ctx: &LayoutContext) -> String {
 /// so the browser can emit percentages natively (see [`length_to_css_frame`]);
 /// the terminal resolves them here. [`Length::Percent`] resolves against `base`
 /// (the terminal width for margins/padding, the post-margin/padding content
-/// width for `max-width`) with the same rounding as the apply layer.
+/// width for `max-width`) with the same rounding as the apply layer; an
+/// unbounded `base` gives it nothing to be a percent of, so it is `0`.
 /// [`Length::Css`] is rejected before reaching the frame, so it maps to `0`.
 pub(crate) fn length_to_cells(
     tv: &renderable::layout::TargetValue<renderable::layout::Length>,
-    base: u16,
-) -> u16 {
+    base: Width,
+) -> u32 {
     use renderable::layout::{Length, TargetValue};
     match tv {
         TargetValue::Universal(Length::Zero) => 0,
-        TargetValue::Universal(Length::Ch(n)) => u16::try_from(*n).unwrap_or(u16::MAX),
-        TargetValue::Universal(Length::Percent(p)) => {
-            (f32::from(base) * (p / 100.0))
-                .round()
-                .clamp(0.0, f32::from(u16::MAX)) as u16
-        }
+        TargetValue::Universal(Length::Ch(n)) => *n,
+        TargetValue::Universal(Length::Percent(p)) => base.as_columns().map_or(0, |columns| {
+            (columns as f32 * (p / 100.0)).round().clamp(0.0, u32::MAX as f32) as u32
+        }),
         _ => 0,
+    }
+}
+
+/// A `max-width` in cells against `base`, or `None` when it caps nothing: a
+/// percent of an unbounded width. A fixed `max-width` still caps there.
+pub(crate) fn max_width_to_cells(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+    base: Width,
+) -> Option<u32> {
+    use renderable::layout::{Length, TargetValue};
+    match tv {
+        TargetValue::Universal(Length::Percent(_)) if !base.is_bounded() => None,
+        _ => Some(length_to_cells(tv, base)),
     }
 }
 
@@ -1683,27 +1756,6 @@ fn edges_is_zero(edges: &renderable::layout::Edges) -> bool {
         && length_is_zero(&edges.right)
         && length_is_zero(&edges.bottom)
         && length_is_zero(&edges.left)
-}
-
-/// Saturating cast from u32 terminal width to u16, clamped to `u16::MAX`.
-fn clamp_width(width: u32) -> u16 {
-    width.min(u16::MAX as u32) as u16
-}
-
-/// The ambient terminal width the zero-config path renders at.
-///
-/// A construction-only page (baked attributes but no frame geometry) keeps its
-/// content box at this ambient width, so an unmatched component policy cannot
-/// widen it (review-2 finding 2). This matches the width
-/// `Markdown::as_terminal(default)` resolves, since both fall back to the same
-/// dynamic dimensions detector.
-///
-/// This is width-only: it calls the dynamic dimensions detector directly rather
-/// than constructing a full `Terminal`, which would pay the whole detection
-/// suite (OSC probes, color-mode, git-root walk, terminal-config parsing) just
-/// to read `width()`.
-fn ambient_terminal_width() -> u16 {
-    clamp_width(biscuit_terminal::discovery::detection::terminal_width())
 }
 
 impl TerminalRenderable for DarkmatterPage {
@@ -2050,19 +2102,18 @@ fn darkmatter_frame_open(
 
     // When a `max-width` is configured, emit its authored `Length` (a `%`
     // resolves against the viewport in the browser). With none set, fall back to
-    // the resolved content width so the wrapper still caps to the frame.
+    // the resolved content width so the wrapper still caps to the frame; an
+    // unbounded page has nothing to cap to.
     let max_width_css = match page.page_max_width() {
-        Some(tv) => length_to_css_frame(tv),
-        None => {
-            let ch = if ctx.effective_width < ctx.terminal_width {
-                ctx.effective_width
-            } else {
-                ctx.terminal_width
-            };
-            format!("{ch}ch")
-        }
+        Some(tv) => Some(length_to_css_frame(tv)),
+        None => ctx.terminal_width.as_columns().map(|terminal_columns| {
+            let effective = ctx.effective_width.as_columns().unwrap_or(terminal_columns);
+            format!("{}ch", effective.min(terminal_columns))
+        }),
     };
-    wrapper_styles.push_str(&format!("max-width: {max_width_css};"));
+    if let Some(max_width_css) = max_width_css {
+        wrapper_styles.push_str(&format!("max-width: {max_width_css};"));
+    }
 
     // Start the wrapper div. A feature-bearing render stamps a stable
     // `data-darkmatter-features` attribute (debug-only; not a runtime lookup

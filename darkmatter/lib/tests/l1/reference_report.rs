@@ -179,7 +179,7 @@ fn a_deep_issue_shows_its_whole_trail_outermost_first() {
     assert_eq!(via.len(), 2);
     assert_eq!(via[0]["line"], 3);
     assert_eq!(via[1]["line"], 6);
-    assert_eq!(via[1]["file"], fixture.path_text("mid.md"));
+    assert_eq!(std::path::Path::new(via[1]["file"].as_str().unwrap()), fixture.root.join("mid.md"));
 }
 
 #[test]

@@ -1,7 +1,6 @@
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
-use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result};
@@ -12,6 +11,7 @@ use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
     CleanOptions, run_clean, run_subcommand, validate_subcommand_usage,
 };
+use darkmatter_cli::output::stderr_terminal;
 use darkmatter_cli::request::{MdRequest, with_magic_roots};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -73,7 +73,8 @@ fn main() {
         if let Some(usage) = e.downcast_ref::<clap::Error>() {
             usage.exit();
         }
-        // `--output report-json` already wrote the failure to stdout.
+        // The failure is already reported: a data output's value, or the problem
+        // report on stderr.
         if let Some(reported) = e.downcast_ref::<darkmatter_cli::commands::ReportedExit>() {
             std::process::exit(reported.code());
         }
@@ -92,18 +93,12 @@ fn main() {
         });
 
         if let Some(block) = block {
-            // TTY => full terminal detection; non-TTY => optimistic 80-column render.
-            let rendered = if io::stderr().is_terminal() {
-                block.report_block_error(&Terminal::new())
-            } else {
-                block.report_block_error_optimistic(None)
-            };
-            eprintln!("{rendered}");
+            eprintln!("{}", block.report_block_error(&stderr_terminal()));
             std::process::exit(1);
         }
 
         // Fallback: legacy Display-chain renderer.
-        eprintln!("{}", error_chain_prose(&e).render(&Terminal::default()));
+        eprintln!("{}", error_chain_prose(&e).render(&stderr_terminal()));
         std::process::exit(1);
     }
 }
@@ -186,7 +181,10 @@ fn run() -> Result<()> {
 
     reject_removed_flags(std::env::args_os());
     let cli = Cli::parse();
-    init_tracing(cli.debug_level);
+    // A data output says everything in its one value; stderr stays empty.
+    if !cli.requests_data_output() {
+        init_tracing(cli.debug_level);
+    }
 
     // Handle --completions first (no input needed)
     if let Some(shell) = cli.completions {
@@ -290,6 +288,8 @@ fn reset_sigpipe() {}
 
 #[cfg(test)]
 mod error_chain_tests {
+    use biscuit_terminal::terminal::Terminal;
+
     use super::*;
 
     #[test]

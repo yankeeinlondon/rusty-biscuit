@@ -118,7 +118,9 @@ fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
 /// Render `md` to terminal through a `DarkmatterPage` at the given width.
 fn render_terminal(md: &Markdown, width: u32) -> String {
     let term = Terminal::new_optimistic(width);
-    let page = DarkmatterPage::new(&term);
+    // A policy that paints nothing renders at ambient color detection, so an
+    // unpinned depth would make these snapshots depend on the host's COLORTERM.
+    let page = DarkmatterPage::new(&term).with_color_depth(darkmatter::markdown::output::terminal::ColorDepth::TrueColor);
     let page = apply_all_styles(page, md);
     page.render(md).expect("terminal render")
 }

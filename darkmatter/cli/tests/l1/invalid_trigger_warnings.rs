@@ -124,12 +124,12 @@ fn compose_beside_the_incident_trigger_succeeds_with_one_warning() {
 }
 
 #[test]
-fn compose_report_json_carries_the_warning_as_a_diagnostic_and_not_on_stderr() {
+fn compose_json_output_carries_the_warning_as_a_diagnostic_and_not_on_stderr() {
     let process = CliProcessFixture::new();
     incident_repository(&process);
     let document = write(process.cwd(), "docs/prompt.md", "---\ntitle: prompt\n---\nPrompt body\n");
 
-    let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+    let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
     assert!(output.status.success(), "{output:?}");
     assert!(!stderr_of(&output).contains(WARNING), "{output:?}");
     let report: Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
@@ -146,13 +146,13 @@ fn compose_report_json_carries_the_warning_as_a_diagnostic_and_not_on_stderr() {
 /// A malformed envelope's YAML error position is the record's `source`, on
 /// the trigger file; the ordinary run's stderr row still spells it out.
 #[test]
-fn compose_report_json_places_a_malformed_envelope_at_its_yaml_error() {
+fn compose_json_output_places_a_malformed_envelope_at_its_yaml_error() {
     let process = CliProcessFixture::new();
     initialize_repository(process.cwd());
     let trigger = write(process.cwd(), "schemas/broken.yaml", "kind: schema-trigger\nmatch: [unclosed\n");
     let document = write(process.cwd(), "docs/prompt.md", "---\ntitle: prompt\n---\nPrompt body\n");
 
-    let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+    let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
     assert!(output.status.success(), "{output:?}");
     let report: Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
     let rows: Vec<&Value> =
@@ -223,7 +223,7 @@ fn compose_deny_of_the_code_or_all_stops_before_writing_the_document() {
         );
         assert!(!stderr.contains(&compact("schema load failed")), "--deny {deny}: {stderr}");
 
-        let report = run(&process, &["compose", "--output", "report-json", "--deny", deny, document.to_str().unwrap()]);
+        let report = run(&process, &["compose", "--output", "json", "--deny", deny, document.to_str().unwrap()]);
         assert!(!report.status.success(), "--deny {deny}: {report:?}");
         let report: Value = serde_json::from_slice(&report.stdout).expect("one JSON report");
         assert!(report["document"].is_null(), "--deny {deny}: {report:#}");
@@ -260,7 +260,7 @@ fn compose_of_a_document_referencing_the_ignored_trigger_still_fails() {
     assert!(stderr_of(&output).contains(&compact("schema-trigger file")), "{output:?}");
 }
 
-/// The `dm.schema.invalid_trigger` rows of a `--output report-json` run,
+/// The `dm.schema.invalid_trigger` rows of a `--output json` run,
 /// after checking that stderr carries no warning row.
 fn report_trigger_rows(output: &Output) -> (Value, usize) {
     assert!(!stderr_of(output).contains(WARNING), "the report carries the warning: {output:?}");
@@ -313,7 +313,7 @@ fn compose_lifecycle_skipped_by_initialize_keeps_the_bootstrap_warning() {
     assert!(!stdout_of(&output).contains("Prompt body"), "{output:?}");
     assert_incident_warning(&stderr_of(&output));
 
-    let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+    let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
     assert!(output.status.success(), "{output:?}");
     let (report, rows) = report_trigger_rows(&output);
     assert_eq!(rows, 1, "{report:#}");
@@ -340,7 +340,7 @@ fn compose_lifecycle_past_initialize_warns_once() {
         assert_eq!(stdout_of(&output).contains("Prompt body"), succeeds, "{output:?}");
         assert_incident_warning(&stderr_of(&output));
 
-        let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+        let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
         assert_eq!(output.status.success(), succeeds, "{output:?}");
         let (report, rows) = report_trigger_rows(&output);
         assert_eq!(rows, 1, "{report:#}");
@@ -367,7 +367,7 @@ fn compose_lifecycle_call_rejection_keeps_the_warning() {
     assert_incident_warning(&stderr);
     assert!(stderr.contains(&compact("can never bind")), "{stderr}");
 
-    let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+    let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
     let (report, rows) = report_trigger_rows(&output);
     assert_eq!(rows, 1, "{report:#}");
     assert_eq!(report["outcome"], "failure", "{report:#}");
@@ -390,14 +390,14 @@ fn compose_lifecycle_blocked_call_warning_keeps_the_warning() {
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert_incident_warning(&stderr_of(&output));
 
-    let output = run(&process, &[&deny[..], &["--output", "report-json", document.to_str().unwrap()]].concat());
+    let output = run(&process, &[&deny[..], &["--output", "json", document.to_str().unwrap()]].concat());
     let (report, rows) = report_trigger_rows(&output);
     assert_eq!(rows, 1, "{report:#}");
     assert_eq!(report["outcome"], "failure", "{report:#}");
 }
 
 /// Unresolved references refuse the document before it composes, with or
-/// without a lifecycle; the refusal (exit 2) still carries the warning.
+/// without a lifecycle; the refusal (exit 1) still carries the warning.
 #[test]
 fn compose_reference_refusal_keeps_the_warning() {
     let process = CliProcessFixture::new();
@@ -410,13 +410,13 @@ fn compose_reference_refusal_keeps_the_warning() {
         );
 
         let output = run(&process, &["compose", document.to_str().unwrap()]);
-        assert_eq!(output.status.code(), Some(2), "{lifecycle:?}: {output:?}");
+        assert_eq!(output.status.code(), Some(1), "{lifecycle:?}: {output:?}");
         let stderr = stderr_of(&output);
         assert_incident_warning(&stderr);
         assert!(stderr.contains(&compact("nope.md")), "{lifecycle:?}: {stderr}");
 
-        let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
-        assert_eq!(output.status.code(), Some(2), "{lifecycle:?}: {output:?}");
+        let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
+        assert_eq!(output.status.code(), Some(1), "{lifecycle:?}: {output:?}");
         let (report, rows) = report_trigger_rows(&output);
         assert_eq!(rows, 1, "{lifecycle:?}: {report:#}");
     }
@@ -455,19 +455,20 @@ fn compose_reference_refusal_keeps_a_child_only_warning() {
         );
 
         let output = run(&process, &["compose", document.to_str().unwrap()]);
-        assert_eq!(output.status.code(), Some(2), "{lifecycle:?}: {output:?}");
+        assert_eq!(output.status.code(), Some(1), "{lifecycle:?}: {output:?}");
         let stderr = stderr_of(&output);
         assert_incident_warning(&stderr);
         assert!(stderr.contains(&compact("nope.md")), "{lifecycle:?}: {stderr}");
 
-        let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
-        assert_eq!(output.status.code(), Some(2), "{lifecycle:?}: {output:?}");
+        let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
+        assert_eq!(output.status.code(), Some(1), "{lifecycle:?}: {output:?}");
         let (report, rows) = report_trigger_rows(&output);
         assert_eq!(rows, 1, "{lifecycle:?}: {report:#}");
         let row = report["diagnostics"].as_array().unwrap().iter().find(|row| row["code"] == CODE).unwrap();
         assert_eq!(row["severity"], "warning", "{report:#}");
         let message = row["message"].as_str().unwrap();
-        assert!(compact(message).contains(&compact(&trigger.display().to_string())), "names alpha's trigger: {report:#}");
+        let portable = |text: &str| compact(text).replace('\\', "/");
+        assert!(portable(message).contains(&portable(&trigger.display().to_string())), "names alpha's trigger: {report:#}");
     }
 }
 
@@ -491,7 +492,7 @@ fn compose_reference_report_and_composition_share_a_child_only_warning() {
         assert!(stdout_of(&output).contains("Child body"), "{lifecycle:?}: {output:?}");
         assert_incident_warning(&stderr_of(&output));
 
-        let output = run(&process, &[&args[..], &["--output", "report-json", document.to_str().unwrap()]].concat());
+        let output = run(&process, &[&args[..], &["--output", "json", document.to_str().unwrap()]].concat());
         assert!(output.status.success(), "{lifecycle:?}: {output:?}");
         let (report, rows) = report_trigger_rows(&output);
         assert_eq!(rows, 1, "{lifecycle:?}: {report:#}");
@@ -519,7 +520,7 @@ fn compose_lifecycle_failing_in_initialize_keeps_the_bootstrap_warning() {
     assert!(stderr.contains(&compact("initialize broke")), "{stderr}");
     assert!(stderr.contains(&compact("cleanup ran")), "{stderr}");
 
-    let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+    let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     let (report, rows) = report_trigger_rows(&output);
     assert_eq!(rows, 1, "{report:#}");
@@ -552,7 +553,7 @@ fn compose_lifecycle_shell_failing_in_preparation_keeps_the_bootstrap_warning() 
         assert_incident_warning(&stderr);
         assert!(stderr.contains(&compact(failure)), "{command}: {stderr}");
 
-        let output = run(&process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+        let output = run(&process, &["compose", "--output", "json", document.to_str().unwrap()]);
         assert_eq!(output.status.code(), Some(1), "{command}: {output:?}");
         let (report, rows) = report_trigger_rows(&output);
         assert_eq!(rows, 1, "{command}: {report:#}");
@@ -560,25 +561,33 @@ fn compose_lifecycle_shell_failing_in_preparation_keeps_the_bootstrap_warning() 
     }
 }
 
-/// A composed document that cannot be rendered fails after composition,
+/// A composed document that cannot be delivered fails after composition,
 /// before the warnings that follow the document; the warning still reaches
-/// stderr, with or without a lifecycle.
+/// stderr, with or without a lifecycle. `md compose` renders nothing, so the
+/// failure is the host refusing to open `--show`'s file.
 #[test]
-fn compose_render_failure_keeps_the_warning() {
+fn compose_show_failure_keeps_the_warning() {
     let process = CliProcessFixture::new();
     incident_repository(&process);
     for lifecycle in ["", "initialize:\n  - info: start\n"] {
         let document = write(
             process.cwd(),
             "docs/prompt.md",
-            &format!("---\n{lifecycle}style:\n  page:\n    max-width: banana\n---\n# Prompt\n"),
+            &format!("---\n{lifecycle}title: prompt\n---\n# Prompt\n"),
         );
 
-        let output = run(&process, &["compose", "--output", "html", document.to_str().unwrap()]);
+        let output = process
+            .command_builder()
+            .plain_terminal(1000, 50)
+            .application_input("MD_DRY_RUN", "fail")
+            .build()
+            .args(["compose", "--show", document.to_str().unwrap()])
+            .output()
+            .expect("md runs");
         assert_eq!(output.status.code(), Some(1), "{lifecycle:?}: {output:?}");
         let stderr = stderr_of(&output);
         assert_incident_warning(&stderr);
-        assert!(stderr.contains(&compact("Failed to parse `style:` frontmatter")), "{lifecycle:?}: {stderr}");
+        assert!(stderr.contains(&compact("Failed to open markdown output")), "{lifecycle:?}: {stderr}");
     }
 }
 
@@ -861,7 +870,7 @@ fn clean_json_schema_failure_carries_the_warning_in_the_envelope() {
 
 // ── shell approval and preparation ─────────────────────────────────────────
 
-/// Runs `document` ordinarily and as `--output report-json`, asserting the
+/// Runs `document` ordinarily and as `--output json`, asserting the
 /// exit status, one trigger warning in each mode, and `fragment` on stderr.
 fn assert_compose_warns_once(process: &CliProcessFixture, document: &Path, code: i32, fragment: &str, case: &str) {
     let output = run(process, &["compose", document.to_str().unwrap()]);
@@ -870,7 +879,7 @@ fn assert_compose_warns_once(process: &CliProcessFixture, document: &Path, code:
     assert_incident_warning(&stderr);
     assert!(stderr.contains(&compact(fragment)), "{case}: {stderr}");
 
-    let output = run(process, &["compose", "--output", "report-json", document.to_str().unwrap()]);
+    let output = run(process, &["compose", "--output", "json", document.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(code), "{case}: {output:?}");
     let (report, rows) = report_trigger_rows(&output);
     assert_eq!(rows, 1, "{case}: {report:#}");
@@ -984,7 +993,7 @@ fn approved_effect_prompt(process: &CliProcessFixture, lifecycle: &str, marker: 
 }
 
 /// A denied warning stops the run as a policy stop before the approved
-/// shell runs, in ordinary and `--output report-json` runs: the warning keeps
+/// shell runs, in ordinary and `--output json` runs: the warning keeps
 /// its severity and names the trigger, never a schema-load error.
 fn assert_denied_before_the_shell(process: &CliProcessFixture, trigger: &Path, lifecycle: &str, child: &str, deny: &str) {
     let case = format!("{lifecycle:?} {child:?} --deny {deny}");
@@ -1000,7 +1009,7 @@ fn assert_denied_before_the_shell(process: &CliProcessFixture, trigger: &Path, l
     assert!(!stderr.contains(&compact("schema load failed")), "{case}: {stderr}");
     assert!(!marker.exists(), "{case}: the approved shell ran before the stop");
 
-    let output = run_with_git(process, &["compose", "--output", "report-json", "--deny", deny, document]);
+    let output = run_with_git(process, &["compose", "--output", "json", "--deny", deny, document]);
     assert_eq!(output.status.code(), Some(1), "{case}: {output:?}");
     let (report, rows) = report_trigger_rows(&output);
     assert_eq!(rows, 1, "{case}: {report:#}");

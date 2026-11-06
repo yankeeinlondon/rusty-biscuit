@@ -1,4 +1,4 @@
-//! The terminal and `--output report-json` report of a failed `::map` /
+//! The terminal and data-output report of a failed `::map` /
 //! `::filter` collection.
 //!
 //! The library's own block names the code and the iteration path but not the
@@ -31,7 +31,7 @@ impl CollectionFailure {
         Self { error, diagnostics }
     }
 
-    /// The `--output report-json` records.
+    /// The data-output records.
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }

@@ -37,6 +37,7 @@ use biscuit_terminal::render_tree::{
 use biscuit_terminal::terminal::Terminal;
 use biscuit_visualized::components::TerminalDiagramRenderer;
 use renderable::browser::feature::{FeatureContext, FeatureResolver, PageFeature};
+use renderable::output::Width;
 use renderable::tree::{
     BrowserMermaidMode, BrowserRenderOptions, Diagnostic, Document, GraphicsMode, MarkdownDialect,
     MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor, TerminalMermaidMode,
@@ -50,7 +51,7 @@ use super::mermaid_font::place_page_font;
 use super::pipeline::PipelineResult;
 use crate::markdown::Markdown;
 use crate::markdown::inline::HorizontalRuleAttrs;
-use crate::markdown::output::{ColorDepth, HtmlOptions, TerminalOptions};
+use crate::markdown::output::{ColorDepth, HtmlOptions, HyperlinkMode, ItalicMode, TerminalOptions};
 
 /// Folds a [`Markdown`] into a canonical [`Document`], wiring darkmatter's
 /// already extracted frontmatter into [`renderable::tree::DocumentMetadata`].
@@ -288,6 +289,7 @@ pub(crate) fn render_tree_html_page_body(
     resolver: Rc<dyn FeatureResolver>,
     feature_context: FeatureContext,
     graphics_mode: GraphicsMode,
+    prose_width: Width,
 ) -> crate::markdown::MarkdownResult<PipelineResult<BrowserPageRender>> {
     let (doc, fold_diagnostics) = to_render_document_with_context(md, build_ctx)?;
     validate_code_directives(&doc.root)?;
@@ -302,6 +304,7 @@ pub(crate) fn render_tree_html_page_body(
         crate::markdown::output::terminal::MermaidMode::Text => BrowserMermaidMode::Code,
     };
     browser_opts.graphics_mode = graphics_mode;
+    browser_opts.width = prose_width;
     browser_opts.feature_resolver = resolver;
     browser_opts.feature_context = feature_context;
     // The page owns feature placement (body-only wrapper), so collect the
@@ -432,29 +435,16 @@ pub(crate) fn render_tree_terminal_with_context(
 /// there is no second construction fold (acceptance criterion 3: one tree build,
 /// one target fold).
 ///
-/// Unlike [`render_tree_terminal_with_context`], this keeps the content-box
-/// width and the terminal capability profile **independent** instead of
-/// encoding both through [`TerminalOptions::max_width`].
+/// Width and capabilities stay independent:
 ///
-/// `max_width` selects the optimistic pre-render [`Terminal`] — carrying both a
-/// width *and* an optimistic styling profile (TrueColor, OSC8; image support
-/// stays with the detected graphics route). The page splits the two concerns:
+///   * `content_width` is the content-box width, whatever the capabilities.
+///   * `captured` is the page's own terminal, whose styling capabilities apply
+///     when the page has frame geometry. A no-geometry page passes `None` and
+///     renders at the capabilities a no-policy page would, so a matched
+///     component policy cannot hand unrelated content color or OSC 8 links.
 ///
-///   * `optimistic_capabilities` selects the capability profile. The page sets
-///     it for *deliberate frame geometry only* — never a matched component
-///     policy — so a centered table or other matched layout cannot promote
-///     unrelated content to optimistic TrueColor + OSC8 the ambient terminal
-///     never advertised (review-5 finding 1). A geometry frame still reaches the
-///     optimistic profile faithfully; a no-geometry page (matched policy or not)
-///     renders at the ambient capabilities a no-policy page would.
-///   * `content_width` is pinned afterwards regardless of that profile, so a
-///     no-geometry page can render at the ambient width independent of the
-///     selected capabilities — a split `max_width` alone cannot express. Painted
-///     construction color still rides `options.color_depth` (the captured
-///     depth), applied by the adapter over the selected base.
-///
-/// Color depth, when the page paints construction color, still rides
-/// `options.color_depth` and is applied by the adapter over the selected base.
+/// [`TerminalOptions::output_profile`] outranks both, and painted construction
+/// color rides `options.color_depth` over the selected base.
 ///
 /// ## Errors
 ///
@@ -465,21 +455,12 @@ pub(crate) fn render_page_terminal_document(
     doc: &Document,
     fold_diagnostics: Vec<Diagnostic>,
     options: &TerminalOptions,
-    content_width: u16,
-    optimistic_capabilities: bool,
+    content_width: Width,
+    captured: Option<&Terminal>,
 ) -> crate::markdown::MarkdownResult<PipelineResult<String>> {
-    // Select the capability profile via the adapter's optimistic/ambient base,
-    // then pin the content width independently on top.
-    let mut capability_options = options.clone();
-    capability_options.max_width = optimistic_capabilities.then_some(content_width);
-    let mut term_opts = terminal_options_from_terminal_options(&capability_options);
-    // Pin only the content-box width. Set it on both the context and its
-    // terminal snapshot so a component reading either agrees on the width,
-    // independent of the capability profile selected above.
-    let width = u32::from(content_width);
-    term_opts.context.terminal.fixed_width = Some(width);
-    term_opts.context.width = renderable::output::Width::Columns(width);
-    term_opts.context.available_width = renderable::output::Width::Columns(width);
+    let mut sized_options = options.clone();
+    sized_options.width = Some(content_width);
+    let term_opts = render_options_with_capabilities(&sized_options, captured);
     let rendered = render_terminal_document(doc, &term_opts)
         .map_err(crate::markdown::MarkdownError::RenderTree)?;
     Ok(PipelineResult::new(
@@ -657,77 +638,103 @@ fn code_block_stylesheet(opts: &HtmlOptions) -> renderable::stylesheet::Styleshe
     sheet
 }
 
-/// The terminal the tree renderer folds against, given the `detected` one and
-/// the caller's pinned width.
+/// The capabilities and width a render starts from, before option overrides.
 ///
-/// Without a width this is `detected`. On a TTY a width only fixes the column
-/// count. On a non-TTY stdout a width also selects the optimistic styling
-/// profile (TrueColor, OSC8 links, italics, TTY), but image availability stays
-/// with `detected`: its graphics route (pixel format, multiplexer transport,
-/// confidence), its app (which chooses the encoder), and its cached cell size.
-/// A width is layout; it must not grant pixels the effective route denied,
-/// such as under `BISCUIT_GRAPHICS=none`.
-fn capability_terminal(detected: Terminal, max_width: Option<u16>) -> Terminal {
-    let Some(width) = max_width.map(u32::from) else {
-        return detected;
+/// An [`output_profile`](TerminalOptions::output_profile) is the whole answer.
+/// Otherwise `captured` (a framed page's own terminal) or a fresh detection
+/// supplies the styling capabilities. Either way a width is layout and never
+/// selects a capability.
+fn base_render_context(opts: &TerminalOptions, captured: Option<&Terminal>) -> TerminalRenderContext {
+    if let Some(profile) = &opts.output_profile {
+        let width = opts.width.unwrap_or_else(|| {
+            Width::Columns(biscuit_terminal::discovery::detection::terminal_width().max(1))
+        });
+        let mut context = TerminalRenderContext::from_profile(profile, width);
+        if profile.graphics {
+            // A profile says whether images may be written, not which protocol
+            // draws them; that is the one thing only detection knows.
+            let detected = Terminal::default();
+            context.terminal.app = detected.app;
+            context.terminal.graphics_route = detected.graphics_route;
+            context.terminal.cell_size = detected.cell_size;
+        }
+        return context;
+    }
+
+    let detected = Terminal::default();
+    let mut term = match captured {
+        // Image availability stays with `detected`: the captured terminal
+        // decides styling, and must not grant pixels the effective route
+        // denied, such as under `BISCUIT_GRAPHICS=none`.
+        Some(captured) => Terminal {
+            app: detected.app,
+            graphics_route: detected.graphics_route,
+            cell_size: detected.cell_size,
+            ..captured.clone()
+        },
+        None => detected,
     };
-    if detected.is_tty {
-        return Terminal {
-            fixed_width: Some(width),
-            ..detected
-        };
+    if let Some(columns) = opts.width.and_then(Width::as_columns) {
+        term.fixed_width = Some(columns);
     }
-    Terminal {
-        app: detected.app,
-        graphics_route: detected.graphics_route,
-        cell_size: detected.cell_size,
-        ..Terminal::new_optimistic(width)
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    if let Some(width) = opts.width {
+        context.width = width;
+        context.available_width = width;
     }
+    context
+}
+
+/// Maps [`TerminalOptions`] to [`TerminalRenderOptions`], with capabilities
+/// from a fresh detection unless the options carry a profile.
+fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRenderOptions {
+    render_options_with_capabilities(opts, None)
 }
 
 /// Maps [`TerminalOptions`] to [`TerminalRenderOptions`].
 ///
-/// Starts from the detected [`Terminal`]; a pinned `max_width` selects the
-/// width and, on a non-TTY stdout, the optimistic styling profile (see
-/// [`capability_terminal`]), never image support. `opts.color_depth`, when set, overrides the
-/// terminal's resolved color depth so callers can pin the tree renderer to
-/// `ColorDepth::None` (matching the legacy renderer's no-color contract)
-/// without depending on host capability detection. `image_mode` and
-/// `mermaid_mode` map onto the context's graphics tier and Mermaid promotion
-/// opt-in (see the inline mapping below).
+/// Starts from [`base_render_context`]. `opts.color_depth`, `hyperlink_mode`,
+/// and `italic_mode`, when explicit, override that base so callers can pin the
+/// tree renderer without depending on host capability detection. `image_mode`
+/// and `mermaid_mode` map onto the context's graphics tier and Mermaid
+/// promotion opt-in (see the inline mapping below). A plain profile is pinned
+/// last, so none of those options can restore a capability it removes.
 ///
 /// The [`TerminalCodeRenderer`] hook is always wired in so fenced code blocks
 /// reproduce darkmatter's syntax-highlighted code-block output (header row
 /// plus highlighted body) rather than the render tree's plain-fence fallback.
-/// Closes review-10 finding 2: previously the entry point passed
-/// `code_renderer: None`, so the user-observable tree terminal path exercised
-/// the generic renderable fallback instead of the darkmatter code path the
-/// renderer was built for.
 ///
-/// Closes review-5 finding 1: previously the tree entry point silently
-/// dropped `TerminalOptions::color_depth`, so `ColorDepth::None` callers and
-/// the `migration/terminal_no_color` benchmark group both measured a
-/// TrueColor tree context.
-///
-/// Phase 2 (centralize theme resolution) removes the `term.color_mode =
-/// opts.color_mode` rebuild that created an independent code-panel mode. The
-/// `Terminal` constructed here is the single source of truth for the page
-/// surface and the nested code-block panel: `code_block_mode.resolve(term.
-/// color_mode())` produces the panel variant, and `term.color_mode()` itself
-/// is the page variant. Callers who want a specific mode should construct a
-/// `Terminal` with that mode (the page path through
-/// [`DarkmatterPage::render`](crate::layout::DarkmatterPage::render) already
-/// captures the terminal; direct [`Markdown::as_terminal`](crate::markdown::Markdown::as_terminal)
-/// callers inherit the default-detection `Terminal::default()`). The
-/// `opts.color_mode` field is preserved for backward compatibility with the
-/// page path (where it is the [`ColorMode::Unknown`] fallback in
-/// [`LayoutContext::from_page`](crate::layout::context::LayoutContext::from_page))
-/// but no longer overrides the terminal here.
-fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRenderOptions {
-    let mut term = capability_terminal(Terminal::default(), opts.max_width);
+/// The context is the single source of truth for the page surface and the
+/// nested code-block panel: `code_block_mode.resolve(context.color_mode)`
+/// produces the panel variant, and `context.color_mode` itself is the page
+/// variant. It comes from `opts.color_mode`, which the page path sets from its
+/// captured terminal's mode (with [`ColorMode::Unknown`] as the fallback in
+/// [`LayoutContext::from_page`](crate::layout::context::LayoutContext::from_page)).
+fn render_options_with_capabilities(
+    opts: &TerminalOptions,
+    captured: Option<&Terminal>,
+) -> TerminalRenderOptions {
+    let mut context = base_render_context(opts, captured);
     if let Some(depth) = opts.color_depth {
-        term.color_depth = darkmatter_color_depth_to_terminal(depth);
+        let depth = darkmatter_color_depth_to_terminal(depth);
+        context.color_depth = depth;
+        context.terminal.color_depth = depth;
     }
+    let hyperlinks = match opts.hyperlink_mode {
+        HyperlinkMode::Auto => None,
+        HyperlinkMode::Always => Some(true),
+        HyperlinkMode::Never => Some(false),
+    };
+    if let Some(hyperlinks) = hyperlinks {
+        context.hyperlinks = hyperlinks;
+        context.terminal.osc_link_support = hyperlinks;
+    }
+    match opts.italic_mode {
+        ItalicMode::Auto => {}
+        ItalicMode::Always => context.terminal.supports_italic = true,
+        ItalicMode::Never => context.terminal.supports_italic = false,
+    }
+    context.verbosity = opts.verbosity;
 
     // Map legacy image_mode onto the graphics fidelity tier so the tree
     // renderer honors the same opt-in / never / force contract as the legacy
@@ -751,7 +758,6 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
         | crate::markdown::output::terminal::MermaidMode::Text => TerminalMermaidMode::Code,
     };
 
-    let mut context = TerminalRenderContext::from_terminal(&term);
     context.graphics_mode = graphics_mode;
     context.mermaid_mode = mermaid_mode;
     context.image_base_path = opts.base_path.clone();
@@ -771,16 +777,9 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
     if opts.image_mode == crate::markdown::output::terminal::TerminalImageMode::Force {
         context.force_graphics = true;
     }
-    // Phase 2 (centralize theme resolution): the `Terminal` above carries the
-    // capability profile (width, color depth, is_tty). The page surface and
-    // the nested code-block panel must resolve against the *caller's*
-    // `opts.color_mode` — for the page path that is the captured
-    // `DarkmatterPage` terminal's mode; for direct `Markdown::as_terminal`
-    // callers it is the requested mode. Setting `context.color_mode` here
-    // and binding an *unbound* code renderer below keeps the page surface
-    // and the code panel on the same source of truth, removing the
-    // pre-Phase-2 dual-source defect (an env-only `Terminal::default()` mode
-    // disagreed with the caller-supplied `opts.color_mode`).
+    // The page surface and the nested code-block panel resolve against the
+    // *caller's* `opts.color_mode`: an env-only detected mode could disagree
+    // with it. The code renderer below stays unbound for the same reason.
     context.color_mode = opts.color_mode;
 
     // Inline code spans take their foreground/background from the prose theme
@@ -793,6 +792,12 @@ fn terminal_options_from_terminal_options(opts: &TerminalOptions) -> TerminalRen
         crate::markdown::highlighting::themes::inline_code_colors(opts.prose_theme, inline_mode);
     context.inline_code_color = Some(inline_fg);
     context.inline_code_background = Some(inline_bg);
+
+    if context.plain {
+        // After every other option: `from_profile` pinned this, but the options
+        // above just set hooks' modes and inline-code colors again.
+        context.pin_plain();
+    }
 
     TerminalRenderOptions {
         context,
@@ -946,7 +951,7 @@ mod tests {
             prose_theme: ThemePair::OneHalf,
             color_mode: mode,
             color_depth: Some(ColorDepth::TrueColor),
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             ..TerminalOptions::default()
         }
     }
@@ -970,9 +975,9 @@ mod tests {
     #[test]
     fn render_tree_terminal_smoke() {
         let md: Markdown = FIXTURE.into();
-        // Pin max_width so the test doesn't depend on the host terminal.
+        // Pin the width so the test doesn't depend on the host terminal.
         let opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             ..TerminalOptions::default()
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
@@ -1196,7 +1201,7 @@ mod tests {
     fn render_tree_terminal_preserves_mark_text() {
         let md: Markdown = "before ==highlighted== after\n".into();
         let opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             ..TerminalOptions::default()
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
@@ -1271,7 +1276,7 @@ mod tests {
             "# Heading\n\nText with `code` and [link](https://example.com).\n".into();
 
         let no_color_opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             color_depth: Some(ColorDepth::None),
             ..TerminalOptions::default()
         };
@@ -1341,7 +1346,7 @@ mod tests {
             (ColorDepth::None, TerminalColorDepth::None),
         ] {
             let opts = TerminalOptions {
-                max_width: Some(80),
+                width: Some(Width::Columns(80)),
                 color_depth: Some(input),
                 ..TerminalOptions::default()
             };
@@ -1353,21 +1358,23 @@ mod tests {
         }
     }
 
-    /// When `color_depth` is unset, the entry point keeps the underlying
-    /// optimistic / detected terminal's color depth — no spurious downgrade.
+    /// When `color_depth` is unset, the entry point keeps the color depth of
+    /// the terminal it renders against: no spurious downgrade or upgrade.
     #[test]
     fn terminal_options_mapping_leaves_unspecified_color_depth_alone() {
         let opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             color_depth: None,
             ..TerminalOptions::default()
         };
-        let term_opts = terminal_options_from_terminal_options(&opts);
-        // `Terminal::new_optimistic` advertises `TrueColor`; without a
-        // pinned `color_depth` that must reach the tree context unchanged.
+        let optimistic = Terminal::new_optimistic(80);
         assert_eq!(
-            term_opts.context.terminal.color_depth,
+            render_options_with_capabilities(&opts, Some(&optimistic)).context.terminal.color_depth,
             TerminalColorDepth::TrueColor
+        );
+        assert_eq!(
+            terminal_options_from_terminal_options(&opts).context.terminal.color_depth,
+            Terminal::default().color_depth
         );
     }
 
@@ -1377,7 +1384,8 @@ mod tests {
     fn render_tree_terminal_emits_dim_sgr_for_dim_span() {
         let md: Markdown = "normal \u{2304}dimmed\u{2304} after\n".into();
         let opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
+            color_depth: Some(ColorDepth::TrueColor),
             ..TerminalOptions::default()
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
@@ -1530,7 +1538,7 @@ mod tests {
     fn render_tree_terminal_applies_hr_defaults_to_bare_rule() {
         let md: Markdown = "---\n".into();
         let opts = TerminalOptions {
-            max_width: Some(40),
+            width: Some(Width::Columns(40)),
             color_depth: Some(ColorDepth::None),
             image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
             hr_defaults: Some(HorizontalRuleAttrs {
@@ -1633,7 +1641,7 @@ mod tests {
     fn render_tree_terminal_syntax_highlights_code_blocks() {
         let md: Markdown = "```rust\nfn demo() -> usize { 42 }\n```\n".into();
         let opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             color_depth: Some(ColorDepth::TrueColor),
             ..TerminalOptions::default()
         };
@@ -1663,7 +1671,7 @@ mod tests {
     fn render_tree_terminal_code_block_color_depth_none_emits_no_color_sgrs() {
         let md: Markdown = "```rust\nfn demo() -> usize { 42 }\n```\n".into();
         let opts = TerminalOptions {
-            max_width: Some(80),
+            width: Some(Width::Columns(80)),
             color_depth: Some(ColorDepth::None),
             ..TerminalOptions::default()
         };
@@ -1766,54 +1774,99 @@ mod tests {
         term
     }
 
-    /// A pinned width on a pipe selects optimistic styling but keeps the
-    /// detected route: no pixels stay no pixels.
-    #[test]
-    fn capability_terminal_width_keeps_a_route_without_pixels() {
-        use biscuit_terminal::components::terminal_image::TerminalImage;
-        use biscuit_terminal::discovery::detection::ImageSupport;
-
-        let term = capability_terminal(piped_terminal(ImageSupport::None), Some(60));
-
-        assert!(!term.graphics_route.has_pixels());
-        assert!(!TerminalImage::route_has_pixels(&term));
-        assert_eq!(term.fixed_width, Some(60));
-        assert_eq!(term.color_depth, TerminalColorDepth::TrueColor);
-        assert!(term.osc_link_support && term.supports_italic && term.is_tty);
+    fn sized_options(columns: u32) -> TerminalOptions {
+        TerminalOptions {
+            width: Some(Width::Columns(columns)),
+            ..TerminalOptions::default()
+        }
     }
 
-    /// The positive control: a detected pixel route survives the width, with
-    /// the app that chooses its encoder.
+    /// A width is layout: on a pipe it leaves every styling capability of the
+    /// terminal it renders against untouched.
     #[test]
-    fn capability_terminal_width_keeps_a_route_with_pixels() {
-        use biscuit_terminal::components::terminal_image::TerminalImage;
-        use biscuit_terminal::discovery::detection::{ImageSupport, TerminalApp};
-
-        let detected = piped_terminal(ImageSupport::Sixel);
-        let route = detected.graphics_route.clone();
-        let term = capability_terminal(detected, Some(60));
-
-        assert_eq!(term.graphics_route, route);
-        assert!(TerminalImage::route_has_pixels(&term));
-        assert!(matches!(term.app, TerminalApp::Wezterm));
-    }
-
-    /// Without a width the detected terminal is used as is; on a TTY a width
-    /// fixes only the column count.
-    #[test]
-    fn capability_terminal_without_width_or_on_a_tty_keeps_detection() {
+    fn a_width_never_selects_styling_capabilities() {
         use biscuit_terminal::discovery::detection::ImageSupport;
 
-        let unchanged = capability_terminal(piped_terminal(ImageSupport::None), None);
-        assert_eq!(unchanged.color_depth, TerminalColorDepth::None);
-        assert_eq!(unchanged.fixed_width, None);
+        let piped = piped_terminal(ImageSupport::None);
+        let context = render_options_with_capabilities(&sized_options(60), Some(&piped)).context;
 
-        let mut tty = piped_terminal(ImageSupport::None);
-        tty.is_tty = true;
-        let fixed = capability_terminal(tty, Some(60));
-        assert_eq!(fixed.fixed_width, Some(60));
-        assert_eq!(fixed.color_depth, TerminalColorDepth::None);
-        assert!(!fixed.graphics_route.has_pixels());
+        assert_eq!(context.width, Width::Columns(60));
+        assert_eq!(context.terminal.fixed_width, Some(60));
+        assert_eq!(context.color_depth, TerminalColorDepth::None);
+        assert!(!context.hyperlinks && !context.terminal.osc_link_support);
+        assert!(!context.terminal.supports_italic && !context.terminal.is_tty);
+    }
+
+    /// The page's terminal decides styling, never pixels: an optimistic
+    /// terminal's Kitty route does not replace the detected one.
+    #[test]
+    fn a_captured_terminal_keeps_the_detected_graphics_route() {
+        let optimistic = Terminal::new_optimistic(100);
+        let context = render_options_with_capabilities(&sized_options(60), Some(&optimistic)).context;
+
+        assert_eq!(context.terminal.graphics_route, Terminal::default().graphics_route);
+        assert_eq!(context.color_depth, TerminalColorDepth::TrueColor);
+    }
+
+    #[test]
+    fn hyperlink_modes_map_onto_the_context() {
+        use biscuit_terminal::discovery::detection::ImageSupport;
+
+        let piped = piped_terminal(ImageSupport::None);
+        let optimistic = Terminal::new_optimistic(100);
+        let with_mode = |mode, terminal: &Terminal| {
+            let mut options = sized_options(60);
+            options.hyperlink_mode = mode;
+            let context = render_options_with_capabilities(&options, Some(terminal)).context;
+            assert_eq!(context.hyperlinks, context.terminal.osc_link_support);
+            context.hyperlinks
+        };
+
+        assert!(!with_mode(HyperlinkMode::Never, &optimistic));
+        assert!(with_mode(HyperlinkMode::Auto, &optimistic));
+        assert!(!with_mode(HyperlinkMode::Auto, &piped));
+        assert!(with_mode(HyperlinkMode::Always, &piped));
+    }
+
+    /// Plain is pinned after every option, so none of them restores anything.
+    #[test]
+    fn a_plain_profile_outranks_every_other_option() {
+        use crate::markdown::output::terminal::{MermaidMode, TerminalImageMode};
+        use renderable::output::TerminalProfile;
+
+        let mut options = sized_options(60);
+        options.output_profile = Some(TerminalProfile::plain());
+        options.color_depth = Some(ColorDepth::TrueColor);
+        options.hyperlink_mode = HyperlinkMode::Always;
+        options.italic_mode = ItalicMode::Always;
+        options.image_mode = TerminalImageMode::Force;
+        options.mermaid_mode = MermaidMode::Image;
+        let context = terminal_options_from_terminal_options(&options).context;
+
+        assert!(context.plain);
+        assert_eq!(context.color_depth, TerminalColorDepth::None);
+        assert!(!context.hyperlinks && !context.terminal.supports_italic);
+        assert!(!context.force_graphics);
+        assert_eq!(context.graphics_mode, GraphicsMode::Off);
+        assert_eq!(context.inline_code_background, None);
+    }
+
+    /// An explicit profile is the whole capability answer, with no detection
+    /// of color.
+    #[test]
+    fn an_output_profile_replaces_detection() {
+        let mut profile = Terminal::new_optimistic(80).output_profile();
+        profile.graphics = false;
+        profile.hyperlinks = false;
+        let mut options = sized_options(60);
+        options.output_profile = Some(profile);
+        options.verbosity = 2;
+        let context = terminal_options_from_terminal_options(&options).context;
+
+        assert_eq!(context.color_depth, TerminalColorDepth::TrueColor);
+        assert!(!context.hyperlinks);
+        assert_eq!(context.verbosity, 2);
+        assert!(!context.terminal.graphics_route.has_pixels());
     }
 
     /// The terminal entry point must map `TerminalImageMode::Never` to

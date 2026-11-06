@@ -497,13 +497,12 @@ mod surface_probe {
 
 /// The column count a terminal code band is padded to.
 ///
-/// A bounded width is the band width (clamped to the `u16` the band renderer
-/// takes). Under an unbounded width nothing fills: the band is the block's
+/// A bounded width is the band width. Under an unbounded width nothing fills: the band is the block's
 /// longest line plus its padding (the left gutter or one-column pad, and a
 /// one-column right pad).
-fn code_band_width(width: renderable::output::Width, value: &str, line_numbers: bool, first_line: usize) -> u16 {
+fn code_band_width(width: renderable::output::Width, value: &str, line_numbers: bool, first_line: usize) -> u32 {
     if let Some(columns) = width.as_columns() {
-        return u16::try_from(columns).unwrap_or(u16::MAX);
+        return columns;
     }
     let lines: Vec<&str> = value.lines().collect();
     let longest = lines
@@ -516,7 +515,7 @@ fn code_band_width(width: renderable::output::Width, value: &str, line_numbers: 
     } else {
         1
     };
-    u16::try_from(gutter + longest + 1).unwrap_or(u16::MAX)
+    u32::try_from(gutter + longest + 1).unwrap_or(u32::MAX)
 }
 
 impl CodeRenderer for TerminalCodeRenderer {
@@ -561,10 +560,12 @@ impl CodeRenderer for TerminalCodeRenderer {
             base_path: None,
             italic_mode: ItalicMode::Auto,
             dim_mode: DimMode::Auto,
-            max_width: None,
+            width: None,
             mermaid_mode: MermaidMode::Off,
             mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Auto,
+            verbosity: 0,
+            output_profile: None,
             hr_defaults: None,
             code_block_mode: self.code_block_mode,
         };
@@ -759,7 +760,7 @@ last: 4
             // hook before it resolves anything, which would make a
             // "resolved once" assertion pass vacuously.
             color_depth: Some(crate::markdown::output::terminal::ColorDepth::TrueColor),
-            max_width: Some(80),
+            width: Some(renderable::output::Width::Columns(80)),
             ..TerminalOptions::default()
         }
     }

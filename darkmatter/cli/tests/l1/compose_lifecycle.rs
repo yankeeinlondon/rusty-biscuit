@@ -91,7 +91,7 @@ fn a_missing_include_runs_failed_then_finalize() {
     let fixture = CliProcessFixture::named("lifecycle-missing-include");
     let doc = fixture.write_file("cwd/doc.md", &format!("---\n{EVERY_EVENT}---\n::file ./missing.md\n"));
     let ran = compose(&fixture, &doc, &[]);
-    assert_eq!(ran.status, Some(2), "{}", ran.stderr);
+    assert_eq!(ran.status, Some(1), "{}", ran.stderr);
     assert_eq!(events(&ran.stderr), ["initialize", "failed", "finalize"], "{}", ran.stderr);
     assert!(ran.stderr.contains("missing.md"), "{}", ran.stderr);
 }
@@ -110,7 +110,7 @@ fn skip_writes_no_document_runs_no_finalize_and_exits_zero() {
 }
 
 #[test]
-fn stdout_actions_frame_the_document_and_other_verbs_use_stderr() {
+fn stdout_holds_only_the_document_and_every_verb_uses_stderr_in_run_order() {
     let fixture = CliProcessFixture::named("lifecycle-stdout-order");
     let doc = fixture.write_file(
         "cwd/doc.md",
@@ -120,16 +120,16 @@ fn stdout_actions_frame_the_document_and_other_verbs_use_stderr() {
     );
     let ran = compose(&fixture, &doc, &[]);
     assert_eq!(ran.status, Some(0), "{}", ran.stderr);
-    let order: Vec<&str> = ran.stdout.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
-    assert_eq!(order, ["before-document", "the-document", "after-document"]);
-    for line in ["warn-line", "message-line", "success-line", "stderr-line"] {
-        assert!(ran.stderr.contains(line), "{line} on stderr: {}", ran.stderr);
-        assert!(!ran.stdout.contains(line), "{line} not on stdout");
+    assert_eq!(ran.stdout, "the-document\n");
+    let mut remaining = ran.stderr.as_str();
+    for line in ["before-document", "warn-line", "message-line", "after-document", "success-line", "stderr-line"] {
+        let found = remaining.find(line).unwrap_or_else(|| panic!("{line} on stderr, in run order: {}", ran.stderr));
+        remaining = &remaining[found + line.len()..];
     }
 }
 
 #[test]
-fn a_piped_stdout_action_writes_its_text_as_authored() {
+fn a_piped_stdout_action_is_plain_prose_on_stderr() {
     let fixture = CliProcessFixture::named("lifecycle-stdout-piped");
     let doc = fixture.write_file(
         "cwd/doc.md",
@@ -147,11 +147,12 @@ fn a_piped_stdout_action_writes_its_text_as_authored() {
         .arg(&doc)
         .output()
         .expect("md runs");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(!stdout.contains('\u{1b}'), "no escape sequence on a pipe: {stdout:?}");
-    let lines: Vec<&str> = stdout.lines().filter(|line| !line.trim().is_empty()).collect();
-    assert_eq!(lines, ["hello **bold** <!-- note -->", "the-document"], "{stdout:?}");
+    let (stdout, stderr) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(stdout, "the-document\n");
+    assert!(!stderr.contains('\u{1b}'), "no escape sequence on a pipe: {stderr:?}");
+    let lines: Vec<&str> = stderr.lines().map(str::trim_end).filter(|line| !line.is_empty()).collect();
+    assert_eq!(lines, ["hello bold"], "{stderr:?}");
 }
 
 /// `document` names one action `md` does not run, between two that it does.
@@ -400,8 +401,8 @@ fn an_approved_lifecycle_shell_runs_once_shells_unlock_at_composed() {
     let doc = fixture.write_file("cwd/doc.md", "---\ncomposed:\n  - shell: \"echo lifecycle-said\"\n---\nthe-body\n");
     let ran = compose(&fixture, &doc, &[]);
     assert_eq!(ran.status, Some(0), "{}", ran.stderr);
-    let order: Vec<&str> = ran.stdout.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
-    assert_eq!(order, ["lifecycle-said", "the-body"]);
+    assert_eq!(ran.stdout, "the-body\n", "a lifecycle command's output never reaches stdout");
+    assert_eq!(ran.stderr.matches("lifecycle-said").count(), 1, "{}", ran.stderr);
 }
 
 #[test]
