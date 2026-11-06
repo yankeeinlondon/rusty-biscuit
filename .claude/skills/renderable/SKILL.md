@@ -29,6 +29,10 @@ Browser, and Terminal **tree renderers** fold that tree into output.
   component stylesheets.
 - Use `RenderTarget` when a value must resolve differently for Markdown,
   MarkdownPlus, Browser, or Terminal.
+- Use `CommandOutput` (`as_prose`, `as_data`, optional `render_*` overrides) for
+  a command result that prints as any `--output` target. `output::Width`
+  (`Columns`, `Unlimited`, `Source`) is unrelated to `layout::Width`; import the
+  latter as `LayoutWidth` where both appear.
 
 ## Progressive Disclosure
 
@@ -37,6 +41,7 @@ Open only the topic file needed for the task:
 | Topic | File |
 |-------|------|
 | Render tree, diagnostics, validation, renderers | `tree.md` |
+| `CommandOutput`, `OutputOptions`, `TerminalProfile`, output width, link metadata | [`renderable/docs/command-output.md`](../../../renderable/docs/command-output.md) |
 | Target-agnostic layout | `layout.md` |
 | Target-agnostic appearance | `style.md` |
 | Browser rendering and fragments | `browser.md` |

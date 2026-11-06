@@ -42,8 +42,9 @@ Traits defined in this library:
 | [`TreeRenderable`](./src/tree/mod.rs) | Renders a component to a canonical [`RenderNode`] tree |
 | [`MarkdownRenderable`](./src/markdown.rs) | Renders directly to Markdown output |
 | [`BrowserRenderable`](./src/browser/renderable.rs) | Renders to HTML for browser display |
+| [`CommandOutput`](./src/output/mod.rs) | A command result that can print as any output target ([guide](./docs/command-output.md)) |
 
-> **Note:** [`TerminalRenderable`](./src/terminal.rs) (formerly `Renderable`) is defined in the `biscuit-terminal` library.
+> **Note:** [`TerminalRenderable`](../biscuit-terminal/lib/src/components/renderable.rs) (formerly `Renderable`) is defined in the `biscuit-terminal` library.
 
 A component that implements `TreeRenderable` gains multi-target rendering for
 free: any of the tree renderers below can fold the tree it produces.
@@ -184,7 +185,7 @@ frontmatter is parsed by `darkmatter::style` and applied to `DarkmatterPage`
 before terminal/HTML rendering.
 
 Implemented wiring currently covers sub-specs 1 through 5 from
-[`features/2026-05-23-style-property`](./features/2026-05-23-style-property/):
+`2026-05-23-style-property`:
 schema/parser, page layout, table/image/block-quote layout, `ul`/`ol`/`li`
 layout, and page/component `color` / `bg-color`. The active phase is
 `ACTIVE_STYLE_WIRING_SUB_SPEC = 5`; HR migration and bespoke knobs such as

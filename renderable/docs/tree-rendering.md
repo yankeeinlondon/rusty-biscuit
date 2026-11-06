@@ -847,7 +847,8 @@ paragraphs, and `Compose` relies on that between the paragraphs of a
 ### Output width
 
 `MarkdownRenderOptions::width` and `BrowserRenderOptions::width` take a
-`renderable::output::Width`, the width a command was asked to print at. It
+`renderable::output::Width`, the width a command was asked to print at (see
+[Command Output](./command-output.md#output-width)). It
 decides how paragraph text is laid out; it never changes what the text says.
 
 | Width | Markdown | Browser |
@@ -861,7 +862,8 @@ space of the paragraph's own text. Code blocks, tables, headings, and HTML
 blocks keep their lines. The `> ` of a block quote, a list item's indent, a
 task checkbox, and a footnote label count toward `n`. A line never breaks:
 
-- inside a code span, a link or image destination and title, or raw HTML;
+- inside a code span, a link or image destination and title, an autolink, or
+  raw HTML;
 - before the `]` that closes a link label, so `](dest "title")` stays with
   the last word of the label;
 - after a backslash, which would turn the line ending into a hard break;
@@ -1282,6 +1284,8 @@ filesystem walk, no color-identity loss. This is the mechanism behind darkmatter
   support matrix.
 - [`layout-and-style.md`](./layout-and-style.md) — the `Layout` and `Style`
   primitives that ride on the tree.
+- [`command-output.md`](./command-output.md) — `CommandOutput`, the contract that
+  turns a command result into any output target through these folds.
 - `.claude/skills/renderable/tree.md` — the `renderable::tree` API.
 - `.claude/skills/biscuit-terminal/render-tree.md` — terminal folding and layout
   application.
