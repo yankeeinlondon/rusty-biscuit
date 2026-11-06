@@ -28,8 +28,10 @@ clarified: false
 implemented: false
 review_iterations: 0
 related:
-    - 2026-11-04-loading-data
     - 2026-10-28-extract-simplified-schema
+    - 2026-11-04-composition-errors
+depends-on:
+    - 2026-11-04-loading-data
 ---
 
 # Dynamic Schema Types
@@ -60,6 +62,11 @@ Today this fails when the schema loads:
 invalid SimplifiedSchema for property os:
 expected `,`, `;`, or `)` in enum members, found `a`
 ```
+
+That file is committed, so the shipped-schema corpus test
+`every_kinded_schema_artifact_passes_its_definition_through_the_registry`
+carves it out until M4 lands. The carve-out fails once the file validates, and
+M4 removes it.
 
 `parse_enum_members` (`simplified-schema/lib/src/simplified/grammar.rs`)
 accepts only literal members,
@@ -137,16 +144,20 @@ cost no larger than one validator compile.
 
 ### S2. Input-fingerprinted resolution cache
 
-Prototype the resolution cache. Record every input an evaluation touches
-through the existing demand-driven context capture, and key on those inputs.
-Measure hit rate and cost across a Claudine-style many-document run. Decide
+Prototype the resolution cache. Record every input an evaluation touches and
+key on those inputs. File and URL reads come from the read set that
+2026-11-04-loading-data delivers (its R8); it holds no content hashes, and it
+does not cover environment values or `ctx.*` groups, which still come through
+the existing demand-driven context capture. Measure hit rate and cost across a Claudine-style many-document run. Decide
 whether the cache is process-wide (like the validator cache), persisted on
 disk, or both.
 
 ### S3. Invalidation and DMLS
 
 Determine how DMLS learns that an input changed (the watch-directories
-mechanism, file events, or a fingerprint check on save). Resolution must run
+mechanism, file events, or a fingerprint check on save). This spec owns using
+the read set for DMLS invalidation; 2026-11-04-loading-data provides the library
+read set only, and DMLS today watches only `.md` and `.yaml` files. Resolution must run
 off the request path: DMLS serves the last resolved schema and marks it stale
 until a fresh one is ready. Measure added latency on completion and hover.
 
@@ -166,7 +177,11 @@ allowed only for slots whose functions are pure or local-input-reading, while
 shell and remote reads go through the existing approval and `--allow host=`
 flows; or a schema with an effectful slot can be discovered but stays
 unresolved until an explicit request (for example `md compose`) approves it.
-Trigger discovery and DMLS must never cause an unapproved effect.
+Trigger discovery and DMLS must never cause an unapproved effect, and neither
+must a pass that runs ahead of composition: the reference check
+(`ComposeOptions::for_reference_check`, also behind `md graph` and
+`md validate refs`), which holds no remote permission and runs no shell, and the
+pre-flight walk. Decide what each of those does with an unresolved slot.
 
 ### S6. Lazy and partial resolution
 
@@ -200,9 +215,11 @@ Whatever the spikes conclude, the finalized spec must deliver:
   `suggest` is allowed today.
 - **M3.** Slot syntax errors and wrong result shapes are positioned schema
   errors, reported in `md schema validate` and DMLS like any other schema
-  error.
+  error. They follow the diagnostic position rule: a line and column only when
+  proven, otherwise null, never a placeholder. A slot whose `load_data` fails
+  keeps that failure's `dm.data.*` code and `data_location`.
 - **M4.** `sandboxing.yaml` (in the M1 spelling above) loads and validates its
-  documents.
+  documents, and the shipped-schema corpus carve-out for it is removed.
 - **M5.** No guarantee from "The tension to resolve" is lost without an
   explicit, documented replacement.
 
@@ -210,8 +227,9 @@ Whatever the spikes conclude, the finalized spec must deliver:
 
 - **Q1.** Is a slot the whole member list, or may literal and dynamic members
   mix (`enum(none, {{ … }})`)?
-- **Q2.** Should JSON Schema output (`md schema` emitters) contain the resolved
-  values, or the template plus an `x-darkmatter-*` extension?
+- **Q2.** Should JSON Schema output (`md schema detect --output json-schema`)
+  contain the resolved values, or the template plus an `x-darkmatter-*`
+  extension?
 - **Q3.** Does any case truly need document-relative evaluation (for example
   `fm.*` inside a schema)? If so, how does it coexist with validator sharing?
 - **Q4.** Should `kind` catalogs and baseline schemas be allowed dynamic slots,
