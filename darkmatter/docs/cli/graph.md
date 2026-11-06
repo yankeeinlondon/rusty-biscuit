@@ -67,6 +67,8 @@ Non-transclusion references extracted from the document, grouped by kind:
 | Remote Hyperlinks    | `\u{eb15}`   | 🔗      | URLs (`https://...`)   |
 | Local Hyperlinks     | `\u{f0354}`  | 📄      | Local `.md` links      |
 | Images               | `\u{f03e}`   | 📸      | Image references       |
+| Media                | `\u{f03e}`   | 📸      | `<video>`, `<audio>`, `<source>` |
+| Iframes              | `\u{eb15}`   | 🔗      | `<iframe src="...">`   |
 | CSS Imports          | `\u{e74a}`   | 📄      | `<link>` / `@import`   |
 | Script Imports       | `\u{ed0d}`   | 📄      | `<script src="...">`   |
 | Font Imports         | `\u{f031}`   | 🔤      | `@font-face` sources   |

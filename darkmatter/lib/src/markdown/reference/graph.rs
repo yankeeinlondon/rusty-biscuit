@@ -1091,6 +1091,10 @@ pub(super) fn extract_all_references(content: &str, source: &ComposeSource) -> R
     // HTML references
     records.extend(super::html::extract_html_links(content, source));
     records.extend(super::html::extract_html_images(content, source));
+    records.extend(super::html::extract_html_videos(content, source));
+    records.extend(super::html::extract_html_audio(content, source));
+    records.extend(super::html::extract_html_sources(content, source));
+    records.extend(super::html::extract_html_iframes(content, source));
     records.extend(super::html::extract_html_script_blocks(content, source));
     records.extend(super::html::extract_html_link_tags(content, source));
     records.extend(super::html::extract_html_meta_tags(content, source));

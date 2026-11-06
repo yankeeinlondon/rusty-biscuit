@@ -619,6 +619,20 @@ mod tests {
     /// The leading type keyword alone decides; a `|` or `file(` inside an
     /// argument, a description, or an import is not a file type.
     #[test]
+    fn a_multiline_html_tag_is_indexed_at_its_document_span_and_line() {
+        let source = "---\ntitle: t\n---\n\n<a\n  href=\"./other.md\">x</a> <img\n  src=\"./image.png\">\n";
+
+        let index = index_document(Path::new("/w/doc.md"), source);
+
+        let link = index.links.iter().find(|link| link.raw_target == "./other.md").expect("the link");
+        assert_eq!(link.line, 5);
+        assert!(source[link.span.start..].starts_with("<a\n"), "{:?}", link.span);
+        let image = index.file_uses.iter().find(|fact| fact.raw_target == "./image.png").expect("the image");
+        assert_eq!(image.line, 6);
+        assert!(source[image.span.start..].starts_with("<img\n"), "{:?}", image.span);
+    }
+
+    #[test]
     fn a_file_type_is_named_by_the_leading_keyword_only() {
         for (type_string, expected) in [
             ("file", true),

@@ -210,11 +210,11 @@ fn replace_existing_meta_tag(content: &str, key: &str, new_value: &str) -> Optio
         }
 
         // Find the closing >
-        let Some(close_offset) = rest.find('>') else {
+        let Some(close_offset) = html::open_tag_end(rest) else {
             search_from = start + 1;
             continue;
         };
-        let tag_end = start + close_offset + 1;
+        let tag_end = start + close_offset;
         let tag_html = &content[start..tag_end];
 
         // Use attribute extraction to check if this tag matches the key

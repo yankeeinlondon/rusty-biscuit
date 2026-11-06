@@ -209,7 +209,9 @@ pub fn classify_target(raw: &str) -> ReferenceTarget {
         ReferenceTarget::DataUri { raw: raw.into() }
     } else if raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("//") {
         ReferenceTarget::RemoteUrl { raw: raw.into() }
-    } else if raw.starts_with("mailto:") || raw.starts_with("tel:") || raw.contains("://") {
+    } else if ["mailto:", "tel:", "about:", "blob:", "javascript:"].iter().any(|scheme| raw.starts_with(scheme))
+        || raw.contains("://")
+    {
         let scheme = if raw.contains("://") {
             raw.split("://").next().unwrap_or("")
         } else {

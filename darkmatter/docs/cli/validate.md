@@ -4,8 +4,8 @@ kind: canonical-documentation
 
 # `md validate refs`
 
-`md validate refs` checks every reference in a document (links, images,
-transclusions, CSS and script imports) and tells you which ones are broken and
+`md validate refs` checks every reference in a document (links, images, media,
+frames, transclusions, CSS and script imports) and tells you which ones are broken and
 exactly where each is written. It reads the document and any documents it
 transcludes, and runs nothing.
 
@@ -92,6 +92,47 @@ flowchart TD
 `--graph` names the diagram's notation, and `--output` still chooses the output:
 `markdown` wraps the diagram in a fenced code block, and a data output is
 `{ "graph": { "format": "dot", "source": "digraph ..." } }` alone.
+
+## HTML and CSS references
+
+Raw HTML in a document is checked along with its Markdown. These are the targets
+that are read:
+
+| Written as | Target checked |
+|---|---|
+| `<a>`, `<link>` | `href` |
+| `<img>`, `<script>`, `<video>`, `<audio>`, `<source>`, `<iframe>` | `src` |
+| `<style>` | `@import` and the `src` URLs of `@font-face`, including one inside `@media` or another group rule |
+
+A `<meta>` tag is recorded as inline data, so its value is never a missing file.
+
+How a tag is laid out makes no difference. An attribute or a CSS rule can be on any
+line, a line can hold several tags, and tag and attribute names ignore case. Each
+target gets its own row at its own position: where its tag's `<` is, or for CSS where
+its `@import` or `url(` is.
+
+```html
+<video controls>
+  <source
+    src="./missing.mp4">  <!-- reported at the `<source`, line 2, column 3 -->
+</video>
+
+<style>
+@import "./missing.css";  /* reported at line 7, column 1 */
+</style>
+```
+
+Some text is not checked because it is not a tag or a live rule: anything in an HTML
+comment, a fenced code block, or inline code; tag-like text inside a raw-text element
+such as `<script>` or `<textarea>`; and rules inside a CSS comment.
+
+Only local files can be missing. An `http(s)` or `//` URL is checked only when remote
+checks are on, a `data:` URI always passes, and an `about:`, `blob:`, or `javascript:`
+target is noted as *unsupported scheme* without failing. An empty target such as
+`<iframe src="">` loads nothing, so it is not a reference.
+
+Other attributes are not read: `srcset`, `poster`, `<track>`, `<embed>`, `<object>`,
+and `url()` outside `@font-face` are not checked.
 
 ## The reference report
 

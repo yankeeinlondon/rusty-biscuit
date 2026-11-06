@@ -6,6 +6,7 @@
 
 use cssparser::{Parser, ParserInput, Token};
 
+use super::html::{LineMap, open_tag_end};
 use super::types::{
     ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax, classify_target,
     make_reference_id,
@@ -15,9 +16,11 @@ use crate::markdown::compose::ComposeSource;
 /// Extracts references from `style`'s CSS with `extract`, spanned in `content`,
 /// the text `style` was extracted from.
 ///
-/// A record's span then indexes the same text as every other record's.
-/// `css_content` is entity-decoded, so when it is not a verbatim copy of the
-/// block its offsets prove nothing and each record is spanned by the whole tag.
+/// A record's line and span then index the same text as every other record's,
+/// whatever line of a multiline block it is on and whatever container prefix
+/// that line carries. `css_content` is entity-decoded, so when it is not a
+/// verbatim copy of the block its offsets prove nothing and each record is
+/// spanned by the whole tag.
 pub(crate) fn style_references(
     content: &str,
     style: &ReferenceRecord,
@@ -27,19 +30,28 @@ pub(crate) fn style_references(
         return Vec::new();
     };
     let origin = &style.origin;
-    let base = content
-        .get(origin.span.clone())
-        .and_then(|tag| tag.find('>'))
-        .map(|tag_end| origin.span.start + tag_end + 1)
-        .filter(|base| content.get(*base..*base + css_content.len()) == Some(css_content));
-    let Some(base) = base else {
+    let body = content.get(origin.span.clone()).and_then(|tag| {
+        let tag_end = open_tag_end(tag)?;
+        Some((origin.line + tag[..tag_end].matches('\n').count(), origin.span.start + tag_end))
+    });
+    let located = body.and_then(|(line, base)| {
+        let map = LineMap::new(content, base, css_content);
+        map.exact.then_some((line, map))
+    });
+    let Some((base_line, map)) = located else {
         let mut records = extract(css_content, &origin.source, origin.line, origin.span.start);
         for record in &mut records {
             record.origin.span = origin.span.clone();
         }
         return records;
     };
-    extract(css_content, &origin.source, origin.line, base)
+    let mut records = extract(css_content, &origin.source, base_line, 0);
+    for record in &mut records {
+        let span = map.to_content(record.origin.span.start)..map.to_content(record.origin.span.end);
+        record.id = make_reference_id(&origin.source, record.origin.line, span.start);
+        record.origin.span = span;
+    }
+    records
 }
 
 /// Extract `@import` URLs from CSS content.
@@ -106,9 +118,10 @@ pub(crate) fn extract_css_imports(
 
 /// Extract `@font-face { src: url(...) }` references from CSS content.
 ///
-/// Correctly identifies `@font-face` blocks and only extracts `url()`
-/// values from `src:` declarations within those blocks. `base_line` and
-/// `base_offset` are as in [`extract_css_imports`]; the span starts at `url(`.
+/// Correctly identifies `@font-face` blocks, at the top level or nested in a
+/// conditional group such as `@media`, and only extracts `url()` values from
+/// `src:` declarations within those blocks. `base_line` and `base_offset` are
+/// as in [`extract_css_imports`]; the span starts at `url(`.
 pub(crate) fn extract_font_face_sources(
     css_content: &str,
     source: &ComposeSource,
@@ -118,37 +131,53 @@ pub(crate) fn extract_font_face_sources(
     let mut records = Vec::new();
     let mut input = ParserInput::new(css_content);
     let mut parser = Parser::new(&mut input);
+    collect_font_faces(&mut parser, css_content, source, base_line, base_offset, &mut records);
+    records
+}
 
+fn collect_font_faces<'i>(
+    parser: &mut Parser<'i, '_>,
+    css_content: &str,
+    source: &ComposeSource,
+    base_line: usize,
+    base_offset: usize,
+    records: &mut Vec<ReferenceRecord>,
+) {
     while let Ok(token) = parser.next_including_whitespace_and_comments().cloned() {
-        if let Token::AtKeyword(ref name) = token
-            && name.eq_ignore_ascii_case("font-face")
-        {
-            // Skip whitespace/comments until the opening brace
-            while let Ok(next) = parser.next_including_whitespace_and_comments().cloned() {
-                match next {
-                    Token::WhiteSpace(_) | Token::Comment(_) => continue,
-                    Token::CurlyBracketBlock => {
-                        // Now we can parse the nested block
-                        let _ = parser.parse_nested_block(|block_parser| {
-                            extract_font_face_urls(
-                                block_parser,
-                                css_content,
-                                source,
-                                base_line,
-                                base_offset,
-                                &mut records,
-                            );
-                            Ok::<(), cssparser::ParseError<'_, ()>>(())
-                        });
-                        break;
+        match token {
+            Token::AtKeyword(ref name) if name.eq_ignore_ascii_case("font-face") => {
+                // Skip whitespace/comments until the opening brace
+                while let Ok(next) = parser.next_including_whitespace_and_comments().cloned() {
+                    match next {
+                        Token::WhiteSpace(_) | Token::Comment(_) => continue,
+                        Token::CurlyBracketBlock => {
+                            // Now we can parse the nested block
+                            let _ = parser.parse_nested_block(|block_parser| {
+                                extract_font_face_urls(
+                                    block_parser,
+                                    css_content,
+                                    source,
+                                    base_line,
+                                    base_offset,
+                                    records,
+                                );
+                                Ok::<(), cssparser::ParseError<'_, ()>>(())
+                            });
+                            break;
+                        }
+                        _ => break, // Unexpected token, skip this at-rule
                     }
-                    _ => break, // Unexpected token, skip this at-rule
                 }
             }
+            Token::CurlyBracketBlock => {
+                let _ = parser.parse_nested_block(|block_parser| {
+                    collect_font_faces(block_parser, css_content, source, base_line, base_offset, records);
+                    Ok::<(), cssparser::ParseError<'_, ()>>(())
+                });
+            }
+            _ => {}
         }
     }
-
-    records
 }
 
 /// Try to extract a URL from after `@import`.

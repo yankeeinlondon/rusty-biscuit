@@ -192,7 +192,7 @@ md.fm_set_defaults(serde_json::json!({
 
 ## Document References
 
-A document can reference external assets through hyperlinks, images, transclusions, inline CSS/scripts/fonts, and meta tags. Darkmatter provides both **local** (single-document) and **graph-aware** (transclusion-following) APIs for reference discovery, plus a validation engine.
+A document can reference external assets through hyperlinks, images, media, frames, transclusions, inline CSS/scripts/fonts, and meta tags. Darkmatter provides both **local** (single-document) and **graph-aware** (transclusion-following) APIs for reference discovery, plus a validation engine.
 
 ### Reference Categories
 
@@ -200,6 +200,8 @@ A document can reference external assets through hyperlinks, images, transclusio
 |----------|----------------|-------------|
 | Hyperlinks | `[text](url)` | `<a href="url">` |
 | Images | `![alt](src)` | `<img src="url">` |
+| Media | -- | `<video src="url">`, `<audio src="url">`, `<source src="url">` |
+| Frames | -- | `<iframe src="url">` |
 | Transclusions | `::file`, `::code`, `::url`, `::file-links` | -- |
 | CSS | -- | `<style>`, `@import` |
 | Scripts | -- | `<script>`, `<script src="...">` |
