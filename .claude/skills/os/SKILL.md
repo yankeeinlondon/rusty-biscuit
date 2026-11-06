@@ -50,6 +50,7 @@ environment's cell and how to record an execution ban.
 |---|---|---|
 | Hook fixture red only on Ubuntu | missing local git identity, inherited default branch, or `gh` already in `/usr/bin` | [linux.md](linux.md#hook-fixtures-red-only-on-ubuntu) |
 | L2 timeout only on Ubuntu, green on the macOS host | depth-1 CI checkout meets git-history code | [linux.md](linux.md#shallow-checkouts-l2-red-only-on-ubuntu-a-timeout) |
+| Terminal snapshot red on `build-win-native` with only its SGR color missing, green on the macOS host | not Windows: the render read ambient color and the macOS shell exports `COLORTERM`. Reproduce with `env -u COLORTERM`; pin the depth in the test (`DarkmatterPage::with_color_depth`) | this row |
 | Linux and WSL red, macOS and Windows green, only an order differs | ext4 `read_dir` hash order | [linux.md](linux.md#read_dir-order-red-on-linux-and-wsl-green-on-macos-and-windows) |
 | ASCII `>` where `▶` was expected, only on `BUILD_LINUX` | `LANG=C` in that host's shells | [linux.md](linux.md#langc-on-the-build_linux-host-ascii-where-a-glyph-was-expected) |
 | A substring count in rendered output red on Linux | temp-path length changes where text wraps | [linux.md](linux.md#temp-path-length-changes-word-wrapping) |

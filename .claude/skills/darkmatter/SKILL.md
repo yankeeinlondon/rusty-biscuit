@@ -296,10 +296,23 @@ and `heading` as a link parameter. Compose and `md graph --validate` show errors
 severities. Reasons and constructs live only in
 `ReferenceIssueCode::reason_phrase` and `ReferenceSyntax::construct_phrase`.
 
-`md compose --output report-json` (compose only; `ComposeOutputFormat`)
-prints one `{outcome, diagnostics, document}` object for every parsed
-invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
-`ReportedExit` for the exit status); every code and record comes from
+`md compose` accepts its Markdown default and the data family; `md render` both
+families, defaulting to `terminal`, which is byte-identical to `plain` off a
+color TTY. A data output of either prints one envelope (`file`, `outcome`,
+`document`, `diagnostics`, `summary`, optional `perf`, `lifecycle_output`;
+`markdown::output::command::DocumentEnvelope`; schemas in
+`cli/schemas/output/`) for every parsed invocation, and stderr stays empty: no
+`-v`, tracing, prompt, or lifecycle line reaches it. Lifecycle output there is
+collected per step; in Markdown mode all of it, `stdout:` included, goes to
+stderr, because stdout holds only the deliverable. Exit 0 succeeded, 1 ran and
+failed (including a refused reference), 2 usage only; handlers return
+`ReportedExit`, and only `main` exits. `cli/src/output/mod.rs` resolves target
+and width (`OutputEnvironment`; a test passes one to spoof a stream) and owns
+stderr (`stderr_terminal`, `stderr_report`: its own TTY and columns, unlimited
+off a terminal, whatever `--width` says). `cli/src/artifact.rs::ProcessOpener`
+is the `--show` seam: `MD_DRY_RUN` never launches, and `MD_DRY_RUN=fail` is a
+host with no default app. The CLI only collects
+(`cli/src/output/report.rs::ReportSink`); every code and record comes from
 `compose::report_diagnostics` (`warning_diagnostic`, `error_diagnostics`,
 `lifecycle_failure_diagnostics`), and a CLI-worded shell failure keeps its
 typed diagnostics through `ClassifiedFailure`. `Markdown::compose_with_warnings`
@@ -335,8 +348,7 @@ each transcluded child in its own context; the lifecycle call check via
 `compose.rs::PendingTriggerWarnings`: merged once into the first report or
 failure, or delivered by any exit that never composes.
 The call precheck orders findings by authored position and keeps the prefix
-before a rejection. Never print to stdout on a report-mode path; see
-`docs/cli/report-json.md`.
+before a rejection. Never print to stdout or stderr on a data-output path.
 
 Every source-file argument opens through `cli/src/io::open_argument`:
 `FileReference` grammar first, resolved in the launch context, with the

@@ -1102,7 +1102,7 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   `payload_path`) take `ResolvedSchema::origin.file()`, the last file of an
   alias chain. `from_invalid_trigger` fills `ComposeWarning::diagnostic`
   with the trigger file at `position()` (source-free otherwise and for
-  embedded), which `report-json` prints. The
+  embedded), which a data output prints. The
   passive parsers (`parse_trigger_envelope_from_str`, `resolve_trigger_payload`)
   stay strict. `file_claims_trigger_envelope` counts a malformed claimed
   envelope as a trigger file, so an authored `$schema` naming a skipped

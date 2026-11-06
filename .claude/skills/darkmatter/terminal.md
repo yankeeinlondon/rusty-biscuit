@@ -27,7 +27,7 @@ pub struct TerminalOptions {
     pub image_mode: TerminalImageMode, // Auto, Never, Force
     pub base_path: Option<PathBuf>,   // For relative image paths
     pub italic_mode: ItalicMode,      // Auto, Always, Never
-    pub max_width: Option<u16>,       // Text wrapping width
+    pub width: Option<Width>,         // renderable::output::Width; None = ambient detection
     pub mermaid_mode: MermaidMode,    // Off, Image, Automatic, Text
     pub hyperlink_mode: HyperlinkMode, // Auto, Always, Never
 }
@@ -61,9 +61,25 @@ a link prints its text (`text <url>` at `-v`, through
 prints `IMAGE[alt]`; the old `▉ IMAGE[alt]` block placeholder and
 `[text](url)` fallback are gone. `md schema validate` forwards its `-v` count
 to its linked document rows, so a piped run shows `doc.md <file://…>` only at
-`-v`. Darkmatter's `TerminalOptions` still carries a `u16` `max_width` and an
-unread `hyperlink_mode` until the page path moves to `renderable::Width` and
-the shared `TerminalProfile`.
+`-v`.
+
+The Darkmatter paths match that fold. `TerminalOptions.width` and the page's
+state are `renderable::output::Width`, so nothing clamps and `Unlimited` omits
+every right-side fill. A width never selects capabilities;
+`TerminalOptions::with_output_options` and `DarkmatterPage::with_output_options`
+carry a `TerminalProfile`, and with one supplied nothing reads ambient color; a
+plain profile is pinned at render time, so no builder restores a capability it
+removed. `hyperlink_mode` maps onto OSC 8 (`Always` on, `Never` off). A page test
+that expects paint pins a profile or color depth: a loose one passes only where
+the host's `COLORTERM` happens to be set.
+
+`markdown::output::command::DocumentOutput::prepare` is the document command
+result: it renders its one target eagerly, so a page failure surfaces there and
+never inside a `CommandOutput` override, which returns only what was prepared.
+`document_markdown` is the source text under a width (`Source` unchanged,
+`Columns` through `reflow_to_width`, `Unlimited` unwrapped).
+`ComposeOptions::with_output_width` reaches the root compose's cleanup instead,
+so `md compose` reflows once, in the pipeline.
 
 ## Theme Pairs
 
