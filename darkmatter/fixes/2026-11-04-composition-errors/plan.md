@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-11-05
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -121,6 +121,222 @@ packages:
 - darkmatter-cli
 - model-citizen-cli
 - sniff-detection-cli
+- claudine
+- darkmatter-lsp
+- claudine-cli
+source_files_during_phase_2:
+- biscuit-terminal/lib/src/components/table/table.rs
+- biscuit-terminal/lib/src/render_tree/link.rs
+- biscuit-terminal/lib/src/render_tree/mod.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- claudine/lib/src/composition/lifecycle/tests/call_check.rs
+- darkmatter/cli/src/args/policy.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/compose/report.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/tests/l1/clean_parity.rs
+- darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+- darkmatter/cli/tests/l1/compose_report_json.rs
+- darkmatter/cli/tests/l1/graph.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/cli/tests/l1/link_titles.rs
+- darkmatter/cli/tests/l1/magic_root.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/reference_report.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/graph_validate.json
+- darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_errors.json
+- darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_local.json
+- darkmatter/lib/src/markdown/cleanup/document.rs
+- darkmatter/lib/src/markdown/cleanup/link_titles.rs
+- darkmatter/lib/src/markdown/cleanup/mod.rs
+- darkmatter/lib/src/markdown/cleanup/structure.rs
+- darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+- darkmatter/lib/src/markdown/compose/body_origin.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/link_title_warnings.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/site_scope.rs
+- darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+- darkmatter/lib/src/markdown/compose/transclusion/conditions.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/transclusion/types.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/reference/css.rs
+- darkmatter/lib/src/markdown/reference/file_tree/model.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/lib/src/markdown/reference/html.rs
+- darkmatter/lib/src/markdown/reference/local.rs
+- darkmatter/lib/src/markdown/reference/mod.rs
+- darkmatter/lib/src/markdown/reference/report.rs
+- darkmatter/lib/src/markdown/reference/snapshot.rs
+- darkmatter/lib/src/markdown/reference/types.rs
+- darkmatter/lib/src/markdown/reference/validate.rs
+- darkmatter/lib/src/markdown/render_tree/build_context.rs
+- darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/src/render/image_ref.rs
+- darkmatter/lib/src/render/link.rs
+- darkmatter/lib/src/style/bespoke.rs
+- darkmatter/lib/tests/browser/browser_render.rs
+- darkmatter/lib/tests/common/clean_parity/mod.rs
+- darkmatter/lib/tests/fixtures/composition_errors/child.md
+- darkmatter/lib/tests/fixtures/composition_errors/leading-rule.md
+- darkmatter/lib/tests/fixtures/composition_errors/root.md
+- darkmatter/lib/tests/fixtures/composition_errors/when-error.md
+- darkmatter/lib/tests/l1/collection_analysis.rs
+- darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+- darkmatter/lib/tests/l1/collection_discovery.rs
+- darkmatter/lib/tests/l1/cutover_reference.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- darkmatter/lib/tests/l1/link_title_migration.rs
+- darkmatter/lib/tests/l1/link_title_warnings.rs
+- darkmatter/lib/tests/l1/link_titles.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/prelude_exports.rs
+- darkmatter/lib/tests/l1/reference_provenance.rs
+- darkmatter/lib/tests/l1/reference_report.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/lib/tests/l1/style_features_baseline.rs
+- darkmatter/lib/tests/l1/style_features_phase5.rs
+- darkmatter/lib/tests/l1/tree_features_characterization.rs
+- renderable/src/output/link_metadata.rs
+- renderable/src/tree/attrs.rs
+- renderable/src/tree/render/browser.rs
+- renderable/src/tree/render/markdown.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/structs/Markdown.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cleanup.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/os/SKILL.md
+source_files_during_phase_3:
+- biscuit-terminal/lib/src/output/mod.rs
+- biscuit-terminal/lib/src/output/width.rs
+- claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/render/final_message.rs
+- claudine/lib/src/render/prompt/formatting.rs
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/enums.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/args/parsers.rs
+- darkmatter/cli/src/args/render.rs
+- darkmatter/cli/src/artifact.rs
+- darkmatter/cli/src/collection_failure.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/compose/report.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/about.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/src/style_claims.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/common/protected_env.rs
+- darkmatter/cli/tests/l1/collection_blocks.rs
+- darkmatter/cli/tests/l1/compose_basic.rs
+- darkmatter/cli/tests/l1/compose_call_warnings.rs
+- darkmatter/cli/tests/l1/compose_collection_controls.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+- darkmatter/cli/tests/l1/compose_report_json.rs
+- darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+- darkmatter/cli/tests/l1/compose_transclusion.rs
+- darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+- darkmatter/cli/tests/l1/compose_value_provenance.rs
+- darkmatter/cli/tests/l1/context_construction_guard.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/cli/tests/l1/layout_flags.rs
+- darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+- darkmatter/cli/tests/l1/link_titles.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/policy_verbs.rs
+- darkmatter/cli/tests/l1/reference_report.rs
+- darkmatter/cli/tests/l1/render_basic.rs
+- darkmatter/cli/tests/l1/schema_recursive.rs
+- darkmatter/lib/benches/phase8_render.rs
+- darkmatter/lib/benches/render_code_heavy.rs
+- darkmatter/lib/benches/render_pipeline.rs
+- darkmatter/lib/src/layout/context.rs
+- darkmatter/lib/src/layout/error.rs
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/layout/page/tests.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/markdown/code_block.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/code_block.rs
+- darkmatter/lib/src/markdown/output/command/document.rs
+- darkmatter/lib/src/markdown/output/command/mod.rs
+- darkmatter/lib/src/markdown/output/command/tests.rs
+- darkmatter/lib/src/markdown/output/mod.rs
+- darkmatter/lib/src/markdown/output/terminal.rs
+- darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+- darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+- darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+- darkmatter/lib/src/style/apply.rs
+- darkmatter/lib/src/style/cli_claims.rs
+- darkmatter/lib/tests/l1/blockquote_list_spacing.rs
+- darkmatter/lib/tests/l1/code_link.rs
+- darkmatter/lib/tests/l1/cutover_reference.rs
+- darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+- darkmatter/lib/tests/l1/horizontal_rule_snapshots.rs
+- darkmatter/lib/tests/l1/layout_snapshots.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+- darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+- darkmatter/lib/tests/l1/plain_corpus.rs
+- darkmatter/lib/tests/l1/prose_wrap_parity.rs
+- darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_terminal.snap
+- darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_plain_corpus.snap
+- darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_styled_corpus.snap
+- darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_center_alignment_terminal.snap
+- darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_right_alignment_terminal.snap
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+- simplified-schema/docs/topics/schema-object.md
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/terminal.md
 ---
 
 # Composition Errors Implementation Plan
@@ -267,14 +483,14 @@ These decisions settle the specification's remaining technical details. They app
   - Own `reference/validate.rs` and its new report builder module. Add graph document metadata, authored issue serialization, per-path trail traversal, and reason/construct phrase methods; replace the old grouped-by-kind rendering with ValidationReportView's structural output.
   - Cover two equal basenames, two-level/repeated-child trails, root/remote/in-memory groups, all reason/syntax variants, error/warning/info visibility, mixed/single reason tallies, detail rows, singular grammar, empty/all-ok summary, and identical common report bodies for graph and validate refs.
 
-- [ ] **Diagnostic projection**
+- [x] **Diagnostic projection**
   - Own `compose/expression/diagnostics.rs`, `compose/report_diagnostics.rs`, workspace diagnostic constructors/consumers, and the `check_references` Result migration in compose/lifecycle. Apply rules 20–21 and add authored source/span/reference details without dropping earlier warnings.
   - Keep DMLS's existing raw-reference extraction and protocol ranges intact. Test public diagnostics for reference, schema, expression, shell, lifecycle, and transclusion failures, including null positions and inserted provenance.
   - Run the `check_references` regression against a preparation error that makes `validate_references` return Err, then assert failure through both direct compose and lifecycle paths.
 
 ### Wave 6 — Reference checkpoint
 
-- [ ] **Reference verification**
+- [x] **Reference verification**
   - Integrate Wave 5, run `just test` in darkmatter, and run the affected shared-library tests. Update the report-view snapshots and authored-line baseline identified in rule 30; retain the untouched error surfaces' assertions.
   - Verify no reference report contains `is not valid`, old category headings, or a `failure:` row; diagnostic data retains the failure class. Verify reported spans index the loaded source and sections match the prepared heading snapshot.
   - Complete this checkpoint before changing CLI output orchestration.
@@ -283,24 +499,24 @@ These decisions settle the specification's remaining technical details. They app
 
 ### Wave 7 — Independent page and run-output work
 
-- [ ] **Document rendering**
+- [x] **Document rendering**
   - Own `markdown/output/command/` document adapter, `markdown/output/terminal.rs`, `markdown/render_tree/entrypoints.rs`, `layout/page.rs`, and page tests. Carry resolved width/profile/verbosity through the default page path and framed page path.
   - Fix P1–P10 in the generic and Darkmatter paths, including ignored HyperlinkMode, ambient-width recapture, plain trailing spaces, natural-width code bands/tables/rules, and fixed-width/unwrap precedence. Keep Darkmatter's theme/style state on its document output value.
   - Verify corpus at 40/80/unlimited with/without frame and with/without max-width, through Markdown::as_terminal and DarkmatterPage. Snapshot styled and plain results as review artifacts; no manual visual gate.
 
-- [ ] **Run collection**
+- [x] **Run collection**
   - Own new `cli/src/output/{mod,report}.rs`, lifecycle observer/capture, perf collection, and artifact opener seam. Generalize ReportSink without changing diagnostic ordering or executing composition twice.
   - Implement rules 23, 26–28, the exact compose/render envelope, and invocation-local error/status handling. Cover preflight failure warnings, denied warnings, errors before input load, lifecycle command/communication ordering, perf on/off, and serialization/open failures.
   - Keep application writes out of generic dispatch; handlers deliver values and main finalizes them. Add stdout/stderr ownership to the collector so a data-mode error never falls back to main's human renderer.
 
 ### Wave 8 — Compose/render wiring
 
-- [ ] **Compose outputs**
+- [x] **Compose outputs**
   - Own `args/output.rs` foundations and compose's selector/width argument, `commands/compose.rs`, lifecycle integration, and compose tests. Replace report-json with all four data formats and use the new report collector.
   - Default Markdown remains the direct output path with unchanged bytes absent an explicit width. Reject terminal/plain/markdown-plus/html/browser/auto/ast/text/report-json with usage status 2. Emit failures as status 1, including reference validation Err, denied warnings, lifecycle failure, and baseline load failure.
   - Capture lifecycle/shell output in data mode and route it to stderr in Markdown mode. Preserve interruption 130 with no object. Serialize once for `--show`; stub open failures and assert a single valid failure payload.
 
-- [ ] **Render outputs**
+- [x] **Render outputs**
   - Own `commands/render.rs`, artifact document adapters, render/root-render selectors, and render tests. Use the library DocumentOutput for all formatted targets and the shared envelope for all data targets.
   - Replace reject_width_flag with actual width resolution, retain max-width as a content cap, and keep root-render behavior aligned for the flags in this change without implementing the separate root-alias redesign.
   - Cover terminal-to-plain byte parity, HTML/style warning collection, Markdown source output, MarkdownPlus disclosure output, data document/source parity, frontmatter, and show extensions/content.
@@ -308,7 +524,7 @@ These decisions settle the specification's remaining technical details. They app
 
 ### Wave 9 — Compose/render checkpoint
 
-- [ ] **Envelope contracts**
+- [x] **Envelope contracts**
   - Add `cli/schemas/output/{compose,render}.yaml` with the spec's exact fields and strict real-command conformance cases for success, failure, and warnings. Use SimplifiedSchema::validate_strict through the crate's existing public API.
   - Test JSON/JSON5/YAML/TOML parity, null omission, perf presence, lifecycle ordering, width warnings, and empty data stderr with verbose/perf enabled. Test formatted diagnostics at independently spoofed stderr width.
   - Freeze byte controls equivalent to homelab/claudine compose recipes, including --frontmatter, and prove both TTY-profile and piped defaults match them. Run `just test` in darkmatter and applicable shared suites before Phase 4.

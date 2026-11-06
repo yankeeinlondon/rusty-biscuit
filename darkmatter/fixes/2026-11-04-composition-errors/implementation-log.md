@@ -120,6 +120,9 @@ packages:
   - darkmatter-cli
   - model-citizen-cli
   - sniff-detection-cli
+  - claudine
+  - darkmatter-lsp
+  - claudine-cli
 decisions_for_review:
   - |-
     Width parsing gained a sixth request kind. The plan listed Auto, Source, Unlimited, Columns and Percent; I added Fractional(f64) so a value like 72.9 is kept until resolution, which floors it to 72 columns and returns the "takes whole columns" warning text. Alternative: floor while parsing and return the warning beside the request. Redoing it means changing the parse return type in biscuit-terminal's output/width.rs and its callers (none outside tests yet).
@@ -147,14 +150,295 @@ decisions_for_review:
     Pretty TOML from biscuit-file writes arrays across lines; the dispatch uses that writer as-is rather than adding a second TOML formatter.
   - |-
     Added Json5::from_value to biscuit-file (public, additive) so the dispatch converts an in-memory value without serializing and re-parsing it.
+  - |-
+    Reference check failures now fail `md compose`, as the plan and spec require, and that exposes real errors the old code hid. These documents used to exit 0 and now exit 1: a hyperlink that points outside the repository, an invalid `::file` in a transcluded child, and `ignore_invalid: true` with an invalid target. Alternative: report an out-of-tree hyperlink as an ordinary broken-reference row instead of a run failure, which is gentler for authors but reverses an existing design note on reference resolution. Redo cost: about 20 lines plus tests. This is the decision most worth a reviewer's attention.
+  - |-
+    The reference check prepares documents in a lenient mode (`ComposeOptions::for_reference_check`, the same deferrals the shell-approval walk uses). The plan only said to propagate the error. A bare propagation failed 12 unrelated tests, because `{{ }}` and `$(...)` frontmatter values were never resolved during the check, so it had been silently doing nothing on those documents. With the lenient mode, only failures the check can prove reach the run; a child's own `{{ bad( }}` stays a tolerated notice. Alternative: make those fatal, which is one flag but changes the transclusion stopping rule. Graph preparation also gained frontmatter interpolation, which affects `md graph` and `md validate refs` too and makes them more accurate. Redo cost: one line, but those values then need another way to resolve.
+  - |-
+    Direct `md compose` now applies the four document-judging `--allow` recoveries (ctx-override, missing-transclusions, invalid-frontmatter-assignment, reassigned-frontmatter-property) before the reference check, not after. The plan did not mention this; it is a defect the old swallowed error hid, found when the full suite failed `--allow ctx-override`. Remote and cache options stay after the check on purpose, so the passive check does not start fetching. Alternative: run the check on the fully built request, as the lifecycle path does, which is simpler but risks network reads during a passive check. Redo cost: a few lines in `commands/compose.rs`.
+  - |-
+    Link-title warnings are produced by two scans: one over authored text before preparation (so a failed run keeps them and `--deny` stops before anything runs) and one after the inline stages (for titles a stage wrote). The plan did not name a stage. A consequence: a link inside a false `::block` still warns, and `md clean` migrates it too. Alternative: one late scan, which loses warnings when an inline stage fails. Redo cost: one call site.
+  - |-
+    `md render` also reports link-title warnings and accepts their codes with `--deny`, so `md render --deny all` now blocks on them. The plan said "composition/render" but render had no code registry, so `RENDER_DIAGNOSTIC_CODES` was added. Alternative: compose only. Redo cost: small.
+  - |-
+    `md clean` migrates titles in the clean-document step rather than the shared body cleanup, because compose and render share that body step and would otherwise start applying attributes silently. Three departures from strict migration: a legacy title with no supported key (`"Run x=1 first"`) becomes `{ title: "Run x=1 first" }` rather than `{}` so its text survives; titles holding `{{ … }}` stay legacy and keep warning, because JSON escaping could break the expression; a reference definition also used by an image stays legacy because image titles keep their old syntax. Alternatives: strict parity, which destroys text or warns forever. Redo cost: small per case.
+  - |-
+    Rule 30 said to update `compose.rs`'s report-view assertion. It was left unchanged: `warning_rows_put_each_extra_line_on_a_row_of_its_own` passes its own literal to `warning_rows`, which non-reference warnings still use, and never reads the report. The plan's statement is stale there. Redo cost: none.
+  - |-
+    Added a borderless table (`Table::borderless`, `TableTerminalHints.borderless`) to the shared crates, because the spec's report rows need aligned columns without hand padding and no such table existed. Its width overhead still reserves box-line columns, so a narrow terminal wraps about 4 columns early. A row with text only in its first cell spans the columns and is not measured, so a long detail line does not widen the first column. HTML and Markdown keep an empty header row, since GFM requires one. Redo cost: small.
+  - |-
+    The report's terminal form has its own tree through a `render_terminal` override (bare `file://` URI, heading in `qp`, no blank line a Markdown table would need), rather than sharing one tree across targets as the plan's "one builder" suggests. Alternative: Prose's link hint, which reads the process directory, which this repo forbids. Redo cost: moderate.
+  - |-
+    Report details the plan left open: the title line appears only when errors exist, so a warnings-only `md validate refs` shows groups and a summary with no "Broken references"; `md compose` prints nothing when there are no errors, so a warnings-only run does not announce "all ok"; ok is scanned minus errors, so ok + broken always equals the total and warnings count as ok; an in-memory source displays as `<stdin>`; group paths retry through canonical forms because `/var` versus `/private/var` printed `../../…` on macOS; `#` and `?` in a path become `%23`/`%3F` in Markdown and HTML destinations, a narrow exception to "the path is not rewritten" that keeps `c#/doc.md` one destination. Each is a one-line change.
+  - |-
+    Positions, special cases: a flow-list `prologue: [./a.md, ./b.md]` reports the key's line and column 1 because the existing locator cannot place list items (alternative: null); a literal prologue link takes its value's location with no section; a `::toc-linking` synthesized link reports `inserted: false` at its directive, since the spec's inserted rule names only expressions, shell steps, and `replace:`; a byte-order mark does not count as a column for references, while the older `AuthoredSpan::locate` still counts it, which matters only for a `when=` directive on line 1 of a BOM file with no frontmatter; a multi-line reference in a CRLF file keeps its whole span, so LF and CRLF agree, where the plan's literal wording would give CRLF a one-character span. Each is a few lines.
+  - |-
+    Fragment validation keeps today's slugs (it accepts `#setup` and rejects `#setup-1`), while `section` uses final duplicate-numbered slugs, as the spec requires. The snapshot therefore holds both and each document parses its headings twice. Alternative: validate against numbered slugs, which removes the second parse but changes which fragments count as broken. A test pins the current behavior.
+  - |-
+    Diagnostics: a named in-memory document reports positions in its own text rather than null, since that text is its frame; null applies to unknown sources and URLs. A schema problem with no line keeps `source: null` rather than the spec's file-only fallback, to stay surgical, and a missing column is now null rather than an invented 1. `ReferenceError::FileReference` has `source: null` and a directive parse error is file-only, because those errors carry no authored location; link-title warnings carry no `section`. `construct` strips `in ` from the report phrase to match the spec's values. Adding the missing locations means wrapping errors at three call sites.
+  - |-
+    Two defects found and deliberately left out, because fixing them changes behavior beyond this phase. A multi-line `<style>` block yields no `@import` or `@font-face` records (the HTML walk splits the node by lines), so those references are not checked at all; fixing it adds new missing-target errors. `::file when=` warnings, unlike the errors this phase fixed, still use the prepared line. Redo cost: small for each, plus their new test expectations.
+  - |-
+    `cutover_reference`'s block-quote snapshot failed on Windows because the test was not hermetic, not because of a platform difference: the page deliberately renders content that paints no color at ambient detection, so the snapshot depended on the host's `COLORTERM` (it fails on macOS too without it). I pinned the depth in the test helper and left production alone; Phase 3 owns how the page carries its terminal profile. If Phase 3 changes that, the pin can go.
+  - |-
+    Windows `os_failing` was not set on the spec. The one remaining Windows failure, `shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry`, also fails on macOS and is not OS-specific: `claudine/docs/research/sandboxing/providers/sandboxing.yaml` uses `enum({{ as_csv(…) }}; required)`, syntax that belongs to the planned `2026-11-05-dynamic-schema-types`. I left that file alone. `just test` was run with this one test skipped. Alternative: mark the file or test as expected-failing until that feature lands, so the full gate is green without a skip.
+  - |-
+    Other sessions shared this worktree during Phase 2. Commits efe02f230, 57b2a76e5, f224928e4, and c845ac498 landed mid-phase under the author's signed identity from outside this run; they hold three of this phase's four tasks, and 57b2a76e5 also holds another session's schema-layer reporting work. So this phase's file lists come from `git diff f85552280 HEAD` plus the working tree, minus that session's files, classified by reading the diffs, not from the uncommitted tree the prompt assumed. Excluded as foreign: schema validate and schema layer sources, tests, and fixtures, `docs/inline/schema-validation.md`, `docs/topics/schemas/definition.md`, the loading-data spec and spikes, and an untracked `simplified-schema/docs/topics/using-prose-in-schemas.md`. A reviewer who wants one commit per concern would need to split 57b2a76e5.
+  - |-
+    Lifecycle `stdout:` actions and lifecycle command output now go to stderr in Markdown mode. They used to share stdout with the document. The spec and plan require it ("formatted lifecycle communication and shell output go to stderr"), though they also say "as today", which was not true of `stdout:`. As a consequence, a piped `stdout:` line is now prose-rendered (`hello **bold**` prints `hello bold`) rather than copied as authored. Alternative: keep `stdout:` on stdout, which breaks the rule that stdout holds only the deliverable. Redo cost: one method in `TerminalEffects` plus two tests. The homelab and claudine recipes use no lifecycle.
+  - |-
+    `md render --output markdown` or a data output, with no `--width` and no known width, keeps the source text. The plan's literal rules resolve that to `Unlimited`, which joins every paragraph, but the spec also says this output "prints the document's source text" and today's bytes are the source. With `OUTPUT_COLUMNS` or a real terminal it still reflows, as `auto` says. Explicit `--width unlimited` joins. Alternative: strict `auto`, which changes every `md render --output markdown > file`. Redo cost: one function in `commands/render.rs`.
+  - |-
+    An envelope's `document` omits the final newline `println!` adds to Markdown stdout, so "byte for byte" means `stdout == document + "\n"`. This matches what `report-json` carried. Alternative: include the newline in `document`. Redo cost: one line plus test helpers.
+  - |-
+    `--show` behavior left open by the spec. Data outputs print to stdout and also open the file, because a data output is always one value on stdout. `md render --output markdown|markdown-plus|html --show` opens and does not print, as today. `md render --show` for `terminal`/`plain` prints and opens the document's Markdown, because terminal text has no useful file form. On a failed data run, `--show` still writes and opens the failure payload (the spec says "the value"); this ends the old rule that a failed composition publishes no viewer file, for data mode only. Opener failure now fails the run in every mode, where it used to print and exit 0. Alternative: no viewer on failure. Redo cost: one condition in `ReportSink::finish_with`.
+  - |-
+    The opener seam is `artifact.rs::ArtifactOpener` with `ProcessOpener` reading the existing `MD_DRY_RUN`, plus a new value `MD_DRY_RUN=fail` that simulates no default app, so a spawned test can prove the one failure payload. A test hook in a production env var already existed; this adds one value. Alternative: unit tests of the seam only, losing the end-to-end proof. Redo cost: small.
+  - |-
+    A data output disables interactive shell approval: a command that would prompt fails with `ApprovalRequired`, because stderr must stay empty. `--debug`/`RUST_LOG` tracing is not initialized in data mode either. Alternative: prompt on `/dev/tty`. Redo cost: one condition.
+  - |-
+    `--width` is declared once as a global root flag, not per leaf as rule 22 words it. So in this phase commands not yet wired (`md clean`, `md toc`, ...) accept and ignore it, ahead of Phase 4. Global gives "no opt-outs" with one declaration, and it also covers the utility routes the rule says accept and ignore it. Phase 4's table-driven metadata still owns `--output`. Alternative: a per-leaf argument. Redo cost: a flag in each leaf.
+  - |-
+    `--max-width` moved from the root `Cli` onto `RenderOptions`, because the spec's acceptance names `md render --max-width` and that form exited 2 (the flag was root-only). Global would have put it on every command, which the spec forbids. `md FILE --max-width` and `md --max-width N render FILE` still work. The explicit subcommand's value is applied after `style:` frontmatter, so it wins as the root flag does. Redo cost: small; `2026-11-05-render-surface` moves the whole style surface anyway.
+  - |-
+    `md compose` never read `fixed-width:`/`unwrap:` frontmatter; its pipeline sets explicit cleanup values on each run. So the spec's "the document's own `fixed-width:` and `unwrap:` frontmatter still applies" describes `md clean`, not compose. `ComposeOptions::with_output_width` therefore overrides nothing for compose in practice, and the `--width source` frontmatter tests can only prove authored newlines stay. Left unchanged: reading that frontmatter in compose would break the no-`--width` byte promise. `md clean` is wired in Phase 4.
+  - |-
+    `md schema about` must stay styled on a pipe, which it only got from the width-selects-rich-profile leak (P2) that this phase removes. It now sets an explicit profile: detected on a TTY, optimistic otherwise. Phase 4 moves it to the shared selector, where the spec says it degrades to plain on a pipe; delete this then.
+  - |-
+    Removing the P2 leak changes two other paths. `claudine`'s rendering on a pipe loses styling that came only from setting a width. A framed `DarkmatterPage` with no profile now styles from its captured terminal rather than `new_optimistic`, so its bytes no longer depend on the host. `HyperlinkMode::Always` now really forces OSC 8 and `ItalicMode` is honored, both as their docs already said. A profile with graphics on still reads `Terminal::default()` for the app, route, and cell size, because a profile cannot name a protocol.
+  - |-
+    `markdown_title()`'s "multiple H1 headings" notice moved from `eprintln!` to `tracing::warn!`, because a library write to stderr breaks a data output's empty stderr. So a formatted run no longer shows it unless tracing is on. Alternative: thread it into `ComposeWarning`, which needs a warning sink through the function context. Redo cost: moderate.
+  - |-
+    `md render`'s unknown and deprecated `style:` keys are now reported: a warning row on stderr in a page output, `dm.style.unknown_key` / `dm.style.deprecated` in a data output's diagnostics. They were tracing-only before, so a document with an unknown key now prints a stderr row on each page render. `--output markdown` builds no page and reports nothing, as today; a data output runs the same check and `--deny style` fails it, but unparseable `style:` is not a failure there, because the source text it carries never reads it. Alternative: treat a data output like `--output markdown` and skip the check. Redo cost: one call in `commands/render.rs`.
+  - |-
+    `DocumentOutput::prepare` renders exactly one target, and overrides return only what was prepared; for any other target they return `None` and fall to the generic fold. The plan describes storing "validated inputs"; rendering once eagerly is the simpler way to keep "overrides never swallow rendering errors". `document_markdown` does not strip embedded metadata; compose strips it itself, because `md render` prints the source as it stands.
+  - |-
+    A refused reference in a lifecycle run reported an extra generic `dm.compose.failure` row with a null source that the same document without a lifecycle did not have. It is now classified with no diagnostics, so both routes report the same rows.
+  - |-
+    `claudine/cli/tests/level2/level2_typed_error_render_capture.rs` still asserted the `[text](url)` fallback Phase 1 removed; Phase 1 and 2 did not run L2, so it was stale. Updated to the non-clickable rule. Other L2 suites are still unexecuted until Phase 6 and may hold more of these.
+source_files_during_phase_2:
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/render_tree/link.rs
+  - biscuit-terminal/lib/src/render_tree/mod.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+  - darkmatter/cli/src/args/policy.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/compose/lifecycle.rs
+  - darkmatter/cli/src/commands/compose/report.rs
+  - darkmatter/cli/src/commands/graph.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/validate.rs
+  - darkmatter/cli/tests/l1/clean_parity.rs
+  - darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+  - darkmatter/cli/tests/l1/compose_report_json.rs
+  - darkmatter/cli/tests/l1/graph.rs
+  - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+  - darkmatter/cli/tests/l1/link_titles.rs
+  - darkmatter/cli/tests/l1/magic_root.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/reference_report.rs
+  - darkmatter/dmls/tests/l1/collection_editor.rs
+  - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+  - darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/graph_validate.json
+  - darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_errors.json
+  - darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_local.json
+  - darkmatter/lib/src/markdown/cleanup/document.rs
+  - darkmatter/lib/src/markdown/cleanup/link_titles.rs
+  - darkmatter/lib/src/markdown/cleanup/mod.rs
+  - darkmatter/lib/src/markdown/cleanup/structure.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+  - darkmatter/lib/src/markdown/compose/body_origin.rs
+  - darkmatter/lib/src/markdown/compose/call_precheck.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/link_title_warnings.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/policy.rs
+  - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/site_scope.rs
+  - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/conditions.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/reference/css.rs
+  - darkmatter/lib/src/markdown/reference/file_tree/model.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/html.rs
+  - darkmatter/lib/src/markdown/reference/local.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/report.rs
+  - darkmatter/lib/src/markdown/reference/snapshot.rs
+  - darkmatter/lib/src/markdown/reference/types.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/src/markdown/render_tree/build_context.rs
+  - darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/src/render/image_ref.rs
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/src/style/bespoke.rs
+  - darkmatter/lib/tests/browser/browser_render.rs
+  - darkmatter/lib/tests/common/clean_parity/mod.rs
+  - darkmatter/lib/tests/fixtures/composition_errors/child.md
+  - darkmatter/lib/tests/fixtures/composition_errors/leading-rule.md
+  - darkmatter/lib/tests/fixtures/composition_errors/root.md
+  - darkmatter/lib/tests/fixtures/composition_errors/when-error.md
+  - darkmatter/lib/tests/l1/collection_analysis.rs
+  - darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+  - darkmatter/lib/tests/l1/collection_discovery.rs
+  - darkmatter/lib/tests/l1/cutover_reference.rs
+  - darkmatter/lib/tests/l1/diagnostic_projection.rs
+  - darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+  - darkmatter/lib/tests/l1/kind_semantic_checks.rs
+  - darkmatter/lib/tests/l1/link_title_migration.rs
+  - darkmatter/lib/tests/l1/link_title_warnings.rs
+  - darkmatter/lib/tests/l1/link_titles.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/prelude_exports.rs
+  - darkmatter/lib/tests/l1/reference_provenance.rs
+  - darkmatter/lib/tests/l1/reference_report.rs
+  - darkmatter/lib/tests/l1/report_diagnostics.rs
+  - darkmatter/lib/tests/l1/shared_diagnostics.rs
+  - darkmatter/lib/tests/l1/style_features_baseline.rs
+  - darkmatter/lib/tests/l1/style_features_phase5.rs
+  - darkmatter/lib/tests/l1/tree_features_characterization.rs
+  - renderable/src/output/link_metadata.rs
+  - renderable/src/tree/attrs.rs
+  - renderable/src/tree/render/browser.rs
+  - renderable/src/tree/render/markdown.rs
+docs_updated_during_phase_2:
+  - darkmatter/docs/structs/Markdown.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/testing.md
+  - .claude/skills/os/SKILL.md
 message_to_agent: |-
-  Phase 1 is complete; the shared foundations Phase 2+ build on are:
-  - renderable::output::{CommandOutput, OutputOptions, TerminalProfile, Width} (also re-exported at the renderable root) and renderable::output::link_metadata::{parse_link_title, StructuredTitle, LinkMetadata, QueryParams, QueryValue, LinkTitleNotice (code(): dm.link.malformed_structured_title / dm.link.legacy_structured_title), is_legacy_structured_title}. NodeAttrs::set_link_metadata/link_metadata() is the typed qp carrier on Link nodes; every fold already lowers it (Markdown JSON5 title, HTML query + heading=, OSC 8 params).
-  - biscuit_terminal::output::{write_output, render_output (returns text + diagnostics), OutputTarget (FromStr, `browser` alias), OutputError, serialize_data, terminal_target_options, parse_width_request, resolve_width, ResolvedWidth, WidthError, resolve_stderr_width} and Terminal::output_profile()/detected_columns(). render_tree::render_terminal_output(&Document, &OutputOptions, strictness) is the generic terminal fold; TerminalRenderContext::from_profile/pin_plain exist.
-  - Darkmatter itself was only compile-migrated: TerminalOptions.max_width is still u16, HyperlinkMode::Never is still ignored on the render-tree path, DarkmatterPage still re-detects ambient width, page decoration still pads (P2/P3/P6/P7/P8 remain for Phase 3's Document rendering task). Darkmatter's render/link.rs still uses the old key=value parser; switch it to parse_link_title in Phase 2's Link migration (keep reference_parse::parse_structured only for md clean migration).
-  - Prose has with_verbosity(u8); md's global -v now reaches md schema validate's linked rows. Wire OutputOptions.verbosity from -v everywhere else when commands move to write_output.
-  - Pre-existing failure to expect: darkmatter::l1 shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry (claudine/docs/research/sandboxing/providers/sandboxing.yaml). Run darkmatter's suite with `just test -- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`; `just test -E '...'` with parentheses breaks the recipe's bash array.
-  - When running claudine-cli tests directly, enable its recipe features (test-fixtures, terminal-tests) or the drain-budget test waits the production 10 s and fails.
+  Phase 3 is complete. What Phase 4 needs to know:
+  - `md compose` and `md render` are the only commands on the new output path. Copy `commands/render.rs`: parse the target, `crate::output::resolve_output`, a `ReportSink` for a data target, `sink.finish(result)`. `ReportSink` is hard-coded to the compose/render envelope (`DocumentEnvelope`); commands with their own data shape need it generalized over `CommandOutput`, keeping its diagnostics, `--show`, serialization-failure, and closed-stdout handling. `crate::output::write_stdout` is the formatted path.
+  - `--width` is already a global root flag (`Cli.width`, an `Option<WidthRequest>`); other commands accept and ignore it until you wire them. Document commands pass `WidthRequest::Source` as the default; everything else `Auto`. `Cli::requests_data_output` covers only compose and render; extend it or tracing leaks to a data output's stderr. `args/output.rs` holds `target_parser`, `ALL_TARGETS`, `COMPOSE_TARGETS`; build the per-leaf metadata there. `OutputFormat` and `ComposeOutputFormat` are gone; `DocumentOutput::prepare` serves clean and set.
+  - `md clean` still has `--fixed-width` and `--ignore-incidental-newlines`, and `--save` still forwards nothing about output (rule 22). `validate refs`, `graph --validate`, `hash --diff`, and `schema validate` still exit 2 or 3 through `process::exit`; `ReportedExit` is the return path.
+  - `md schema about` has a temporary explicit output profile in `markdown_options` because it relied on the removed width-selects-rich leak; delete it when you move the command. See `decisions_for_review`.
+  - Any test expecting paint must pin a profile or color depth: width no longer selects capabilities. Two such tests failed only on Windows this phase. Run page tests with `env -u COLORTERM` too.
+  - `tests/common/protected_env.rs` lists `OUTPUT_COLUMNS` as an application input. `context_construction_guard` rejects any new `*::from_process` and unlisted `std::env::var`; `OutputEnvironment::detect` is the one reader. Conformance tests must keep `include_str!` of a schema literally inside a `#[test]`, not a macro, or CI maps the input to the whole binary (see `output_envelope.rs`).
+  - Still applies: `just test -- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`; that failure is an input for 2026-11-05-dynamic-schema-types. `just cross-check` breaks on parentheses in -E; pass plain name filters. The worktree may be shared with other sessions; classify file lists by content.
+  - For Phase 5: docs/cli/report-json.md is now stale in full (`--output json`, the envelope, exit 1); the spec's Documentation inventory also needs the lifecycle stdout rule, `--show`, `MD_DRY_RUN=fail`, and `.claude/skills/biscuit-terminal` should mention `stderr_terminal_columns`. A few comments in Claudine and DMLS still name `report-json`.
+source_files_during_phase_3:
+  - biscuit-terminal/lib/src/output/mod.rs
+  - biscuit-terminal/lib/src/output/width.rs
+  - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/render/final_message.rs
+  - claudine/lib/src/render/prompt/formatting.rs
+  - darkmatter/cli/schemas/output/compose.yaml
+  - darkmatter/cli/schemas/output/render.yaml
+  - darkmatter/cli/src/args/cli.rs
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/src/args/enums.rs
+  - darkmatter/cli/src/args/mod.rs
+  - darkmatter/cli/src/args/output.rs
+  - darkmatter/cli/src/args/parsers.rs
+  - darkmatter/cli/src/args/render.rs
+  - darkmatter/cli/src/artifact.rs
+  - darkmatter/cli/src/collection_failure.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/compose/lifecycle.rs
+  - darkmatter/cli/src/commands/compose/report.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/src/main.rs
+  - darkmatter/cli/src/output/mod.rs
+  - darkmatter/cli/src/output/report.rs
+  - darkmatter/cli/src/render.rs
+  - darkmatter/cli/src/style_claims.rs
+  - darkmatter/cli/tests/common/fixture.rs
+  - darkmatter/cli/tests/common/protected_env.rs
+  - darkmatter/cli/tests/l1/collection_blocks.rs
+  - darkmatter/cli/tests/l1/compose_basic.rs
+  - darkmatter/cli/tests/l1/compose_call_warnings.rs
+  - darkmatter/cli/tests/l1/compose_collection_controls.rs
+  - darkmatter/cli/tests/l1/compose_data_output.rs
+  - darkmatter/cli/tests/l1/compose_lifecycle.rs
+  - darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+  - darkmatter/cli/tests/l1/compose_report_json.rs
+  - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+  - darkmatter/cli/tests/l1/compose_value_provenance.rs
+  - darkmatter/cli/tests/l1/context_construction_guard.rs
+  - darkmatter/cli/tests/l1/feature_flag.rs
+  - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+  - darkmatter/cli/tests/l1/layout_flags.rs
+  - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+  - darkmatter/cli/tests/l1/link_titles.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/mermaid_features.rs
+  - darkmatter/cli/tests/l1/output_envelope.rs
+  - darkmatter/cli/tests/l1/policy_verbs.rs
+  - darkmatter/cli/tests/l1/reference_report.rs
+  - darkmatter/cli/tests/l1/render_basic.rs
+  - darkmatter/cli/tests/l1/schema_recursive.rs
+  - darkmatter/lib/benches/phase8_render.rs
+  - darkmatter/lib/benches/render_code_heavy.rs
+  - darkmatter/lib/benches/render_pipeline.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/layout/error.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/page/tests.rs
+  - darkmatter/lib/src/lifecycle/md_host.rs
+  - darkmatter/lib/src/markdown/code_block.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+  - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/output/code_block.rs
+  - darkmatter/lib/src/markdown/output/command/document.rs
+  - darkmatter/lib/src/markdown/output/command/mod.rs
+  - darkmatter/lib/src/markdown/output/command/tests.rs
+  - darkmatter/lib/src/markdown/output/mod.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+  - darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/style/cli_claims.rs
+  - darkmatter/lib/tests/l1/blockquote_list_spacing.rs
+  - darkmatter/lib/tests/l1/code_link.rs
+  - darkmatter/lib/tests/l1/cutover_reference.rs
+  - darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+  - darkmatter/lib/tests/l1/horizontal_rule_snapshots.rs
+  - darkmatter/lib/tests/l1/layout_snapshots.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+  - darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+  - darkmatter/lib/tests/l1/plain_corpus.rs
+  - darkmatter/lib/tests/l1/prose_wrap_parity.rs
+  - darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_terminal.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_plain_corpus.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_styled_corpus.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_center_alignment_terminal.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_right_alignment_terminal.snap
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+  - simplified-schema/docs/topics/schema-object.md
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/terminal.md
 ---
 
 # Implementation Log for 2026-11-04-composition-errors (6 phases)
@@ -237,3 +521,168 @@ message_to_agent: |-
 #### Scope check
 
 `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` reports `change_class: package` and `packages: [biscuit-file, biscuit-terminal, biscuit-terminal-cli, biscuit-visualized, darkmatter, darkmatter-cli, model-citizen-cli, renderable, sniff-detection-cli, test-toolkit, claudine, sniff]`, so the test and lint gates were run, not skipped.
+
+## Phase 2
+
+Ran as four serial foreground subagents (one per task) because all four edit one crate, then orchestrator integration. Everything below was verified on the final tree.
+
+### Wave 4 — Reference provenance
+
+- `ReferenceOrigin.authored` / `.section`, `ReferenceInsertion.authored_directive_line`, `ReferenceTrailStep`, `ReferenceIssue.included_via`; `ComposeReport.body_origin`; private `PreparedReferenceContent`; `BodyOrigin::producer_of` backed by producer segments carried through edits and splices; `project_whole`; `PreparedHeading` snapshot; CSS spans rebased to body offsets; prologue/epilogue located through the frontmatter leaf machinery; A10 `when=` errors carry authored line and source (`TransclusionError::ConditionEval.authored`).
+- `Markdown::new` does not misread a leading `---`: pinned by `a_leading_rule_is_not_read_as_frontmatter`.
+- Reconstructed spike fixtures in `lib/tests/fixtures/composition_errors/`. Checked by hand through the real binary: `md validate refs root.md --fragments` prints 9:5, 15:9, 22:13, 24:8, 28:1, child 7:9, 7:43, 9:7, 11:1, and `(transcluded at root.md:26)`.
+
+### Wave 4 — Link migration
+
+- `Link` parses titles through `parse_link_title`; `key=value` no longer applies attributes. `md clean` migrates by source span (`cleanup/link_titles.rs`); `compose/link_title_warnings.rs` produces located warnings; codes are in the compose and new render registries. `query_href` and `osc8_parameters` are shared by `Link` and the tree folds.
+
+### Wave 5 — Report data
+
+- `reference/report.rs`: `ValidationReportView` with `CommandOutput`, grouped by `(source, trail)`; `reason_phrase`/`construct_phrase`; `validation_category_label` and `validation_order` removed; trails populated during the walk; `Table::borderless`. CLI-atheist baselines updated (new fields; `line` values did not change because those fixtures have no frontmatter).
+
+### Wave 5 — Diagnostic projection
+
+- `DiagnosticSource` optional positions plus `section`/`inserted`; flattened `ReferenceDetails`; `check_references -> Result`, used with `?` in direct compose and lifecycle.
+- Regression input: a hyperlink leaving the repository, which makes `validate_references` return Err. With the old line temporarily restored, the direct path failed with exit 0 where 1 is expected. The lifecycle leg is by reasoning only (same branch), because the test stopped at the first leg.
+
+### Wave 6 — Reference checkpoint: defects found by the gate
+
+Scoped subagent runs missed these; the first full `just test` caught them:
+
+- **Real bug:** `--allow ctx-override` stopped working on direct compose. `run_compose` ran the check before applying the recoveries, which the old swallowed error hid. Fixed by moving the four document-judging recoveries ahead of the check (pinned by `policy_verbs::a_specific_recovery_beats_deny_all_in_either_order` and `an_independently_denied_diagnostic_still_blocks_a_recovered_command`).
+- **Stale assertion:** `magic_root` looked for `Valid: 1`; now `across 2 documents`, which also proves `@doc.md` resolved.
+
+Windows found, all test assumptions (no product change):
+
+- `kind_semantic_checks` (4 tests, older than this phase): `str::ends_with("schemas/…")` against backslashes; now `Path::ends_with`.
+- `reference_report::a_deep_issue…`, `cli reference_report::data_reports…`: compare as `Path`.
+- `link_titles::render_warns…`: a long temp path wraps the stderr row; whitespace is collapsed first.
+- `invalid_trigger_warnings::compose_reference_refusal…`: separators normalized on both sides; the full path is still required.
+- `cutover_reference::reference_block_quote_width_and_left`: not Windows-specific; it depended on the host's `COLORTERM` and reproduces on macOS without it. The helper now pins the depth; the snapshot is unchanged and passes with and without `COLORTERM`.
+
+### Gates (final tree, macOS unless stated)
+
+| Gate | Result |
+|---|---|
+| `just test` darkmatter (`-- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`) | 13221 passed, 11 skipped |
+| `just lint` darkmatter, renderable, biscuit-terminal | pass |
+| `just check-tier-coverage darkmatter` | pass, 0 stranded |
+| `just test` renderable / biscuit-terminal | 731 / 3992 passed (55 skipped) |
+| `cargo check --workspace --all-targets` | clean (run before the final test-only edits to darkmatter; those are covered by the `just test` above) |
+| `just cross-check --os windows`: darkmatter-cli / darkmatter-lsp / renderable / biscuit-terminal | 1512 / 1724 / 731 / 3568 passed |
+| `just cross-check darkmatter --os windows` | 9899 passed, 1 failed (the corpus failure below) |
+
+Dependents, serially, filtered to `link\|render\|report\|diagnostic\|compose\|markdown\|prose\|table\|output`: biscuit-icon-cli 36, biscuit-speaks-cli 1, biscuit-terminal-cli 118, messenger 72, messenger-cli 19, playa-cli 5, research 150, sniff-detection-cli 521, claudine-gen 30. With the filter `compos\|link\|report\|diagnostic\|lifecycle\|call_check\|reference`: claudine 3002, claudine-cli 1779 (`test-fixtures,terminal-tests`). All pass. These ran before the final test-only edits, which touch no code they depend on.
+
+Not run: `just test-l2` and `just test-browser`; `lib/tests/browser/browser_render.rs` inputs were migrated and compiled but not executed. Linux and WSL were not cross-checked; CI covers Linux, and the nightly covers WSL.
+
+The scope shortcut was not used: source files changed this phase, so both gates ran. The prompt's premise that the uncommitted tree equals this phase's changes does not hold here (see `decisions_for_review`), so `affected_scope.py` over the uncommitted tree would understate the phase.
+
+### Pre-existing and load-sensitive failures
+
+- **Pre-existing, skipped on macOS, failing on Windows:** `shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry`. Its input, `claudine/docs/research/sandboxing/providers/sandboxing.yaml`, uses syntax planned by `2026-11-05-dynamic-schema-types`. Not touched.
+- **Load-sensitive:** with host load at 68 (other sessions were active), 8 existing tests reported 5.0–6.7 s in one full run (`schema_validate_legacy_json_output_is_byte_identical`, `test_compose_denied_host_never_reads_a_seeded_cache_entry`, `every_suggested_rule_approves_the_command`, five `darkmatter-lsp` parity tests). Each took under 3 s when rerun alone; the final full run reported 1 slow test. None was added by this phase.
+- Subagents used `--no-fail-fast` on narrowed runs several times against their brief; no result recorded here came from those runs.
+
+### Requirement to test mapping (Phase 2)
+
+| Requirement | Tests |
+|---|---|
+| Authored line/column, LF/CRLF/BOM, multibyte | `reference_provenance::{spike_fixture_positions_and_sections_are_exact, crlf_line_endings_report_the_same_positions, a_byte_order_mark_reports_the_same_positions, an_image_after_a_multibyte_character_has_a_character_column}` |
+| Prepared coordinates preserved | `reference_provenance::prepared_coordinates_are_unchanged`; existing file-tree tests |
+| Inserted references name their producer (edge, adjacent, chained) | `body_origin::tests::producers::*` (13); `reference_provenance::{producers_at_both_body_edges_are_located, adjacent_producers_name_their_own_expression, an_edit_inside_produced_text_inherits_the_original_producer, a_replaced_key_is_the_producer_of_its_value, shell_output_is_located_at_its_directive}` |
+| Mixed label is authored; in-memory and remote have null positions | `reference_provenance::{a_mixed_label_stays_authored_with_a_first_character_span, an_in_memory_document_has_a_section_and_no_authored_position, a_remote_document_keeps_its_url_and_has_no_authored_position}` |
+| Sections use final slugs; removed and duplicate headings; leading rule | `reference_provenance::{a_section_uses_the_final_slug_of_the_innermost_prior_heading, a_leading_rule_is_not_read_as_frontmatter, fragment_lookup_keeps_the_table_of_contents_slugs}` |
+| CSS rebasing; frontmatter values | `reference_provenance::{css_records_are_rebased_onto_the_body_and_include_their_opener, css_positions_follow_preparation_edits, frontmatter_values_locate_their_authored_position}` |
+| A10 `when=` | `reference_provenance::a_transclusion_when_*`, `an_in_memory_when_failure_has_no_authored_source` |
+| Title classification, `qp`, HTML and OSC 8 mapping, Windows URI, round trip | `link_titles::*` (17) |
+| `md clean` migration, parity, idempotence, code left alone | `link_title_migration::*` (15); CLI `link_titles::clean_migrates_once_and_leaves_code_alone`; shared parity case `legacy-link-title` (lib, CLI, DMLS) |
+| Located warnings, dedup by span, survive failure, `--deny` | `link_title_warnings::*` (16); CLI `link_titles::{report_json_locates_both_warnings_and_succeeds, a_failing_composition_reports_the_warning_too, compose_deny_names_each_code, render_warns_on_stderr_and_deny_blocks_it}` |
+| Report grouping, trails, visibility, tallies, grammar, details, every phrase | `reference_report::*` (32) |
+| No `is not valid`, kind headings, or `failure:` row | `reference_report::a_report_has_no_failure_row_verdict_or_kind_heading`; CLI `compose_reports_broken_references_on_stderr_without_the_old_wording` |
+| Markdown, HTML, OSC 8, and `-v` location forms | `reference_report::{markdown_writes_the_exact_location_link, html_moves_the_section_and_position_into_the_query, osc8_links_carry_a_bare_uri_and_their_position_as_parameters, verbose_plain_prints_the_bare_file_uri}` |
+| Graph and validate refs share a body | CLI `reference_report::{graph_and_validate_refs_print_the_same_report_body, a_clean_document_prints_the_same_all_ok_summary_on_both}` |
+| Diagnostic `source`, details, trail, every family, null positions | CLI `compose_report_diagnostics::*` (10); `diagnostic_projection::*` (4) |
+| Failed check is a failure, direct and lifecycle; no shell run | CLI `compose_report_diagnostics::{a_reference_check_that_cannot_run_fails_the_run, the_check_runs_no_shell_directive}` |
+| `--allow` recoveries reach the check | `policy_verbs::{a_specific_recovery_beats_deny_all_in_either_order, an_independently_denied_diagnostic_still_blocks_a_recovered_command}`; `compose_state_set` recovery tests |
+
+The Input Robustness Matrix does not apply (plan rule 29: Markdown and title grammars and output writers, not a configuration loader).
+
+## Phase 3
+
+Ran as two foreground subagents (Document rendering; test migration and contracts) with the CLI layer written by the orchestrator between them. All results below are from the final tree.
+
+### Wave 7 — Document rendering
+
+- P1, P2, P3, P6, P7, and P8 fixed on `Markdown::as_terminal` and `DarkmatterPage::render`: `capability_terminal` and `ambient_terminal_width` are gone; `Width` runs through page state, `LayoutContext`, `TerminalOptions`, and the code band; a right margin and padding with no background emit nothing; `HyperlinkMode` maps onto OSC 8; verbosity reaches the fold; the `▉` placeholder is gone.
+- `with_output_options` on the page and on `TerminalOptions`; plain pinned at render time, so no builder can restore a capability.
+- `markdown/output/command/`: `DocumentOutput`, `DocumentEnvelope`, `Outcome`, `PerfData`, `LifecycleOutputEntry`, `ReferenceSummary`, `document_markdown`. `ComposeOptions::with_output_width`.
+- Snapshots changed only for a listed defect: P6 (`char_list_item_center/right_alignment_terminal`, now in the 60 columns given rather than the ambient 80) and P7 (`ref_page_margin_and_padding_terminal`).
+
+### Wave 7 — Run collection
+
+- `cli/src/output/mod.rs`: `OutputEnvironment` (the one read of `COLUMNS`/`OUTPUT_COLUMNS`/stream state), `resolve_output`, `stderr_terminal`, `stderr_report`, `write_stdout`. `cli/src/output/report.rs`: `ReportSink` generalized from compose's collector, lock-protected because lifecycle delivery is `Sync`; `ReportedExit`; `ClassifiedFailure`. `commands/compose/report.rs` removed.
+- Lifecycle seam: `md_host::CommandOutput::command` (provided method) gives the host one finished command's stdout and stderr; `ComposeHost::event` supplies the stage.
+- `artifact.rs`: `ArtifactOpener`, `ProcessOpener`, open failure is a run failure naming the path.
+- `biscuit_terminal::output::stderr_terminal_columns` added, because `Terminal::detected_columns` measures stdout.
+
+### Wave 8 — Compose and render
+
+- `--output` through `args/output.rs::target_parser`; compose accepts exactly markdown/json/json5/yaml/toml; render accepts both families, default `terminal`. `--width` is real. `reject_width_flag`, `OutputFormat`, `ComposeOutputFormat`, and the AST artifact are gone. A refused reference exits 1, direct and lifecycle, through `ReportedExit`, not `process::exit`. Interrupted stays 130 with no object.
+- `md compose` default path stays `println!` of the same text: no dispatch.
+- Stderr now uses stderr's own detection everywhere on these paths, including `main`'s error rendering.
+
+### Wave 9 — Envelope contracts
+
+- `cli/schemas/output/{compose,render}.yaml`: the spec's text, unchanged; strict validation passes and a negative control proves it can refuse.
+- `cli/tests/l1/output_envelope.rs` (170 tests); `compose_report_json.rs` became `compose_data_output.rs`.
+
+### Gates (final tree, macOS unless stated)
+
+| Gate | Result |
+|---|---|
+| `just test` darkmatter (`-- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`) | 13468 passed, 11 skipped |
+| `just lint` darkmatter, biscuit-terminal | pass |
+| `just check-tier-coverage darkmatter` | pass, 0 stranded |
+| `env -u COLORTERM`: `plain_corpus`, `cutover_reference`, `layout::page`, `tree_features` | 192 passed |
+| `cargo test -p darkmatter --doc output::command` | pass |
+| `cargo check --workspace --all-targets` | clean |
+| biscuit-terminal `test(output)` | 85 passed (only an addition to its `width.rs`) |
+| Dependents, filter `compos\|lifecycle\|render\|final_message` | claudine 2719 passed; claudine-cli `compos\|render` with `test-fixtures,terminal-tests` 1183 passed |
+| `just cross-check darkmatter-cli --os windows` | 1690 passed, 1 failed (`schema_about_markdown_code_uses_inverted_theme...`); fixed; `schema_about` passes filtered, and `output_envelope` passes filtered on the final tree (170) |
+| `just cross-check darkmatter --os windows` | 9963 passed, 2 failed: the corpus test below and `render_tree_terminal_emits_dim_sgr_for_dim_span`; fixed, `render_tree_terminal` rerun passes |
+
+Both Windows failures were tests relying on the width-selects-rich leak this phase removed, reading ambient color on a host with no `COLORTERM`; neither was Windows-specific. Two fixes after those full Windows runs (the `about` profile and test pin) were rerun filtered, not full. Linux and WSL were not cross-checked; `just test-l2` and `just test-browser` were not run (Phase 6). One L2 test was run because a filter selected it, which is how the stale `claudine-cli` assertion was found.
+
+The scope shortcut was not used: source files changed, so both gates ran.
+
+### Pre-existing and load-sensitive failures
+
+- **Pre-existing, skipped on macOS, failing on Windows:** `shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry` (planned syntax of `2026-11-05-dynamic-schema-types`).
+- Nothing load-sensitive appeared. One subagent ran scoped filters twice with `--no-fail-fast` against its brief; no result here came from those runs.
+
+### Requirement to test mapping (Phase 3)
+
+| Requirement | Tests |
+|---|---|
+| Plain corpus at 40/80/unlimited, with and without frame and max-width, through `as_terminal` and `DarkmatterPage`: no ESC, no trailing whitespace, quotes, rule, tables, fences, headings, disclosure, link and image rule | `plain_corpus::*` (lib L1, one test per row); insta styled and plain snapshots |
+| Unlimited has natural size; page width reaches the zero-config page (P6) | `plain_corpus` unlimited rows; `layout::page::tests::zero_config_render_uses_the_width_it_was_given` |
+| P2 width never selects capabilities; P3 `HyperlinkMode` | `markdown/output/command/tests.rs`; entrypoints capability tests |
+| `DocumentOutput` per target, plain parity, `document_markdown` per width, envelope field order, `perf` absent, nulls present | `markdown/output/command/tests.rs`, doctests |
+| `with_output_width` against frontmatter | `markdown/output/command/tests.rs`; `output_envelope` width rows |
+| Envelope conformance: success, failure, warnings, for compose and render | `output_envelope` conformance tests (strict, hand-written so `include_str!` maps per test) |
+| JSON/JSON5/YAML/TOML parity, null omission, one value on stdout | `output_envelope` parity rows; `biscuit-terminal` `output_dispatch` (TOML null in an array, Phase 1) |
+| Empty stderr with `-v`, `-vv`, `--perf`, `--debug`; `perf` present only when asked | `output_envelope` stream rows |
+| Width precedence, percent, float, invalid `OUTPUT_COLUMNS`, stderr independence | `output::tests::*` (spoofed streams); `output_envelope` width rows; `layout_flags::layout_width_flag_wraps_prose_at_its_columns` |
+| Lifecycle output: payload in run order, one entry per shell step, stderr in Markdown mode, stdout only the document | `output_envelope` lifecycle rows; `compose_lifecycle::stdout_holds_only_the_document_and_every_verb_uses_stderr_in_run_order` |
+| Exit status: refused reference 1 with and without a lifecycle, `--deny` 1, usage 2 with empty stdout, removed values 2, interrupt 130 with no object | `output_envelope` exit rows; `compose_lifecycle`; `output::report::tests::an_interrupted_run_writes_no_value_and_keeps_its_status` |
+| `--show` extension and content per format, open failure is one failure payload naming the path | `output_envelope` show rows; `output::report::tests::an_open_failure_fails_the_run` |
+| Serialization failure names the path; usage error passes through | `output::report::tests::*` |
+| Terminal equals plain piped, formats, disclosure in markdown vs markdown-plus, source text, `--max-width` in all three spellings | `output_envelope` render rows; `render_basic` |
+| Style warnings: stderr in page outputs, diagnostics with empty stderr in data, `--deny style` fails one payload | `output_envelope::a_style_warning_*`, `a_denied_style_warning_fails_a_data_output_with_one_payload` |
+| Recipe bytes: `md compose X --frontmatter` and `md compose X` | `output_envelope` recipe rows, literal strings matching the pre-change binary |
+| Problem report on stderr, no ESC, unwrapped, even with `--width 20` | `output_envelope` formatted-diagnostic rows |
+
+A piped run has no TTY, so "TTY-profile" parity for compose is by construction (its Markdown path never reads a terminal), and spoofed stream behavior is tested in-process through `OutputEnvironment`. Real-terminal coverage is Phase 6.
+
+The Input Robustness Matrix does not apply (plan rule 29). The `OUTPUT_COLUMNS` and `--width` value parsers have their shapes tested at `biscuit-terminal` `output::width::tests`, and wiring at `output_envelope`.
