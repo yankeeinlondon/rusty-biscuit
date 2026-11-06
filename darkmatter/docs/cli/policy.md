@@ -58,6 +58,10 @@ them.
 | `untyped-map-variables` | a `::map` source with no iterable declaration is accepted with a warning | `dm.collection.untyped_map_source` |
 | `untyped-filter-variables` | a `::filter` source with no iterable declaration is accepted with a warning | `dm.collection.untyped_filter_source` |
 
+A missing target of any other kind (a CSS, script, or font import, a `<video>`,
+`<audio>`, `<source>`, or `<iframe>`) has no recovery: `md compose` stops on it even
+with `--allow all`.
+
 A recovered problem is still reported, carrying its code: on stderr in a Markdown
 run, and in `diagnostics` in a [data output](./data-contracts.md). Without the
 allowance the problem fails the command.

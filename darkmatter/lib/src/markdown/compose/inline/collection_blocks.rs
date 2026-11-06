@@ -87,7 +87,9 @@ pub(crate) fn run_stage(
             _ => false,
         };
         let nodes = structure(&pages, &collections);
-        Execution::new(content, &lookup, &runtime.iteration, source, report, &mut stop).expand(&nodes)
+        let origin = body.origin.as_ref().filter(|origin| origin.describes(content));
+        let opener = |span: &std::ops::Range<usize>| super::super::site_scope::authored_opener(markdown, origin, span);
+        Execution::new(content, &lookup, &runtime.iteration, source, &opener, report, &mut stop).expand(&nodes)
     };
     let expansion = match expansion {
         Ok(expansion) => expansion,

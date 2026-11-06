@@ -267,6 +267,9 @@ pub fn run_compose(
     } else {
         load_markdown(None, request)?
     };
+    if let Some(sink) = sink {
+        sink.composes(md.source().as_ref());
+    }
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
     perf_stage("load input", load_input_dur);
     // One context for validation, pre-flight, and compose: the document's own

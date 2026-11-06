@@ -661,12 +661,19 @@ impl<'a> TransclusionEngine<'a> {
                 // A directive in a repeated body reads the frame of its copy.
                 let lookup = crate::markdown::compose::site_scope::SiteLookup::new(&document, scopes, None);
                 crate::markdown::compose::site_scope::SiteHook::enter(&lookup, directive.span.start);
+                // A failure names the file line, not the rewritten body's.
+                let site = crate::markdown::compose::conditions::ConditionSite {
+                    span: &directive.span,
+                    body_line: directive.line,
+                    opener: &|span| crate::markdown::compose::site_scope::authored_opener(self.markdown, origin, span),
+                    current: &|| self.markdown.source_context_for_errors(),
+                };
                 for warning in
                     crate::markdown::compose::conditions::collect_condition_context_warnings(
                         expr, &lookup, "condition",
                     )
                 {
-                    report.add_warning(warning.at_line(directive.line));
+                    report.add_warning(site.locate_warning(warning));
                 }
                 // A blocking finding of an earlier directive, or of this
                 // condition's context check, stops before this condition
@@ -675,31 +682,9 @@ impl<'a> TransclusionEngine<'a> {
                     watch.check(report)?;
                 }
                 let mut missing = Vec::new();
-                // A failure names the file line, not the rewritten body's.
-                let authored = crate::markdown::compose::site_scope::authored_opener(
-                    self.markdown,
-                    origin,
-                    &directive.span,
-                );
-                let (condition_context, condition_line) = match &authored {
-                    Some((context, span)) => (context.clone(), span.line()),
-                    None => (self.markdown.source_context_for_errors(), directive.line),
-                };
-                let should_include =
-                    crate::markdown::compose::conditions::evaluate_condition_observed(
-                        expr,
-                        &lookup,
-                        condition_line,
-                        condition_context,
-                        &mut missing,
-                    )
-                    .map_err(|error| {
-                        let mut error = transclusion::TransclusionError::from(error);
-                        if let transclusion::TransclusionError::ConditionEval { authored: slot, .. } = &mut error {
-                            *slot = authored.as_ref().map(|(_, span)| span.clone());
-                        }
-                        in_scope(error.into())
-                    })?;
+                let should_include = site
+                    .evaluate(expr, &lookup, &mut missing)
+                    .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 report.add_unknown_root_candidates("condition", missing, |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,

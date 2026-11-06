@@ -9,6 +9,7 @@
 //! module only collects and serializes them. Nothing is evaluated or rendered
 //! again.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -16,9 +17,9 @@ use biscuit_terminal::output::{OutputError, OutputTarget, render_output};
 use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
 use darkmatter::markdown::compose::report_diagnostics::{
-    error_diagnostics, reference_issue_diagnostic, warning_diagnostic,
+    error_diagnostics, reference_issue_diagnostic, warning_diagnostic, with_document_fallback,
 };
-use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
+use darkmatter::markdown::compose::{ComposePerfReport, ComposeSource, ComposeWarning};
 use darkmatter::markdown::output::command::{
     DocumentEnvelope, LifecycleOutputEntry, Outcome, PerfData, PerfStage, ReferenceSummary,
 };
@@ -37,6 +38,7 @@ pub struct ReportSink {
     options: OutputOptions,
     show: bool,
     file: Option<String>,
+    source_document: Mutex<Option<PathBuf>>,
     diagnostics: Mutex<Vec<Diagnostic>>,
     document: Mutex<Option<String>>,
     summary: Mutex<Option<ReferenceSummary>>,
@@ -56,6 +58,7 @@ impl ReportSink {
             options: output.options.clone(),
             show,
             file,
+            source_document: Mutex::new(None),
             diagnostics: Mutex::new(diagnostics),
             document: Mutex::new(None),
             summary: Mutex::new(None),
@@ -64,14 +67,33 @@ impl ReportSink {
         }
     }
 
+    /// Names the document this run opened, the file of each later record that
+    /// knows no file of its own.
+    pub fn composes(&self, source: Option<&ComposeSource>) {
+        *self.source_document.lock().expect("sink lock") = source.and_then(ComposeSource::document_path);
+    }
+
+    /// `diagnostics` with the fallback of [`Self::composes`] applied.
+    fn in_document(&self, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+        with_document_fallback(&mut diagnostics, self.source_document.lock().expect("sink lock").as_deref());
+        diagnostics
+    }
+
     /// Records `warnings`, as a formatted run would print them.
     pub fn warnings(&self, warnings: &[ComposeWarning]) {
-        self.diagnostics.lock().expect("sink lock").extend(warnings.iter().map(warning_diagnostic));
+        let records = self.in_document(warnings.iter().map(warning_diagnostic).collect());
+        self.diagnostics.lock().expect("sink lock").extend(records);
     }
 
     /// Records `diagnostics` the library produced for a failure.
     pub fn diagnostics(&self, diagnostics: Vec<Diagnostic>) {
         self.diagnostics.lock().expect("sink lock").extend(diagnostics);
+    }
+
+    /// Records `diagnostics` that are about the document this run opened.
+    pub fn document_diagnostics(&self, diagnostics: Vec<Diagnostic>) {
+        let records = self.in_document(diagnostics);
+        self.diagnostics.lock().expect("sink lock").extend(records);
     }
 
     /// Records the reference check's totals and the issues a formatted run
@@ -93,9 +115,10 @@ impl ReportSink {
     /// Records a failure's diagnostics, except those already recorded: a
     /// policy stop the CLI raised repeats the warnings it was given.
     pub fn failure(&self, error: &Report) {
+        let records = self.in_document(failure_diagnostics(error));
         let mut diagnostics = self.diagnostics.lock().expect("sink lock");
         let mut recorded = diagnostics.clone();
-        let fresh: Vec<Diagnostic> = failure_diagnostics(error)
+        let fresh: Vec<Diagnostic> = records
             .into_iter()
             .filter(|diagnostic| match recorded.iter().position(|seen| seen == diagnostic) {
                 Some(index) => {

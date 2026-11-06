@@ -85,15 +85,40 @@ broken `::code` target on line 9, and `types.md` pulled it in on line 8:
 
 | Field | Meaning |
 | --- | --- |
-| `source.line`, `source.column` | The authored position. Both are 1-based and count the complete file, frontmatter included. For a reference, the column counts characters rather than bytes, and CRLF line endings do not change either number. `null` when the document has no authored positions (built in memory or fetched from a URL), and never a placeholder. |
+| `source.line`, `source.column` | The authored position. Both are 1-based and count the complete file, frontmatter included. For a reference, the column counts characters rather than bytes, and CRLF line endings do not change either number. `null` when no position is proven: the document has no authored positions (built in memory or fetched from a URL), or the producer knows only the file. Never a placeholder. |
 | `source.inserted` | `true` when an expression, a shell step, or a `replace:` value wrote the reference. It has no authored text of its own, so `line` and `column` name the construct that wrote it: the `{{ … }}`, the `$( … )`, or the replaced key. |
 | `source.section` | The composed anchor slug of the innermost heading at or before the problem. `# Intro {{ title }}` with `title: Root` gives `intro-root`, the anchor that exists in the composed document. |
 | `reason`, `construct`, `reference`, `failure` | Reference problems only: the report's phrase, the construct, the reference as written, and the [failure class](./file-reference-failures.md). |
 | `included_via` | Reference problems only: the directives that pulled the document in, outermost first, each with its `file` and authored `line`. Empty for the named document. |
 
-`source` is `null` when the problem has no known place, as with a shell failure or a
-transclusion cycle. Schema problems report a [location](../topics/schemas/definition.md#problem-locations)
-when their producer has one.
+When a problem's position cannot be proven, `source` still names the file, with a
+`null` line and column. A line counted in text a stage rewrote is never published as
+authored, so a `::shell` directive or a `::shell-block` command reports its file alone,
+and its message may name a different line than the file has:
+
+```json
+{
+  "code": "dm.shell.failure",
+  "message": "Approval required for 'echo hi' at line 8",
+  "source": { "file": "/work/repo/notes.md", "line": null, "column": null, "inserted": false }
+}
+```
+
+What each family reports:
+
+| Problem | `source` |
+| --- | --- |
+| A schema problem | the file, at its [location](../topics/schemas/definition.md#problem-locations) when it has one; a schema that could not be prepared has the file alone |
+| A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
+| A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
+| A `::file` directive that does not parse, or a malformed `::block` | the file |
+| A transclusion cycle | the document holding the directive that closes the cycle, which may be a child rather than the named document |
+| An undeclared property | the file and the line of its first read; the column is `null` |
+| Another warning | the document that reported it |
+| Any other failure that holds no file, such as a caller's `--set` value that could not bind | the document named on the command line |
+
+`source` is `null` only when no file is known: input read from stdin or built in
+memory, or a lifecycle `error:` step, whose message is the author's own text.
 
 Reference graphs keep a second set of numbers. `ReferenceOrigin::line` and `span`
 count lines in the prepared body, after frontmatter removal and expansion, because

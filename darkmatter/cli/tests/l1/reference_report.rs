@@ -211,3 +211,46 @@ fn compose_warning_row_names_the_inserting_construct() {
         .stderr(predicate::str::contains("Checked").not())
         .stderr(predicate::str::contains("(line 4, column 5, inside inserted text)"));
 }
+
+#[test]
+fn multiline_html_and_css_targets_report_invalid_and_exit_one() {
+    let fixture = fixture("reference_report_multiline_html");
+    let input = fixture.write_file(
+        "cwd/doc.md",
+        "<img\n src=\"./missing.png\">\n\n<style>\n@import \"./missing.css\";\n@font-face {\n  src: url(\"./missing.woff\");\n}\n</style>\n\n<video\n src=\"./missing.mp4\"></video>\n",
+    );
+
+    let refs = fixture.command().args(["validate", "refs"]).arg(&input).args(["--output", "json"]).output().unwrap();
+    let compose = fixture.command().arg("compose").arg(&input).output().unwrap();
+    let graph = fixture.command().arg("graph").arg(&input).arg("--validate").output().unwrap();
+
+    assert_eq!(refs.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&refs.stdout).unwrap();
+    let found: Vec<_> = report["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|issue| {
+            (
+                issue["reference"].as_str().unwrap().to_string(),
+                issue["line"].as_u64().unwrap(),
+                issue["column"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("./missing.png".to_string(), 1, 1),
+            ("./missing.css".to_string(), 5, 1),
+            ("./missing.woff".to_string(), 7, 8),
+            ("./missing.mp4".to_string(), 11, 1),
+        ]
+    );
+
+    assert_eq!(compose.status.code(), Some(1), "{}", String::from_utf8_lossy(&compose.stderr));
+    assert_eq!(graph.status.code(), Some(1));
+    let graph_out = stdout_of(&graph);
+    assert!(graph_out.contains("./missing.mp4"), "{graph_out}");
+    assert!(graph_out.contains("./missing.css"), "{graph_out}");
+}

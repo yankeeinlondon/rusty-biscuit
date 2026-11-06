@@ -139,7 +139,10 @@ fn compose_json_output_carries_the_warning_as_a_diagnostic_and_not_on_stderr() {
     assert_eq!(rows.len(), 1, "{report:#}");
     assert_eq!(rows[0]["severity"], "warning", "{report:#}");
     assert!(rows[0]["message"].as_str().unwrap().contains("memory.yaml"), "{report:#}");
-    assert_eq!(rows[0]["source"], Value::Null, "unsupported keys have no position to report: {report:#}");
+    // Unsupported keys have no position, and the file is still known.
+    assert!(rows[0]["source"]["file"].as_str().unwrap().ends_with("memory.yaml"), "{report:#}");
+    assert_eq!(rows[0]["source"]["line"], Value::Null, "{report:#}");
+    assert_eq!(rows[0]["source"]["column"], Value::Null, "{report:#}");
     assert!(report["document"].as_str().unwrap().contains("Prompt body"), "{report:#}");
 }
 

@@ -181,6 +181,7 @@ fn condition_parse_lists_operators_and_helpers() {
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
+        authored: None,
     };
     let out = render(&err);
     assert_contains_all(

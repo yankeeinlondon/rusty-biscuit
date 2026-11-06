@@ -72,6 +72,9 @@ impl Render<'_> {
         // Page-relative assets (images, `style:` files) resolve beside the file
         // the argument opened, not beside its spelling (`@doc.md` has no parent).
         let input = resolved.as_ref();
+        if let Some(sink) = sink {
+            sink.composes(md.source().as_ref());
+        }
 
         // Before cleanup: a rewritten body has no authored position to report.
         let link_warnings = md.link_title_warnings();
@@ -97,7 +100,7 @@ impl Render<'_> {
         }
 
         if let Some(sink) = sink {
-            sink.diagnostics(crate::render::style_diagnostics(&md, self.strict_style)?);
+            sink.document_diagnostics(crate::render::style_diagnostics(&md, self.strict_style)?);
             sink.document(document_markdown(&md, true, self.output.options.width));
             return Ok(());
         }

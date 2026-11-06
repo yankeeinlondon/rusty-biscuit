@@ -76,55 +76,21 @@ pub(crate) fn find_target_range(
     }
     let outer_text = &content[span.clone()];
 
-    // Try attribute-aware search for HTML syntax first
-    if let Some(attr_name) = get_attribute_name_for_syntax(&record.origin.syntax) {
-        // Try searching for attr="target" or attr = "target" (with optional whitespace)
-        let patterns = [
-            format!(r#"{}="{}""#, attr_name, raw_target),
-            format!("{}='{}'", attr_name, raw_target),
-        ];
-        for pattern in &patterns {
-            if let Some(idx) = outer_text.find(pattern) {
-                let mut actual_idx = idx + attr_name.len() + 1; // skip past attr_name=
-                // Skip optional whitespace after =
-                while actual_idx < outer_text.len() && outer_text[actual_idx..].starts_with(' ') {
-                    actual_idx += 1;
-                }
-                let start = span.start + actual_idx + 1; // skip past quote
-                let end = start + raw_target.len();
+    // An HTML target lives only in the value of its own attribute: `data-src`
+    // can hold the same text, and a rewrite there would leave `src` unchanged.
+    if let Some(attr_name) = get_attribute_name_for_syntax(&record.origin.syntax)
+        && let Some(value) = crate::markdown::reference::html::attribute_value_range(outer_text, attr_name)
+    {
+        let value_text = &outer_text[value.clone()];
+        let encoded = html_escape::encode_quoted_attribute(raw_target);
+        for candidate in [raw_target, encoded.as_ref()] {
+            if let Some(idx) = value_text.find(candidate) {
+                let start = span.start + value.start + idx;
                 trace!(
-                    "find_target_range: attribute-aware match for '{}' in {:?} at {}",
+                    "find_target_range: attribute match for '{}' in {:?} at {}",
                     raw_target, record.origin.syntax, start
                 );
-                return Some((start, end));
-            }
-        }
-
-        // Try HTML-encoded form (for entities like &amp;)
-        let encoded = html_escape::encode_quoted_attribute(raw_target);
-        if encoded != raw_target {
-            let patterns = [
-                format!(r#"{}="{}""#, attr_name, encoded),
-                format!("{}='{}'", attr_name, encoded),
-            ];
-            for pattern in &patterns {
-                if let Some(idx) = outer_text.find(pattern.as_str()) {
-                    let actual_idx = idx + attr_name.len() + 1;
-                    // Skip optional whitespace after =
-                    let mut quote_start = actual_idx;
-                    while quote_start < outer_text.len()
-                        && outer_text[quote_start..].starts_with(' ')
-                    {
-                        quote_start += 1;
-                    }
-                    let start = span.start + quote_start + 1; // skip past quote
-                    let end = start + encoded.len();
-                    trace!(
-                        "find_target_range: HTML-encoded match for '{}' in {:?} at {}",
-                        raw_target, record.origin.syntax, start
-                    );
-                    return Some((start, end));
-                }
+                return Some((start, start + candidate.len()));
             }
         }
     }

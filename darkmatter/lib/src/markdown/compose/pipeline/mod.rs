@@ -220,6 +220,7 @@ impl Markdown {
         // recurs once per nested composition, and the depth limit's test runs
         // at the edge of the 2 MiB test stack.
         let mut report = new_document_report();
+        report.document = self.source().as_ref().and_then(ComposeSource::document_path).or_else(|| options.source.document_path());
         let result = (|| {
             // Passive and first, so a later failure keeps these warnings and
             // a blocking one stops the document before anything runs.
@@ -828,7 +829,12 @@ pub(crate) fn stop_if_blocked_with(
             pending
         })
         .unwrap_or_default();
-    policy_stop(policy, report.warnings.iter().chain(stage_warnings).chain(&pending))
+    let attributed = stage_warnings.iter().chain(&pending).cloned().map(|mut warning| {
+        warning.attribute_to(report.document.as_deref());
+        warning
+    });
+    let attributed: Vec<ComposeWarning> = attributed.collect();
+    policy_stop(policy, report.warnings.iter().chain(&attributed))
 }
 
 /// [`stop_if_blocked`] over warnings a pass found ahead of any composition

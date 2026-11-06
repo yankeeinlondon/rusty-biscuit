@@ -2433,6 +2433,16 @@ impl ComposeSource {
         Self::File(path.as_ref().to_path_buf())
     }
 
+    /// The file or URL a diagnostic names for this source; `None` for input
+    /// with no named origin.
+    pub fn document_path(&self) -> Option<PathBuf> {
+        match self {
+            Self::File(path) => Some(path.clone()),
+            Self::Url(url) => Some(url.as_str().into()),
+            Self::Unknown => None,
+        }
+    }
+
     /// Returns a human-readable form of the source.
     ///
     /// - `File` → the path's lossy string form.

@@ -125,20 +125,24 @@ fn a_prologue_problem_is_reported_at_its_value() {
     assert_eq!(found["construct"], "prologue:");
 }
 
-/// Each family's failure: a position only where its producer knows one, and
-/// none of the reference fields.
+/// Each family's failure: a position only where its producer proves one, its
+/// file when it knows only that, and none of the reference fields.
 #[test]
 fn other_families_report_their_positions_and_no_reference_details() {
     let fixture = CliProcessFixture::named("report_families");
     fixture.write_file("cwd/cycle.md", "::file ./cycle.md\n");
     fixture.write_file("cwd/x.md", "# X\n");
-    for (name, content, code, position) in [
-        ("schema.md", "---\ncount: hello\n$schema:\n  count: number(required)\n---\nbody\n", "dm.schema.type_mismatch", Some((2, 8))),
-        ("expression.md", "# Doc\n\n{{ 1 / 0 }}\n", "dm.expression.evaluation_failure", Some((3, 1))),
-        ("condition.md", "---\nmulti: \"a\\n\\nb\"\n---\n{{ multi }}\n\n::file ./x.md when=\"current.nosuch\"\n", "dm.expression.evaluation_failure", Some((6, 1))),
-        ("transclusion.md", "::file ./cycle.md\n", "dm.transclusion.failure", None),
-        ("shell.md", "::shell not-a-real-command --flag\n", "dm.shell.failure", None),
-        ("lifecycle.md", "---\ncomposed:\n  - error: boom\n---\nbody\n", "dm.lifecycle.failure", None),
+    for (name, content, code, file, line, column) in [
+        ("schema.md", "---\ncount: hello\n$schema:\n  count: number(required)\n---\nbody\n", "dm.schema.type_mismatch", Some("schema.md"), Some(2), Some(8)),
+        ("prepare.md", "---\n$schema:\n  count: definitely_unknown_type\n---\nbody\n", "dm.schema.prepare", Some("prepare.md"), None, None),
+        ("expression.md", "# Doc\n\n{{ 1 / 0 }}\n", "dm.expression.evaluation_failure", Some("expression.md"), Some(3), Some(1)),
+        ("condition.md", "---\nmulti: \"a\\n\\nb\"\n---\n{{ multi }}\n\n::file ./x.md when=\"current.nosuch\"\n", "dm.expression.evaluation_failure", Some("condition.md"), Some(6), Some(1)),
+        ("block.md", "---\nmulti: \"a\\n\\nb\"\n---\n{{ multi }}\n\n::block when=\"current.nosuch\"\nhi\n::end-block\n", "dm.expression.evaluation_failure", Some("block.md"), Some(6), Some(1)),
+        ("transclusion.md", "::file ./cycle.md\n", "dm.transclusion.failure", Some("cycle.md"), None, None),
+        ("shell.md", "::shell not-a-real-command --flag\n", "dm.shell.failure", Some("shell.md"), None, None),
+        ("frontmatter_shell.md", "---\nx: \"$(echo hello)\"\n---\nbody\n", "dm.shell.failure", Some("frontmatter_shell.md"), Some(2), None),
+        // Names nothing a document wrote: a lifecycle `error:` is a message.
+        ("lifecycle.md", "---\ncomposed:\n  - error: boom\n---\nbody\n", "dm.lifecycle.failure", None, None, None),
     ] {
         let document = fixture.write_file(format!("cwd/{name}"), content);
 
@@ -150,10 +154,11 @@ fn other_families_report_their_positions_and_no_reference_details() {
             panic!("{name}: one record: {report:#}");
         };
         assert_eq!(diagnostic["code"], code, "{name}: {diagnostic:#}");
-        match position {
-            Some((line, column)) => {
-                assert_eq!(diagnostic["source"]["line"], line, "{name}: {diagnostic:#}");
-                assert_eq!(diagnostic["source"]["column"], column, "{name}: {diagnostic:#}");
+        match file {
+            Some(file) => {
+                assert_eq!(file_of(&diagnostic["source"]["file"]).file_name().unwrap(), file, "{name}: {diagnostic:#}");
+                assert_eq!(diagnostic["source"]["line"], json!(line), "{name}: {diagnostic:#}");
+                assert_eq!(diagnostic["source"]["column"], json!(column), "{name}: {diagnostic:#}");
                 assert_eq!(diagnostic["source"]["inserted"], false, "{name}");
             }
             None => assert_eq!(diagnostic["source"], Value::Null, "{name}: {diagnostic:#}"),
@@ -161,6 +166,67 @@ fn other_families_report_their_positions_and_no_reference_details() {
         for key in ["reason", "construct", "reference", "failure", "included_via"] {
             assert!(diagnostic.get(key).is_none(), "{name}: {key}: {diagnostic:#}");
         }
+    }
+}
+
+/// Warnings and a failure holding no file of its own reach the envelope with
+/// the document's name, and a policy stop reports the same records.
+#[test]
+fn warnings_and_a_typeless_failure_name_the_document() {
+    let fixture = CliProcessFixture::named("report_document_fallback");
+    let content = "---\na: 1\n---\n\n{{ nosuch }}\n\n::block when=\"ctx.toady.x == 1\"\nhi\n::end-block\n";
+    let document = fixture.write_file("cwd/warns.md", content);
+
+    let (status, warned) = report(&fixture, &document);
+
+    assert_eq!(status, Some(0), "{warned:#}");
+    let sources = |report: &Value| -> Vec<(u64, Option<u64>)> {
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|diagnostic| {
+                assert_eq!(file_of(&diagnostic["source"]["file"]).file_name().unwrap(), "warns.md", "{diagnostic:#}");
+                (diagnostic["source"]["line"].as_u64().unwrap(), diagnostic["source"]["column"].as_u64())
+            })
+            .collect()
+    };
+    assert_eq!(sources(&warned), [(7, Some(1)), (5, None)], "{warned:#}");
+
+    let output = fixture
+        .command()
+        .args(["compose", "--output", "json", "--deny", "all"])
+        .arg(&document)
+        .output()
+        .unwrap();
+    let blocked: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1), "{blocked:#}");
+    assert_eq!(sources(&blocked), [(7, Some(1))], "the stop is before the undeclared read is judged: {blocked:#}");
+
+    // The typed error names only its target, not the document that wrote it.
+    fixture.write_file("cwd/picture.png", "x");
+    let (status, failed) = report(&fixture, &fixture.write_file("cwd/includes.md", "::file ./picture.png\n"));
+    assert_eq!(status, Some(1), "{failed:#}");
+    let [record] = failed["diagnostics"].as_array().unwrap().as_slice() else {
+        panic!("one record: {failed:#}");
+    };
+    assert_eq!(record["code"], "dm.transclusion.failure", "{record:#}");
+    assert_eq!(file_of(&record["source"]["file"]).file_name().unwrap(), "includes.md", "{record:#}");
+    assert_eq!(record["source"]["line"], Value::Null, "{record:#}");
+}
+
+/// Input with no file reports positions with a null file, and otherwise a null
+/// source, never a placeholder name.
+#[test]
+fn stdin_names_no_file() {
+    let fixture = CliProcessFixture::named("report_stdin");
+    for (content, expected) in [
+        ("---\ncount: hello\n$schema:\n  count: number(required)\n---\nbody\n", json!({ "file": null, "line": 2, "column": 8, "inserted": false })),
+        ("---\n$schema:\n  count: definitely_unknown_type\n---\nbody\n", Value::Null),
+    ] {
+        let output = fixture.command().args(["compose", "--output", "json", "-"]).write_stdin(content).output().unwrap();
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["diagnostics"][0]["source"], expected, "{value:#}");
     }
 }
 

@@ -74,10 +74,11 @@ pub(crate) fn frontmatter_key_line(ctx: &SourceContext, key: &str) -> Option<usi
     let prefix_lines = ctx.content[..range.start].lines().count();
 
     for (idx, line) in fm_text.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(&format!("{key}:"))
-            || trimmed.starts_with(&format!("'{key}':"))
-            || trimmed.starts_with(&format!("\"{key}\":"))
+        // Unindented only: an indented match is a nested key or block-scalar
+        // text of the same name, never this top-level key.
+        if line.starts_with(&format!("{key}:"))
+            || line.starts_with(&format!("'{key}':"))
+            || line.starts_with(&format!("\"{key}\":"))
         {
             return Some(prefix_lines + idx + 1);
         }
@@ -793,6 +794,28 @@ impl ShellExpansionError {
             | Self::ExpressionEvaluation { .. }
             | Self::PolicyIo { .. }
             | Self::Preflight(_) => None,
+        }
+    }
+
+    /// The document context this error was raised against, when it has one.
+    pub fn context(&self) -> Option<&SourceContext> {
+        match self {
+            Self::ParseDirective { ctx, .. }
+            | Self::ExpressionEvaluation { ctx, .. }
+            | Self::CommandNotFound { ctx, .. }
+            | Self::Blacklisted { ctx, .. }
+            | Self::ApprovalRequired { ctx, .. }
+            | Self::Denied { ctx, .. }
+            | Self::NotPreApproved { ctx, .. }
+            | Self::MissingValue { ctx, .. }
+            | Self::TemplateGrammar { ctx, .. }
+            | Self::TemplateValueRejected { ctx, .. }
+            | Self::TemplateTarget { ctx, .. }
+            | Self::DynamicCommandShape { ctx, .. }
+            | Self::UnevaluatedDependencyShape { ctx, .. }
+            | Self::Timeout { ctx, .. }
+            | Self::ExecutionFailed { ctx, .. } => Some(ctx),
+            Self::PolicyIo { .. } | Self::Preflight(_) => None,
         }
     }
 
@@ -2493,6 +2516,13 @@ mod tests {
         assert_eq!(frontmatter_key_line(&ctx, "quoted"), Some(3));
         assert_eq!(frontmatter_key_line(&ctx, "double"), Some(4));
         assert_eq!(frontmatter_key_line(&ctx, "missing"), None);
+    }
+
+    #[test]
+    fn frontmatter_key_line_skips_a_nested_key_of_the_same_name() {
+        let content = "---\na:\n  x: 1\nb: |\n  x: 2\nx: 3\n---\n";
+        let ctx = SourceContext::new(std::path::PathBuf::from("/test.md"), std::path::PathBuf::from("test.md"), content);
+        assert_eq!(frontmatter_key_line(&ctx, "x"), Some(6));
     }
 
     #[test]

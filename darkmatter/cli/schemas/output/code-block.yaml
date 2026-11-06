@@ -15,7 +15,7 @@ types:
         code: string(required) -> stable code, e.g. dm.output.fractional_width
         severity: enum(info,warning,error;required)
         message: string(required)
-        source: source -> null when no position is known
+        source: source -> null when no file is known
         expected_type: string
         actual_type: string
         span: span

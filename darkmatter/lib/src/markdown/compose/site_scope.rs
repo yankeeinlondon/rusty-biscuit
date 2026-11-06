@@ -181,6 +181,10 @@ pub(crate) fn scope_failure(
     }
 }
 
+/// [`authored_opener`] of a stage's body, for a traversal that holds no document.
+pub(crate) type AuthoredOpener<'a> =
+    &'a dyn Fn(&Range<usize>) -> Option<(biscuit_terminal::errors::SourceContext, AuthoredSpan)>;
+
 /// The loaded file of `markdown` and the opener of the directive occupying
 /// `span` of the current body in it, past the directive's indentation. No
 /// stage writes an opener, so only a lost map leaves it unlocated.

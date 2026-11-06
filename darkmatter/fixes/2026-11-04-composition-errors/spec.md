@@ -52,6 +52,7 @@ references:
         output and for very large widths; it lists the escape leaks, link and
         image fallbacks, and width defects this change fixes.
 implemented_by: "claude/opus"
+review_iterations: 1
 ---
 
 # Composition Errors: an Actionable Report, and One `--output` for Every `md` Command

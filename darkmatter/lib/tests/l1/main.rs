@@ -112,6 +112,7 @@ mod compose_call_precheck;
 mod shared_diagnostics;
 #[cfg(feature = "effects-instrumentation")]
 mod report_diagnostics;
+mod diagnostic_source_provenance;
 mod diagnostic_projection;
 mod runtime_blocking;
 mod frontmatter_coercion_engine;
@@ -165,6 +166,7 @@ mod prose_wrap_parity;
 mod raw_root_union_assertions;
 mod raw_schema_conversion;
 mod recent_commits_shared_type;
+mod reference_html_discovery;
 mod reference_integration;
 mod link_title_migration;
 mod link_title_warnings;

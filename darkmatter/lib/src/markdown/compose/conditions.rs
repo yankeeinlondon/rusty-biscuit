@@ -12,6 +12,8 @@
 //! topic for the full grammar.
 
 use super::expression::absence::MissingRootObserver;
+use super::site_scope::AuthoredOpener;
+use crate::markdown::types::AuthoredSpan;
 use super::expression::{
     CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, fm_namespace,
     evaluate,
@@ -42,6 +44,9 @@ pub enum ConditionError {
         /// records a single-point span at that offset. If no position can be
         /// recovered, the span falls back to the full expression.
         span: Range<usize>,
+        /// The directive's opener when `ctx` is its loaded file, which makes
+        /// `line` an authored line; `None` when `ctx` is the current body.
+        authored: Option<AuthoredSpan>,
     },
     /// Failed to evaluate a condition expression.
     #[error("Failed to evaluate condition '{expr}' at line {line}: {cause}")]
@@ -53,7 +58,53 @@ pub enum ConditionError {
         /// runtime context capture from an authoring mistake.
         #[source]
         cause: Box<ExpressionError>,
+        /// As for [`Self::Parse`].
+        authored: Option<AuthoredSpan>,
     },
+}
+
+/// Where one `when=` condition sits, for its failure and its warnings: the
+/// loaded file and its authored opener when the body's map proves them,
+/// otherwise the current body and its line. Resolved only for a finding: a
+/// repeated body evaluates its gates once per copy, and resolving one reads
+/// the filesystem.
+pub(crate) struct ConditionSite<'a> {
+    /// The directive in the current body.
+    pub(crate) span: &'a Range<usize>,
+    /// Its one-based line there.
+    pub(crate) body_line: usize,
+    /// [`authored_opener`](super::site_scope::authored_opener) of the body.
+    pub(crate) opener: AuthoredOpener<'a>,
+    /// The current body's error context.
+    pub(crate) current: &'a dyn Fn() -> SourceContext,
+}
+
+impl ConditionSite<'_> {
+    fn located(&self) -> (SourceContext, usize, Option<AuthoredSpan>) {
+        match (self.opener)(self.span) {
+            Some((context, span)) => (context, span.line(), Some(span)),
+            None => ((self.current)(), self.body_line, None),
+        }
+    }
+
+    /// `warning`, a finding of this condition, at this site.
+    pub(crate) fn locate_warning(&self, warning: ComposeWarning) -> ComposeWarning {
+        let warning = warning.at_line(self.body_line);
+        match (self.opener)(self.span) {
+            Some((context, span)) => warning.at_authored(Some(context.display), &span),
+            None => warning,
+        }
+    }
+
+    /// [`evaluate_condition_observed`] at this site.
+    pub(crate) fn evaluate<L: EvaluationLookup, O: MissingRootObserver>(
+        &self,
+        expr: &str,
+        state: &L,
+        observer: &mut O,
+    ) -> Result<bool, ConditionError> {
+        evaluate_at(expr, state, observer, || self.located())
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for ConditionError {
@@ -75,6 +126,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
                 line,
                 message,
                 span,
+                ..
             } => {
                 let body = vec![
                     Prose::new(format!(
@@ -101,6 +153,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
                 expr,
                 line,
                 cause,
+                ..
             } => {
                 let body = vec![
                     Prose::new(format!(
@@ -156,21 +209,45 @@ pub(crate) fn evaluate_condition_observed<L: EvaluationLookup, O: MissingRootObs
     observer: &mut O,
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
+    evaluate_at(expr, state, observer, || (ctx, line, None))
+}
 
-    let parsed = parse(expr).map_err(|e| ConditionError::Parse {
-        ctx: Box::new(ctx.clone()),
-        expr: expr.to_string(),
-        line,
-        message: e.message.clone(),
-        span: parse_error_span(expr, e.position),
-    })?;
+/// [`evaluate_condition_observed`], asking `site` for the context, line, and
+/// authored opener a failure names only if it fails.
+fn evaluate_at<L: EvaluationLookup, O: MissingRootObserver>(
+    expr: &str,
+    state: &L,
+    observer: &mut O,
+    site: impl FnOnce() -> (SourceContext, usize, Option<AuthoredSpan>),
+) -> Result<bool, ConditionError> {
+    let parsed = match parse(expr) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            let (ctx, line, authored) = site();
+            return Err(ConditionError::Parse {
+                ctx: Box::new(ctx),
+                expr: expr.to_string(),
+                line,
+                message: error.message.clone(),
+                span: parse_error_span(expr, error.position),
+                authored,
+            });
+        }
+    };
 
-    let value = evaluate_observed(&parsed, state, observer).map_err(|error| ConditionError::Eval {
-        ctx: Box::new(ctx),
-        expr: expr.to_string(),
-        line,
-        cause: Box::new(error),
-    })?;
+    let value = match evaluate_observed(&parsed, state, observer) {
+        Ok(value) => value,
+        Err(error) => {
+            let (ctx, line, authored) = site();
+            return Err(ConditionError::Eval {
+                ctx: Box::new(ctx),
+                expr: expr.to_string(),
+                line,
+                cause: Box::new(error),
+                authored,
+            });
+        }
+    };
 
     let result = is_truthy(&value);
     debug!(expr = %expr, result, "conditions: evaluated");
@@ -297,6 +374,7 @@ pub fn evaluate_condition_against(
         line: 1,
         message: e.message.clone(),
         span: parse_error_span(expr, e.position),
+        authored: None,
     })?;
 
     let lookup = ShortcutLookup::new(data, context);
@@ -305,6 +383,7 @@ pub fn evaluate_condition_against(
         expr: expr.to_string(),
         line: 1,
         cause: Box::new(error),
+        authored: None,
     })?;
 
     let result = is_truthy(&value);
@@ -1291,6 +1370,7 @@ mod tests {
                 line: 1,
                 message: "Unexpected token".to_string(),
                 span: 0..1,
+                authored: None,
             };
             let terminal = Terminal::default();
             let block = err.status_block(&terminal);

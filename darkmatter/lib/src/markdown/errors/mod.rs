@@ -349,6 +349,7 @@ mod tests {
             line: 7,
             message: "unexpected token".into(),
             span: 3..4,
+            authored: None,
         };
         let out = render(&err);
         assert!(out.contains("ConditionError"));

@@ -143,8 +143,9 @@ pub struct DiagnosticSource {
     /// The authored file, or a remote document's URL; `None` for input with no
     /// named origin.
     pub file: Option<PathBuf>,
-    /// One-based authored line; `None` when `file` has no position to point
-    /// at, such as a document built in memory. Never a placeholder number.
+    /// One-based authored line; `None` when no position in `file` is proven,
+    /// such as a document built in memory or a line counted in rewritten text.
+    /// Never a placeholder number.
     pub line: Option<usize>,
     /// One-based authored column, in characters; `None` as for `line`.
     pub column: Option<usize>,

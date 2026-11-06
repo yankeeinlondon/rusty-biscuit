@@ -389,8 +389,11 @@ pub enum TransclusionError {
     ConditionParse {
         ctx: Box<SourceContext>,
         expr: String,
+        /// The directive's line in `ctx`.
         line: usize,
         message: String,
+        /// As for [`Self::ConditionEval`].
+        authored: Option<crate::markdown::types::AuthoredSpan>,
     },
 
     #[error("Heading re-leveling failed: {0}")]
@@ -652,6 +655,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 expr,
                 line,
                 message,
+                ..
             } => {
                 let body = vec![
                     Prose::new(format!(

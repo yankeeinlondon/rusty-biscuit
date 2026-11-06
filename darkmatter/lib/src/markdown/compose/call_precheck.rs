@@ -643,6 +643,7 @@ fn condition_rejection(markdown: &Markdown, when: &str, line: usize, check: Call
         expr: when.to_string(),
         line: markdown.frontmatter_line_count() + line,
         cause: Box::new(ExpressionError::CallCheck(Box::new(check))),
+        authored: None,
     }
 }
 

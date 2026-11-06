@@ -158,7 +158,7 @@ record this output prints.
 | `code` | a stable `dm.<family>.<kind>` code, shared with DMLS; see [Codes](#codes) |
 | `severity` | `"error"`, `"warning"`, or `"info"` |
 | `message` | the problem in words |
-| `source` | where the problem is, as below, or `null` when no position is known |
+| `source` | where the problem is, as below, or `null` when no file is known |
 | `expected_type` | for a call argument, the parameter's declared type; otherwise `null` |
 | `actual_type` | for a call argument, the argument's type; otherwise `null` |
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
@@ -175,13 +175,15 @@ result, so transclusion cannot shift it:
 | `source` field | Value |
 |---|---|
 | `file` | the resolved path of the file that holds the problem; `null` for stdin |
-| `line` | the authored line, one-based; `null` for a document built in memory |
-| `column` | the authored column, one-based and counting characters; `null` for a document built in memory |
+| `line` | the authored line, one-based; `null` when no authored position is proven, as for a document built in memory or a line counted in rewritten text |
+| `column` | the authored column, one-based and counting characters; `null` as for `line`, and for a problem whose producer knows only the line |
 | `section` | the composed anchor slug of the innermost heading at or before the problem; absent above the first heading, and on diagnostics that do not compute it |
 | `inserted` | `true` when an expression, a shell step, or a `replace:` value created the reference, so `line` and `column` point at the construct that created it |
 
 A problem inside transcluded content points at the transcluded file, not at the
-`::file` directive that included it.
+`::file` directive that included it. A problem whose producer knows no file falls back
+to the document the command named, with a `null` line and column. See
+[what each family reports](../errors/composition-problems.md#how-a-problem-is-located).
 
 ### Reference details
 
@@ -363,15 +365,17 @@ known position there, which is a trigger file that is not valid YAML:
   "expected_type": null, "actual_type": null }
 ```
 
-Every other cause has `source: null`, since no position is invented: an
-envelope with unsupported keys, a payload or import that fails to load (a
-position inside that file is never placed on the trigger; the message names
-the file instead), and any embedded trigger, which names no local file:
+Every other cause names the trigger file with a `null` line and column, since
+no position is invented: an envelope with unsupported keys, or a payload or
+import that fails to load (a position inside that file is never placed on the
+trigger; the message names the file instead). An embedded trigger names no local
+file, so its `source` is `null`:
 
 ```json
 { "code": "dm.schema.invalid_trigger", "severity": "warning",
   "message": "ignoring invalid schema trigger /repo/schemas/memory.yaml: invalid schema-trigger: …",
-  "source": null, "expected_type": null, "actual_type": null }
+  "source": { "file": "/repo/schemas/memory.yaml", "line": null, "column": null, "inserted": false },
+  "expected_type": null, "actual_type": null }
 ```
 
 `md schema validate --output json`, which reports several files, puts a

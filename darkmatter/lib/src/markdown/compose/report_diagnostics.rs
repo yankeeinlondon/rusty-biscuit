@@ -6,15 +6,23 @@
 //! schema trigger) is reported as that record; any other warning, and every
 //! failure, is classified by its
 //! typed error into a code of the same `dm.<family>.<kind>` taxonomy DMLS
-//! reports, with `source` and the types left `None` where the error holds no
-//! authored position. A reference issue always has a `source`: its file, and
-//! its authored position when the document has one. A failure inside a
-//! repeated `::map` / `::filter` copy also carries the typed `span` and
+//! reports, with the types left `None`.
+//!
+//! `source` says as much as the value proves: a file and an authored position,
+//! a file alone with a null line and column when only the file is known (a
+//! line counted in a body a stage rewrote is not authored, so it is never
+//! published), and `None` for a value naming no file.
+//! [`with_document_fallback`] gives a caller that knows the composed document
+//! a file for those. A reference issue always has a `source`. A failure inside
+//! a repeated `::map` / `::filter` copy also carries the typed `span` and
 //! `iteration_path` its error holds, so every host reports the same
 //! provenance. Classification reads only the error and warning values: it
 //! evaluates nothing and reads no file.
 
 use std::error::Error;
+use std::path::{Path, PathBuf};
+
+use biscuit_terminal::errors::SourceContext;
 
 use super::ShellExpansionError;
 use super::TransclusionError;
@@ -23,7 +31,8 @@ use super::context::report::ComposeWarning;
 use super::expression::iteration::IterationPath;
 use super::expression::{Diagnostic, DiagnosticSource, ExpressionError, ReferenceDetails, Severity};
 use super::page_blocks::PageBlockError;
-use super::ComposeSource;
+use super::shell_blocks::ShellBlockError;
+use super::shell_expansion::ShellCommandOrigin;
 use crate::markdown::errors::resolution_failure_name;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::validate::{ReferenceIssue, ReferenceIssueCode, ReferenceSeverity};
@@ -53,17 +62,38 @@ pub const COMPOSE_FAILURE_CODE: &str = "dm.compose.failure";
 pub const UNCODED_WARNING_CODE: &str = "dm.compose.warning";
 
 /// `warning` as a shared record: its own record when it carries one,
-/// otherwise its code (or [`UNCODED_WARNING_CODE`]) and message, with no
-/// source or types.
+/// otherwise its code (or [`UNCODED_WARNING_CODE`]) and message, with its
+/// document and proven authored position as `source`.
 pub fn warning_diagnostic(warning: &ComposeWarning) -> Diagnostic {
     if let Some(diagnostic) = warning.diagnostic.as_deref() {
         return diagnostic.clone();
     }
-    unlocated(
+    let mut record = unlocated(
         warning.code.as_deref().unwrap_or(UNCODED_WARNING_CODE),
         Severity::Warning,
         warning.message.clone(),
-    )
+    );
+    let file = warning.document.as_deref().and_then(named);
+    record.span = warning.location.as_ref().and_then(|location| location.span.clone());
+    record.source = file.map(|file| DiagnosticSource {
+        line: warning.location.as_ref().map(|location| location.line),
+        column: warning.location.as_ref().and_then(|location| location.column),
+        ..DiagnosticSource::file_only(Some(file))
+    });
+    record
+}
+
+/// Names `document`, the composed document, as the file of each of
+/// `diagnostics` that names none. For a host that knows the document it asked
+/// for: a failure's typed error may hold no file of its own. `None` changes
+/// nothing, so input with no named origin keeps a null `source`.
+pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&Path>) {
+    let Some(document) = document else {
+        return;
+    };
+    for diagnostic in diagnostics.iter_mut().filter(|diagnostic| diagnostic.source.is_none()) {
+        diagnostic.source = Some(DiagnosticSource::file_only(Some(document.to_path_buf())));
+    }
 }
 
 /// A reported reference-validation `issue` as a shared record. A missing
@@ -91,11 +121,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
         severity,
         message: issue.message.clone(),
         source: Some(DiagnosticSource {
-            file: match &issue.origin.source {
-                ComposeSource::File(path) => Some(path.clone()),
-                ComposeSource::Url(url) => Some(url.as_str().into()),
-                ComposeSource::Unknown => None,
-            },
+            file: issue.origin.source.document_path(),
             line: authored.map(|location| location.line),
             column: authored.map(|location| location.column),
             section: issue.origin.section.clone(),
@@ -129,8 +155,11 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 ///   innermost typed error; a foreign error reports [`INPUT_READ_CODE`] for an
 ///   I/O error and [`COMPOSE_FAILURE_CODE`] otherwise.
 /// - Every record of a Darkmatter failure carries the iteration path of the
-///   copies it happened in, and an otherwise unlocated record their authored
-///   site (see `with_iteration_context`).
+///   copies it happened in, and a record with no authored position their
+///   authored site (see `with_iteration_context`).
+///
+/// A record's `source` comes only from `error`; see [`with_document_fallback`]
+/// for one that names no file.
 pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
     let mut current = Some(error);
     while let Some(error) = current {
@@ -189,8 +218,8 @@ fn markdown_error_diagnostics(error: &MarkdownError) -> Vec<Diagnostic> {
 /// carries: each enclosing repeated copy's items
 /// ([`IterationFailure`](super::collection_blocks::IterationFailure)),
 /// outermost first, followed by the items a collection failure itself names;
-/// and, for a record with no position of its own, the authored site of the
-/// innermost copy that proved one. A message that does not already name the
+/// and, for a record with no position of its own or only its directive's
+/// opener, the authored site of the innermost copy that proved one. A message that does not already name the
 /// path ends with `at <path>`.
 fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic]) {
     let mut path = super::expression::iteration::IterationPath::empty();
@@ -205,6 +234,8 @@ fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic])
         }
         current = cause.source();
     }
+    // A repeated gate's site names its expression, narrower than the opener.
+    let gate_failure = matches!(innermost(error), MarkdownError::PageBlock(_));
     match innermost(error) {
         MarkdownError::Collection(inner) => path = path.joined(&inner.iteration_path()),
         MarkdownError::Interpolation { cause, .. } => path = path.joined(&cause.callback_path()),
@@ -212,11 +243,12 @@ fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic])
     }
     let rendered = path.to_string();
     for diagnostic in diagnostics {
-        if diagnostic.source.is_none()
+        let positioned = diagnostic.source.as_ref().is_some_and(|source| source.line.is_some());
+        if (!positioned || gate_failure)
             && let Some((source, span)) = location.clone()
         {
             diagnostic.source = Some(source);
-            diagnostic.span = Some(span);
+            diagnostic.span = span;
         }
         if !path.is_empty() {
             if !diagnostic.message.contains(&rendered) {
@@ -236,11 +268,14 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                 code: problem.code.diagnostic_code().to_string(),
                 severity: Severity::Error,
                 message: problem.message.clone(),
-                source: problem.line.map(|line| DiagnosticSource {
-                    line: Some(line as usize),
-                    column: problem.column.map(|column| column as usize),
-                    ..DiagnosticSource::file_only(Some(path.clone()))
-                }),
+                source: match problem.line {
+                    Some(line) => Some(DiagnosticSource {
+                        line: Some(line as usize),
+                        column: problem.column.map(|column| column as usize),
+                        ..DiagnosticSource::file_only(named(path))
+                    }),
+                    None => file_only(named(path)),
+                },
                 expected_type: None,
                 actual_type: None,
                 span: None,
@@ -253,15 +288,16 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
     }
 }
 
-/// Where `source` starts in its file and the bytes it covers, when it is a
-/// proven authored span.
-fn located(source: &SourceRef) -> Option<(DiagnosticSource, std::ops::Range<usize>)> {
+/// Where `source` is in its file and the bytes it covers: a file alone when
+/// its span was not proven.
+fn located(source: &SourceRef) -> Option<(DiagnosticSource, Option<std::ops::Range<usize>>)> {
     match source {
         SourceRef::OnDiskSpan { context, span } => Some((
-            DiagnosticSource::at(named(&context.display), span.line(), span.column()),
-            span.range(),
+            DiagnosticSource::at(context_file(context), span.line(), span.column()),
+            Some(span.range()),
         )),
-        _ => None,
+        SourceRef::OnDisk(context) => context_source(context).map(|source| (source, None)),
+        SourceRef::Supplied { .. } | SourceRef::Effective { .. } => None,
     }
 }
 
@@ -270,25 +306,26 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
     let mut span = None;
     let mut proven = |source: Option<&SourceRef>| {
         let (source, range) = source.and_then(located)?;
-        span = Some(range);
+        span = range;
         Some(source)
     };
     let (code, source) = match error {
         MarkdownError::FrontmatterParse { ctx, source } => (
             FRONTMATTER_PARSE_CODE,
-            source.location().map(|location| {
-                DiagnosticSource::at(
-                    named(&ctx.display),
+            match source.location() {
+                Some(location) => Some(DiagnosticSource::at(
+                    context_file(ctx),
                     frontmatter_file_line(ctx, location.line()),
                     location.column().max(1),
-                )
-            }),
+                )),
+                None => context_source(ctx),
+            },
         ),
         MarkdownError::FrontmatterFenceMismatch { ctx, line, .. } => (
             FRONTMATTER_PARSE_CODE,
-            Some(DiagnosticSource::at(named(&ctx.display), *line, 1)),
+            Some(DiagnosticSource::at(context_file(ctx), *line, 1)),
         ),
-        MarkdownError::SchemaValidationFailed { .. } => (simplified_schema::SCHEMA_PREPARE_CODE, None),
+        MarkdownError::SchemaValidationFailed { path, .. } => (simplified_schema::SCHEMA_PREPARE_CODE, file_only(named(path))),
         MarkdownError::FileLoad(_) | MarkdownError::UrlFetch(_) => (INPUT_READ_CODE, None),
         MarkdownError::Interpolation { source, cause, .. } => (expression_code(cause), proven(Some(source.as_ref()))),
         MarkdownError::Transclusion(inner) => (
@@ -298,31 +335,45 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
                 _ => TRANSCLUSION_FAILURE_CODE,
             },
             match inner.as_ref() {
-                TransclusionError::ConditionEval { ctx, authored: Some(authored), .. } => {
-                    span = Some(authored.range());
-                    Some(DiagnosticSource::at(named(&ctx.display), authored.line(), authored.column()))
+                TransclusionError::ConditionEval { ctx, authored, .. }
+                | TransclusionError::ConditionParse { ctx, authored, .. } => condition_source(ctx, authored.as_ref(), &mut span),
+                // The directive's line is in the current body, so only the
+                // file is authored.
+                TransclusionError::ParseDirective { ctx, .. }
+                | TransclusionError::InvalidReference { ctx, .. }
+                | TransclusionError::InvalidFrontmatterAssignment { ctx, .. }
+                | TransclusionError::InvalidReassignedFrontmatterProperty { ctx, .. } => context_source(ctx),
+                // The last document on the chain before the repeat wrote the
+                // directive that closes the cycle. A chain's line is not
+                // that directive's.
+                TransclusionError::CycleDetected { chain } => {
+                    file_only(chain.iter().rev().nth(1).and_then(|(path, _)| named(path)))
                 }
                 _ => None,
             },
         ),
-        MarkdownError::PageBlock(inner) => (
-            match inner.as_ref() {
-                PageBlockError::Condition(condition) => match condition.as_ref() {
-                    ConditionError::Parse { .. } => ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
-                    ConditionError::Eval { .. } => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
-                },
-                _ => DIRECTIVE_PARSE_CODE,
+        MarkdownError::PageBlock(inner) => match inner.as_ref() {
+            PageBlockError::Condition(condition) => match condition.as_ref() {
+                ConditionError::Parse { ctx, authored, .. } => {
+                    (ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE, condition_source(ctx, authored.as_ref(), &mut span))
+                }
+                ConditionError::Eval { ctx, authored, .. } => {
+                    (ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE, condition_source(ctx, authored.as_ref(), &mut span))
+                }
             },
-            None,
-        ),
+            // The parser counts lines in the current body.
+            PageBlockError::ParseDirective { ctx, .. }
+            | PageBlockError::UnmatchedEnd { ctx, .. }
+            | PageBlockError::UnterminatedBlock { ctx, .. } => (DIRECTIVE_PARSE_CODE, context_source(ctx)),
+        },
         MarkdownError::Collection(inner) => (inner.code(), proven(inner.site().map(|site| site.source.as_ref()))),
-        MarkdownError::ShellBlock(_) => (SHELL_FAILURE_CODE, None),
+        MarkdownError::ShellBlock(inner) => (SHELL_FAILURE_CODE, shell_block_source(inner)),
         MarkdownError::Reference(inner) => (
             REFERENCE_FAILURE_CODE,
             // The directive's line is in the prepared body, so only the file
             // is authored.
             match inner.as_ref() {
-                ReferenceError::ParseDirective { ctx, .. } => Some(DiagnosticSource::file_only(named(&ctx.display))),
+                ReferenceError::ParseDirective { ctx, .. } => context_source(ctx),
                 _ => None,
             },
         ),
@@ -347,6 +398,44 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
     }
 }
 
+/// A condition failure's opener when it is proven, otherwise its file.
+fn condition_source(
+    ctx: &SourceContext,
+    authored: Option<&crate::markdown::types::AuthoredSpan>,
+    span: &mut Option<std::ops::Range<usize>>,
+) -> Option<DiagnosticSource> {
+    match authored {
+        Some(authored) => {
+            *span = Some(authored.range());
+            Some(DiagnosticSource::at(context_file(ctx), authored.line(), authored.column()))
+        }
+        None => context_source(ctx),
+    }
+}
+
+/// A shell failure's file, and a frontmatter command's line. A body or
+/// shell-block origin counts lines in the prepared body, and a command with no
+/// file of its own keeps its enclosing block's.
+fn shell_source(error: &ShellExpansionError) -> Option<DiagnosticSource> {
+    if let ShellExpansionError::PolicyIo { path, .. } = error {
+        return file_only(named(path));
+    }
+    let file = context_file(error.context()?)?;
+    let line = match error.origin() {
+        Some(ShellCommandOrigin::Frontmatter { line, .. }) => *line,
+        _ => None,
+    };
+    Some(DiagnosticSource { line, ..DiagnosticSource::file_only(Some(file)) })
+}
+
+fn shell_block_source(error: &ShellBlockError) -> Option<DiagnosticSource> {
+    let (file, command) = match error {
+        ShellBlockError::Parse { source_file, .. } | ShellBlockError::Unterminated { source_file, .. } => (source_file, None),
+        ShellBlockError::Command { source_file, source, .. } => (source_file, Some(source)),
+    };
+    file_only(file.as_deref().and_then(named)).or_else(|| command.and_then(|command| shell_source(command)))
+}
+
 /// What a reference check that could not run knows about its reference.
 fn reference_error_details(error: &ReferenceError) -> Option<ReferenceDetails> {
     let failure = error.resolution_failure().map(|failure| resolution_failure_name(failure).to_string());
@@ -362,9 +451,13 @@ fn reference_error_details(error: &ReferenceError) -> Option<ReferenceDetails> {
 fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
     match error {
         ShellExpansionError::Preflight(inner) => markdown_error_diagnostics(inner),
-        ShellExpansionError::ParseDirective { .. } => vec![unlocated(DIRECTIVE_PARSE_CODE, Severity::Error, error.to_string())],
-        _ => vec![unlocated(SHELL_FAILURE_CODE, Severity::Error, error.to_string())],
+        ShellExpansionError::ParseDirective { .. } => vec![shell_record(DIRECTIVE_PARSE_CODE, error)],
+        _ => vec![shell_record(SHELL_FAILURE_CODE, error)],
     }
+}
+
+fn shell_record(code: &str, error: &ShellExpansionError) -> Diagnostic {
+    Diagnostic { source: shell_source(error), ..unlocated(code, Severity::Error, error.to_string()) }
 }
 
 fn expression_code(cause: &ExpressionError) -> &'static str {
@@ -419,16 +512,32 @@ fn as_shell_error<'e>(error: &'e (dyn Error + 'static)) -> Option<&'e ShellExpan
 
 /// The file line of YAML line `yaml_line` (one-based) in the frontmatter of
 /// `ctx`.
-fn frontmatter_file_line(ctx: &biscuit_terminal::errors::SourceContext, yaml_line: usize) -> usize {
+fn frontmatter_file_line(ctx: &SourceContext, yaml_line: usize) -> usize {
     match ctx.frontmatter.as_ref() {
         Some(range) => ctx.content[..range.start].matches('\n').count() + 1 + yaml_line,
         None => yaml_line,
     }
 }
 
-/// A context's display path, or `None` for input with no named origin.
-fn named(display: &std::path::Path) -> Option<std::path::PathBuf> {
-    (display != std::path::Path::new("unknown")).then(|| display.to_path_buf())
+/// `path`, unless it is a placeholder for input with no named origin
+/// (`unknown`, `<stdin>`, `<transient>`).
+fn named(path: &Path) -> Option<PathBuf> {
+    let placeholder = path == Path::new("unknown") || path.to_str().is_some_and(|text| text.starts_with('<'));
+    (!placeholder).then(|| path.to_path_buf())
+}
+
+/// A context's document. A frontmatter value's own context is named after its
+/// key, with no absolute path, and is no file.
+fn context_file(ctx: &SourceContext) -> Option<PathBuf> {
+    named(&ctx.display).filter(|_| ctx.absolute.is_absolute())
+}
+
+fn context_source(ctx: &SourceContext) -> Option<DiagnosticSource> {
+    file_only(context_file(ctx))
+}
+
+fn file_only(file: Option<PathBuf>) -> Option<DiagnosticSource> {
+    file.map(|file| DiagnosticSource::file_only(Some(file)))
 }
 
 fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {

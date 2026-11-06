@@ -3,6 +3,7 @@
 //! the trigger file, and only an explicit `--deny` makes it blocking.
 
 use super::*;
+use crate::markdown::compose::expression::DiagnosticSource;
 use crate::markdown::compose::policy::BlockingPolicy;
 use crate::markdown::compose::shell_expansion::{ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest};
 use crate::markdown::compose::{ComposeFailure, ShellExpansionError};
@@ -132,7 +133,7 @@ fn a_malformed_envelope_reports_the_trigger_file_at_its_yaml_error() {
 }
 
 #[test]
-fn a_trigger_failure_without_a_position_reports_no_source() {
+fn a_trigger_failure_without_a_position_names_only_its_file() {
     let repo = Repo::new();
     let prompt = repo.write("prompts/plain.md", "# Plain\n");
 
@@ -140,21 +141,27 @@ fn a_trigger_failure_without_a_position_reports_no_source() {
 
     let record = the_trigger_record(&report);
     assert_eq!(record.code, SCHEMA_INVALID_TRIGGER_CODE);
-    assert_eq!(record.source, None, "no position is invented for unsupported envelope keys");
+    let trigger = biscuit_file::canonicalize_simplified(&repo.trigger()).unwrap();
+    assert_eq!(
+        record.source,
+        Some(DiagnosticSource::file_only(Some(trigger))),
+        "no position is invented for unsupported envelope keys"
+    );
 }
 
 #[test]
 fn a_payload_failure_names_the_payload_but_never_places_it_on_the_trigger() {
     let repo = Repo::new();
     std::fs::remove_file(repo.trigger()).unwrap();
-    repo.write("schemas/host.yaml", "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: ./payload.yaml\n");
+    let host = repo.write("schemas/host.yaml", "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: ./payload.yaml\n");
     let payload = repo.write("schemas/payload.yaml", "$schema:\n  notes: [unclosed\n");
     let prompt = repo.write("prompts/plain.md", "# Plain\n");
 
     let (_, report) = repo.compose(&prompt, ComposeOptions::new()).expect("composes");
 
     let record = the_trigger_record(&report);
-    assert_eq!(record.source, None, "the payload's line is not a line of the trigger");
+    let host = biscuit_file::canonicalize_simplified(&host).unwrap();
+    assert_eq!(record.source, Some(DiagnosticSource::file_only(Some(host))), "the payload's line is not a line of the trigger");
     let payload = biscuit_file::canonicalize_simplified(&payload).unwrap();
     assert!(record.message.contains(&payload.display().to_string()), "{}", record.message);
 }

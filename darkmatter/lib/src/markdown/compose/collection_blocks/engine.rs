@@ -26,7 +26,9 @@ use super::error::{CollectionError, CollectionSite, IterationFailure};
 use super::parser::site;
 use super::types::{CollectionKind, CollectionRegion, QuotedExpression, SortOrder};
 use crate::markdown::compose::body_origin::{ExpansionWriter, ScopeRanges, Splice};
+use crate::markdown::compose::conditions::ConditionSite;
 use crate::markdown::compose::context::report::CandidateLocus;
+use crate::markdown::compose::site_scope::AuthoredOpener;
 use crate::markdown::compose::expression::iteration::{
     IterationBudget, IterationError, IterationFrame, IterationPath,
 };
@@ -198,6 +200,8 @@ pub(crate) struct Execution<'a, L: EvaluationLookup> {
     pub budget: &'a IterationBudget,
     /// The document's error context for conditions.
     pub context: SourceContext,
+    /// A directive's authored opener, when the body's map proves one.
+    pub opener: AuthoredOpener<'a>,
     /// The report warnings and counters go to.
     pub report: &'a mut ComposeReport,
     /// Asked before each gate; `true` ends the traversal with
@@ -234,10 +238,11 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         lookup: &'a L,
         budget: &'a IterationBudget,
         context: SourceContext,
+        opener: AuthoredOpener<'a>,
         report: &'a mut ComposeReport,
         stop: &'a mut dyn FnMut(&ComposeReport) -> bool,
     ) -> Self {
-        Self { content, lookup, budget, context, report, stop, plans: HashMap::new(), discover: !budget.is_charging() }
+        Self { content, lookup, budget, context, opener, report, stop, plans: HashMap::new(), discover: !budget.is_charging() }
     }
 
     /// Expands the whole body: `nodes` are its top-level regions.
@@ -294,7 +299,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
                     .map_or(region.span.start..region.span.start + 2, |at| {
                         region.span.start + at..region.span.start + at + expression.len()
                     });
-                self.condition(expression, region.start_line, scope)
+                self.condition(expression, &region.span, region.start_line, scope)
                     .map_err(|halt| self.in_iteration(halt, span, path))?
             }
             None => true,
@@ -310,8 +315,11 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
 
     /// Evaluates a `when` condition in `scope`: its context warnings are
     /// reported and `stop` is asked before it runs, as page blocks do.
-    fn condition(&mut self, expression: &str, line: usize, scope: Option<&Arc<LexicalScope>>) -> Result<bool, Halt> {
+    fn condition(&mut self, expression: &str, directive: &std::ops::Range<usize>, line: usize, scope: Option<&Arc<LexicalScope>>) -> Result<bool, Halt> {
         let lookup = self.lookup;
+        let context = self.context.clone();
+        let current = || context.clone();
+        let site = ConditionSite { span: directive, body_line: line, opener: self.opener, current: &current };
         let warnings = match scope {
             Some(scope) => conditions::collect_condition_context_warnings(
                 expression,
@@ -321,22 +329,15 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
             None => conditions::collect_condition_context_warnings(expression, lookup, "condition"),
         };
         for warning in warnings {
-            self.report.add_warning(warning.at_line(line));
+            self.report.add_warning(site.locate_warning(warning));
         }
         if (self.stop)(self.report) {
             return Err(Halt::Blocked);
         }
         let mut missing = Vec::new();
-        let context = self.context.clone();
         let verdict = match scope {
-            Some(scope) => conditions::evaluate_condition_observed(
-                expression,
-                &ScopedLookup::new(lookup, Arc::clone(scope)),
-                line,
-                context,
-                &mut missing,
-            ),
-            None => conditions::evaluate_condition_observed(expression, lookup, line, context, &mut missing),
+            Some(scope) => site.evaluate(expression, &ScopedLookup::new(lookup, Arc::clone(scope)), &mut missing),
+            None => site.evaluate(expression, lookup, &mut missing),
         }
         .map_err(|error| Halt::from(crate::markdown::compose::page_blocks::PageBlockError::from(error)))?;
         self.report.add_unknown_root_candidates("condition", missing, |_| CandidateLocus::BodyLine(line));
@@ -423,7 +424,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         if !self.discover
             && let Some(when) = &header.when
             && !self
-                .condition(&when.text, region.start_line, scope)
+                .condition(&when.text, &region.span, region.start_line, scope)
                 .map_err(|halt| self.in_iteration(halt, when.span.clone(), path))?
         {
             return Ok(());

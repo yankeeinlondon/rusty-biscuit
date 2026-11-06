@@ -328,6 +328,10 @@ and `heading` as a link parameter. Compose and `md graph --validate` show errors
 (compose prints nothing when there are none), `md validate refs` shows all
 severities. Reasons and constructs live only in
 `ReferenceIssueCode::reason_phrase` and `ReferenceSyntax::construct_phrase`.
+HTML discovery (`reference/html.rs`) reads one Markdown HTML node as any number of
+elements with `scan_elements`, and `LineMap` carries each back to the source past
+line breaks and container prefixes; never classify an HTML node line by line. See
+`docs/cli/validate.md#html-and-css-references`.
 
 `md compose` accepts its Markdown default and the data family; `md render` both
 families, defaulting to `terminal`, which is byte-identical to `plain` off a
@@ -368,8 +372,12 @@ it cannot finish). A check that still fails (`check_references` returns
 `Result`) is a composition failure with status 1, reported through
 `error_diagnostics`; its graph build leaves its warnings for
 `take_preflight_failure_warnings`. A `Diagnostic`'s `source.line`/`column` are
-`Option` (null for a document with no authored positions, never a placeholder)
-and `source.inserted` marks a construct that wrote the text; only a reference
+`Option` (null when no authored position is proven, never a placeholder), a
+record that knows only its file keeps the file, a typed error with no file takes
+the composed document (`report_diagnostics::with_document_fallback`, applied by
+`ReportSink`), a warning's file is stamped from `ComposeReport::document`, and
+only `ComposeWarning::location` (never `line_number`, a current-body count) is
+published; `source.inserted` marks a construct that wrote the text; only a reference
 record has `reference_details`, flattened into `reason`, `construct`,
 `reference`, `failure`, and `included_via`. Skipped-trigger
 warnings found by a pass that runs ahead of the delivering report (reference

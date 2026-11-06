@@ -165,6 +165,9 @@ pub(super) fn run(mut compose: LifecycleCompose<'_>) -> Result<()> {
         && host.reported.as_deref() != Some(error.msg.as_str())
     {
         match sink {
+            // A failure with no typed cause is an authored message, not a
+            // problem in the document.
+            Some(sink) if error.cause.is_some() => sink.document_diagnostics(lifecycle_failure_diagnostics(error)),
             Some(sink) => sink.diagnostics(lifecycle_failure_diagnostics(error)),
             None => effects.status(StatusState::Error, &error.msg),
         }
