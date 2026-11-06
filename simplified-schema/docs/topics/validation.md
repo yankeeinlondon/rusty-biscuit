@@ -1,6 +1,6 @@
 # Strict and Soft Validation
 
-The [`SimplifiedSchema` object](./schema-object.md) has both methods and
+The [`SimplifiedSchema` object](simplified-schema-struct.md) has both methods and
 prepares itself; this page describes the contract they share, and the
 lower-level `Prepared` schema they run on.
 

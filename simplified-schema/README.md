@@ -131,7 +131,7 @@ assert_eq!(decode_leaf(&token), Some(Ok("{{ kept as data }}".to_string())));
 - [Selecting a schema file](./docs/topics/selecting-schema-files.md): which file a schema reference names, what was probed, where a missing file would be created, and whether the file is a valid `$schema` target.
 - [Custom vocabulary](./docs/topics/custom-vocabulary.md): the `darkmatter-*` formats and `x-darkmatter-*` keywords in a lowered schema, and what other JSON Schema validators miss.
 - [Host capabilities](./docs/topics/host-capabilities.md): which checks need a file system, and when the library reads the running process.
-- [The `SimplifiedSchema` object](./docs/topics/schema-object.md): building, validating, layering, querying, and exporting a schema.
+- [The `SimplifiedSchema` object](docs/topics/simplified-schema-struct.md): building, validating, layering, querying, and exporting a schema.
 - [Language core](./docs/topics/language-core.md): the modules, the resolver's supplied sources, and what stays in a host.
 - [Foundations](./docs/topics/foundations.md): the numeric model, spans, the expression scan, and the literal-token codec.
 - [Expression syntax](./docs/topics/expression-syntax.md): parsing expressions without evaluating them.

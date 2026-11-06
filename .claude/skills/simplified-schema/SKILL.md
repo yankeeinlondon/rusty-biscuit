@@ -205,7 +205,7 @@ Run from `simplified-schema/`:
 ## Documentation
 
 - [README](../../../simplified-schema/README.md) — overview and install
-- [The `SimplifiedSchema` object](../../../simplified-schema/docs/topics/schema-object.md) — build, validate, layer, inspect, export
+- [The `SimplifiedSchema` object](../../../simplified-schema/docs/topics/simplified-schema-struct.md) — build, validate, layer, inspect, export
 - [Strict and soft validation](../../../simplified-schema/docs/topics/validation.md) — `Prepared`, success and failure shapes
 - [Conversion](../../../simplified-schema/docs/topics/conversion.md) — coercion rules, unions, function binding, type errors
 - [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md) — located failures and the error model

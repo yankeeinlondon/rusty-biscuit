@@ -57,7 +57,7 @@ The schema can live in two places:
   A document then writes `$schema: ./schemas/page.yaml` in place of the
   mapping.
 
-From Rust, the [`SimplifiedSchema` object](../schema-object.md) builds from
+From Rust, the [`SimplifiedSchema` object](../simplified-schema-struct.md) builds from
 either form and validates values:
 
 ```rust

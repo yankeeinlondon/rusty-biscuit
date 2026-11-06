@@ -50,7 +50,7 @@ flowchart TD
 | `coercion` | The conversion engine over shapes (`bind`, `bind_with`, `check_exact`) |
 | `coerce` | Frontmatter conversion against a lowered JSON Schema (`coerce_frontmatter`) |
 | `validate`, `format`, `file_match` | Compiled validators and their cache, the `darkmatter-*` formats, the `x-darkmatter-*` keywords, and `file(match(...))` globs |
-| `schema` | `SimplifiedSchema` (build from content or a file, validate, layer, query, export), `SchemaSource`, `TypeDefinition`, `FunctionView`, `SimplifiedSchemaError`; see [The `SimplifiedSchema` Object](./schema-object.md) |
+| `schema` | `SimplifiedSchema` (build from content or a file, validate, layer, query, export), `SchemaSource`, `TypeDefinition`, `FunctionView`, `SimplifiedSchemaError`; see [The `SimplifiedSchema` Object](simplified-schema-struct.md) |
 | `prepared`, `outcome` | `Prepared` (a schema compiled once, with `validate_strict` and `validate_soft`), `ValidationSuccess`, `ValidationFailure`; see [Strict and Soft Validation](./validation.md) |
 | `envelope` | The compiled definitions of the `kind: schema` and `kind: yaml-schema` envelopes (`ENVELOPE_DEFINITIONS`) and `admit_envelope_text`, which judges a standalone document against its definition; see [Admission](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text (`PositionMap::byte_range`) |

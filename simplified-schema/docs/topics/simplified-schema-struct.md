@@ -1,6 +1,16 @@
-# The `SimplifiedSchema` Object
+# The `SimplifiedSchema` Struct
 
-`SimplifiedSchema` is the one object most callers need. Build it from text
+> [SimplifiedSchema](simplified-schema/lib/src/schema/mod.rs)
+
+The `SimplifiedSchema` struct provides the focus for this schema and the functionality surrounding it. You can:
+
+- Build it from text or a file
+- validate values
+- layer other schemas on top or under it
+- ask it about it's types
+- export it
+
+is the one object most callers need. Build it from text
 or a file, then validate values, layer other schemas into it, ask it about
 its types, and export it. There is no compile step to call: the first
 validation prepares the schema, and later validations reuse that work.

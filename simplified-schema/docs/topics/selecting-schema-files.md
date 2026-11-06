@@ -11,7 +11,7 @@ file is one a `$schema` may point at, without validating anything.
 Use these when you build a tool that needs to know *which file* a reference
 means, or *what it would mean* if the file existed, rather than the resolved
 schema itself. To build a schema, use the [`SimplifiedSchema`
-object](./schema-object.md) or the `resolve` module's resolvers, which call
+object](simplified-schema-struct.md) or the `resolve` module's resolvers, which call
 the selector for you.
 
 ## Selecting the file
