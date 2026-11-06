@@ -59,12 +59,11 @@ sessions, and those that follow from the three spikes, are recorded under
 without pausing for approval is listed under
 [Pre-authorizations](#pre-authorizations).
 
-This spec builds on 2026-11-04-composition-errors. That fix removes
-`md compose --output report-json` in favor of `md compose --output json`
-(the **compose data envelope**), adds optional fields to the diagnostic
-record, and renames the report-json documentation page to the data-contract
-page. This spec uses those names throughout, and its implementation does not
-start until that fix is complete (see [Dependencies](#dependencies)).
+This spec builds on 2026-11-04-composition-errors, which is complete. That fix
+removed `md compose --output report-json` in favor of `md compose --output json`
+(the **compose data envelope**), added optional fields to the diagnostic
+record, and documents the data outputs on `docs/cli/data-contracts.md` (the
+**data-contract page**). This spec uses those names throughout.
 
 ## Motivation
 
@@ -108,11 +107,11 @@ not bytes: `macOS` starts at the third character of `- macOS`.
 
 ## Dependencies
 
-- **2026-11-04-composition-errors must be complete before implementation of
-  this spec begins.** This spec adds fields to the diagnostic record and the
-  compose data envelope that fix defines, and documents its codes on the
-  data-contract page that fix creates. Starting earlier would mean reworking
-  one of the two. (Decided 2026-11-05.)
+- **2026-11-04-composition-errors (met 2026-11-06).** This spec adds fields to
+  the diagnostic record and the compose data envelope that fix defines, and
+  documents its codes on the data-contract page. Requirements below were
+  revised on 2026-11-06 against what that fix actually built; see
+  [Resolved decisions](#resolved-decisions).
 
 ## Terms
 
@@ -146,11 +145,19 @@ not bytes: `macOS` starts at the third character of `- macOS`.
   `code` is a stable `dm.<family>.<kind>` string shared with DMLS; its
   `source` is the position in the Markdown document.
 - **Read set** — the list of files and URLs that expressions read during one
-  compose run (R8).
+  command (R8).
+- **Reference check** — the pass `md compose` runs before composition (its
+  `validate references` stage) to find broken links, images, and `::file`
+  targets. A link target can be computed, so the pass evaluates expressions on
+  a throwaway copy of the document. It runs no shell command and has no
+  permission to read a remote URL. `md graph` and `md validate refs` prepare
+  documents the same way.
 - **Options-level shared slot** — a value held behind an `Arc` on
-  `ComposeOptions`, so every part of one compose run (both expression-context
-  builders, every document, every nested compose) sees the same instance.
-  The existing `GlobWarningSink` works this way. R7 and R8 use the pattern.
+  `ComposeOptions`, so every part of one command (the reference check, the
+  pre-flight walk, composition, both expression-context builders, every
+  document, every nested compose) sees the same instance. The existing
+  `RemoteFetchRuntime` works this way: a caller supplies one to share across
+  passes, and a run with none builds its own. R7 and R8 use the pattern.
 
 ## Requirements
 
@@ -508,10 +515,32 @@ planning):
 | `dm.data.contract_mismatch` | the parsed data does not satisfy `as` | this section |
 
 A failure to resolve or read the file — a missing file, a denied remote host,
-a failed fetch — is **not** a new code. It uses the existing file-reference
-diagnostic, with its `failure` and `reference` fields (added by
-2026-11-04-composition-errors), so a missing file reads the same as it does
-for `try_frontmatter` or `::file`.
+a failed fetch — is **not** a new code. It stays
+`dm.expression.evaluation_failure`, and gains the fields a reference record
+already has, so a script can tell what went wrong without parsing the message.
+The rule covers **every read-side expression function**, not only `load_data`.
+Before this spec only a `MarkdownError::Reference` filled these fields, so
+`::file` had them and `frontmatter()` did not.
+
+```json
+{
+  "code": "dm.expression.evaluation_failure",
+  "reason": "file not found",
+  "construct": "frontmatter()",
+  "reference": "missing.md",
+  "failure": "no-match"
+}
+```
+
+- `construct` is the function's name followed by `()`.
+- `reference` is the argument as written.
+- `failure` is the `FileReferenceDiagnostic`'s resolution-failure class.
+- `included_via` follows its existing rule: omitted when no one reference or
+  trail is known.
+
+The code is deliberately not a `dm.reference.*` one: those codes are the
+missing-reference diagnostics that `--allow` and `--deny` govern. Human stderr
+and each `message` are unchanged.
 
 **Where things point.** A diagnostic has two locations:
 
@@ -606,10 +635,13 @@ the span is visible only at the usual verbosity.
   (`darkmatter/lib/src/markdown/compose/policy.rs`), which lists the
   warnings `--deny` can make blocking. A code is added there only if it is
   ever emitted as a warning.
-- Add `data_location` to `Diagnostic` and to
-  `darkmatter/cli/schemas/output/compose.yaml`, after
-  2026-11-04-composition-errors is complete (see
-  [Dependencies](#dependencies) and pre-authorization (d)).
+- Add `data_location` to `Diagnostic` and to the `diagnostic` type of **every
+  output schema a `load_data` failure can reach** (pre-authorization (d)).
+  Seventeen files under `darkmatter/cli/schemas/output/` declare their own
+  closed copy of that type. `compose.yaml` and `render.yaml` are the obvious
+  two, and `graph.yaml` and `validate-refs.yaml` follow because those commands
+  evaluate expressions while preparing documents. Check the rest while
+  implementing; a closed type rejects a field it does not list.
 - **Why not `validate_soft`.** When the coercion engine cannot build a
   partial copy of a value (it cannot when any key or tuple element is
   undeclared), `validate_soft` runs the JSON Schema validator over the
@@ -698,8 +730,13 @@ returns nothing means pointer only.
   key reports `expected_type` `absent`.
 - A URL-loaded fixture reports `data_location` with the URL, pointer, line,
   and column.
-- A missing file, and a URL from a denied host, each produce the existing
-  file-reference diagnostic with `failure` and `reference` set.
+- A missing file, and a URL from a denied host, each produce
+  `dm.expression.evaluation_failure` with `reason`, `construct`, `reference`,
+  and `failure` set.
+- `frontmatter`, `markdown_title`, `markdown_body_empty`, and `validate_schema`
+  on a missing file report the same four fields, each naming its own function
+  in `construct`.
+- The human stderr report of a missing file is byte-identical to before.
 - Each `dm.data.*` code in the table has at least one test.
 
 ### R6. Remote reads
@@ -720,16 +757,39 @@ Add `load_data` to `REMOTE_READ_FUNCTIONS` in
 **Acceptance criteria**
 
 - A URL with no `--allow` fails without a network request, with the
-  file-reference diagnostic (R5).
+  file-reference fields (R5).
 - A URL with `--allow host=HOST` is fetched once and loaded.
 
-### R7. Repeated reads within one run
+### R7. Repeated reads within one command
 
 **Requirement**
 
-Within one compose run, the same resolved file (canonical path or URL)
+Within one command (for `md compose`: the reference check, the pre-flight walk,
+and composition together), the same resolved file (canonical path or URL)
 loaded with the same **resolved** `as` is read, parsed, and validated
 **once**; later calls reuse the result. There is no file-size limit.
+
+**Anything that may have changed a file ends the reuse.** The memo is emptied
+each time a command has run: a frontmatter `$(...)`, a `::shell` directive, a
+shell block, or a lifecycle step. The reference check runs no command, so
+without this rule a file a frontmatter command regenerates would be served
+from the check's earlier read.
+
+```markdown
+---
+made: "$(./regenerate-hosts)"
+---
+{{ load_data("hosts.yaml", "string[]") }}
+```
+
+Here the check reads the old `hosts.yaml`, the command runs, and composition
+reads the new one: two reads, and the correct data. Lifecycle events behave the
+same way: `initialize` runs after the frontmatter bootstrap, so a read in the
+bootstrap is not reused after it.
+
+A result that only means "not possible yet" is never remembered. The reference
+check has no remote permission, so a remote read there defers to composition
+rather than storing a failure composition would inherit.
 
 "Resolved `as`" matters for named imports: `"Os@./schemas/os.yaml"` written
 in two documents in different folders can name two different files, so the
@@ -759,10 +819,11 @@ remote fetch, so "reads again" never means a second network request.
 
 **Design notes**
 
-- The memo is **one options-level shared slot for the whole compose run**:
-  an `Arc` held on `ComposeOptions`, like the existing `GlobWarningSink`,
-  cloned into both expression-context builders and drained in the pipeline
-  when the run ends. Nothing persists.
+- The memo is **one options-level shared slot for the whole command**: an
+  `Arc` held on `ComposeOptions`, cloned into both expression-context builders
+  and shared by every pass, on the pattern of `remote_fetch_runtime`. A library
+  caller that supplies none gets a fresh one per root run, so separate
+  compositions never share results. Nothing persists.
 - It does **not** follow the `ResolutionContext.provider_queries` pattern
   (`darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs`). That
   slot is created per `ResolutionContext` unless a remote runtime exists, so
@@ -787,18 +848,29 @@ remote fetch, so "reads again" never means a second network request.
 - Under `Off` and `Refresh`, the same `::map` reads the local file three
   times; a URL is still fetched once.
 - Under `ReadOnly`, it reads once.
+- `md compose` on a file-backed document with a `load_data` call and a reference
+  check reads the data file once across both passes.
+- A frontmatter command that rewrites the data file before a body `load_data`
+  call yields the rewritten data, with the read count showing the second read.
+- A shell step inside a `::map` body causes the next item's call to read again.
+- A URL read under `--allow host=HOST` succeeds when the reference check ran
+  first and could not read it.
+- Two library compositions with no caller-supplied slot do not share results.
 
 ### R8. Read set
 
 **Requirement**
 
-Each compose run keeps a **read set**: the resolved file paths and
-normalized URLs that expressions read. `load_data` and every existing
-read-side expression function (every member of `REMOTE_READ_FUNCTIONS`:
-`frontmatter`, `try_frontmatter`, `file_exists`, `markdown_title`,
-`markdown_body_empty`, `validate_schema`) report into it, on every surface
-where expressions are evaluated. A call that fails after resolving its file
-still reports it.
+Each command keeps a **read set**: the resolved file paths and normalized URLs
+that expressions read. `load_data` and every existing read-side expression
+function (every member of `REMOTE_READ_FUNCTIONS`: `frontmatter`,
+`try_frontmatter`, `file_exists`, `markdown_title`, `markdown_body_empty`,
+`validate_schema`) report into it, on every surface where expressions are
+evaluated. A call that fails after resolving its file still reports it.
+
+The read set covers the whole command. A read in the reference check counts, and
+emptying the R7 memo never removes an entry, so a failure in the check reports
+the file it failed on even though composition never started.
 
 The read set is a **library** feature. It is available on the compose
 result and appears in the compose data envelope (`md compose --output
@@ -818,7 +890,8 @@ S3), which introduces evaluated results in DMLS.
 
 - The read set uses the same options-level shared slot as the R7 memo: an
   `Arc` sink on `ComposeOptions`, cloned into every expression context and
-  copied onto the compose result when the run ends.
+  copied onto the compose result when the command ends, whichever pass stopped
+  it.
 - **Coverage risk.** About 120 sites construct `ResolutionContext::new`
   directly. Many build a context with a default sink — for example the
   `ShortcutLookup` in
@@ -842,6 +915,8 @@ S3), which introduces evaluated results in DMLS.
   and lifecycle expressions where they can call a read-side function.
 - A URL read under `--allow host=HOST` appears normalized in the read set.
 - A call that fails after resolving its file still records that file.
+- A malformed data file that fails during the reference check appears in the
+  failed envelope's read set.
 - `md compose --output json` includes the read set, and the record passes
   the compose conformance test.
 - DMLS behavior is unchanged; no DMLS test is added for the read set.
@@ -1053,12 +1128,13 @@ package area.
   gives one compact example per form (including `tuple([…])` versus a bracket
   union), and adds a "container types" section that R2 links to.
 - The `dm.data.*` codes, the `data_location` field (including the YAML
-  pointer-only case and the line-break rule), and the read-set field are
-  documented on the data-contract page (the page
-  2026-11-04-composition-errors makes from `docs/cli/report-json.md`), not on
-  `report-json.md`.
-- The read set (R8) and the per-run memo with its cache-mode table (R7) are
-  described on the relevant compose topic page.
+  pointer-only case and the line-break rule), the file-reference fields on
+  expression failures, and the read-set field are documented on
+  `docs/cli/data-contracts.md`. The stopping rule for a data failure, including
+  that it can stop a command in the reference check, is on
+  `docs/errors/composition-problems.md`.
+- The read set (R8) and the per-command memo, with its cache-mode table and its
+  emptying rule (R7), are described on the relevant compose topic page.
 - The expression-syntax page states the R11 rule in plain terms: a `}}`
   inside a quoted string, or inside a nested `{ … }`, does not end an
   expression; and, next to the object-literal example, that `{{{ … }}}` is
@@ -1093,10 +1169,11 @@ without pausing for approval.
   headerless CSV/TSV with an options or format override; a member-level
   undeclared-property check; and YAML locator hardening (see
   [Follow-ups](#follow-ups)).
-- **(d) Shared record shape**, once 2026-11-04-composition-errors is
-  complete: add `data_location` and the read-set field to the `Diagnostic`
-  record and the envelope, to `compose.yaml`, to its conformance test, and to
-  the data-contract page.
+- **(d) Shared record shape.** Add `data_location` to the `Diagnostic` record
+  and the read-set field to the envelope, in every output schema they can
+  reach, in their conformance tests, and on the data-contract page. Fill the
+  file-reference fields on expression failures for every read-side function
+  (R5).
 
 ## Defects found
 
@@ -1164,10 +1241,12 @@ Remaining risks:
   cases; the union-flattening criteria of R5; the 25-violation cap case; and
   a URL-loaded fixture with positions.
 - **Memoization (L1):** the R7 `::map` read-count test, the callback-plus-body
-  case, the different-`as` and different-folder import cases, and each cache
-  access mode.
+  case, the different-`as` and different-folder import cases, each cache access
+  mode, one read across the reference check and composition, and the memo
+  emptied after a frontmatter command, a `::shell`, and a lifecycle step.
 - **Read set (L1):** the R8 criteria for `load_data` and the other
-  read-side functions, one test per evaluation surface, and a URL.
+  read-side functions, one test per evaluation surface, a URL, and a failure in
+  the reference check.
 - **Typed result (L1 + DMLS):** the R10 criteria, including one DMLS
   completion test after a typed callback parameter.
 - **Scanner (L1, simplified-schema, darkmatter, DMLS, claudine):** the R11
@@ -1190,9 +1269,13 @@ Remaining risks:
   pointer-only case — YAML files containing aliases or multi-line flow
   collections — which the docs name too (hardening is a follow-up).
 - `just test` and `just lint` pass in `darkmatter/`, `simplified-schema/`,
-  `biscuit-file/`, and `claudine/`.
+  `biscuit-file/`, and `claudine/`. The shipped-schema corpus carves out
+  `sandboxing.yaml`, whose enum slot 2026-11-05-dynamic-schema-types delivers;
+  that test fails if the file starts to validate, so the carve-out cannot
+  outlive the feature.
 - `compose.yaml` and its conformance test include `data_location` and the
-  read set.
+  read set; every other output schema a `load_data` failure can reach includes
+  `data_location`.
 - The catalog entry, generated function page, topic section, data-contract
   page, and rewritten `type-definition` page are in place;
   `docs/dependencies.md` records `csv` and `csv-core`.
@@ -1274,13 +1357,26 @@ All decided on 2026-11-05.
   `::map` over `load_data` goes through frontmatter and the document
   schema. A member-level undeclared check does not exist today and is a
   follow-up, not part of this spec.
-- **(R7) Memo placement.** One options-level shared slot per compose run,
+- **(R7) Memo placement.** One options-level shared slot per command,
   single-flight per entry. A per-`ResolutionContext` memo would be per
   evaluation surface and miss the reuse R7 exists for.
 - **(R8) Read-set placement.** The same options-level pattern, because
   contexts built directly with a default sink would drop reads.
-- **Sequencing.** Implementation begins only after
-  2026-11-04-composition-errors is complete (see
+- **(2026-11-06) File failures.** Every read-side expression function fills
+  `reason`, `construct`, `reference`, and `failure` (R5), keeping the
+  `dm.expression.evaluation_failure` code. The earlier text assumed these
+  functions already did. Filling them for `load_data` alone would leave two
+  behaviors for one failure.
+- **(2026-11-06) One memo and read set for the whole command.** The reference
+  check, added by 2026-11-04-composition-errors, evaluates expressions before
+  composition. Sharing the slot across passes keeps "one `md compose` reads a
+  file once" true, and keeps a file that fails in the check in the read set.
+- **(2026-11-06) Commands end reuse.** The memo empties after any command or
+  lifecycle step, because the check runs no shell and would otherwise serve a
+  regenerated file's old contents to composition. The shared slot was chosen
+  knowing this: reads repeat only where a command could have changed the data.
+- **Sequencing.** Implementation began only after
+  2026-11-04-composition-errors was complete (see
   [Dependencies](#dependencies)).
 - **Diagnostics.** Typed `dm.data.*` codes, structured fields, a new
   `data_location`, a cap on listed violations, and a tracing span per call
@@ -1335,7 +1431,7 @@ Cross-spec impact:
   - it owns DMLS invalidation from the read set (its spikes S2 and S3); this
     spec provides the library read set only.
 - **2026-11-04-composition-errors:** this spec adds the optional
-  `data_location` field to `Diagnostic` and `compose.yaml`, adds a read-set
-  field to the compose data envelope, and documents the `dm.data.*` codes on
-  the data-contract page that fix creates. It lands after that fix is
-  complete (pre-authorization (d)).
+  `data_location` field to `Diagnostic` and the output schemas, adds a read-set
+  field to the compose data envelope, fills the file-reference fields on
+  expression failures, and documents the `dm.data.*` codes on the data-contract
+  page (pre-authorization (d)).
