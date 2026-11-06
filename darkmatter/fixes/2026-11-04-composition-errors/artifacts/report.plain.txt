@@ -1,0 +1,14 @@
+Broken references in root.md
+
+root.md
+  file not found in hyperlink  `./missing-one.md`    root.md:9:5
+  file not found in hyperlink  `./missing-two.md`    root.md:15:9
+  file not found in hyperlink  `./missing-three.md`  root.md:22:13
+  file not found in hyperlink  `./missing-five.md`   root.md:24:8
+
+child.md (transcluded at root.md:26)
+  file not found in hyperlink  `./missing-four.md`  child.md:7:43
+  file not found in hyperlink  `./missing-ins.md`   child.md:9:7
+
+Checked 10 references across 2 documents: 5 ok, 5 broken
+  1 warning

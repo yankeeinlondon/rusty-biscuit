@@ -123,6 +123,7 @@ packages:
   - claudine
   - darkmatter-lsp
   - claudine-cli
+  - simplified-schema
 decisions_for_review:
   - |-
     Width parsing gained a sixth request kind. The plan listed Auto, Source, Unlimited, Columns and Percent; I added Fractional(f64) so a value like 72.9 is kept until resolution, which floors it to 72 columns and returns the "takes whole columns" warning text. Alternative: floor while parsing and return the warning beside the request. Redoing it means changing the parse return type in biscuit-terminal's output/width.rs and its callers (none outside tests yet).
@@ -246,6 +247,48 @@ decisions_for_review:
   - |-
     The `md edit` conformance success cases are `#[cfg(unix)]`, using a shell script as `EDITOR`.
     The editor has to write to the file, and the shared argv recorder does not, so a native stub would be a new test binary. The failure case runs on every OS, and `run_edit` has no OS-specific code of its own. Nightly Windows therefore proves only the failure path. Adding a writing mode to the recorder would close this.
+  - |-
+      When a report's rows cannot fit in the requested width, they now stack instead of being replaced by a notice.
+      The plan did not cover this; the documentation audit found it. `md validate refs --width 30`, or one long reference at `--width 60`, printed "Table could not be rendered" where the rows belonged, and every location was lost. Any borderless table in the terminal fold now writes each cell on its own line, and only the first cell wraps, so a reference prints exactly as written and may overflow. Bordered tables keep the notice.
+      Alternatives: give the report's columns break-anywhere wrapping, which inserts hyphens that are not in the reference and misstates it; or keep the notice and document it, which breaks the promise that a location is always visible. Redoing it means replacing one match arm and `emit_stacked_rows` in biscuit-terminal's `render_tree/render.rs` and one test.
+  - |-
+      A TOML output writes an integer above the signed 64-bit range as its decimal text.
+      The plan says TOML preserves the command's data subject to the null and root rules, but `md toc --output toml` always failed, because its unsigned hashes do not fit a TOML integer. So one field can be an integer or a string depending on its value, which a typed TOML reader must allow for.
+      Alternatives: keep the failure and document it, so a declared output never works for `md toc`; write every hash as text in all formats, which breaks today's JSON; or write them as floats, which silently loses digits. Redoing it means removing one match arm in biscuit-terminal's `output/data.rs` and its two tests.
+  - |-
+      A file argument that fails to open now reports its class in a data output: `failure` and `reference` on the `dm.input.read_failure` diagnostic.
+      The plan's documentation task tells scripts to read the diagnostic's `failure` field, but this one case did not have it, so `md compose nofile.md --output json` could not say why. It now does for every command, using the fields reference diagnostics already have. `md schema validate` keeps its own per-file record. `md schema detect`'s formatted error still has no `failure:` row; the docs state that.
+      Alternative: a separate `input_details` object, which would be more exact but adds a field to all 17 schemas for one case. Redoing it touches `DocumentArgumentError::diagnostic` and one test.
+  - |-
+      Documentation added beyond the plan's list: `darkmatter/docs/cli/developing.md` holds the source layout and test-fixture notes cut from the CLI README, and `darkmatter/docs/errors/composition-problems.md` holds the per-family stopping rules and authored positions, because no existing page fit both. `docs/cli-best-practices.md` was also corrected outside section 2.1 where other sections contradicted it. `cli/README.md` went from 438 lines to 67.
+      Alternative: fold the two new pages into existing ones, which is a move plus link updates.
+  - |-
+      The component bridge `Terminal::from_output_options` still gives components 1,048,576 columns under `unlimited` and `source`; I left it and documented the limit.
+      The plan says width carries no sentinel. The render-tree fold honors that, but a filling component rendered directly through this bridge would print about a million glyphs. No shipped `md` command I ran reaches it: output sizes under `--width unlimited` stayed normal for toc, delta, graph, code-block, schema about/validate/triggers, hash, and render. Fixing it means making a component's width an enum rather than a number, across the component trait, which is much larger than this documentation phase. If the reviewer wants it, it is one bridge plus each filling component.
+  - |-
+      A set `$EDITOR` or `$VISUAL` that names a missing program now fails `md edit` instead of opening a probed editor. The Phase 5 list called the silent fallthrough a defect; the plan did not settle it.
+      `$EDITOR` still gives way to a valid `$VISUAL`, which a test and the documentation pinned. A blank variable counts as unset. This also changes Claudine's prompt editing, which shares `resolve_editor_command`.
+      Alternative: keep falling through and print a warning, which still opens an editor the user did not choose. Redoing it means restoring the probe in that one function.
+  - |-
+      `render_terminal_output` now returns its diagnostics (`Rendered<String>`) and `render_output` carries them, but `md` does not print them. The Phase 5 list named the dropped diagnostics as a defect.
+      I tried writing them to stderr, and `md validate refs --output markdown` then warned "inline span style has no plain Markdown equivalent" about the command's own report, which a user cannot act on.
+      Alternative: forward them only for a document the user authored (`md render`). That needs a flag on `CommandValue`; the library side would not change.
+  - |-
+      A reference and a location in the report are now never split: their columns do not wrap, so a width that cannot hold a row stacks that group. The spec did not state this.
+      Without it the report broke `./missing-one.md` at the hyphen in a narrow table. It also found a planner bug: a borderless table reserved a boxed table's overhead, so the split happened at every numeric width, even 200.
+      Alternative: allow wrapping again and fix only the overhead, which gives more rows in columns at narrow widths and splits references there. Redoing it is one `with_word_wrap` per column in `rows_table`.
+  - |-
+      `md schema about` has no minimum width now. It kept a 64-column floor; `--width 30` must mean 30. A table that cannot fit becomes a list naming each column, for this command only.
+      Alternative: stack in the shared `Table` component, so every bordered table gains it. That is the larger fix and changes other commands' output; I left it because the spec does not ask for it.
+  - |-
+      `md validate refs` still aborts with `interpolation failed` on a document whose inline code holds an expression that does not parse, such as `` `{{ a b }}` ``. Phase 5 listed this as a defect; I left it, because `md compose` rejects the same document with the same error, so the check tells the truth about what composition will do.
+      Alternative: make the check defer parse errors and report the references anyway, which would then pass a document composition cannot build.
+  - |-
+      The summary `5 ok, 5 broken` and the data field `references_valid: 4` can differ on the same report, because a warning-severity reference counts as ok in the summary's arithmetic but not in the field, whose meaning the plan keeps from today's wire shape.
+      I changed nothing. Alternative: count warnings apart in the summary (`4 ok, 5 broken, 1 warning`), which is one formatting change in the report and its pinned tests.
+  - |-
+      `every_kinded_schema_artifact_passes_its_definition_through_the_registry` still fails, and the gates ran with it skipped, as in every phase. It rejects `claudine/docs/research/sandboxing/providers/sandboxing.yaml`, an in-progress research schema with `{{ as_csv(...) }}` inside an enum. It is unrelated to this fix and not mine to rewrite.
+      It will fail CI's darkmatter cell until the author changes that file or excludes it from the corpus.
 source_files_during_phase_2:
   - biscuit-terminal/lib/src/components/table/table.rs
   - biscuit-terminal/lib/src/render_tree/link.rs
@@ -351,15 +394,6 @@ skills_files_updated_during_phase_2:
   - .claude/skills/darkmatter/compose.md
   - .claude/skills/darkmatter/testing.md
   - .claude/skills/os/SKILL.md
-message_to_agent: |-
-  Phase 4 is complete: every command is on the output contract. What Phase 5 needs to know:
-
-  - The new pieces to document: `--output` on every leaf, defaults, `--width`, exit statuses 0/1/2, data shapes. The shapes are in `darkmatter/cli/schemas/output/` (17 files, one per leaf); `args/output.rs::COMMAND_LEAVES` is the inventory. `.claude/skills/darkmatter/SKILL.md` "CLI orientation" has a paragraph on `CommandRun`, `CommandValue`, and `DataShape`.
-  - Wire shapes a doc must state precisely: `md schema validate` is one `{files:[...]}` object; `md get`/`md schema detect` wrap as `{outcome,diagnostics,value}` when a run has something to say; `md clean`'s run-level records are `run_diagnostics`, because its `diagnostics` are the v1 rows; existing objects gain `outcome`+`diagnostics` only on failure or a run warning; a failure with no result is `{outcome,diagnostics,value:null}`. New diagnostic codes: `dm.hash.no_stored_hash`, `dm.hash.changed`, `dm.schema.baseline`.
-  - Behavior changes users will notice, which docs must not contradict: `md delta`, `md code-block`, and `md schema about` no longer paint on a pipe; `md schema detect` default is a fenced block, and `--output yaml` has no `# detected from` comment; on a pipe nothing wraps; `md validate refs` failing prints no `N error(s) found`; `md rm` prints nothing on terminal and plain. `--show` exists only on compose and render. See `decisions_for_review`.
-  - `just/review.just`'s nine `md get --raw` calls are still yours and now fail with exit 2 against a rebuilt `md`. I did not find other callers using removed flags in `just/`, but the Consistency audit should sweep again, including `darkmatter/docs/`, which still describes the old flags throughout.
-  - `simplified-schema/docs/topics/types.md` shows as modified in the worktree and is not this phase's; classify file lists by content.
-  - Still applies: `just test -- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`. `rg` hung this shell for over 100 s here; `grep` (ugrep) is fine. A `StatusBlock` paints regardless of its terminal, so anything new printing one needs `stderr_text` or a strip.
 source_files_during_phase_3:
   - biscuit-terminal/lib/src/output/mod.rs
   - biscuit-terminal/lib/src/output/width.rs
@@ -571,6 +605,551 @@ skills_files_updated_during_phase_4:
   - .claude/skills/darkmatter/SKILL.md
   - .claude/skills/darkmatter/cli.md
   - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/output/data.rs
+  - biscuit-terminal/lib/src/output/mod.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - darkmatter/cli/src/args/cli.rs
+  - darkmatter/cli/src/commands/schema/detect.rs
+  - darkmatter/cli/src/io/mod.rs
+  - darkmatter/cli/src/output/report.rs
+  - darkmatter/cli/tests/l1/output_commands.rs
+  - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+  - darkmatter/lib/tests/l1/reference_report.rs
+  - just/review.just
+  - simplified-schema/lib/src/validation.rs
+docs_updated_during_phase_5:
+  - biscuit-terminal/README.md
+  - biscuit-terminal/docs/components/prose.md
+  - biscuit-terminal/docs/render-tree.md
+  - biscuit-terminal/lib/README.md
+  - darkmatter/README.md
+  - darkmatter/cli/README.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - darkmatter/docs/cli/clean.md
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/cli/delta.md
+  - darkmatter/docs/cli/get.md
+  - darkmatter/docs/cli/graph.md
+  - darkmatter/docs/cli/hash.md
+  - darkmatter/docs/cli/index.md
+  - darkmatter/docs/cli/policy.md
+  - darkmatter/docs/cli/render.md
+  - darkmatter/docs/cli/rm.md
+  - darkmatter/docs/cli/set.md
+  - darkmatter/docs/cli/toc.md
+  - darkmatter/docs/dependencies.md
+  - darkmatter/docs/errors/README.md
+  - darkmatter/docs/errors/file-reference-failures.md
+  - darkmatter/docs/inline/call-check.md
+  - darkmatter/docs/inline/filter.md
+  - darkmatter/docs/inline/link-validation.md
+  - darkmatter/docs/inline/map.md
+  - darkmatter/docs/inline/preflight-checks.md
+  - darkmatter/docs/inline/schema-validation.md
+  - darkmatter/docs/rendering/disclosure.md
+  - darkmatter/docs/rendering/mermaid.md
+  - darkmatter/docs/rendering/popover.md
+  - darkmatter/docs/structs/Link.md
+  - darkmatter/docs/topics/compose-requests.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/delta.md
+  - darkmatter/docs/topics/hyperlinking.md
+  - darkmatter/docs/topics/image-previews.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/markdown-formatting.md
+  - darkmatter/docs/topics/output-formats.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/schemas/dmls-schema-support.md
+  - darkmatter/docs/topics/schemas/schema-triggers.md
+  - docs/cli-best-practices.md
+  - docs/dependencies.md
+  - renderable/README.md
+  - renderable/docs/tree-rendering.md
+docs_created_during_phase_5:
+  - biscuit-terminal/docs/output.md
+  - darkmatter/docs/cli/code-block.md
+  - darkmatter/docs/cli/data-contracts.md
+  - darkmatter/docs/cli/developing.md
+  - darkmatter/docs/cli/edit.md
+  - darkmatter/docs/cli/output-and-width.md
+  - darkmatter/docs/cli/schema.md
+  - darkmatter/docs/cli/validate.md
+  - darkmatter/docs/errors/composition-problems.md
+  - renderable/docs/command-output.md
+  - darkmatter/fixes/2026-11-04-composition-errors/implementation.md
+skills_files_updated_during_phase_5:
+  - .claude/skills/biscuit-terminal/SKILL.md
+  - .claude/skills/biscuit-terminal/render-tree.md
+  - .claude/skills/cli/SKILL.md
+  - .claude/skills/cli/cli-best-practices.md
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/rendering.md
+  - .claude/skills/renderable/SKILL.md
+source_files_during_phase_6:
+  - renderable/src/tree/render/markdown.rs
+  - renderable/src/output/link_metadata.rs
+  - biscuit-terminal/lib/src/components/prose/tokens.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/src/output/mod.rs
+  - biscuit-terminal/lib/tests/l1/render_terminal_output.rs
+  - biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs
+  - biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs
+  - darkmatter/lib/src/editor/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/policy.rs
+  - darkmatter/lib/src/markdown/delta/mod.rs
+  - darkmatter/lib/src/markdown/output/command/value.rs
+  - darkmatter/lib/src/markdown/reference/report.rs
+  - darkmatter/lib/tests/l1/link_titles.rs
+  - darkmatter/lib/tests/l1/reference_report.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/code_panel.rs
+  - darkmatter/cli/src/commands/code_block.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/frontmatter.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/src/commands/schema/triggers.rs
+  - darkmatter/cli/src/render.rs
+  - darkmatter/cli/tests/l1/delta.rs
+  - darkmatter/cli/tests/l1/output_commands.rs
+  - darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+  - darkmatter/lib/src/lifecycle/md_host.rs
+  - darkmatter/lib/src/lifecycle/md_host/tests.rs
+docs_updated_during_phase_6:
+  - biscuit-terminal/docs/output.md
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/cli/edit.md
+  - darkmatter/docs/cli/policy.md
+  - darkmatter/docs/cli/render.md
+  - darkmatter/docs/cli/validate.md
+  - renderable/docs/command-output.md
+  - darkmatter/fixes/2026-11-04-composition-errors/implementation.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/biscuit-terminal/render-tree.md
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/os/build-hosts.md
+source_code:
+  - Cargo.lock
+  - biscuit-file/lib/src/json5/types.rs
+  - biscuit-terminal/cli/src/commands/mermaid.rs
+  - biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs
+  - biscuit-terminal/lib/src/components/prose/markdown.rs
+  - biscuit-terminal/lib/src/components/prose/mod.rs
+  - biscuit-terminal/lib/src/components/prose/parity.rs
+  - biscuit-terminal/lib/src/components/prose/prose.rs
+  - biscuit-terminal/lib/src/components/prose/render.rs
+  - biscuit-terminal/lib/src/components/prose/tokens.rs
+  - biscuit-terminal/lib/src/components/table/table.rs
+  - biscuit-terminal/lib/src/discovery/detection/color.rs
+  - biscuit-terminal/lib/src/lib.rs
+  - biscuit-terminal/lib/src/output/data.rs
+  - biscuit-terminal/lib/src/output/mod.rs
+  - biscuit-terminal/lib/src/output/profile.rs
+  - biscuit-terminal/lib/src/output/width.rs
+  - biscuit-terminal/lib/src/render_tree/link.rs
+  - biscuit-terminal/lib/src/render_tree/mod.rs
+  - biscuit-terminal/lib/src/render_tree/options.rs
+  - biscuit-terminal/lib/src/render_tree/render.rs
+  - biscuit-terminal/lib/src/terminal.rs
+  - biscuit-terminal/lib/src/utils/block_constraint.rs
+  - biscuit-terminal/lib/tests/l1/level1_apple_terminal_prose.rs
+  - biscuit-terminal/lib/tests/l1/main.rs
+  - biscuit-terminal/lib/tests/l1/output_dispatch.rs
+  - biscuit-terminal/lib/tests/l1/prose_destinations.rs
+  - biscuit-terminal/lib/tests/l1/prose_grammar.rs
+  - biscuit-terminal/lib/tests/l1/render_terminal_output.rs
+  - biscuit-terminal/lib/tests/l1/render_tree_code_context.rs
+  - biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+  - biscuit-terminal/lib/tests/l1/tree_layout.rs
+  - biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs
+  - biscuit-visualized/src/src/components/mermaid.rs
+  - biscuit-visualized/src/src/components/render_hook.rs
+  - biscuit-visualized/src/tests/l1/display_size.rs
+  - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/lifecycle/tests/call_check.rs
+  - claudine/lib/src/render/final_message.rs
+  - claudine/lib/src/render/prompt/formatting.rs
+  - darkmatter/cli/schemas/output/clean.yaml
+  - darkmatter/cli/schemas/output/code-block.yaml
+  - darkmatter/cli/schemas/output/compose.yaml
+  - darkmatter/cli/schemas/output/delta.yaml
+  - darkmatter/cli/schemas/output/edit.yaml
+  - darkmatter/cli/schemas/output/get.yaml
+  - darkmatter/cli/schemas/output/graph.yaml
+  - darkmatter/cli/schemas/output/hash.yaml
+  - darkmatter/cli/schemas/output/render.yaml
+  - darkmatter/cli/schemas/output/rm.yaml
+  - darkmatter/cli/schemas/output/schema-about.yaml
+  - darkmatter/cli/schemas/output/schema-detect.yaml
+  - darkmatter/cli/schemas/output/schema-triggers.yaml
+  - darkmatter/cli/schemas/output/schema-validate.yaml
+  - darkmatter/cli/schemas/output/set.yaml
+  - darkmatter/cli/schemas/output/toc.yaml
+  - darkmatter/cli/schemas/output/validate-refs.yaml
+  - darkmatter/cli/src/args/cli.rs
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/src/args/completion.rs
+  - darkmatter/cli/src/args/enums.rs
+  - darkmatter/cli/src/args/mod.rs
+  - darkmatter/cli/src/args/output.rs
+  - darkmatter/cli/src/args/parsers.rs
+  - darkmatter/cli/src/args/policy.rs
+  - darkmatter/cli/src/args/render.rs
+  - darkmatter/cli/src/args/target.rs
+  - darkmatter/cli/src/artifact.rs
+  - darkmatter/cli/src/collection_failure.rs
+  - darkmatter/cli/src/commands/clean.rs
+  - darkmatter/cli/src/commands/clean/json.rs
+  - darkmatter/cli/src/commands/code_block.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/compose/lifecycle.rs
+  - darkmatter/cli/src/commands/compose/report.rs
+  - darkmatter/cli/src/commands/delta.rs
+  - darkmatter/cli/src/commands/frontmatter.rs
+  - darkmatter/cli/src/commands/graph.rs
+  - darkmatter/cli/src/commands/hash.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/src/commands/schema/detect.rs
+  - darkmatter/cli/src/commands/schema/mod.rs
+  - darkmatter/cli/src/commands/schema/triggers.rs
+  - darkmatter/cli/src/commands/schema/validate.rs
+  - darkmatter/cli/src/commands/toc.rs
+  - darkmatter/cli/src/commands/trigger_findings.rs
+  - darkmatter/cli/src/commands/validate.rs
+  - darkmatter/cli/src/io/mod.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/src/main.rs
+  - darkmatter/cli/src/output/command.rs
+  - darkmatter/cli/src/output/mod.rs
+  - darkmatter/cli/src/output/report.rs
+  - darkmatter/cli/src/render.rs
+  - darkmatter/cli/src/style_claims.rs
+  - darkmatter/cli/tests/common/fixture.rs
+  - darkmatter/cli/tests/common/mod.rs
+  - darkmatter/cli/tests/common/protected_env.rs
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_valid/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_fileref/expected.pretty
+  - darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+  - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+  - darkmatter/cli/tests/l1/clean.rs
+  - darkmatter/cli/tests/l1/clean_fidelity.rs
+  - darkmatter/cli/tests/l1/clean_frontmatter.rs
+  - darkmatter/cli/tests/l1/clean_json.rs
+  - darkmatter/cli/tests/l1/clean_parity.rs
+  - darkmatter/cli/tests/l1/clean_rules.rs
+  - darkmatter/cli/tests/l1/code_block.rs
+  - darkmatter/cli/tests/l1/collection_blocks.rs
+  - darkmatter/cli/tests/l1/compose_basic.rs
+  - darkmatter/cli/tests/l1/compose_call_warnings.rs
+  - darkmatter/cli/tests/l1/compose_collection_controls.rs
+  - darkmatter/cli/tests/l1/compose_data_output.rs
+  - darkmatter/cli/tests/l1/compose_lifecycle.rs
+  - darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+  - darkmatter/cli/tests/l1/compose_report_json.rs
+  - darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+  - darkmatter/cli/tests/l1/compose_value_provenance.rs
+  - darkmatter/cli/tests/l1/context_construction_guard.rs
+  - darkmatter/cli/tests/l1/delta.rs
+  - darkmatter/cli/tests/l1/diagnostic_positions.rs
+  - darkmatter/cli/tests/l1/entry_point_parity.rs
+  - darkmatter/cli/tests/l1/feature_flag.rs
+  - darkmatter/cli/tests/l1/frontmatter_key_order.rs
+  - darkmatter/cli/tests/l1/get_set_rm.rs
+  - darkmatter/cli/tests/l1/graph.rs
+  - darkmatter/cli/tests/l1/hash_entry_precedence.rs
+  - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+  - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+  - darkmatter/cli/tests/l1/layout_flags.rs
+  - darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+  - darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+  - darkmatter/cli/tests/l1/link_titles.rs
+  - darkmatter/cli/tests/l1/magic_root.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/mermaid_features.rs
+  - darkmatter/cli/tests/l1/output_commands.rs
+  - darkmatter/cli/tests/l1/output_envelope.rs
+  - darkmatter/cli/tests/l1/policy_verbs.rs
+  - darkmatter/cli/tests/l1/reference_report.rs
+  - darkmatter/cli/tests/l1/render_basic.rs
+  - darkmatter/cli/tests/l1/rm.rs
+  - darkmatter/cli/tests/l1/schema_about.rs
+  - darkmatter/cli/tests/l1/schema_detect.rs
+  - darkmatter/cli/tests/l1/schema_grammar_types.rs
+  - darkmatter/cli/tests/l1/schema_recursive.rs
+  - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+  - darkmatter/cli/tests/l1/schema_target_recognition.rs
+  - darkmatter/cli/tests/l1/schema_triggers.rs
+  - darkmatter/cli/tests/l1/schema_union_matrix.rs
+  - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+  - darkmatter/cli/tests/l1/schema_validate.rs
+  - darkmatter/cli/tests/l1/schema_validate_baseline.rs
+  - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+  - darkmatter/cli/tests/l1/schema_validate_core_types.rs
+  - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+  - darkmatter/cli/tests/l1/schema_validate_timings.rs
+  - darkmatter/cli/tests/l1/schema_validate_yaml.rs
+  - darkmatter/cli/tests/l1/standalone_baseline.rs
+  - darkmatter/cli/tests/l1/toc.rs
+  - darkmatter/cli/tests/l1/validate_refs.rs
+  - darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+  - darkmatter/dmls/tests/l1/collection_editor.rs
+  - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+  - darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/graph_validate.json
+  - darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_errors.json
+  - darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_local.json
+  - darkmatter/lib/benches/phase8_render.rs
+  - darkmatter/lib/benches/render_code_heavy.rs
+  - darkmatter/lib/benches/render_pipeline.rs
+  - darkmatter/lib/src/editor/mod.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/layout/error.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/page/tests.rs
+  - darkmatter/lib/src/lifecycle/md_host.rs
+  - darkmatter/lib/src/lifecycle/md_host/tests.rs
+  - darkmatter/lib/src/markdown/cleanup/document.rs
+  - darkmatter/lib/src/markdown/cleanup/link_titles.rs
+  - darkmatter/lib/src/markdown/cleanup/mod.rs
+  - darkmatter/lib/src/markdown/cleanup/structure.rs
+  - darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+  - darkmatter/lib/src/markdown/code_block.rs
+  - darkmatter/lib/src/markdown/compose/body_origin.rs
+  - darkmatter/lib/src/markdown/compose/call_precheck.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/link_title_warnings.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+  - darkmatter/lib/src/markdown/compose/policy.rs
+  - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/site_scope.rs
+  - darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+  - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/conditions.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/delta/mod.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/output/code_block.rs
+  - darkmatter/lib/src/markdown/output/command/clean.rs
+  - darkmatter/lib/src/markdown/output/command/data.rs
+  - darkmatter/lib/src/markdown/output/command/document.rs
+  - darkmatter/lib/src/markdown/output/command/mod.rs
+  - darkmatter/lib/src/markdown/output/command/schema_about.rs
+  - darkmatter/lib/src/markdown/output/command/tests.rs
+  - darkmatter/lib/src/markdown/output/command/value.rs
+  - darkmatter/lib/src/markdown/output/mod.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/markdown/reference/css.rs
+  - darkmatter/lib/src/markdown/reference/file_tree/model.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/html.rs
+  - darkmatter/lib/src/markdown/reference/local.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/report.rs
+  - darkmatter/lib/src/markdown/reference/snapshot.rs
+  - darkmatter/lib/src/markdown/reference/types.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/src/markdown/render_tree/build_context.rs
+  - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+  - darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+  - darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/src/render/image_ref.rs
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/style/bespoke.rs
+  - darkmatter/lib/src/style/cli_claims.rs
+  - darkmatter/lib/tests/browser/browser_render.rs
+  - darkmatter/lib/tests/common/clean_parity/mod.rs
+  - darkmatter/lib/tests/fixtures/composition_errors/child.md
+  - darkmatter/lib/tests/fixtures/composition_errors/leading-rule.md
+  - darkmatter/lib/tests/fixtures/composition_errors/root.md
+  - darkmatter/lib/tests/fixtures/composition_errors/when-error.md
+  - darkmatter/lib/tests/l1/blockquote_list_spacing.rs
+  - darkmatter/lib/tests/l1/code_link.rs
+  - darkmatter/lib/tests/l1/collection_analysis.rs
+  - darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+  - darkmatter/lib/tests/l1/collection_discovery.rs
+  - darkmatter/lib/tests/l1/cutover_reference.rs
+  - darkmatter/lib/tests/l1/diagnostic_projection.rs
+  - darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+  - darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+  - darkmatter/lib/tests/l1/horizontal_rule_snapshots.rs
+  - darkmatter/lib/tests/l1/kind_semantic_checks.rs
+  - darkmatter/lib/tests/l1/layout_snapshots.rs
+  - darkmatter/lib/tests/l1/link_title_migration.rs
+  - darkmatter/lib/tests/l1/link_title_warnings.rs
+  - darkmatter/lib/tests/l1/link_titles.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+  - darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+  - darkmatter/lib/tests/l1/mermaid_text_line_numbers.rs
+  - darkmatter/lib/tests/l1/plain_corpus.rs
+  - darkmatter/lib/tests/l1/prelude_exports.rs
+  - darkmatter/lib/tests/l1/prose_wrap_parity.rs
+  - darkmatter/lib/tests/l1/reference_provenance.rs
+  - darkmatter/lib/tests/l1/reference_report.rs
+  - darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs
+  - darkmatter/lib/tests/l1/render_tree_roundtrip.rs
+  - darkmatter/lib/tests/l1/report_diagnostics.rs
+  - darkmatter/lib/tests/l1/shared_diagnostics.rs
+  - darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_terminal.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_plain_corpus.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_styled_corpus.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_exact_width_terminal.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_max_width_terminal.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_center_alignment_terminal.snap
+  - darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_right_alignment_terminal.snap
+  - darkmatter/lib/tests/l1/style_features_baseline.rs
+  - darkmatter/lib/tests/l1/style_features_phase5.rs
+  - darkmatter/lib/tests/l1/tree_features_characterization.rs
+  - darkmatter/lib/tests/l1/yaml_block_parity.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/code_panel.rs
+  - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+  - just/review.just
+  - model-citizen/cli/src/output.rs
+  - renderable/Cargo.toml
+  - renderable/src/color/capability.rs
+  - renderable/src/html/mod.rs
+  - renderable/src/lib.rs
+  - renderable/src/output/link_metadata.rs
+  - renderable/src/output/mod.rs
+  - renderable/src/tree/attrs.rs
+  - renderable/src/tree/document.rs
+  - renderable/src/tree/render/browser.rs
+  - renderable/src/tree/render/markdown.rs
+  - renderable/src/tree/validate.rs
+  - renderable/tests/html_output_width.rs
+  - renderable/tests/html_policy_comment_nodes.rs
+  - renderable/tests/link_metadata_folds.rs
+  - renderable/tests/markdown_container_line_endings.rs
+  - renderable/tests/markdown_footnote_continuation.rs
+  - renderable/tests/markdown_footnote_labels.rs
+  - renderable/tests/markdown_html_contexts.rs
+  - renderable/tests/markdown_line_endings_in_fields.rs
+  - renderable/tests/markdown_literal_text.rs
+  - renderable/tests/markdown_output_width.rs
+  - renderable/tests/markdown_raw_html_payloads.rs
+  - renderable/tests/markdown_single_line_raw_html.rs
+  - renderable/tests/markdown_structural_breaks.rs
+  - renderable/tests/markdown_table_cell_blocks.rs
+  - renderable/tests/markdown_table_cell_pipes.rs
+  - renderable/tests/markdown_unsupported_placeholder.rs
+  - renderable/tests/support/adjacent_code_matrix.rs
+  - simplified-schema/docs/topics/schema-object.md
+  - simplified-schema/lib/src/validation.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/recent_commits_prose_layout.rs
+  - sniff/cli/tests/l1/cli.rs
+  - sniff/cli/tests/level2/level2_git_status_styling.rs
+  - sniff/cli/tests/level2/level2_recent_commits_rendering.rs
+documentation:
+  - .claude/skills/biscuit-terminal/SKILL.md
+  - .claude/skills/biscuit-terminal/image-rendering.md
+  - .claude/skills/biscuit-terminal/render-tree.md
+  - .claude/skills/cli/SKILL.md
+  - .claude/skills/cli/cli-best-practices.md
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/cleanup.md
+  - .claude/skills/darkmatter/cli.md
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/rendering.md
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/terminal.md
+  - .claude/skills/darkmatter/testing.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/build-hosts.md
+  - .claude/skills/renderable/SKILL.md
+  - .claude/skills/renderable/tree.md
+  - .claude/skills/worktree/list.md
+  - biscuit-terminal/README.md
+  - biscuit-terminal/docs/components/prose.md
+  - biscuit-terminal/docs/components/terminal_image.md
+  - biscuit-terminal/docs/output.md
+  - biscuit-terminal/docs/render-tree.md
+  - biscuit-terminal/lib/README.md
+  - darkmatter/README.md
+  - darkmatter/cli/README.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - darkmatter/docs/cli/clean.md
+  - darkmatter/docs/cli/code-block.md
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/cli/data-contracts.md
+  - darkmatter/docs/cli/delta.md
+  - darkmatter/docs/cli/developing.md
+  - darkmatter/docs/cli/edit.md
+  - darkmatter/docs/cli/get.md
+  - darkmatter/docs/cli/graph.md
+  - darkmatter/docs/cli/hash.md
+  - darkmatter/docs/cli/index.md
+  - darkmatter/docs/cli/output-and-width.md
+  - darkmatter/docs/cli/policy.md
+  - darkmatter/docs/cli/render.md
+  - darkmatter/docs/cli/rm.md
+  - darkmatter/docs/cli/schema.md
+  - darkmatter/docs/cli/set.md
+  - darkmatter/docs/cli/toc.md
+  - darkmatter/docs/cli/validate.md
+  - darkmatter/docs/dependencies.md
+  - darkmatter/docs/errors/README.md
+  - darkmatter/docs/errors/composition-problems.md
+  - darkmatter/docs/errors/file-reference-failures.md
+  - darkmatter/docs/inline/call-check.md
+  - darkmatter/docs/inline/filter.md
+  - darkmatter/docs/inline/link-validation.md
+  - darkmatter/docs/inline/map.md
+  - darkmatter/docs/inline/preflight-checks.md
+  - darkmatter/docs/inline/schema-validation.md
+  - darkmatter/docs/rendering/disclosure.md
+  - darkmatter/docs/rendering/mermaid.md
+  - darkmatter/docs/rendering/popover.md
+  - darkmatter/docs/structs/Link.md
+  - darkmatter/docs/structs/Markdown.md
+  - darkmatter/docs/topics/compose-requests.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/delta.md
+  - darkmatter/docs/topics/hyperlinking.md
+  - darkmatter/docs/topics/image-previews.md
+  - darkmatter/docs/topics/lifecycle/error-handling.md
+  - darkmatter/docs/topics/lifecycle/index.md
+  - darkmatter/docs/topics/markdown-formatting.md
+  - darkmatter/docs/topics/output-formats.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/schemas/dmls-schema-support.md
+  - darkmatter/docs/topics/schemas/schema-triggers.md
+  - darkmatter/fixes/2026-11-04-composition-errors/implementation.md
+  - docs/cli-best-practices.md
+  - docs/dependencies.md
+  - renderable/README.md
+  - renderable/docs/command-output.md
+  - renderable/docs/tree-rendering.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-11-04-composition-errors (6 phases)
@@ -906,3 +1485,146 @@ The scope shortcut was not used: source files changed, so both gates ran.
 | Terminal from options | `biscuit-terminal` `output::profile::tests::{a_terminal_from_a_plain_profile_keeps_no_capability, a_terminal_round_trips_a_rich_profile}` and doctest |
 
 The Input Robustness Matrix does not apply (plan rule 29).
+
+## Phase 5
+
+Ran Wave 14 with three foreground documentation subagents, each owning its files; the orchestrator did `just/review.just`, the code fixes, the audit, and the gates.
+
+### Wave 14 — Documentation
+
+- CLI: new `output-and-width.md`, `data-contracts.md` (replaces `report-json.md`), `validate.md`, `schema.md`, `code-block.md`, `edit.md`, `developing.md`; every command page updated; READMEs cut to overviews. `just/review.just`: nine `md get --raw` calls became `md get --output plain`; bytes checked for scalar, null, list, and missing keys against the built binary.
+- Topics: link titles, authored positions, stopping rules (new `errors/composition-problems.md`), lifecycle output order, exit statuses, removed flags. Comment fixes in `simplified-schema/lib/src/validation.rs` and `dmls/tests/l1/expression_call_diagnostics.rs`; `report_diagnostics.rs` and Claudine's error module had no stale mention left.
+- Shared: new `renderable/docs/command-output.md` and `biscuit-terminal/docs/output.md`; `prose.md` degradation; `cli` skill and `docs/cli-best-practices.md`.
+
+A subagent's `md edit` checks launched two windowless `nvim` processes on temp files (`EDITOR` naming a missing program falls through). It killed both and removed the temp directory.
+
+### Wave 15 — Consistency audit
+
+The sweep covered removed flags and values, old report wording, old exit claims, `report-json` links, and `key=value` titles across docs, skills, just files, and source comments. Remaining hits are Removed-spellings tables, usage-error exit 2, unrelated "is not valid" prose, image titles and pre-migration examples, parser-rejection tests, and historical specs. `docs/dependencies.md` still named `--format json` (fixed). Older doc links to specs in `inline/fm-shell-expansion.md`, `rendering/popover.md`, `rendering/style.md`, `rendering/code-highlighting.md`, and `topics/caching.md` predate this fix and were left. Comments corrected: `RenderedOutput::diagnostics` overstated what the terminal fold reports; `--width`'s help implied every command has `--max-width`.
+
+### Defects the documentation pass found, fixed here
+
+| Defect | Reproduced with | Fix |
+|---|---|---|
+| The report lost every row to a "Table could not be rendered" notice | `md validate refs --width 30`; a long reference at `--width 60` | borderless tables stack (`emit_stacked_rows`) |
+| `md toc --output toml` always failed | exit 1 with `u64 value was too large` | above-range integers become decimal text in `toml_values` |
+| A file argument's class was missing from data | `md compose nofile.md --output json`, `md get @ title` | `DocumentArgumentError::diagnostic` adds `failure` and `reference` |
+
+### Requirement to test mapping
+
+| Behavior | Test | Boundary, rung |
+|---|---|---|
+| Too-narrow borderless table keeps all cells, verbatim, no notice | `render_tree_tests::a_borderless_table_too_narrow_for_its_columns_stacks_every_cell` | terminal fold, F1 |
+| Report keeps locations at 20/30/40/60 columns; a stacked reference is verbatim | `reference_report::a_width_too_narrow_for_the_columns_keeps_every_row` | library public `render_output`, F2 |
+| TOML integer range edges (`u64::MAX`, `i64::MAX`, small, negative, in an array) | `output::data::tests::toml_writes_an_integer_above_its_range_as_decimal_text` | dispatcher, F1 |
+| `md toc --output toml` succeeds and its hashes match JSON's digits | `output_commands::toc_toml_carries_its_hashes_without_failing` | real CLI, F3 |
+| `failure` and `reference` on no-match and invalid-reference across get, compose, detect, strict schemas | `output_commands::a_file_argument_failure_carries_its_class_in_data` | real CLI, F3 |
+
+Input Robustness Matrix: not applicable, per plan rule 29; no loader changed.
+
+### Gates (macOS)
+
+- `just test` in `darkmatter/` with `--skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`: 13638 passed, 11 skipped, 5 slow. After it, a change to `emit_stacked_rows` reran `reference_report` (33), biscuit-terminal `render_tree|borderless` (311), and darkmatter-cli `validate|graph` (259): all passed.
+- `just lint` in `darkmatter/`: pass (rerun after the last change). `just test` in `biscuit-terminal/`: 3996 passed, 55 skipped, before the same change. `just lint` there: pass.
+- CI scope (`affected_scope.py` on the working tree): `change_class: package`, so gates were required. Its test-input cells, run here: claudine-cli `research_sequence_artifacts` (7), test-toolkit `the_ci_documentation_states_the_implemented_behavior` (1), tree-hugger-cli (2733): all passed.
+- Doc-reading tests (`docs_corpus`, `trigger_spelling`, `current_root_*`, `schema_phase_validation`, `shipped_schema_corpus`) ran within the full gate.
+- Not run: L2, browser, doctest, Windows, WSL2, Linux; Phase 6 owns them. The fixes carry no OS logic, so no cross-check was run. `just check-tier-coverage` was not run: new tests carry no tier marker.
+
+### Pre-existing and load-sensitive failures
+
+`every_kinded_schema_artifact_passes_its_definition_through_the_registry` still fails on `sandboxing.yaml`, unrelated and already logged. No load-sensitive failure this phase.
+
+## Phase 6
+
+Ran as the orchestrator with no subagents: the work was serial verification. A first pass reproduced the Phase 5 defect list against the built binary; each confirmed defect got a failing test first, then a fix.
+
+### Wave 16 — Defects from the Phase 5 list
+
+| Reported | Verdict | Change |
+|---|---|---|
+| `md validate refs` aborts on an expression in inline code | Not a defect. `md compose` rejects the same document with the same error, and the check reports what composition would do. Only an expression that does not parse does this. | None; in `decisions_for_review` |
+| `md schema about --width 30` wraps near 60 | Confirmed: a 64-column floor | Floor removed; a table that cannot fit becomes a list naming each column |
+| `md schema triggers --output markdown` runs rows together | Confirmed: it parsed its terminal text as Markdown | `trace_markdown` builds a real document; both outputs share `RootLine` |
+| `md schema about --output markdown` leaves `&#32;` | Confirmed, two causes: the fold wrote each phrasing child of a tight list item as its own block, and a `<type>` keyword read as raw HTML | `render_list_item_blocks`; keyword is a code span |
+| `md code-block --output markdown` adds a blank line | Confirmed | The file's last line ending is the fence's |
+| `md clean --save` prints `No changes` above `Preamble: modified` | Confirmed in `compute_delta`, so `md delta` too: classification ignored the preamble | A changed preamble classifies as whitespace-only or minor. `delta_golden_preamble_change` had pinned the defect and moved |
+| `md compose --shell --show` ignores `--show` | Confirmed | Usage error |
+| `md render --deny` rejects `dm.style.unknown_key` | Confirmed: documented code, not in the catalog | Both style codes accepted, each denying only itself |
+| `md edit` falls through on a missing `$EDITOR`, leaves an empty file | Confirmed; a test really launched `nvim` | Refuses when every set variable is missing, before creating anything; removes a file it created if the edit fails and it is still empty. A new `edit_refuses_…` test timed out on the launch before the fix |
+| `render_terminal_output` drops diagnostics | Confirmed | Returns `Rendered<String>`; `RenderedOutput` carries them. `md` does not print them: see `decisions_for_review` |
+| `link_metadata` names `dm.link.*` in a shared crate | Confirmed | `LinkTitleNotice::token()` is neutral; codes moved to `compose::policy` |
+
+### Defects verification found beyond the list
+
+| Defect | Found by | Fix |
+|---|---|---|
+| The report split `./missing-one.md` at the hyphen at every numeric width, even 200 | The styled artifact capture | A borderless table planned a boxed table's overhead (10 columns against 4 of gaps), and a later pass hands it its natural width. `Table::border_overhead` uses the gaps; the fold passes `borderless`; reference and location columns no longer wrap, so a row stacks instead |
+| An interrupted lifecycle run could exit 1, not 130 | `ctrl_c_runs_cancelled_then_finalize_and_exits_130` on WSL2 | A group `SIGINT` kills the command as `md` receives it, and the handler sets its flag on another thread. A command ended by a signal now waits up to 250 ms for the flag (`wait_for_interrupt`) |
+| My own test did not compile on Windows | `just cross-check darkmatter --os windows` | Gated `#[cfg(unix)]` like its neighbors |
+
+Stale L2 tests corrected, none a product defect: `level2_apple_terminal_link_fallback_visible` and `…styled_link_fallback_escapes_bracket` asserted the removed `(url)` fallback; `level2_style_images_local_style_width_alignment_in_terminal` the removed `▉ IMAGE[`; `level2_page_no_double_blank_rows_between_code_blocks` did not read WezTerm's `CSI K` capture of a painted empty row; `level2_tmux_draws_sixel_itself_at_the_bottom_of_the_viewport` counted lines without the fixture's `tty_modes_restored` row, which predates this branch.
+
+One first attempt was reversed. Forwarding fold diagnostics to stderr made `md validate refs --output markdown` warn about the command's own report, so the CLI forwarding was removed before the final gates. The phrasing-run fix also first applied to every container and broke `Section__baseline__markdown`; it is now list items only.
+
+### Requirement to test mapping
+
+| Behavior | Test | Boundary, rung |
+|---|---|---|
+| Tight list item is one block, and wraps under its marker | `markdown::tests::a_tight_list_item_writes_its_phrasing_as_one_block`, `…wraps_at_a_width_and_indents_under_its_marker` | fold, F1 |
+| `schema about` Markdown rows, narrow width keeps content, no ESC | `output_commands::schema_about_markdown_keeps_each_entry_on_its_own_list_row`, `schema_about_honors_a_width_narrower_than_a_page` | real CLI, F3 |
+| `schema triggers` Markdown rows | `output_commands::schema_triggers_markdown_keeps_its_rows_apart` | real CLI, F3 |
+| Code block fence; a blank last line stays; data keeps bytes | `output_commands::code_block_markdown_has_no_blank_line_before_its_closing_fence` | real CLI, F3 |
+| Preamble classification, all three variants | `delta::tests::a_changed_preamble_is_a_change`, `output_commands::delta_never_calls_a_changed_preamble_no_changes` | library F1, CLI F3 |
+| `--shell --show` | `output_commands::compose_shell_refuses_show` | real CLI, F3 |
+| Style code denial: denied, other code, unknown code, formatted and data | `output_commands::render_deny_takes_the_style_codes_it_reports` | real CLI, F3 |
+| Editor resolution and cleanup, each cell | `editor::tests::a_configured_editor_that_is_missing_refuses_rather_than_probing`, `a_blank_editor_variable_counts_as_unset`, `output_commands::edit_refuses_…`, `edit_removes_…`, `edit_keeps_…` | library F1, CLI F3 |
+| Terminal fold diagnostics | `render_terminal_output::the_generic_terminal_fold_reports_what_it_could_not_render` | public API, F2 |
+| Borderless planning | `render_tree_tests::a_borderless_table_that_fits_exactly_wraps_nothing`, `reference_report::a_reference_is_never_split_at_any_width` | fold F1, public API F2 |
+| Portable locations: spaces, Unicode, CRLF, drive-spelled URI on Windows | `reference_report::a_location_is_portable_through_spaces_unicode_and_crlf` | public API, F2, executed on Windows |
+| Interrupt settling | `md_host::tests::a_late_interrupt_flag_is_seen_and_a_missing_one_gives_up`, `compose_lifecycle::ctrl_c_runs_cancelled_then_finalize_and_exits_130` | F1, real process and signal F3 |
+
+Input Robustness Matrix: not applicable, per plan rule 29; no loader changed.
+
+### Gates (final tree)
+
+| Gate | Result |
+|---|---|
+| `just test`, renderable | 733 passed |
+| `just test`, biscuit-terminal | 3998 run, all passed |
+| `just test`, darkmatter, with the one logged skip | 13654 passed, 11 skipped |
+| `just lint`, all three areas | pass |
+| `just doctest`, all three areas | pass |
+| `cargo check --workspace --all-targets` | pass |
+| `just test-l2`, biscuit-terminal | 8 and 252 passed |
+| `just test-l2`, darkmatter | 3, 18, and 69 passed |
+| `just test-browser` | biscuit-terminal 56, darkmatter 44 passed |
+| `just check-tier-coverage` darkmatter, biscuit-terminal | pass |
+| Dependents, targeted | claudine-cli 17, simplified-schema 31 and 69, darkmatter-lsp 221, biscuit-icon 129, biscuit-visualized 19, messenger 226, tree-hugger-cli 2733, test-toolkit 1: all passed |
+| `git diff --check` | clean |
+
+WezTerm, tmux, kitty, Apple Terminal, and Google Chrome are all installed here, and the logs show no capability skip. L2 and browser passed after the last change each of them can reach, except `wait_for_interrupt`, which neither tier exercises.
+
+CI scope (`affected_scope.py` on the working tree): `change_class: package`, `packages` non-empty, so the gates were required. It includes `simplified-schema`, from uncommitted topic-page changes this fix does not own.
+
+### Cross-OS evidence
+
+Declared hosts: `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`.
+
+| Package | Linux | Windows | WSL2 |
+|---|---|---|---|
+| renderable | 733 passed | 733 passed | 733 passed |
+| biscuit-terminal | 3612 passed | 3574 passed | 3612 passed |
+| darkmatter-cli | 1879 passed | 1869 passed | 1879 passed |
+| darkmatter | L1 target only: 3999 of 4000 | 9968 of 9969 | 10022 of 10023 |
+
+The one failure in each darkmatter cell is the pre-existing corpus test below. WSL2's darkmatter-cli first failed the interrupt race, then passed whole after the fix, and the test alone passed three more times. The darkmatter cells ran before `wait_for_interrupt` landed; darkmatter-cli's lifecycle tests reran on Windows and WSL2 after it.
+
+**Gap:** Linux has no darkmatter archive run. Two attempts ended with `ld terminated with signal 9` on `build-linux`, which also stopped answering SSH, so the library's unit tests did not run there. WSL2 Ubuntu covers them; CI's Linux leg will too. Recorded in the `os` skill. No Windows or WSL2 observation was published from a filtered or patched run. L2 and browser ran on macOS only.
+
+### Artifacts
+
+`artifacts/` holds the report in every output, a styled capture with its control bytes shown as `\e`, the plain corpus at 40, 80, and unlimited, `streams-and-status.txt`, the conformance inventory, and `generate.sh`, which rebuilds them. `implementation.md` lists each acceptance item against its evidence.
+
+### Pre-existing and load-sensitive failures
+
+`every_kinded_schema_artifact_passes_its_definition_through_the_registry` fails on `claudine/docs/research/sandboxing/providers/sandboxing.yaml`, on every OS: an in-progress research schema with an expression in an enum. Left alone and in `decisions_for_review`. No load-sensitive failure on macOS.

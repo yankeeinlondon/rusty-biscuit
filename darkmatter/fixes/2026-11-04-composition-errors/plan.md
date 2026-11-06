@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-11-05
-phase: 5
+phase: 7
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -124,6 +124,7 @@ packages:
 - claudine
 - darkmatter-lsp
 - claudine-cli
+- simplified-schema
 source_files_during_phase_2:
 - biscuit-terminal/lib/src/components/table/table.rs
 - biscuit-terminal/lib/src/render_tree/link.rs
@@ -440,6 +441,551 @@ skills_files_updated_during_phase_4:
 - .claude/skills/darkmatter/SKILL.md
 - .claude/skills/darkmatter/cli.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_5:
+- biscuit-terminal/lib/src/components/table/table.rs
+- biscuit-terminal/lib/src/output/data.rs
+- biscuit-terminal/lib/src/output/mod.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/commands/schema/detect.rs
+- darkmatter/cli/src/io/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/lib/tests/l1/reference_report.rs
+- just/review.just
+- simplified-schema/lib/src/validation.rs
+docs_updated_during_phase_5:
+- biscuit-terminal/README.md
+- biscuit-terminal/docs/components/prose.md
+- biscuit-terminal/docs/render-tree.md
+- biscuit-terminal/lib/README.md
+- darkmatter/README.md
+- darkmatter/cli/README.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/delta.md
+- darkmatter/docs/cli/get.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/hash.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/cli/rm.md
+- darkmatter/docs/cli/set.md
+- darkmatter/docs/cli/toc.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/errors/README.md
+- darkmatter/docs/errors/file-reference-failures.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/docs/inline/filter.md
+- darkmatter/docs/inline/link-validation.md
+- darkmatter/docs/inline/map.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/rendering/disclosure.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/rendering/popover.md
+- darkmatter/docs/structs/Link.md
+- darkmatter/docs/topics/compose-requests.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/delta.md
+- darkmatter/docs/topics/hyperlinking.md
+- darkmatter/docs/topics/image-previews.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/markdown-formatting.md
+- darkmatter/docs/topics/output-formats.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- docs/cli-best-practices.md
+- docs/dependencies.md
+- renderable/README.md
+- renderable/docs/tree-rendering.md
+docs_created_during_phase_5:
+- biscuit-terminal/docs/output.md
+- darkmatter/docs/cli/code-block.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/developing.md
+- darkmatter/docs/cli/edit.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/errors/composition-problems.md
+- renderable/docs/command-output.md
+- darkmatter/fixes/2026-11-04-composition-errors/implementation.md
+skills_files_updated_during_phase_5:
+- .claude/skills/biscuit-terminal/SKILL.md
+- .claude/skills/biscuit-terminal/render-tree.md
+- .claude/skills/cli/SKILL.md
+- .claude/skills/cli/cli-best-practices.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cleanup.md
+- .claude/skills/darkmatter/rendering.md
+- .claude/skills/renderable/SKILL.md
+source_files_during_phase_6:
+- renderable/src/tree/render/markdown.rs
+- renderable/src/output/link_metadata.rs
+- biscuit-terminal/lib/src/components/prose/tokens.rs
+- biscuit-terminal/lib/src/components/table/table.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- biscuit-terminal/lib/src/output/mod.rs
+- biscuit-terminal/lib/tests/l1/render_terminal_output.rs
+- biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs
+- biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs
+- darkmatter/lib/src/editor/mod.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/delta/mod.rs
+- darkmatter/lib/src/markdown/output/command/value.rs
+- darkmatter/lib/src/markdown/reference/report.rs
+- darkmatter/lib/tests/l1/link_titles.rs
+- darkmatter/lib/tests/l1/reference_report.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/code_panel.rs
+- darkmatter/cli/src/commands/code_block.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/about.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/tests/l1/delta.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+docs_updated_during_phase_6:
+- biscuit-terminal/docs/output.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/edit.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/cli/validate.md
+- renderable/docs/command-output.md
+- darkmatter/fixes/2026-11-04-composition-errors/implementation.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/biscuit-terminal/render-tree.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/os/build-hosts.md
+source_code:
+- Cargo.lock
+- biscuit-file/lib/src/json5/types.rs
+- biscuit-terminal/cli/src/commands/mermaid.rs
+- biscuit-terminal/cli/tests/level2/level2_apple_terminal_prose.rs
+- biscuit-terminal/lib/src/components/prose/markdown.rs
+- biscuit-terminal/lib/src/components/prose/mod.rs
+- biscuit-terminal/lib/src/components/prose/parity.rs
+- biscuit-terminal/lib/src/components/prose/prose.rs
+- biscuit-terminal/lib/src/components/prose/render.rs
+- biscuit-terminal/lib/src/components/prose/tokens.rs
+- biscuit-terminal/lib/src/components/table/table.rs
+- biscuit-terminal/lib/src/discovery/detection/color.rs
+- biscuit-terminal/lib/src/lib.rs
+- biscuit-terminal/lib/src/output/data.rs
+- biscuit-terminal/lib/src/output/mod.rs
+- biscuit-terminal/lib/src/output/profile.rs
+- biscuit-terminal/lib/src/output/width.rs
+- biscuit-terminal/lib/src/render_tree/link.rs
+- biscuit-terminal/lib/src/render_tree/mod.rs
+- biscuit-terminal/lib/src/render_tree/options.rs
+- biscuit-terminal/lib/src/render_tree/render.rs
+- biscuit-terminal/lib/src/terminal.rs
+- biscuit-terminal/lib/src/utils/block_constraint.rs
+- biscuit-terminal/lib/tests/l1/level1_apple_terminal_prose.rs
+- biscuit-terminal/lib/tests/l1/main.rs
+- biscuit-terminal/lib/tests/l1/output_dispatch.rs
+- biscuit-terminal/lib/tests/l1/prose_destinations.rs
+- biscuit-terminal/lib/tests/l1/prose_grammar.rs
+- biscuit-terminal/lib/tests/l1/render_terminal_output.rs
+- biscuit-terminal/lib/tests/l1/render_tree_code_context.rs
+- biscuit-terminal/lib/tests/l1/render_tree_diagram_hook.rs
+- biscuit-terminal/lib/tests/l1/tree_layout.rs
+- biscuit-terminal/lib/tests/level2/level2_graphics_tmux.rs
+- biscuit-visualized/src/src/components/mermaid.rs
+- biscuit-visualized/src/src/components/render_hook.rs
+- biscuit-visualized/src/tests/l1/display_size.rs
+- claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+- claudine/lib/src/composition/error/mod.rs
+- claudine/lib/src/composition/lifecycle/tests/call_check.rs
+- claudine/lib/src/render/final_message.rs
+- claudine/lib/src/render/prompt/formatting.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/enums.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/args/parsers.rs
+- darkmatter/cli/src/args/policy.rs
+- darkmatter/cli/src/args/render.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/src/artifact.rs
+- darkmatter/cli/src/collection_failure.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/clean/json.rs
+- darkmatter/cli/src/commands/code_block.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/lifecycle.rs
+- darkmatter/cli/src/commands/compose/report.rs
+- darkmatter/cli/src/commands/delta.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/hash.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/about.rs
+- darkmatter/cli/src/commands/schema/detect.rs
+- darkmatter/cli/src/commands/schema/mod.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/commands/toc.rs
+- darkmatter/cli/src/commands/trigger_findings.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/src/io/mod.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/src/style_claims.rs
+- darkmatter/cli/tests/common/fixture.rs
+- darkmatter/cli/tests/common/mod.rs
+- darkmatter/cli/tests/common/protected_env.rs
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/enum_member_invalid/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/missing_required/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_invalid/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_nested_object/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/property_union_valid/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_fileref/expected.pretty
+- darkmatter/cli/tests/fixtures/schema_validate_baseline/root_union_none_match/expected.pretty
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/clean.rs
+- darkmatter/cli/tests/l1/clean_fidelity.rs
+- darkmatter/cli/tests/l1/clean_frontmatter.rs
+- darkmatter/cli/tests/l1/clean_json.rs
+- darkmatter/cli/tests/l1/clean_parity.rs
+- darkmatter/cli/tests/l1/clean_rules.rs
+- darkmatter/cli/tests/l1/code_block.rs
+- darkmatter/cli/tests/l1/collection_blocks.rs
+- darkmatter/cli/tests/l1/compose_basic.rs
+- darkmatter/cli/tests/l1/compose_call_warnings.rs
+- darkmatter/cli/tests/l1/compose_collection_controls.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/compose_lifecycle.rs
+- darkmatter/cli/tests/l1/compose_report_diagnostics.rs
+- darkmatter/cli/tests/l1/compose_report_json.rs
+- darkmatter/cli/tests/l1/compose_schema_enhancements.rs
+- darkmatter/cli/tests/l1/compose_transclusion.rs
+- darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+- darkmatter/cli/tests/l1/compose_value_provenance.rs
+- darkmatter/cli/tests/l1/context_construction_guard.rs
+- darkmatter/cli/tests/l1/delta.rs
+- darkmatter/cli/tests/l1/diagnostic_positions.rs
+- darkmatter/cli/tests/l1/entry_point_parity.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/frontmatter_key_order.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/graph.rs
+- darkmatter/cli/tests/l1/hash_entry_precedence.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/cli/tests/l1/layout_flags.rs
+- darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+- darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+- darkmatter/cli/tests/l1/link_titles.rs
+- darkmatter/cli/tests/l1/magic_root.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/policy_verbs.rs
+- darkmatter/cli/tests/l1/reference_report.rs
+- darkmatter/cli/tests/l1/render_basic.rs
+- darkmatter/cli/tests/l1/rm.rs
+- darkmatter/cli/tests/l1/schema_about.rs
+- darkmatter/cli/tests/l1/schema_detect.rs
+- darkmatter/cli/tests/l1/schema_grammar_types.rs
+- darkmatter/cli/tests/l1/schema_recursive.rs
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_target_recognition.rs
+- darkmatter/cli/tests/l1/schema_triggers.rs
+- darkmatter/cli/tests/l1/schema_union_matrix.rs
+- darkmatter/cli/tests/l1/schema_union_pipeline.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/cli/tests/l1/schema_validate_baseline.rs
+- darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+- darkmatter/cli/tests/l1/schema_validate_core_types.rs
+- darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+- darkmatter/cli/tests/l1/schema_validate_timings.rs
+- darkmatter/cli/tests/l1/schema_validate_yaml.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/cli/tests/l1/toc.rs
+- darkmatter/cli/tests/l1/validate_refs.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_images.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/graph_validate.json
+- darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_errors.json
+- darkmatter/features/_completed/2026-06-17-cli-atheist/baseline/json/validate_refs_local.json
+- darkmatter/lib/benches/phase8_render.rs
+- darkmatter/lib/benches/render_code_heavy.rs
+- darkmatter/lib/benches/render_pipeline.rs
+- darkmatter/lib/src/editor/mod.rs
+- darkmatter/lib/src/layout/context.rs
+- darkmatter/lib/src/layout/error.rs
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/layout/page/tests.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/md_host/tests.rs
+- darkmatter/lib/src/markdown/cleanup/document.rs
+- darkmatter/lib/src/markdown/cleanup/link_titles.rs
+- darkmatter/lib/src/markdown/cleanup/mod.rs
+- darkmatter/lib/src/markdown/cleanup/structure.rs
+- darkmatter/lib/src/markdown/cleanup/tests/parse_count.rs
+- darkmatter/lib/src/markdown/code_block.rs
+- darkmatter/lib/src/markdown/compose/body_origin.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/link_title_warnings.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/lib/src/markdown/compose/site_scope.rs
+- darkmatter/lib/src/markdown/compose/tests/invalid_triggers.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/compose/transclusion/conditions.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/transclusion/types.rs
+- darkmatter/lib/src/markdown/delta/mod.rs
+- darkmatter/lib/src/markdown/mod.rs
+- darkmatter/lib/src/markdown/output/code_block.rs
+- darkmatter/lib/src/markdown/output/command/clean.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/markdown/output/command/document.rs
+- darkmatter/lib/src/markdown/output/command/mod.rs
+- darkmatter/lib/src/markdown/output/command/schema_about.rs
+- darkmatter/lib/src/markdown/output/command/tests.rs
+- darkmatter/lib/src/markdown/output/command/value.rs
+- darkmatter/lib/src/markdown/output/mod.rs
+- darkmatter/lib/src/markdown/output/terminal.rs
+- darkmatter/lib/src/markdown/reference/css.rs
+- darkmatter/lib/src/markdown/reference/file_tree/model.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/lib/src/markdown/reference/html.rs
+- darkmatter/lib/src/markdown/reference/local.rs
+- darkmatter/lib/src/markdown/reference/mod.rs
+- darkmatter/lib/src/markdown/reference/report.rs
+- darkmatter/lib/src/markdown/reference/snapshot.rs
+- darkmatter/lib/src/markdown/reference/types.rs
+- darkmatter/lib/src/markdown/reference/validate.rs
+- darkmatter/lib/src/markdown/render_tree/build_context.rs
+- darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+- darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+- darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+- darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/src/render/image_ref.rs
+- darkmatter/lib/src/render/link.rs
+- darkmatter/lib/src/style/apply.rs
+- darkmatter/lib/src/style/bespoke.rs
+- darkmatter/lib/src/style/cli_claims.rs
+- darkmatter/lib/tests/browser/browser_render.rs
+- darkmatter/lib/tests/common/clean_parity/mod.rs
+- darkmatter/lib/tests/fixtures/composition_errors/child.md
+- darkmatter/lib/tests/fixtures/composition_errors/leading-rule.md
+- darkmatter/lib/tests/fixtures/composition_errors/root.md
+- darkmatter/lib/tests/fixtures/composition_errors/when-error.md
+- darkmatter/lib/tests/l1/blockquote_list_spacing.rs
+- darkmatter/lib/tests/l1/code_link.rs
+- darkmatter/lib/tests/l1/collection_analysis.rs
+- darkmatter/lib/tests/l1/collection_blocks/provenance.rs
+- darkmatter/lib/tests/l1/collection_discovery.rs
+- darkmatter/lib/tests/l1/cutover_reference.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
+- darkmatter/lib/tests/l1/horizontal_rule_integration.rs
+- darkmatter/lib/tests/l1/horizontal_rule_snapshots.rs
+- darkmatter/lib/tests/l1/kind_semantic_checks.rs
+- darkmatter/lib/tests/l1/layout_snapshots.rs
+- darkmatter/lib/tests/l1/link_title_migration.rs
+- darkmatter/lib/tests/l1/link_title_warnings.rs
+- darkmatter/lib/tests/l1/link_titles.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/mermaid_automatic_mode.rs
+- darkmatter/lib/tests/l1/mermaid_syntax_highlighting.rs
+- darkmatter/lib/tests/l1/mermaid_text_line_numbers.rs
+- darkmatter/lib/tests/l1/plain_corpus.rs
+- darkmatter/lib/tests/l1/prelude_exports.rs
+- darkmatter/lib/tests/l1/prose_wrap_parity.rs
+- darkmatter/lib/tests/l1/reference_provenance.rs
+- darkmatter/lib/tests/l1/reference_report.rs
+- darkmatter/lib/tests/l1/render_tree_hr_snapshots.rs
+- darkmatter/lib/tests/l1/render_tree_roundtrip.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/lib/tests/l1/snapshots/l1__cutover_reference__ref_page_margin_and_padding_terminal.snap
+- darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_plain_corpus.snap
+- darkmatter/lib/tests/l1/snapshots/l1__plain_corpus__snapshot_of_the_styled_corpus.snap
+- darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_exact_width_terminal.snap
+- darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_hyperlink_max_width_terminal.snap
+- darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_center_alignment_terminal.snap
+- darkmatter/lib/tests/l1/snapshots/l1__tree_features_characterization__char_list_item_right_alignment_terminal.snap
+- darkmatter/lib/tests/l1/style_features_baseline.rs
+- darkmatter/lib/tests/l1/style_features_phase5.rs
+- darkmatter/lib/tests/l1/tree_features_characterization.rs
+- darkmatter/lib/tests/l1/yaml_block_parity.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/code_panel.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+- just/review.just
+- model-citizen/cli/src/output.rs
+- renderable/Cargo.toml
+- renderable/src/color/capability.rs
+- renderable/src/html/mod.rs
+- renderable/src/lib.rs
+- renderable/src/output/link_metadata.rs
+- renderable/src/output/mod.rs
+- renderable/src/tree/attrs.rs
+- renderable/src/tree/document.rs
+- renderable/src/tree/render/browser.rs
+- renderable/src/tree/render/markdown.rs
+- renderable/src/tree/validate.rs
+- renderable/tests/html_output_width.rs
+- renderable/tests/html_policy_comment_nodes.rs
+- renderable/tests/link_metadata_folds.rs
+- renderable/tests/markdown_container_line_endings.rs
+- renderable/tests/markdown_footnote_continuation.rs
+- renderable/tests/markdown_footnote_labels.rs
+- renderable/tests/markdown_html_contexts.rs
+- renderable/tests/markdown_line_endings_in_fields.rs
+- renderable/tests/markdown_literal_text.rs
+- renderable/tests/markdown_output_width.rs
+- renderable/tests/markdown_raw_html_payloads.rs
+- renderable/tests/markdown_single_line_raw_html.rs
+- renderable/tests/markdown_structural_breaks.rs
+- renderable/tests/markdown_table_cell_blocks.rs
+- renderable/tests/markdown_table_cell_pipes.rs
+- renderable/tests/markdown_unsupported_placeholder.rs
+- renderable/tests/support/adjacent_code_matrix.rs
+- simplified-schema/docs/topics/schema-object.md
+- simplified-schema/lib/src/validation.rs
+- sniff/cli/src/output/filesystem/mod.rs
+- sniff/cli/src/output/recent_commits_prose_layout.rs
+- sniff/cli/tests/l1/cli.rs
+- sniff/cli/tests/level2/level2_git_status_styling.rs
+- sniff/cli/tests/level2/level2_recent_commits_rendering.rs
+documentation:
+- .claude/skills/biscuit-terminal/SKILL.md
+- .claude/skills/biscuit-terminal/image-rendering.md
+- .claude/skills/biscuit-terminal/render-tree.md
+- .claude/skills/cli/SKILL.md
+- .claude/skills/cli/cli-best-practices.md
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cleanup.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/rendering.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/terminal.md
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/os/SKILL.md
+- .claude/skills/os/build-hosts.md
+- .claude/skills/renderable/SKILL.md
+- .claude/skills/renderable/tree.md
+- .claude/skills/worktree/list.md
+- biscuit-terminal/README.md
+- biscuit-terminal/docs/components/prose.md
+- biscuit-terminal/docs/components/terminal_image.md
+- biscuit-terminal/docs/output.md
+- biscuit-terminal/docs/render-tree.md
+- biscuit-terminal/lib/README.md
+- darkmatter/README.md
+- darkmatter/cli/README.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/docs/cli/clean.md
+- darkmatter/docs/cli/code-block.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/delta.md
+- darkmatter/docs/cli/developing.md
+- darkmatter/docs/cli/edit.md
+- darkmatter/docs/cli/get.md
+- darkmatter/docs/cli/graph.md
+- darkmatter/docs/cli/hash.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/output-and-width.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/cli/rm.md
+- darkmatter/docs/cli/schema.md
+- darkmatter/docs/cli/set.md
+- darkmatter/docs/cli/toc.md
+- darkmatter/docs/cli/validate.md
+- darkmatter/docs/dependencies.md
+- darkmatter/docs/errors/README.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/errors/file-reference-failures.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/docs/inline/filter.md
+- darkmatter/docs/inline/link-validation.md
+- darkmatter/docs/inline/map.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/rendering/disclosure.md
+- darkmatter/docs/rendering/mermaid.md
+- darkmatter/docs/rendering/popover.md
+- darkmatter/docs/structs/Link.md
+- darkmatter/docs/structs/Markdown.md
+- darkmatter/docs/topics/compose-requests.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/delta.md
+- darkmatter/docs/topics/hyperlinking.md
+- darkmatter/docs/topics/image-previews.md
+- darkmatter/docs/topics/lifecycle/error-handling.md
+- darkmatter/docs/topics/lifecycle/index.md
+- darkmatter/docs/topics/markdown-formatting.md
+- darkmatter/docs/topics/output-formats.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/docs/topics/schemas/schema-triggers.md
+- darkmatter/fixes/2026-11-04-composition-errors/implementation.md
+- docs/cli-best-practices.md
+- docs/dependencies.md
+- renderable/README.md
+- renderable/docs/command-output.md
+- renderable/docs/tree-rendering.md
+completed_phase: 6
+implemented: true
 ---
 
 # Composition Errors Implementation Plan
@@ -679,23 +1225,23 @@ These decisions settle the specification's remaining technical details. They app
 
 ### Wave 14 — Parallel documentation owners
 
-- [ ] **CLI documentation**
+- [x] **CLI documentation**
   - Own darkmatter/docs/cli, both Darkmatter READMEs, and `just/review.just`. Add `docs/cli/output-and-width.md`; rename/rewrite report-json.md to `data-contracts.md` and update every live link. Keep READMEs as overviews linking to the references.
   - Update every command page; add pages for validate/schema/code-block/edit where references are absent. Document accepted families/defaults/extras, width, stream/exit behavior, legacy success-shape exceptions, multiple schema detection results, null/TOML errors, save output, show artifacts, and removed spellings with examples.
   - Replace all nine review.just get --raw calls with --output plain. Preserve compose recipes in homelab and claudine unchanged.
 
-- [ ] **Topic documentation**
+- [x] **Topic documentation**
   - Own Darkmatter topic/inline/struct/error pages and Darkmatter skill topic files. Update hyperlinking/Link/DSL examples for JSON5, qp transport, malformed/legacy notices and clean migration; explain authored coordinates, inserted provenance, sections and trails, and unchanged family stopping rules.
   - Update lifecycle Output order, schemas' old output flags and exits, compose request/expression examples, cleanup rules, and file-reference-failures' obsolete reference-report row. Retain non-reference failure-row contracts.
   - Apply the complete file inventory in spec “Documentation,” including schema definition/DMLS support, policy, inline schema validation/call-check/map/filter/preflight-checks, and source comments in simplified-schema, Claudine, and DMLS. Live docs must never link to this fix.
 
-- [ ] **Shared guidance**
+- [x] **Shared guidance**
   - Own renderable/biscuit-terminal docs and skills, `.claude/skills/cli/SKILL.md`, and docs/cli-best-practices.md §2.1. Document two sources, families, overrides, the canonical profile, Width versus layout Width, intrinsic unlimited behavior, code/link/image fallbacks, OSC parameters, and Markdown reflow.
   - Update biscuit-terminal/docs/components/prose.md graceful degradation. Update renderable and dependency docs for changed APIs/dependencies. Record the root-alias principle while keeping its Darkmatter implementation assigned to the separate render-surface work.
 
 ### Wave 15 — Drift checkpoint
 
-- [ ] **Consistency audit**
+- [x] **Consistency audit**
   - Search active code/docs/skills/just files for removed flags/values, old reference headings/wording, obsolete exit 2/3/64 claims, report-json links, and structured key=value examples. Keep parser rejection tests, migration fixtures, historical specs, benchmark records, and unchanged failure surfaces intact.
   - Confirm comments describe each changed symbol's behavior, especially prepared versus authored spans, plain capability pinning, lifecycle streams, and schema-detect multi-file output. Update mismatches in the owning change; do not perform adjacent comment cleanup.
   - Add `implementation.md` beside this plan with completed tasks, actual validation evidence, produced visual artifacts, and the explicit compatibility interpretation from rule 23. Leave spec.md as its dated snapshot.
@@ -704,19 +1250,19 @@ These decisions settle the specification's remaining technical details. They app
 
 ### Wave 16 — Final automated validation
 
-- [ ] **Behavior verification**
+- [x] **Behavior verification**
   - Run `just test` and `just lint` from each of renderable, biscuit-terminal, and darkmatter. Run `cargo check --workspace --all-targets --color=never` for public API migration coverage. Use nextest through recipes, never cargo test; do not invoke cargo fmt.
   - Run `just test-l2` for biscuit-terminal and darkmatter with harness settings that never activate windows; run `just test-browser` for both areas with headless protocol input. Cover actual OSC 8 bytes, no-color/plain profile, page width/frame behavior, HTML query attributes, and disclosure/code rendering. Follow rust-testing/biscuit-test-harness skills and record missing capability evidence rather than claiming skipped tests passed.
   - Run `just doctest` for changed public API docs in renderable, biscuit-terminal, and darkmatter. Re-run only suites affected by subsequent fixes.
 
-- [ ] **Portable verification**
+- [x] **Portable verification**
   - Exercise portable path/URI helpers with Windows-drive, Unicode, escaped-space, LF/CRLF/BOM fixtures through public results. Keep native eager file values distinct from portable display strings.
   - Use the OS skill's configured BUILD_LINUX/BUILD_WIN/BUILD_WSL hosts and canonical cross-check recipes to gather required behavioral evidence, reusing qualifying receipts. Execute SSH only through the documented unattended BatchMode workflow. A missing destination or provisioning failure is recorded with its exact missing environment; local cross-compilation is labeled compile-only and never substitutes for native behavior.
   - Do not change CI scheduling, add speculative matrix cells, push, or contact services as part of this implementation plan. Resolve code failures exposed by configured hosts; include unavoidable environment limitations in the final evidence.
 
 ### Wave 17 — Completion audit
 
-- [ ] **Review artifacts**
+- [x] **Review artifacts**
   - Save deterministic examples under the fix's `artifacts/`: root/child reference report in plain/Markdown/HTML/data, representative styled report capture, plain corpus at 40/80/unlimited, and the schema-conformance inventory. Normalize only fixture-root prefixes and timing values in review snapshots; do not erase position, trail, query, control-byte, or stream evidence.
   - Check every acceptance item in spec.md against the corresponding test/artifact and list the result in implementation.md. Explicitly verify compose recipe byte parity, null-array serialization failure paths, error-return propagation, authored positions, same-child repeated trails, no data stderr, status 0/1/2/130, and opener/editor stubs.
   - Run `git diff --check`, review the final diff for unrelated changes, and check off completed plan tasks. Report implementation complete and ready for review, with tests and any environmental evidence gaps. Leave lifecycle movement and commits to the author.

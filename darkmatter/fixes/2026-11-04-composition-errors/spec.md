@@ -28,7 +28,7 @@ review_note: "the clarification process served as a review"
 clarified: true
 clarified_by: claude/opus
 needs_rulings: false
-implemented: false
+implemented: true
 created: 2026-11-04
 owner: Ken Snyder <ken@ken.net>
 related:
@@ -51,6 +51,7 @@ references:
         Spike (2026-11-05) measuring what today's renderers emit for `plain`
         output and for very large widths; it lists the escape leaks, link and
         image fallbacks, and width defects this change fixes.
+implemented_by: "claude/opus"
 ---
 
 # Composition Errors: an Actionable Report, and One `--output` for Every `md` Command
