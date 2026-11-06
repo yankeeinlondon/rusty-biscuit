@@ -173,6 +173,43 @@ fn data_reports_authored_positions_and_the_trail() {
 }
 
 #[test]
+fn a_flow_list_reports_each_value_in_data_and_text() {
+    let fixture = fixture("reference_report_flow_list");
+    fixture.write_file("cwd/child.md", "[gone](./child-gone.md)\n");
+    let input = fixture.write_file("cwd/root.md", "---\nprologue: [\n  ./missing.md,\n  ./child.md\n]\n---\n# Root\n");
+
+    let json = fixture.command().args(["validate", "refs", "--output", "json"]).arg(&input).output().unwrap();
+    let data: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    let issue = |target: &str| {
+        data["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|issue| issue["raw"] == target || issue["reference"] == target)
+            .unwrap_or_else(|| panic!("no issue of {target}: {data}"))
+            .clone()
+    };
+    let missing = issue("./missing.md");
+    assert_eq!((&missing["line"], &missing["column"]), (&serde_json::json!(3), &serde_json::json!(3)), "{missing}");
+    assert_eq!(issue("./child-gone.md")["included_via"][0]["line"], 4);
+
+    let text = fixture.command().args(["validate", "refs"]).arg(&input).output().unwrap();
+    let body = stdout_of(&text);
+    assert!(body.contains("root.md:3:3"), "{body}");
+    assert!(body.contains("(transcluded at root.md:4)"), "{body}");
+
+    let composed = fixture.command().args(["compose", "--output", "json"]).arg(&input).output().unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&composed.stdout).unwrap();
+    let located = envelope["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["reference_details"]["reference"] == "./missing.md" || diagnostic["reference"] == "./missing.md")
+        .unwrap_or_else(|| panic!("no diagnostic of the target: {envelope}"));
+    assert_eq!((&located["source"]["line"], &located["source"]["column"]), (&serde_json::json!(3), &serde_json::json!(3)), "{located}");
+}
+
+#[test]
 fn compose_reports_broken_references_on_stderr_without_the_old_wording() {
     let fixture = fixture("reference_report_compose");
     let input = fixture.write_file("cwd/doc.md", "# Head\n\n[gone](./gone*.md)\n");
@@ -253,4 +290,73 @@ fn multiline_html_and_css_targets_report_invalid_and_exit_one() {
     let graph_out = stdout_of(&graph);
     assert!(graph_out.contains("./missing.mp4"), "{graph_out}");
     assert!(graph_out.contains("./missing.css"), "{graph_out}");
+}
+
+const SCRIPT_TEMPLATE_DOCUMENT: &str = "Note: <script>const label = '<a href=\"./draft.md\">Draft</a>';</script>\n";
+
+#[test]
+fn validate_refs_accepts_a_script_template_after_prose() {
+    let fixture = fixture("reference_report_script_template_refs");
+    let input = fixture.write_file("cwd/doc.md", SCRIPT_TEMPLATE_DOCUMENT);
+
+    let output = fixture.command().args(["validate", "refs"]).arg(&input).args(["--output", "json"]).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["issues"].as_array().unwrap().len(), 0, "{report:#}");
+}
+
+#[test]
+fn graph_validate_accepts_a_script_template_after_prose() {
+    let fixture = fixture("reference_report_script_template_graph");
+    let input = fixture.write_file("cwd/doc.md", SCRIPT_TEMPLATE_DOCUMENT);
+
+    let output = fixture.command().arg("graph").arg(&input).args(["--validate", "--output", "json"]).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+}
+
+#[test]
+fn compose_accepts_a_script_template_after_prose() {
+    let fixture = fixture("reference_report_script_template_compose");
+    let input = fixture.write_file("cwd/doc.md", SCRIPT_TEMPLATE_DOCUMENT);
+
+    let output = fixture.command().arg("compose").arg(&input).args(["--output", "json"]).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+}
+
+const STYLE_COMMENT_DOCUMENT: &str = "Note: <style>/* <img src=\"./gone.png\"> */</style>\n";
+
+#[test]
+fn graph_validate_accepts_a_style_comment_after_prose() {
+    let fixture = fixture("reference_report_style_comment_graph");
+    let input = fixture.write_file("cwd/doc.md", STYLE_COMMENT_DOCUMENT);
+
+    let output = fixture.command().arg("graph").arg(&input).args(["--validate", "--output", "json"]).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+}
+
+#[test]
+fn compose_accepts_a_style_comment_after_prose() {
+    let fixture = fixture("reference_report_style_comment_compose");
+    let input = fixture.write_file("cwd/doc.md", STYLE_COMMENT_DOCUMENT);
+
+    let output = fixture.command().arg("compose").arg(&input).args(["--output", "json"]).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+}
+
+#[test]
+fn a_missing_link_after_a_script_template_still_fails() {
+    let fixture = fixture("reference_report_script_template_control");
+    let input = fixture.write_file("cwd/doc.md", &format!("{SCRIPT_TEMPLATE_DOCUMENT}\n[x](./gone.md)\n"));
+
+    let output = fixture.command().args(["validate", "refs"]).arg(&input).args(["--output", "json"]).output().unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{}", stdout_of(&output));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let references: Vec<_> = report["issues"].as_array().unwrap().iter().map(|issue| issue["reference"].as_str().unwrap()).collect();
+    assert_eq!(references, ["./gone.md"]);
 }

@@ -8,6 +8,12 @@
 //! A Markdown HTML node can hold any number of tags, and a tag or a `<style>`
 //! body can span lines. [`scan_elements`] finds each element in a node, skipping
 //! comments and raw-text bodies; a tag's record is located at its `<`.
+//!
+//! A raw-text element can also span nodes: CommonMark splits one opened after
+//! prose, or one it has no block type for, at every tag, and its body can run
+//! across paragraphs. [`visit_html_elements`] therefore walks all of a
+//! document's HTML nodes in order, and [`inert_ranges`] lets the other readers
+//! drop what such a body holds.
 
 use super::types::{
     ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax, ReferenceTarget,
@@ -84,12 +90,106 @@ pub(crate) fn extract_html_meta_tags(
 
 // ── Unified collector ───────────────────────────────────────────────
 
-/// Walks the MDAST, finds `Html` nodes, and applies a classifier function.
+/// Applies a classifier function to every active HTML element of `content`.
 fn collect_from_html_nodes(
     content: &str,
     source: &ComposeSource,
     classifier: fn(&str, &ComposeSource, usize, usize, usize) -> Option<ReferenceRecord>,
 ) -> Vec<ReferenceRecord> {
+    let mut records = Vec::new();
+    visit_html_elements(content, |text, line, span| {
+        records.extend(classifier(text, source, line, span.start, span.end));
+    });
+    records
+}
+
+/// The ranges of `content` holding the body of a raw-text element that spans
+/// Markdown nodes, each running from the end of the opener's node through the
+/// closing tag. Whatever starts inside one is text, not a reference.
+pub(crate) fn inert_ranges(content: &str) -> Vec<Range<usize>> {
+    if !content.contains('<') {
+        return Vec::new();
+    }
+    visit_html_elements(content, |_, _, _| {})
+}
+
+/// `content` with the body of every raw-text element masked, offsets and
+/// whitespace unchanged, for a reader that looks for tags in an HTML node's text.
+pub(crate) fn blank_raw_text_bodies(content: &str) -> Cow<'_, str> {
+    if !content.contains('<') {
+        return Cow::Borrowed(content);
+    }
+    let mut bodies = Vec::new();
+    visit_html_elements(content, |text, _, span| {
+        if let Some(name) = tag_name(text).map(str::to_ascii_lowercase)
+            && RAW_TEXT_ELEMENTS.contains(&name.as_str())
+            && let Some(element) = content.get(span.clone())
+            && let Some(open_end) = open_tag_end(element)
+        {
+            // The closing tag stays: without one, reparsing the blanked text
+            // could run the element to the end of the document.
+            let body_len = last_closing_tag(&element[open_end..], &name)
+                .map_or(element.len() - open_end, |closer| closer.start);
+            bodies.push(span.start + open_end..span.start + open_end + body_len);
+        }
+    });
+    if bodies.is_empty() {
+        return Cow::Borrowed(content);
+    }
+    let mut blanked = content.as_bytes().to_vec();
+    for body in bodies {
+        for byte in &mut blanked[body] {
+            // Not a space: that would indent the closing tag on a body's last
+            // line into a code block, hiding it and what follows it on reparse.
+            if !byte.is_ascii_whitespace() {
+                *byte = b'x';
+            }
+        }
+    }
+    // A body starts and ends on character boundaries and every byte in it but
+    // ASCII whitespace was replaced, so the bytes stay valid UTF-8.
+    Cow::Owned(String::from_utf8_lossy(&blanked).into_owned())
+}
+
+/// One Markdown HTML node, located in the text it was parsed from.
+struct HtmlNode<'a> {
+    value: &'a str,
+    start: usize,
+    end: usize,
+    line: usize,
+}
+
+fn collect_html_nodes<'a>(node: &'a Node, nodes: &mut Vec<HtmlNode<'a>>) {
+    if let Node::Html(html) = node
+        && let Some(position) = &html.position
+    {
+        nodes.push(HtmlNode {
+            value: &html.value,
+            start: position.start.offset,
+            end: position.end.offset,
+            line: position.start.line,
+        });
+    }
+    if let Some(children) = node.children() {
+        for child in children {
+            collect_html_nodes(child, nodes);
+        }
+    }
+}
+
+/// Calls `visit` with the text, line, and span in `content` of every active
+/// HTML element, in document order, and returns [`inert_ranges`].
+///
+/// A raw-text element's closing tag is looked for only in the HTML nodes after
+/// its own, never in the source: `</textarea>` in a code span or fence reaches
+/// a browser escaped, so it closes nothing. The search does not stop at a
+/// paragraph, because the browser reads one body across the rendered `<p>`s.
+/// With no closing tag in any later node, nothing past the opener's node is
+/// inert: a prose mention of `<title>` must not hide the references after it.
+fn visit_html_elements(
+    content: &str,
+    mut visit: impl FnMut(&str, usize, Range<usize>),
+) -> Vec<Range<usize>> {
     let root = match output::parse_mdast(content) {
         Ok(root) => root,
         Err(error) => {
@@ -97,47 +197,60 @@ fn collect_from_html_nodes(
             return Vec::new();
         }
     };
+    let mut nodes = Vec::new();
+    collect_html_nodes(&root, &mut nodes);
 
-    let line_index = super::local::LineIndex::new(content);
-    let mut records = Vec::new();
-    walk_html_nodes(&root, content, source, &line_index, classifier, &mut records);
-    records
-}
-
-fn walk_html_nodes(
-    node: &Node,
-    content: &str,
-    source: &ComposeSource,
-    line_index: &super::local::LineIndex,
-    classifier: fn(&str, &ComposeSource, usize, usize, usize) -> Option<ReferenceRecord>,
-    records: &mut Vec<ReferenceRecord>,
-) {
-    if let Node::Html(html_node) = node {
-        let position = html_node.position.as_ref();
-        let (span_start, span_end) = position
-            .map(|p| (p.start.offset, p.end.offset))
-            .unwrap_or((0, 0));
-        let base_line = position
-            .map(|p| p.start.line)
-            .unwrap_or_else(|| line_index.line_at(span_start));
-
-        let value = with_inline_raw_body(&html_node.value, content, span_end);
-        let lines = LineMap::new(content, span_start, &value);
-        for element in scan_elements(&value) {
-            let line = base_line + value[..element.span.start].matches('\n').count();
+    let mut inert = Vec::new();
+    let mut index = 0;
+    let mut resume_at = 0;
+    while let Some(node) = nodes.get(index) {
+        let lines = LineMap::new(content, node.start, node.value);
+        let mut next = (index + 1, 0);
+        for element in scan_elements(node.value, resume_at) {
+            let line = node.line + node.value[..element.span.start].matches('\n').count();
             let start = lines.to_content(element.span.start);
-            let end = lines.to_content(element.span.end);
-            if let Some(record) = classifier(&value[element.text], source, line, start, end) {
-                records.push(record);
+            let text = &node.value[element.text];
+            let spanning = closer_in_later_node(text, &nodes[index + 1..], content).and_then(|closer| {
+                Some((content.get(start..closer.content_end)?, closer))
+            });
+            if let Some((whole, closer)) = spanning {
+                visit(whole, line, start..closer.content_end);
+                inert.push(node.end..closer.content_end);
+                next = (index + 1 + closer.nodes_ahead, closer.value_end);
+            } else {
+                visit(text, line, start..lines.to_content(element.span.end));
             }
         }
+        (index, resume_at) = next;
     }
+    inert
+}
 
-    if let Some(children) = node.children() {
-        for child in children {
-            walk_html_nodes(child, content, source, line_index, classifier, records);
-        }
+/// Where a raw-text element's closing tag ends, past its opener's node.
+struct LaterCloser {
+    /// The closing tag's node, as an index into the nodes after the opener's.
+    nodes_ahead: usize,
+    /// The end's offset in that node's value.
+    value_end: usize,
+    content_end: usize,
+}
+
+/// The closing tag in `later` for the raw-text element `text` opens, when `text`
+/// has a complete open tag and no closing tag of its own.
+fn closer_in_later_node(text: &str, later: &[HtmlNode<'_>], content: &str) -> Option<LaterCloser> {
+    let name = tag_name(text)?.to_ascii_lowercase();
+    let open_end = open_tag_end(text)?;
+    if !RAW_TEXT_ELEMENTS.contains(&name.as_str()) || closing_tag(&text[open_end..], &name).is_some() {
+        return None;
     }
+    later.iter().enumerate().find_map(|(nodes_ahead, node)| {
+        let closer = closing_tag(node.value, &name)?;
+        Some(LaterCloser {
+            nodes_ahead,
+            value_end: closer.end,
+            content_end: LineMap::new(content, node.start, node.value).to_content(closer.end),
+        })
+    })
 }
 
 // ── Tag classifiers ─────────────────────────────────────────────────
@@ -544,11 +657,11 @@ struct ScannedElement {
     span: Range<usize>,
 }
 
-/// Finds every element start tag in `html`, in order, past comments, closing
-/// tags, declarations, and the bodies of raw-text elements.
-fn scan_elements(html: &str) -> Vec<ScannedElement> {
+/// Finds every element start tag in `html` from `from` on, in order, past
+/// comments, closing tags, declarations, and the bodies of raw-text elements.
+fn scan_elements(html: &str, from: usize) -> Vec<ScannedElement> {
     let mut elements = Vec::new();
-    let mut cursor = 0;
+    let mut cursor = from;
     while let Some(found) = html[cursor..].find('<') {
         let start = cursor + found;
         let rest = &html[start..];
@@ -608,30 +721,17 @@ fn closing_tag(text: &str, lower_name: &str) -> Option<Range<usize>> {
     None
 }
 
-/// `value`, extended past its node when it ends inside a `<style>` or
-/// `<script>` opened in running text.
-///
-/// CommonMark only starts a raw-text HTML block at the start of a line. After
-/// other text, the open tag, its body, and its closing tag are separate inline
-/// nodes, so the body is read from `content`, up to the paragraph's end.
-fn with_inline_raw_body<'a>(value: &'a str, content: &str, node_end: usize) -> Cow<'a, str> {
-    let Some(last) = scan_elements(value).pop() else {
-        return Cow::Borrowed(value);
-    };
-    let text = &value[last.text];
-    let is_inline_raw = (is_tag(text, "style") || is_tag(text, "script"))
-        && tag_name(text).is_some_and(|name| closing_tag(text, &name.to_ascii_lowercase()).is_none());
-    if !is_inline_raw {
-        return Cow::Borrowed(value);
+/// The range of the last `</name>` closing tag in `text`, ignoring case. An
+/// element's text ends at its real closing tag, so one before it sat in a code
+/// span and closes nothing.
+fn last_closing_tag(text: &str, lower_name: &str) -> Option<Range<usize>> {
+    let mut last = None;
+    let mut cursor = 0;
+    while let Some(closer) = closing_tag(&text[cursor..], lower_name) {
+        last = Some(cursor + closer.start..cursor + closer.end);
+        cursor += closer.end;
     }
-    let paragraph = content.get(node_end..).map_or("", |rest| {
-        rest.find("\n\n").map_or(rest, |blank| &rest[..blank])
-    });
-    let name = tag_name(text).map(str::to_ascii_lowercase).unwrap_or_default();
-    match closing_tag(paragraph, &name) {
-        Some(closer) => Cow::Owned(format!("{value}{}", &paragraph[..closer.end])),
-        None => Cow::Borrowed(value),
-    }
+    last
 }
 
 /// Maps offsets in text copied from an Html node back to `content`.
@@ -811,7 +911,7 @@ pub(super) fn extract_inner_text(html: &str) -> Option<String> {
     let html = html.trim_start();
     let name = tag_name(html)?.to_ascii_lowercase();
     let after_tag = &html[open_tag_end(html)?..];
-    let text = match closing_tag(after_tag, &name) {
+    let text = match last_closing_tag(after_tag, &name) {
         Some(closer) => &after_tag[..closer.start],
         None if RAW_TEXT_ELEMENTS.contains(&name.as_str()) => after_tag,
         None => return None,

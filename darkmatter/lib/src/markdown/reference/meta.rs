@@ -179,9 +179,9 @@ fn build_meta_tag_html(key: &str, value: &str) -> String {
 
 /// Try to replace an existing `<meta>` tag that matches the given key.
 ///
-/// Scans for `<meta` tag boundaries and uses attribute extraction to identify
-/// matching tags regardless of attribute order, extra whitespace, or additional
-/// attributes. Only the first matching tag is replaced.
+/// Considers the tags reference extraction finds, so one in a code block, a
+/// comment, or a raw-text body is not a match. Only the first matching tag is
+/// replaced.
 ///
 /// Returns `Some(updated_content)` if a replacement was made, `None` otherwise.
 fn replace_existing_meta_tag(content: &str, key: &str, new_value: &str) -> Option<String> {
@@ -194,52 +194,17 @@ fn replace_existing_meta_tag(content: &str, key: &str, new_value: &str) -> Optio
         ("name", Some(key))
     };
 
-    // Scan for <meta tags (case-insensitive opening)
-    let lower = content.to_lowercase();
-    let mut search_from = 0;
+    let records = html::extract_html_meta_tags(content, &ComposeSource::Unknown);
+    let existing = records.iter().find(|record| {
+        let value = record.attributes.get(attr_name).and_then(|value| value.as_str());
+        attr_value.map_or(value.is_some(), |expected| value == Some(expected))
+    })?;
 
-    while let Some(rel_start) = lower[search_from..].find("<meta") {
-        let start = search_from + rel_start;
-        let rest = &content[start..];
-
-        // Verify it's actually a tag opening (next non-alpha char must be space or >)
-        let after_meta = &rest["<meta".len()..];
-        if !after_meta.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/') {
-            search_from = start + 1;
-            continue;
-        }
-
-        // Find the closing >
-        let Some(close_offset) = html::open_tag_end(rest) else {
-            search_from = start + 1;
-            continue;
-        };
-        let tag_end = start + close_offset;
-        let tag_html = &content[start..tag_end];
-
-        // Use attribute extraction to check if this tag matches the key
-        let matches = if let Some(expected_value) = attr_value {
-            html::extract_attribute(tag_html, attr_name)
-                .map(|v| v == expected_value)
-                .unwrap_or(false)
-        } else {
-            // charset: any tag with a charset attribute matches
-            html::extract_attribute(tag_html, attr_name).is_some()
-        };
-
-        if matches {
-            let new_tag = build_meta_tag_html(key, new_value);
-            let mut result = String::with_capacity(content.len());
-            result.push_str(&content[..start]);
-            result.push_str(&new_tag);
-            result.push_str(&content[tag_end..]);
-            return Some(result);
-        }
-
-        search_from = tag_end;
-    }
-
-    None
+    let span = existing.origin.span.clone();
+    content.get(span.clone())?;
+    let mut result = content.to_string();
+    result.replace_range(span, &build_meta_tag_html(key, new_value));
+    Some(result)
 }
 
 #[cfg(test)]

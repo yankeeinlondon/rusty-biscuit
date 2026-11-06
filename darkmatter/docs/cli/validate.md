@@ -123,8 +123,29 @@ its `@import` or `url(` is.
 ```
 
 Some text is not checked because it is not a tag or a live rule: anything in an HTML
-comment, a fenced code block, or inline code; tag-like text inside a raw-text element
-such as `<script>` or `<textarea>`; and rules inside a CSS comment.
+comment, a fenced code block, or inline code; tag-like text and Markdown links or images
+inside a raw-text element (`<script>`, `<style>`, `<textarea>`, `<title>`, `<xmp>`,
+`<iframe>`, `<noembed>`, `<noframes>`); and rules inside a CSS comment.
+
+A browser reads everything from a raw-text element's opening tag to its closing tag as
+text, so this holds when the element opens after prose or spans paragraphs. Only a real
+HTML closing tag ends it; one inside inline code or a fenced code block does not. An
+element with no closing tag anywhere later covers only its own HTML, so what follows is
+still checked:
+
+```markdown
+Note: <script>const label = '<a href="./draft.md">Draft</a>';</script>
+
+Use <title> in the page head.
+
+[This link is still checked](./guide.md)
+```
+
+The first line is one inline script and no link. The second never closes its element, so
+the link after it counts. The element's own target is still a
+reference, as `src` is in `<iframe src="./page.html">`, and real CSS rules in a `<style>`
+are still read. A directive such as `::file` is not HTML and still runs inside a raw-text
+element.
 
 Only local files can be missing. An `http(s)` or `//` URL is checked only when remote
 checks are on, a `data:` URI always passes, and an `about:`, `blob:`, or `javascript:`

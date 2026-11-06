@@ -409,6 +409,8 @@ impl Markdown {
     /// markers) and link metadata from markdown titles is parsed via [`Link`].
     pub fn links(&self) -> Vec<Link> {
         let parser = Parser::new_ext(&self.content, markdown_parse_options());
+        let inert = reference::html::inert_ranges(&self.content);
+        let is_active = |offset: usize| !inert.iter().any(|range| range.contains(&offset));
 
         let mut links = Vec::new();
         let mut in_link = false;
@@ -416,11 +418,11 @@ impl Markdown {
         let mut current_title = String::new();
         let mut current_display = String::new();
 
-        for event in parser {
+        for (event, range) in parser.into_offset_iter() {
             match event {
                 Event::Start(Tag::Link {
                     dest_url, title, ..
-                }) => {
+                }) if is_active(range.start) => {
                     in_link = true;
                     current_href = dest_url.to_string();
                     current_title = title.to_string();
@@ -465,6 +467,8 @@ impl Markdown {
     /// applied consistently with standalone `ImageRef::try_from`.
     pub fn image_references(&self) -> Vec<ImageRef> {
         let parser = Parser::new_ext(&self.content, markdown_parse_options());
+        let inert = reference::html::inert_ranges(&self.content);
+        let is_active = |offset: usize| !inert.iter().any(|range| range.contains(&offset));
 
         let mut images = Vec::new();
         let mut in_image = false;
@@ -472,11 +476,11 @@ impl Markdown {
         let mut current_title = String::new();
         let mut current_alt = String::new();
 
-        for event in parser {
+        for (event, range) in parser.into_offset_iter() {
             match event {
                 Event::Start(Tag::Image {
                     dest_url, title, ..
-                }) => {
+                }) if is_active(range.start) => {
                     in_image = true;
                     current_src = dest_url.to_string();
                     current_title = title.to_string();

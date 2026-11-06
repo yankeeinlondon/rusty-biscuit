@@ -655,6 +655,18 @@ fn a_width_too_narrow_for_the_columns_keeps_every_row() {
     }
 }
 
+#[test]
+fn a_glob_hint_wraps_between_words_at_every_width() {
+    let fixture = Fixture::new();
+    let path = fixture.write("doc.md", "[x](./gone*.md)\n");
+
+    for columns in 30..=120 {
+        let options = OutputOptions::new(Width::Columns(columns), TerminalProfile::plain());
+        let text = render_output(&fixture.view(&path), OutputTarget::Plain, &options).unwrap().text;
+        assert!(text.contains("`::file-links`"), "{columns}: {text}");
+    }
+}
+
 /// The row is 59 columns, plus the two-column indent. Every width keeps the
 /// reference and the location whole, on one line when they fit.
 #[test]
