@@ -33,16 +33,18 @@ See the `renderable` skill's *Tree Module* topic for the tree model itself
   `from_profile(&TerminalProfile, Width)` / `from_output_options`.
   `pin_plain()` applies the plain profile after every other option; a pinned
   render writes no escape byte and no trailing whitespace.
-- **`render_terminal_output(&Document, &OutputOptions, strictness)`** — the
-  generic terminal fold the shared dispatch (`biscuit_terminal::output`) uses.
-  Under an unbounded width nothing wraps and nothing fills (3-glyph styled
-  rule, `---` in plain, natural-width tables, code band hugging its longest
-  line). Non-clickable links print `text` (`text <url>` at verbosity ≥ 1);
-  printed URLs are unbreakable words.
   Fork helpers — `for_child(indent_delta, width_delta)`, `with_width`,
   `with_layout` — narrow width and accumulate indent for nested content.
   (`active_layout` is currently a carried-but-unread field; the renderer
   applies layout from `NodeAttrs::layout()` directly — see *Layout* below.)
+- **`render_terminal_output(&Document, &OutputOptions, strictness)`** — the
+  generic terminal fold the shared dispatch (`biscuit_terminal::output`) uses.
+  Under an unbounded width nothing wraps and nothing fills (3-glyph styled
+  rule, `---` in plain, natural-width tables). It returns `Rendered<String>`, and
+  `render_output` carries the fold's diagnostics in `RenderedOutput`; a borderless
+  table plans for its gaps, not a box. Non-clickable links print `text`
+  (`text <url>` at verbosity ≥ 1); printed URLs are unbreakable words. See
+  `biscuit-terminal/docs/output.md`.
 
 ## Strictness model
 

@@ -12,6 +12,10 @@ concepts (graphics ceiling, Mermaid modes) are explained in
 | `code_renderer` | `with_code_renderer(Rc<dyn CodeRenderer>)` | every code node |
 | `diagram_renderer` | `with_diagram_renderer(Rc<dyn DiagramRenderer>)` | a `mermaid` code node, when promotion is on (below) |
 
+The shared [command output dispatch](./output.md) installs neither hook. A
+command that wants them overrides `CommandOutput::render_terminal` and builds its
+options with `TerminalRenderOptions::from_output_options`.
+
 ## The code renderer
 
 Every `NodeKind::Code` node is offered to the code renderer with its language,

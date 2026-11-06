@@ -105,6 +105,7 @@ Open only the topic file needed for the task:
 | Terminal struct and capability fields | `terminal-struct.md` |
 | Component catalog | `components.md` |
 | Render-tree terminal renderer | `render-tree.md` |
+| `write_output`, `OutputTarget`, `--width` resolution, plain rules, `Terminal::from_output_options` | [`biscuit-terminal/docs/output.md`](../../../biscuit-terminal/docs/output.md) |
 | Inline images | `image-rendering.md` |
 | Diagram hook, package boundary, `bt` diagram commands | `diagrams.md` |
 | Colors | `color-system.md` |
