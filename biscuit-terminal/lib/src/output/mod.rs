@@ -41,7 +41,7 @@ pub use data::serialize_data;
 pub use profile::terminal_target_options;
 pub use width::{
     ResolvedWidth, WidthError, WidthRequest, parse_width_request, resolve_stderr_width,
-    resolve_width,
+    resolve_width, stderr_terminal_columns,
 };
 
 /// The two output families. A command accepts whole families, never part of

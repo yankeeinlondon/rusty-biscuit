@@ -213,6 +213,22 @@ pub fn resolve_stderr_width(stderr_terminal_columns: Option<u32>) -> Width {
         .unwrap_or(Width::Unlimited)
 }
 
+/// Stderr's measured columns, when stderr is a terminal.
+///
+/// [`Terminal::detected_columns`](crate::terminal::Terminal::detected_columns)
+/// measures stdout; a deliverable and what accompanies it can have different
+/// widths.
+#[must_use]
+pub fn stderr_terminal_columns() -> Option<u32> {
+    use std::io::IsTerminal as _;
+    if !std::io::stderr().is_terminal() {
+        return None;
+    }
+    terminal_size::terminal_size_of(std::io::stderr())
+        .map(|(terminal_size::Width(columns), _)| u32::from(columns))
+        .filter(|&columns| columns > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
