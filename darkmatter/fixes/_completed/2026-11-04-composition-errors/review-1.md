@@ -1,5 +1,6 @@
 ---
 $schema: feature-review.yaml
+next: 2026-11-04-composition-errors/review-2.md
 ready: false
 findings:
   - "R1-F1 (high): HTML reference discovery silently drops multiline tags and media targets"
@@ -83,6 +84,19 @@ human_review_items:
   - "Retain other CLIs adopting the output trait as future work explicitly outside this spec."
   - "Retain the render-style redesign in its already designated follow-up rather than adding that scope here."
   - "Retain leaving pre-existing unrelated documentation links outside this surgical change."
+  - "R1-F1: a missing video, audio, source, or iframe target has no --allow recovery and stops md compose, the same as CSS and script imports."
+  - "R1-F1: an empty target creates no reference, and a target reports at its tag's opening or at @import/url(, not at the attribute value."
+  - "R1-F1: srcset, poster, track, embed, object, and url() outside @font-face stay undiscovered because the spec's construct table omits them; confirm or extend."
+  - "R1-F2: body-counted failures (::shell, ::shell-block, ::file and ::block parse) report only the file rather than threading proven positions through every variant."
+  - "R1-F2: a failure with no file raised inside a child names the root document, following the spec's composed-document fallback."
+  - "R1-F2: dm.schema.invalid_trigger now names the trigger file instead of null, and a malformed --set reports the document."
+  - "R1-F2: md validate refs, md graph, and md schema triggers apply the document fallback; other commands rely on typed sources or span several files."
+  - "R1-F3: a directly rendered plain rule at Columns(n) stays n glyphs, as the review's control requires, although the spec's table says --- at every width."
+  - "R1-F3: Terminal::width() answers 80 with no width; TwoColumn images, GraphExpression images, and GitGraph viewports keep that budget because they need a concrete size and no CLI route reaches them."
+  - "R1-F3: the compose perf report hugs its content with no stderr width, and a percentage image or margin takes natural size or zero."
+  - "R1-F4: flow-value positions use a new read-only locator; the shared writer now also locates a quoted flow item before a comment and a value after a commented key."
+  - "R1-F4: tagged and anchored values report their opening token, and a flow item beside an unreadable sibling such as other: {a, b} reports null."
+  - "R1-F5: the borderless spanning-row wrap repair lives in biscuit-terminal; L2 accepts dim or a background for references and checks colors by hue."
 human_in_the_loop: null
 has_blocked_findings: false
 blocked: false
@@ -90,9 +104,11 @@ recurrence: false
 reviewed_by: codex/gpt-6.1-sol
 created: "2026-11-05T20:01:25-08:00"
 spec: 2026-11-04-composition-errors/spec.md
-implemented: false
+implemented: true
 description: "A **fix** review of `2026-11-04-composition-errors/spec.md`"
 fix: 2026-11-04-composition-errors/review-1.md
+log: /Volumes/coding/wt/rusty-biscuit/feat-better-research/darkmatter/fixes/2026-11-04-composition-errors/log.md
+implemented_by: claude/opus
 ---
 # Composition errors review — iteration 1
 
