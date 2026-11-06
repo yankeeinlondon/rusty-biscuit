@@ -216,6 +216,36 @@ decisions_for_review:
     A refused reference in a lifecycle run reported an extra generic `dm.compose.failure` row with a null source that the same document without a lifecycle did not have. It is now classified with no diagnostics, so both routes report the same rows.
   - |-
     `claudine/cli/tests/level2/level2_typed_error_render_capture.rs` still asserted the `[text](url)` fallback Phase 1 removed; Phase 1 and 2 did not run L2, so it was stale. Updated to the non-clickable rule. Other L2 suites are still unexecuted until Phase 6 and may hold more of these.
+  - |-
+    `md rm` prints nothing on `terminal` and `plain` and reports on `markdown`, `markdown-plus`, and `html`.
+    The spec gives `md rm` the `terminal` default and every family, and also says saves keep their existing no-output behavior. I kept the silence for the two terminal outputs (with `-v` still a stderr summary), and an explicit Markdown or HTML output, which someone asked for by name, gets one sentence.
+    Alternative: print the summary on stdout for all formatted outputs, which is more uniform but changes the default for scripts. Redoing it is a one-line change in `rm_value`, plus one test.
+  - |-
+    `md clean`'s run-level diagnostics are in a new `run_diagnostics` field.
+    Plan rule 23 says an existing object gains `outcome` and `diagnostics` when a run needs them, and rule 23 also says clean's own `diagnostics` must stay intact. They collide, because version 1 of clean already has a `diagnostics` array with a different row shape. I kept the published field and put a run's records (a fractional `--width`, a schema-load failure) in `run_diagnostics`.
+    Alternative: bump clean's data to version 2 and rename. Redoing it touches `DataShape::status`, `clean.yaml`, and a few tests.
+  - |-
+    `md get` and a single or merged `md schema detect` wrap as `{ outcome, diagnostics, value }` whenever a run has something to say, even when the value is an object.
+    Rule 23 lets an existing object gain the two fields directly, but these objects' keys are the user's: a frontmatter property called `outcome` would be overwritten. A clean success stays the bare value. The cost is that a script reading `md get doc.md a b` must check for `outcome` only on a warning or failure, which it must do anyway.
+  - |-
+    Most non-document commands' `markdown` and `html` outputs are simple projections, not bespoke designs.
+    The spec requires them but does not design them. `md toc` is a nested list of links, `md schema about` is a reference built from its data, `md schema validate` and `md schema triggers` parse their plain report as Markdown (its rows are already list items), and `md delta`, `md graph`'s tree, and a saved `md clean`'s delta are a plain code block. A file name holding Markdown punctuation can therefore read oddly in `md schema validate --output markdown`, though nothing is lost in the terminal or data outputs. Better layouts are additive: each lives in one function.
+  - |-
+    Two spec-accepted-argument conflicts became usage errors that the spec does not list: `md hash <dir>` with `--save`, `--diff`, or a structured or detailed kind, and a bad `md code-block --highlight`. Both exited 1 and their own comments already called them usage errors; plan rule 27 and the Code results task ask for this. `--save` with stdin stays a runtime failure (exit 1), because whether an argument is stdin is decided the same way as any other failure to open, and the spec's table leaves it alone. Moving it is a small change in each of `clean`, `set`, and `hash`.
+  - |-
+    `--show` is gone from `md code-block` rather than preserved. The plan's Code results task mentions show handling, but the code read `cli.render.show`, and `md --show code-block x` has always been refused as a subcommand combined with a top-level option, so that branch could never run. The spec lists `--show` only for `md render` and `md compose`. Adding a real `md code-block --show` would be a small feature, built the way `md render` does it.
+  - |-
+    `md schema validate` failing on a file reports `outcome: failure` with an empty run-level `diagnostics`; the problems stay in each file's record.
+    The spec says the records tell the failures apart, and copying each into a second list would duplicate them. Only an invocation-level problem (an unloadable baseline, `dm.schema.baseline`) has a run diagnostic. An alternative is to project every file's failure into `diagnostics`, as `md validate refs` does, which would make the two commands read alike; that is a small addition in `validate_all`.
+  - |-
+    `md schema validate -vv --output json` carries no timings.
+    Formerly they went to stderr, which a data output must leave empty. The spec moves `--perf` timings into `perf` for compose only and says `-v` output disappears, so they are dropped rather than given a field this schema does not define.
+  - |-
+    Error blocks are made escape-free on stderr, and inside a plain report, by stripping after they render (`stderr_text`, `pretty_report`).
+    `StatusBlock` paints regardless of the terminal it is given, which broke "plain never holds an ESC byte" for every error `main` prints. Fixing `StatusBlock` itself is the cleaner fix, but other CLIs and many snapshots rely on it, and this fix's scope leaves other CLIs' output alone. If a reviewer wants the component fixed, these two strip calls are removed in that change.
+  - |-
+    The `md edit` conformance success cases are `#[cfg(unix)]`, using a shell script as `EDITOR`.
+    The editor has to write to the file, and the shared argv recorder does not, so a native stub would be a new test binary. The failure case runs on every OS, and `run_edit` has no OS-specific code of its own. Nightly Windows therefore proves only the failure path. Adding a writing mode to the recorder would close this.
 source_files_during_phase_2:
   - biscuit-terminal/lib/src/components/table/table.rs
   - biscuit-terminal/lib/src/render_tree/link.rs
@@ -322,15 +352,14 @@ skills_files_updated_during_phase_2:
   - .claude/skills/darkmatter/testing.md
   - .claude/skills/os/SKILL.md
 message_to_agent: |-
-  Phase 3 is complete. What Phase 4 needs to know:
-  - `md compose` and `md render` are the only commands on the new output path. Copy `commands/render.rs`: parse the target, `crate::output::resolve_output`, a `ReportSink` for a data target, `sink.finish(result)`. `ReportSink` is hard-coded to the compose/render envelope (`DocumentEnvelope`); commands with their own data shape need it generalized over `CommandOutput`, keeping its diagnostics, `--show`, serialization-failure, and closed-stdout handling. `crate::output::write_stdout` is the formatted path.
-  - `--width` is already a global root flag (`Cli.width`, an `Option<WidthRequest>`); other commands accept and ignore it until you wire them. Document commands pass `WidthRequest::Source` as the default; everything else `Auto`. `Cli::requests_data_output` covers only compose and render; extend it or tracing leaks to a data output's stderr. `args/output.rs` holds `target_parser`, `ALL_TARGETS`, `COMPOSE_TARGETS`; build the per-leaf metadata there. `OutputFormat` and `ComposeOutputFormat` are gone; `DocumentOutput::prepare` serves clean and set.
-  - `md clean` still has `--fixed-width` and `--ignore-incidental-newlines`, and `--save` still forwards nothing about output (rule 22). `validate refs`, `graph --validate`, `hash --diff`, and `schema validate` still exit 2 or 3 through `process::exit`; `ReportedExit` is the return path.
-  - `md schema about` has a temporary explicit output profile in `markdown_options` because it relied on the removed width-selects-rich leak; delete it when you move the command. See `decisions_for_review`.
-  - Any test expecting paint must pin a profile or color depth: width no longer selects capabilities. Two such tests failed only on Windows this phase. Run page tests with `env -u COLORTERM` too.
-  - `tests/common/protected_env.rs` lists `OUTPUT_COLUMNS` as an application input. `context_construction_guard` rejects any new `*::from_process` and unlisted `std::env::var`; `OutputEnvironment::detect` is the one reader. Conformance tests must keep `include_str!` of a schema literally inside a `#[test]`, not a macro, or CI maps the input to the whole binary (see `output_envelope.rs`).
-  - Still applies: `just test -- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`; that failure is an input for 2026-11-05-dynamic-schema-types. `just cross-check` breaks on parentheses in -E; pass plain name filters. The worktree may be shared with other sessions; classify file lists by content.
-  - For Phase 5: docs/cli/report-json.md is now stale in full (`--output json`, the envelope, exit 1); the spec's Documentation inventory also needs the lifecycle stdout rule, `--show`, `MD_DRY_RUN=fail`, and `.claude/skills/biscuit-terminal` should mention `stderr_terminal_columns`. A few comments in Claudine and DMLS still name `report-json`.
+  Phase 4 is complete: every command is on the output contract. What Phase 5 needs to know:
+
+  - The new pieces to document: `--output` on every leaf, defaults, `--width`, exit statuses 0/1/2, data shapes. The shapes are in `darkmatter/cli/schemas/output/` (17 files, one per leaf); `args/output.rs::COMMAND_LEAVES` is the inventory. `.claude/skills/darkmatter/SKILL.md` "CLI orientation" has a paragraph on `CommandRun`, `CommandValue`, and `DataShape`.
+  - Wire shapes a doc must state precisely: `md schema validate` is one `{files:[...]}` object; `md get`/`md schema detect` wrap as `{outcome,diagnostics,value}` when a run has something to say; `md clean`'s run-level records are `run_diagnostics`, because its `diagnostics` are the v1 rows; existing objects gain `outcome`+`diagnostics` only on failure or a run warning; a failure with no result is `{outcome,diagnostics,value:null}`. New diagnostic codes: `dm.hash.no_stored_hash`, `dm.hash.changed`, `dm.schema.baseline`.
+  - Behavior changes users will notice, which docs must not contradict: `md delta`, `md code-block`, and `md schema about` no longer paint on a pipe; `md schema detect` default is a fenced block, and `--output yaml` has no `# detected from` comment; on a pipe nothing wraps; `md validate refs` failing prints no `N error(s) found`; `md rm` prints nothing on terminal and plain. `--show` exists only on compose and render. See `decisions_for_review`.
+  - `just/review.just`'s nine `md get --raw` calls are still yours and now fail with exit 2 against a rebuilt `md`. I did not find other callers using removed flags in `just/`, but the Consistency audit should sweep again, including `darkmatter/docs/`, which still describes the old flags throughout.
+  - `simplified-schema/docs/topics/types.md` shows as modified in the worktree and is not this phase's; classify file lists by content.
+  - Still applies: `just test -- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`. `rg` hung this shell for over 100 s here; `grep` (ugrep) is fine. A `StatusBlock` paints regardless of its terminal, so anything new printing one needs `stderr_text` or a strip.
 source_files_during_phase_3:
   - biscuit-terminal/lib/src/output/mod.rs
   - biscuit-terminal/lib/src/output/width.rs
@@ -439,6 +468,109 @@ skills_files_updated_during_phase_3:
   - .claude/skills/darkmatter/SKILL.md
   - .claude/skills/darkmatter/schema.md
   - .claude/skills/darkmatter/terminal.md
+source_files_during_phase_4:
+  - biscuit-terminal/lib/src/output/profile.rs
+  - darkmatter/cli/src/args/cli.rs
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/src/args/completion.rs
+  - darkmatter/cli/src/args/enums.rs
+  - darkmatter/cli/src/args/mod.rs
+  - darkmatter/cli/src/args/output.rs
+  - darkmatter/cli/src/args/parsers.rs
+  - darkmatter/cli/src/args/target.rs
+  - darkmatter/cli/src/commands/clean.rs
+  - darkmatter/cli/src/commands/clean/json.rs
+  - darkmatter/cli/src/commands/code_block.rs
+  - darkmatter/cli/src/commands/frontmatter.rs
+  - darkmatter/cli/src/commands/graph.rs
+  - darkmatter/cli/src/commands/hash.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/commands/schema/about.rs
+  - darkmatter/cli/src/commands/schema/detect.rs
+  - darkmatter/cli/src/commands/schema/mod.rs
+  - darkmatter/cli/src/commands/schema/triggers.rs
+  - darkmatter/cli/src/commands/schema/validate.rs
+  - darkmatter/cli/src/commands/trigger_findings.rs
+  - darkmatter/cli/src/commands/validate.rs
+  - darkmatter/cli/src/main.rs
+  - darkmatter/cli/src/output/mod.rs
+  - darkmatter/cli/src/output/report.rs
+  - darkmatter/cli/tests/common/mod.rs
+  - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+  - darkmatter/cli/tests/l1/clean.rs
+  - darkmatter/cli/tests/l1/clean_fidelity.rs
+  - darkmatter/cli/tests/l1/clean_frontmatter.rs
+  - darkmatter/cli/tests/l1/clean_json.rs
+  - darkmatter/cli/tests/l1/clean_parity.rs
+  - darkmatter/cli/tests/l1/clean_rules.rs
+  - darkmatter/cli/tests/l1/code_block.rs
+  - darkmatter/cli/tests/l1/compose_data_output.rs
+  - darkmatter/cli/tests/l1/delta.rs
+  - darkmatter/cli/tests/l1/diagnostic_positions.rs
+  - darkmatter/cli/tests/l1/entry_point_parity.rs
+  - darkmatter/cli/tests/l1/frontmatter_key_order.rs
+  - darkmatter/cli/tests/l1/get_set_rm.rs
+  - darkmatter/cli/tests/l1/graph.rs
+  - darkmatter/cli/tests/l1/hash_entry_precedence.rs
+  - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+  - darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+  - darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+  - darkmatter/cli/tests/l1/magic_root.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/policy_verbs.rs
+  - darkmatter/cli/tests/l1/reference_report.rs
+  - darkmatter/cli/tests/l1/rm.rs
+  - darkmatter/cli/tests/l1/schema_about.rs
+  - darkmatter/cli/tests/l1/schema_detect.rs
+  - darkmatter/cli/tests/l1/schema_grammar_types.rs
+  - darkmatter/cli/tests/l1/schema_recursive.rs
+  - darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+  - darkmatter/cli/tests/l1/schema_target_recognition.rs
+  - darkmatter/cli/tests/l1/schema_triggers.rs
+  - darkmatter/cli/tests/l1/schema_union_matrix.rs
+  - darkmatter/cli/tests/l1/schema_union_pipeline.rs
+  - darkmatter/cli/tests/l1/schema_validate.rs
+  - darkmatter/cli/tests/l1/schema_validate_baseline.rs
+  - darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+  - darkmatter/cli/tests/l1/schema_validate_core_types.rs
+  - darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+  - darkmatter/cli/tests/l1/schema_validate_timings.rs
+  - darkmatter/cli/tests/l1/schema_validate_yaml.rs
+  - darkmatter/cli/tests/l1/standalone_baseline.rs
+  - darkmatter/cli/tests/l1/toc.rs
+  - darkmatter/cli/tests/l1/validate_refs.rs
+  - darkmatter/lib/src/markdown/output/command/document.rs
+  - darkmatter/lib/src/markdown/output/command/mod.rs
+  - darkmatter/cli/schemas/output/clean.yaml
+  - darkmatter/cli/schemas/output/code-block.yaml
+  - darkmatter/cli/schemas/output/delta.yaml
+  - darkmatter/cli/schemas/output/edit.yaml
+  - darkmatter/cli/schemas/output/get.yaml
+  - darkmatter/cli/schemas/output/graph.yaml
+  - darkmatter/cli/schemas/output/hash.yaml
+  - darkmatter/cli/schemas/output/rm.yaml
+  - darkmatter/cli/schemas/output/schema-about.yaml
+  - darkmatter/cli/schemas/output/schema-detect.yaml
+  - darkmatter/cli/schemas/output/schema-triggers.yaml
+  - darkmatter/cli/schemas/output/schema-validate.yaml
+  - darkmatter/cli/schemas/output/set.yaml
+  - darkmatter/cli/schemas/output/toc.yaml
+  - darkmatter/cli/schemas/output/validate-refs.yaml
+  - darkmatter/cli/src/commands/delta.rs
+  - darkmatter/cli/src/commands/toc.rs
+  - darkmatter/cli/src/output/command.rs
+  - darkmatter/cli/tests/l1/output_commands.rs
+  - darkmatter/lib/src/markdown/output/command/clean.rs
+  - darkmatter/lib/src/markdown/output/command/data.rs
+  - darkmatter/lib/src/markdown/output/command/schema_about.rs
+  - darkmatter/lib/src/markdown/output/command/value.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/cli.md
+  - .claude/skills/darkmatter/schema.md
 ---
 
 # Implementation Log for 2026-11-04-composition-errors (6 phases)
@@ -686,3 +818,91 @@ The scope shortcut was not used: source files changed, so both gates ran.
 A piped run has no TTY, so "TTY-profile" parity for compose is by construction (its Markdown path never reads a terminal), and spoofed stream behavior is tested in-process through `OutputEnvironment`. Real-terminal coverage is Phase 6.
 
 The Input Robustness Matrix does not apply (plan rule 29). The `OUTPUT_COLUMNS` and `--width` value parsers have their shapes tested at `biscuit-terminal` `output::width::tests`, and wiring at `output_envelope`.
+
+## Phase 4
+
+Ran with one foreground subagent, for migrating existing CLI tests to the contract; the product code, schemas, and new tests were written by the orchestrator. All results below are from the final tree.
+
+### Wave 10 — Leaf arguments
+
+- Every leaf has `--output` with its default in `--help`; `--width` was already global. `SchemaDetectOutput` adds `json-schema`. `args/output.rs::COMMAND_LEAVES` records path, default, schema file, and families. `Cli::requests_data_output` is exhaustive over leaves, so tracing stays off for every data output.
+- Removed: `CodeBlockOutput`, `ValidateOutputFormat`, `SchemaValidateFormat`, `SchemaDetectFormat`, `parse_fixed_width`, every per-command format flag. The removed flags are simply undeclared, so clap reports them (status 2) and their tokens stay legal inside positional content and after `--`. `complete_fixed_width_values` became `complete_width_values` on `--width`.
+- `validate_subcommand_usage` and the utility routes (`--completions`, `--list-themes` with `--output`) are usage errors now.
+
+### Shared delivery
+
+- `cli/src/output/command.rs`: `CommandRun`, `Completed`, `DataShape::{Typed, Object, Bare}`. Serialization failure and closed stdout behave as `ReportSink` does, without its `--show`, which no other command has.
+- Library: `markdown/output/command/{value,data,clean,schema_about}.rs`. The clean wire types and `FindingRow` moved there from the CLI (rule 8). `DocumentOutput::with_markdown_source` keeps clean's and set's exact bytes.
+- `Terminal::from_output_options` in `biscuit-terminal`: a component's terminal from the options it was given, with nothing detected. This is what lets one override serve `plain`.
+- Interpretation of rule 23 as planned: an explicit existing shape outranks the general "every result has `outcome`" wording. Departures from the plan's letter are in `decisions_for_review`.
+
+### Wave 11 and 12 — Commands
+
+- Document: `clean` and `set` through `document_value`; a saved `clean` prints its delta; explicit `--width` lowers to the `fixed-width`/`unwrap` rule overrides (`u16` saturates, matching compose). `get`'s formatted output is today's raw layout, byte for byte, including the bare newline for null. `edit` reports `created` and the editor's executable.
+- Reference: `toc` and `delta` moved to their own modules; `graph` and `validate refs` print the report on stdout and exit 1 through the value rather than `process::exit`; `--graph` stays the diagram alone (rule 25). `print_validation_report_text` and graph's footer were already gone.
+- Schema: `validate` collects records before dispatch and has no `process::exit`; `detect` and `triggers` have data shapes; `about` builds its data from the catalogs, removing Phase 3's temporary profile. `-vv` timings go to stderr in formatted runs only.
+- Hash and code: rule 24's fields; hash formatted bytes unchanged. `code-block` styled output uses the block's own panel, `plain` uses the fence.
+- A defect the migration surfaced, fixed here: every error `main` printed held ESC bytes on a piped stderr. New tests pin it.
+
+### Wave 13 — Contract inventory
+
+`cli/tests/l1/output_commands.rs` (152 tests): strict conformance per leaf; the guard `every_leaf_has_a_schema_file_and_a_conformance_test` (clap leaves == table, schema directory == table, each schema spelled in a test); every leaf's families and global width; help defaults; removed spellings and conflicts; terminal == plain; width invariance; format parity. The conformance tests read shipped schema files with `include_str!` inside each `#[test]`.
+
+### Gates (final tree, macOS unless stated)
+
+| Gate | Result |
+|---|---|
+| `just test` darkmatter (`-- --skip every_kinded_schema_artifact_passes_its_definition_through_the_registry`) | 13635 passed, 11 skipped |
+| `just lint` darkmatter | pass (including wasm32 zed-dmls) |
+| `just check-tier-coverage darkmatter` | 0 stranded |
+| `cargo check --workspace --all-targets` | clean |
+| `cargo test -p darkmatter --doc output::command`, `-p biscuit-terminal --doc from_output_options` | pass |
+| biscuit-terminal `test(output)` | 87 passed |
+| `just cross-check darkmatter-cli --os windows` | 1859 passed, 69 skipped |
+
+After that Windows run the only changes were documentation and skills. No published Windows observation: the rig tested a patched tree, not this head. `just cross-check darkmatter --os windows` was not run, because the library change is additive. Linux and WSL were not cross-checked; `just test-l2` and `just test-browser` were not run (Phase 6).
+
+Dependents: not run beyond the workspace compile. This phase changes no existing library symbol's behavior: `darkmatter` and `biscuit-terminal` gained items only, and `darkmatter-cli` has no dependents. `biscuit-terminal`'s full `just test` was not rerun, for the same reason; only its output tests.
+
+The scope shortcut was not used: source files changed, so both gates ran.
+
+### Pre-existing and load-sensitive failures
+
+- **Pre-existing, skipped:** `shipped_schema_corpus::every_kinded_schema_artifact_passes_its_definition_through_the_registry` (planned syntax of `2026-11-05-dynamic-schema-types`).
+- Nothing load-sensitive appeared. The full run reported no timeouts at load 18. The Windows run recorded one test at or above 5 s; I did not check which, or whether this phase added it.
+
+### Tests deleted or moved by the migration
+
+- Deleted: `code_block_theme_env_changes_terminal_output_without_flag`; a pipe cannot show a theme now, and library tests `terminal_honors_theme_env_when_no_override` and `terminal_honors_code_theme_env_when_no_override` cover it.
+- Converted: `test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines` to `test_clean_subcommand_rejects_the_removed_width_flags`.
+- Moved in-process, because styled output needs a terminal: `code_block` styling tests; four `schema_about` tests went to unit tests in `about.rs`. Each kept a CLI test asserting the piped form. Golden files: none changed; baselines compare after removing `outcome` and `diagnostics`, which are asserted separately.
+- Not exercised against a real TTY on this path: styled output of the commands converted here. That is Phase 6's L2.
+
+### Requirement to test mapping (Phase 4)
+
+| Requirement | Tests |
+|---|---|
+| Families per leaf, `json-schema` only on detect, global `--width`, inventory | `output_commands::{every_leaf_declares_its_output_and_width, every_leaf_has_a_schema_file_and_a_conformance_test, json_schema_is_only_detect}` |
+| `--help` shows each default | `output_commands::help_*`, `the_help_rows_cover_every_leaf`, `render_help_states_its_default` |
+| Removed flags and values exit 2, with empty stdout and no effect | `output_commands::{clean_json, toc_json, delta_json, rm_json, graph_json, get_json5, get_yaml, get_toml, get_raw, get_plain, validate_format, schema_validate_format, schema_detect_format, clean_fixed_width, clean_incidental, output_auto, output_ast, output_text, output_report_json}` |
+| Conflicts exit 2, `--compact` only with json and json5 | `output_commands::{compact_with_yaml, compact_with_plain, compact_prints_one_line_for_json_and_json5, subcommand_with_top_level_output, list_themes_with_output, completions_with_output, invalid_assignment, bad_highlight, hash_directory_save, hash_directory_kind, a_yaml_document_refuses_assignments_as_a_usage_error}` |
+| `md get --output plain` is `--raw`: string, null, list, object | `output_commands::get_plain_*` |
+| Every shape against its schema: success, failure, warning | `output_commands::conforms_*`; `every_schema_file_shares_one_diagnostic_type` |
+| Terminal piped equals plain, no ESC | `output_commands::plain_*`; `a_formatted_failure_with_no_result_is_on_stderr_without_escapes`, `a_report_row_holding_an_error_block_has_no_escapes_on_a_pipe`, `an_unloadable_baseline_is_a_failure_on_stderr_without_escapes`; `delta` goldens |
+| `--width` no effect without prose; accepted everywhere | `output_commands::{width_*, accepts_*}` |
+| Unlimited has natural size; explicit width wraps | `output_commands::{a_report_has_its_natural_size_on_a_pipe_with_no_width, a_report_wraps_at_an_explicit_width}` |
+| Explicit width overrides frontmatter, default keeps it; data matches Markdown | `output_commands::{explicit_width_reflows_clean_and_set_and_overrides_frontmatter, explicit_source_keeps_breaks_a_document_would_have_unwrapped}`; `commands::clean::tests::*`; `commands::frontmatter::tests::an_explicit_width_reflows_only_the_body` |
+| Float width: stderr for formatted, payload for data | `output_commands::{a_fractional_width_warns_on_stderr_for_a_formatted_output, conforms_toc_fractional_width, conforms_get_warning_wraps_a_scalar, conforms_clean_with_a_run_warning_keeps_its_own_diagnostics, conforms_schema_validate_fractional_width}` |
+| Failing report on stdout, status 1 | `output_commands::a_report_that_fails_is_on_stdout_with_status_one`; `conforms_graph_validate_failure`, `conforms_validate_refs_failure_has_one_diagnostic_per_problem`, `conforms_hash_diff_with_nothing_stored_fails`, `conforms_hash_save_then_diff_round_trips` |
+| Save side effects, data after save, round trip | `output_commands::{conforms_set_save_reports_the_document_it_wrote, saving_prints_nothing_formatted_for_set_and_rm, the_top_level_save_alias_forwards_output_and_width}`; `conforms_hash_save_then_diff_round_trips` (write, read, change, read) |
+| Edit: created, existing, editor, failure launches nothing | `output_commands::{conforms_edit_reports_a_created_file, conforms_edit_reports_an_existing_file, conforms_edit_failure_launches_nothing}` |
+| Heterogeneous hash tuples through TOML, null omitted | `output_commands::conforms_hash_detailed_writes_its_mixed_tuples_as_toml` |
+| Format parity | `output_commands::parity_*`, `a_toml_scalar_is_wrapped_as_value` |
+| Detect forms, multiple and merged | `output_commands::{yaml_is_the_bare_schema_and_json_schema_is_its_draft, conforms_schema_detect_*}` |
+| `--quiet` keeps data records; failure kinds distinct | `output_commands::conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart` |
+| Code: plain long line whole, markdown and HTML bytes; styled panel | `output_commands::code_keeps_its_exact_markdown_and_a_long_line_is_whole_in_plain`; `code_block` in-process tests |
+| `--graph` is the diagram alone | `output_commands::{conforms_validate_refs_graph_is_the_diagram_alone, a_graph_notation_is_its_source_in_a_terminal_and_a_fence_in_markdown}` |
+| Run status shapes | `output::command::tests::*` |
+| Terminal from options | `biscuit-terminal` `output::profile::tests::{a_terminal_from_a_plain_profile_keeps_no_capability, a_terminal_round_trips_a_rich_profile}` and doctest |
+
+The Input Robustness Matrix does not apply (plan rule 29).

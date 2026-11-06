@@ -1,7 +1,7 @@
 ---
 total_phases: 6
 created: 2026-11-05
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -337,6 +337,109 @@ skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/SKILL.md
 - .claude/skills/darkmatter/schema.md
 - .claude/skills/darkmatter/terminal.md
+source_files_during_phase_4:
+- biscuit-terminal/lib/src/output/profile.rs
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/enums.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/output.rs
+- darkmatter/cli/src/args/parsers.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/clean/json.rs
+- darkmatter/cli/src/commands/code_block.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/hash.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/about.rs
+- darkmatter/cli/src/commands/schema/detect.rs
+- darkmatter/cli/src/commands/schema/mod.rs
+- darkmatter/cli/src/commands/schema/triggers.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/commands/trigger_findings.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/tests/common/mod.rs
+- darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+- darkmatter/cli/tests/l1/clean.rs
+- darkmatter/cli/tests/l1/clean_fidelity.rs
+- darkmatter/cli/tests/l1/clean_frontmatter.rs
+- darkmatter/cli/tests/l1/clean_json.rs
+- darkmatter/cli/tests/l1/clean_parity.rs
+- darkmatter/cli/tests/l1/clean_rules.rs
+- darkmatter/cli/tests/l1/code_block.rs
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/delta.rs
+- darkmatter/cli/tests/l1/diagnostic_positions.rs
+- darkmatter/cli/tests/l1/entry_point_parity.rs
+- darkmatter/cli/tests/l1/frontmatter_key_order.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/graph.rs
+- darkmatter/cli/tests/l1/hash_entry_precedence.rs
+- darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+- darkmatter/cli/tests/l1/invalid_trigger_warnings.rs
+- darkmatter/cli/tests/l1/lifecycle_schema_fallback.rs
+- darkmatter/cli/tests/l1/magic_root.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/policy_verbs.rs
+- darkmatter/cli/tests/l1/reference_report.rs
+- darkmatter/cli/tests/l1/rm.rs
+- darkmatter/cli/tests/l1/schema_about.rs
+- darkmatter/cli/tests/l1/schema_detect.rs
+- darkmatter/cli/tests/l1/schema_grammar_types.rs
+- darkmatter/cli/tests/l1/schema_recursive.rs
+- darkmatter/cli/tests/l1/schema_robustness_matrix.rs
+- darkmatter/cli/tests/l1/schema_target_recognition.rs
+- darkmatter/cli/tests/l1/schema_triggers.rs
+- darkmatter/cli/tests/l1/schema_union_matrix.rs
+- darkmatter/cli/tests/l1/schema_union_pipeline.rs
+- darkmatter/cli/tests/l1/schema_validate.rs
+- darkmatter/cli/tests/l1/schema_validate_baseline.rs
+- darkmatter/cli/tests/l1/schema_validate_baseline_selection.rs
+- darkmatter/cli/tests/l1/schema_validate_core_types.rs
+- darkmatter/cli/tests/l1/schema_validate_shipped_artifacts.rs
+- darkmatter/cli/tests/l1/schema_validate_timings.rs
+- darkmatter/cli/tests/l1/schema_validate_yaml.rs
+- darkmatter/cli/tests/l1/standalone_baseline.rs
+- darkmatter/cli/tests/l1/toc.rs
+- darkmatter/cli/tests/l1/validate_refs.rs
+- darkmatter/lib/src/markdown/output/command/document.rs
+- darkmatter/lib/src/markdown/output/command/mod.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/src/commands/delta.rs
+- darkmatter/cli/src/commands/toc.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/lib/src/markdown/output/command/clean.rs
+- darkmatter/lib/src/markdown/output/command/data.rs
+- darkmatter/lib/src/markdown/output/command/schema_about.rs
+- darkmatter/lib/src/markdown/output/command/value.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Composition Errors Implementation Plan
@@ -533,41 +636,41 @@ These decisions settle the specification's remaining technical details. They app
 
 ### Wave 10 — Shared command wiring
 
-- [ ] **Leaf arguments**
+- [x] **Leaf arguments**
   - Extend args/output.rs metadata to every command leaf with the defaults from the spec; add width everywhere and the schema-detect json-schema extra. Remove obsolete output enums/fields, get aliases/raw, clean fixed-width/incidental-newline flags, and output-auto/ast/text values.
   - Own `args/{cli,command,target,enums,render,completion,parsers}.rs`, command dispatch signatures, and reusable output argument helpers. Keep graph notation, fail-fast, show-all, save, list compact/loose, and hash semantics.
   - Add parser tests per leaf for families, default help, alias browser, width, removed flags/values, compact restrictions, and accepted-but-invalid conflicts. Use table-driven metadata instead of independent command-specific acceptance lists.
 
 ### Wave 11 — Parallel command groups
 
-- [ ] **Document commands**
+- [x] **Document commands**
   - Own CLI `commands/{clean,frontmatter}.rs`, `commands/clean/json.rs`, corresponding library adapters, schemas `clean/get/set/rm/edit.yaml`, and conformance tests.
   - Preserve clean's v1 diagnostics and get's exact successful data shape/raw plain bytes; render clean/set formatted outputs through DocumentOutput. Preserve save side effects and add data acknowledgments. Stub edit's editor and verify created/existing file behavior.
   - Implement explicit-width cleanup precedence and legacy-title migration; emit no format-specific printing directly from handlers.
 
-- [ ] **Reference commands**
+- [x] **Reference commands**
   - Own `commands/{graph,validate}.rs`, toc/delta branches currently in commands/mod.rs, their library output adapters, schemas `graph/validate-refs/toc/delta.yaml`, and conformance tests. Move toc/delta leaf implementations into command modules to avoid concurrent edits to the dispatch match.
   - Preserve existing graph/TOC/delta JSON values, use the common reference report, and support both output families. Integrate show-all and auxiliary graph data per rule 25. Return status 1 for failed validation.
   - Delete print_validation_report_text and graph's handwritten summary footer. Test graph --validate and validate refs report-body parity without weakening their different severity visibility settings.
 
-- [ ] **Schema commands**
+- [x] **Schema commands**
   - Own `commands/schema/{validate,detect,triggers,about}.rs`, corresponding adapters, schemas `schema-validate/schema-detect/schema-triggers/schema-about.yaml`, and conformance tests.
   - Collect validate file results before dispatch; preserve per-file fields and diagnostic distinctions while normalizing operational exits to 1 and usage conflicts to 2. Preserve YAML versus Markdown selection behavior and keep schema-about passive.
   - Implement rule 24's new trigger/about projections and multi-file detect shapes; render detect as a YAML Code node for formatted output, bare inferred schema for single/merged data, and Draft 2020-12 only for json-schema. Cover `--quiet`, merge/unmerged inputs, and no-prose width invariance.
 
 ### Wave 12 — Hash and code
 
-- [ ] **Hash results**
+- [x] **Hash results**
   - Own commands/hash.rs, typed library hash output projections, hash.yaml, and conformance tests. Load the biscuit-hash skill before editing hash functionality; preserve all hash computations, options, stored-ignore comparison, directory aggregate, and save behavior.
   - Emit rule 24's fields, retain existing formatted hash bytes, and return status 1 for missing stored hash or a difference. Width is accepted and leaves hash results unchanged. Test compute/diff/save/directory, including a detailed hash containing heterogeneous section tuples under TOML.
 
-- [ ] **Code results**
+- [x] **Code results**
   - Own commands/code_block.rs, the CodeBlock output adapter, code-block.yaml, and conformance tests. Preserve file/content resolution, language/theme/title/number/highlight behavior while replacing its three-way private renderer with shared dispatch.
   - Test both families, plain fences and long-line overflow, styled truncation, data fields, show artifact handling, and invalid argument versus operational failure status. Use native fixtures, never shell-dependent test commands.
 
 ### Wave 13 — Command checkpoint
 
-- [ ] **Contract inventory**
+- [x] **Contract inventory**
   - Add one guard test enumerating clap leaf commands and their data-family acceptance; assert a matching schema file and registered executable conformance cases. Expected leaf schemas are compose, render, clean, toc, delta, get, set, rm, edit, validate-refs, hash, schema-validate, schema-detect, schema-triggers, schema-about, and code-block.
   - Register tests in existing CLI L1 roots and use the established process fixtures. Every leaf gets a control, runtime failure, and warning case for the warnings it can produce; all leaves get width acceptance and help/default tests. Runtime-failure payloads follow the settled compatibility rules, including scalar get and multi-file detect.
   - Test each serializer/dispatcher branch once at its public API, then prove command wiring. Run complete darkmatter L1, shared-library L1, and workspace all-target compile after integration.
