@@ -368,11 +368,20 @@ fn an_alias_of_an_unprovable_anchor_spans_the_alias_token() {
     }
 }
 
+/// A flow sequence spread over lines is located item by item.
+#[test]
+fn a_multiline_flow_item_reports_its_exact_span() {
+    let content = "---\nlist: [\n  \"x {{ min(1) }}\"\n  ]\n---\nbody\n";
+    for error in failures(content) {
+        assert_frontmatter_failure(&error, content, "list", "min(1)", 17..29, (3, 6));
+    }
+}
+
 /// The alias-token fallback is for aliases only: a value the locator cannot
-/// reach (here a flow sequence spread over lines) still claims no span.
+/// prove (here a flow item beside a sibling it cannot read) still claims no span.
 #[test]
 fn an_unlocatable_value_that_is_no_alias_still_claims_no_span() {
-    let content = "---\nlist: [\n  \"x {{ min(1) }}\"\n  ]\n---\nbody\n";
+    let content = "---\nother: {a, b}\nlist: [\n  \"x {{ min(1) }}\"\n  ]\n---\nbody\n";
     for error in failures(content) {
         let MarkdownError::Interpolation { key, source, .. } = &error else {
             panic!("expected a typed interpolation error, got {error:?}");

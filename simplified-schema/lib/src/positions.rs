@@ -402,6 +402,17 @@ mod tests {
     }
 
     #[test]
+    fn a_multiline_flow_collection_keeps_every_position_in_the_document() {
+        let yaml = "title: x\ns: [ # first\n  1, # one, two ]\n  # between\n  two\n]\nm: {\n  a: 1,\n  b: x # end\n}\nafter: y\n";
+        let map = build_position_map(yaml);
+        assert_eq!(at(&map, "/s/0", PositionTarget::Value), Some((3, 3)));
+        assert_eq!(at(&map, "/s/1", PositionTarget::Value), Some((5, 3)));
+        assert_eq!(at(&map, "/m", PositionTarget::Key("b")), Some((9, 3)));
+        assert_eq!(at(&map, "/m/b", PositionTarget::Value), Some((9, 6)));
+        assert_eq!(at(&map, "/after", PositionTarget::Value), Some((11, 8)));
+    }
+
+    #[test]
     fn block_list_items_exclude_the_dash() {
         let map = build_position_map("tags:\n  - 1\n  - oops\nitems:\n  - name: a\n    id: 1\n  - name: b\n");
         assert_eq!(at(&map, "/tags/1", PositionTarget::Value), Some((3, 5)));

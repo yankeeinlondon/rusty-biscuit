@@ -1001,7 +1001,8 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 
 /// [`locate_schema_value`] for a document's frontmatter, which also follows a
 /// multi-line quoted scalar, a tag, and an empty value instead of giving up,
-/// and does not require every line to belong to the value.
+/// follows a flow collection across lines and past its comments, and does not
+/// require every line to belong to the value.
 ///
 /// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.
@@ -1077,8 +1078,8 @@ enum LocatorGrammar {
     /// model fails instead of leaving lines unread.
     Strict,
     /// Frontmatter lookup, which also follows tags, multi-line quoted
-    /// scalars, empty (null) values, and compact sequence items wider than
-    /// `- `.
+    /// scalars, empty (null) values, compact sequence items wider than `- `,
+    /// multi-line flow collections, and comments beside a node.
     Tolerant,
 }
 
@@ -1179,9 +1180,12 @@ impl BlockLocator<'_> {
             self.next += 1;
             let range = line.content_start..line.end;
             if self.tolerant {
+                if self.source[range.clone()].starts_with(['[', '{']) {
+                    return self.flow_collection(range.start);
+                }
                 // Frontmatter lookup keeps reading a scalar that opens its own
                 // line as that line alone.
-                locate_inline(self.source, range)
+                locate_inline(self.source, range, LocatorGrammar::Tolerant)
             } else {
                 self.inline_value(range, indent)
             }
@@ -1227,7 +1231,7 @@ impl BlockLocator<'_> {
             };
             self.next += 1;
             let item_start = line.content_start + relative;
-            if item_start < line.end {
+            if item_start < line.end && !(self.tolerant && self.source[item_start..line.end].starts_with('#')) {
                 let item_content = &self.source[item_start..line.end];
                 if explicit_indicator_content(item_content, '?').is_some()
                     || mapping_separator(item_content, false).is_some()
@@ -1344,7 +1348,9 @@ impl BlockLocator<'_> {
         value_range: Range<usize>,
         indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
-        if value_range.start < value_range.end {
+        // A comment after the key leaves the value to the following lines.
+        let is_comment = self.tolerant && self.source[value_range.clone()].starts_with('#');
+        if value_range.start < value_range.end && !is_comment {
             if let Some(after_properties) =
                 node_properties_end(self.source, &value_range, self.tolerant)
             {
@@ -1355,7 +1361,7 @@ impl BlockLocator<'_> {
                     node
                 } else if self.tolerant {
                     // A tagged empty value (`key: !!str`) has no node to descend into.
-                    locate_inline(self.source, value_range.clone())?
+                    locate_inline(self.source, value_range.clone(), LocatorGrammar::Tolerant)?
                 } else {
                     return Err(projection_error());
                 };
@@ -1409,14 +1415,15 @@ impl BlockLocator<'_> {
         parent_indent: usize,
     ) -> Result<LocatedValue, SchemaError> {
         let raw = &self.source[range.clone()];
+        if self.tolerant && raw.starts_with(['[', '{']) {
+            return self.flow_collection(range.start);
+        }
         let continues = self
             .lines
             .get(self.next)
             .is_some_and(|line| line.indent > parent_indent);
         let multi_line = if self.tolerant {
-            is_block_scalar_header(raw)
-                || raw.starts_with(['\'', '"'])
-                || (continues && !raw.starts_with(['[', '{']))
+            is_block_scalar_header(raw) || raw.starts_with(['\'', '"']) || continues
         } else {
             // A literal or folded block scalar, the form multi-line type
             // expressions such as `function(...)` signatures are written in,
@@ -1427,7 +1434,8 @@ impl BlockLocator<'_> {
                 || (continues && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*']))
         };
         if !multi_line {
-            return locate_inline(self.source, range);
+            let grammar = if self.tolerant { LocatorGrammar::Tolerant } else { LocatorGrammar::Strict };
+            return locate_inline(self.source, range, grammar);
         }
         let (scalar, end) =
             yaml_scalar::decode_scalar_node(self.source, range.start, parent_indent)
@@ -1443,6 +1451,17 @@ impl BlockLocator<'_> {
             span: range.start..end,
             kind: LocatedKind::Scalar(scalar),
         })
+    }
+
+    /// The flow collection opening at `start`, which may close on a later line
+    /// at any indentation. Its lines are consumed here because a line inside
+    /// it says nothing about the block structure around it.
+    fn flow_collection(&mut self, start: usize) -> Result<LocatedValue, SchemaError> {
+        let end = flow_collection_end(self.source, start).ok_or_else(projection_error)?;
+        while self.lines.get(self.next).is_some_and(|line| line.content_start <= end) {
+            self.next += 1;
+        }
+        locate_inline(self.source, start..end + 1, LocatorGrammar::Tolerant)
     }
 }
 
@@ -1527,8 +1546,15 @@ fn located_mapping(pairs: Vec<LocatedPair>) -> Result<LocatedValue, SchemaError>
     })
 }
 
-fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, SchemaError> {
-    let range = trim_range(source, range);
+fn locate_inline(
+    source: &str,
+    range: Range<usize>,
+    grammar: LocatorGrammar,
+) -> Result<LocatedValue, SchemaError> {
+    let range = match grammar {
+        LocatorGrammar::Strict => trim_range(source, range),
+        LocatorGrammar::Tolerant => node_without_comments(source, range),
+    };
     let raw = &source[range.clone()];
     if is_block_scalar_header(raw) {
         return Err(projection_error());
@@ -1541,9 +1567,9 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         // no child node, and is itself the smallest authored node there is.
         let items = split_flow_entries(source, range.start + 1..end)
             .into_iter()
-            .map(|item| trim_range(source, item))
+            .map(|item| flow_entry(source, item, grammar))
             .filter(|item| item.start < item.end)
-            .map(|item| locate_inline(source, item))
+            .map(|item| locate_inline(source, item, grammar))
             .collect::<Result<Vec<_>, _>>()?;
         return Ok(LocatedValue {
             span: range,
@@ -1556,7 +1582,7 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
             .ok_or_else(projection_error)?;
         let mut pairs = Vec::new();
         for pair in split_flow_entries(source, range.start + 1..end) {
-            let pair = trim_range(source, pair);
+            let pair = flow_entry(source, pair, grammar);
             if pair.start == pair.end {
                 continue;
             }
@@ -1564,7 +1590,7 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
             let colon = mapping_separator(raw_pair, true).ok_or_else(projection_error)?;
             let key_span = trim_range(source, pair.start..pair.start + colon);
             let key = decoded_text(source, &key_span)?;
-            let value = locate_inline(source, pair.start + colon + 1..pair.end)?;
+            let value = locate_inline(source, pair.start + colon + 1..pair.end, grammar)?;
             let pair_span = key_span.start..value.span.end;
             pairs.push(LocatedPair {
                 key,
@@ -1584,6 +1610,46 @@ fn locate_inline(source: &str, range: Range<usize>) -> Result<LocatedValue, Sche
         span: range.start..range.start + consumed,
         kind: LocatedKind::Scalar(scalar),
     })
+}
+
+/// One entry of a flow collection, past the comments the tolerant grammar reads
+/// before it. An entry holding only comments is empty.
+fn flow_entry(source: &str, entry: Range<usize>, grammar: LocatorGrammar) -> Range<usize> {
+    match grammar {
+        LocatorGrammar::Strict => trim_range(source, entry),
+        LocatorGrammar::Tolerant => trim_range(source, past_leading_comments(source, entry)),
+    }
+}
+
+fn past_leading_comments(source: &str, range: Range<usize>) -> Range<usize> {
+    let bytes = source.as_bytes();
+    let mut start = range.start;
+    loop {
+        while start < range.end && bytes[start].is_ascii_whitespace() {
+            start += 1;
+        }
+        if start >= range.end || bytes[start] != b'#' {
+            return start..range.end;
+        }
+        while start < range.end && !matches!(bytes[start], b'\n' | b'\r') {
+            start += 1;
+        }
+    }
+}
+
+/// The one node `range` holds, without the blanks and comments around it. A
+/// quoted scalar or collection ends at its own close, so what follows it can
+/// only be a comment; a plain scalar ends at its first comment.
+fn node_without_comments(source: &str, range: Range<usize>) -> Range<usize> {
+    let bytes = source.as_bytes();
+    let range = past_leading_comments(source, range);
+    let end = match bytes[range.clone()].first() {
+        Some(b'[' | b'{') => flow_collection_end(source, range.start).map(|end| end + 1),
+        Some(b'\'' | b'"') => quoted_flow_scalar_end(bytes, range.start, range.end),
+        _ => (range.start..range.end)
+            .find(|index| bytes[*index] == b'#' && *index > range.start && bytes[*index - 1].is_ascii_whitespace()),
+    };
+    trim_range(source, range.start..end.map_or(range.end, |end| end.min(range.end)))
 }
 
 /// Where the raw YAML flow collection opening at byte `start` of `source`

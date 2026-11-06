@@ -27,7 +27,7 @@ use crate::markdown::compose::transclusion::{
 use crate::markdown::compose::{
     ComposeOperation, ComposeSource, ComposeWarning, EffectiveStateBuilder, ResolvingLookup,
 };
-use crate::markdown::hash::{FrontmatterPathSegment, LeafLocateError, locate_frontmatter_leaves};
+use crate::markdown::hash::{FrontmatterPathSegment, locate_frontmatter_leaves, locate_frontmatter_value_range};
 use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
 
@@ -379,20 +379,18 @@ impl<'a> AuthoredLocator<'a> {
         span.clone().find_map(|offset| self.origin.producer_of(offset)).map(|construct| self.location(construct, true))
     }
 
-    /// The location of a `prologue:` or `epilogue:` value (`index` for one
-    /// item of a list), or of its key when YAML's layout hides the value
-    /// itself, such as an item of a flow list.
-    fn frontmatter_location(&self, key: &str, index: Option<usize>) -> Option<AuthoredReferenceLocation> {
+    /// The location of a `prologue:` or `epilogue:` value reading `expected`
+    /// (`index` for one item of a list); `None` when it cannot be proven.
+    fn frontmatter_location(&self, key: &str, index: Option<usize>, expected: &str) -> Option<AuthoredReferenceLocation> {
         let mut path = vec![FrontmatterPathSegment::Key(key.to_string())];
         path.extend(index.map(FrontmatterPathSegment::Index));
-        match locate_frontmatter_leaves(self.loaded, std::slice::from_ref(&path)) {
-            Ok(mut leaves) => leaves.pop().map(|leaf| self.location(leaf.range, false)),
-            Err(LeafLocateError::Unlocated(leaf)) if leaf.reason != crate::markdown::hash::UnlocatedLeafReason::Missing => {
-                let start = *self.line_starts.get(leaf.line.checked_sub(1)?)?;
-                self.loaded.get(start..)?.chars().next().map(|first| self.location(start..start + first.len_utf8(), false))
-            }
-            Err(_) => None,
-        }
+        // A leaf is located within its own property, so a construct elsewhere
+        // the whole-frontmatter locator cannot read does not cost it its place.
+        let range = match locate_frontmatter_leaves(self.loaded, std::slice::from_ref(&path)) {
+            Ok(mut leaves) => leaves.pop()?.range,
+            Err(_) => locate_frontmatter_value_range(self.loaded, key, index, expected)?,
+        };
+        Some(self.location(range, false))
     }
 }
 
@@ -871,13 +869,13 @@ fn build_node(
 
     // Frontmatter prologue/epilogue
     if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
-        let value_location = |key: &str, idx: usize| {
+        let value_location = |key: &str, idx: usize, expected: &str| {
             let in_list = md.frontmatter().as_map().get(key).is_some_and(serde_json::Value::is_array);
-            locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx)))
+            locator.and_then(|locator| locator.frontmatter_location(key, in_list.then_some(idx), expected))
         };
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
             let is_literal = is_literal_content(prologue);
-            let location = value_location("prologue", idx);
+            let location = value_location("prologue", idx, prologue);
 
             if extract_references {
                 let mut attrs = serde_json::Map::new();
@@ -967,7 +965,7 @@ fn build_node(
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
             let is_literal = is_literal_content(epilogue);
-            let location = value_location("epilogue", idx);
+            let location = value_location("epilogue", idx, epilogue);
 
             if extract_references {
                 let mut attrs = serde_json::Map::new();

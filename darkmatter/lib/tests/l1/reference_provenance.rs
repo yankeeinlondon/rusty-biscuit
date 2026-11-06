@@ -509,14 +509,165 @@ fn frontmatter_values_locate_their_authored_position() {
     }
 }
 
-/// A flow list's items have no exact leaf span, but the property's own line is
-/// proven, so the value's key stands in.
+/// The `prologue:` or `epilogue:` records of `text` (`KEY` naming the property)
+/// in authored order, as `(target, line, column)`; a null position is `None`.
+fn value_positions(property: &str, text: &str) -> Vec<(String, Option<(usize, usize)>)> {
+    let (_dir, _path, graph) = graph_over(&text.replace("KEY", property));
+    graph
+        .root()
+        .local_references
+        .records
+        .iter()
+        .filter(|record| {
+            matches!(record.origin.syntax, ReferenceSyntax::FrontmatterPrologue | ReferenceSyntax::FrontmatterEpilogue)
+        })
+        .map(|record| {
+            let position = record.origin.authored.as_ref().map(|location| (location.line, location.column));
+            (record.target.raw().unwrap_or_default().to_string(), position)
+        })
+        .collect()
+}
+
+/// One `#[test]` per property for each authored shape.
+macro_rules! frontmatter_value_positions {
+    ($($name:ident: $text:expr => [$(($target:expr, $position:expr)),* $(,)?];)*) => {
+        $(mod $name {
+            fn expected() -> Vec<(String, Option<(usize, usize)>)> {
+                vec![$(($target.to_string(), $position.into())),*]
+            }
+
+            #[test]
+            fn prologue() {
+                assert_eq!(super::value_positions("prologue", $text), expected());
+            }
+
+            #[test]
+            fn epilogue() {
+                assert_eq!(super::value_positions("epilogue", $text), expected());
+            }
+        })*
+    };
+}
+
+frontmatter_value_positions! {
+    a_scalar: "---\nKEY: ./a.md\n---\n# Top\n" => [("./a.md", (2, 11))];
+    a_block_sequence: "---\nKEY:\n  - ./a.md\n  - ./b.md\n---\n# Top\n" => [
+        ("./a.md", (3, 5)), ("./b.md", (4, 5)),
+    ];
+    a_one_line_flow: "---\nKEY: [./a.md, ./b.md]\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./b.md", (2, 20)),
+    ];
+    a_multiline_flow: "---\nKEY: [\n  ./a.md,\n  ./b.md\n]\n---\n# Top\n" => [
+        ("./a.md", (3, 3)), ("./b.md", (4, 3)),
+    ];
+    a_single_flow_entry: "---\nKEY: [./a.md]\n---\n# Top\n" => [("./a.md", (2, 12))];
+    quoted_flow_entries: "---\nKEY: [\"./a.md\", './b.md']\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./b.md", (2, 22)),
+    ];
+    multiline_quoted_flow_entries: "---\nKEY: [\n  \"./a.md\",\n  './b.md',\n]\n---\n# Top\n" => [
+        ("./a.md", (3, 3)), ("./b.md", (4, 3)),
+    ];
+    a_trailing_comma: "---\nKEY: [./a.md, ./b.md,]\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./b.md", (2, 20)),
+    ];
+    comments_between_entries:
+        "---\nKEY: [ # first\n  # lead, in\n  ./a.md, # one, two ]\n  # between\n  ./b.md # last\n  # end\n]\n---\n# Top\n" => [
+        ("./a.md", (4, 3)), ("./b.md", (6, 3)),
+    ];
+    quoted_flow_punctuation: "---\nKEY: [\"./a,b].md\", ./c.md]\n---\n# Top\n" => [
+        ("./a,b].md", (2, 12)), ("./c.md", (2, 25)),
+    ];
+    multibyte_earlier_in_the_line: "---\nKEY: [./\u{e9}.md, \"./\u{2713}.md\", ./b.md]\n---\n# Top\n" => [
+        ("./\u{e9}.md", (2, 12)), ("./\u{2713}.md", (2, 20)), ("./b.md", (2, 30)),
+    ];
+    a_byte_order_mark: "\u{FEFF}---\nKEY: [./a.md, ./b.md]\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./b.md", (2, 20)),
+    ];
+    a_byte_order_mark_multiline: "\u{FEFF}---\nKEY: [\n  ./a.md,\n  ./b.md\n]\n---\n# Top\n" => [
+        ("./a.md", (3, 3)), ("./b.md", (4, 3)),
+    ];
+    crlf_one_line_flow: "---\r\nKEY: [./a.md, ./b.md]\r\n---\r\n# Top\r\n" => [
+        ("./a.md", (2, 12)), ("./b.md", (2, 20)),
+    ];
+    crlf_multiline_flow: "---\r\nKEY: [\r\n  ./a.md,\r\n  ./b.md\r\n]\r\n---\r\n# Top\r\n" => [
+        ("./a.md", (3, 3)), ("./b.md", (4, 3)),
+    ];
+    repeated_identical_values: "---\nKEY: [./a.md, ./a.md]\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./a.md", (2, 20)),
+    ];
+    repeated_identical_values_over_lines: "---\nKEY: [\n  ./a.md,\n  ./a.md\n]\n---\n# Top\n" => [
+        ("./a.md", (3, 3)), ("./a.md", (4, 3)),
+    ];
+    a_flow_opening_its_own_line: "---\nKEY:\n  [ ./a.md,\n    ./b.md ]\n---\n# Top\n" => [
+        ("./a.md", (3, 5)), ("./b.md", (4, 5)),
+    ];
+    a_comment_after_the_flow: "---\nKEY: [./a.md] # note\n---\n# Top\n" => [("./a.md", (2, 12))];
+    a_comment_after_the_key: "---\nKEY: # note\n  - ./a.md\n---\n# Top\n" => [("./a.md", (3, 5))];
+    a_plain_entry_continued_on_a_line: "---\nKEY: [./a\n  b.md, ./c.md]\n---\n# Top\n" => [
+        ("./a b.md", (2, 12)), ("./c.md", (3, 9)),
+    ];
+    a_tagged_entry_at_its_tag: "---\nKEY: [!!str ./a.md, ./b.md]\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./b.md", (2, 26)),
+    ];
+    an_anchor_and_its_alias: "---\nKEY: [&x ./a.md, *x]\n---\n# Top\n" => [
+        ("./a.md", (2, 12)), ("./a.md", (2, 23)),
+    ];
+    a_block_alias_at_its_token: "---\nshared: &x ./a.md\nKEY: *x\n---\n# Top\n" => [("./a.md", (3, 11))];
+    a_block_anchor_at_its_token: "---\nKEY: &x ./a.md\n---\n# Top\n" => [("./a.md", (2, 11))];
+    a_sibling_multiline_flow: "---\nother: [\n  1,\n  2\n]\nKEY: ./a.md\n---\n# Top\n" => [("./a.md", (6, 11))];
+    an_indented_root: "---\n  KEY: [./a.md]\n---\n# Top\n" => [("./a.md", (2, 14))];
+    // YAML a whole-frontmatter read does not model proves no item's place, so
+    // the item reports no position rather than its key's.
+    an_unreadable_sibling_gives_a_flow_item_no_position: "---\nother: {a, b}\nKEY: [./a.md]\n---\n# Top\n" => [
+        ("./a.md", None::<(usize, usize)>),
+    ];
+    an_unreadable_sibling_leaves_a_scalar_its_position: "---\nother: {a, b}\nKEY: ./a.md\n---\n# Top\n" => [
+        ("./a.md", (3, 11)),
+    ];
+}
+
+/// Each child of a flow list keeps the authored line of its own entry, in the
+/// graph and in the report's trail.
+fn flow_list_child_trail(property: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["a", "b"] {
+        std::fs::write(dir.path().join(format!("{name}.md")), format!("[gone](./{name}-gone.md)\n")).unwrap();
+    }
+    let path = dir.path().join("doc.md");
+    std::fs::write(&path, format!("---\n{property}: [\n  ./a.md,\n  ./b.md\n]\n---\n# Top\n")).unwrap();
+    let graph = graph_of(&path);
+
+    let lines: Vec<_> =
+        graph.root().child_insertions.iter().map(|insertion| insertion.authored_directive_line).collect();
+    assert_eq!(lines, vec![Some(3), Some(4)]);
+
+    let options = ReferenceValidationOptions::with_graph(graph_options(dir.path()));
+    let report = Markdown::try_from(path.as_path()).unwrap().validate_references(options).unwrap();
+    let trails: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|issue| issue.reference_display.ends_with("-gone.md"))
+        .map(|issue| issue.included_via.iter().map(|step| step.line).collect::<Vec<_>>())
+        .collect();
+    assert_eq!(trails, vec![vec![Some(3)], vec![Some(4)]]);
+}
+
 #[test]
-fn a_flow_list_value_falls_back_to_its_key() {
-    let text = "---\ntitle: T\nprologue: [./a.md, ./b.md]\n---\nBody\n";
-    let (_dir, _path, graph) = graph_over(text);
-    assert_eq!(at(graph.root(), "./a.md"), (3, 1, false));
-    assert_eq!(at(graph.root(), "./b.md"), (3, 1, false));
+fn a_prologue_flow_list_keeps_each_childs_trail_line() {
+    flow_list_child_trail("prologue");
+}
+
+#[test]
+fn an_epilogue_flow_list_keeps_each_childs_trail_line() {
+    flow_list_child_trail("epilogue");
+}
+
+/// A link in a literal flow item points at that item, not at its list's key.
+#[test]
+fn a_literal_flow_item_locates_its_links_at_the_item() {
+    let (_dir, _path, graph) = graph_over("---\nprologue: [\n  \"See [p](./p.md)\\nmore\"\n]\n---\nBody\n");
+    let link = authored(graph.root(), "./p.md");
+    assert_eq!((link.line, link.column), (3, 3));
 }
 
 /// A literal prologue's links have no body position; they name the value.

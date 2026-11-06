@@ -285,7 +285,7 @@ Single-document variants (no transclusion traversal):
 
 **`merge_meta_into_frontmatter(overwrite) -> MarkdownResult<usize>`** copies meta tag values into the document's frontmatter. Returns the number of keys inserted or updated.
 
-**`set_meta_tag(key, value) -> usize`** sets a `<meta>` tag in the document content. If a tag with the same key already exists, it is updated in place regardless of attribute order, extra whitespace, or additional attributes. Otherwise, a new tag is appended. Returns 0 for insert, 1 for update.
+**`set_meta_tag(key, value) -> usize`** sets a `<meta>` tag in the document content. If a tag with the same key already exists, it is updated in place regardless of attribute order, extra whitespace, or additional attributes. A `<meta>` written in a code block, an HTML comment, or a raw-text element such as `<textarea>` is text rather than a tag, so it is left alone. Otherwise, a new tag is appended. Returns 0 for insert, 1 for update.
 
 Key-to-attribute mapping:
 
@@ -372,6 +372,8 @@ if md.has_inline_html() {
 
 Extracts HTML `<a>` tags from the markdown body as typed [`Link`](./Link.md) structs. This complements `links()`, which remains Markdown-syntax only.
 
+Text inside a raw-text element such as `<script>` or `<textarea>` is not a link, here or in `links()`.
+
 ```rust
 let html_links = md.inline_html_links();
 for link in &html_links {
@@ -393,6 +395,8 @@ for img in &images {
 ### `inline_html_image_references() -> Vec<ImageRef>`
 
 Extracts HTML `<img>` tags from the markdown body as typed [`ImageRef`](./ImageRef.md) structs. This complements `image_references()`, which remains Markdown-syntax only.
+
+Text inside a raw-text element such as `<script>` or `<textarea>` is not an image, here or in `image_references()`.
 
 ```rust
 let html_images = md.inline_html_image_references();

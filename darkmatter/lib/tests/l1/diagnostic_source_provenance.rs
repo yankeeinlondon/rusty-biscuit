@@ -77,6 +77,13 @@ fn at_line(file: &Path, line: usize) -> Option<DiagnosticSource> {
     Some(DiagnosticSource { line: Some(line), ..DiagnosticSource::file_only(Some(file.to_path_buf())) })
 }
 
+/// An absolute path under a fixture root; a rootless path is not absolute on
+/// Windows, and a context with no absolute path names no file.
+fn work(name: &str) -> PathBuf {
+    let root = if cfg!(windows) { "C:/work" } else { "/work" };
+    Path::new(root).join(name)
+}
+
 fn file_only(file: &Path) -> Option<DiagnosticSource> {
     Some(DiagnosticSource::file_only(Some(file.to_path_buf())))
 }
@@ -158,6 +165,13 @@ failure_sources! {
     a_frontmatter_interpolation_keeps_its_position:
         "---\ntitle: x\nvalue: \"{{ 1 / 0 }}\"\n---\nbody\n",
         "dm.expression.evaluation_failure", |file| at(file, 3, 9);
+    // R1-F4.14
+    a_frontmatter_interpolation_in_a_multiline_flow_keeps_its_position:
+        "---\ntitle: x\nvalues: [\n  \"{{ 1 / 0 }}\"\n]\n---\nbody\n",
+        "dm.expression.evaluation_failure", |file| at(file, 4, 4);
+    a_multiline_flow_elsewhere_leaves_a_frontmatter_interpolation_its_position:
+        "---\nother: [\n  a\n]\nvalue: \"{{ 1 / 0 }}\"\n---\nbody\n",
+        "dm.expression.evaluation_failure", |file| at(file, 5, 9);
     // R1-F2.24
     an_unmatched_end_block_names_its_file:
         "# T\n\n::end-block\n",
@@ -208,7 +222,7 @@ fn a_self_inclusion_names_the_child() {
 /// R1-F2.25: a typed cycle has no parent line to publish.
 #[test]
 fn a_cycle_chain_line_is_never_published() {
-    let (a, b) = (Path::new("/work/a.md"), Path::new("/work/b.md"));
+    let (a, b) = (&work("a.md"), &work("b.md"));
     let error: MarkdownError = TransclusionError::CycleDetected {
         chain: vec![(a.to_path_buf(), 9), (b.to_path_buf(), 9), (a.to_path_buf(), 9)],
     }
@@ -217,7 +231,7 @@ fn a_cycle_chain_line_is_never_published() {
 }
 
 fn document_context() -> SourceContext {
-    SourceContext::new(PathBuf::from("/work/doc.md"), PathBuf::from("/work/doc.md"), "---\nx: 1\n---\nbody\n")
+    SourceContext::new(work("doc.md"), work("doc.md"), "---\nx: 1\n---\nbody\n")
 }
 
 fn context() -> Box<SourceContext> {
@@ -250,14 +264,14 @@ macro_rules! shell_variants {
             fn at_a_frontmatter_key() {
                 let records = error_diagnostics(&error(frontmatter()));
                 assert_eq!(records[0].code, $code);
-                assert_eq!(records[0].source, at_line(Path::new("/work/doc.md"), 2));
+                assert_eq!(records[0].source, at_line(work("doc.md").as_path(), 2));
             }
 
             /// A body origin's line is prepared, so only the file is known.
             #[test]
             fn in_a_body() {
                 let records = error_diagnostics(&error(body()));
-                assert_eq!(records[0].source, file_only(Path::new("/work/doc.md")));
+                assert_eq!(records[0].source, file_only(work("doc.md").as_path()));
             }
         }
     )*};
@@ -319,10 +333,10 @@ shell_variants! {
 #[test]
 fn a_policy_failure_names_the_policy_file() {
     let error = ShellExpansionError::PolicyIo {
-        path: PathBuf::from("/home/me/whitelist"),
+        path: work("whitelist"),
         source: std::io::Error::other("denied"),
     };
-    assert_eq!(error_diagnostics(&error)[0].source, file_only(Path::new("/home/me/whitelist")));
+    assert_eq!(error_diagnostics(&error)[0].source, file_only(work("whitelist").as_path()));
 }
 
 /// R1-F2.28: a frontmatter value's own context is named after its key; the key
@@ -344,7 +358,7 @@ fn excerpt() -> SourceExcerpt {
 /// R1-F2.11: each variant's file, never its prepared line.
 #[test]
 fn a_shell_block_failure_names_its_file() {
-    let file = PathBuf::from("/work/block.md");
+    let file = work("block.md");
     for error in [
         ShellBlockError::Parse { line: 40, message: "m".into(), excerpt: excerpt(), source_file: Some(file.clone()) },
         ShellBlockError::Unterminated { line: 40, opening_text: "o".into(), excerpt: excerpt(), source_file: Some(file.clone()) },
@@ -371,8 +385,8 @@ fn a_shell_block_command_falls_back_to_its_command_file() {
         }
         .into()
     };
-    assert_eq!(error_diagnostics(&command(None))[0].source, file_only(Path::new("/work/doc.md")));
-    let own = PathBuf::from("/work/block.md");
+    assert_eq!(error_diagnostics(&command(None))[0].source, file_only(work("doc.md").as_path()));
+    let own = work("block.md");
     assert_eq!(error_diagnostics(&command(Some(own.clone())))[0].source, file_only(&own));
 }
 
@@ -416,7 +430,7 @@ fn a_frontmatter_error_with_no_position_names_its_file() {
     };
     let records = error_diagnostics(&error);
     assert_eq!(records[0].code, "dm.frontmatter.yaml_parse");
-    assert_eq!(records[0].source, file_only(Path::new("/work/doc.md")));
+    assert_eq!(records[0].source, file_only(work("doc.md").as_path()));
 }
 
 /// R1-F2.20: a file with no proven span keeps the file; neither other locus is
@@ -431,7 +445,7 @@ fn an_unproven_interpolation_keeps_its_file() {
     };
 
     let on_disk = error_diagnostics(&error(SourceRef::OnDisk(document_context())));
-    assert_eq!(on_disk[0].source, file_only(Path::new("/work/doc.md")));
+    assert_eq!(on_disk[0].source, file_only(work("doc.md").as_path()));
     assert_eq!(on_disk[0].span, None);
 
     let supplied = error(SourceRef::Supplied { supplier: "a flag".into() });
@@ -446,7 +460,7 @@ fn a_page_block_directive_failure_publishes_no_body_line() {
     let error: MarkdownError = PageBlockError::ParseDirective { ctx: context(), line: 40, message: "m".into() }.into();
     let records = error_diagnostics(&error);
     assert_eq!(records[0].code, "dm.directive.parse_failure");
-    assert_eq!(records[0].source, file_only(Path::new("/work/doc.md")));
+    assert_eq!(records[0].source, file_only(work("doc.md").as_path()));
 }
 
 /// R1-F2.25: every transclusion variant holding a context names its file.
@@ -460,7 +474,7 @@ fn a_transclusion_failure_with_a_context_names_its_file() {
         TransclusionError::ConditionEval { ctx: context(), expr: "e".into(), line: 40, authored: None, cause: expression_failure() },
     ] {
         let error: MarkdownError = error.into();
-        assert_eq!(error_diagnostics(&error)[0].source, file_only(Path::new("/work/doc.md")), "{error}");
+        assert_eq!(error_diagnostics(&error)[0].source, file_only(work("doc.md").as_path()), "{error}");
     }
 }
 
@@ -476,7 +490,7 @@ fn a_reference_failure_keeps_what_it_holds() {
         caret_col: None,
     }
     .into();
-    assert_eq!(error_diagnostics(&directive)[0].source, file_only(Path::new("/work/doc.md")));
+    assert_eq!(error_diagnostics(&directive)[0].source, file_only(work("doc.md").as_path()));
 
     for error in [
         ReferenceError::MissingSourceContext { reference: "r".into(), line: 40 },
@@ -486,15 +500,15 @@ fn a_reference_failure_keeps_what_it_holds() {
         let error: MarkdownError = error.into();
         let mut records = error_diagnostics(&error);
         assert_eq!(records[0].source, None, "{error}");
-        with_document_fallback(&mut records, Some(Path::new("/work/root.md")));
-        assert_eq!(records[0].source, file_only(Path::new("/work/root.md")), "{error}");
+        with_document_fallback(&mut records, Some(work("root.md").as_path()));
+        assert_eq!(records[0].source, file_only(work("root.md").as_path()), "{error}");
     }
 }
 
 /// R1-F2.21: these hold no file; a caller that knows the document supplies it.
 #[test]
 fn a_failure_holding_no_file_takes_the_composed_document() {
-    let document = Path::new("/work/root.md");
+    let document = &work("root.md");
     for error in [
         MarkdownError::ParameterBinding { property: "p".into(), provided: "v".into(), reason: "r".into() },
         MarkdownError::CallerFileClassificationChanged { property: "p".into() },

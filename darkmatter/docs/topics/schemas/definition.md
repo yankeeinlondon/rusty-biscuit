@@ -1163,7 +1163,7 @@ problem at the start of that flow mapping. A newly added top-level property
 has no authored node or non-root ancestor, so JSON reports `null` for both
 `line` and `column`.
 
-**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation includes aliases (`*a`), merge keys (`<<`), unquoted `{{ … }}` templates, flow collections spread across lines, and comments inside flow collections. It never changes the validation result or causes an error; it only makes every location in that document coarser.
+**Fallbacks.** When the exact node has no authored source, the location falls back as shown below. Unsupported YAML presentation includes aliases (`*a`), merge keys (`<<`), and unquoted `{{ … }}` templates. A flow collection is mapped node by node, even spread across lines or holding comments. It never changes the validation result or causes an error; it only makes every location in that document coarser.
 
 ```mermaid
 flowchart TD

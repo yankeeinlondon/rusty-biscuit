@@ -636,6 +636,9 @@ pub fn locate_frontmatter_leaves(
         let mut located = &root;
         let mut parent_indent = 0;
         for segment in path {
+            if is_multi_line_flow(&document[located.span.clone()]) {
+                return fail(UnlocatedLeafReason::UnsupportedShape);
+            }
             located = match (segment, &located.kind) {
                 (FrontmatterPathSegment::Key(key), SchemaValueKind::Mapping(entries)) => {
                     if entries.iter().any(|entry| entry.key == "<<") {
@@ -675,6 +678,73 @@ pub fn locate_frontmatter_leaves(
         });
     }
     Ok(spans)
+}
+
+/// Whether `node`, a located node's text, is a flow collection spread over
+/// several lines, past any tag or anchor.
+fn is_multi_line_flow(node: &str) -> bool {
+    let mut content = node;
+    while content.starts_with(['&', '!']) {
+        let token = content.find(char::is_whitespace).unwrap_or(content.len());
+        content = content[token..].trim_start();
+    }
+    content.starts_with(['[', '{']) && node.contains(['\n', '\r'])
+}
+
+/// The authored bytes of the string value at top-level `key`, or of item `index`
+/// of its sequence, for reporting where the value was typed.
+///
+/// Unlike [`locate_frontmatter_leaves`], whose spans must be safe to replace,
+/// this also answers for a plain flow item, a multi-line flow collection, and a
+/// value holding a tag, anchor, or alias, whose range starts at that token.
+/// `None` unless the located scalar is proven to read as `expected`, or is an
+/// alias, which certainly names the value there.
+pub(crate) fn locate_frontmatter_value_range(
+    document: &str,
+    key: &str,
+    index: Option<usize>,
+    expected: &str,
+) -> Option<Range<usize>> {
+    use simplified_schema::SchemaValueKind;
+    use simplified_schema::decode_scalar_node;
+    use simplified_schema::simplified::{locate_frontmatter_value, yaml_scalar::alias_token};
+
+    let block = extract_frontmatter_block(document).ok()??;
+    let root = locate_frontmatter_value(block.yaml, block.yaml_span.start)?;
+    let SchemaValueKind::Mapping(entries) = &root.kind else {
+        return None;
+    };
+    let entry = entries.iter().find(|entry| entry.key == key)?;
+    let mut node = &entry.value;
+    // The item of a flow list continues by its key's indentation, wherever the
+    // list's bracket sits.
+    let mut parent_indent = column_of(document, entry.key_span.start);
+    if let Some(index) = index {
+        let SchemaValueKind::Sequence(items) = &node.kind else {
+            return None;
+        };
+        if !document[node.span.clone()].starts_with(['[', '{']) {
+            parent_indent = column_of(document, node.span.start);
+        }
+        node = items.get(index)?;
+    }
+    if !matches!(node.kind, SchemaValueKind::Scalar) || node.span.is_empty() {
+        return None;
+    }
+    let start = node.span.start;
+    // A plain flow item ends at its own span; the decoder alone would read on
+    // through the list. A block scalar is read as compose reads it, without
+    // the terminator of the frontmatter's last line.
+    let yaml_end = block.yaml_span.end
+        - [&b"\r\n"[..], b"\n", b"\r"]
+            .into_iter()
+            .find(|terminator| document.as_bytes()[..block.yaml_span.end].ends_with(terminator))
+            .map_or(0, <[u8]>::len);
+    let proven = [node.span.end, yaml_end].into_iter().any(|end| {
+        decode_scalar_node(&document[..end], start, parent_indent)
+            .is_some_and(|(scalar, _)| scalar.decoded() == expected)
+    });
+    (proven || alias_token(document, start).is_some()).then(|| node.span.clone())
 }
 
 /// The character column of byte `offset` on its line of `text`.
@@ -3335,6 +3405,28 @@ mod leaf_tests {
             reason(multi_line_flow, vec![key("f"), Index(0)]),
             UnlocatedLeafReason::UnsupportedShape
         );
+    }
+
+    #[test]
+    fn a_quoted_item_is_located_beside_a_comment() {
+        replace_one("---\nq: [\"a\", \"b\"] # note\n---\n", vec![key("q"), Index(1)]);
+        replace_one("---\nq: # note\n  - \"a\"\n---\n", vec![key("q"), Index(0)]);
+        assert_eq!(
+            reason("---\nq: [a, b] # note\n---\n", vec![key("q"), Index(1)]),
+            UnlocatedLeafReason::UnsupportedShape
+        );
+    }
+
+    #[test]
+    fn a_multi_line_flow_stays_refused_past_a_tag_or_anchor() {
+        for value in ["[\n  \"a\"\n  ]", "&x [\n  \"a\"\n  ]", "!!seq [\n  \"a\"\n  ]"] {
+            let document = format!("---\nf: {value}\n---\n");
+            assert_eq!(
+                reason(&document, vec![key("f"), Index(0)]),
+                UnlocatedLeafReason::UnsupportedShape,
+                "{value}"
+            );
+        }
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub use write::{
     RestoredDocument, UnlocatedLeaf, UnlocatedLeafReason, apply_hash_save_text,
     locate_frontmatter_leaves, restore_properties_text,
 };
+pub(crate) use write::locate_frontmatter_value_range;
 
 use crate::markdown::Markdown;
 use crate::markdown::FrontmatterMap;

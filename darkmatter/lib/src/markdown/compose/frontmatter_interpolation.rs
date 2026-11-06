@@ -582,8 +582,7 @@ impl FrontmatterExpressionLocation {
     /// `None` when the path does not lead to a scalar that decodes to exactly
     /// [`scanned`](Self::scanned) and is no alias: the value changed after
     /// loading (a schema coercion, a shell expansion) or is authored in a form
-    /// the shared decoder does not model (a flow-collection member spread over
-    /// several lines).
+    /// the shared decoder does not model (a plain flow-collection member).
     pub(crate) fn project(&self, loaded: &str) -> Option<Range<usize>> {
         use simplified_schema::SchemaValueKind;
         use simplified_schema::decode_scalar_node;
