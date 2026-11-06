@@ -151,10 +151,10 @@ pub fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
     candidates
 }
 
-/// Completes common fixed-width wrapping targets.
-pub fn complete_fixed_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
+/// Completes `--width`: its keywords and common columns.
+pub fn complete_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
-    let mut candidates: Vec<_> = ["40", "60", "80", "100", "120"]
+    let mut candidates: Vec<_> = ["40", "60", "80", "100", "120", "auto", "source", "unlimited"]
         .into_iter()
         .filter(|value| value.starts_with(current_str.as_ref()))
         .map(CompletionCandidate::new)
@@ -206,11 +206,11 @@ mod tests {
     }
 
     #[test]
-    fn complete_fixed_width_values_lists_common_widths() {
-        let values = completion_values(complete_fixed_width_values(OsStr::new("")));
-        assert_eq!(values, vec!["100", "120", "40", "60", "80"]);
+    fn complete_width_values_lists_keywords_and_common_widths() {
+        let values = completion_values(complete_width_values(OsStr::new("")));
+        assert_eq!(values, vec!["100", "120", "40", "60", "80", "auto", "source", "unlimited"]);
 
-        let values = completion_values(complete_fixed_width_values(OsStr::new("8")));
+        let values = completion_values(complete_width_values(OsStr::new("8")));
         assert_eq!(values, vec!["80"]);
     }
 

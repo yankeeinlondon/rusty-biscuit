@@ -1,25 +1,32 @@
 //! `md graph` subcommand implementation.
 
+use crate::args::Cli;
+use crate::commands::validate::report_failure_diagnostics;
 use crate::io::open_argument;
+use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::output::{OutputTarget, WidthRequest, render_output};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource};
+use darkmatter::markdown::output::command::{CommandValue, code_document};
 use darkmatter::markdown::reference::file_tree::FileTree;
+use darkmatter::markdown::reference::validate::ValidationReportView;
+use renderable::{CommandOutput as _, OutputOptions, TerminalProfile, Width};
+use serde_json::Value;
 use std::path::Path;
 use tracing::instrument;
 
 #[instrument(skip_all)]
-pub(crate) fn run_graph(
-    input: &Path,
-    follow: bool,
-    validate: bool,
-    json: bool,
-    verbosity: u8,
-    request: &MdRequest,
-) -> Result<()> {
+pub(crate) fn run_graph(input: &Path, follow: bool, validate: bool, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
+    let result = graph_value(input, follow, validate, request);
+    run.finish(result)
+}
+
+fn graph_value(input: &Path, follow: bool, validate: bool, request: &MdRequest) -> Result<Completed<CommandValue<Value>>> {
     let opened = open_argument(input, request)?;
     // The graph resolves through the document's own context: one derived from
     // the launch context, or built at the document for a document in another
@@ -44,38 +51,46 @@ pub(crate) fn run_graph(
 
     tree.ensure_built().map_err(|e| eyre!("{e}"))?;
 
-    // ── JSON output ──────────────────────────────────────────────────
-    if json {
-        if let Some(graph) = tree.graph() {
-            let mut root_json = serde_json::to_value(graph.view(follow))?;
-
-            if validate && let Some(report) = tree.validation_report() {
-                root_json["validation"] = serde_json::to_value(report)?;
-            }
-
-            println!("{}", serde_json::to_string_pretty(&root_json)?);
-        }
-        // JSON mode always exits 0
-        return Ok(());
+    let report = validate.then(|| tree.validation_report().cloned()).flatten();
+    let mut data = match tree.graph() {
+        Some(graph) => serde_json::to_value(graph.view(follow))?,
+        None => Value::Null,
+    };
+    if let Some(report) = &report {
+        data["validation"] = serde_json::to_value(report)?;
     }
 
-    // ── Terminal tree output ─────────────────────────────────────────
-    let term = Terminal::default();
-    print!("{}", tree.display(&term));
-
-    if validate && let Some(report) = tree.validation_report() {
-        use darkmatter::markdown::reference::validate::ValidationReportView;
-
-        let view = ValidationReportView::new(report.clone())
+    let view = report.as_ref().map(|report| {
+        ValidationReportView::new(report.clone())
             .with_root_source(ComposeSource::File(resolved.to_path_buf()))
-            .with_launch_dir(request.launch_dir());
-        println!("\n{}", super::validate::terminal_report(&view, &term, verbosity)?);
+            .with_launch_dir(request.launch_dir())
+    });
+    let failure = report.as_ref().filter(|report| !report.is_valid()).map(report_failure_diagnostics);
 
-        // Exit code 2 for validation errors
-        if !report.is_valid() {
-            std::process::exit(2);
-        }
+    let plain = OutputOptions::new(Width::Unlimited, TerminalProfile::plain());
+    let plain_tree = tree.render(&Terminal::from_output_options(&plain));
+    let mut prose = code_document(None, plain_tree.trim_end());
+    if let Some(view) = &view
+        && let Some(children) = prose.root.children_mut()
+    {
+        children.extend(view.as_prose().root.children().iter().cloned());
     }
-
-    Ok(())
+    let value = CommandValue::new(data, prose).with_terminal(move |options| {
+        let mut text = tree.render(&Terminal::from_output_options(options));
+        if let Some(view) = &view {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push('\n');
+            match render_output(view, OutputTarget::Terminal, options) {
+                Ok(rendered) => text.push_str(&rendered.text),
+                Err(error) => text.push_str(&error.to_string()),
+            }
+        }
+        text
+    });
+    Ok(match failure {
+        Some(diagnostics) => Completed::failure(value).with_diagnostics(diagnostics),
+        None => Completed::success(value),
+    })
 }

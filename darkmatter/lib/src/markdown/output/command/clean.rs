@@ -1,20 +1,46 @@
-//! The version-1 `md clean --json` STDOUT envelope.
+//! The version-1 `md clean` data value.
 //!
-//! The library reports diagnostics and accepted repairs in authored document
-//! coordinates; this module adds the source description and 1-based line and
-//! byte-column positions, and is the only place the wire shape is defined.
+//! The clean transaction reports diagnostics and accepted repairs in authored
+//! document coordinates; this module adds the source description and 1-based
+//! line and byte-column positions, and is the only place the wire shape is
+//! defined.
 
-use crate::commands::trigger_findings::FindingRow;
 use biscuit_file::{SourceSpan, YamlCertainty, YamlRepair};
-use darkmatter::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic};
-use darkmatter::markdown::cleanup::{CleanOutcome, CleanResult};
-use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::InvalidTriggerFinding;
-use darkmatter::markdown::span::line_col_of_offset;
 use serde::Serialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize)]
+use crate::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic};
+use crate::markdown::cleanup::{CleanOutcome, CleanResult};
+use crate::markdown::extract_frontmatter_block;
+use crate::markdown::schemas::InvalidTriggerFinding;
+use crate::markdown::span::line_col_of_offset;
+
+/// One skipped trigger in a data output; the same shape as a schema advisory
+/// row. `path` is the trigger file, `null` for an embedded trigger.
+#[derive(Debug, Clone, Serialize)]
+pub struct FindingRow {
+    /// The family that reported it.
+    pub source: &'static str,
+    /// The finding's stable code.
+    pub code: &'static str,
+    /// The trigger file.
+    pub path: Option<PathBuf>,
+    /// Why the trigger was skipped.
+    pub message: String,
+}
+
+impl From<&InvalidTriggerFinding> for FindingRow {
+    fn from(finding: &InvalidTriggerFinding) -> Self {
+        Self {
+            source: finding.source_family(),
+            code: finding.code(),
+            path: finding.source().path().map(PathBuf::from),
+            message: finding.message(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanJsonReport {
     pub version: u8,
     pub source: CleanJsonSource,
@@ -30,20 +56,20 @@ pub struct CleanJsonReport {
     pub warnings: Vec<FindingRow>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanJsonSource {
     pub kind: CleanJsonSourceKind,
     pub path: Option<PathBuf>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CleanJsonSourceKind {
     File,
     Stdin,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanJsonFrontmatter {
     pub present: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,7 +82,7 @@ pub struct CleanJsonSpan {
     pub end: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanJsonPositionedSpan {
     pub start: usize,
     pub end: usize,
@@ -66,7 +92,7 @@ pub struct CleanJsonPositionedSpan {
     pub end_column: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanJsonDiagnostic {
     pub code: CleanCode,
     pub classification: YamlCertainty,
@@ -82,8 +108,8 @@ pub struct CleanJsonRepair {
     pub explanation: String,
 }
 
-/// Builds the `--json` envelope for a clean result over `document_source`,
-/// the document exactly as it was read.
+/// The data value for a clean result over `document_source`, the document
+/// exactly as it was read.
 pub fn json_report(
     result: &CleanResult,
     path: Option<PathBuf>,
@@ -110,9 +136,8 @@ pub fn json_report(
     }
 }
 
-/// Builds the `--json` envelope for a run that failed loading a schema,
-/// written before the failure is returned so the warnings discovery
-/// retained still reach the report.
+/// The data value for a run that failed loading a schema, so the warnings
+/// discovery retained still reach the report.
 ///
 /// No clean result exists: `diagnostics` and `applied` are empty and
 /// `changed` is `false`, as for an `Invalid` run. A schema is only loaded

@@ -38,6 +38,21 @@ pub fn unwrapped(stderr: &str) -> String {
         .collect()
 }
 
+/// The per-file records of one `md schema validate --output json` report.
+pub fn schema_validate_records(stdout: &[u8]) -> Vec<serde_json::Value> {
+    let text = String::from_utf8_lossy(stdout);
+    let report: serde_json::Value =
+        serde_json::from_str(text.trim()).unwrap_or_else(|error| panic!("one JSON report ({error}): {text}"));
+    report["files"].as_array().unwrap_or_else(|| panic!("the report has no `files` array: {text}")).clone()
+}
+
+/// The only per-file record of one `md schema validate --output json` report.
+pub fn schema_validate_record(stdout: &[u8]) -> serde_json::Value {
+    let mut records = schema_validate_records(stdout);
+    assert_eq!(records.len(), 1, "one file record: {}", String::from_utf8_lossy(stdout));
+    records.remove(0)
+}
+
 pub fn md_file(content: &str) -> tempfile::NamedTempFile {
     let mut tmp = tempfile::NamedTempFile::new().unwrap();
     write!(tmp, "{}", content).unwrap();

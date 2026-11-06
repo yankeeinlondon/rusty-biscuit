@@ -75,7 +75,7 @@ fn declined_clean_json_reports_the_fallback() {
             .command()
             .arg("clean")
             .arg(&path)
-            .arg("--json")
+            .args(["--output", "json"])
             .args(extra)
             .assert()
             .success();
@@ -103,7 +103,7 @@ fn declined_clean_discards_frontmatter_repairs() {
 
     let json = fixture
         .command()
-        .args(["clean", "--json"])
+        .args(["clean", "--output", "json"])
         .arg(&path)
         .assert()
         .success();
@@ -177,7 +177,8 @@ fn broken_pass_refusal_is_never_saved() {
     };
 
     let _guard = install_broken_pass(retarget_link);
-    run_clean(Some(&path), &options, &request).expect("a refusal is not an error");
+    let cli = <darkmatter_cli::Cli as clap::Parser>::try_parse_from(["md"]).expect("bare md parses");
+    run_clean(Some(&path), &options, &cli, &request).expect("a refusal is not an error");
 
     assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
 }
@@ -199,7 +200,7 @@ fn unrepairable_frontmatter_fails_without_saving() {
         .command()
         .arg("clean")
         .arg(&path)
-        .args(["--save", "--json"])
+        .args(["--save", "--output", "json"])
         .assert()
         .failure();
     let output = json.get_output();
@@ -229,7 +230,7 @@ fn disabled_frontmatter_repair_leaves_invalid_yaml_invalid() {
 
     let json = fixture
         .command()
-        .args(["clean", "--json"])
+        .args(["clean", "--output", "json"])
         .arg(&path)
         .assert()
         .failure();
@@ -277,7 +278,7 @@ fn frontmatter_only_darkmatter_loads_is_kept_and_the_body_formatted() {
     let stderr = String::from_utf8_lossy(&printed.get_output().stderr);
     assert!(stderr.contains("yaml.parse"), "the strict-YAML finding is reported: {stderr}");
 
-    let json = fixture.command().args(["clean", "--json"]).arg(&path).assert().success();
+    let json = fixture.command().args(["clean", "--output", "json"]).arg(&path).assert().success();
     assert!(json.get_output().stderr.is_empty());
     let report = json_report(&json.get_output().stdout);
     assert_eq!(report["changed"], json!(true));
@@ -396,7 +397,7 @@ fn stdin_routes_clean_and_report() {
 
     let json = fixture
         .command()
-        .args(["clean", "--json"])
+        .args(["clean", "--output", "json"])
         .write_stdin(source)
         .assert()
         .success();

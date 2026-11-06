@@ -38,17 +38,6 @@ impl Feature {
     }
 }
 
-/// Output format for `md code-block`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum CodeBlockOutput {
-    /// Render as ANSI-styled terminal output.
-    Terminal,
-    /// Render as a `<pre><code class="language-…">…</code></pre>` HTML fragment.
-    Html,
-    /// Re-emit as a Markdown fenced code block.
-    Markdown,
-}
-
 /// Cache-staleness handling for remote URL artifacts.
 ///
 /// Mirrors `darkmatter::markdown::compose::RemoteFreshnessMode`. A closed value
@@ -67,33 +56,6 @@ pub enum RemoteFreshness {
     Fallback,
 }
 
-/// Output format for validation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum ValidateOutputFormat {
-    /// Human-readable text.
-    Text,
-    /// JSON output.
-    Json,
-}
-
-/// Output format for `md schema validate`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum SchemaValidateFormat {
-    /// Pretty (terminal) output.
-    Pretty,
-    /// Newline-delimited JSON, one object per file.
-    Json,
-}
-
-/// Output format for `md schema detect`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub enum SchemaDetectFormat {
-    /// SimplifiedSchema YAML.
-    Yaml,
-    /// JSON Schema (Draft 2020-12).
-    Json,
-}
-
 /// Graph visualization format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum GraphFormat {
@@ -101,6 +63,17 @@ pub enum GraphFormat {
     Mermaid,
     /// DOT (Graphviz) graph.
     Dot,
+}
+
+impl GraphFormat {
+    /// The value's spelling, which is also its code-block language.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mermaid => "mermaid",
+            Self::Dot => "dot",
+        }
+    }
 }
 
 /// Structural kind for `md hash --kind`.

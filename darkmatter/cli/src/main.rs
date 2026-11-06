@@ -11,7 +11,7 @@ use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
     CleanOptions, run_clean, run_subcommand, validate_subcommand_usage,
 };
-use darkmatter_cli::output::stderr_terminal;
+use darkmatter_cli::output::{stderr_terminal, stderr_text};
 use darkmatter_cli::request::{MdRequest, with_magic_roots};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -93,12 +93,12 @@ fn main() {
         });
 
         if let Some(block) = block {
-            eprintln!("{}", block.report_block_error(&stderr_terminal()));
+            eprintln!("{}", stderr_text(block.report_block_error(&stderr_terminal())));
             std::process::exit(1);
         }
 
         // Fallback: legacy Display-chain renderer.
-        eprintln!("{}", error_chain_prose(&e).render(&stderr_terminal()));
+        eprintln!("{}", stderr_text(error_chain_prose(&e).render(&stderr_terminal())));
         std::process::exit(1);
     }
 }
@@ -186,6 +186,13 @@ fn run() -> Result<()> {
         init_tracing(cli.debug_level);
     }
 
+    // These print a fixed listing, which is no command's typed result.
+    if (cli.completions.is_some() || cli.list_themes) && cli.render.output.is_some() {
+        Cli::command()
+            .error(clap::error::ErrorKind::ArgumentConflict, "`--output` does not apply to `--completions` or `--list-themes`")
+            .exit();
+    }
+
     // Handle --completions first (no input needed)
     if let Some(shell) = cli.completions {
         print_completions(shell);
@@ -216,9 +223,10 @@ fn run() -> Result<()> {
             save: true,
             indent: cli.render.indent,
             verbose: cli.verbose > 0,
+            output: cli.render.output,
             ..CleanOptions::default()
         };
-        run_clean(cli.render.input.as_ref(), &options, &request)?;
+        run_clean(cli.render.input.as_ref(), &options, &cli, &request)?;
         return Ok(());
     } else if cli.render.input.is_none() && io::stdin().is_terminal() {
         Cli::command().print_help()?;

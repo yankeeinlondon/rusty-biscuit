@@ -38,7 +38,7 @@ fn test_delta_subcommand_json_output() {
         .arg("delta")
         .arg(&base)
         .arg(&updated)
-        .arg("--json")
+        .args(["--output", "json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"classification\""));
@@ -46,18 +46,9 @@ fn test_delta_subcommand_json_output() {
 
 // ── Level 1 golden tests ─────────────────────────────────────────────────
 //
-// Phase 1 of the CLI Atheist feature (Leak 6b) replaced the CLI's
-// hand-rolled `print_delta` ANSI writer with
-// `darkmatter::markdown::delta::DeltaReport`, a `TerminalRenderable`
-// that emits raw ANSI/Unicode bytes. The migration is required to be
-// byte-for-byte equal to the previous CLI shape, so each scenario
-// below captures the full expected output — ANSI escapes, Unicode
-// classification glyphs, and visual-diff bytes — and compares the
-// CLI output against it.
-//
-// The renderer writes fixed `format!` strings that depend only on the
-// input bytes (verified deterministic across `NO_COLOR`, `FORCE_COLOR`,
-// `COLUMNS`, and `CI`), so byte-level comparison is the right level.
+// `md delta` on a pipe is the report's plain form. Each scenario captures the
+// full expected output, classification glyphs and visual diff included, and
+// `delta_stdout` proves no escape byte reaches the pipe.
 
 /// Writes `base` and `updated` to a tempdir and returns the full stdout
 /// produced by `md delta` (or `md -v delta` when `verbose` is set).
@@ -81,7 +72,9 @@ fn delta_stdout(fixture: &CliProcessFixture, base: &str, updated: &str, verbose:
         output.status.code(),
         String::from_utf8_lossy(&output.stderr),
     );
-    String::from_utf8_lossy(&output.stdout).into_owned()
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(!stdout.contains('\x1b'), "no escape bytes on a pipe: {stdout:?}");
+    stdout
 }
 
 #[test]
@@ -136,8 +129,8 @@ fn delta_golden_section_added() {
     let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25d0} Moderate changes (36.1% changed)\n\n\
         Added (1):\n  + Title > New\n\n\
-        Whitespace only (1):\n  - Title: \x1b[3mblank lines\x1b[0m\n\n  \
-        \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m\n\n";
+        Whitespace only (1):\n  - Title: blank lines\n\n  \
+        whitespace only changes have no visual effect when rendered\n\n";
     assert_eq!(out, expected);
 }
 
@@ -149,8 +142,8 @@ fn delta_golden_section_removed() {
     let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25d0} Moderate changes (36.1% changed)\n\n\
         Removed (1):\n  - Title > Old\n\n\
-        Whitespace only (1):\n  - Title: \x1b[3mblank lines\x1b[0m\n\n  \
-        \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m\n\n";
+        Whitespace only (1):\n  - Title: blank lines\n\n  \
+        whitespace only changes have no visual effect when rendered\n\n";
     assert_eq!(out, expected);
 }
 
@@ -186,8 +179,8 @@ fn delta_golden_whitespace_only() {
     let updated = "# Title\n\n  Hello  \n";
     let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n~ Whitespace changes only (0.0% changed)\n\n\
-        Whitespace only (1):\n  - Title: \x1b[3mtrailing space, interior space\x1b[0m\n\n  \
-        \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m\n\n";
+        Whitespace only (1):\n  - Title: trailing space, interior space\n\n  \
+        whitespace only changes have no visual effect when rendered\n\n";
     assert_eq!(out, expected);
 }
 
@@ -199,8 +192,8 @@ fn delta_golden_code_block_modified() {
     let out = delta_stdout(&fixture, base, updated, false);
     let expected = "\n\u{25b3} Minor changes (6.2% changed)\n\n\
         Modified (1):\n  - Title: text edited\n\n\
-        Code blocks:\n  - \x1b[7mrust\x1b[0m code block in \x1b[1mTitle\x1b[0m \
-        was \x1b[1mmodified\x1b[0m\n\n";
+        Code blocks:\n  - rust code block in Title \
+        was modified\n\n";
     assert_eq!(out, expected);
 }
 
@@ -208,7 +201,7 @@ fn delta_golden_code_block_modified() {
 fn delta_golden_code_block_language_changed() {
     let fixture = CliProcessFixture::named("delta-delta-golden-code-block-language-changed");
     // Switching the language token exercises the `Language: x → y` branch of
-    // `format_code_block_change`. The styled token is the *updated* language
+    // `format_code_block_change`. The leading token is the *updated* language
     // (the renderer receives `change.language`, which the engine populates
     // from the updated document), and the description spells out the
     // transition as `Language: rust → python`.
@@ -221,18 +214,17 @@ fn delta_golden_code_block_language_changed() {
     );
     assert!(
         out.contains(
-            "\x1b[7mpython\x1b[0m code block in \x1b[1mTitle\x1b[0m \
-            changed its \x1b[1mlanguage\x1b[0m setting: rust \u{2192} python"
+            "python code block in Title \
+            changed its language setting: rust \u{2192} python"
         ),
-        "expected styled language-change line, got:\n{out}"
+        "expected language-change line, got:\n{out}"
     );
 }
 
 // ── Verbose mode (`md -v delta`) ─────────────────────────────────────────
 //
 // Verbose mode adds the statistics block and, when there are content or
-// frontmatter changes, a visual diff. The visual diff bytes are also
-// deterministic across `NO_COLOR`, `FORCE_COLOR`, and `COLUMNS`.
+// frontmatter changes, a visual diff.
 
 #[test]
 fn delta_golden_verbose_no_change() {
@@ -265,35 +257,32 @@ fn delta_golden_verbose_frontmatter_and_content() {
 
     // Visual diff: frontmatter block first.
     assert!(
-        out.contains("\x1b[1mFrontmatter Visual Diff:\x1b[0m\n"),
+        out.contains("Frontmatter Visual Diff:\n"),
         "expected Frontmatter Visual Diff section, got:\n{out}"
     );
     assert!(
         out.contains(
-            "\x1b[2m\u{2500}\u{2500}\u{2500} \x1b[0moriginal\x1b[2m \u{2192} \
-            \x1b[0mupdated\x1b[2m \u{2500}\u{2500}\u{2500}\x1b[0m\n"
+            "\u{2500}\u{2500}\u{2500} original \u{2192} \
+            updated \u{2500}\u{2500}\u{2500}\n"
         ),
         "expected visual diff header rule, got:\n{out}"
     );
-    // `Old` highlighted in red (256-color bg 88), `New` in green (bg 28).
     assert!(
-        out.contains("title: \x1b[48;5;88m\x1b[1m\x1b[4mOld\x1b[0m"),
-        "expected red `Old` highlight, got:\n{out}"
+        out.contains("-    1      \u{2502} title: Old\n"),
+        "expected removed `Old` line, got:\n{out}"
     );
     assert!(
-        out.contains("title: \x1b[48;5;28m\x1b[1m\x1b[4mNew\x1b[0m"),
-        "expected green `New` highlight, got:\n{out}"
+        out.contains("+         1 \u{2502} title: New\n"),
+        "expected added `New` line, got:\n{out}"
     );
 
-    // Body visual diff: `Hello` is partially highlighted (only the `H` and
-    // `llo` runs survive on the original side; `Goodby` is highlighted on
-    // the updated side and the trailing `e` is common).
+    // Body visual diff: one removed and one added line.
     assert!(
-        out.contains("\x1b[48;5;88m\x1b[1m\x1b[4mH\x1b[0me\x1b[48;5;88m\x1b[1m\x1b[4mllo\x1b[0m"),
+        out.contains("-    4      \u{2502} Hello\n"),
         "expected `Hello` body diff on original side, got:\n{out}"
     );
     assert!(
-        out.contains("\x1b[48;5;28m\x1b[1m\x1b[4mGoodby\x1b[0me"),
+        out.contains("+         4 \u{2502} Goodbye\n"),
         "expected `Goodbye` body diff on updated side, got:\n{out}"
     );
 }
@@ -316,9 +305,9 @@ fn delta_golden_verbose_content_only_no_frontmatter_block() {
         out.contains("Statistics:\n  Bytes: 15 \u{2192} 17 (2 changed)\n"),
         "expected statistics block for content-only change, got:\n{out}"
     );
-    // Body visual diff is emitted (Goodbye highlighted).
+    // Body visual diff is emitted.
     assert!(
-        out.contains("\x1b[48;5;28m\x1b[1m\x1b[4mGoodby\x1b[0me"),
+        out.contains("+         3 \u{2502} Goodbye\n"),
         "expected `Goodbye` body diff, got:\n{out}"
     );
 }

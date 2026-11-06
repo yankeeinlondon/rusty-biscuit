@@ -247,6 +247,16 @@ impl DocumentOutput {
         self
     }
 
+    /// Replaces the Markdown with `text`, for a command whose text is not a
+    /// reserialization of its document: `md clean` and `md set` keep every
+    /// frontmatter byte they did not change.
+    #[must_use]
+    pub fn with_markdown_source(mut self, text: String) -> Self {
+        self.envelope.document = Some(text.clone());
+        self.markdown = text;
+        self
+    }
+
     /// The text [`document_markdown`] produced at prepare.
     #[must_use]
     pub fn markdown(&self) -> &str {

@@ -21,7 +21,7 @@ fn test_toc_subcommand_json_output() {
     let fixture = CliProcessFixture::named("toc-test-toc-subcommand-json-output");
     fixture
         .command()
-        .args(["toc", "--json", "-"])
+        .args(["toc", "--output", "json", "-"])
         .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
         .assert()
         .success()

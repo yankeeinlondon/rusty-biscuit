@@ -1,108 +1,163 @@
 //! `md get` / `md set` / `md rm` / `md edit` frontmatter subcommand implementations.
 
 use crate::args::Cli;
+use crate::commands::render::document_value;
 use crate::io::{DocumentArgumentError, load_markdown, parse_argument, resolve_file_path};
+use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::request::MdRequest;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
+use clap::CommandFactory as _;
 use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::cleanup::{reflow_to_width, strip_incidental_newlines};
+use darkmatter::markdown::extract_frontmatter_block;
+use darkmatter::markdown::output::command::{CommandValue, EditData, RemovedData, SetData, prose_document};
+use renderable::Width;
+use renderable::tree::{Document, RenderNode};
+use serde_json::Value;
 use std::path::PathBuf;
 use tracing::instrument;
 
 /// Get frontmatter properties from a markdown document.
+///
+/// The value prints no prose, so `--width` changes nothing here.
 #[instrument(skip_all)]
-#[allow(clippy::too_many_arguments)]
-pub fn run_get(
-    input: &PathBuf,
-    props: &[String],
-    json5: bool,
-    yaml: bool,
-    toml: bool,
-    raw: bool,
-    compact: bool,
-    request: &MdRequest,
-) -> Result<()> {
-    let md = load_markdown(Some(input), request)?;
-    let fm = md.frontmatter();
+pub fn run_get(input: &PathBuf, props: &[String], output: OutputTarget, compact: bool, cli: &Cli, request: &MdRequest) -> Result<()> {
+    if compact && !matches!(output, OutputTarget::Json | OutputTarget::Json5) {
+        return Err(Cli::command()
+            .error(clap::error::ErrorKind::ArgumentConflict, "`--compact` is valid only with `--output json` or `--output json5`")
+            .into());
+    }
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Bare)?.compact_json(compact);
+    let result = load_markdown(Some(input), request).map(|md| {
+        let value = requested_value(&md, props);
+        // `println!` always printed a final newline, even for an empty value.
+        let raw = format!("{}\n", format_raw(&value));
+        let terminal = raw.clone();
+        let prose = raw_document(&raw);
+        Completed::success(
+            CommandValue::new(value, prose).with_terminal(move |_| terminal.clone()).with_markdown(raw),
+        )
+    });
+    run.finish(result)
+}
 
-    let value = if props.len() == 1 {
-        // Single property: return the raw value (or empty string if missing)
-        fm.as_map()
-            .get(&props[0])
-            .cloned()
-            .unwrap_or(serde_json::Value::String(String::new()))
-    } else {
-        // Multiple properties: return a dictionary of requested keys
-        let mut map = serde_json::Map::new();
-        for prop in props {
-            let v = fm
-                .as_map()
-                .get(prop)
-                .cloned()
-                .unwrap_or(serde_json::Value::String(String::new()));
-            map.insert(prop.clone(), v);
+/// One property's value, or an object of the requested keys; a missing key is `""`.
+fn requested_value(md: &Markdown, props: &[String]) -> Value {
+    let map = md.frontmatter().as_map();
+    let value_of = |prop: &String| map.get(prop).cloned().unwrap_or_else(|| Value::String(String::new()));
+    match props {
+        [prop] => value_of(prop),
+        _ => Value::Object(props.iter().map(|prop| (prop.clone(), value_of(prop))).collect()),
+    }
+}
+
+/// `raw`'s lines, as they are, in one paragraph.
+fn raw_document(raw: &str) -> Document {
+    let mut children = Vec::new();
+    for line in raw.trim_end_matches('\n').lines() {
+        if !children.is_empty() {
+            children.push(RenderNode::hard_break());
         }
-        serde_json::Value::Object(map)
-    };
-
-    let output = format_value(&value, json5, yaml, toml, raw, compact)?;
-    println!("{output}");
-
-    Ok(())
+        children.push(RenderNode::text(line));
+    }
+    Document::new(RenderNode::root(vec![RenderNode::paragraph(children)]))
 }
 
 /// Set a frontmatter property on a markdown document.
 ///
-/// By default the modified document is written to stdout without changing the
-/// source file. With `--save` the file is updated in place and nothing is
-/// printed.
+/// By default the modified document is the deliverable and the source file is
+/// not changed. With `--save` the file is updated in place, and a formatted
+/// output prints nothing; a data output always reports the result.
 #[instrument(skip_all)]
-pub fn run_set(
+pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let file = input_label(input);
+    let skeleton = SetData { file: file.clone(), property: prop.to_string(), value: Value::Null, document: None, saved: false };
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Source, cli.verbose, DataShape::typed(&skeleton))?.exact_markdown();
+    let result = set_value(input, skeleton, raw_value, save, &run, cli, request);
+    run.finish(result)
+}
+
+fn set_value(
     input: &PathBuf,
-    prop: &str,
+    mut data: SetData,
     raw_value: &str,
     save: bool,
+    run: &CommandRun,
+    cli: &Cli,
     request: &MdRequest,
-) -> Result<()> {
-    let is_stdin = input.to_str() == Some("-");
-
-    if save && is_stdin {
-        return Err(eyre!(
-            "--save requires an input file path (stdin is not supported)"
-        ));
+) -> Result<Completed<CommandValue<SetData>>> {
+    if save && data.file.is_none() {
+        return Err(eyre!("--save requires an input file path (stdin is not supported)"));
     }
 
     let mut md = load_markdown(Some(input), request)?;
 
-    let value: serde_json::Value = serde_json::from_str(raw_value)
-        .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
+    let value: Value = serde_json::from_str(raw_value).unwrap_or_else(|_| Value::String(raw_value.to_string()));
+    data.value = value.clone();
 
-    md.fm_insert(prop, value)
-        .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
-    let text = edited_text(&md, &[prop]);
+    md.fm_insert(&data.property, value).map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
+    let output = run.output();
+    let width = output.explicit_width.then_some(output.options.width);
+    let text = at_width(edited_text(&md, &[data.property.as_str()]), width);
+    data.document = Some(text.clone());
 
     if save {
         let resolved = resolve_file_path(input, request.launch_context()?)?;
-        std::fs::write(&resolved, text)
-            .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
-    } else {
-        print!("{text}");
+        std::fs::write(&resolved, &text).wrap_err_with(|| format!("Failed to write to {resolved:?}"))?;
+        data.saved = true;
+        if !run.is_data() {
+            let prose = darkmatter::markdown::output::command::empty_document();
+            return Ok(Completed::success(CommandValue::new(data, prose).with_terminal(|_| String::new()).with_markdown(String::new())));
+        }
     }
+    let path = resolved_input(input, request);
+    document_value(data, &md, text, path.as_ref(), output, cli).map(Completed::success)
+}
 
-    Ok(())
+/// `text` with its body at `width`, its frontmatter bytes untouched.
+fn at_width(text: String, width: Option<Width>) -> String {
+    let Some(width) = width.filter(|width| *width != Width::Source) else {
+        return text;
+    };
+    let body_start = match extract_frontmatter_block(&text) {
+        Ok(Some(extraction)) => extraction.body_span.start,
+        _ => 0,
+    };
+    let (frontmatter, body) = text.split_at(body_start);
+    let body = match width {
+        Width::Columns(columns) => reflow_to_width(body, columns.max(1) as usize),
+        _ => strip_incidental_newlines(body),
+    };
+    format!("{frontmatter}{body}")
+}
+
+fn input_label(input: &std::path::Path) -> Option<String> {
+    (input.to_str() != Some("-")).then(|| input.display().to_string())
+}
+
+fn resolved_input(input: &std::path::Path, request: &MdRequest) -> Option<PathBuf> {
+    if input.to_str() == Some("-") {
+        return None;
+    }
+    resolve_file_path(input, request.launch_context().ok()?).ok()
 }
 
 /// Remove one or more frontmatter properties from a markdown document.
 ///
-/// Saves the file in place. By default produces no output on success.
-/// With `-v`, prints a human-readable summary. With `--json`, outputs
-/// structured JSON.
+/// Saves the file in place. The terminal outputs print nothing on success; `-v`
+/// adds a summary on stderr. An explicit Markdown or HTML output, and any data
+/// output, reports the result.
 #[instrument(skip_all)]
-pub fn run_rm(
-    input: &PathBuf,
-    props: &[String],
-    json: bool,
-    cli: &Cli,
-    request: &MdRequest,
-) -> Result<()> {
+pub fn run_rm(input: &PathBuf, props: &[String], output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
+    let result = rm_value(input, props, &run, cli, request);
+    run.finish(result)
+}
+
+fn rm_value(input: &PathBuf, props: &[String], run: &CommandRun, cli: &Cli, request: &MdRequest) -> Result<Completed<CommandValue<RemovedData>>> {
     let resolved = resolve_file_path(input, request.launch_context()?)?;
     let mut md = load_markdown(Some(input), request)?;
     let fm = md.frontmatter_mut().as_map_mut();
@@ -142,43 +197,33 @@ pub fn run_rm(
         .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
 
     let remaining: Vec<String> = md.frontmatter().as_map().keys().cloned().collect();
-
-    if json {
-        let output = serde_json::json!({
-            "removed": removed,
-            "remaining": remaining,
-            "filename": resolved.to_string_lossy(),
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else if cli.verbose > 0 {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::terminal::Terminal;
-        let props_label = if removed.len() == 1 {
-            format!("<b>{}</b> property", removed[0])
-        } else {
-            format!(
-                "<b>{}</b> properties",
-                removed
-                    .iter()
-                    .map(|p| format!("\"{}\"", p))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        let remaining_label = remaining.join(", ");
-        let terminal = Terminal::default();
-        eprintln!(
-            "{}",
-            Prose::new(format!(
-                "- removed the {} from frontmatter (<dim>remaining: <i>{}</i></dim>)",
-                props_label, remaining_label
-            ))
-            .render(&terminal)
-        );
+    let summary = rm_summary(&removed, &remaining);
+    if cli.verbose > 0 && !run.is_data() {
+        eprintln!("{}", Prose::new(summary.clone()).render(&crate::output::stderr_terminal()));
     }
+    let data = RemovedData { removed, remaining, filename: resolved.to_string_lossy().into_owned() };
+    let prose = prose_document(&rm_markdown(&data));
+    Ok(Completed::success(CommandValue::new(data, prose).with_terminal(|_| String::new())))
+}
 
-    Ok(())
+fn rm_summary(removed: &[String], remaining: &[String]) -> String {
+    let props_label = if removed.len() == 1 {
+        format!("<b>{}</b> property", removed[0])
+    } else {
+        format!(
+            "<b>{}</b> properties",
+            removed.iter().map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(", ")
+        )
+    };
+    format!(
+        "- removed the {props_label} from frontmatter (<dim>remaining: <i>{}</i></dim>)",
+        remaining.join(", ")
+    )
+}
+
+fn rm_markdown(data: &RemovedData) -> String {
+    let spans = |names: &[String]| names.iter().map(|name| renderable::markdown::code_span(name)).collect::<Vec<_>>().join(", ");
+    format!("Removed {} from the frontmatter. Remaining: {}.\n", spans(&data.removed), spans(&data.remaining))
 }
 
 /// The document text after `md set` / `md rm` changed `properties`.
@@ -197,62 +242,6 @@ fn edited_text(md: &darkmatter::markdown::Markdown, properties: &[&str]) -> Stri
         .map_or(edited, |restored| restored.text)
 }
 
-/// Format a `serde_json::Value` according to the requested output format.
-fn format_value(
-    value: &serde_json::Value,
-    json5: bool,
-    yaml: bool,
-    toml: bool,
-    raw: bool,
-    compact: bool,
-) -> Result<String> {
-    if raw {
-        return Ok(format_raw(value));
-    }
-    if compact {
-        return Ok(serde_json::to_string(value)?);
-    }
-    if json5 {
-        let json_str = serde_json::to_string(value)?;
-        let j5 = biscuit_file::Json5::from_str(&json_str)
-            .map_err(|e| eyre!("JSON5 conversion failed: {e}"))?;
-        Ok(j5.as_json5())
-    } else if yaml {
-        let json_str = serde_json::to_string(value)?;
-        let j5 = biscuit_file::Json5::from_str(&json_str)
-            .map_err(|e| eyre!("YAML conversion failed: {e}"))?;
-        let mut yaml_str = j5
-            .as_yaml()
-            .map_err(|e| eyre!("YAML conversion failed: {e}"))?;
-        // serde_yaml appends a trailing newline; trim for consistent output
-        if yaml_str.ends_with('\n') {
-            yaml_str.truncate(yaml_str.len() - 1);
-        }
-        Ok(yaml_str)
-    } else if toml {
-        // TOML requires a table at the top level; wrap scalar values
-        let toml_value = if value.is_object() {
-            value.clone()
-        } else {
-            serde_json::json!({ "value": value })
-        };
-        let json_str = serde_json::to_string(&toml_value)?;
-        let j5 = biscuit_file::Json5::from_str(&json_str)
-            .map_err(|e| eyre!("TOML conversion failed: {e}"))?;
-        let mut toml_str = j5
-            .as_toml()
-            .map_err(|e| eyre!("TOML conversion failed: {e}"))?;
-        // Trim trailing newline for consistent output
-        if toml_str.ends_with('\n') {
-            toml_str.truncate(toml_str.len() - 1);
-        }
-        Ok(toml_str)
-    } else {
-        // Default: JSON
-        Ok(serde_json::to_string_pretty(value)?)
-    }
-}
-
 /// Format a JSON value as raw output (no JSON quoting).
 ///
 /// - Strings: printed without quotes
@@ -260,14 +249,14 @@ fn format_value(
 /// - Booleans/numbers: their natural representation
 /// - Arrays: one element per line (each element formatted raw)
 /// - Objects: one `key: value` pair per line (values formatted raw)
-fn format_raw(value: &serde_json::Value) -> String {
+fn format_raw(value: &Value) -> String {
     match value {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(arr) => arr.iter().map(format_raw).collect::<Vec<_>>().join("\n"),
-        serde_json::Value::Object(map) => map
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => arr.iter().map(format_raw).collect::<Vec<_>>().join("\n"),
+        Value::Object(map) => map
             .iter()
             .map(|(k, v)| format!("{k}: {}", format_raw(v)))
             .collect::<Vec<_>>()
@@ -285,9 +274,16 @@ fn format_raw(value: &serde_json::Value) -> String {
 /// launch directory for a relative path, the repository root for `&`, and so
 /// on); a recursive (`%`) reference that matches nothing is an error. Creates
 /// the file if it doesn't exist. After the editor exits, validates that the
-/// file exists and is non-empty (after trimming whitespace). Prints the fully
-/// qualified path on success.
-pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
+/// file exists and is non-empty (after trimming whitespace). The fully
+/// qualified path is the result.
+pub fn run_edit(raw_file: &str, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let skeleton = EditData { file: None, editor: None, created: false };
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::typed(&skeleton))?;
+    let result = edit_value(raw_file, request);
+    run.finish(result)
+}
+
+fn edit_value(raw_file: &str, request: &MdRequest) -> Result<Completed<CommandValue<EditData>>> {
     let argument = std::path::Path::new(raw_file);
     let reference = parse_argument(argument)?;
     let context = request.launch_context()?;
@@ -312,7 +308,8 @@ pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
     }
 
     // Create the file if it doesn't exist
-    if !path.exists() {
+    let created = !path.exists();
+    if created {
         std::fs::write(&path, "")
             .wrap_err_with(|| format!("Failed to create file: {}", path.display()))?;
     }
@@ -322,6 +319,7 @@ pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
     // verbatim `\\?\` prefix.
     let canonical = biscuit_file::canonicalize_simplified(&path)
         .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
+    let editor = darkmatter::editor::resolve_editor_command()?;
     darkmatter::editor::launch_editor_on_path(&canonical)?;
 
     // --- Validate the result ---
@@ -342,8 +340,46 @@ pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
         ));
     }
 
-    // Output the fully qualified filename
-    println!("{}", canonical.display());
+    let shown = canonical.display().to_string();
+    let terminal = shown.clone();
+    let data = EditData {
+        file: Some(biscuit_file::to_portable_string(&canonical)),
+        // The command may carry arguments; the executable is its first word.
+        editor: editor.split_whitespace().next().map(str::to_string),
+        created,
+    };
+    let prose = raw_document(&shown);
+    Ok(Completed::success(CommandValue::new(data, prose).with_terminal(move |_| terminal.clone())))
+}
 
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::terminal::Terminal;
+
+    #[test]
+    fn raw_values_keep_todays_layout() {
+        assert_eq!(format_raw(&serde_json::json!(null)), "");
+        assert_eq!(format_raw(&serde_json::json!("a")), "a");
+        assert_eq!(format_raw(&serde_json::json!(["a", 1])), "a\n1");
+        assert_eq!(format_raw(&serde_json::json!({ "k": "v" })), "k: v");
+    }
+
+    #[test]
+    fn an_explicit_width_reflows_only_the_body() {
+        let text = "---\ntitle: a long title that must stay as it is\n---\none two\nthree four\n".to_string();
+        let joined = at_width(text.clone(), Some(Width::Unlimited));
+        assert!(joined.starts_with("---\ntitle: a long title that must stay as it is\n---\n"), "{joined}");
+        assert!(joined.contains("one two three four"), "{joined}");
+        assert_eq!(at_width(text.clone(), None), text);
+        assert_eq!(at_width(text.clone(), Some(Width::Source)), text);
+    }
+
+    #[test]
+    fn the_summary_names_what_was_removed() {
+        let terminal = Terminal::builder().width(200).color_depth(biscuit_terminal::discovery::detection::ColorDepth::None).build();
+        let row = Prose::new(rm_summary(&["a".to_string()], &["b".to_string()])).render(&terminal);
+        assert!(row.contains("removed the a property"), "{row}");
+        assert!(row.contains("remaining: b"), "{row}");
+    }
 }

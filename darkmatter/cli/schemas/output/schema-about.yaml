@@ -1,0 +1,48 @@
+$schema:
+    sections: section[](required) -> always the whole catalog, whatever the verbosity
+    outcome: enum(success,failure;required)
+    diagnostics: diagnostic[](required)
+types:
+    section:
+        id: string(required)
+        title: string(required)
+        description: string(required)
+        entries: entry[](required)
+    entry:
+        name: string(required)
+        description: string(required)
+        example: string
+        constraints: string[](required)
+        details: detail[](required)
+    detail:
+        name: string(required)
+        value: string(required)
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no position is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory

@@ -13,7 +13,7 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::rules::{Indentation, Leaf, MarkdownRuleOverrides};
-use darkmatter::markdown::output::command::{DocumentOutput, document_markdown};
+use darkmatter::markdown::output::command::{CommandValue, DocumentOutput, document_markdown, empty_document};
 use renderable::Width;
 use std::path::PathBuf;
 use tracing::{debug, instrument};
@@ -145,6 +145,44 @@ impl Render<'_> {
         }
         Ok(())
     }
+}
+
+/// A document command's value: `data` behind the data family, and `text`, which
+/// keeps its exact bytes, as the Markdown. Every other formatted output renders
+/// `document` through its page, which happens now so a failure surfaces here.
+///
+/// ## Errors
+///
+/// The page could not be built or rendered.
+pub(crate) fn document_value<D>(
+    data: D,
+    document: &Markdown,
+    text: String,
+    input: Option<&PathBuf>,
+    output: &ResolvedOutput,
+    cli: &Cli,
+) -> Result<CommandValue<D>> {
+    let target = output.target;
+    let page = match target {
+        OutputTarget::Terminal | OutputTarget::Plain => terminal_page(document, input, cli, &Terminal::default(), false, &[])?,
+        OutputTarget::Html | OutputTarget::MarkdownPlus => html_page(document, cli, input, false, &[])?,
+        OutputTarget::Markdown => return Ok(CommandValue::new(data, empty_document()).with_markdown(text)),
+        OutputTarget::Json | OutputTarget::Json5 | OutputTarget::Yaml | OutputTarget::Toml => {
+            return Ok(CommandValue::new(data, empty_document()));
+        }
+    };
+    let prepared = DocumentOutput::prepare(document, &page, target, &output.options)
+        .wrap_err_with(|| format!("Failed to render {target} output"))?;
+    let prose = renderable::CommandOutput::as_prose(&prepared);
+    let rendered = biscuit_terminal::output::render_output(&prepared, target, &output.options)
+        .map_err(|error| color_eyre::eyre::eyre!(error))?
+        .text;
+    let value = CommandValue::new(data, prose);
+    Ok(match target {
+        OutputTarget::Html => value.with_html(rendered),
+        OutputTarget::Terminal | OutputTarget::Plain => value.with_terminal(move |_| rendered.clone()),
+        _ => value,
+    })
 }
 
 fn warning_row(warning: &darkmatter::markdown::compose::ComposeWarning) -> String {

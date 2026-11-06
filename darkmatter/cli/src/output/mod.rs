@@ -5,6 +5,7 @@
 //! terminal. Stderr has its own: it wraps at stderr's terminal columns and is
 //! unlimited when stderr is not a terminal, whatever `--width` says.
 
+pub mod command;
 pub mod report;
 
 use std::io::{IsTerminal as _, Write as _};
@@ -162,6 +163,13 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         iteration_path: Default::default(),
         reference_details: None,
     }
+}
+
+/// `text` as stderr can show it: a component may paint regardless of its
+/// terminal, so off a terminal any escape it wrote is removed.
+#[must_use]
+pub fn stderr_text(text: String) -> String {
+    if std::io::stderr().is_terminal() { text } else { biscuit_terminal::utils::escape_codes::strip_escape_codes(text) }
 }
 
 /// Writes a warning row to stderr.

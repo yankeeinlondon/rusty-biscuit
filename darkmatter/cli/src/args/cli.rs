@@ -126,7 +126,13 @@ pub struct Cli {
     /// Width the output is wrapped to: N columns, N%, `auto` (`OUTPUT_COLUMNS`,
     /// else the terminal, else unlimited), `source` (keep authored line
     /// breaks), or `unlimited`. `--max-width` caps content inside it.
-    #[arg(long, value_name = "WIDTH", value_parser = crate::args::output::parse_width, global = true)]
+    #[arg(
+        long,
+        value_name = "WIDTH",
+        value_parser = crate::args::output::parse_width,
+        global = true,
+        add = ArgValueCompleter::new(crate::args::complete_width_values)
+    )]
     pub width: Option<WidthRequest>,
 
     /// Include line numbers in code blocks
@@ -255,11 +261,29 @@ impl Cli {
     /// Whether this invocation prints a data output, which owns stderr too:
     /// nothing may be written there.
     pub fn requests_data_output(&self) -> bool {
+        use crate::args::{Command, SchemaTarget, ValidateTarget};
         let target: Option<OutputTarget> = match &self.command {
-            Some(crate::args::Command::Compose { output, .. }) => Some(*output),
-            Some(crate::args::Command::Render(options)) => options.output,
-            Some(_) => None,
             None => self.render.output,
+            Some(Command::Render(options)) => options.output,
+            Some(
+                Command::Clean { output, .. }
+                | Command::Compose { output, .. }
+                | Command::Toc { output, .. }
+                | Command::Delta { output, .. }
+                | Command::Get { output, .. }
+                | Command::Set { output, .. }
+                | Command::Rm { output, .. }
+                | Command::Edit { output, .. }
+                | Command::Hash { output, .. }
+                | Command::Graph { output, .. }
+                | Command::CodeBlock { output, .. }
+                | Command::Validate { target: ValidateTarget::Refs { output, .. } }
+                | Command::Schema {
+                    target:
+                        SchemaTarget::Validate { output, .. } | SchemaTarget::Triggers { output, .. } | SchemaTarget::About { output },
+                },
+            ) => Some(*output),
+            Some(Command::Schema { target: SchemaTarget::Detect { output, .. } }) => Some(output.target()),
         };
         target.is_some_and(OutputTarget::is_data)
     }
@@ -302,44 +326,23 @@ mod tests {
     }
 
     #[test]
-    fn clean_fixed_width_flag_parses() {
-        let cli = Cli::try_parse_from(["md", "clean", "doc.md", "--fixed-width", "80"]).unwrap();
-        match cli.command {
-            Some(crate::args::Command::Clean { fixed_width, .. }) => {
-                assert_eq!(fixed_width, Some(80));
-            }
-            _ => panic!("Expected Clean command"),
-        }
+    fn clean_fixed_width_flag_is_removed() {
+        let error = Cli::try_parse_from(["md", "clean", "doc.md", "--fixed-width", "80"]).err().expect("removed");
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]
-    fn clean_ignore_incidental_newlines_flag_parses() {
-        let cli =
-            Cli::try_parse_from(["md", "clean", "doc.md", "--ignore-incidental-newlines"])
-                .unwrap();
-        match cli.command {
-            Some(crate::args::Command::Clean {
-                ignore_incidental_newlines,
-                ..
-            }) => assert!(ignore_incidental_newlines),
-            _ => panic!("Expected Clean command"),
-        }
+    fn clean_ignore_incidental_newlines_flag_is_removed() {
+        let error = Cli::try_parse_from(["md", "clean", "doc.md", "--ignore-incidental-newlines"]).err().expect("removed");
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]
-    fn clean_fixed_width_conflicts_with_ignore_incidental_newlines() {
-        let result = Cli::try_parse_from([
-            "md",
-            "clean",
-            "doc.md",
-            "--fixed-width",
-            "80",
-            "--ignore-incidental-newlines",
-        ]);
-        let Err(err) = result else {
-            panic!("expected conflicting clean flags to fail");
-        };
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    fn clean_width_replaces_both_removed_flags() {
+        let cli = Cli::try_parse_from(["md", "clean", "doc.md", "--width", "80"]).unwrap();
+        assert_eq!(cli.width, Some(WidthRequest::Columns(80)));
+        let cli = Cli::try_parse_from(["md", "clean", "doc.md", "--width", "source"]).unwrap();
+        assert_eq!(cli.width, Some(WidthRequest::Source));
     }
 
     #[test]
@@ -543,7 +546,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(crate::args::Command::Schema {
-                target: crate::args::SchemaTarget::About,
+                target: crate::args::SchemaTarget::About { .. },
             })
         ));
         assert_eq!(cli.code_block, CodeBlockArg::Inverse);
@@ -556,7 +559,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(crate::args::Command::Schema {
-                target: crate::args::SchemaTarget::About,
+                target: crate::args::SchemaTarget::About { .. },
             })
         ));
         assert_eq!(cli.code_block, CodeBlockArg::Light);

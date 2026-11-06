@@ -32,18 +32,32 @@ fn schema_detect_yaml_emits_simplified_schema() {
 }
 
 #[test]
-fn schema_detect_json_emits_json_schema() {
+fn schema_detect_json_emits_the_simplified_schema_as_data() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    let doc = write_file(tmp, "doc.md", "---\ntitle: Hello\n---\nBody\n");
+
+    let output = process.command().args(["schema", "detect", "--output", "json"]).arg(&doc).output().unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(schema, serde_json::json!({ "$schema": { "title": "string" } }));
+}
+
+#[test]
+fn schema_detect_json_schema_output_emits_draft_2020_12() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let doc = write_file(tmp, "doc.md", "---\ntitle: Hello\n---\nBody\n");
 
     process
         .command()
-        .args(["schema", "detect", "--format", "json"])
+        .args(["schema", "detect", "--output", "json-schema"])
         .arg(&doc)
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"$schema\""))
+        .stdout(predicate::str::contains("2020-12"))
         .stdout(predicate::str::contains("\"type\": \"object\""))
         .stdout(predicate::str::contains("\"title\""));
 }
@@ -84,7 +98,7 @@ fn schema_detect_no_merge_emits_per_file_headers() {
 }
 
 #[test]
-fn schema_detect_unparseable_frontmatter_exits_3() {
+fn schema_detect_unparseable_frontmatter_exits_1() {
     let process = CliProcessFixture::new();
     let tmp = process.cwd();
     let bad = write_file(
@@ -98,5 +112,5 @@ fn schema_detect_unparseable_frontmatter_exits_3() {
         .args(["schema", "detect"])
         .arg(&bad)
         .assert()
-        .code(3);
+        .code(1);
 }

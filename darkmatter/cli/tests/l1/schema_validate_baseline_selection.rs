@@ -37,7 +37,7 @@ enum Observed {
     Env,
 }
 
-/// One `md schema validate --format json` run's exit code and record.
+/// One `md schema validate --output json` run's exit code and record.
 struct JsonRun {
     code: Option<i32>,
     record: Value,
@@ -95,7 +95,7 @@ fn run_json(
         builder = builder.application_input(BASELINE_ENV, "./env.yaml");
     }
     let mut command = builder.build();
-    command.args(["schema", "validate", "--format", "json"]);
+    command.args(["schema", "validate", "--output", "json"]);
     if selection.no_baseline_flag {
         command.args(["--disable", "baseline-schema"]);
     }
@@ -104,12 +104,7 @@ fn run_json(
     }
     let output = command.args(extra).arg(document).output().expect("run md schema validate");
     let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
-    let record = serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!(
-            "one JSON record expected ({error}); stdout:\n{stdout}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        )
-    });
+    let record = common::schema_validate_record(stdout.as_bytes());
     JsonRun {
         code: output.status.code(),
         record,
@@ -256,30 +251,36 @@ fn assert_broken_baseline(schema_flag: bool, no_baseline_env: Option<&str>, base
         builder = builder.application_input(BASELINE_ENV, "broken.yaml");
     }
     let mut command = builder.build();
-    command.args(["schema", "validate", "--format", "json"]);
+    command.args(["schema", "validate", "--output", "json"]);
     if schema_flag {
         command.args(["--schema", "broken.yaml"]);
     }
-    command.arg(&document).assert().code(2).stdout(predicate::str::is_empty());
+    let output = command.arg(&document).output().expect("run md schema validate");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
+    assert_eq!(report["files"], serde_json::json!([]), "{report}");
+    assert_eq!(report["outcome"], "failure", "{report}");
+    assert_eq!(report["diagnostics"][0]["code"], "dm.schema.baseline", "{report}");
 }
 
 #[test]
-fn broken_schema_flag_baseline_exits_2_without_fallback() {
+fn broken_schema_flag_baseline_exits_1_without_fallback() {
     assert_broken_baseline(true, None, false);
 }
 
 #[test]
-fn broken_schema_flag_baseline_exits_2_even_with_env_opt_out() {
+fn broken_schema_flag_baseline_exits_1_even_with_env_opt_out() {
     assert_broken_baseline(true, Some("1"), false);
 }
 
 #[test]
-fn broken_baseline_schema_env_exits_2_without_fallback() {
+fn broken_baseline_schema_env_exits_1_without_fallback() {
     assert_broken_baseline(false, None, true);
 }
 
 #[test]
-fn missing_baseline_schema_env_file_exits_2_without_fallback() {
+fn missing_baseline_schema_env_file_exits_1_without_fallback() {
     let process = CliProcessFixture::new();
     let document = process.cwd().join("doc.md");
     std::fs::write(&document, "---\ntitle: hi\n---\nBody\n").unwrap();
@@ -290,7 +291,7 @@ fn missing_baseline_schema_env_file_exits_2_without_fallback() {
         .args(["schema", "validate"])
         .arg(&document)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::is_empty());
 }
 

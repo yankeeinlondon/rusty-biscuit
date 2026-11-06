@@ -13,13 +13,14 @@ use darkmatter::markdown::Markdown;
 use darkmatter::testing::strip_ansi_codes;
 use serde_json::{Value, json};
 
+use crate::common;
 use crate::common::CliProcessFixture;
 use crate::union_fixtures::{
     CONTENT_POLICY_CASES, CONTENT_POLICY_FILE, CONTENT_POLICY_LIST, FILE_TYPES, NESTED_UNION_FILE,
     NESTED_UNION_TYPES, content_policy_union_schema, write_files,
 };
 
-/// The public outcome of `md schema validate --format json` for one document.
+/// The public outcome of `md schema validate --output json` for one document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Expected {
     /// Exit 0 and a report with no problems.
@@ -54,7 +55,7 @@ pub(crate) fn content_policy_workspace(
     (process, doc)
 }
 
-/// Runs `md schema validate --format json` on `doc`, asserts the file's bytes
+/// Runs `md schema validate --output json` on `doc`, asserts the file's bytes
 /// did not change, and asserts the exit code and report match `expected`.
 pub(crate) fn assert_validates_unchanged(
     process: &CliProcessFixture,
@@ -64,7 +65,7 @@ pub(crate) fn assert_validates_unchanged(
     let before = fs::read(doc).expect("read document before validation");
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(doc)
         .output()
         .expect("run md schema validate");
@@ -82,8 +83,7 @@ pub(crate) fn assert_validates_unchanged(
         String::from_utf8_lossy(&before),
         String::from_utf8_lossy(&output.stderr),
     );
-    let report: Value = serde_json::from_str(stdout.trim())
-        .unwrap_or_else(|err| panic!("expected one JSON report ({err})\n{context}"));
+    let report = common::schema_validate_record(&output.stdout);
     let mut paths: Vec<&str> = report["problems"]
         .as_array()
         .unwrap_or_else(|| panic!("report has no problems array\n{context}"))
@@ -107,7 +107,7 @@ pub(crate) fn assert_validates_unchanged(
             assert_eq!(paths, expected_paths, "{context}");
         }
         Expected::LoadError => {
-            assert_eq!(code, Some(3), "{context}");
+            assert_eq!(code, Some(1), "{context}");
             assert_eq!(report["error"], json!("frontmatter_parse"), "{context}");
             assert!(paths.is_empty(), "{context}");
         }
@@ -388,7 +388,7 @@ fn recomposing_normalized_union_items_is_idempotent_and_inserts_nothing() {
 
 /// A union alias that already carries a postfix is still a union: the
 /// forbidden value constraint and the `[]` over an array arm fail schema
-/// resolution (exit 2) naming the alias, while an allowed container postfix
+/// resolution (exit 1) naming the alias, while an allowed container postfix
 /// through the same alias validates.
 #[test]
 fn schema_validate_rejects_union_operations_through_a_postfixed_alias() {
@@ -415,13 +415,10 @@ fn schema_validate_rejects_union_operations_through_a_postfixed_alias() {
     let validate = |doc: &str| {
         let output = process
             .command()
-            .args(["schema", "validate", "--format", "json", doc])
+            .args(["schema", "validate", "--output", "json", doc])
             .output()
             .expect("run md schema validate");
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let report: Value = serde_json::from_str(stdout.trim())
-            .unwrap_or_else(|err| panic!("expected one JSON report ({err}): {stdout}"));
-        (output.status.code(), report)
+        (output.status.code(), common::schema_validate_record(&output.stdout))
     };
 
     for (doc, needle) in [
@@ -429,7 +426,7 @@ fn schema_validate_rejects_union_operations_through_a_postfixed_alias() {
         ("array_arm.md", "union arm 0 is already an array"),
     ] {
         let (code, report) = validate(doc);
-        assert_eq!(code, Some(2), "{doc}: {report}");
+        assert_eq!(code, Some(1), "{doc}: {report}");
         assert_eq!(report["error"], json!("schema"), "{doc}: {report}");
         let message = report["message"].as_str().expect("schema error message");
         assert!(message.contains(needle), "{doc}: {message}");
@@ -444,7 +441,7 @@ fn schema_validate_rejects_union_operations_through_a_postfixed_alias() {
 
 /// The review's cross-file reproduction: `eager` before `[]` validates as
 /// `[]` followed by `eager` does, while a value constraint there, or any list
-/// before `[]` on a single named type, fails schema resolution (exit 2).
+/// before `[]` on a single named type, fails schema resolution (exit 1).
 #[test]
 fn schema_validate_accepts_eager_before_the_array_suffix_and_rejects_value_constraints() {
     let process = CliProcessFixture::new();
@@ -463,13 +460,10 @@ fn schema_validate_accepts_eager_before_the_array_suffix_and_rejects_value_const
     let validate = |doc: &str| {
         let output = process
             .command()
-            .args(["schema", "validate", "--format", "json", doc])
+            .args(["schema", "validate", "--output", "json", doc])
             .output()
             .expect("run md schema validate");
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let report: Value = serde_json::from_str(stdout.trim())
-            .unwrap_or_else(|err| panic!("expected one JSON report ({err}): {stdout}"));
-        (output.status.code(), report)
+        (output.status.code(), common::schema_validate_record(&output.stdout))
     };
 
     for doc in ["before.md", "after.md"] {
@@ -482,7 +476,7 @@ fn schema_validate_accepts_eager_before_the_array_suffix_and_rejects_value_const
         ("single.md", "constraint `eager` before `[]`"),
     ] {
         let (code, report) = validate(doc);
-        assert_eq!(code, Some(2), "{doc}: {report}");
+        assert_eq!(code, Some(1), "{doc}: {report}");
         assert_eq!(report["error"], json!("schema"), "{doc}: {report}");
         let message = report["message"].as_str().expect("schema error message");
         assert!(message.contains(needle), "{doc}: {message}");
@@ -521,16 +515,13 @@ fn schema_validate_assignment_keeps_raw_text_for_every_union_reference_form() {
 
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .args(["inline.md", "bare.md", "marked.md", "version=1.10"])
         .output()
         .expect("run md schema validate");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let reports: Vec<Value> = stdout
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("NDJSON report"))
-        .collect();
+    let reports = common::schema_validate_records(&output.stdout);
     assert_eq!(reports.len(), 3, "{stdout}");
     for report in &reports {
         assert_eq!(report["valid"], json!(true), "{stdout}");

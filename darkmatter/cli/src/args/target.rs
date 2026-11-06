@@ -1,10 +1,9 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
-use crate::args::{
-    GraphFormat, SchemaDetectFormat, SchemaValidateFormat, ValidateOutputFormat,
-    complete_compose_args, complete_markdown_files,
-};
+use crate::args::output::{ALL_TARGETS, SchemaDetectOutput, detect_target_parser, target_parser};
+use crate::args::{GraphFormat, complete_compose_args, complete_markdown_files};
+use biscuit_terminal::output::OutputTarget;
 use std::path::PathBuf;
 
 /// Validation sub-targets.
@@ -32,9 +31,9 @@ pub enum ValidateTarget {
         #[arg(long)]
         fail_fast: bool,
 
-        /// Output format
-        #[arg(long, value_enum, default_value_t = ValidateOutputFormat::Text)]
-        format: ValidateOutputFormat,
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
 
         /// Show all references, not just issues
         #[arg(long = "show-all")]
@@ -77,9 +76,9 @@ pub enum SchemaTarget {
         #[arg(long, value_name = "PATH")]
         schema: Option<PathBuf>,
 
-        /// Output format
-        #[arg(long, value_enum, default_value_t = SchemaValidateFormat::Pretty)]
-        format: SchemaValidateFormat,
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
 
         /// Suppress success lines; only failures print
         #[arg(long)]
@@ -101,6 +100,10 @@ pub enum SchemaTarget {
         /// Markdown file to inspect
         #[arg(value_name = "FILE", add = ArgValueCompleter::new(complete_markdown_files))]
         file: PathBuf,
+
+        /// What to print
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
     },
 
     /// Detect a SimplifiedSchema from one or more markdown documents.
@@ -114,9 +117,9 @@ pub enum SchemaTarget {
         )]
         files: Vec<PathBuf>,
 
-        /// Output format
-        #[arg(long, value_enum, default_value_t = SchemaDetectFormat::Yaml)]
-        format: SchemaDetectFormat,
+        /// What to print; `yaml` is the bare schema, and `json-schema` is Draft 2020-12
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = detect_target_parser())]
+        output: SchemaDetectOutput,
 
         /// Merge multiple files: widen disagreeing types and mark
         /// properties required only if present in every input file.
@@ -139,5 +142,9 @@ pub enum SchemaTarget {
     /// The command is documentation-only: it does not parse documents,
     /// capture context, construct an `EffectEngine`, resolve file
     /// references, or perform network access.
-    About,
+    About {
+        /// What to print; a data format always carries the whole catalog
+        #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
+        output: OutputTarget,
+    },
 }

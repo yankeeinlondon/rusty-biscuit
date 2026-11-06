@@ -2,32 +2,31 @@
 
 use crate::args::policy::{self, PolicyCommand};
 use crate::args::{Cli, Command as CliCommand, SchemaTarget};
-use crate::io::load_markdown;
 use crate::output::report::ReportSink;
 use crate::output::{OutputEnvironment, resolve_output, stderr_warning};
 use biscuit_terminal::output::WidthRequest;
 use crate::request::MdRequest;
-use biscuit_terminal::components::renderable::TerminalRenderable as _;
-use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Context, Result, eyre};
-use darkmatter::markdown::toc::TocTree;
+use clap::CommandFactory as _;
+use color_eyre::eyre::Result;
 use tracing::instrument;
 
 mod code_block;
 pub(crate) mod compose;
 mod clean;
+mod delta;
 mod frontmatter;
 mod graph;
 mod hash;
 mod render;
 pub mod schema;
+mod toc;
 mod trigger_findings;
 mod validate;
 
-use code_block::run_code_block;
+use code_block::{CodeBlockFlags, run_code_block};
 use compose::{CollectionLimits, ComposeOutputWidth, build_remote_read_config, parse_compose_positionals, run_compose};
 use frontmatter::{run_edit, run_get, run_rm, run_set};
-use hash::run_hash;
+use hash::{HashFlags, run_hash};
 
 pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
 pub use crate::output::report::ReportedExit;
@@ -59,10 +58,12 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     if conflicts.is_empty() {
         Ok(())
     } else {
-        Err(eyre!(
-            "subcommands cannot be combined with top-level options: {}",
-            conflicts.join(", ")
-        ))
+        Err(Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!("subcommands cannot be combined with top-level options: {}", conflicts.join(", ")),
+            )
+            .into())
     }
 }
 
@@ -76,9 +77,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             indent,
             compact,
             loose,
-            fixed_width,
-            ignore_incidental_newlines,
-            json,
+            output,
             schema,
             baseline_schema,
             disable,
@@ -94,10 +93,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 save,
                 indent,
                 list_item_padding: clean::resolve_list_spacing(compact, loose),
-                fixed_width,
-                ignore_incidental_newlines,
                 verbose: cli.verbose > 0,
-                json,
+                output: Some(output),
                 schema: CleanSchemaFlags {
                     schema,
                     baseline_schema,
@@ -105,7 +102,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     no_schema_triggers: policy.disables("schema-triggers"),
                 },
             };
-            run_clean(input.as_ref(), &options, request)?;
+            run_clean(input.as_ref(), &options, cli, request)?;
         }
         CliCommand::Compose {
             args,
@@ -200,138 +197,24 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 None => result?,
             }
         }
-        CliCommand::Toc { input, json } => {
-            let md = load_markdown(input.as_ref(), request)?;
-            let toc = md.toc();
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&toc)?);
-            } else {
-                // Detect the terminal only on the human-rendered branch so
-                // `md toc --json` never pays terminal detection (finding 3).
-                let term = Terminal::new();
-                let mut tree = TocTree::new(toc);
-                if cli.verbose > 0 {
-                    tree = tree.verbose();
-                }
-                print!("{}", tree.render(&term));
-            }
+        CliCommand::Toc { input, output } => toc::run_toc(input.as_ref(), output, cli, request)?,
+        CliCommand::Delta { base, updated, output } => delta::run_delta(&base, &updated, output, cli, request)?,
+        CliCommand::Get { input, props, output, compact } => run_get(&input, &props, output, compact, cli, request)?,
+        CliCommand::Set { input, prop, value, save, output } => run_set(&input, &prop, &value, save, output, cli, request)?,
+        CliCommand::Rm { input, props, output } => run_rm(&input, &props, output, cli, request)?,
+        CliCommand::Edit { file, output } => run_edit(&file, output, cli, request)?,
+        CliCommand::Hash { input, kind, body, frontmatter, save, diff, strict, output } => {
+            let flags = HashFlags { kind: kind.map(Into::into), body, frontmatter, save, diff, strict };
+            run_hash(input.as_ref(), flags, output, cli, request)?;
         }
-        CliCommand::Delta {
-            base,
-            updated,
-            json,
-        } => {
-            let base_md = load_markdown(Some(&base), request)
-                .wrap_err_with(|| format!("Failed to read base file: {:?}", base))?;
-            let updated_md = load_markdown(Some(&updated), request)
-                .wrap_err_with(|| format!("Failed to read updated file: {:?}", updated))?;
-            let delta = base_md.delta(&updated_md);
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&delta)?);
-            } else {
-                use darkmatter::markdown::delta::DeltaReport;
-
-                // `delta` is already an owned `MarkdownDelta`, and neither
-                // document is used after this point, so move them into the
-                // report instead of cloning two full documents.
-                let mut report = DeltaReport::new(delta).with_documents(base_md, updated_md);
-                if cli.verbose > 0 {
-                    report = report.verbose();
-                }
-                print!("{}", report.render(&Terminal::new()));
-            }
-        }
-        CliCommand::Get {
-            input,
-            props,
-            json5,
-            yaml,
-            toml,
-            raw,
-            compact,
-        } => {
-            run_get(&input, &props, json5, yaml, toml, raw, compact, request)?;
-        }
-        CliCommand::Set {
-            input,
-            prop,
-            value,
-            save,
-        } => {
-            run_set(&input, &prop, &value, save, request)?;
-        }
-        CliCommand::Rm { input, props, json } => {
-            run_rm(&input, &props, json, cli, request)?;
-        }
-        CliCommand::Edit { file } => {
-            run_edit(&file, request)?;
-        }
-        CliCommand::Hash {
-            input,
-            kind,
-            body,
-            frontmatter,
-            save,
-            diff,
-            strict,
-        } => {
-            run_hash(
-                input.as_ref(),
-                kind.map(Into::into),
-                body,
-                frontmatter,
-                save,
-                diff,
-                strict,
-                request,
-            )?;
-        }
-        CliCommand::Validate { target } => {
-            validate::run_validate(target, cli.verbose, request)?;
-        }
-        CliCommand::Graph {
-            input,
-            follow,
-            validate,
-            json,
-        } => {
-            graph::run_graph(&input, follow, validate, json, cli.verbose, request)?;
-        }
-        CliCommand::CodeBlock {
-            input,
-            file,
-            content,
-            language,
-            theme,
-            title,
-            line_numbering,
-            highlight,
-            output,
-        } => {
-            run_code_block(
-                &input,
-                file,
-                content,
-                language.as_deref(),
-                theme,
-                title.as_deref(),
-                line_numbering,
-                highlight.as_deref(),
-                output,
-                cli,
-                request,
-            )?;
+        CliCommand::Validate { target } => validate::run_validate(target, cli, request)?,
+        CliCommand::Graph { input, follow, validate, output } => graph::run_graph(&input, follow, validate, output, cli, request)?,
+        CliCommand::CodeBlock { input, file, content, language, theme, title, line_numbering, highlight, output } => {
+            let flags = CodeBlockFlags { force_file: file, force_content: content, language, theme, title, line_numbering, highlight };
+            run_code_block(&input, &flags, output, cli, request)?;
         }
         CliCommand::Schema { target } => match target {
-            SchemaTarget::Validate {
-                inputs,
-                schema,
-                format,
-                quiet,
-                disable,
-            } => {
+            SchemaTarget::Validate { inputs, schema, output, quiet, disable } => {
                 let policy = policy::resolve_for(
                     PolicyCommand::SchemaValidate,
                     &[],
@@ -339,28 +222,18 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     &disable,
                     schema.is_some().then_some("--schema <PATH>"),
                 )?;
-                schema::run_validate(
-                    &inputs,
-                    schema.as_deref(),
-                    policy.disables("baseline-schema"),
-                    format,
+                let options = schema::ValidateOptions {
+                    schema: schema.as_deref(),
+                    no_baseline_schema: policy.disables("baseline-schema"),
+                    no_schema_triggers: policy.disables("schema-triggers"),
                     quiet,
-                    policy.disables("schema-triggers"),
-                    cli.verbose,
-                    request,
-                )?;
+                    output,
+                };
+                schema::run_validate(&inputs, &options, cli, request)?;
             }
-            SchemaTarget::Detect {
-                files,
-                format,
-                merge,
-            } => {
-                schema::run_detect(&files, format, merge, request)?;
-            }
-            SchemaTarget::About => {
-                schema::run_about(cli.verbose > 0, cli.code_block.into())?;
-            }
-            SchemaTarget::Triggers { file } => schema::run_triggers(&file, request)?,
+            SchemaTarget::Detect { files, output, merge } => schema::run_detect(&files, output, merge, cli, request)?,
+            SchemaTarget::About { output } => schema::run_about(output, cli.code_block.into(), cli)?,
+            SchemaTarget::Triggers { file, output } => schema::run_triggers(&file, output, cli, request)?,
         },
     }
 

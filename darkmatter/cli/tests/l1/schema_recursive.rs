@@ -50,20 +50,17 @@ fn position_of(text: &str, needle: &str) -> (u64, u64) {
     ((index + 1) as u64, column as u64)
 }
 
-/// Runs `md schema validate --format json` on `document` (plus any
+/// Runs `md schema validate --output json` on `document` (plus any
 /// assignments) and returns the exit code and the report's `problems`.
 fn validate_json(fixture: &CliProcessFixture, document: &Path, extra: &[&str]) -> (Option<i32>, Vec<Value>) {
     let output = fixture
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(document)
         .args(extra)
         .output()
         .expect("run md schema validate");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let report: Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("not one JSON report ({error}):\n{stdout}\nstderr: {}", String::from_utf8_lossy(&output.stderr))
-    });
+    let report = common::schema_validate_record(&output.stdout);
     let problems = report["problems"].as_array().cloned().unwrap_or_default();
     (output.status.code(), problems)
 }
@@ -284,7 +281,7 @@ fn validation_runs_no_expression_inside_a_recursive_item_and_leaves_the_source_u
         .command_builder()
         .host_path()
         .build()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(&document)
         .output()
         .expect("run md schema validate");
@@ -336,7 +333,7 @@ fn a_function_type_reachable_only_through_a_recursive_definition_is_a_schema_loa
     let output = fixture.command().args(["schema", "validate"]).arg(&document).output().expect("run md");
     let stdout = common::unwrapped(&String::from_utf8_lossy(&output.stdout));
     let stderr = common::unwrapped(&String::from_utf8_lossy(&output.stderr));
-    assert_eq!(output.status.code(), Some(2), "a schema definition error: {stdout}{stderr}");
+    assert_eq!(output.status.code(), Some(1), "a schema definition error: {stdout}{stderr}");
     let report = format!("{stdout}{stderr}");
     assert!(report.contains("root.f"), "{report}");
     assert!(report.contains("cannot type a value in a document schema"), "{report}");

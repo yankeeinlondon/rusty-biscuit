@@ -619,11 +619,10 @@ fn schema_validate_json_attaches_a_shared_warning_to_the_first_file() {
     let second = write(process.cwd(), "docs/b.md", "---\ntitle: b\n---\n");
 
     let output =
-        run(&process, &["schema", "validate", "--format", "json", first.to_str().unwrap(), second.to_str().unwrap()]);
+        run(&process, &["schema", "validate", "--output", "json", first.to_str().unwrap(), second.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(!stderr_of(&output).contains(WARNING), "{output:?}");
-    let records: Vec<Value> =
-        stdout_of(&output).lines().map(|line| serde_json::from_str(line).expect("one JSON record per line")).collect();
+    let records = common::schema_validate_records(&output.stdout);
     assert_eq!(records.len(), 2, "{records:#?}");
     assert_eq!(records[0]["valid"], true, "{records:#?}");
     let warnings = records[0]["warnings"].as_array().expect("the first file carries the warning");
@@ -652,12 +651,11 @@ fn schema_validate_json_keeps_same_named_triggers_of_two_packages_distinct() {
 
     let output = run(
         &process,
-        &["schema", "validate", "--format", "json", documents[0].to_str().unwrap(), documents[1].to_str().unwrap()],
+        &["schema", "validate", "--output", "json", documents[0].to_str().unwrap(), documents[1].to_str().unwrap()],
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(!stderr_of(&output).contains(WARNING), "{output:?}");
-    let records: Vec<Value> =
-        stdout_of(&output).lines().map(|line| serde_json::from_str(line).expect("one JSON record per line")).collect();
+    let records = common::schema_validate_records(&output.stdout);
     assert_eq!(records.len(), 2, "{records:#?}");
     for (record, trigger) in records.iter().zip(&triggers) {
         let warnings = record["warnings"].as_array().expect("each file carries its own package's warning");
@@ -675,9 +673,9 @@ fn schema_validate_json_failure_keeps_the_discovery_warning() {
     let trigger = process.cwd().join("schemas/memory.yaml");
     let document = write(process.cwd(), "docs/prompt.md", "---\nkind: prompt\n---\n");
 
-    let output = run(&process, &["schema", "validate", "--format", "json", document.to_str().unwrap()]);
+    let output = run(&process, &["schema", "validate", "--output", "json", document.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    let record: Value = serde_json::from_str(stdout_of(&output).trim()).unwrap();
+    let record = common::schema_validate_record(&output.stdout);
     assert_eq!(record["valid"], false, "{record:#}");
     assert!(record["problems"].as_array().unwrap().iter().any(|problem| problem["property"] == "owner"), "{record:#}");
     let warnings = record["warnings"].as_array().expect("the failure keeps its warning");
@@ -685,16 +683,16 @@ fn schema_validate_json_failure_keeps_the_discovery_warning() {
     assert_incident_row(&warnings[0], &trigger);
 }
 
-/// A schema failure after discovery keeps exit 2 and the warning.
+/// A schema failure after discovery keeps the failure exit and the warning.
 #[test]
 fn schema_validate_json_schema_error_keeps_the_discovery_warning() {
     let process = CliProcessFixture::new();
     let trigger = incident_repository(&process);
     let document = write(process.cwd(), "docs/prompt.md", "---\n$schema: ./missing.yaml\n---\n");
 
-    let output = run(&process, &["schema", "validate", "--format", "json", document.to_str().unwrap()]);
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    let record: Value = serde_json::from_str(stdout_of(&output).trim()).unwrap();
+    let output = run(&process, &["schema", "validate", "--output", "json", document.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let record = common::schema_validate_record(&output.stdout);
     assert_eq!(record["error"], "schema", "{record:#}");
     assert_incident_row(&record["warnings"][0], &trigger);
 }
@@ -790,7 +788,7 @@ fn clean_beside_the_incident_trigger_succeeds_with_one_stderr_warning() {
     assert_incident_warning(&stderr_of(&output));
 }
 
-/// `--json` keeps the version-1 envelope, adds the top-level `warnings`
+/// `--output json` keeps the version-1 envelope, adds the top-level `warnings`
 /// array beside an unchanged `diagnostics`, and keeps stderr clean.
 #[test]
 fn clean_json_carries_the_warning_in_the_top_level_warnings_array() {
@@ -798,7 +796,7 @@ fn clean_json_carries_the_warning_in_the_top_level_warnings_array() {
     let trigger = incident_repository(&process);
     let document = write(process.cwd(), "docs/prompt.md", "---\ntitle: prompt\n---\nPrompt body\n");
 
-    let output = run(&process, &["clean", "--json", document.to_str().unwrap()]);
+    let output = run(&process, &["clean", "--output", "json", document.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(output.stderr.is_empty(), "report mode never repeats the warning: {output:?}");
     let report: Value = serde_json::from_slice(&output.stdout).expect("the JSON envelope");
@@ -821,7 +819,7 @@ fn clean_with_schema_triggers_disabled_reports_nothing() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert!(output.stderr.is_empty(), "{output:?}");
 
-    let output = run(&process, &["clean", "--json", "--disable", "schema-triggers", document.to_str().unwrap()]);
+    let output = run(&process, &["clean", "--output", "json", "--disable", "schema-triggers", document.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["warnings"], Value::Array(Vec::new()), "{report:#}");
@@ -843,21 +841,22 @@ fn clean_keeps_the_warning_when_the_authored_schema_fails_to_load() {
     assert!(stderr.contains(&compact("missing.yaml")), "{stderr}");
 }
 
-/// `--json` failing on its authored `$schema` still writes the version-1
-/// envelope with the retained warning in `warnings`, keeps the schema error
-/// on stderr and exit 1, and writes no warning row to stderr.
+/// `--output json` failing on its authored `$schema` still writes the
+/// version-1 envelope with the retained warning in `warnings`, carries the
+/// schema error in `run_diagnostics`, exits 1, and leaves stderr empty.
 #[test]
 fn clean_json_schema_failure_carries_the_warning_in_the_envelope() {
     let process = CliProcessFixture::new();
     let trigger = incident_repository(&process);
     let document = write(process.cwd(), "docs/prompt.md", "---\n$schema: ./missing.yaml\n---\nPrompt body\n");
 
-    let output = run(&process, &["clean", "--json", document.to_str().unwrap()]);
+    let output = run(&process, &["clean", "--output", "json", document.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    let stderr = stderr_of(&output);
-    assert!(!stderr.contains(WARNING), "report mode never repeats the warning: {stderr}");
-    assert!(stderr.contains(&compact("missing.yaml")), "the schema error stays on stderr: {stderr}");
+    assert!(output.stderr.is_empty(), "a data output writes nothing to stderr: {output:?}");
     let report: Value = serde_json::from_slice(&output.stdout).expect("the JSON envelope");
+    assert_eq!(report["outcome"], "failure", "{report:#}");
+    let schema_error = report["run_diagnostics"].to_string();
+    assert!(schema_error.contains("missing.yaml"), "the schema error is in the payload: {report:#}");
     assert_eq!(report["version"], 1, "{report:#}");
     assert_eq!(report["frontmatter"]["present"], true, "{report:#}");
     assert_eq!(report["diagnostics"], Value::Array(Vec::new()), "{report:#}");

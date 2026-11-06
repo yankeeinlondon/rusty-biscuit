@@ -199,14 +199,14 @@ fn md_argument(cli: &CliProcessFixture, fixture: &ParityFixture, route: MdRoute,
         MdRoute::Render => vec!["render", &value],
         MdRoute::Compose => vec!["compose", &value],
         MdRoute::Clean => vec!["clean", &value],
-        MdRoute::Toc => vec!["toc", "--json", &value],
+        MdRoute::Toc => vec!["toc", "--output", "json", &value],
         MdRoute::FrontmatterGet => vec!["get", &value, "title"],
         MdRoute::FrontmatterSet => vec!["set", &value, "routed", "yes"],
-        MdRoute::FrontmatterRm => vec!["rm", &value, "title", "--json"],
+        MdRoute::FrontmatterRm => vec!["rm", &value, "title", "--output", "json"],
         MdRoute::Hash => vec!["hash", &value],
-        MdRoute::DeltaBase => vec!["delta", &value, &control, "--json"],
-        MdRoute::DeltaUpdated => vec!["delta", &control, &value, "--json"],
-        MdRoute::Graph => vec!["graph", "--json", &value],
+        MdRoute::DeltaBase => vec!["delta", &value, &control, "--output", "json"],
+        MdRoute::DeltaUpdated => vec!["delta", &control, &value, "--output", "json"],
+        MdRoute::Graph => vec!["graph", "--output", "json", &value],
         MdRoute::Edit => vec!["edit", &value],
         MdRoute::ValidateRefs => vec!["validate", "refs", "--graph", "mermaid", &value],
         // `-v`: without OSC 8 a link prints its destination only when verbose.
@@ -693,9 +693,9 @@ fn external_document_magic_reference_keeps_the_launch_scope() {
         String::from_utf8_lossy(&composed.stderr),
     );
 
-    let graphed = md_from_launch(&cli, &fixture, &["graph".as_ref(), "--json".as_ref(), document.as_os_str()]);
+    let graphed = md_from_launch(&cli, &fixture, &["graph".as_ref(), "--output".as_ref(), "json".as_ref(), document.as_os_str()]);
     assert!(graphed.status.success(), "md graph: {}", String::from_utf8_lossy(&graphed.stderr));
-    let graph: serde_json::Value = serde_json::from_slice(&graphed.stdout).expect("md graph --json is JSON");
+    let graph: serde_json::Value = serde_json::from_slice(&graphed.stdout).expect("md graph --output json is JSON");
     let targets: Vec<_> = graph["transclusions"]
         .as_array()
         .expect("transclusions array")
@@ -729,9 +729,9 @@ fn external_document_magic_schema_keeps_the_launch_scope() {
         );
     }
 
-    let cleaned = md_from_launch(&cli, &fixture, &["clean".as_ref(), "--json".as_ref(), document.as_os_str()]);
+    let cleaned = md_from_launch(&cli, &fixture, &["clean".as_ref(), "--output".as_ref(), "json".as_ref(), document.as_os_str()]);
     assert!(cleaned.status.success(), "md clean: {}", String::from_utf8_lossy(&cleaned.stderr));
-    let report: serde_json::Value = serde_json::from_slice(&cleaned.stdout).expect("md clean --json is JSON");
+    let report: serde_json::Value = serde_json::from_slice(&cleaned.stdout).expect("md clean --output json is JSON");
     assert_eq!(report["diagnostics"], serde_json::json!([]), "{report:#}");
 }
 

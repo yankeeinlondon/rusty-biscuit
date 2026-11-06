@@ -1,0 +1,75 @@
+$schema:
+  # Version 1, unchanged since before --output, gaining status only when needed.
+  # Its own `diagnostics` rows are positions in the document, so run-level
+  # diagnostics are `run_diagnostics`.
+  - version: number(required)
+    source: clean-source(required)
+    frontmatter: clean-frontmatter(required)
+    diagnostics: clean-diagnostic[](required)
+    applied: clean-repair[](required)
+    changed: boolean(required)
+    warnings: finding[](required)
+    outcome: enum(success,failure) -> present when the run failed or has run diagnostics
+    run_diagnostics: diagnostic[] -> present with outcome
+  # A failure before any result existed.
+  - outcome: enum(success,failure;required)
+    diagnostics: diagnostic[](required)
+    value: unknown -> null when no result existed
+types:
+    clean-source:
+        kind: enum(file,stdin;required)
+        path: string
+    clean-frontmatter:
+        present: boolean(required)
+        span: span
+    clean-diagnostic:
+        code: string(required)
+        classification: string(required)
+        message: string(required)
+        span: positioned-span(required)
+        repairs: clean-repair[](required)
+    positioned-span:
+        start: number(required)
+        end: number(required)
+        start_line: number(required)
+        start_column: number(required)
+        end_line: number(required)
+        end_column: number(required)
+    clean-repair:
+        span: span(required)
+        replacement: string(required)
+        explanation: string(required)
+    finding:
+        source: string(required)
+        code: string(required)
+        path: string
+        message: string(required)
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no position is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory

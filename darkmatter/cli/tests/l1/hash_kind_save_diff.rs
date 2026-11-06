@@ -78,8 +78,8 @@ fn test_hash_diff_malformed_stored_hash_exits_one() {
     let fixture = CliProcessFixture::named(
         "hash-kind-save-diff-test-hash-diff-malformed-stored-hash-exits-one",
     );
-    // A corrupt stored hash is an operational error (exit 1), never a content
-    // difference (exit 2).
+    // A corrupt stored hash is an operational error, never a content
+    // difference.
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     std::fs::write(
@@ -94,7 +94,8 @@ fn test_hash_diff_malformed_stored_hash_exits_one() {
         .arg("--diff")
         .arg(&file)
         .assert()
-        .code(1);
+        .code(1)
+        .stderr(predicate::str::contains("malformed stored hash"));
 }
 
 #[test]
@@ -103,7 +104,7 @@ fn test_hash_diff_detailed_bad_section_level_exits_one() {
         "hash-kind-save-diff-test-hash-diff-detailed-bad-section-level-exits-one",
     );
     // A stored detailed hash whose section level is outside 1-6 is a malformed
-    // baseline (operational error, exit 1), never a content difference (exit 2).
+    // baseline (operational error), never a content difference.
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
     std::fs::write(
@@ -132,7 +133,8 @@ fn test_hash_diff_detailed_bad_section_level_exits_one() {
         .arg("--diff")
         .arg(&file)
         .assert()
-        .code(1);
+        .code(1)
+        .stderr(predicate::str::contains("malformed stored hash"));
 }
 
 #[test]
@@ -712,7 +714,7 @@ fn test_hash_save_requires_file_not_stdin() {
 }
 
 #[test]
-fn test_hash_diff_no_stored_hash_exits_two() {
+fn test_hash_diff_no_stored_hash_exits_one() {
     let fixture =
         CliProcessFixture::named("hash-kind-save-diff-test-hash-diff-no-stored-hash-exits-two");
     fixture
@@ -720,7 +722,7 @@ fn test_hash_diff_no_stored_hash_exits_two() {
         .args(["hash", "--diff", "-"])
         .write_stdin("---\ntitle: T\n---\n# H\n\nBody.")
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains(
             "No stored hash to compare against",
         ));
@@ -754,7 +756,7 @@ fn test_hash_diff_unchanged_exits_zero() {
 }
 
 #[test]
-fn test_hash_diff_changed_exits_two() {
+fn test_hash_diff_changed_exits_one() {
     let fixture = CliProcessFixture::named("hash-kind-save-diff-test-hash-diff-changed-exits-two");
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("doc.md");
@@ -779,7 +781,7 @@ fn test_hash_diff_changed_exits_two() {
         .arg("--diff")
         .arg(&file)
         .assert()
-        .code(2);
+        .code(1);
 }
 
 #[test]

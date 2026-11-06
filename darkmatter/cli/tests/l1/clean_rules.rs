@@ -115,7 +115,7 @@ fn fixed_width_flag_beats_the_document_width() {
         format!("{frontmatter}one two three four\nfive six seven eight\nnine ten\n")
     );
     assert_eq!(
-        clean(&fixture, &document, &["--fixed-width", "30"]),
+        clean(&fixture, &document, &["--width", "30"]),
         format!("{frontmatter}one two three four five six\nseven eight nine ten\n")
     );
 }
@@ -132,7 +132,7 @@ fn ignore_incidental_newlines_overrides_the_document_width_and_unwrap() {
 
     assert_ne!(clean(&fixture, &document, &[]), document, "the document width applies");
     assert_eq!(
-        clean(&fixture, &document, &["--ignore-incidental-newlines"]),
+        clean(&fixture, &document, &["--width", "source"]),
         document
     );
 }
@@ -173,7 +173,7 @@ fn invalid_document_rules_are_ignored_as_a_whole() {
 
     let json = fixture
         .command()
-        .args(["clean", "--json", "-"])
+        .args(["clean", "--output", "json", "-"])
         .write_stdin(document.as_str())
         .assert()
         .success();

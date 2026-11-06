@@ -21,13 +21,12 @@ fn write_document(process: &CliProcessFixture, name: &str, text: &str) -> PathBu
 fn validate_json(process: &CliProcessFixture, doc: &PathBuf, assignments: &[&str]) -> (i32, serde_json::Value) {
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json"])
+        .args(["schema", "validate", "--output", "json"])
         .arg(doc)
         .args(assignments)
         .output()
         .unwrap();
-    let report = serde_json::from_slice(&output.stdout)
-        .unwrap_or_else(|err| panic!("JSON report: {err}\n{}", String::from_utf8_lossy(&output.stdout)));
+    let report = common::schema_validate_record(&output.stdout);
     (output.status.code().expect("exit code"), report)
 }
 

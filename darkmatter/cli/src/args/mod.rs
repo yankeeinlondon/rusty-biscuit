@@ -13,16 +13,15 @@ pub use cli::Cli;
 pub use command::Command;
 pub use render::RenderOptions;
 pub use completion::{
-    complete_compose_args, complete_compose_args_from, complete_fixed_width_values,
+    complete_compose_args, complete_compose_args_from,
     complete_indent_values, complete_markdown_files, complete_markdown_files_from,
-    complete_theme_names,
+    complete_theme_names, complete_width_values,
 };
 pub use enums::{
-    CodeBlockOutput, Feature, GraphFormat, HashKind, RemoteFreshness,
-    SchemaDetectFormat, SchemaValidateFormat, ValidateOutputFormat,
+    Feature, GraphFormat, HashKind, RemoteFreshness,
 };
 pub use parsers::{
-    parse_bool_str, parse_cli_fill, parse_cli_length, parse_fixed_width, parse_indent_size,
+    parse_bool_str, parse_cli_fill, parse_cli_length, parse_indent_size,
     parse_max_width, parse_positive_limit, parse_theme_name,
 };
 pub use target::{SchemaTarget, ValidateTarget};

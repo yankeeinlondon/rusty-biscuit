@@ -1,0 +1,67 @@
+$schema:
+    files: file-record[](required) -> one per file argument, in order; empty when the baseline could not be loaded
+    outcome: enum(success,failure) -> present when the run failed or has run diagnostics
+    diagnostics: diagnostic[] -> present with outcome
+types:
+    file-record:
+        file: string(required) -> the file as given
+        valid: boolean(required)
+        schema: string -> the document's schema reference or definition
+        problems: problem[](required)
+        layers: layers -> absent when no validation ran
+        error: enum(file_reference,frontmatter_parse,yaml_parse,schema) -> why validation could not run
+        failure: string -> the file-reference failure class
+        message: string -> the error's message
+        line: number
+        column: number
+        warnings: warning[] -> discovery findings, then schema advisories
+    problem:
+        path: string(required)
+        property: string
+        message: string(required)
+        kind: enum(missing,type,invalid,kind_check;required)
+        line: number
+        column: number
+        arm_index: number
+        description: string
+    layers:
+        document: layer
+        triggers: string[](required)
+        baseline: layer
+    layer:
+        form: string(required)
+        reference: string
+    warning:
+        source: string(required)
+        code: string(required)
+        path: string
+        message: string(required)
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no position is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory

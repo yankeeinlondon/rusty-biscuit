@@ -30,11 +30,11 @@ const ROUTES: [(&[&str], Observable); 14] = [
     (&["@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["compose", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["compose", "main.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
-    (&["toc", "--json", "@doc.md"], |out, _| out.contains("\"title\": \"Configured\"")),
+    (&["toc", "--output", "json", "@doc.md"], |out, _| out.contains("\"title\": \"Configured\"")),
     (&["clean", "@doc.md"], |out, _| out.contains("FROM CONFIGURED ROOT")),
     (&["get", "@doc.md", "title"], |out, _| out.trim() == "\"Configured\""),
     (&["hash", "@doc.md"], |out, facts| out.trim() == facts.hash),
-    (&["graph", "--json", "@doc.md"], |out, _| {
+    (&["graph", "--output", "json", "@doc.md"], |out, _| {
         serde_json::from_str::<serde_json::Value>(out).is_ok_and(|graph| {
             graph["source"].as_str().is_some_and(|source| {
                 let source = std::path::Path::new(source);

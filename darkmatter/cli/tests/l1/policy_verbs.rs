@@ -352,7 +352,7 @@ fn a_disabled_baseline_stays_disabled_under_deny_all() {
     // Skipped checks are not described as passing validation.
     let output = fixture
         .command()
-        .args(["schema", "validate", "--disable", "baseline-schema", "--format", "json"])
+        .args(["schema", "validate", "--disable", "baseline-schema", "--output", "json"])
         .arg(&document)
         .output()
         .unwrap();

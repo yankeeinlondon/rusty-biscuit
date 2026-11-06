@@ -1,0 +1,50 @@
+$schema:
+  - classification: string(required)
+    statistics: unknown(required)
+    frontmatter_changed: boolean(required)
+    frontmatter_formatting_only: boolean(required)
+    frontmatter_changes: unknown[](required)
+    preamble_changed: boolean(required)
+    preamble_whitespace_only: boolean(required)
+    added: unknown[](required)
+    removed: unknown[](required)
+    modified: unknown[](required)
+    moved: unknown[](required)
+    code_block_changes: unknown[](required)
+    broken_links: unknown[](required)
+    outcome: enum(success,failure) -> present when the run failed or has run diagnostics
+    diagnostics: diagnostic[] -> present with outcome
+  # A failure before any result existed.
+  - outcome: enum(success,failure;required)
+    diagnostics: diagnostic[](required)
+    value: unknown -> null when no result existed
+types:
+    diagnostic:
+        code: string(required) -> stable code, e.g. dm.output.fractional_width
+        severity: enum(info,warning,error;required)
+        message: string(required)
+        source: source -> null when no position is known
+        expected_type: string
+        actual_type: string
+        span: span
+        iteration_path: iteration-step[](required)
+        reason: string -> e.g. "file not found"
+        construct: string -> e.g. "hyperlink", "::code"
+        reference: string -> the reference as written
+        failure: string -> file-reference failure class, e.g. no-match
+        included_via: trail-step[] -> outermost first
+    source:
+        file: string -> null for stdin
+        line: number -> 1-based authored line; null when unknown
+        column: number -> 1-based authored column, in characters; null when unknown
+        section: string -> composed anchor slug of the innermost heading at or before the problem
+        inserted: boolean -> true when an expression, shell step, or replace value created the reference
+    span:
+        start: number(required)
+        end: number(required)
+    iteration-step:
+        collection: string(required)
+        position: unknown(required) -> a number for an index, a string for a key
+    trail-step:
+        file: string(required)
+        line: number -> authored line of the directive; null when the parent was built in memory

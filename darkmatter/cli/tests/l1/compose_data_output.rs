@@ -530,16 +530,15 @@ fn the_shell_conflict_and_the_removed_value_are_usage_errors_before_any_work() {
     let compose = fixture.command().args(["compose", "--output", "report-json"]).arg(&document).output().unwrap();
     let render = fixture.command().args(["render", "--output", "report-json"]).arg(&document).output().unwrap();
     let top_level = fixture.command().args(["--output", "report-json"]).arg(&document).output().unwrap();
-    let clean = fixture.command().args(["clean", "--save", "--output", "json"]).arg(&document).output().unwrap();
-    let validate = fixture.command().args(["schema", "validate", "--format", "report-json"]).arg(&document).output().unwrap();
+    let clean = fixture.command().args(["clean", "--save", "--output", "report-json"]).arg(&document).output().unwrap();
+    let validate = fixture.command().args(["schema", "validate", "--output", "report-json"]).arg(&document).output().unwrap();
     for (label, output, names) in [
         ("compose --shell", shell, "'--output json' cannot be used with '--shell'"),
         ("compose", compose, "invalid value 'report-json' for '--output"),
         ("render", render, "invalid value 'report-json' for '--output"),
         ("md FILE", top_level, "invalid value 'report-json' for '--output"),
-        // `md clean` has no output selector at all.
-        ("clean", clean, "unexpected argument '--output'"),
-        ("schema validate", validate, "invalid value 'report-json' for '--format"),
+        ("clean", clean, "invalid value 'report-json' for '--output"),
+        ("schema validate", validate, "invalid value 'report-json' for '--output"),
     ] {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(2), "{label}: {stderr}");

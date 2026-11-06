@@ -1,6 +1,6 @@
 //! The document-data Input Robustness Matrix for a `content_policy` property
 //! typed `policy[](min(1))@./content-policy.yaml`, through `md schema
-//! validate --format json`.
+//! validate --output json`.
 //!
 //! Columns are `content_policy` itself and the object item's `rule` and
 //! `action`. Each cell is one textual edit of the control document, and each

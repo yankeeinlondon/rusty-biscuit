@@ -114,6 +114,7 @@ mod schema_validate_summary;
 mod schema_validate_yaml;
 mod spawn_site_guard;
 mod standalone_baseline;
+mod output_commands;
 mod output_envelope;
 mod test_layout;
 mod toc;

@@ -68,7 +68,7 @@ fn test_clean_subcommand_fixed_width_reflows_to_target_width() {
         CliProcessFixture::named("clean-test-clean-subcommand-fixed-width-reflows-to-target-width");
     let assert = fixture
         .command()
-        .args(["clean", "--fixed-width", "80", "-"])
+        .args(["clean", "--width", "80", "-"])
         .write_stdin(
             "This paragraph starts with editor wrapping around a fixed column\n\
              and should be collapsed first before it is reflowed back to a\n\
@@ -97,7 +97,7 @@ fn test_clean_subcommand_ignore_incidental_newlines_preserves_source_wrapping() 
     );
     let assert = fixture
         .command()
-        .args(["clean", "--ignore-incidental-newlines", "-"])
+        .args(["clean", "--width", "source", "-"])
         .write_stdin("Alpha wrapped\nbeta line\n")
         .assert()
         .success();
@@ -128,11 +128,11 @@ fn test_clean_line_width_modes_preserve_mixed_document_structure() {
             source,
         ),
         (
-            vec!["clean", "--ignore-incidental-newlines", "-"],
+            vec!["clean", "--width", "source", "-"],
             source,
         ),
         (
-            vec!["clean", "--fixed-width", "40", "-"],
+            vec!["clean", "--width", "40", "-"],
             concat!(
                 "A top-level paragraph is deliberately\n",
                 "long enough to wrap differently at forty\n",
@@ -147,7 +147,7 @@ fn test_clean_line_width_modes_preserve_mixed_document_structure() {
             ),
         ),
         (
-            vec!["clean", "--fixed-width", "80", "-"],
+            vec!["clean", "--width", "80", "-"],
             concat!(
                 "A top-level paragraph is deliberately long enough to wrap differently at forty\n",
                 "and eighty display columns. It also contains an authored incidental newline.\n",
@@ -191,7 +191,7 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
 
     let fixed = fixture
         .command()
-        .args(["clean", "--fixed-width", "24", "-"])
+        .args(["clean", "--width", "24", "-"])
         .write_stdin(source)
         .assert()
         .success()
@@ -212,7 +212,7 @@ fn test_clean_subcommand_list_modes_match_library_contract() {
 
     let preserved = fixture
         .command()
-        .args(["clean", "--ignore-incidental-newlines", "-"])
+        .args(["clean", "--width", "source", "-"])
         .write_stdin(source)
         .assert()
         .success()
@@ -275,7 +275,7 @@ fn test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph(
 
     let fixed = fixture
         .command()
-        .args(["clean", "--fixed-width", "24", "-"])
+        .args(["clean", "--width", "24", "-"])
         .write_stdin(source)
         .assert()
         .success()
@@ -287,7 +287,7 @@ fn test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph(
 
     let second = fixture
         .command()
-        .args(["clean", "--fixed-width", "24", "-"])
+        .args(["clean", "--width", "24", "-"])
         .write_stdin(fixed.as_str())
         .assert()
         .success()
@@ -305,7 +305,7 @@ fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_item
     let fixtures = [
         (
             "> - Parent first paragraph.\n>\n>   Second paragraph alpha beta gamma delta.\n>\n>   - Child item alpha beta.\n",
-            &["clean", "--indent", "4", "--fixed-width", "24", "-"][..],
+            &["clean", "--indent", "4", "--width", "24", "-"][..],
             "> - Parent first\n>   paragraph.\n>\n>   Second paragraph\n>   alpha beta gamma\n>   delta.\n>\n>     - Child item alpha\n>       beta.\n",
         ),
         (
@@ -315,7 +315,7 @@ fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_item
                 "--compact",
                 "--indent",
                 "2",
-                "--fixed-width",
+                "--width",
                 "24",
                 "-",
             ][..],
@@ -328,7 +328,7 @@ fn test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_item
                 "--loose",
                 "--indent",
                 "4",
-                "--fixed-width",
+                "--width",
                 "24",
                 "-",
             ][..],
@@ -462,7 +462,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
     for (source, expected) in fixtures {
         let first = fixture
             .command()
-            .args(["clean", "--fixed-width", "24", "-"])
+            .args(["clean", "--width", "24", "-"])
             .write_stdin(source)
             .assert()
             .success()
@@ -473,7 +473,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
 
         let second = fixture
             .command()
-            .args(["clean", "--fixed-width", "24", "-"])
+            .args(["clean", "--width", "24", "-"])
             .write_stdin(expected)
             .assert()
             .success()
@@ -488,7 +488,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
     tmp.flush().unwrap();
     fixture
         .command()
-        .args(["clean", "--fixed-width", "24"])
+        .args(["clean", "--width", "24"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -498,7 +498,7 @@ fn test_clean_subcommand_preserves_markers_in_protected_bodies() {
 
     fixture
         .command()
-        .args(["clean", "--fixed-width", "24"])
+        .args(["clean", "--width", "24"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -554,7 +554,7 @@ fn test_clean_subcommand_preserves_nested_lists_inside_blockquotes() {
 
         let fixed = fixture
             .command()
-            .args(["clean", "--fixed-width", "24", "-"])
+            .args(["clean", "--width", "24", "-"])
             .write_stdin(source)
             .assert()
             .success()
@@ -571,7 +571,7 @@ fn test_clean_subcommand_preserves_nested_lists_inside_blockquotes() {
 
         let fixed_second = fixture
             .command()
-            .args(["clean", "--fixed-width", "24", "-"])
+            .args(["clean", "--width", "24", "-"])
             .write_stdin(fixed.as_str())
             .assert()
             .success()
@@ -610,7 +610,7 @@ fn test_clean_subcommand_preserves_quoted_marker_looking_indented_code() {
         for args in [
             &["clean", "-"][..],
             &["clean", "--indent", "4", "-"][..],
-            &["clean", "--fixed-width", "24", "-"][..],
+            &["clean", "--width", "24", "-"][..],
         ] {
             let output = fixture
                 .command()
@@ -626,7 +626,7 @@ fn test_clean_subcommand_preserves_quoted_marker_looking_indented_code() {
 
         let second = fixture
             .command()
-            .args(["clean", "--fixed-width", "24", "-"])
+            .args(["clean", "--width", "24", "-"])
             .write_stdin(expected)
             .assert()
             .success()
@@ -655,7 +655,7 @@ fn test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft
 
     fixture
         .command()
-        .args(["clean", "--ignore-incidental-newlines"])
+        .args(["clean", "--width", "source"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -666,7 +666,7 @@ fn test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft
 
     fixture
         .command()
-        .args(["clean", "--ignore-incidental-newlines"])
+        .args(["clean", "--width", "source"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -683,7 +683,7 @@ fn test_clean_subcommand_fixed_width_treats_nine_digit_ordinal_as_an_ordered_mar
     );
     let fixed = fixture
         .command()
-        .args(["clean", "--fixed-width", "24", "-"])
+        .args(["clean", "--width", "24", "-"])
         .write_stdin("123456789. Alpha beta gamma delta epsilon.\n")
         .assert()
         .success()
@@ -708,7 +708,7 @@ fn test_clean_subcommand_fixed_width_treats_ten_digit_ordinal_as_prose() {
     );
     let fixed = fixture
         .command()
-        .args(["clean", "--fixed-width", "24", "-"])
+        .args(["clean", "--width", "24", "-"])
         .write_stdin("1234567890. Alpha beta gamma delta epsilon zeta.\n")
         .assert()
         .success()
@@ -786,7 +786,7 @@ fn test_clean_subcommand_fixed_width_keeps_reference_definitions_intact() {
 
     let fixed = fixture
         .command()
-        .args(["clean", "--fixed-width", "24", "-"])
+        .args(["clean", "--width", "24", "-"])
         .write_stdin(source)
         .assert()
         .success()
@@ -807,23 +807,19 @@ fn test_clean_subcommand_fixed_width_keeps_reference_definitions_intact() {
 }
 
 #[test]
-fn test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines() {
-    let fixture = CliProcessFixture::named(
-        "clean-test-clean-subcommand-rejects-fixed-width-with-ignore-incidental-newlines",
-    );
-    fixture
-        .command()
-        .args([
-            "clean",
-            "--fixed-width",
-            "80",
-            "--ignore-incidental-newlines",
-            "-",
-        ])
-        .write_stdin("Alpha\nbeta\n")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("cannot be used with"));
+fn test_clean_subcommand_rejects_the_removed_width_flags() {
+    let fixture = CliProcessFixture::named("clean-test-clean-subcommand-rejects-removed-width-flags");
+    for removed in [&["--fixed-width", "80"][..], &["--ignore-incidental-newlines"][..]] {
+        fixture
+            .command()
+            .arg("clean")
+            .args(removed)
+            .arg("-")
+            .write_stdin("Alpha\nbeta\n")
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("unexpected argument"));
+    }
 }
 
 #[test]
@@ -906,7 +902,7 @@ fn test_clean_subcommand_indent_eight_preserves_structure() {
 
     let fixed = fixture
         .command()
-        .args(["clean", "-", "--indent", "8", "--fixed-width", "30"])
+        .args(["clean", "-", "--indent", "8", "--width", "30"])
         .write_stdin(source)
         .assert()
         .success()
@@ -924,7 +920,7 @@ fn test_clean_subcommand_indent_eight_preserves_structure() {
 
     let second = fixture
         .command()
-        .args(["clean", "-", "--indent", "8", "--fixed-width", "30"])
+        .args(["clean", "-", "--indent", "8", "--width", "30"])
         .write_stdin(fixed.as_str())
         .assert()
         .success()
@@ -958,7 +954,7 @@ fn test_clean_subcommand_indent_eight_uses_exact_nested_columns() {
     for (source, expected) in cases {
         let first = fixture
             .command()
-            .args(["clean", "-", "--indent", "8", "--fixed-width", "80"])
+            .args(["clean", "-", "--indent", "8", "--width", "80"])
             .write_stdin(source)
             .assert()
             .success()
@@ -970,7 +966,7 @@ fn test_clean_subcommand_indent_eight_uses_exact_nested_columns() {
 
         let second = fixture
             .command()
-            .args(["clean", "-", "--indent", "8", "--fixed-width", "80"])
+            .args(["clean", "-", "--indent", "8", "--width", "80"])
             .write_stdin(first.as_str())
             .assert()
             .success()
@@ -996,7 +992,7 @@ fn test_clean_subcommand_save_fixed_width_reports_delta() {
 
     fixture
         .command()
-        .args(["clean", "--fixed-width", "40"])
+        .args(["clean", "--width", "40"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -1029,7 +1025,7 @@ fn test_clean_subcommand_save_reflows_list_and_is_stable_on_repeated_read() {
 
     fixture
         .command()
-        .args(["clean", "--fixed-width", "24"])
+        .args(["clean", "--width", "24"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -1047,7 +1043,7 @@ fn test_clean_subcommand_save_reflows_list_and_is_stable_on_repeated_read() {
 
     fixture
         .command()
-        .args(["clean", "--fixed-width", "24"])
+        .args(["clean", "--width", "24"])
         .arg(tmp.path())
         .arg("--save")
         .assert()
@@ -1092,7 +1088,7 @@ fn test_clean_subcommand_save_verbose_reports_fixed_width_visual_delta() {
 
     fixture
         .command()
-        .args(["clean", "--fixed-width", "40", "--save", "-v"])
+        .args(["clean", "--width", "40", "--save", "-v"])
         .arg(tmp.path())
         .assert()
         .success()

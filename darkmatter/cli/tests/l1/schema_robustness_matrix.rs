@@ -8,7 +8,7 @@
 //! from its control. Instance columns judge values against the core types.
 //!
 //! Each test validates all its documents in one `md` process and matches the
-//! NDJSON records back to their documents by file name. Load errors are
+//! JSON file records back to their documents by file name. Load errors are
 //! asserted per record (`"error": "schema"` is the exit-`2` class,
 //! `"error": "frontmatter_parse"` the exit-`3` class) and by the process exit
 //! code, which is the most specific class present.
@@ -56,10 +56,10 @@ enum Expect {
     /// Validation fails with a problem located at this property (a root
     /// `required` problem names it; a value problem's path starts with it).
     Invalid(&'static str),
-    /// The schema does not load (exit `2`); the message contains each of
+    /// The schema does not load (exit `1`); the message contains each of
     /// these texts.
     SchemaLoad(Vec<String>),
-    /// The frontmatter does not parse (exit `3`); the message contains this
+    /// The frontmatter does not parse (exit `1`); the message contains this
     /// text.
     Parse(String),
 }
@@ -69,8 +69,8 @@ impl Expect {
         match self {
             Self::Valid => 0,
             Self::Invalid(_) => 1,
-            Self::SchemaLoad(_) => 2,
-            Self::Parse(_) => 3,
+            Self::SchemaLoad(_) => 1,
+            Self::Parse(_) => 1,
         }
     }
 }
@@ -198,15 +198,14 @@ fn run(files: &[(String, String)], cells: &[Cell], compared: &BTreeSet<String>) 
     // merging have their own tests in `schema_validate_baseline_selection`.
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json", "--disable", "baseline-schema"])
+        .args(["schema", "validate", "--output", "json", "--disable", "baseline-schema"])
         .args(cells.iter().map(|cell| cell.name.as_str()))
         .output()
         .expect("md runs");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let records: BTreeMap<String, Value> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| {
-            let record: Value = serde_json::from_str(line).expect("NDJSON record");
+    let records: BTreeMap<String, Value> = common::schema_validate_records(&output.stdout)
+        .into_iter()
+        .map(|record| {
             (record["file"].as_str().expect("file").to_string(), record)
         })
         .collect();

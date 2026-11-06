@@ -152,7 +152,7 @@ fn strict_hash_follows_nested_author_order_and_is_refreshed_only_by_save() {
         .args(["hash", "--strict", "--diff"])
         .arg(&file)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("Frontmatter has changed, body remains unchanged"));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), reordered, "--diff never migrates");
 

@@ -106,7 +106,7 @@ fn test_get_json5_output() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-json5-output");
     fixture
         .command()
-        .args(["get", "--json5", "-", "title", "count"])
+        .args(["get", "--output", "json5", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -120,7 +120,7 @@ fn test_get_yaml_output() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-yaml-output");
     fixture
         .command()
-        .args(["get", "--yaml", "-", "title"])
+        .args(["get", "--output", "yaml", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -132,7 +132,7 @@ fn test_get_toml_output() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-toml-output");
     fixture
         .command()
-        .args(["get", "--toml", "-", "title", "count"])
+        .args(["get", "--output", "toml", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -186,7 +186,7 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
 
     let output = fixture
         .command()
-        .args(["get", "-", "phases"])
+        .args(["get", "--output", "plain", "-", "phases"])
         .write_stdin(yaml)
         .output()
         .expect("md get should run");
@@ -213,13 +213,40 @@ fn test_get_rejects_duplicate_keys_through_the_normal_cli_path() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-rejects-duplicate-keys");
     let yaml = "---\nstatus: first\nstatus: second\n---\n# Doc\n";
 
-    fixture
+    let output = fixture
         .command()
         .args(["get", "-", "status"])
         .write_stdin(yaml)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("duplicate entry with key"));
+        .output()
+        .expect("md get should run");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
+    assert_eq!(report["outcome"], "failure", "{report:#}");
+    assert_eq!(report["value"], serde_json::Value::Null, "{report:#}");
+    assert!(report["diagnostics"].to_string().contains("duplicate entry with key"), "{report:#}");
+}
+
+#[test]
+fn test_get_malformed_frontmatter_reports_the_failure_in_the_default_json_payload() {
+    let fixture = CliProcessFixture::named("get-set-rm-test-get-malformed-frontmatter-json");
+    let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
+
+    let output = fixture
+        .command()
+        .args(["get", "-", "phases"])
+        .write_stdin(yaml)
+        .output()
+        .expect("md get should run");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("one JSON report");
+    assert_eq!(report["outcome"], "failure", "{report:#}");
+    assert_eq!(report["value"], serde_json::Value::Null, "{report:#}");
+    assert_eq!(report["diagnostics"][0]["code"], "dm.frontmatter.yaml_parse", "{report:#}");
+    assert_eq!(report["diagnostics"][0]["source"]["line"], 4, "{report:#}");
 }
 
 #[test]
@@ -243,7 +270,7 @@ fn test_get_raw_string_unquoted() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-string-unquoted");
     fixture
         .command()
-        .args(["get", "--raw", "-", "title"])
+        .args(["get", "--output", "plain", "-", "title"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -255,7 +282,7 @@ fn test_get_raw_number() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-number");
     fixture
         .command()
-        .args(["get", "--raw", "-", "count"])
+        .args(["get", "--output", "plain", "-", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -267,7 +294,7 @@ fn test_get_raw_null_returns_empty() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-null-returns-empty");
     fixture
         .command()
-        .args(["get", "--raw", "-", "nonexistent"])
+        .args(["get", "--output", "plain", "-", "nonexistent"])
         .write_stdin("---\nnonexistent: null\n---\n# Doc")
         .assert()
         .success()
@@ -279,7 +306,7 @@ fn test_get_raw_array_one_per_line() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-array-one-per-line");
     fixture
         .command()
-        .args(["get", "--raw", "-", "tags"])
+        .args(["get", "--output", "plain", "-", "tags"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -291,7 +318,7 @@ fn test_get_raw_object_key_value_lines() {
     let fixture = CliProcessFixture::named("get-set-rm-test-get-raw-object-key-value-lines");
     fixture
         .command()
-        .args(["get", "--raw", "-", "title", "count"])
+        .args(["get", "--output", "plain", "-", "title", "count"])
         .write_stdin(FM_DOC)
         .assert()
         .success()
@@ -580,7 +607,7 @@ fn test_set_then_rm_round_trip_restores_original_bytes() {
             .success();
         fixture
             .command()
-            .args(["get", "--raw"])
+            .args(["get", "--output", "plain"])
             .arg(tmp.path())
             .arg("start_phase")
             .assert()

@@ -1,43 +1,82 @@
 //! `md code-block` subcommand implementation.
 
-use crate::args::{CodeBlockOutput, Cli};
-use crate::artifact::{OutputArtifact, open_output_artifact};
+use crate::args::Cli;
+use crate::output::command::{CommandRun, Completed, DataShape};
 use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Context, Result, eyre};
+use clap::CommandFactory as _;
+use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::dsl::{CodeBlockMeta, parse_highlight_spec};
 use darkmatter::markdown::highlighting::ThemePair;
-use std::io::{self, IsTerminal};
+use darkmatter::markdown::output::command::{CodeBlockData, CommandValue, terminal_fold};
 use crate::io::open_argument;
 use biscuit_file::FileReference;
+use renderable::OutputOptions;
+use renderable::tree::{Document, TreeRenderable};
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
-/// Run the `md code-block` subcommand: render a single [`CodeBlock`] from a
-/// file or literal content. Constructs the [`CodeBlock`] directly (without
-/// synthesizing a Markdown document) and emits the requested output format.
-#[allow(clippy::too_many_arguments)]
+/// `md code-block`'s flags.
+#[derive(Debug, Clone)]
+pub struct CodeBlockFlags {
+    /// `--file`.
+    pub force_file: bool,
+    /// `--content`.
+    pub force_content: bool,
+    /// `--language`.
+    pub language: Option<String>,
+    /// `--theme`.
+    pub theme: Option<ThemePair>,
+    /// `--title`.
+    pub title: Option<String>,
+    /// `--line-numbering`.
+    pub line_numbering: bool,
+    /// `--highlight`.
+    pub highlight: Option<String>,
+}
+
+/// Run the `md code-block` subcommand: report a single [`CodeBlock`] from a file
+/// or literal content, built directly without synthesizing a Markdown document.
 #[instrument(skip_all, fields(command = "code-block"))]
-pub fn run_code_block(
+pub fn run_code_block(input: &str, flags: &CodeBlockFlags, output: OutputTarget, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let run = CommandRun::begin(output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::typed(CodeBlockData {
+        file: None,
+        code: None,
+        language: None,
+        title: flags.title.clone(),
+        line_numbering: flags.line_numbering,
+        highlight: Vec::new(),
+    }))?;
+    // A malformed range is an argument problem: no command runs.
+    let highlight = flags
+        .highlight
+        .as_deref()
+        .map(parse_highlight_spec)
+        .transpose()
+        .map_err(|error| {
+            Cli::command().error(
+                clap::error::ErrorKind::ValueValidation,
+                format!("Invalid --highlight range: {error} (expected comma-separated lines and ranges, e.g. `1,4-6`)"),
+            )
+        })?;
+    let result = code_block_value(input, flags, highlight, request);
+    run.finish(result)
+}
+
+fn code_block_value(
     input: &str,
-    force_file: bool,
-    force_content: bool,
-    language: Option<&str>,
-    theme: Option<ThemePair>,
-    title: Option<&str>,
-    line_numbering: bool,
-    highlight: Option<&str>,
-    output: CodeBlockOutput,
-    cli: &Cli,
+    flags: &CodeBlockFlags,
+    highlight: Option<darkmatter::markdown::dsl::HighlightSpec>,
     request: &MdRequest,
-) -> Result<()> {
+) -> Result<Completed<CommandValue<CodeBlockData>>> {
     // `--content` keeps the input literal and `--file` requires a file; with
     // neither, see `default_input_file` for when the input names a file.
-    let source_file = if force_content {
+    let source_file = if flags.force_content {
         None
-    } else if force_file {
+    } else if flags.force_file {
         Some(
             open_argument(Path::new(input), request)
                 .wrap_err_with(|| format!("`{input}` is not a valid file path (--file was passed)"))?
@@ -46,6 +85,7 @@ pub fn run_code_block(
     } else {
         default_input_file(input, request)?
     };
+    let file = source_file.as_ref().map(|path| path.display().to_string());
     let (code, inferred_lang_token) = match source_file {
         Some(path) => {
             let body = std::fs::read_to_string(&path)
@@ -61,8 +101,10 @@ pub fn run_code_block(
 
     // Build the CodeBlock. The CLI's explicit --language wins over both the
     // file-extension heuristic and any literal-content guess.
-    let lang_token: Option<&str> = language
-        .map(|s| s.trim())
+    let lang_token: Option<&str> = flags
+        .language
+        .as_deref()
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .or(inferred_lang_token.as_deref());
     let mut block = match lang_token {
@@ -72,89 +114,43 @@ pub fn run_code_block(
 
     // Apply theme override. When set, the block uses a pinned theme instead
     // of resolving through the page context — useful for one-off renders.
-    if let Some(theme) = theme {
+    if let Some(theme) = flags.theme {
         block = block.with_theme(theme);
     }
 
-    // Apply metadata (title, line numbering, highlight) on the block. A
-    // direct `CodeBlockMeta` is constructed (rather than routed through
-    // `parse_code_info`) so we can surface malformed --highlight ranges
-    // as a clear error instead of silently dropping the directive.
-    if title.is_some() || line_numbering || highlight.is_some() {
-        let mut meta = CodeBlockMeta::default();
-        if let Some(t) = title {
-            meta.title = Some(t.to_string());
-        }
-        if line_numbering {
-            meta.line_numbering = true;
-        }
-        if let Some(h) = highlight {
-            meta.highlight = parse_highlight_spec(h).map_err(|e| {
-                eyre!("Invalid --highlight range: {e} (expected comma-separated lines and ranges, e.g. `1,4-6`)")
-            })?;
-        }
+    if flags.title.is_some() || flags.line_numbering || highlight.is_some() {
+        let meta = CodeBlockMeta {
+            title: flags.title.clone(),
+            line_numbering: flags.line_numbering,
+            highlight: highlight.unwrap_or_default(),
+            ..CodeBlockMeta::default()
+        };
         block = block.with_meta(meta);
     }
 
-    // Pre-compute the Markdown representation so the stdout and `--show`
-    // paths emit byte-identical artifacts.
-    let markdown_artifact = code_block_markdown(&block);
+    let data = CodeBlockData::new(file, block.code(), block.language().map(ToString::to_string), block.meta());
+    Ok(Completed::success(code_value(data, block)))
+}
 
-    // Render to the requested output format.
-    match output {
-        CodeBlockOutput::Terminal => {
-            let stdout_is_tty = io::stdout().is_terminal();
-            let term = if stdout_is_tty {
-                Terminal::new()
-            } else {
-                Terminal::new_optimistic(80)
-            };
-            let rendered = TerminalRenderable::render(&block, &term);
-            print!("{rendered}");
-        }
-        CodeBlockOutput::Html => {
-            let fragment = BrowserRenderable::render_html_fragment(&block);
-            print!("{}", fragment.render());
-        }
-        CodeBlockOutput::Markdown => {
-            print!("{markdown_artifact}");
-        }
+/// A code block's value: a fence from the generic fold in `plain`, and the
+/// block's own panel in a styled terminal.
+pub(crate) fn code_value<D>(data: D, block: CodeBlock) -> CommandValue<D> {
+    let markdown = code_block_markdown(&block);
+    let html = BrowserRenderable::render_html_fragment(&block).render();
+    let prose = Document::new(block.render_tree());
+    let document = prose.clone();
+    CommandValue::new(data, prose)
+        .with_terminal(move |options| code_terminal(&block, &document, options))
+        .with_markdown(markdown)
+        .with_html(html)
+}
+
+fn code_terminal(block: &CodeBlock, document: &Document, options: &OutputOptions) -> String {
+    if options.terminal_profile.is_plain() {
+        terminal_fold(document, options)
+    } else {
+        block.render(&Terminal::from_output_options(options))
     }
-
-    // `--show` opens the rendered output in the default app via a temp file.
-    // Reuse the markdown/HTML artifact flow: HTML goes to a `.html` temp file
-    // and markdown to a `.md` temp file.
-    if cli.render.show {
-        match output {
-            CodeBlockOutput::Html => {
-                let fragment = BrowserRenderable::render_html_fragment(&block);
-                let artifact = OutputArtifact {
-                    content: fragment.render(),
-                    extension: "html",
-                    label: "code-block-html",
-                };
-                open_output_artifact(&artifact)?;
-            }
-            CodeBlockOutput::Markdown => {
-                let artifact = OutputArtifact {
-                    content: markdown_artifact,
-                    extension: "md",
-                    label: "code-block-markdown",
-                };
-                open_output_artifact(&artifact)?;
-            }
-            CodeBlockOutput::Terminal => {
-                // Terminal output is already on stdout; opening it as a file
-                // would just write the same ANSI to a `.txt` and `xdg-open`
-                // it, which is rarely useful. Emit a hint instead.
-                eprintln!(
-                    "--show is a no-op for terminal output; pass --output html or --output markdown to open in an app"
-                );
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Serializes a [`CodeBlock`] back to a Markdown fenced code block.
@@ -290,19 +286,6 @@ mod tests {
         assert!(md.starts_with("````text\n"), "expected longer opening fence, got: {md:?}");
         assert!(md.ends_with("\n````\n"), "expected longer closing fence, got: {md:?}");
         assert!(md.contains("```\ninner\n```"));
-    }
-
-    #[test]
-    fn code_block_markdown_show_artifact_matches_stdout() {
-        let block = CodeBlock::new("fn main() {}").with_fence_language("rust");
-        let markdown = code_block_markdown(&block);
-        let artifact = OutputArtifact {
-            content: markdown.clone(),
-            extension: "md",
-            label: "code-block-markdown",
-        };
-        assert_eq!(artifact.content, "```rust\nfn main() {}\n```\n");
-        assert_eq!(artifact.content, markdown);
     }
 
     #[test]

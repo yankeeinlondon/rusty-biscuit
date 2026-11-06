@@ -1,11 +1,19 @@
 //! `md schema validate` implementation.
 
-use crate::args::SchemaValidateFormat;
+use crate::args::Cli;
 use crate::commands::compose::{NO_BASELINE_SCHEMA_ENV, disables_baseline_schema};
-use crate::commands::trigger_findings::{DeliveredFindings, FindingRow, emit_warnings};
+use crate::commands::trigger_findings::{DeliveredFindings, emit_warnings};
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
 use crate::io::{DocumentArgumentError, OpenedArgument, open_argument, resolve_file_path};
+use crate::output::command::{CommandRun, Completed, DataShape};
+use crate::output::{ResolvedOutput, output_diagnostic, stderr_terminal};
 use crate::request::MdRequest;
+use biscuit_terminal::output::{OutputTarget, WidthRequest};
+use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+use clap::CommandFactory as _;
+use darkmatter::markdown::compose::expression::Severity;
+use darkmatter::markdown::output::command::{CommandValue, FindingRow, ValidateData, prose_document};
+use renderable::{OutputOptions, TerminalProfile, Width};
 use darkmatter::markdown::errors::resolution_failure_name;
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -39,13 +47,11 @@ enum FileOutcome {
         layers: AppliedLayers,
     },
     /// The file argument did not open (it is not valid reference syntax,
-    /// failed to resolve, or matched no file); reported with the parse
-    /// errors (exit `3`) because no document was read.
+    /// failed to resolve, or matched no file); no document was read.
     Unopened(color_eyre::eyre::Report),
     /// Frontmatter could not be parsed.
     ParseError(String),
-    /// A YAML document is not one admissible YAML document (exit `3`); the
-    /// location is the 1-based line and UTF-8 byte column of the failure.
+    /// A YAML document is not one admissible YAML document; the location is the 1-based line and UTF-8 byte column of the failure.
     YamlLoadError { message: String, location: Option<(usize, usize)> },
     /// Schema could not be resolved/built for this file.
     SchemaError(Box<SchemaError>),
@@ -166,59 +172,59 @@ fn join_names(names: &[String]) -> String {
     }
 }
 
+/// What `md schema validate` was asked for, beyond its inputs.
+#[derive(Debug, Clone, Copy)]
+pub struct ValidateOptions<'a> {
+    /// `--schema`.
+    pub schema: Option<&'a Path>,
+    /// `--disable baseline-schema`.
+    pub no_baseline_schema: bool,
+    /// `--disable schema-triggers`.
+    pub no_schema_triggers: bool,
+    /// `--quiet`: hide formatted success rows; a data output keeps every file.
+    pub quiet: bool,
+    /// `--output`.
+    pub output: OutputTarget,
+}
+
+/// One input's result.
+struct FileResult {
+    file: PathBuf,
+    document: Option<PathBuf>,
+    outcome: FileOutcome,
+    findings: Vec<InvalidTriggerFinding>,
+}
+
 /// Run `md schema validate`.
 ///
-/// Drives validation of each input file and exits with the appropriate code.
-/// When multiple kinds of failure occur in the same invocation, the more
-/// specific failure wins (parse → schema-load → validation):
-///
-/// - `0` — all files validated successfully
-/// - `1` — one or more files failed validation
-/// - `2` — schema or baseline could not be loaded (CLI baseline _or_ a
-///   per-document `$schema` reference)
-/// - `3` — at least one file could not be opened, its frontmatter could
-///   not be parsed, or (a YAML document) it is not admissible YAML
+/// The report is what the command was run to produce, so it is the deliverable
+/// on stdout, with every file's record collected before anything prints. A
+/// failure of any kind (a file that fails validation, cannot be opened or
+/// parsed, or is not admissible YAML; a schema or baseline that cannot be
+/// loaded) exits `1`. A data output tells them apart by each record's `error`
+/// field. Arguments that cannot work together are usage errors (exit `2`).
 ///
 /// An input whose resolved path ends in `.yaml` or `.yml` (any letter case)
 /// is a whole YAML document, validated by the schema it selects (its claimed
 /// `kind`, else its root `$schema`) with no baseline and no triggers. A
 /// preflight opens every argument before anything is validated and refuses
-/// (exit `64`) assignments or `--schema` alongside any YAML input. The
-/// baseline is loaded only when some input is not YAML.
+/// assignments or `--schema` alongside any YAML input. The baseline is loaded
+/// only when some input is not YAML.
 ///
-/// At `verbose >= 2` each validated document's stage timings follow its
-/// outcome on stderr; stdout and the exit code are unaffected.
+/// At `verbose >= 2` a formatted run's stage timings go to stderr, per document;
+/// stdout and the exit status are unaffected.
 ///
-/// A schema trigger discovery skipped as invalid is a warning, never an exit
-/// status: it is reported once per invocation, on the first file that
-/// discovers it, whatever that file's outcome (stderr in pretty mode, the
-/// record's `warnings` in JSON mode).
-#[allow(clippy::too_many_arguments)]
-pub fn run_validate(
-    inputs: &[String],
-    schema: Option<&Path>,
-    no_baseline_schema: bool,
-    format: SchemaValidateFormat,
-    quiet: bool,
-    no_schema_triggers: bool,
-    verbose: u8,
-    request: &MdRequest,
-) -> Result<()> {
-    let terminal = Terminal::default();
-
-    let (files, assignments) = match split_inputs(inputs) {
-        Ok(split) => split,
-        Err(message) => {
-            let line = format!("<red>Error:</red> {}", escape_prose(&message));
-            eprintln!("{}", Prose::new(line).render(&terminal));
-            std::process::exit(64);
-        }
+/// A schema trigger discovery skipped as invalid is a warning, never a failure:
+/// it is reported once per invocation, on the first file that discovers it,
+/// whatever that file's outcome (stderr in a formatted output, the record's
+/// `warnings` in a data output).
+pub fn run_validate(inputs: &[String], options: &ValidateOptions<'_>, cli: &Cli, request: &MdRequest) -> Result<()> {
+    let usage = |message: &str| -> color_eyre::Report {
+        Cli::command().error(clap::error::ErrorKind::ValueValidation, message).into()
     };
-
+    let (files, assignments) = split_inputs(inputs).map_err(|message| usage(&message))?;
     if files.is_empty() {
-        let line = "<red>Error:</red> no Markdown or YAML files were provided".to_string();
-        eprintln!("{}", Prose::new(line).render(&terminal));
-        std::process::exit(64);
+        return Err(usage("no Markdown or YAML files were provided"));
     }
 
     // Preflight: every argument is opened, and the batch judged, before any
@@ -234,16 +240,31 @@ pub fn run_validate(
         })
         .collect();
     let any_yaml = opened.iter().any(|(_, yaml)| *yaml);
-    if any_yaml && let Some(message) = yaml_usage_error(&assignments, schema) {
-        let line = format!("<red>Error:</red> {}", escape_prose(message));
-        eprintln!("{}", Prose::new(line).render(&terminal));
-        std::process::exit(64);
+    if any_yaml && let Some(message) = yaml_usage_error(&assignments, options.schema) {
+        return Err(usage(message));
     }
 
+    let run = CommandRun::begin(options.output, cli.width, WidthRequest::Auto, cli.verbose, DataShape::Object)?;
+    let result = validate_all(&files, opened, &assignments, options, cli.verbose, request, run.output());
+    run.finish(result)
+}
+
+type ValidateValue = CommandValue<ValidateData>;
+
+fn validate_all(
+    files: &[PathBuf],
+    opened: Vec<(Result<OpenedArgument>, bool)>,
+    assignments: &[Assignment],
+    options: &ValidateOptions<'_>,
+    verbose: u8,
+    request: &MdRequest,
+    output: &ResolvedOutput,
+) -> Result<Completed<ValidateValue>> {
+    let is_data = output.target.is_data();
     // YAML documents never use the baseline, so a YAML-only batch never
     // loads (or fails on) one.
     let loaded = if opened.iter().any(|(_, yaml)| !*yaml) {
-        load_api(schema, no_baseline_schema, request)
+        load_api(options.schema, options.no_baseline_schema, request)
     } else {
         request
             .launch_context()
@@ -252,57 +273,64 @@ pub fn run_validate(
     };
     let (api, baseline) = match loaded {
         Ok(loaded) => loaded,
+        Err(err) if is_data => {
+            let diagnostic = output_diagnostic("dm.schema.baseline", Severity::Error, &err.to_string());
+            let value = validate_value(Vec::new(), options.quiet, verbose);
+            return Ok(Completed::failure(value).with_diagnostics(vec![diagnostic]));
+        }
         Err(err) => {
-            emit_schema_error(&err);
-            std::process::exit(2);
+            let terminal = stderr_terminal();
+            eprintln!("{}", crate::output::stderr_text(err.status_block(&terminal).render(&terminal)));
+            return Err(crate::output::report::ReportedExit(1).into());
         }
     };
 
-    let mut any_parse_error = false;
-    let mut any_schema_error = false;
-    let mut any_validation_failure = false;
     let mut delivered = DeliveredFindings::default();
+    let mut results = Vec::with_capacity(files.len());
+    let stderr = (!is_data).then(stderr_terminal);
 
     for (file, (opened, yaml)) in files.iter().zip(opened) {
         let (outcome, timings, findings, document) = match opened {
             Ok(opened) if yaml => (validate_yaml(&api, &opened, request), None, Vec::new(), Some(opened.into_path())),
             Ok(opened) => {
-                let checked = validate_one(&api, &baseline, &opened, &assignments, no_schema_triggers, request);
+                let checked = validate_one(&api, &baseline, &opened, assignments, options.no_schema_triggers, request);
                 (checked.outcome, checked.timings, checked.findings, Some(opened.into_path()))
             }
             Err(err) => (FileOutcome::Unopened(err), None, Vec::new(), None),
         };
         let findings = delivered.first_seen(&findings);
-        match &outcome {
-            FileOutcome::Validated { report_valid, .. } if !report_valid => {
-                any_validation_failure = true;
+        if let Some(terminal) = &stderr {
+            // Warnings, so `--quiet` (which hides successes) keeps them.
+            emit_warnings(&findings, terminal);
+            if verbose > 1
+                && let Some(timings) = &timings
+            {
+                emit_timings(file, timings, terminal);
             }
-            FileOutcome::ParseError(_) | FileOutcome::YamlLoadError { .. } | FileOutcome::Unopened(_) => {
-                any_parse_error = true;
-            }
-            FileOutcome::SchemaError(_) => {
-                any_schema_error = true;
-            }
-            FileOutcome::Validated { .. } => {}
         }
-        emit_outcome(file, document.as_deref(), &outcome, &findings, format, quiet, verbose, &terminal);
-        if verbose > 1
-            && let Some(timings) = &timings
-        {
-            emit_timings(file, timings, &terminal);
-        }
+        results.push(FileResult { file: file.clone(), document, outcome, findings });
     }
 
-    if any_parse_error {
-        std::process::exit(3);
+    let failed = results.iter().any(|result| !matches!(result.outcome, FileOutcome::Validated { report_valid: true, .. }));
+    let value = validate_value(results, options.quiet, verbose);
+    Ok(if failed { Completed::failure(value) } else { Completed::success(value) })
+}
+
+fn validate_value(results: Vec<FileResult>, quiet: bool, verbose: u8) -> ValidateValue {
+    let data = ValidateData { files: results.iter().map(|result| file_record(&result.file, &result.outcome, &result.findings)).collect() };
+    // The report's rows are already Markdown list items.
+    let plain = pretty_report(&results, quiet, 0, &OutputOptions::new(Width::Unlimited, TerminalProfile::plain()));
+    CommandValue::new(data, prose_document(&plain)).with_terminal(move |options| pretty_report(&results, quiet, verbose, options))
+}
+
+fn pretty_report(results: &[FileResult], quiet: bool, verbose: u8, options: &OutputOptions) -> String {
+    let terminal = Terminal::from_output_options(options);
+    let mut report = String::new();
+    for result in results {
+        render_pretty(&mut report, &result.file, result.document.as_deref(), &result.outcome, quiet, verbose, &terminal);
     }
-    if any_schema_error {
-        std::process::exit(2);
-    }
-    if any_validation_failure {
-        std::process::exit(1);
-    }
-    Ok(())
+    // An error block paints regardless of its terminal.
+    if options.terminal_profile.degrades_to_plain() { strip_escape_codes(report) } else { report }
 }
 
 /// Builds the [`DarkmatterSchemas`] entry point at the launch context with
@@ -381,8 +409,8 @@ struct CheckedFile {
     findings: Vec<InvalidTriggerFinding>,
 }
 
-/// Validates a single file, capturing parse/schema failures separately so the
-/// caller can map them to the spec's exit codes.
+/// Validates a single file, keeping parse and schema failures apart so its
+/// record can tell them apart.
 fn validate_one(
     api: &DarkmatterSchemas,
     baseline: &Baseline,
@@ -403,7 +431,7 @@ fn validate_one(
 
     // The document's context resolves its schema `file` values and bounds
     // trigger discovery. A context that cannot be built has no better outcome
-    // than the file's parse error (exit 3).
+    // than the file's parse error.
     let document_context = match request.document_context(Some(opened.reference()), &discovery_path) {
         Ok(context) => context,
         Err(err) => return early(FileOutcome::ParseError(format!("{err:#}")), None),
@@ -530,7 +558,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
     }
 }
 
-/// Prints one document's validation stage timings to stderr.
+/// Writes one document's validation stage timings to stderr.
 fn emit_timings(file: &Path, timings: &ValidationTimings, terminal: &Terminal) {
     let triggers = match timings.matched_triggers() {
         [] => "none".to_string(),
@@ -584,28 +612,13 @@ fn schema_label_from(md: &Markdown) -> Option<String> {
         .map(String::from)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn emit_outcome(
-    file: &Path,
-    document: Option<&Path>,
-    outcome: &FileOutcome,
-    findings: &[InvalidTriggerFinding],
-    format: SchemaValidateFormat,
-    quiet: bool,
-    verbose: u8,
-    terminal: &Terminal,
-) {
-    match format {
-        SchemaValidateFormat::Pretty => {
-            // Warnings, so `--quiet` (which hides successes) keeps them.
-            emit_warnings(findings, terminal);
-            emit_pretty(file, document, outcome, quiet, verbose, terminal);
-        }
-        SchemaValidateFormat::Json => emit_json(file, outcome, findings),
-    }
+fn push_row(out: &mut String, row: &str) {
+    out.push_str(row);
+    out.push('\n');
 }
 
-fn emit_pretty(
+fn render_pretty(
+    out: &mut String,
     file: &Path,
     document: Option<&Path>,
     outcome: &FileOutcome,
@@ -628,9 +641,9 @@ fn emit_pretty(
             let tail = layers.success_tail();
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
-            println!("{}", Prose::new(line).with_verbosity(verbose).render(terminal));
+            push_row(out, &Prose::new(line).with_verbosity(verbose).render(terminal));
             for advisory in advisories {
-                emit_advisory_bullet(advisory, terminal);
+                push_advisory_bullet(out, advisory, terminal);
             }
         }
         FileOutcome::Validated {
@@ -642,24 +655,24 @@ fn emit_pretty(
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>failed schema validation:</dim>_"
             );
-            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
             for problem in problems {
-                emit_problem_bullet(problem, terminal);
+                push_problem_bullet(out, problem, terminal);
             }
             for advisory in advisories {
-                emit_advisory_bullet(advisory, terminal);
+                push_advisory_bullet(out, advisory, terminal);
             }
         }
         FileOutcome::Unopened(err) => {
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>could not be opened:</dim>_"
             );
-            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
             match unopened_argument(err) {
-                Some(argument) => println!("{}", argument.status_block(terminal).render(terminal)),
+                Some(argument) => push_row(out, &argument.status_block(terminal).render(terminal)),
                 None => {
                     let bullet = format!("    - {}", escape_prose(&format!("{err:#}")));
-                    println!("{}", Prose::new(bullet).render(terminal));
+                    push_row(out, &Prose::new(bullet).render(terminal));
                 }
             }
         }
@@ -667,47 +680,47 @@ fn emit_pretty(
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has unparseable frontmatter:</dim>_"
             );
-            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
             let bullet = format!("    - {}", escape_prose(message));
-            println!("{}", Prose::new(bullet).render(terminal));
+            push_row(out, &Prose::new(bullet).render(terminal));
         }
         FileOutcome::YamlLoadError { message, location } => {
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>is not a valid YAML document:</dim>_"
             );
-            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
             let suffix = match location {
                 Some((line, column)) => format!(" <dim>(at line {line}, column {column})</dim>"),
                 None => String::new(),
             };
             let bullet = format!("    - {}{suffix}", escape_prose(message));
-            println!("{}", Prose::new(bullet).render(terminal));
+            push_row(out, &Prose::new(bullet).render(terminal));
         }
         FileOutcome::SchemaError(err) => {
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has a schema definition error:</dim>_"
             );
-            println!("{}", Prose::new(header).with_verbosity(verbose).render(terminal));
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
             let block = err.status_block(terminal);
-            println!("{}", block.render(terminal));
+            push_row(out, &block.render(terminal));
         }
     }
 }
 
-fn emit_advisory_bullet(advisory: &SchemaAdvisory, terminal: &Terminal) {
+fn push_advisory_bullet(out: &mut String, advisory: &SchemaAdvisory, terminal: &Terminal) {
     let bullet = format!(
         "    - <yellow>warning</yellow> <dim>[{}/{}]</dim> {}",
         advisory.source(),
         advisory.code(),
         escape_prose(&advisory.message()),
     );
-    println!("{}", Prose::new(bullet).render(terminal));
+    push_row(out, &Prose::new(bullet).render(terminal));
 }
 
 /// Renders one `ValidationProblem` as an indented Prose list item, with the
 /// offending property name (or root-union arm) prefix and an optional
 /// source-location suffix.
-fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
+fn push_problem_bullet(out: &mut String, problem: &ValidationProblem, terminal: &Terminal) {
     let mut prefix_parts: Vec<String> = Vec::new();
     if let Some(arm_index) = problem.arm_index {
         prefix_parts.push(format!("arm[{arm_index}]:"));
@@ -739,17 +752,14 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     // A message's own `hint:` row stays a row, indented under its bullet.
     let message = escape_prose(message).replace('\n', "\n      ");
     let bullet = format!("    - {prefix}{message}{location_suffix}");
-    println!(
-        "{}",
-        Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal)
-    );
+    push_row(out, &Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal));
 
     // Surface the declared property description on its own dimmed sub-line,
     // one indent level beneath the bullet (Decision #7). Enrichment already
     // suppressed empty / message-equal descriptions, so a `Some` here renders.
     if let Some(description) = problem.description.as_deref() {
         let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
-        println!("{}", Prose::new(sub_line).render(terminal));
+        push_row(out, &Prose::new(sub_line).render(terminal));
     }
     // The stable class of a failed `file` value (R5), on its own sub-line.
     if let Some(reference) = problem.file_reference.as_ref() {
@@ -757,7 +767,7 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
             "        <dim>failure:</dim> {}",
             darkmatter::markdown::errors::resolution_failure_name(reference.resolution_failure())
         );
-        println!("{}", Prose::new(sub_line).render(terminal));
+        push_row(out, &Prose::new(sub_line).render(terminal));
     }
 }
 
@@ -796,10 +806,10 @@ fn document_link(file: &Path, document: Option<&Path>) -> String {
     )
 }
 
-/// One file's JSON record. `warnings` holds the discovery findings first
+/// One file's data record. `warnings` holds the discovery findings first
 /// (discovery runs before validation), then the schema advisories, and is
 /// present on any outcome that has one.
-fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFinding]) {
+fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFinding]) -> serde_json::Value {
     use serde_json::json;
 
     let mut warnings_json: Vec<serde_json::Value> = findings
@@ -889,13 +899,13 @@ fn emit_json(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFindi
             .expect("every outcome is a JSON object")
             .insert("warnings".to_string(), warnings_json.into());
     }
-    // The JSON report's keys are alphabetical, a published contract that
-    // predates `serde_json/preserve_order`.
+    // The record's keys are alphabetical, a published contract that predates
+    // `serde_json/preserve_order`.
     value.sort_all_objects();
-    println!("{}", value);
+    value
 }
 
-/// Stable lowercase token for a problem's kind, used in JSON output; a YAML
+/// Stable lowercase token for a problem's kind, used in a data output; a YAML
 /// document kind's own check is `kind_check` whatever its underlying kind.
 fn kind_str(problem: &ValidationProblem) -> &'static str {
     if problem.code == ValidationProblemCode::KindCheck {
@@ -927,10 +937,4 @@ fn escape_prose(input: &str) -> String {
 /// The typed argument error inside an [`FileOutcome::Unopened`] report.
 fn unopened_argument(err: &color_eyre::eyre::Report) -> Option<&DocumentArgumentError> {
     err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>())
-}
-
-fn emit_schema_error(err: &SchemaError) {
-    let terminal = Terminal::default();
-    let block = err.status_block(&terminal);
-    eprintln!("{}", block.render(&terminal));
 }

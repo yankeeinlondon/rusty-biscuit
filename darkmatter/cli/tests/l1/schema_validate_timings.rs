@@ -104,15 +104,15 @@ fn single_verbose_output_is_unchanged() {
 }
 
 #[test]
-fn json_stdout_is_unchanged_under_double_verbose() {
+fn json_output_is_unchanged_and_stderr_empty_under_double_verbose() {
     let (fixture, document) = triggered_repository();
 
-    let quiet = validate(&fixture, &["--format", "json"], &document);
-    let verbose = validate(&fixture, &["--format", "json", "-vv"], &document);
+    let quiet = validate(&fixture, &["--output", "json"], &document);
+    let verbose = validate(&fixture, &["--output", "json", "-vv"], &document);
 
     assert_eq!(verbose.status.code(), quiet.status.code());
     assert_eq!(verbose.stdout, quiet.stdout, "the JSON report is unchanged");
-    assert_stage_report(&stderr(&verbose));
+    assert_eq!(stderr(&verbose), "", "a data output writes nothing to stderr");
 }
 
 #[test]
@@ -124,8 +124,8 @@ fn unresolvable_schema_keeps_its_error_and_reports_partial_timings() {
     let quiet = validate(&fixture, &[], &document);
     let verbose = validate(&fixture, &["-vv"], &document);
 
-    assert_eq!(quiet.status.code(), Some(2), "a schema that does not resolve exits 2");
-    assert_eq!(verbose.status.code(), Some(2));
+    assert_eq!(quiet.status.code(), Some(1), "a schema that does not resolve exits 1");
+    assert_eq!(verbose.status.code(), Some(1));
     assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     let report = stderr(&verbose);
     assert!(report.starts_with(&stderr(&quiet)), "the existing error is printed unchanged first");
@@ -170,8 +170,8 @@ fn a_failing_assignment_preparation_keeps_its_error_and_reports_partial_timings(
     let quiet = validate(&fixture, &args, &document);
     let verbose = validate(&fixture, &["-vv", args[0], args[1], args[2]], &document);
 
-    assert_eq!(quiet.status.code(), Some(2), "a schema that does not resolve exits 2");
-    assert_eq!(verbose.status.code(), Some(2));
+    assert_eq!(quiet.status.code(), Some(1), "a schema that does not resolve exits 1");
+    assert_eq!(verbose.status.code(), Some(1));
     assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     assert!(String::from_utf8_lossy(&quiet.stdout).contains("schema definition error"));
     let report = stderr(&verbose);
@@ -212,8 +212,8 @@ fn a_discovery_failure_keeps_its_error_and_reports_partial_timings() {
     let quiet = validate(&fixture, &[], &document);
     let verbose = validate(&fixture, &["-vv"], &document);
 
-    assert_eq!(quiet.status.code(), Some(2), "an unreadable schema-root file exits 2");
-    assert_eq!(verbose.status.code(), Some(2));
+    assert_eq!(quiet.status.code(), Some(1), "an unreadable schema-root file exits 1");
+    assert_eq!(verbose.status.code(), Some(1));
     assert_eq!(pretty_stdout(&verbose), pretty_stdout(&quiet));
     assert!(String::from_utf8_lossy(&quiet.stdout).contains("I/O failure"), "{}", String::from_utf8_lossy(&quiet.stdout));
     let report = stderr(&verbose);

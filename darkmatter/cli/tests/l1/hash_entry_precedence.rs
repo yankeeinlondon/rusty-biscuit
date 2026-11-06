@@ -125,7 +125,7 @@ fn diff_and_save_act_on_the_earlier_file() {
     let far_before = std::fs::read_to_string(&far_path).unwrap();
 
     let diff = fixture.md("docs", &["hash", "--diff", "collision.md"]);
-    assert_eq!(diff.status.code(), Some(2), "{diff:?}");
+    assert_eq!(diff.status.code(), Some(1), "{diff:?}");
     assert!(
         String::from_utf8_lossy(&diff.stdout).contains("No stored hash to compare against"),
         "{diff:?}"

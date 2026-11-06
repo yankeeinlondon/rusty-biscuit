@@ -31,7 +31,7 @@ fn graph_and_validate_refs_print_the_same_report_body() {
     let body = stdout_of(&refs);
 
     assert_eq!(refs.status.code(), Some(1));
-    assert_eq!(graph.status.code(), Some(2));
+    assert_eq!(graph.status.code(), Some(1));
     assert_eq!(
         body,
         "\
@@ -119,8 +119,8 @@ fn show_all_adds_the_listing_to_the_text_and_the_data() {
         let output = fixture.command().args(["validate", "refs"]).args(args).arg(&input).output().unwrap();
         serde_json::from_slice(&output.stdout).unwrap()
     };
-    assert!(data(&["--format", "json"]).get("references").is_none());
-    assert_eq!(data(&["--format", "json", "--show-all"])["references"].as_array().unwrap().len(), 2);
+    assert!(data(&["--output", "json"]).get("references").is_none());
+    assert_eq!(data(&["--output", "json", "--show-all"])["references"].as_array().unwrap().len(), 2);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn data_reports_authored_positions_and_the_trail() {
 
     let output = fixture
         .command()
-        .args(["validate", "refs", "--format", "json"])
+        .args(["validate", "refs", "--output", "json"])
         .arg(&input)
         .output()
         .unwrap();

@@ -176,7 +176,7 @@ fn sibling_only_bare_reference_suggests_explicit_relative_path() {
         .args(["schema", "validate"])
         .arg(document)
         .assert()
-        .code(2)
+        .code(1)
         .stdout(predicate::str::contains("./local.yaml"));
 }
 
@@ -607,7 +607,7 @@ fn duplicate_steps_key_is_a_load_error_not_a_last_wins_selection() {
         .args(["schema", "validate"])
         .arg(&document)
         .assert()
-        .code(3)
+        .code(1)
         .stdout(predicate::str::contains("duplicate entry with key \"steps\""));
 }
 
