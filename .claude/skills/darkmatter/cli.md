@@ -37,15 +37,16 @@ context that does not admit the document into `string`). User contract:
 `schema validate` routes an argument as a whole YAML document when its
 **resolved** path ends in `.yaml`/`.yml` (ASCII case-insensitive; an
 unopened argument by its spelling). A preflight opens every argument first
-and exits `64` for assignments or `--schema` with any YAML input; the
+and raises a usage error (exit 2) for assignments or `--schema` with any YAML input; the
 baseline is loaded only when some input is not YAML. The YAML route
 (`validate.rs::validate_yaml`) loads with `LoadedYamlDocument::load` (failure
-→ `FileOutcome::YamlLoadError`, exit 3, JSON `error: "yaml_parse"` with
+→ `FileOutcome::YamlLoadError`, record `error: "yaml_parse"` with
 `line`/`column`) and validates with `validate_loaded_yaml_document` (error →
-exit 2; problems → 1; `NoSchema` → the Markdown no-schema record). A
-`KindCheck` problem's JSON `kind` is `kind_check`. Wiring tests:
+record `error: "schema"`; `NoSchema` → the Markdown no-schema record); every
+failure exits 1, and the record's `error` tells them apart. A `KindCheck`
+problem's `kind` is `kind_check`. Wiring tests:
 `cli/tests/l1/schema_validate_yaml.rs`; the matrices stay in-process in lib.
-A YAML file with Markdown `---` fences is two documents and exits 3; a
+A YAML file with Markdown `---` fences is two documents and fails to load; a
 leading `---` alone is a document marker. A root-`$schema` file with no
 `kind` (an informal schema file) is judged as data against its own
 `$schema`, so such a file can fail here, and DMLS reports the same failure.

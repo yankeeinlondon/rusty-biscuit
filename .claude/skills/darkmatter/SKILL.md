@@ -273,6 +273,30 @@ the last stages' warnings are checked by the CLI before writing. A new coded war
 code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
 naming the codes it governs.
 
+Every other command leaf goes through `cli/src/output/command.rs::CommandRun`:
+`CommandRun::begin` (target, `--width`, default width, `DataShape`), build a
+`CommandValue` (`markdown::output::command`: the data struct, a `Document` for
+the generic folds, optional terminal, Markdown, and HTML overrides), then
+`run.finish(result)`. A handler returns `Completed::success` or
+`Completed::failure` (a report that is the deliverable), or `Err` (no result),
+which `finish` turns into a payload for a data output and leaves to `main` for a
+formatted one. `DataShape` adds the run status: `Typed` always, `Object` only
+when a run needs it, `Bare` as `{ outcome, diagnostics, value }` for a value whose
+fields are the user's (`md get`, `md schema detect`). `md clean`'s own
+`diagnostics` keep their meaning, so its run-level ones are `run_diagnostics`. A
+document command calls `.exact_markdown()` and `commands/render.rs::document_value`,
+keeping its text's bytes and page-rendering everything else. An override reads
+only the `OutputOptions` it is given (`Terminal::from_output_options`), never the
+host: it also serves `plain`. A component that paints regardless of its terminal
+(`DeltaReport`, a status block) needs `strip_escape_codes` when
+`terminal_profile.degrades_to_plain()`, and `output::stderr_text` on stderr.
+A new leaf adds a row to `args/output.rs::COMMAND_LEAVES`, a schema file under
+`cli/schemas/output/`, and conformance tests in `cli/tests/l1/output_commands.rs`
+that spell the schema path inside each `#[test]`;
+`every_leaf_has_a_schema_file_and_a_conformance_test` fails otherwise. A schema's
+named types are closed, unlike its root object, so a type must list every field.
+A schema root is an object: a scalar result is judged under `value`.
+
 Link titles (`dm.link.malformed_structured_title`,
 `dm.link.legacy_structured_title`) are interpreted only by
 `renderable::output::link_metadata::parse_link_title`; `Link` stores the notice

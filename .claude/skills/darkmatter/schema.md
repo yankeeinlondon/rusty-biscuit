@@ -204,7 +204,7 @@ Ownership and lifecycle:
   selection rule, not a data defect. As an opened document it is never an
   envelope: its `description`/`categories`/`types` are data, and a sibling
   `types` is no type library (a `$schema` naming an entry is an unknown named
-  type, exit `2`). The informal envelope applies only where a file is loaded
+  type, record `error: "schema"`, exit `1`). The informal envelope applies only where a file is loaded
   as a schema (a `$schema` target, a `Name@file` import, a root-file
   classification). DMLS reads an opened `kind: schema`/`yaml-schema` with
   `parse_selected_standalone_schema_document` over
@@ -400,7 +400,7 @@ first match wins:
 5. built-in (`with_darkmatter_baseline_json_schema`).
 
 Custom paths resolve in the launch context (`crate::io::resolve_file_path`);
-a failed load is exit 2 with no fallback. Opting out keeps document `$schema`
+a failed load is exit 1 with no fallback. Opting out keeps document `$schema`
 and triggers; `--disable schema-triggers` is independent. JSON `schema` stays null
 for a document without `$schema`. Compatibility: `last_updated: not-a-date`
 with no `$schema` now fails validate as it fails compose. Compose keeps
@@ -1116,15 +1116,15 @@ library-owned one fails `lib/tests/l1/schema_language_ownership_guard.rs`.
   warning rows, as compose prints them), `FindingRow` (`{source, code, path,
   message}`, `path` null for embedded), and `DeliveredFindings` (one warning
   per `identity()` per invocation; `schema validate` attaches a shared
-  trigger to the first file). `schema validate --format json` puts rows
+  trigger to the first file). `schema validate --output json` puts rows
   first in a record's `warnings` on any outcome; `schema triggers` (no
   report mode) writes the warning rows to stderr and lists only each
   source and code in its stdout "Skipped invalid triggers" section; `md clean` reads
-  `CleanResult::trigger_findings` (stderr, or `--json`'s top-level
+  `CleanResult::trigger_findings` (stderr, or a data output's top-level
   `warnings`), and a schema failure carries them on
   `FrontmatterRepairError::Schema { trigger_findings, .. }`, which
   `clean.rs::CleanFailure` hands back so the caller prints them on stderr
-  or, under `--json`, in `json::schema_failure_report`'s v1 envelope. Ordinary
+  or, in a data output, in `clean_schema_failure_report`'s v1 value. Ordinary
   `md compose` prints a failed run's trigger warnings before its error
   (`report_failure_trigger_warnings`), except the ones a `--deny` block
   already shows. Tests: `cli/tests/l1/invalid_trigger_warnings.rs`.
