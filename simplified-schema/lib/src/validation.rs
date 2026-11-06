@@ -153,7 +153,7 @@ pub const SCHEMA_KIND_CHECK_CODE: &str = "dm.schema.kind_check";
 pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
 
 impl ValidationProblemCode {
-    /// The shared diagnostic code DMLS and `md compose --output report-json`
+    /// The shared diagnostic code DMLS and `md compose --output json`
     /// report this problem under.
     pub fn diagnostic_code(self) -> &'static str {
         match self {

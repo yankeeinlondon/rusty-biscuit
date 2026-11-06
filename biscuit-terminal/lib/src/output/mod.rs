@@ -201,7 +201,7 @@ pub struct RenderedOutput {
     /// The complete output text.
     pub text: String,
     /// Non-fatal diagnostics the generic folds reported. An override reports
-    /// none here; it delivers its own.
+    /// none here.
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -227,13 +227,16 @@ pub fn render_output<T: CommandOutput + ?Sized>(
             if let Some(text) = value.render_terminal(&options) {
                 return Ok(formatted(text));
             }
-            let text = crate::render_tree::render_terminal_output(
+            let rendered = crate::render_tree::render_terminal_output(
                 &value.as_prose(),
                 &options,
                 RenderStrictness::Warn,
             )
             .map_err(render_error)?;
-            Ok(formatted(text))
+            Ok(RenderedOutput {
+                text: rendered.output,
+                diagnostics: rendered.diagnostics,
+            })
         }
         OutputTarget::Markdown | OutputTarget::MarkdownPlus => {
             let (dialect, overridden) = if target == OutputTarget::Markdown {

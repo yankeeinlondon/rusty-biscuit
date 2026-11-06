@@ -118,5 +118,5 @@ pub fn code_document(language: Option<&str>, source: &str) -> Document {
 /// for `plain`.
 #[must_use]
 pub fn terminal_fold(document: &Document, options: &OutputOptions) -> String {
-    render_terminal_output(document, options, RenderStrictness::Warn).unwrap_or_else(|error| error.to_string())
+    render_terminal_output(document, options, RenderStrictness::Warn).map_or_else(|error| error.to_string(), |rendered| rendered.output)
 }

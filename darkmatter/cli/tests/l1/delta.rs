@@ -116,7 +116,7 @@ fn delta_golden_preamble_change() {
     let base = "Old intro\n\n# Title\n";
     let updated = "New intro\n\n# Title\n";
     let out = delta_stdout(&fixture, base, updated, false);
-    let expected = "\n\u{2713} No changes (0.0% changed)\n\n\
+    let expected = "\n\u{25b3} Minor changes (0.0% changed)\n\n\
         Preamble: modified\n\n";
     assert_eq!(out, expected);
 }

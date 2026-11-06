@@ -542,6 +542,28 @@ pub struct MdShellRunner<'a> {
     pub source_path: &'a Path,
     /// Where command output goes.
     pub output: &'a dyn CommandOutput,
+    /// Whether the user interrupted the run.
+    pub interrupted: &'a (dyn Fn() -> bool + Sync),
+}
+
+/// How long a command's death by a signal waits for the run's interrupt flag.
+const INTERRUPT_SETTLE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Waits up to `limit` for `interrupted`, returning its last answer.
+///
+/// A terminal's Ctrl-C reaches `md` and its command together, and a signal
+/// handler sets the flag on its own thread, so the command's death can be
+/// noticed first. Reporting that as a failed command would turn an interrupted
+/// run's status 130 into 1.
+fn wait_for_interrupt(interrupted: &dyn Fn() -> bool, limit: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while !interrupted() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    true
 }
 
 impl MdShellRunner<'_> {
@@ -589,10 +611,13 @@ impl MdShellRunner<'_> {
                     origin: self.origin(),
                 },
             }),
-            ShellStatus::Signaled => Err(ShellRunError::Spawn {
-                command: raw.to_string(),
-                source: std::io::Error::other("ended by a signal"),
-            }),
+            ShellStatus::Signaled => {
+                wait_for_interrupt(self.interrupted, INTERRUPT_SETTLE);
+                Err(ShellRunError::Spawn {
+                    command: raw.to_string(),
+                    source: std::io::Error::other("ended by a signal"),
+                })
+            }
         }
     }
 }
@@ -712,6 +737,7 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         request: context.request,
         source_path: context.source_path,
         output: context.output,
+        interrupted: context.interrupted,
     };
     let options = context.request.options();
     let inputs = StackInputs {

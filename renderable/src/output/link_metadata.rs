@@ -29,13 +29,6 @@ use std::fmt;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
-/// The warning code for a title that starts with `{` but is not a valid
-/// structured title, or whose structured title had a value that was ignored.
-pub const MALFORMED_STRUCTURED_TITLE: &str = "dm.link.malformed_structured_title";
-
-/// The warning code for a leftover `key=value` structured title.
-pub const LEGACY_STRUCTURED_TITLE: &str = "dm.link.legacy_structured_title";
-
 /// One query-parameter value: a string, a finite number, or a boolean.
 ///
 /// The original scalar is retained so a Markdown round trip writes `14`, not
@@ -443,12 +436,13 @@ pub enum LinkTitleNotice {
 }
 
 impl LinkTitleNotice {
-    /// The warning code for this notice.
+    /// The name of this notice's kind. An application maps it to its own
+    /// diagnostic code.
     #[must_use]
-    pub fn code(&self) -> &'static str {
+    pub fn token(&self) -> &'static str {
         match self {
-            Self::Malformed { .. } => MALFORMED_STRUCTURED_TITLE,
-            Self::Legacy => LEGACY_STRUCTURED_TITLE,
+            Self::Malformed { .. } => "malformed",
+            Self::Legacy => "legacy",
         }
     }
 }
@@ -838,7 +832,7 @@ mod tests {
         for raw in ["{ qp: 3 }", "{ qp: 'line=3' }", "{ qp: [1] }", "{ qp: null }"] {
             let (title, notice) = structured(raw);
             assert!(title.query.is_empty(), "{raw}");
-            assert_eq!(notice.as_ref().map(LinkTitleNotice::code), Some(MALFORMED_STRUCTURED_TITLE), "{raw}");
+            assert_eq!(notice.as_ref().map(LinkTitleNotice::token), Some("malformed"), "{raw}");
         }
     }
 
@@ -859,11 +853,7 @@ mod tests {
         for raw in ["{ class: ", "{not json}", "{ a: 1 } trailing", "{}}"] {
             let parsed = parse_link_title(raw);
             assert_eq!(parsed.title, LinkTitle::Plain(raw.to_owned()), "{raw}");
-            assert_eq!(
-                parsed.notice.as_ref().map(LinkTitleNotice::code),
-                Some(MALFORMED_STRUCTURED_TITLE),
-                "{raw}"
-            );
+            assert_eq!(parsed.notice.as_ref().map(LinkTitleNotice::token), Some("malformed"), "{raw}");
         }
     }
 
@@ -882,7 +872,7 @@ mod tests {
         let parsed = parse_link_title(raw);
         assert_eq!(parsed.title, LinkTitle::Plain(raw.to_owned()));
         assert_eq!(parsed.notice, Some(LinkTitleNotice::Legacy));
-        assert_eq!(LinkTitleNotice::Legacy.code(), LEGACY_STRUCTURED_TITLE);
+        assert_eq!(LinkTitleNotice::Legacy.token(), "legacy");
     }
 
     #[test]

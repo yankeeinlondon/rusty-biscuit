@@ -76,8 +76,8 @@ pub fn serialize_data<D: Serialize + ?Sized>(
     Ok(text)
 }
 
-/// Applies TOML's null and root rules; `Err` carries the path of a null
-/// array element.
+/// Applies TOML's null, integer, and root rules; `Err` carries the path of a
+/// null array element.
 fn toml_ready(value: Value) -> Result<Value, String> {
     let root = match value {
         Value::Object(map) => Value::Object(map),
@@ -89,10 +89,10 @@ fn toml_ready(value: Value) -> Result<Value, String> {
         }
     };
     let mut path = String::new();
-    strip_nulls(root, &mut path)
+    toml_values(root, &mut path)
 }
 
-fn strip_nulls(value: Value, path: &mut String) -> Result<Value, String> {
+fn toml_values(value: Value, path: &mut String) -> Result<Value, String> {
     match value {
         Value::Object(map) => {
             let mut kept = Map::new();
@@ -103,7 +103,7 @@ fn strip_nulls(value: Value, path: &mut String) -> Result<Value, String> {
                 let len = path.len();
                 path.push('/');
                 push_pointer_token(path, &key);
-                let child = strip_nulls(child, path)?;
+                let child = toml_values(child, path)?;
                 path.truncate(len);
                 kept.insert(key, child);
             }
@@ -118,11 +118,16 @@ fn strip_nulls(value: Value, path: &mut String) -> Result<Value, String> {
                 if child.is_null() {
                     return Err(path.clone());
                 }
-                let child = strip_nulls(child, path)?;
+                let child = toml_values(child, path)?;
                 path.truncate(len);
                 kept.push(child);
             }
             Ok(Value::Array(kept))
+        }
+        // TOML integers are signed 64-bit, and a float would lose the digits of
+        // an unsigned value above that range, so it travels as its decimal text.
+        Value::Number(number) if number.as_i64().is_none() && number.as_u64().is_some() => {
+            Ok(Value::String(number.to_string()))
         }
         scalar => Ok(scalar),
     }
@@ -192,6 +197,16 @@ mod tests {
         assert_eq!(toml(json!("hi")).unwrap(), "value = \"hi\"\n");
         assert_eq!(toml(json!([1, 2])).unwrap(), "value = [\n    1,\n    2,\n]\n");
         assert_eq!(toml(json!(null)).unwrap(), "\n");
+    }
+
+    #[test]
+    fn toml_writes_an_integer_above_its_range_as_decimal_text() {
+        let text = toml(json!({ "big": u64::MAX, "edge": i64::MAX, "small": 1, "neg": -1, "list": [u64::MAX] })).unwrap();
+        assert!(text.contains("big = \"18446744073709551615\""), "{text}");
+        assert!(text.contains(&format!("edge = {}", i64::MAX)), "{text}");
+        assert!(text.contains("small = 1"), "{text}");
+        assert!(text.contains("neg = -1"), "{text}");
+        assert!(text.contains("\"18446744073709551615\""), "{text}");
     }
 
     #[test]

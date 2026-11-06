@@ -51,11 +51,10 @@ fn detect_value(files: &[PathBuf], output: SchemaDetectOutput, merge: bool, requ
                 contexts.push(context);
             }
             Err(LoadError::Unopened(err)) => {
-                let message = match err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>()) {
-                    Some(argument) => argument.to_string(),
-                    None => format!("{}: {err:#}", file.display()),
-                };
-                failures.push(output_diagnostic(INPUT_READ_CODE, Severity::Error, &message));
+                failures.push(match err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>()) {
+                    Some(argument) => argument.diagnostic(),
+                    None => output_diagnostic(INPUT_READ_CODE, Severity::Error, &format!("{}: {err:#}", file.display())),
+                });
             }
             Err(LoadError::Parse(err)) => {
                 failures.push(output_diagnostic(FRONTMATTER_PARSE_CODE, Severity::Error, &format!("{}: {err}", file.display())));

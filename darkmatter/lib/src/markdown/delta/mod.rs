@@ -92,6 +92,15 @@ pub fn compute_delta(original: &Markdown, updated: &Markdown) -> MarkdownDelta {
 
     // Determine classification
     delta.classification = DocumentChange::from_statistics(&delta.statistics);
+    // The statistics count sections, so they cannot see the text above the
+    // first heading.
+    if delta.classification == DocumentChange::NoChange && delta.preamble_changed {
+        delta.classification = if delta.preamble_whitespace_only {
+            DocumentChange::WhitespaceOnly
+        } else {
+            DocumentChange::ContentMinor
+        };
+    }
 
     delta
 }
@@ -906,6 +915,23 @@ mod tests {
 
         let delta = compute_delta(&original, &updated);
         assert!(delta.preamble_changed);
+    }
+
+    #[test]
+    fn a_changed_preamble_is_a_change() {
+        let original: Markdown = "Some intro\n\n# Hello".into();
+        let reworded: Markdown = "Different intro\n\n# Hello".into();
+        let delta = compute_delta(&original, &reworded);
+        assert!(!delta.is_unchanged());
+        assert_eq!(delta.classification, DocumentChange::ContentMinor);
+
+        let spaced: Markdown = "Some intro   \n\n# Hello".into();
+        let delta = compute_delta(&original, &spaced);
+        assert!(delta.preamble_whitespace_only, "{delta:?}");
+        assert_eq!(delta.classification, DocumentChange::WhitespaceOnly);
+
+        let same: Markdown = "Some intro\n\n# Hello".into();
+        assert!(compute_delta(&original, &same).is_unchanged());
     }
 
     #[test]

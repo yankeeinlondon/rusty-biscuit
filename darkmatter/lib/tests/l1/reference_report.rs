@@ -635,3 +635,79 @@ fn an_inserted_reference_points_at_its_construct_in_the_report() {
     assert_eq!(issue["line"], 4);
     assert_eq!(issue["column"], 5);
 }
+
+/// One long reference needs more than 60 columns for its word, and a very
+/// narrow width cannot hold the columns at all; either way no location is lost.
+#[test]
+fn a_width_too_narrow_for_the_columns_keeps_every_row() {
+    let fixture = Fixture::new();
+    let long = "./a-very-long-directory-name/with/several/levels/of/nesting/that-goes-on-for-a-while/missing-document-name.md";
+    let path = fixture.write("doc.md", &format!("# T\n\n[x]({long}) [y](./gone.md)\n"));
+
+    for columns in [20, 30, 40, 60] {
+        let options = OutputOptions::new(Width::Columns(columns), TerminalProfile::plain());
+        let text = render_output(&fixture.view(&path), OutputTarget::Plain, &options).unwrap().text;
+        assert!(!text.contains("could not be rendered"), "{columns}: {text}");
+        assert!(text.contains("doc.md:3:1"), "{columns}: {text}");
+        assert!(text.contains("./gone.md"), "{columns}: {text}");
+        assert!(columns >= 60 || text.contains(long), "a stacked reference prints as written, {columns}: {text}");
+        assert!(text.contains("file not found"), "{columns}: {text}");
+    }
+}
+
+/// The row is 59 columns, plus the two-column indent. Every width keeps the
+/// reference and the location whole, on one line when they fit.
+#[test]
+fn a_reference_is_never_split_at_any_width() {
+    let fixture = Fixture::new();
+    let path = fixture.write("doc.md", "# T\n\n[x](./missing-one.md)\n");
+    let row = "file not found in hyperlink  `./missing-one.md`  doc.md:3:1";
+
+    for columns in [61, 62, 70, 80, 120, 200] {
+        let options = OutputOptions::new(Width::Columns(columns), TerminalProfile::plain());
+        let text = render_output(&fixture.view(&path), OutputTarget::Plain, &options).unwrap().text;
+        assert!(text.contains(row), "{columns}: {text}");
+    }
+    for columns in [20, 30, 40, 50, 60] {
+        let options = OutputOptions::new(Width::Columns(columns), TerminalProfile::plain());
+        let text = render_output(&fixture.view(&path), OutputTarget::Plain, &options).unwrap().text;
+        assert!(text.contains("`./missing-one.md`"), "{columns}: {text}");
+        assert!(text.contains("doc.md:3:1"), "{columns}: {text}");
+    }
+}
+
+/// A location through a folder and file with spaces and non-ASCII names, in a
+/// CRLF file: the same line and column, a percent-encoded `file://` URI that
+/// holds no native separator, and `/` in every displayed path, on every OS.
+#[test]
+fn a_location_is_portable_through_spaces_unicode_and_crlf() {
+    let fixture = Fixture::new();
+    let name = "my docs/Café/a b.md";
+    let crlf = fixture.write(name, "# Intro\r\n\r\nCafé — [gone](./nope.md)\r\n");
+    let view = fixture.view(&crlf);
+
+    let text = plain(&view);
+    assert!(text.contains("my docs/Café/a b.md\n"), "{text}");
+    assert!(text.contains("a b.md:3:8"), "{text}");
+    assert!(!text.contains('\\'), "{text}");
+
+    let uri = fixture.uri(name);
+    assert!(uri.starts_with("file:///"), "{uri}");
+    assert!(uri.ends_with("my%20docs/Caf%C3%A9/a%20b.md"), "{uri}");
+    assert!(!uri.contains('\\'), "{uri}");
+    #[cfg(windows)]
+    {
+        let drive = uri.strip_prefix("file:///").unwrap();
+        assert_eq!(drive.as_bytes()[1], b':', "a Windows URI spells its drive: {uri}");
+    }
+    let terminal = osc8(&view);
+    assert!(terminal.contains(&format!("\x1b]8;line=3:column=8:heading=intro;{uri}\x1b\\")), "{terminal:?}");
+
+    let markdown = fold(&view, OutputTarget::Markdown, 0);
+    let destination = fixture.path_text(name);
+    assert!(markdown.contains(&format!("(<{destination}#intro> '{{ qp: {{ line: 3, column: 8 }} }}')")), "{markdown}");
+    assert!(!markdown.contains('\\'), "{markdown}");
+
+    let lf = fixture.write("my docs/Café/lf.md", "# Intro\n\nCafé — [gone](./nope.md)\n");
+    assert!(plain(&fixture.view(&lf)).contains("lf.md:3:8"));
+}

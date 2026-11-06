@@ -16,7 +16,7 @@ use biscuit_terminal::output::{OutputError, OutputTarget, render_output};
 use color_eyre::eyre::{Report, Result};
 use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
 use darkmatter::markdown::compose::report_diagnostics::{
-    INPUT_READ_CODE, error_diagnostics, reference_issue_diagnostic, warning_diagnostic,
+    error_diagnostics, reference_issue_diagnostic, warning_diagnostic,
 };
 use darkmatter::markdown::compose::{ComposePerfReport, ComposeWarning};
 use darkmatter::markdown::output::command::{
@@ -288,8 +288,8 @@ pub(crate) fn failure_diagnostics(error: &Report) -> Vec<Diagnostic> {
         if let Some(collection) = cause.downcast_ref::<crate::collection_failure::CollectionFailure>() {
             return collection.diagnostics().to_vec();
         }
-        if cause.downcast_ref::<crate::io::DocumentArgumentError>().is_some() {
-            return vec![output_diagnostic(INPUT_READ_CODE, Severity::Error, &error.to_string())];
+        if let Some(argument) = cause.downcast_ref::<crate::io::DocumentArgumentError>() {
+            return vec![argument.diagnostic()];
         }
     }
     let root: &(dyn std::error::Error + 'static) = error.as_ref();

@@ -299,6 +299,9 @@ fn edit_value(raw_file: &str, request: &MdRequest) -> Result<Completed<CommandVa
         Err(source) => return Err(DocumentArgumentError::new(raw_file.to_string(), source).into()),
     };
 
+    // Before anything is created: a refused edit leaves nothing behind.
+    let editor = darkmatter::editor::resolve_editor_command()?;
+
     // Ensure parent directory exists
     if let Some(parent) = path.parent()
         && !parent.exists()
@@ -319,26 +322,11 @@ fn edit_value(raw_file: &str, request: &MdRequest) -> Result<Completed<CommandVa
     // verbatim `\\?\` prefix.
     let canonical = biscuit_file::canonicalize_simplified(&path)
         .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
-    let editor = darkmatter::editor::resolve_editor_command()?;
-    darkmatter::editor::launch_editor_on_path(&canonical)?;
-
-    // --- Validate the result ---
-    if !canonical.exists() {
-        return Err(eyre!(
-            "File was deleted during editing: {}",
-            canonical.display()
-        ));
+    let edited = edit_in_place(&canonical);
+    if edited.is_err() && created {
+        discard_if_empty(&canonical);
     }
-
-    let content = std::fs::read_to_string(&canonical)
-        .wrap_err_with(|| format!("Failed to read file after editing: {}", canonical.display()))?;
-
-    if content.trim().is_empty() {
-        return Err(eyre!(
-            "File is empty after editing: {}",
-            canonical.display()
-        ));
-    }
+    edited?;
 
     let shown = canonical.display().to_string();
     let terminal = shown.clone();
@@ -350,6 +338,31 @@ fn edit_value(raw_file: &str, request: &MdRequest) -> Result<Completed<CommandVa
     };
     let prose = raw_document(&shown);
     Ok(Completed::success(CommandValue::new(data, prose).with_terminal(move |_| terminal.clone())))
+}
+
+/// Runs the editor on `path` and judges what it left.
+fn edit_in_place(path: &std::path::Path) -> Result<()> {
+    darkmatter::editor::launch_editor_on_path(path)?;
+
+    if !path.exists() {
+        return Err(eyre!("File was deleted during editing: {}", path.display()));
+    }
+
+    let content = std::fs::read_to_string(path)
+        .wrap_err_with(|| format!("Failed to read file after editing: {}", path.display()))?;
+
+    if content.trim().is_empty() {
+        return Err(eyre!("File is empty after editing: {}", path.display()));
+    }
+    Ok(())
+}
+
+/// Removes a file this command created for an edit that failed, unless the
+/// editor wrote something to it. The failure being reported outranks one here.
+fn discard_if_empty(path: &std::path::Path) {
+    if std::fs::read_to_string(path).is_ok_and(|content| content.trim().is_empty()) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(test)]

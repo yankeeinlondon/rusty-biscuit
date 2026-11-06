@@ -139,7 +139,7 @@ fn lifted_title<'a>(title_ref: &str, lifted: &'a [Lifted]) -> Option<&'a str> {
 /// A JSON5 object title becomes the link's typed metadata (its `qp` query
 /// parameters) and its `title` property the tooltip; any other title stays
 /// the tooltip. A notice the title raised is stored on the link (hint
-/// `biscuit_terminal.link.title_notice`, its warning code), never printed.
+/// `biscuit_terminal.link.title_notice`, its kind), never printed.
 fn apply_link_title(link: &mut RenderNode, raw: &str) {
     use renderable::output::link_metadata::parse_link_title;
 
@@ -154,7 +154,7 @@ fn apply_link_title(link: &mut RenderNode, raw: &str) {
         link.attrs.set_hint(
             renderable::tree::HintNamespace("biscuit_terminal.link"),
             "title_notice",
-            serde_json::Value::String(notice.code().to_owned()),
+            serde_json::Value::String(notice.token().to_owned()),
         );
     }
 }

@@ -46,6 +46,7 @@ fn terminal_of(text: &str) -> String {
         RenderStrictness::Warn,
     )
     .expect("renders")
+    .output
 }
 
 fn query(pairs: &[(&str, &str)]) -> LinkMetadata {

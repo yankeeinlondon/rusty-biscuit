@@ -10,6 +10,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::block::scan_inline_hr_warnings;
+use darkmatter::markdown::compose::policy::{STYLE_DEPRECATED_CODE, STYLE_UNKNOWN_KEY_CODE};
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair, detect_code_theme, detect_prose_theme};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
@@ -202,12 +203,37 @@ fn denied_style_issues(warnings: Vec<StyleWarning>, md: &Markdown) -> (Vec<Style
 /// a notice that stays in the debug log.
 fn style_warning_report(warning: &StyleWarning) -> Option<(&'static str, String)> {
     match &warning.kind {
-        StyleWarningKind::UnknownKey => Some(("dm.style.unknown_key", format!("unknown style key `{}`", warning.path))),
+        StyleWarningKind::UnknownKey => Some((STYLE_UNKNOWN_KEY_CODE, format!("unknown style key `{}`", warning.path))),
         StyleWarningKind::Deprecated { replacement } => Some((
-            "dm.style.deprecated",
+            STYLE_DEPRECATED_CODE,
             format!("deprecated style key `{}`; use `{replacement}`", warning.path),
         )),
         StyleWarningKind::KnownButInactive { .. } => None,
+    }
+}
+
+/// Fails when `--deny <code>` named the code of one of `md`'s `style:` warnings.
+///
+/// `--deny style` is the whole family and is judged where the page's style is
+/// read; this judges a single code. Unparseable `style:` frontmatter reports
+/// nothing here, as in [`style_diagnostics`].
+///
+/// ## Errors
+///
+/// The first denied warning.
+pub fn stop_if_style_code_denied(md: &Markdown, blocking: &darkmatter::markdown::compose::policy::BlockingPolicy) -> Result<()> {
+    use darkmatter::markdown::compose::expression::Severity;
+    let Ok((_, warnings)) = from_frontmatter(md.frontmatter()) else {
+        return Ok(());
+    };
+    let (issues, _) = denied_style_issues(warnings, md);
+    match issues
+        .iter()
+        .filter_map(style_warning_report)
+        .find(|(code, _)| blocking.blocks(Some(code), Severity::Warning))
+    {
+        Some((code, message)) => Err(eyre!("`style:` frontmatter rejected by --deny {code}: {message}")),
+        None => Ok(()),
     }
 }
 

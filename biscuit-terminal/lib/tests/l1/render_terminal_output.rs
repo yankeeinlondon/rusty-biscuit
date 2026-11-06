@@ -44,7 +44,7 @@ fn plain(width: Width) -> OutputOptions {
 }
 
 fn render(doc: &Document, options: &OutputOptions) -> String {
-    render_terminal_output(doc, options, RenderStrictness::Warn).expect("render")
+    render_terminal_output(doc, options, RenderStrictness::Warn).expect("render").output
 }
 
 fn doc(children: Vec<RenderNode>) -> Document {
@@ -387,4 +387,31 @@ fn a_prose_plain_title_stays_a_title() {
     let term = Terminal::builder().width(80).osc_link_support(false).build();
     let out = Prose::new(r#"[doc](https://example.com/doc.md "Read me")"#).render(&term);
     assert_eq!(out.trim_end(), "doc", "no `[text](url)` fallback: {out:?}");
+}
+
+/// A value with only a document, so `render_output` takes the generic fold.
+struct GenericFold(Document);
+
+impl renderable::CommandOutput for GenericFold {
+    type Data = ();
+
+    fn as_prose(&self) -> Document {
+        self.0.clone()
+    }
+
+    fn as_data(&self) {}
+}
+
+#[test]
+fn the_generic_terminal_fold_reports_what_it_could_not_render() {
+    use biscuit_terminal::output::{OutputTarget, render_output};
+
+    let lossy = GenericFold(doc(vec![RenderNode::html("<div>raw</div>", true)]));
+    for target in [OutputTarget::Plain, OutputTarget::Terminal] {
+        let rendered = render_output(&lossy, target, &plain(Width::Columns(40))).expect("render");
+        assert_eq!(rendered.diagnostics.len(), 1, "{target}: {rendered:?}");
+        assert!(rendered.diagnostics[0].message.contains("raw HTML"), "{rendered:?}");
+    }
+    let clean = GenericFold(doc(vec![RenderNode::paragraph(vec![RenderNode::text("fine")])]));
+    assert!(render_output(&clean, OutputTarget::Plain, &plain(Width::Columns(40))).expect("render").diagnostics.is_empty());
 }

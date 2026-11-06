@@ -15,7 +15,7 @@ use biscuit_terminal::components::table::{Table, TableColumn};
 use biscuit_terminal::output::{OutputTarget, render_output};
 use biscuit_terminal::render_tree::render_terminal_output;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::Layout;
+use biscuit_terminal::utils::layout::{Layout, WordWrap};
 use renderable::layout::{Edges, Length, TargetValue, Width as LayoutWidth};
 use renderable::output::link_metadata::{LinkMetadata, QueryParams};
 use renderable::output::{CommandOutput, OutputOptions, Width};
@@ -404,7 +404,7 @@ impl CommandOutput for ValidationReportView {
     }
 
     fn render_terminal(&self, options: &OutputOptions) -> Option<String> {
-        render_terminal_output(&self.document(LinkStyle::Terminal), options, RenderStrictness::Warn).ok()
+        render_terminal_output(&self.document(LinkStyle::Terminal), options, RenderStrictness::Warn).ok().map(|rendered| rendered.output)
     }
 }
 
@@ -501,7 +501,13 @@ fn group_for<'g, 'a>(
 /// omits and a Markdown table requires.
 fn rows_table(rows: Vec<RenderNode>, links: LinkStyle) -> RenderNode {
     let mut table = Table::new()
-        .with_columns(vec![TableColumn::new(""), TableColumn::new(""), TableColumn::new("")])
+        // A reference and a location are copied as written, so a width that
+        // cannot hold them stacks the row rather than split them.
+        .with_columns(vec![
+            TableColumn::new(""),
+            TableColumn::new("").with_word_wrap(WordWrap::None),
+            TableColumn::new("").with_word_wrap(WordWrap::None),
+        ])
         .borderless()
         .render_tree();
     if links == LinkStyle::Terminal {

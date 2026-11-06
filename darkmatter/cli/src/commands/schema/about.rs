@@ -42,7 +42,6 @@ use renderable::markdown::code_span;
 
 const LEFT_MARGIN_CH: u32 = 1;
 const RIGHT_MARGIN_CH: u32 = 2;
-const MIN_REPORT_WIDTH: u32 = 64;
 
 fn markdown_color_mode_from_terminal(mode: TerminalColorMode) -> MarkdownColorMode {
     match mode {
@@ -104,7 +103,10 @@ fn about_markdown(data: &AboutData, verbose: bool) -> String {
                 out.push_str(&format!("  - constraints: {}\n", names.join(", ")));
             }
             for detail in &entry.details {
-                out.push_str(&format!("  - {}: {}\n", detail.name, detail.value.replace('\n', " ")));
+                // A keyword such as `<type>` is code, not raw HTML.
+                let value = detail.value.replace('\n', " ");
+                let value = if detail.name == "keyword" { code_span(&value) } else { value };
+                out.push_str(&format!("  - {}: {value}\n", detail.name));
             }
         }
     }
@@ -126,7 +128,7 @@ struct SchemaAboutReport<'a> {
 impl<'a> SchemaAboutReport<'a> {
     fn new(terminal: &'a Terminal, options: &OutputOptions, code_block_mode: CodeBlockMode) -> Self {
         let margin_width = LEFT_MARGIN_CH + RIGHT_MARGIN_CH;
-        let width = terminal.width().saturating_sub(margin_width).max(MIN_REPORT_WIDTH);
+        let width = terminal.width().saturating_sub(margin_width).max(1);
         let output_width = match options.width {
             Width::Columns(_) => Width::Columns(width),
             other => other,
@@ -484,11 +486,35 @@ In this example, constraints are added to a string, a number, and an array of st
     fn table(&mut self, columns: Vec<TableColumn>, rows: Vec<Vec<TableCellContent>>) {
         self.blank();
         let table = Table::new()
-            .with_columns(columns)
-            .with_data(rows)
+            .with_columns(columns.clone())
+            .with_data(rows.clone())
             .alternate_background_color();
-        self.block(&table.render_in_width(self.terminal, self.width));
+        if table.plan_widths(self.width).is_ok() {
+            self.block(&table.render_in_width(self.terminal, self.width));
+        } else {
+            self.stacked_rows(&columns, &rows);
+        }
         self.blank();
+    }
+
+    /// The rows of a table too narrow for its columns, as a list that names each
+    /// column, so a narrow width costs layout rather than content.
+    fn stacked_rows(&mut self, columns: &[TableColumn], rows: &[Vec<TableCellContent>]) {
+        let mut list = UnorderedList::empty();
+        for row in rows {
+            let mut cells = columns.iter().zip(row);
+            let first = cells.next().map(|(_, cell)| cell_markup(cell)).unwrap_or_default();
+            let rest: Vec<String> = cells
+                .map(|(column, cell)| format!("<b>{}</b>: {}", escape_prose(&column.header), cell_markup(cell)))
+                .collect();
+            let item = std::iter::once(first).chain(rest).collect::<Vec<_>>().join("\n");
+            list.add(
+                Prose::new(item)
+                    .with_line_breaks(LineBreaks::Hard)
+                    .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
+            );
+        }
+        self.block(&list.render_in_width(self.terminal, self.width));
     }
 
     fn block(&mut self, rendered: &str) {
@@ -576,6 +602,15 @@ fn prose_cell<T: Into<String>>(text: T) -> TableCellContent {
 /// A cell whose single newlines start new rows (a summary, then `- ` rows).
 fn rows_cell<T: Into<String>>(text: T) -> TableCellContent {
     InlineProse::new(text.into()).with_line_breaks(LineBreaks::Hard).into()
+}
+
+/// A cell's Prose markup. Its `Display` is already painted, for a terminal that
+/// may not be this one.
+fn cell_markup(cell: &TableCellContent) -> String {
+    match cell {
+        TableCellContent::StyledInlineProse(prose) => prose.content().to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {

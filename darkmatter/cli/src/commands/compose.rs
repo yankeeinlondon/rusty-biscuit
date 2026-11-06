@@ -141,20 +141,28 @@ pub(crate) fn build_remote_read_config(
     }
 }
 
-/// Refuses `--shell` beside a data output: `--shell` is a report of its own
-/// and the data value is the command's only output.
+/// Refuses `--shell` beside a data output or `--show`: `--shell` is a report of
+/// its own, composing nothing there is to open, and a data value is the
+/// command's only output.
 ///
 /// ## Errors
 ///
 /// A clap `ArgumentConflict` usage error.
-pub(crate) fn reject_report_conflicts(output: OutputTarget, shell: bool) -> Result<()> {
+pub(crate) fn reject_report_conflicts(output: OutputTarget, shell: bool, show: bool) -> Result<()> {
     if !shell {
         return Ok(());
     }
+    let conflict = if output.is_data() {
+        format!("--output {output}")
+    } else if show {
+        "--show".to_string()
+    } else {
+        return Ok(());
+    };
     Err(crate::args::policy::usage_error(
         crate::args::policy::PolicyCommand::Compose,
         clap::error::ErrorKind::ArgumentConflict,
-        format!("the argument '--output {output}' cannot be used with '--shell'"),
+        format!("the argument '{conflict}' cannot be used with '--shell'"),
     )
     .into())
 }

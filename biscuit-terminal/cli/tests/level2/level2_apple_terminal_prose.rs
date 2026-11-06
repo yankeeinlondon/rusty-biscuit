@@ -142,9 +142,10 @@ fn level2_apple_terminal_link_fallback_visible() {
         "expected visible link label `click here` between sentinels.\nbounded:\n{}",
         bounded,
     );
+    // The non-clickable link rule prints the text alone; `-v` adds the URL.
     assert!(
-        bounded.contains("(https://example.com)"),
-        "expected markdown-style URL fallback `(https://example.com)`.\nbounded:\n{}",
+        !bounded.contains("https://example.com"),
+        "a link without OSC 8 prints only its text by default.\nbounded:\n{}",
         bounded,
     );
     // Negative: literal OSC8 escape garbage must not be visible.
@@ -166,13 +167,11 @@ fn level2_apple_terminal_link_fallback_visible() {
 /// A link whose description carries inline styling **and** a Markdown
 /// bracket must degrade to a visible `[desc](url)` fallback with the
 /// bracket escaped — proving the shared terminal tree path keeps the
-/// bespoke Markdown destination/description escaping when OSC8 is
-/// unavailable.
+/// non-clickable link rule when OSC8 is unavailable.
 ///
 /// Input `<a href="…"><b>x</b>[1]</a>` renders (bold stripped by
-/// Terminal.app's capture) to the fallback `[x[1\]](https://example.com)`:
-/// the inner `]` is escaped, the styled child text stays visible, and no
-/// OSC8 introducer leaks on screen.
+/// Terminal.app's capture) to `x[1]`: the styled child text stays visible,
+/// and neither the URL nor an OSC8 introducer reaches the screen.
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
@@ -222,17 +221,15 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
         "expected visible styled link description `x[1`.\nbounded:\n{}",
         bounded,
     );
-    // The Markdown destination fallback is visible.
+    // The non-clickable link rule prints the text as written, and no URL.
     assert!(
-        bounded.contains("(https://example.com)"),
-        "expected markdown-style URL fallback `(https://example.com)`.\nbounded:\n{}",
+        bounded.contains("x[1]"),
+        "expected the description printed as written.\nbounded:\n{}",
         bounded,
     );
-    // The `]` in the description is escaped in the fallback.
     assert!(
-        bounded.contains(r"x[1\]"),
-        "expected the description bracket to be escaped as `x[1\\]` in the \
-         fallback.\nbounded:\n{}",
+        !bounded.contains("https://example.com"),
+        "a link without OSC 8 prints only its text by default.\nbounded:\n{}",
         bounded,
     );
     // No OSC8 introducer may leak onto the screen.

@@ -748,7 +748,7 @@ mod shared_fields {
                 .expect_err("a category 5 call rejects the document");
             let composed = error.call_diagnostic().unwrap_or_else(|| panic!("{label}: no call diagnostic: {error}"));
             assert_eq!(editor, vec![composed.clone()], "{label}");
-            // `md compose --output report-json` writes these records.
+            // `md compose --output json` writes these records.
             assert_eq!(error_diagnostics(&error), editor, "{label}: the report's records");
             assert_eq!(composed.severity, Severity::Error, "{label}");
             assert_eq!(composed.expected_type.as_deref(), Some("number"), "{label}");

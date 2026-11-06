@@ -92,6 +92,10 @@ impl Render<'_> {
             ..MarkdownRuleOverrides::default()
         });
 
+        if !self.strict_style {
+            crate::render::stop_if_style_code_denied(&md, &self.blocking)?;
+        }
+
         if let Some(sink) = sink {
             sink.diagnostics(crate::render::style_diagnostics(&md, self.strict_style)?);
             sink.document(document_markdown(&md, true, self.output.options.width));

@@ -139,6 +139,21 @@ fn conforms_toc_missing_input() {
     assert_eq!(value["outcome"], "failure");
 }
 
+/// A TOML integer is signed 64-bit, and a TOC's hashes are unsigned: those above
+/// the range arrive as decimal text, so either form must carry the JSON's digits.
+#[test]
+fn toc_toml_carries_its_hashes_without_failing() {
+    let fixture = with_document("output-toc-toml", GOOD);
+    let json = conforms(include_str!("../../schemas/output/toc.yaml"), &fixture, &["toc", "doc.md", "--output", "json"], 0);
+    let output = run(&fixture, &["toc", "doc.md", "--output", "toml"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stdout_of(&output));
+    let parsed: toml::Value = toml::from_str(&stdout_of(&output)).unwrap();
+    for hash in ["page_hash", "page_hash_trimmed", "preamble_hash"] {
+        assert_eq!(parsed[hash].to_string().trim_matches('"'), json[hash].to_string(), "{hash}");
+    }
+    assert_eq!(parsed["structure"][0]["title"].as_str(), Some("Head"));
+}
+
 #[test]
 fn conforms_toc_fractional_width() {
     let fixture = with_document("output-toc-fractional", GOOD);
@@ -184,6 +199,24 @@ fn conforms_get_failure_has_a_null_value() {
     let value = conforms(include_str!("../../schemas/output/get.yaml"), &fixture, &["get", "missing.md", "title"], 1);
     assert_eq!(value["outcome"], "failure");
     assert_eq!(value["value"], Value::Null);
+}
+
+/// The class a formatted error prints as its `failure:` row is what a script
+/// reads from a data output.
+#[test]
+fn a_file_argument_failure_carries_its_class_in_data() {
+    let fixture = CliProcessFixture::named("output-argument-class");
+    let missing = conforms(include_str!("../../schemas/output/get.yaml"), &fixture, &["get", "missing.md", "title"], 1);
+    assert_eq!(missing["diagnostics"][0]["code"], "dm.input.read_failure");
+    assert_eq!(missing["diagnostics"][0]["failure"], "no-match");
+    assert_eq!(missing["diagnostics"][0]["reference"], "missing.md");
+
+    let invalid = conforms(include_str!("../../schemas/output/compose.yaml"), &fixture, &["compose", "@", "--output", "json"], 1);
+    assert_eq!(invalid["diagnostics"][0]["failure"], "invalid-reference");
+    assert_eq!(invalid["diagnostics"][0]["reference"], "@");
+
+    let detect = conforms(include_str!("../../schemas/output/schema-detect.yaml"), &fixture, &["schema", "detect", "@", "--output", "json"], 1);
+    assert_eq!(detect["diagnostics"][0]["failure"], "invalid-reference");
 }
 
 #[test]
@@ -1175,4 +1208,153 @@ fn the_top_level_save_alias_forwards_output_and_width() {
     assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
     assert_eq!(one_value(&output)["version"], 1);
     assert!(read_document(&fixture).contains("one two\nthree four"));
+}
+
+// Defects the Phase 6 verification pass reproduced through the real binary.
+
+#[test]
+fn schema_about_markdown_keeps_each_entry_on_its_own_list_row() {
+    let fixture = CliProcessFixture::named("output-about-markdown-rows");
+    let output = run(&fixture, &["schema", "about", "--output", "markdown"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    let text = stdout_of(&output);
+    assert!(!text.contains("&#32;"), "{text}");
+    assert!(text.lines().any(|line| line.starts_with("- `") && line.contains(" — ")), "{text}");
+}
+
+#[test]
+fn schema_about_honors_a_width_narrower_than_a_page() {
+    let fixture = CliProcessFixture::named("output-about-narrow");
+    let output = run(&fixture, &["schema", "about", "--width", "30", "--output", "plain"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    let text = stdout_of(&output);
+    let introduction: Vec<&str> = text.lines().take_while(|line| !line.contains("Schema Shapes")).collect();
+    assert!(introduction.len() > 5, "{text}");
+    for line in introduction {
+        assert!(line.chars().count() <= 30, "{line:?}");
+    }
+    // A table too narrow for its columns keeps its rows.
+    assert!(!text.contains("could not be rendered"), "{text}");
+    assert!(text.contains("Constraints:"), "{text}");
+    assert!(!text.contains('\u{1b}'), "{text}");
+}
+
+#[test]
+fn schema_triggers_markdown_keeps_its_rows_apart() {
+    let fixture = with_document("output-triggers-markdown-rows", GOOD);
+    init_repository(&fixture);
+    fixture.write_file("cwd/schemas/bad.yaml", "kind: schema-trigger\n$path: \"*.md\"\n");
+    let output = run(&fixture, &["schema", "triggers", "doc.md", "--output", "markdown"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    let text = stdout_of(&output);
+    assert!(!text.contains("&#32;"), "{text}");
+    assert!(!text.contains("\\["), "{text}");
+    let lines: Vec<&str> = text.lines().collect();
+    for heading in ["**Schema roots (search order):**", "**Shadowed envelopes:**", "**Skipped invalid triggers:**", "**Triggers:**"] {
+        assert!(lines.contains(&heading), "{heading} is not its own line: {text}");
+    }
+    assert!(lines.iter().any(|line| line.starts_with("- `") && line.ends_with("`dm.schema.invalid_trigger`")), "{text}");
+}
+
+#[test]
+fn code_block_markdown_has_no_blank_line_before_its_closing_fence() {
+    let fixture = CliProcessFixture::named("output-code-block-fence");
+    fixture.write_file("cwd/x.rs", "fn a() {}\n");
+    let output = run(&fixture, &["code-block", "x.rs", "--output", "markdown"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    assert_eq!(stdout_of(&output), "```rust\nfn a() {}\n```\n");
+    // A blank last line of the file is content, so one blank line stays.
+    fixture.write_file("cwd/y.rs", "fn a() {}\n\n");
+    assert_eq!(stdout_of(&run(&fixture, &["code-block", "y.rs", "--output", "markdown"])), "```rust\nfn a() {}\n\n```\n");
+    // The data value keeps the file's bytes.
+    assert_eq!(one_value(&run(&fixture, &["code-block", "x.rs", "--output", "json"]))["code"], "fn a() {}\n");
+}
+
+#[test]
+fn delta_never_calls_a_changed_preamble_no_changes() {
+    let fixture = CliProcessFixture::named("output-delta-preamble");
+    fixture.write_file("cwd/a.md", "Some intro\n\n# Hello\n");
+    fixture.write_file("cwd/b.md", "Different intro\n\n# Hello\n");
+    let output = run(&fixture, &["delta", "a.md", "b.md", "--output", "plain"]);
+    let text = stdout_of(&output);
+    assert!(text.contains("Preamble: modified"), "{text}");
+    assert!(!text.contains("No changes"), "{text}");
+}
+
+#[test]
+fn compose_shell_refuses_show() {
+    let fixture = with_document("output-compose-shell-show", GOOD);
+    // A regression that launched a viewer would skip it.
+    let output = fixture.command_builder().application_input("MD_DRY_RUN", "1").build().args(["compose", "doc.md", "--shell", "--show"]).output().expect("md runs");
+    assert_eq!(output.status.code(), Some(2), "{}", stderr_of(&output));
+    assert!(output.stdout.is_empty(), "{}", stdout_of(&output));
+    assert!(stderr_of(&output).contains("--show"), "{}", stderr_of(&output));
+}
+
+#[test]
+fn render_deny_takes_the_style_codes_it_reports() {
+    let fixture = with_document("output-render-deny-style-code", "---\nstyle:\n  page:\n    bogus: 1\n---\n# Head\n");
+    // The denied code blocks.
+    let denied = run(&fixture, &["render", "doc.md", "--deny", "dm.style.unknown_key", "--output", "json"]);
+    assert_eq!(denied.status.code(), Some(1), "{}", stderr_of(&denied));
+    assert_eq!(one_value(&denied)["outcome"], "failure");
+    let formatted = run(&fixture, &["render", "doc.md", "--deny", "dm.style.unknown_key", "--output", "plain"]);
+    assert_eq!(formatted.status.code(), Some(1), "{}", stderr_of(&formatted));
+    assert!(formatted.stdout.is_empty(), "{}", stdout_of(&formatted));
+    // Another code leaves the same warning a warning.
+    let other = run(&fixture, &["render", "doc.md", "--deny", "dm.style.deprecated", "--output", "json"]);
+    assert_eq!(other.status.code(), Some(0), "{}", stderr_of(&other));
+    let value = one_value(&other);
+    assert_eq!(value["outcome"], "success");
+    assert_eq!(first_code(&value), "dm.style.unknown_key");
+    // A code the command does not report stays a usage error.
+    let unknown = run(&fixture, &["render", "doc.md", "--deny", "dm.style.nonsense"]);
+    assert_eq!(unknown.status.code(), Some(2), "{}", stderr_of(&unknown));
+}
+
+#[test]
+fn edit_refuses_a_configured_editor_that_is_missing() {
+    let fixture = CliProcessFixture::named("output-edit-missing-editor");
+    let output = fixture.command().env("EDITOR", "/definitely/missing/editor").env("VISUAL", "/definitely/missing/visual").args(["edit", "new.md", "--output", "json"]).output().expect("md runs");
+    assert_eq!(output.status.code(), Some(1), "{}", stderr_of(&output));
+    let value = one_value(&output);
+    validate_strictly(include_str!("../../schemas/output/edit.yaml"), &value);
+    assert!(value["diagnostics"][0]["message"].as_str().unwrap().contains("/definitely/missing/editor"), "{value:#}");
+    assert!(!fixture.cwd().join("new.md").exists(), "a refused edit leaves nothing behind");
+}
+
+/// `md edit` with an editor running `script`.
+#[cfg(unix)]
+fn edit_with_script(fixture: &CliProcessFixture, script: &str, file: &str) -> Output {
+    use std::os::unix::fs::PermissionsExt as _;
+    let editor = fixture.write_file("cwd/scripted-editor.sh", script);
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fixture.command().env("EDITOR", editor).args(["edit", file, "--output", "json"]).output().expect("md runs")
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_removes_the_file_it_created_when_the_edit_fails() {
+    let fixture = CliProcessFixture::named("output-edit-failed-created");
+    let failed = edit_with_script(&fixture, "#!/bin/sh\nexit 3\n", "new.md");
+    assert_eq!(failed.status.code(), Some(1), "{}", stderr_of(&failed));
+    assert_eq!(one_value(&failed)["outcome"], "failure");
+    assert!(!fixture.cwd().join("new.md").exists(), "an editor failure leaves no empty file");
+
+    let abandoned = edit_with_script(&fixture, "#!/bin/sh\nexit 0\n", "other.md");
+    assert_eq!(abandoned.status.code(), Some(1), "{}", stderr_of(&abandoned));
+    assert!(!fixture.cwd().join("other.md").exists(), "an abandoned new file is not kept");
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_keeps_an_existing_file_and_a_created_file_with_content_when_the_edit_fails() {
+    let fixture = with_document("output-edit-failed-existing", GOOD);
+    let failed = edit_with_script(&fixture, "#!/bin/sh\nexit 3\n", "doc.md");
+    assert_eq!(failed.status.code(), Some(1), "{}", stderr_of(&failed));
+    assert_eq!(read_document(&fixture), GOOD);
+
+    let wrote = edit_with_script(&fixture, "#!/bin/sh\nprintf 'kept\\n' >> \"$1\"\nexit 3\n", "new.md");
+    assert_eq!(wrote.status.code(), Some(1), "{}", stderr_of(&wrote));
+    assert_eq!(std::fs::read_to_string(fixture.cwd().join("new.md")).unwrap(), "kept\n");
 }

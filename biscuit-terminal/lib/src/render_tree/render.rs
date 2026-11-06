@@ -68,7 +68,7 @@ use crate::components::terminal_image::TerminalImage;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
     BG_RESET, FG_RESET, apply_vertical_padding, build_border, highlight_bg_escape, row_paint,
-    stripe_bg_escape, stripe_fg_escape, wrap_cell_content,
+    BORDERLESS_GAP, stripe_bg_escape, stripe_fg_escape, wrap_cell_content,
 };
 use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
@@ -227,8 +227,8 @@ pub fn render_terminal_document(
 ///     RenderNode::strong(vec![RenderNode::text("Hello")]),
 /// ])]));
 /// let options = OutputOptions::new(Width::Columns(40), TerminalProfile::plain());
-/// let text = render_terminal_output(&doc, &options, RenderStrictness::Warn).unwrap();
-/// assert_eq!(text, "Hello");
+/// let rendered = render_terminal_output(&doc, &options, RenderStrictness::Warn).unwrap();
+/// assert_eq!(rendered.output, "Hello");
 /// ```
 ///
 /// ## Errors
@@ -238,13 +238,13 @@ pub fn render_terminal_output(
     document: &Document,
     options: &OutputOptions,
     strictness: RenderStrictness,
-) -> Result<String, RenderError> {
+) -> Result<Rendered<String>, RenderError> {
     let mut opts = TerminalRenderOptions::from_output_options(options, strictness);
     opts.context.wrap_prose = true;
     if options.terminal_profile.is_plain() {
         opts.pin_plain();
     }
-    Ok(render_terminal_document(document, &opts)?.output)
+    render_terminal_document(document, &opts)
 }
 
 /// Deserialized payload for the `"icon"` extension token.
@@ -2312,6 +2312,10 @@ impl Writer<'_> {
         let mut table = Table::new()
             .with_columns(columns.clone())
             .with_data(planned_data);
+        // Plan for the gaps this table draws, not a box it does not.
+        if terminal_hints.borderless {
+            table = table.borderless();
+        }
         table.expand_tabs_in_place(self.opts.context.terminal.tab_width);
 
         // Carry only the content-box `width` from the node's layout onto the
@@ -2338,6 +2342,9 @@ impl Writer<'_> {
         };
         let plan = match table.plan_widths(available) {
             Ok(plan) => plan,
+            // A borderless table has no grid to keep, so its rows stack rather
+            // than lose their content to a notice.
+            Err(_) if terminal_hints.borderless => return Ok(emit_stacked_rows(&data, available)),
             // Width planning failed (table cannot fit): degrade to the
             // structured error message, matching the bespoke component.
             Err(error) => return Ok(error.to_string()),
@@ -3059,10 +3066,29 @@ fn emit_borderless_table(
                     line.push_str(text);
                 } else {
                     line.push_str(&pad_cell(text, planned.resolved_width, Alignment::Left, None));
-                    line.push_str("  ");
+                    line.push_str(BORDERLESS_GAP);
                 }
             }
             lines.push(line.trim_end().to_string());
+        }
+    }
+    lines.join("\n")
+}
+
+/// Writes a borderless table too narrow for its columns: each cell on its own
+/// lines, the cells after a row's first indented two spaces, empty cells left
+/// out. Only the first cell wraps; the others may hold a path or reference whose
+/// text a wrap would alter, so one wider than `width` overflows intact.
+fn emit_stacked_rows(data: &[Vec<TableCellContent>], width: u32) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for row in data {
+        let cells = row.iter().map(ToString::to_string).filter(|text| !text.is_empty());
+        for (index, text) in cells.enumerate() {
+            if index == 0 {
+                lines.extend(wrap_cell_content(&text, &WordWrap::default(), width as usize));
+            } else {
+                lines.push(format!("  {text}"));
+            }
         }
     }
     lines.join("\n")
@@ -4243,6 +4269,48 @@ mod render_tree_tests {
         assert_eq!(
             strip_escape_codes(&out),
             "one     a\nlonger  b\na row with text only in its first cell"
+        );
+    }
+
+    #[test]
+    fn a_borderless_table_that_fits_exactly_wraps_nothing() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new(""), TableColumn::new("")])
+            .with_data(vec![vec!["reason-text".into(), "./some-long-name.md".into()]])
+            .borderless();
+        let node = <Table as renderable::tree::TreeRenderable>::render_tree(&table);
+        let natural = "reason-text".len() + 2 + "./some-long-name.md".len();
+        let at = |columns: usize| {
+            let mut options = TerminalRenderOptions::default();
+            options.context.available_width = renderable::output::Width::Columns(columns as u32);
+            strip_escape_codes(&render_terminal_node(&node, &options).unwrap().output)
+        };
+        assert_eq!(at(natural), "reason-text  ./some-long-name.md");
+        assert_ne!(at(natural - 1), "reason-text  ./some-long-name.md");
+    }
+
+    #[test]
+    fn a_borderless_table_too_narrow_for_its_columns_stacks_every_cell() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("problem"),
+                TableColumn::new("reference").with_word_wrap(WordWrap::None),
+                TableColumn::new("location").with_word_wrap(WordWrap::None),
+            ])
+            .with_data(vec![
+                vec!["reason".into(), "reference-that-cannot-wrap".into(), "location-that-cannot-wrap".into()],
+                vec!["detail".into(), "".into(), "".into()],
+            ])
+            .borderless();
+        let node = <Table as renderable::tree::TreeRenderable>::render_tree(&table);
+        let mut options = TerminalRenderOptions::default();
+        options.context.available_width = renderable::output::Width::Columns(30);
+
+        let out = render_terminal_node(&node, &options).unwrap().output;
+
+        assert_eq!(
+            strip_escape_codes(&out),
+            "reason\n  reference-that-cannot-wrap\n  location-that-cannot-wrap\ndetail"
         );
     }
 

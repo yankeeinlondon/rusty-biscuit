@@ -125,7 +125,7 @@ pub struct Cli {
 
     /// Width the output is wrapped to: N columns, N%, `auto` (`OUTPUT_COLUMNS`,
     /// else the terminal, else unlimited), `source` (keep authored line
-    /// breaks), or `unlimited`. `--max-width` caps content inside it.
+    /// breaks), or `unlimited`. `md render`'s `--max-width` caps content inside it.
     #[arg(
         long,
         value_name = "WIDTH",

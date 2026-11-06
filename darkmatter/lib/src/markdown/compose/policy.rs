@@ -34,14 +34,30 @@ pub const REASSIGNED_FRONTMATTER_PROPERTY_CODE: &str = "dm.transclusion.reassign
 pub const SHELL_TIMEOUT_CODE: &str = "dm.shell.timeout_recovered";
 
 /// A malformed structured link title, read as plain text.
-pub const LINK_MALFORMED_TITLE_CODE: &str = renderable::output::link_metadata::MALFORMED_STRUCTURED_TITLE;
+pub const LINK_MALFORMED_TITLE_CODE: &str = "dm.link.malformed_structured_title";
 /// A leftover `key=value` link title, read as plain text.
-pub const LINK_LEGACY_TITLE_CODE: &str = renderable::output::link_metadata::LEGACY_STRUCTURED_TITLE;
+pub const LINK_LEGACY_TITLE_CODE: &str = "dm.link.legacy_structured_title";
+/// An unknown key under `style:`.
+pub const STYLE_UNKNOWN_KEY_CODE: &str = "dm.style.unknown_key";
+/// A deprecated key under `style:`, or a deprecated inline rule style.
+pub const STYLE_DEPRECATED_CODE: &str = "dm.style.deprecated";
+
+/// The diagnostic code of a link title's notice.
+#[must_use]
+pub fn link_title_code(notice: &renderable::output::link_metadata::LinkTitleNotice) -> &'static str {
+    use renderable::output::link_metadata::LinkTitleNotice;
+    match notice {
+        LinkTitleNotice::Malformed { .. } => LINK_MALFORMED_TITLE_CODE,
+        LinkTitleNotice::Legacy => LINK_LEGACY_TITLE_CODE,
+    }
+}
 
 /// The diagnostic codes `md render` reports too, with what they report.
 pub const RENDER_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (LINK_MALFORMED_TITLE_CODE, "a link title that starts with `{` but is not a valid structured title"),
     (LINK_LEGACY_TITLE_CODE, "a link title in the removed `key=value` syntax"),
+    (STYLE_UNKNOWN_KEY_CODE, "an unknown key under `style:`"),
+    (STYLE_DEPRECATED_CODE, "a deprecated key under `style:`, or a deprecated inline rule style"),
 ];
 
 /// The code of a missing reference target of `kind`, when a recovery

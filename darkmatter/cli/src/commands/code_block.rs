@@ -179,6 +179,9 @@ fn code_block_markdown(block: &CodeBlock) -> String {
     }
     let info = parts.join(" ");
     let code = block.code();
+    // A file's last line ending is the fence's own line ending, not a blank
+    // line of code.
+    let code = code.strip_suffix('\n').map_or(code, |body| body.strip_suffix('\r').unwrap_or(body));
 
     let longest_backtick_run = code
         .chars()

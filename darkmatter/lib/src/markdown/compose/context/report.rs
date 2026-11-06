@@ -869,7 +869,7 @@ impl ComposeWarning {
             None => (None, None, None, None),
         };
         let diagnostic = crate::markdown::compose::expression::Diagnostic {
-            code: notice.code().to_string(),
+            code: crate::markdown::compose::policy::link_title_code(notice).to_string(),
             severity: crate::markdown::compose::expression::Severity::Warning,
             message: message.clone(),
             source,
@@ -884,7 +884,7 @@ impl ComposeWarning {
             message,
             line_number,
             source: Some(Self::LINK_TITLE_SOURCE.to_string()),
-            code: Some(notice.code().to_string()),
+            code: Some(crate::markdown::compose::policy::link_title_code(notice).to_string()),
             path,
             consumer: None,
             resolution_failure: None,

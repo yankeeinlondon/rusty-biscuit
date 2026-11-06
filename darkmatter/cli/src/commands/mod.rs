@@ -152,9 +152,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 cli.verbose,
                 &OutputEnvironment::detect(),
             )?;
-            if output.is_data() {
-                compose::reject_report_conflicts(output, shell)?;
-            }
+            compose::reject_report_conflicts(output, shell, show)?;
             let sink = output.is_data().then(|| {
                 let file = parse_compose_positionals(&args)
                     .ok()

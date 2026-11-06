@@ -232,9 +232,10 @@ impl Table {
 
     /// Draw the data rows alone: columns still align, but there are no box
     /// lines and no header row in the terminal. A row with text only in its
-    /// first cell runs across the columns without widening them. The Markdown
-    /// and browser outputs are unaffected, since a GFM table cannot omit its
-    /// header.
+    /// first cell runs across the columns without widening them. When the
+    /// columns cannot fit, the tree fold stacks each row's cells on their own
+    /// lines rather than print a width notice. The Markdown and browser outputs
+    /// are unaffected, since a GFM table cannot omit its header.
     ///
     /// Cursor alignment ([`Self::prefer_cursor_alignment`]) keeps its borders.
     pub fn borderless(mut self) -> Self {
@@ -581,6 +582,16 @@ impl Table {
         }
     }
 
+    /// The columns a row takes beyond its cells: box lines and cell padding, or
+    /// only the gaps between the cells of a borderless table.
+    fn border_overhead(&self, column_count: usize) -> usize {
+        if self.borderless {
+            BORDERLESS_GAP.len() * column_count.saturating_sub(1)
+        } else {
+            table_border_overhead(column_count)
+        }
+    }
+
     fn measure_widths_for_indices(
         &self,
         available_render_width: usize,
@@ -590,7 +601,7 @@ impl Table {
             return Err(TableWidthError::NoVisibleColumns);
         }
 
-        let border_overhead = table_border_overhead(visible_indices.len());
+        let border_overhead = self.border_overhead(visible_indices.len());
         let content_budget = available_render_width.saturating_sub(border_overhead);
 
         let columns: Vec<MeasuredColumn> = visible_indices
@@ -2163,6 +2174,9 @@ enum WidthFailureKind {
     NonWrapping,
     Wrapping,
 }
+
+/// The blank columns between two cells of a borderless table.
+pub(crate) const BORDERLESS_GAP: &str = "  ";
 
 fn table_border_overhead(column_count: usize) -> usize {
     if column_count == 0 {

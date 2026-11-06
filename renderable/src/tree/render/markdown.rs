@@ -310,7 +310,10 @@ impl Writer<'_> {
             } => self.render_list(node, *ordered, *start, children),
             NodeKind::ListItem { checked, children } => {
                 let lead = if checked.is_some() { 4 } else { 0 };
-                let body = self.render_prefixed_blocks(children, 0, lead)?;
+                self.lead_width = lead;
+                let body = self.render_list_item_blocks(children);
+                self.lead_width = 0;
+                let body = body?;
                 Ok(match checked {
                     Some(true) => format!("[x] {body}"),
                     Some(false) => format!("[ ] {body}"),
@@ -882,18 +885,25 @@ impl Writer<'_> {
             });
             rest = &rest[run..];
         }
-        let mut result = String::new();
-        for (i, part) in parts.iter().enumerate() {
-            if i > 0 {
-                if part.is_empty() || parts[i - 1].is_empty() {
-                    result.push('\n');
-                } else {
-                    result.push_str("\n\n");
-                }
-            }
-            result.push_str(part);
+        Ok(join_blocks(&parts))
+    }
+
+    /// [`Self::render_blocks`] for a list item, whose phrasing children are one
+    /// implicit paragraph: a tight list item holds its text with no paragraph
+    /// node. In any other container, sibling phrasing nodes are separate blocks.
+    fn render_list_item_blocks(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        let mut parts = Vec::with_capacity(children.len());
+        let mut rest = children;
+        while !rest.is_empty() {
+            let run = phrasing_run(rest);
+            parts.push(if run > 0 {
+                self.render_paragraph(&rest[..run])?
+            } else {
+                self.render(&rest[0])?
+            });
+            rest = &rest[run.max(1)..];
         }
-        Ok(result)
+        Ok(join_blocks(&parts))
     }
 
     /// [`Self::render_blocks`] for a container that prefixes each line of
@@ -1998,6 +2008,22 @@ impl Sides {
     }
 }
 
+/// Joins rendered blocks with a blank line; an empty block adds only its line.
+fn join_blocks(parts: &[String]) -> String {
+    let mut result = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            if part.is_empty() || parts[i - 1].is_empty() {
+                result.push('\n');
+            } else {
+                result.push_str("\n\n");
+            }
+        }
+        result.push_str(part);
+    }
+    result
+}
+
 /// The number of leading `nodes` written as one block: a phrasing node
 /// together with every break that follows it and the phrasing node after
 /// each such break, or a lone node otherwise.
@@ -2015,6 +2041,21 @@ fn break_run(nodes: &[RenderNode]) -> usize {
         run += 1;
     }
     run
+}
+
+/// The number of leading `nodes` that are phrasing, which in a list item make
+/// one implicit paragraph.
+///
+/// Extended nodes alone count as none: a run of components with no text
+/// between them are separate blocks, which is what a component at block level
+/// is.
+fn phrasing_run(nodes: &[RenderNode]) -> usize {
+    let run = nodes.iter().take_while(|node| is_inline_kind(&node.kind)).count();
+    if nodes[..run].iter().all(|node| matches!(node.kind, NodeKind::Extended { .. })) {
+        0
+    } else {
+        run
+    }
 }
 
 /// The first block among `nodes` or inside their inline descendants, in
@@ -3115,6 +3156,40 @@ mod tests {
 
     fn render(node: &RenderNode) -> Rendered<String> {
         render_markdown_node(node, &MarkdownRenderOptions::default()).expect("render")
+    }
+
+    /// A tight list item holds its phrasing directly, with no paragraph.
+    fn tight_list() -> RenderNode {
+        RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                None,
+                vec![
+                    RenderNode::inline_code("name"),
+                    RenderNode::text(" — one two three four five six"),
+                ],
+            )],
+        )
+    }
+
+    #[test]
+    fn a_tight_list_item_writes_its_phrasing_as_one_block() {
+        assert_eq!(render(&tight_list()).output, "- `name` — one two three four five six");
+    }
+
+    #[test]
+    fn a_tight_list_item_wraps_at_a_width_and_indents_under_its_marker() {
+        let opts = MarkdownRenderOptions {
+            width: Width::Columns(20),
+            ..MarkdownRenderOptions::default()
+        };
+        let output = render_with(&tight_list(), &opts).output;
+        assert!(output.lines().count() > 1, "{output}");
+        for (index, line) in output.lines().enumerate() {
+            assert!(line.chars().count() <= 20, "{line:?}");
+            assert_eq!(line.starts_with("  "), index > 0, "{output}");
+        }
     }
 
     fn render_with(node: &RenderNode, opts: &MarkdownRenderOptions) -> Rendered<String> {

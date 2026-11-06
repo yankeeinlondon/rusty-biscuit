@@ -8,7 +8,9 @@ use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::errors::resolution_failure_row;
+use darkmatter::markdown::compose::expression::{Diagnostic, ReferenceDetails, Severity};
+use darkmatter::markdown::compose::report_diagnostics::INPUT_READ_CODE;
+use darkmatter::markdown::errors::{resolution_failure_name, resolution_failure_row};
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
@@ -197,6 +199,17 @@ impl DocumentArgumentError {
     /// The failure class.
     pub fn resolution_failure(&self) -> ResolutionFailure {
         self.failure
+    }
+
+    /// The record a data output reports: the argument as written, with its class.
+    pub fn diagnostic(&self) -> Diagnostic {
+        let mut diagnostic = crate::output::output_diagnostic(INPUT_READ_CODE, Severity::Error, &self.to_string());
+        diagnostic.reference_details = Some(ReferenceDetails {
+            reference: Some(self.argument.clone()),
+            failure: Some(resolution_failure_name(self.failure).to_string()),
+            ..ReferenceDetails::default()
+        });
+        diagnostic
     }
 }
 
