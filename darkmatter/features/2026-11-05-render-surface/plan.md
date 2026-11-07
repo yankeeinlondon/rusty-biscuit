@@ -1,14 +1,116 @@
 ---
 total_phases: 7
 created: 2026-11-06
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+- darkmatter
+- darkmatter-cli
+- darkmatter-lsp
+source_files_during_phase_2:
+- darkmatter/lib/src/style/apply.rs
+- darkmatter/lib/src/style/bespoke.rs
+- darkmatter/lib/src/style/coverage_tests.rs
+- darkmatter/lib/src/style/descriptor.rs
+- darkmatter/lib/src/style/error.rs
+- darkmatter/lib/src/style/layer.rs
+- darkmatter/lib/src/style/length.rs
+- darkmatter/lib/src/style/mod.rs
+- darkmatter/lib/src/style/normalize.rs
+- darkmatter/lib/src/style/parse.rs
+- darkmatter/lib/src/style/presentation.rs
+- darkmatter/lib/src/style/schema/common.rs
+- darkmatter/lib/src/style/schema/components.rs
+- darkmatter/lib/src/style/schema/hr.rs
+- darkmatter/lib/src/style/schema/mod.rs
+- darkmatter/lib/src/style/schema/page.rs
+- darkmatter/lib/src/style/walker.rs
+- darkmatter/lib/src/style/warning.rs
+- darkmatter/lib/src/layout/page.rs
+- darkmatter/lib/src/markdown/render_tree/structural_gate.rs
+- darkmatter/lib/src/markdown/render_tree/style_tree_parity_tests.rs
+- darkmatter/lib/benches/render_pipeline_steps.rs
+- darkmatter/schemas/partials/style.yaml
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/artifact.rs
+- darkmatter/cli/src/commands/clean.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/io/mod.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/cutover_reference.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/meta_schema_phase6.rs
+- darkmatter/lib/tests/l1/style_effective_lowering.rs
+- darkmatter/lib/tests/l1/style_frontmatter_parity.rs
+- darkmatter/lib/tests/l1/style_frontmatter.rs
+- darkmatter/lib/tests/l1/style_layers.rs
+- darkmatter/lib/tests/l1/tree_features_characterization.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/layout_policy.rs
+- darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/layout_fill.rs
+- darkmatter/cli/tests/l1/layout_style_frontmatter.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/level2/level2_frontmatter_tables.rs
+- darkmatter/example-docs/rendering/code-blocks.md
+- darkmatter/example-docs/rendering/style-prop.md
+docs_updated_during_phase_2:
+- darkmatter/docs/topics/layouts-and-style.md
+- darkmatter/docs/rendering/style.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/darkmatter/rendering.md
+source_files_during_phase_3:
+- darkmatter/cli/src/args/render.rs
+- darkmatter/cli/src/args/render/tests.rs
+- darkmatter/cli/src/args/render_prepare.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/cli.rs
+- darkmatter/cli/src/args/target.rs
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/render.rs
+- darkmatter/cli/src/render_style.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/render_style_files.rs
+- darkmatter/cli/tests/l1/feature_flag.rs
+- darkmatter/cli/tests/l1/help.rs
+- darkmatter/cli/tests/l1/mermaid_features.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/cli/tests/l1/render_basic.rs
+- darkmatter/cli/tests/level2/level2_code_block_styling.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/cli/render.md
+- darkmatter/docs/cli/code-block.md
+- darkmatter/docs/rendering/code-highlighting.md
+- darkmatter/docs/rendering/style.md
+- darkmatter/docs/topics/layouts-and-style.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/cli.md
 ---
 
 # Render Surface Implementation Plan
@@ -84,19 +186,19 @@ Phases run in order. Wave numbers are unique across this plan. Tasks within a wa
 
 ### Wave 2 — Models and Merge (parallel)
 
-- [ ] **Extend style models**
+- [x] **Extend style models**
   - Own `style/schema/*`, `descriptor.rs`, `parse.rs`, `length.rs`, and `schemas/partials/style.yaml`. Implement Rule 18's names, shorthands, theme/mode/gutter fields, component sides, HR surface, and typo suggestions together.
   - Apply vertical `u16` limits to all-sides/vertical page spacing, preserve horizontal length grammar, and require a positive resolved page cap. Preserve unrelated compatibility aliases for authored frontmatter only.
   - Add parser/schema/typed-value agreement cases for new fields, compound unions, metadata, and cleanup rules. Correct comments on changed behavior, including currently stale “inactive” page-field descriptions.
 
-- [ ] **Implement sparse layers**
+- [x] **Implement sparse layers**
   - Own new `style/layer.rs`, `style/normalize.rs`, and their new L1 test modules. Implement Rules 7–12 and 16 against the existing style types; export integration follows Wave 2.
   - Build public preparation tests for normalized shorthand precedence, all broadcast components, exact-path replacement, distinct-spelling collisions, scalar/object union switching, null absence, sparse borders, width replacement, and required fields supplied across layers.
   - Validate schema-admitted custom values without routing them to the built-in unknown-key walker; test schema replacement and widened known fields explicitly.
 
 ### Wave 3 — Lowering (serial)
 
-- [ ] **Wire effective styles**
+- [x] **Wire effective styles**
   - Export the new library API from `style/mod.rs`. Extend `apply.rs`, `bespoke.rs`, `layout/context.rs`, `layout/page.rs`, and render-tree build context to consume the new fields. Keep existing claim APIs temporarily so all intermediate callers compile.
   - Lower component side padding into `ComponentPolicy.layout.padding` for terminal and browser; update hyperlink/image `CommonStyle::to_css_overlay` and local-style merges as well as block/list/disclosure/HR policy paths. Preserve inherited vertical padding for ordinary side-only overrides.
   - Split passive style/runtime validation from asset execution; page construction takes `PreparedStyle` and a target-aware asset resolver. Implement winning stylesheet origins with request contexts, no `current_dir`, local CSS reads only for browser-backed targets, and retained remote CSS links.
@@ -107,12 +209,12 @@ Phases run in order. Wave numbers are unique across this plan. Tasks within a wa
 
 ### Wave 4 — Files and Arguments (parallel)
 
-- [ ] **Load style files**
+- [x] **Load style files**
   - Own `cli/src/render_style.rs`, its library export, and new style-file L1 tests. Implement passive reference/offset parsing, local opening, extension dispatch, source locations, empty-file checking, and per-field origins under Rules 14–17.
   - Extract the reusable passive schema-selection helper beside the dependency's shared selection code and route execution through it. Preserve baseline environment controls and trigger findings; use the Markdown document's context, not the style file's context, for schema selection.
   - Return typed diagnostics and prepared layers to the caller; print nothing here. Reuse data-reader location helpers and file-reference failure fields. Wrap schema/value failures with `output/report.rs::ClassifiedFailure::report` so `failure_diagnostics` preserves `dm.schema.*` codes; retain `DocumentArgumentError` in file-failure chains. Store explicit CLI locations with `ReportSink::diagnostics`, avoiding its authored-document fallback.
 
-- [ ] **Refactor render arguments**
+- [x] **Refactor render arguments**
   - Own `args/render.rs`, root `args/cli.rs`, `args/command.rs`, `args/target.rs`, `args/mod.rs`, and focused parser tests. Implement shared positional classification, root-option presence checks, style file references, behavior switches, removals, and local `schema about --code-block`.
   - Add `PreparedRenderOptions` construction in a new `cli/src/args/render_prepare.rs`; keep semantic style preparation outside clap so its failures can use the run sink.
   - Tailor root help with clap's root-only help template and argument help headings: commands, shared controls, `--style`, and the exact alias sentence; keep full retained render details on `render --help`. Do not hide shared `RenderOptions` fields globally merely to shorten root help.
