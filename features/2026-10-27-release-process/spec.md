@@ -1,8 +1,50 @@
+---
+kind: feature
+name: release-process
+date: 2026-10-27
+status: draft-spec
+depends-on:
+  - 2026-11-06-rust-evidence-client
+  - 2026-11-06-merge-triggered-os-runs
+  - 2026-11-06-release-path-repair
+  - 2026-10-28-publish
+next_spec: 2026-11-06-publish-more-channels
+reviewed: false
+implemented: false
+---
+
 # The Release Process
 
 We are using the [Release-Plz](https://release-plz.dev/) solution today and we can continue to if it makes sense but in this spec we are going to define what is required and then agree on the right solution for it.
 
-## The Process
+## Decision needed first
+
+Two descriptions of this process now exist, and they differ:
+
+| | Authored process (below) | Discussed on 2026-11-06 |
+|---|---|---|
+| Starts when | A person runs `just release` | Evidence for all four OSes exists |
+| Happens through | A local interactive flow | A release pull request |
+| Reaches `main` by | A push, as the sole exception to PR-only | A normal merge |
+| Testing | None; existing evidence is posted | None; existing evidence is shown |
+
+**Recommended combination:**
+
+```mermaid
+flowchart LR
+    E[all-OS evidence for a commit<br/>newer than the last release] --> D[draft release PR<br/>versions + deterministic changelog + evidence]
+    D --> P[just release prep<br/>AI notes, editor, version, channels]
+    P --> M[merge]
+    M --> T[tag, GitHub Release]
+    T --> B[build binaries]
+    B --> C[publish to channels]
+```
+
+This keeps everything in the authored process, including the human review and AI
+notes, and removes the need for any exception to PR-only `main`. That exception was
+the part flagged as a security concern.
+
+## The Process (as authored)
 
 - Prelude
     - code in `main` -- which can only come in via PR's -- has evidence of tests passing on 1 or more OS's
@@ -32,7 +74,7 @@ We are using the [Release-Plz](https://release-plz.dev/) solution today and we c
     - We send the release notes to the user's favorite editor using the `claudine edit` functionality
         - this allows them to read/review and make any adjustments they would like to
     - interactive prompt to agree on the release version number (with the recommended release version based on the AI's response)
-    - we then use the mapping data in @docs/deployment.md to determine what platforms the given package will be deployed/published to. This will be reported to the user to confirm these platforms are their intention (simple yes/no confirm)
+    - we then use the mapping data in @docs/deployment.yaml to determine what platforms the given package will be deployed/published to. This will be reported to the user to confirm these platforms are their intention (simple yes/no confirm)
 - Changelog
     - the CHANGELOG.md in each package being released is updated with the release information agreed to
 - Release on Github
@@ -50,6 +92,30 @@ We are using the [Release-Plz](https://release-plz.dev/) solution today and we c
 
 - if Release-Plz is able to deterministically build a "changelog" then we might want it to do that and then after the AI has created it's rendition have it review what was produced by Release-Plz and do one final iteration on the changelog
 - the release process should be wrapped by `just`: `just release <package>` at repo root or `just release <package?>` in a package area where if no discrete package is specified then it is assumed that all packages in that package area are being released.
+
+## Rules this spec must settle
+
+- **The trigger.** Use "a `main` commit with complete evidence, newer than the last
+  release" rather than "the latest commit", which may never be proven if a merge
+  lands before each run finishes.
+- **The release's own diff.** Bumping versions and changelogs creates a new tree,
+  which would invalidate the evidence. A diff limited to versions, changelogs, and
+  the lockfile must inherit the evidence, with a check that the diff is limited to
+  exactly those files. That check is what lets `ci-gate` pass with no tests.
+- **Accepted gaps.** `d1-model.md` proposes that capability gaps block a release.
+  The Windows and WSL2 Level 2 cells are gaps today, so that needs a ruling.
+- **Packages.** Is a release whole-repo, or per-package as `just release <package>`
+  implies? Does a package need all-OS evidence for its own closure, or for the whole
+  commit?
+- **Keep or replace release-plz.** It may stay for versions and changelogs, or be
+  replaced by the tool that owns the rest of this flow.
+
+## Spikes needed
+
+- **Release-only diff.** Does anything meaningful depend on the version value, such
+  as tests reading `CARGO_PKG_VERSION`?
+- **AI notes.** Try `prompts/release.md` on a real span of commits before committing
+  to its shape.
 
 ## Guidelines
 
