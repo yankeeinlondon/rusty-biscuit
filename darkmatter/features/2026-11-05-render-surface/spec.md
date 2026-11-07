@@ -21,12 +21,13 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-05
-status: draft-spec
+status: finalized-spec
 area: darkmatter
 owner: Ken Snyder <ken@ken.net>
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-05
+clarified: true
 review_iterations: 0
 implemented: false
 packages:
@@ -34,6 +35,11 @@ packages:
     - darkmatter
 related:
     - 2026-11-04-composition-errors
+depends-on:
+    - 2026-11-04-composition-errors
+    - 2026-11-04-loading-data
+    - 2026-11-06-dotted-paths
+next_spec: 2026-11-05-dynamic-schema-types
 ---
 
 # The `md render` Surface: One Render Command, and `--style`
@@ -41,35 +47,29 @@ related:
 `md` renders a Markdown file when you give it no subcommand (`md notes.md`),
 and it also has an explicit `md render` subcommand. The two are documented as
 the same thing, but they are not: about forty style flags work only in the
-first form, a few flags make bare `md` do something that is not rendering at
+first form, a few flags make `md` with no subcommand do something that is not rendering at
 all, and the two forms differ when there is no input.
 
 This feature does two things:
 
-1. **Makes bare `md` an exact alias of `md render`.** Same options, same
+1. **Makes `md` with no subcommand mean exactly `md render`.** Same options, same
    defaults, same behavior. Options that are truly global stay global; every
    render or style option moves onto `md render`.
-2. **Replaces the forty style flags with one `--style` option** that takes a
-   JSON5 object mirroring the `style:` frontmatter, plus hidden,
-   per-key convenience flags such as `--style-margin 4`.
+2. **Replaces the forty style flags with `name=value` style setters**, such as
+   `style.margin=4` or `style="{ max-width: 50 }"`, which mirror the `style:`
+   frontmatter, and one **`--style <FILE>`** option for a reusable style file.
 
-This is a **draft**. The open questions at the end must be settled before the
-spec is finalized.
+This spec is **finalized**: the author's rulings are marked **Decided**.
 
-**How to read the markers.** A **Decided** note records a ruling the owner
-made on 2026-11-05 while clarifying `2026-11-04-composition-errors`; it is not
-up for re-discussion in review. **Proposed** marks a design detail the drafter
-chose that the owner has not ruled on.
+A **Decided** note records a ruling the owner made, on 2026-11-05 while clarifying
+`2026-11-04-composition-errors` or on the date it gives; it is not up for re-discussion
+in review.
 
 ## Review notes
 
 This inline review preserves the owner’s decisions. It corrects JSON5
 examples, separates layer precedence from shorthand precedence, and adds
 requirements for parser construction, file context, errors, and migration.
-Recommendations in **Open Questions** remain choices for the author; they
-are not approvals to change behavior. In particular, removing fill behavior,
-adding new presentation keys, accepting style files, and adding a theme-list
-command require the choices described there before implementation.
 
 The behavior inventory below was refreshed on 2026-11-06, after
 `2026-11-04-composition-errors` completed. The current
@@ -80,8 +80,8 @@ The behavior inventory below was refreshed on 2026-11-06, after
 
 | Package | Why |
 |---|---|
-| `darkmatter-cli` | the root/`render` argument definitions, dispatch, `--style` parsing, generated hidden aliases, removal of the old flags |
-| `darkmatter` | the style model the CLI lowers into (`CliStyleClaims` is replaced by a `style:` layer, **Proposed**), and any shorthand keys added to the `style:` schema |
+| `darkmatter-cli` | the root/`render` argument definitions, dispatch, `--style` parsing, style setters and their completion, removal of the old flags |
+| `darkmatter` | the style model the CLI lowers into (`CliStyleClaims` is replaced by a `style:` layer), and any shorthand keys added to the `style:` schema |
 
 **Out of scope.** `--width` and `--output` were delivered by
 `2026-11-04-composition-errors` (width is a CLI-wide constraint, output is
@@ -98,9 +98,9 @@ mentions them, it is only to say where they sit today.
 | **global option** | a clap argument declared with `global = true`, accepted before or after any subcommand (`-v`, `--debug`, `--code-block` today) |
 | **clap** | the Rust argument-parsing crate `md` uses; its "derive" form turns struct fields into flags |
 | **`style:` frontmatter** | the YAML block in a document that sets layout and colors, documented in `docs/topics/layouts-and-style.md` |
-| **JSON5** | JSON with identifier keys, single quotes, trailing commas, and comments; hyphenated keys and string values still require quotes |
-| **dasherized alias** | a flag spelled from a style key path, such as `--style-max-width` for the `max-width` key |
-| **style layer** | one source of explicitly set style fields: the document, one `--style` occurrence, or the combined hidden aliases; fields omitted by that source stay unset |
+| **JSON5** | JSON with identifier keys, single quotes, trailing commas, and comments; hyphenated keys and string values still require quotes in JSON5 itself, though a style value also accepts YAML flow syntax (see [Style setters](#style-setters)) |
+| **style setter** | a `key=value` argument whose key is a dotted path under `style.`, such as `style.ul.padding-left=4` |
+| **style layer** | one source of explicitly set style fields: the document, one `--style` file, or the combined style setters; fields omitted by that source stay unset |
 | **normalization** | expanding shorthands and equivalent spellings to the same full field paths before combining sources |
 | **shell completion** | the candidates your shell offers when you press Tab; `md` uses clap's dynamic completion engine (`COMPLETE=zsh md`) |
 
@@ -108,7 +108,7 @@ mentions them, it is only to say where they sit today.
 
 > **Decided (1). A CLI with subcommands has no "root command".** A root alias
 > is allowed for ergonomics, but it must always be an **exact** alias of one
-> named subcommand. For `md`, bare `md` is exactly `md render`: the same
+> named subcommand. For `md`, `md` with no subcommand is exactly `md render`: the same
 > options, defaults, and behavior. Every current divergence between `md` and
 > `md render` is a defect. Truly global options (`-v`/`--verbose`, `--debug`,
 > `--magic-root`, `--completions`) stay global; render and style options move
@@ -119,20 +119,25 @@ mentions them, it is only to say where they sit today.
 > `2026-11-04-composition-errors`. The other style constraints are a design of
 > `md render` specifically, not a general rule for every command.
 
-> **Decided (3). `--max-width` is removed as a pattern.** `md render` packs all
-> style attributes under `--style <json|json5>`, mirroring the `style:`
-> frontmatter:
+> **Decided (3), amended 2026-11-06. `--max-width` is removed as a pattern.**
+> `md render` takes style attributes as `name=value`, mirroring the `style:`
+> frontmatter, and `--style` names a file:
 >
 > ```sh
-> md render notes.md --style "{ 'max-width': 50, margin: 4 }"
+> md render notes.md style="{ max-width: 50, margin: 4 }"
+> md render notes.md style.max-width=50
+> md render notes.md --style=style.yaml
 > ```
 >
 > The attributes needed include `max-width`, `margin` (all sides), and
 > `ml`/`mr`/`mt`/`mb`.
 
-> **Decided (4). Each style key also has a dasherized flag,** for example
-> `md render notes.md --style-margin 4`. These flags are **not** shown in
-> `--help` (to keep help compact) but **are** offered by shell completion.
+> **Decided (4), amended 2026-11-06. Each style key also has a `key=value`
+> setter,** for example `md render notes.md style.ul.padding-left=4`. It replaces
+> the dasherized flag (`--style-ul-padding-left 4`) this decision first named.
+> Setters are not flags, so `--help` stays compact with nothing to hide, and
+> shell completion offers them from the schema. The dot also removes an ambiguity
+> a dash cannot: `style.code-block.line-numbers` has one reading.
 
 > **Decided (5). Until this spec lands,** `2026-11-04-composition-errors`
 > keeps `--max-width` on `md render`.
@@ -186,7 +191,7 @@ numbers cited elsewhere stay stable.
 | 1 | Style, theme, and layout flags (the [inventory](#root-style-flags) below) are root-only | `md doc.md --margin 4` works | `md render doc.md --margin 4` fails: `unexpected argument '--margin'` | `cli.rs` fields; `render.rs`, `style_claims.rs` read `Cli` |
 | 2 | The same flags are accepted **before** the subcommand and silently ignored by every subcommand, including `--max-width`, which is a `RenderOptions` field | `md --margin 4 toc doc.md` and `md --max-width 40 toc doc.md` succeed and ignore the flag | n/a | `validate_subcommand_usage` (`commands/mod.rs`) checks only six options |
 | 3 | **Resolved by `2026-11-04-composition-errors`.** `md compose` accepts only Markdown and the data family, so `md compose --output html` is a usage error and no compose path reads style flags | n/a | n/a | `args/output.rs::COMPOSE_TARGETS` |
-| 4 | `--save` makes bare `md` a **clean**, not a render | `md --save doc.md` = `md clean --save doc.md` | `md render doc.md --save` fails | `main.rs` (`cli.save` branch) |
+| 4 | `--save` makes `md` with no subcommand a **clean**, not a render | `md --save doc.md` = `md clean --save doc.md` | `md render doc.md --save` fails | `main.rs` (`cli.save` branch) |
 | 5 | `--list-themes` is root-only and is not a render | `md --list-themes` lists themes | `md render --list-themes` fails | `main.rs` |
 | 6 | No input on a terminal | `md` prints `md --help` and exits 0, even with `--output json`, where the data contract promises one value | `md render` fails: "No input file provided" | `main.rs` vs `io::load_document` |
 | 7 | `--feature` is accepted in both places and the lists are **combined** | `md --feature a render doc.md --feature b` turns on both | — | `Cli::command_or_render` |
@@ -270,10 +275,10 @@ subcommand's value applied directly after `style:` in `commands/render.rs`.
 
 ## Problem
 
-1. **The alias is not an alias.** A user who learns `md doc.md --margin 4`
+1. **The default is not `md render`.** A user who learns `md doc.md --margin 4`
    and then writes `md render doc.md --margin 4` in a script gets a usage
    error (rows 1, 9). The documentation says the two are the same.
-2. **Bare `md` does things that are not rendering.** `--save` cleans and
+2. **`md` with no subcommand does things that are not rendering.** `--save` cleans and
    writes a file; `--list-themes` lists themes (rows 4, 5). A user cannot
    predict from `md render --help` what `md` will do.
 3. **Root flags leak into other commands.** Style flags before any subcommand
@@ -290,31 +295,13 @@ subcommand's value applied directly after `style:` in `commands/render.rs`.
 
 ## Design
 
-### One definition, two spellings
+### `md` is `md render`
 
-> **Proposed.** `md render`'s arguments are defined once. The root `Cli`
-> carries that same definition plus the global options and nothing else, so
-> both spellings produce the same render options for every render argument
-> sequence. Explicit subcommands and root help/completion requests are not
-> render argument sequences.
+`md` with no subcommand runs `md render`. There is one command and one set of options,
+`RenderOptions`, and the root `Cli` adds only the global options to it.
 
-```mermaid
-flowchart LR
-    subgraph Root["md (root)"]
-        G["shared controls and root actions<br/>-v, --debug, --width,<br/>--magic-root, --completions"]
-        RA["RenderOptions<br/>(the alias)"]
-    end
-    subgraph Render["md render"]
-        RO["RenderOptions"]
-    end
-    RA -. "same definition,<br/>same generated aliases" .- RO
-    RA --> RUN["run_render(&RenderOptions)"]
-    RO --> RUN
-```
-
-- `RenderOptions` gains everything `run_render` reads: `--style`, the hidden
-  `--style-*` aliases, and whichever render-behavior flags are not folded into
-  `--style` (the “Which flags fold into `--style`?” open question).
+- `RenderOptions` gains everything `run_render` reads: `--style`, the style
+  setters, and `--mermaid`.
 - The `darkmatter-cli` render handler takes prepared render options, the
   resolved output context, and the request. It never reads a root argument
   structure, so a root field cannot introduce a hidden rendering option.
@@ -330,29 +317,22 @@ flowchart LR
   subcommand. The owner’s word “global” means shared responsibility here,
   not a request to change those parsing rules.
 
-**Proposed mechanism.** Build one clap command factory that augments both
-root rendering and explicit `render` with the same arguments, including
-hidden style aliases. In `darkmatter-cli`, the current
-[`Cli`](../../cli/src/args/cli.rs) is the derived argument structure and
-[`RenderOptions`](../../cli/src/args/render.rs) holds shared render options.
-Runtime-added arguments are not automatically captured into derived fields.
-Parse through the augmented command’s `try_get_matches_from`, extract the
-alias values from `ArgMatches`, then construct the typed invocation through
-`FromArgMatches` plus that extraction. Ordinary `Cli::parse()` builds the
-derive-only command and must not bypass this factory. Tests, dynamic
-completion, and generated shell completions use this same factory.
+`RenderOptions` stays one derived `clap::Args` struct,
+flattened at the root and held by `Command::Render`, and ordinary `Cli::parse()`
+keeps working. Its `[INPUT]` positional becomes `[ARGS]...`, as `md compose`'s
+already is, and one shared function classifies those tokens into the input and
+the setters (see [Style setters](#style-setters)). Setters are not clap arguments,
+so nothing is added to the command at runtime.
 
 Distinguish an explicitly supplied option from a clap default when checking
 whether root render arguments precede a subcommand. Reject, for example,
-`md --feature a render doc.md` and `md --style '{}' toc doc.md`, even if the
+`md --feature a render doc.md` and `md style='{}' toc doc.md`, even if the
 explicit `render` has no duplicate option. Shared controls do not count as
 render arguments. Root help presents commands, shared controls, `--style`,
 and the alias usage line; other render details belong in `md render --help`.
 
-A command word in a consumed value is never a subcommand:
-`md --style-page-code-theme render notes.md` treats `render` as the theme
-value. Respect `--` for positional inputs; `md -- render` renders a file
-named `render`. Do not rewrite arguments by scanning for command words.
+Respect `--` for positional inputs; `md -- render` renders a file named
+`render`. Do not rewrite arguments by scanning for command words.
 
 Resolve shared output options once at dispatch and pass the resolved output
 context and request to the render handler. Removing `&Cli` must not lose
@@ -362,38 +342,61 @@ its plain-output behavior, rather than being detected again downstream.
 
 ### `--style`
 
-`--style` takes a JSON5 object whose shape mirrors the `style:` frontmatter.
-It is repeatable; later values merge over earlier ones.
+> **Decided (2026-11-06). A flag names a file, and `name=value` sets a value.**
+
+`--style` takes a file reference. The file is JSON, JSON5, YAML, or TOML, and holds a
+dictionary valid for the Darkmatter `style` property. The option is repeatable, and
+later files merge over earlier ones.
 
 ```sh
-# page frame
-md render notes.md --style "{ 'max-width': 80, margin: 2 }"
-
-# a component bucket, same keys as frontmatter
-md render notes.md --style "{ table: { alignment: 'center', 'max-width': '80%' } }"
-
-# several --style values merge key by key
-md render notes.md --style "{ margin: 2 }" --style "{ ml: 6 }"
+md render notes.md --style=style.yaml                # the whole file
+md render notes.md --style=style@style.yaml          # the `style` key of that file
+md render notes.md --style=theme.dark@style.yaml     # a nested key
+md render notes.md --style=style@@/shared.yaml       # an offset into a magic path
+md render notes.md --style=@/shared.yaml             # a magic path, no offset
+md render notes.md --style=./user@host.yaml          # a file with `@` in its name
 ```
 
-**Proposed** rules (each one is an open question below):
+```yaml
+# style.yaml, for --style=style.yaml
+max-width: 50
+margin-left: 4
+bad-mojo: true    # warned about and ignored
+```
 
-| Rule | Proposal | Open question |
-|---|---|---|
-| Shape | the `style:` frontmatter shape, plus page shorthand keys at the top level (`max-width`, `margin`, `mx`, `ml`, ...) that apply to `page` | 2 |
-| Precedence | defaults < document `style:` < `--style` (in order) < `--style-*` aliases | 3 |
-| Merge | key by key, deep; a key you do not set keeps the document's value | 3 |
-| Files | a value that does not start with `{` is a file reference | 4 |
-| Validation | shared runtime validation; inline syntax/type/key errors are usage errors, while file execution failures retain the run-error contract | 5 |
+**Reading the reference.** Text before the first `@` is an offset when it is not empty
+and holds no `/`; the rest is the file reference. `FileReference` gives a mid-name `@`
+no meaning, so this split happens first. The offset is a `PropertyPath` from
+`2026-11-06-dotted-paths`. A file whose name would read as an offset needs `./`, as a
+file named `a=b.md` already does.
 
-The precedence, as a picture:
+**Rules.**
+
+| Case | Result |
+|---|---|
+| A key the effective schema does not allow | excluded with a warning, and the allowed keys still apply; `--deny style` makes it fatal |
+| No value in the file was applied, including `{}` and `{ table: { bad: 1 } }` | fails |
+| An allowed key with an invalid value (`max-width: abc`) | fails: continuing would render the wrong thing |
+| The offset key is missing or not a mapping | fails, naming the key and the file |
+| `style="{ margin: 4 }"` | fails as a missing file, with a hint to use `style="..."` |
+
+A failure here is a run failure: see
+[Style input preparation and errors](#style-input-preparation-and-errors).
+
+**Precedence.**
+
+| Rule | Decision |
+|---|---|
+| Shape | the `style:` frontmatter shape, plus every `page` key and the short forms at the top level (`max-width`, `margin-left`, `margin`, `mx`, `ml`, ...), which apply to `page` |
+| Precedence | defaults < document `style:` < `--style` files, in order < style setters |
+| Merge | key by key, deep; a key you do not set keeps the document's value |
 
 ```mermaid
 flowchart LR
     D["built-in defaults"] --> F["document style:"]
-    F --> S1["--style #1"]
-    S1 --> S2["--style #2 …"]
-    S2 --> A["--style-* aliases"]
+    F --> S1["--style file #1"]
+    S1 --> S2["--style file #2 …"]
+    S2 --> A["style setters"]
     A --> E["effective style"]
 ```
 
@@ -406,16 +409,17 @@ a document’s `ml: 6` defeat a CLI `margin: 2`.
 
 Top-level page keys and nested `page` keys normalize to the same fields.
 Reject duplicate spellings of the same specific field in one object, such
-as `ml` together with `page.left-margin`. A shorthand plus a more specific
+as `ml` together with `page.margin-left`. A shorthand plus a more specific
 field is valid. Duplicate exact object keys must be rejected before a JSON
 map silently discards one. Preserve option occurrence and source information
 long enough to identify the offending layer and key.
 
-The hidden aliases form one final layer regardless of their position among
+The style setters form one final layer regardless of their position among
 `--style` occurrences. Within that layer, expand shorthands by specificity;
-repeating the same flag uses its last value. Thus `--style-ml 6
---style-margin 2` still yields left 6 and other sides 2. Across separate
-`--style` layers, later layers win even if earlier layers used a more
+repeating the same key uses its last value. Thus `style.ml=6 style.margin=2`
+still yields left 6 and other sides 2. `style="{...}"` is the setter at the path
+`style`, so `style="{ margin: 2 }" style.ml=6` resolves the same way. Across separate
+`--style` files, later files win even if earlier layers used a more
 specific shorthand. No omitted value or parser default becomes an override.
 
 Use nonnegative integer row counts for vertical page spacing, retaining the
@@ -436,7 +440,7 @@ not a reset instruction; zero and `false`
 are explicit values where their field permits them. A present CLI root must
 be an object; a scalar or `null` root is invalid. Reset syntax is out of scope.
 
-**Proposed shared path.** In the `darkmatter` library,
+In the `darkmatter` library,
 [`StyleFrontmatter`](../../lib/src/style/schema/mod.rs) is the typed sparse
 render style. Normalize and merge through the library’s shared style path,
 then apply the effective values during tree construction and page-frame
@@ -444,79 +448,140 @@ assembly. Do not mutate the document’s authored frontmatter or serialized
 Markdown to inject CLI overrides. Preserve the one context-aware tree build
 and one target fold; no HTML repair or terminal decoration pass is added.
 
-Removal of the library’s
-[`CliStyleClaims`](../../lib/src/style/cli_claims.rs), which currently records
-explicit CLI fields, is proposed only after all behavior it protects has a
-replacement. In particular, page alignment broadcasts, component overrides,
-relative stylesheet origins, and fill behavior need coverage. A merged tree
-alone does not solve page alignment: a CLI page-alignment broadcast must
-beat a document’s component alignment, while a component alignment in the
-same or later layer beats that broadcast. Expand broadcasts into component
-claims within each layer, before the cross-layer merge, using the existing
-broadcast targets. Preserve origins separately from typed presentation
-values where a field refers to a file.
+> **Decided (2026-11-06). `--alignment` is removed, and alignment gets no special
+> treatment on the command line.** `style.alignment` and `style.page.alignment` are
+> ordinary keys, so the merge rule applies: a source changes only the keys it names.
+
+```yaml
+# document
+style:
+    table:
+        alignment: left
+```
+
+```sh
+md render doc.md style.alignment=center          # everything else centers; the table stays left
+md render doc.md style.table.alignment=center    # the table centers
+```
+
+`page.alignment` keeps its existing meaning: it applies to each component with no
+alignment of its own. `--align-*` go with the other removed flags.
+
+Remove the library's [`CliStyleClaims`](../../lib/src/style/cli_claims.rs) and its
+claim-derived overrides once component overrides, relative stylesheet origins, and the
+fill replacements have coverage on the new path. Preserve origins separately from typed
+presentation values where a field refers to a file.
 
 The shared schema also contains `style.markdown`, whose cleanup rules are
 accepted and validated but never read by rendering. It has no field in
 `StyleFrontmatter`; retain it through validation separately and preserve its
 existing lack of rendering effects. `--style` must not clean or save a file.
 
-### Hidden dasherized aliases
+### Style key names
 
-Every supported canonical style value path gets a flag spelled from its path,
-prefixed `--style-` and joined with `-`:
+> **Decided (2026-11-06). Page margin and padding keys use CSS order,** one spelling
+> with the new component keys and with CSS.
 
-| Flag | Same as |
+| Today | After |
 |---|---|
-| `--style-margin 4` | `--style "{ margin: 4 }"` |
-| `--style-max-width 80` | `--style "{ 'max-width': 80 }"` |
-| `--style-table-alignment center` | `--style "{ table: { alignment: 'center' } }"` |
-| `--style-page-bg-color slate-900` | `--style "{ page: { 'bg-color': 'slate-900' } }"` |
+| `page.left-margin`, `right-margin`, `top-margin`, `bottom-margin` | `page.margin-left`, `margin-right`, `margin-top`, `margin-bottom` |
+| `page.left-padding`, `right-padding`, `top-padding`, `bottom-padding` | `page.padding-left`, `padding-right`, `padding-top`, `padding-bottom` |
 
-- They are not listed by `md render --help` or `md --help`.
-- Shell completion offers them (the “Generating the hidden aliases” open question chooses how).
-- The value is read as the key's type through the same conversion engine
-  that reads frontmatter (`simplified_schema::coercion`), so `4` is a number
-  and `slate-900` a string. **Proposed.**
-- Generate canonical kebab-case spellings only. Deprecated snake-case aliases
-  do not create flags. Read the embedded schema without filesystem or
-  network discovery; any parsed catalog can be reused within the process.
-- Generate compound-value flags too: `--style-table-border thin` and
-  `--style-table-border "{ left: true, right: false }"` both set the border;
-  `--style-table-border-left false` sets one nested field. Open objects such
-  as `page.meta` get a whole-object flag taking JSON5, not unbounded nested
-  flags. The same normalization rules resolve compound and nested flags;
-  nested fields override their containing compound value within the alias
-  layer. If the parent is scalar, a nested field switches to the object arm.
-- Every alias requires exactly one argument, including booleans (`false`
-  remains false); accept both `--flag VALUE` and `--flag=VALUE`. Strings such
-  as `slate-900` and `40ch` are passed as text, not parsed as bare JSON5
-  expressions. Numbers, booleans, unions, and compound values bind through
-  the declared type and shared conversion engine, then the runtime style
-  validator. A string containing expression syntax is never executed.
-- Cleanup-rule aliases under `--style-markdown-*` follow the shared schema
-  and remain accepted without rendering effects, just like those keys in
-  frontmatter. Help in the style reference and completion descriptions
-  explain that these rules belong to `md clean`.
-- See **Generating the hidden aliases** in Open Questions for the catalog
-  source choice and completion behavior.
+The rename reaches the embedded schema, `descriptor::SCHEMA`, `style/schema/page.rs`,
+the parser, tests, golden fixtures, and docs. The old spellings are removed rather than
+deprecated, so they become unknown keys, whose warning should suggest the new name. The
+snake-case aliases of the old names go with them. Other names, such as `bg-color`, are
+unchanged.
+
+### Style setters
+
+Every supported canonical style value path can be set with a `key=value`
+argument, spelled from its path and joined with `.`:
+
+| Setter | Same as |
+|---|---|
+| `style.margin=4` | `style="{ margin: 4 }"` |
+| `style.max-width=80` | `style="{ 'max-width': 80 }"` |
+| `style.table.alignment=center` | `style="{ table: { alignment: 'center' } }"` |
+| `style.page.bg-color=slate-900` | `style="{ page: { 'bg-color': 'slate-900' } }"` |
+
+**Recognizing one.** A token is a setter when the text before its first `=` is `style`
+or starts with `style.`; every other token is the input.
+
+```sh
+md render notes.md style.ul.padding-left=4      # input plus one setter
+md style.margin=2 notes.md style.ml=6           # order does not matter
+md render notes.md style="{ max-width: 50, margin-left: 4 }"   # several at once
+md render ./style.draft=old.md                  # a file: `./` makes it a path
+md render -- style.draft=old.md                 # a file: nothing after `--` is a setter
+```
+
+- More than one input is a usage error, as it is for `md compose`.
+- A setter before a subcommand is a render argument there, so it is a usage
+  error like any other: `md style.margin=4 toc doc.md` exits 2.
+- A setter is judged by the document's effective schema, like any other frontmatter
+  value (see [Style input preparation and errors](#style-input-preparation-and-errors)).
+  A misspelled prefix such as `stlye.ul.x=4` is not
+  recognized as a setter, so it fails as an input that does not resolve; that
+  message should suggest the setter when the token has a `=` and a `.`.
+- The path grammar and its parser come from `2026-11-06-dotted-paths`, which also
+  gives `md compose` dotted setters. The spelling is shared and the effect differs:
+  `md compose` overrides a frontmatter value, which reaches the composed output,
+  while a style setter here is a one-time render override that never touches the
+  document.
+
+**Values.** The value is the text after the first `=`, read as the key's declared
+type through the same conversion engine that reads frontmatter
+(`simplified_schema::coercion`), so `4` is a number and `slate-900` a string. Every
+style key is declared, so this is the shared parser's declared-type path from
+`2026-11-06-dotted-paths`. A string containing expression syntax is never executed.
+
+A value starting with `{` is read as JSON5, then as YAML flow syntax, so hyphenated
+keys need no quotes inside the shell's quotes: `style="{ max-width: 50 }"`. Bare
+`{a:1}` stays an object because JSON5 reads it first. That parser lives in
+`2026-11-06-dotted-paths`, so `md compose` and `md set` read such values too.
+
+- Canonical kebab-case spellings only. Deprecated snake-case aliases have no
+  setter.
+- Compound values are accepted too: `style.table.border=thin` and
+  `style.table.border='{ left: true, right: false }'` both set the border;
+  `style.table.border.left=false` sets one nested field. Open objects such as
+  `page.meta` take a whole-object JSON5 value, not unbounded nested paths. Nested
+  fields override their containing compound value within the setter layer. If the
+  parent is scalar, a nested field switches to the object arm.
+- Booleans always take a value: `style.code-block.line-numbers=false`.
+- Cleanup-rule setters under `style.markdown.*` follow the shared schema and
+  remain accepted without rendering effects, just like those keys in frontmatter.
+  The style reference explains that these rules belong to `md clean`.
+
+**Completion** comes from the document's effective schema, through the completer in
+`2026-11-06-dotted-paths`, with the same rules for what it reads.
+
+```text
+md render doc.md style.<Tab>                  page. table. ul. code-block. ...
+md render doc.md style.ul.<Tab>               alignment= max-width= padding-left= ...
+md render doc.md style.ul.alignment=<Tab>     left center right
+```
+
+`md render` needs no catalog of its own, because `style` is part of that schema.
+`--style=<Tab>` completes files with the `json`, `json5`, `yaml`, `yml`, and `toml`
+extensions.
 
 ### What leaves the root
 
-| Today | After | Open question |
+| Today | After | Ruling |
 |---|---|---|
-| the 38 style and layout flags | `--style` / `--style-*` on `md render` (and therefore on bare `md`); each old flag is a usage error naming its replacement | 1, 8 |
-| `--theme`, `--code-theme`, `--mermaid`, `--line-numbers`, `--code-block` | on `md render`, as `--style` keys or as plain render flags | 1 |
-| `--save` | removed; `md clean --save` | 7 |
-| `--list-themes` | not a root flag | 7 |
-| `--max-width` | removed; `--style "{ 'max-width': N }"` or `--style-max-width N` (Decided 3 and 5) | 8 |
+| the 38 style and layout flags | `--style` and style setters on `md render` (and therefore on `md` with no subcommand); each old flag is an unknown argument | 1, 8 |
+| `--theme`, `--code-theme`, `--code-block`, `--line-numbers` | style keys `page.theme`, `page.code.theme`, `page.code.mode`, `code-block.line-numbers` | — |
+| `--mermaid` | a plain `md render` flag | — |
+| `--save` | removed; it is an unknown flag like any other, with no special message | — |
+| `--list-themes` | a new subcommand, `md list-themes` | — |
+| `--max-width` | removed; `style="{ 'max-width': N }"` or `style.max-width=N` (Decided 3 and 5) | 8 |
 | `--width` | unchanged: a global option on the root | — |
 | `-v`, `--debug`, `--magic-root`, `--completions` | unchanged placement rules; magic roots and completion generation stay root-only | — |
 
-Removed flags use a command-aware extension of the existing `darkmatter-cli`
-[`REMOVED_FLAGS`](../../cli/src/main.rs) rejection mechanism: each is
-rejected before parsing with "`--mx` was removed with no alias; use
-`--style-mx`", so completion never offers it.
+> **Decided (2026-11-06). A removed flag is an unknown argument,** with clap's ordinary
+> error and no custom message. `docs/cli/render.md` holds the migration table.
 
 ### Style input preparation and errors
 
@@ -530,51 +595,85 @@ normalization and merging. A style applicable only to HTML may be valid for
 terminal output without being used there; lack of target applicability is
 not an unknown-key error.
 
-Inline syntax, unknown keys, deprecated spellings, and invalid typed values
-are usage errors (exit 2, stderr, no stdout value), regardless of `--deny`.
-Use the shared runtime style validator, including apply-time constraints;
-calling its parser alone does not enforce all width exclusions. Constraints
-that depend on an opened file, the effective merged sources, or resolved
-output geometry are run failures (exit 1), not late parser errors. Only
-constraints decidable from inline arguments alone produce exit 2. Preserve
-informational `KnownButInactive` notices as the current parser does rather
-than promoting every notice to an error. Report the `--style` occurrence or
-alias and canonical key path; syntax errors include line and column.
+> **Decided (2026-11-06). `style` is treated like the rest of the frontmatter.** A
+> setter is judged by the document's effective schema, exactly as `md compose` judges
+> one, whether it targets `style` or anything else.
 
-If style files are approved, opening and reading them is execution. Missing,
-unreadable, unsupported-format, or invalid-content files fail with exit 1
-and the existing run diagnostics. For `--output json|yaml|toml`, return the
+Nested objects in a schema are closed, so an undeclared key is an error, not a warning.
+A schema can open one with a pattern key, and then the same setter is simply valid:
+
+```yaml
+$schema:
+    style:
+        foo: string
+        "<string>": unknown
+```
+
+| Setter, with no schema of the document's own | Result |
+|---|---|
+| `md render doc.md style.magin=4` | fails: `magin` is not a valid property under `style` |
+| `md render doc.md style.margin=abc` | fails: `abc` is not a number |
+| `md render doc.md style="{ margin: "` | fails: the value is not an object |
+
+These are ordinary schema failures, with the same codes and exit status as `md compose`:
+`dm.schema.unknown_key` or `dm.schema.type_mismatch`, exit 1, and one envelope for a data
+output. They are checked before anything renders. A failure from a setter names the
+property and its parent in plain words and suggests the nearest valid key; schema-aware
+completion is the main defense against the typo in the first place. Use the shared
+runtime style validator as well, including apply-time constraints, because the schema
+alone does not enforce all width exclusions. Preserve informational `KnownButInactive`
+notices as the current parser does. Report the setter and canonical key path.
+
+**A document that declares `style` replaces the built-in definition,** as it does for
+any property, so `$schema: { style: { foo: string } }` makes `style.margin=4` an error
+and leaves completion with `foo` alone. This feature does not change schema layering.
+Custom values belong in their own top-level property, which is already open.
+
+**What is already in the document stays a warning.** `md render` warns about an unknown
+`style:` key in frontmatter, and `--deny style` makes it fatal, as today. `md compose`
+stays an error, because it produces a document, while `md render` only shows one. The
+warning changes in one way: it asks the effective schema what counts as unknown, so a key
+allowed by `"<string>": unknown` no longer warns.
+
+**A data file is more lenient, on purpose.** It may hold keys for other purposes or
+versions, and it has no schema enforcing what it contains, so a key the schema does not
+allow is excluded with a warning, while an allowed key with a wrong value is still an
+error. The warning goes to stderr, or to `diagnostics` for a data output, where stderr
+stays empty.
+
+Opening and reading a `--style` file is execution. Missing, unreadable,
+unsupported-format, or invalid-content files, and the failing cases in the `--style`
+rules above, fail with exit 1 and the existing run diagnostics. Its unknown-key warnings
+are ordinary diagnostics: on stderr, or in `diagnostics` for a data output. For `--output json|yaml|toml`, return the
 one failed result and keep stderr empty, as required by the data-output
 contract. Retain the typed file-reference `failure:` information. Do not
 turn these failures into pre-parse exit-2 messages. Stylesheet reads occur
 only when preparing a target that uses them and follow the same run-error
 contract.
 
-### File context if style files are approved
+### File context of a style file
 
-A style file contains the **style value itself**, for example `page:` and
-`table:` at its root, not a wrapper with a `style:` property. A Markdown
-file with frontmatter is not a style file. Select JSON, JSON5, YAML, or TOML
-by extension through biscuit-file’s existing readers; reject unsupported
-extensions, extra YAML documents, and non-object roots. Do not recursively
-load other style files. A whitespace-trimmed value beginning with `{` is
-inline; all other values are reference candidates, and a literal file name
-beginning with `{` needs a `./` prefix. Do not retry failed inline JSON5 as a
-file path. `--style -` is rejected: stdin is reserved for the Markdown input.
+A style file holds the style value at its root or at its offset, for example `page:`
+and `table:`. A Markdown file with frontmatter is not a style file. Select JSON, JSON5,
+YAML, or TOML by extension through biscuit-file's readers and `detect_from_extension`,
+which `2026-11-04-loading-data` makes public; reject other extensions, including the
+JSONL, CSV, and TSV ones it adds, extra YAML documents, and non-object values. Do not
+recursively load other style files. `--style -` is rejected: stdin is reserved for the
+Markdown input.
 
 In `darkmatter-cli`, use
 [`io::open_argument`](../../cli/src/io/mod.rs) to open the reference through
 biscuit-file’s [`FileReference`](../../../biscuit-file/lib/src/file_reference/mod.rs)
 and the existing request’s launch context. Derive the style-file context
 from that opening reference; do not capture another process directory,
-repository observation, or home directory. Local style files only are
-proposed here: reject HTTP(S) style-file inputs without making a network
+repository observation, or home directory. Style files are local only: reject HTTP(S)
+style-file inputs without making a network
 request. Remote style-file transport would need a separate authorization
 and cache design.
 
 Track the source context of a winning file-valued style field such as
 `page.stylesheet`: document values use the document context, inline CLI
-values and aliases use the launch context, and file-supplied values use
+values and setters use the launch context, and file-supplied values use
 that style file’s context. The context belongs to the field that wins the
 merge, not to the last style file opened. Resolving an asset must preserve
 FileReference diagnostics and the existing distinction between a local CSS
@@ -592,197 +691,131 @@ broadcasts and the value-dependent fill spellings. A replacement may be a
 complete `--style` object affecting several buckets, rather than one flag.
 Never advertise a nonequivalent replacement as exact.
 
-The rejection code must understand command ownership and argument values.
-`md schema about --code-block light` and `md code-block --theme dracula`
-remain legal if those command-local options are retained. `md clean --save`
-remains legal. Check `--flag=value`, the removed short `-m` forms supported
-by today’s parser, and the `--` terminator. A consumed argument value such
-as `--style-page-meta '{ title: "--margin" }'` is not a removed flag. A flat
-scan of every token in the current rejection helper cannot safely implement
-this migration.
+Command-local options of the same name are untouched, because each command simply
+declares its own: `md schema about --code-block light`, `md code-block --theme dracula`,
+and `md clean --save` stay valid. `REMOVED_FLAGS` gains no entries for this change, and
+its existing entries stay.
 
-## Open Questions
+## Rulings
 
 ### 1. Which flags fold into `--style`?
 
-`--theme`, `--code-theme`, `--code-block`, `--line-numbers`, `--mermaid`, and
-`--feature` all change rendered output. Which of them are "style"?
+> **Decided (2026-11-06). Presentation folds, behavior stays.** The test is
+> "would a document author pin it in the document?"
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Only what has a `style:` key today** (`--code-theme` → `page.code.theme`, plus margins, padding, background, alignment); the rest stay plain `render` flags | no schema change; smallest step | `--theme` and `--line-numbers` stay as separate flags, though an author would also want them in frontmatter |
-| **B. Presentation folds, behavior stays.** Fold A plus `--theme` (new `page.theme`), `--code-block` (new `page.code.mode`), `--line-numbers` (new `code-block.line-numbers`); keep `--mermaid` and `--feature` as render flags | one rule a reader can apply: "would a document author pin it in frontmatter?"; frontmatter gains the same reach | adds three schema keys; `md schema about` reads `--code-block` and would need its own flag |
-| **C. Everything into `--style`** | one option | `--mermaid` and features are rendering behavior, not style, and have no frontmatter meaning |
+| Today | After |
+|---|---|
+| `--theme` | new key `page.theme` |
+| `--code-theme` | existing key `page.code.theme` |
+| `--code-block` | new key `page.code.mode`, default `inverse` |
+| `--line-numbers` | new key `code-block.line-numbers` |
+| `--mermaid`, `--feature` | stay plain `md render` flags |
 
-**Recommendation: B.** The test “would an author pin it in the document?”
-separates presentation from behavior. `md schema about` keeps a
-`--code-block` of its own (it is not a render). Before approving this
-schema expansion, define prose theme and code-theme name validation,
-`page.code.mode`’s default of `inverse`, and explicit `false` for line
-numbers. Resolve defaults after merging, including code-theme fallback
-from the effective prose theme; an omitted CLI value must not override the
-document. Keep existing per-fence and direct-component precedence above
-page defaults. Extend the embedded schema, runtime descriptors, typed
-models, validation, and terminal/browser lowering together; do not add
-schema-only keys that the renderer cannot use.
+`md schema about` is not a render and keeps a `--code-block` of its own. Define
+prose theme and code-theme name validation, and explicit `false` for line
+numbers. Resolve defaults after merging, including code-theme fallback from the
+effective prose theme; an omitted CLI value must not override the document. Keep
+existing per-fence and direct-component precedence above page defaults. Extend
+the embedded schema, runtime descriptors, typed models, validation, and
+terminal/browser lowering together; do not add schema-only keys that the renderer
+cannot use.
 
-**Alignment and fill need a separate author choice.** Alignment has
-component keys, but global and list-group flags are broadcasts; replacing
-`--align-lists` needs values for `ul`, `ol`, and `li`. Fill is more than a
-width shortcut. In the `darkmatter` library,
-[`apply_cli_claims`](../../lib/src/style/cli_claims.rs) lowers `indent=N`
-to alignment-dependent **padding**, and `full` resets width, max-width,
-and padding. A left margin is not an equivalent replacement, even for a
-left-aligned component. Current shared component spacing is scalar and
-cannot express all of these edge-specific values.
+**Alignment** has component keys, but global and list-group flags are
+broadcasts; replacing `--align-lists` needs values for `ul`, `ol`, and `li`.
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Add edge-specific component padding and an explicit, documented way to clear an inherited width cap in the shared style model; migrate each fill value into those fields** | retains layout capabilities; one style vocabulary | expands the shared schema and needs terminal/browser support; callers must spell the appropriate edge for their alignment |
-| **B. Add a shared structured fill property with today’s fill modes, resolved after alignment** | closest behavioral migration, including alignment-dependent indent | retains a second layout vocabulary inside the new style API |
-| **C. Remove unsupported fill behavior with an explicit breaking-change note** | smallest implementation | loses one-sided indentation and reset behavior; existing layout assertions cannot all stay unchanged |
+> **Decided (2026-11-06). `--fill` migrates into real style properties.** Add
+> `padding-left` and `padding-right` to the shared component style, in the schema,
+> typed model, parser, and terminal and browser lowering.
 
-**Recommendation: A.** It fits the long-term goal of one style model and
-expresses actual layout properties. The author must approve the shared
-padding and reset design before removal; until then, removal of the fill
-claim implementation is blocked. Do not assume the general no-reset rule
-for CLI nulls supplies this missing reset operation. If the author chooses
-C, name each lost behavior and revise acceptance tests rather than weakening
-them silently.
+| Today | After |
+|---|---|
+| `max=40` | `style.table.max-width=40` |
+| `explicit=50` | `style.table.width=50` |
+| `full` | `style="{ table: { width: 'auto', padding: 0 } }"` |
+| `pad=4` | `style.table.padding-left=4 style.table.padding-right=4` |
+| `indent=4` | `style.ul.padding-left=4`, or `padding-right` for a right-aligned component |
 
-### 2. The shape of `--style`
+- `full` needs no reset syntax: setting `width` removes an inherited `max-width`
+  under the cross-field rule above.
+- `indent`'s automatic side is given up: the caller names the side.
+- The broadcast `--fill max=60` has no single replacement; list each component,
+  or keep the list in a style file.
 
-The owner's example, `{ 'max-width': 50, margin: 4 }`, is flat, while
-`style:` frontmatter is bucketed (`page.max-width`, `page.left-margin`) and
-has no `margin` or `ml` key.
+### 2. The shape of a style value
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Exactly the frontmatter shape** | one vocabulary, already validated | the example does not parse; `--style "{ page: { 'left-margin': 4 } }"` is long to type |
-| **B. Frontmatter shape plus top-level page shorthands, added to the shared `style:` schema** (`margin`, `mx`/`my`, `mt`/`mb`/`ml`/`mr`, `padding` and `p*`, `max-width`, `background`, `bg-color`, `color`, `alignment` at the top level mean `page.*`) | the example works; a `--style` value pastes into frontmatter and back unchanged | frontmatter gains a second spelling for page keys; the schema must say which wins when both are set |
-| **C. Shorthands only on the CLI**, lowered onto the frontmatter shape | frontmatter untouched | two vocabularies again (problem 5); a value cannot be pasted into a document |
+> **Decided (2026-11-06).** The frontmatter shape, plus every `page` key and the short
+> forms at the top level, added to the shared `style:` schema, so a value pastes between
+> the command line and a document. See [`--style`](#--style).
 
-**Recommendation: B.** Copy-paste parity between the command line and the
-document is the point of mirroring `style:`. A shorthand and its long form in
-the same object resolve most-specific-wins (`ml` over `margin`), and
-`page.left-margin` and top-level `ml` are the same key (setting both is a
+A shorthand and its long form in the same object resolve most-specific-wins (`ml` over
+`margin`), and `page.margin-left` and top-level `ml` are the same key (setting both is a
 validation error).
 
 ### 3. Precedence and merge
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Key-by-key deep merge; CLI over document; later `--style` over earlier; aliases over `--style`** | matches today's field-level override; scripts can pass a base `--style` and a user can override one key | aliases and `--style` naming the same key resolve silently |
-| **B. As A, but an alias and a `--style` that set the same key with different values is a usage error** | no silent choice | breaks the "base plus override" use |
-| **C. Replace, not merge:** a `--style` bucket replaces the document's whole bucket | simple to explain | `--style "{ table: { alignment: 'center' } }"` would drop the document's `table.max-width`; differs from today |
+> **Decided (2026-11-06). Merge key by key.** A source changes only the keys it names:
+> CLI over document, later `--style` files over earlier ones, setters over files. A
+> setter that overrides a file does so silently; that is the "shared file plus one
+> tweak" use.
 
-**Recommendation: A**, with normalization before each layer merge, as
-specified under `--style`. Layer order decides which source wins;
-shorthand specificity resolves overlapping keys only within one layer.
+Normalization happens before each layer merge, as specified under `--style`. Layer order
+decides which source wins; shorthand specificity resolves overlapping keys only within
+one layer.
 
-### 4. May `--style` name a file?
+### 4. Style files
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Inline only** | nothing to resolve | long styles live in shell history |
-| **B. A value starting with `{` (after whitespace) is inline JSON5; anything else is a `FileReference`** resolved in the launch context and read locally as JSON, JSON5, YAML, or TOML by extension (biscuit-file) | reusable style files; `@`/`^`/`&` work like every other `md` file argument | one more resolution path to test; a file named `{x}.json` needs `./` |
-| **C. An explicit prefix** (`--style @dark.yaml` only) | unambiguous | `@` already means a magic path in the reference grammar |
-
-**Recommendation: B**, limited to local files and the input/error/context
-rules above. Reusable styles are useful, but opening one must not add a
-network authorization path or redirect document assets. A missing file is
-a run failure carrying the existing file-reference diagnostics.
+> **Decided (2026-11-06).** `--style` always names a file; see [`--style`](#--style).
+> CSS files are the separate draft `2026-11-06-css-style-files`.
 
 ### 5. Validation and error reporting
 
-Frontmatter unknown/deprecated keys are warnings unless `--deny style` is
-set; malformed typed values and application errors already have their own
-failure paths. Preserve that distinction.
+> **Decided (2026-11-06).** See
+> [Style input preparation and errors](#style-input-preparation-and-errors).
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Same parser and same policy as frontmatter** (warn; `--deny style` makes it fatal) | one behavior | a typo on the command line (`--style "{ magin: 4 }"`) renders without it, which looks like it worked |
-| **B. Same parser (`style::from_frontmatter` path), but inline CLI syntax, unknown/deprecated keys, and invalid values are usage errors (exit 2)** naming the option and the key path, such as ``--style: unknown key `magin` (did you mean `margin`?)`` | typos fail where they were typed; frontmatter keeps its policy | the CLI is stricter than the document |
-| **C. Validate against the SimplifiedSchema `style` partial (`schemas/partials/style.yaml`) as well** | the schema DMLS uses | the runtime parser is authoritative for cross-field rules (`width` vs `max-width`); two validators can disagree |
+### 6. Where the setter key list comes from
 
-**Recommendation: B**, using the shared parser and application constraints,
-with the informational-notice and file-error distinctions specified above.
-A JSON5 syntax error
-reports the line and column inside the value. Hidden aliases fail the same
-way (`--style-margin abc`: expected a number).
+> **Decided (2026-11-06), following from question 5.** The document's effective schema,
+> through `simplified_schema::completion`. No separate catalog is needed.
 
-### 6. Generating the hidden aliases
-
-**Where the key list comes from.**
-
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Walk the embedded `style` partial schema** (scalar leaves plus whole compound/open-object values; stop descending at open objects like `page.meta`) | the schema already lists every key; DMLS uses it too | the partial is SimplifiedSchema, not the Rust structs; the two can disagree |
-| **B. Extend the existing `darkmatter` runtime descriptor catalog**, tested against the structs and partial | already used by the parser; cheap at startup | compound branches need richer descriptors; the schema still needs agreement tests |
-| **C. Hand-written clap args** | no generation | drifts by construction |
-
-**Recommendation: A**, with semantic coverage against the runtime path,
-not just successful serde deserialization (which can ignore unknown fields).
-The `darkmatter` library already has a parser catalog,
-[`descriptor::SCHEMA`](../../lib/src/style/descriptor.rs); do not introduce
-a third hand-maintained list. Test representative values through the runtime
-validator and assert the resulting typed value or expected cleanup-rule
-validation result. Cover union scalar and object branches and open objects.
-Every generated path must be recognized, and no two paths or existing
-arguments may produce the same flag. New keys need no handwritten clap
-argument, but still need schema/model/descriptor/rendering agreement.
-
-**How clap hides them but completion keeps them.** The lockfile pins
-clap_complete 4.6.2. The draft expects its dynamic
-engine to offer hidden candidates when no visible candidate matches the
-typed prefix; verify that behavior against this pinned version before
-relying on it. The implementation alternatives are:
-
-| Option | Help | Completion |
-|---|---|---|
-| **A. `Arg::hide(true)`** | hidden | offered once the prefix matches only hidden flags, so `--style-<Tab>` lists them and `--st<Tab>` shows only `--style` |
-| **B. `hide_short_help(true)` + `hide_long_help(true)`** | hidden from `-h` and `--help` | always offered, because `is_hide_set()` is false |
-
-**Recommendation: A.** `--style-<Tab>` is the natural discovery path and keeps
-`--<Tab>` short. Verify with a test against the pinned clap_complete version.
-
-**How many.** Generate every supported canonical path using the rules
-above, including compound and cleanup-rule paths; do not hard-code a count.
-No performance spike is required for this bounded in-memory command setup.
-If implementation reveals a material startup cost, record the observed
-cost before proposing additional measurement.
+The schema and the runtime parser must still agree: test representative values through
+the runtime validator and assert the resulting typed value or expected cleanup-rule
+validation result, because serde success alone can ignore unknown fields. Cover union
+scalar and object branches and open objects. `descriptor::SCHEMA` stays the parser's own
+list; do not add a third.
 
 ### 7. Non-render behaviors on the root
 
-`md --save` cleans a file; `md --list-themes` lists themes. Neither is a
+`md doc.md --save` cleans a file; `md --list-themes` lists themes. Neither is a
 render, so neither can be an option of `md render` without breaking
-the owner’s requirement that bare `md` perform rendering.
+the owner’s requirement that `md` with no subcommand perform rendering.
 
-| Behavior | Option | Recommendation |
-|---|---|---|
-| `--save` | **A.** remove; usage error "use `md clean --save`". **B.** keep as `md render --save` meaning clean | **A.** A render option that writes the file is surprising; `md clean --save` already exists |
-| `--list-themes` | **A.** new `md themes` subcommand. **B.** `md render --list-themes`. **C.** remove; completion already lists theme names | **A.** It is its own action; define its data shape, schema, and completion before implementation |
+> **Decided (2026-11-06). `md render` has no `--save`.** `md doc.md --save` and
+> `md render doc.md --save` both fail as an unknown argument, because `md` with no
+> subcommand is `md render`. To keep rendered output, use the shell:
+> `md render doc.md --output html > doc.html`.
 
-If a theme-list command is chosen, implement it through the existing
-`darkmatter-cli` command-output path, with command-leaf registration, an
-output schema, and a schema-conformance test. Specify whether the result
-lists prose themes, code themes, or both; **recommendation:** preserve the
-current list’s content and ordering, with explicit categories if it already
-distinguishes them. Keep the current command’s exit status and stream rules.
+> **Decided (2026-11-06). `md clean --save` and `md set --save` stay.** Only commands
+> that edit a file have `--save`. `>` cannot replace them: `md clean doc.md > doc.md`
+> empties the file before `md` reads it, and exits 0.
+
+> **Decided (2026-11-06). Themes are listed by `md list-themes`.** The `--list-themes`
+> flag is removed. A file named `list-themes` needs `./list-themes`, as a file named
+> `render` does.
+
+Implement it through the existing `darkmatter-cli` command-output path, with a
+`COMMAND_LEAVES` row, an output schema, and a schema-conformance test, so it takes
+`--output` like every other command. Keep the current list's contents and order, and its
+exit status. A data output is a list of `{ name, description }`.
 
 ### 8. Naming conflicts and removed spellings
 
-All generated flags share the `--style-` prefix, and no current render flag
-starts with it (`--show`, `--output`, `--indent`, `--deny`, `--feature`), so
-no generated flag collides with an existing one. Two risks remain:
+Setters are not flags, so they cannot collide with one. A file whose name starts
+`style.` and contains `=` needs `./` or `--`.
 
-- **A new render flag named `--style-…`** would shadow a generated alias. The
-  uniqueness test covers this.
-- **Old spellings.** `--margin-top`, `--padding-left`, `-m`, and the other
-  visible aliases are removed with the flags. **Recommendation:** each enters
-  `REMOVED_FLAGS` with its exact replacement (`--mt` → `--style-mt`,
-  `--align-tables` → `--style-table-alignment`, `--fill-ul max=40` →
-  `--style-ul-max-width 40`) rather than staying as a silent alias.
+**Old spellings.** `--margin-top`, `--padding-left`, `-m`, and the other visible aliases
+are removed with the flags, as unknown arguments. The migration table gives their
+replacements (`--mt` → `style.mt=N`, `--align-tables` → `style.table.alignment=VALUE`,
+`--fill-ul max=40` → `style.ul.max-width=40`).
 
 ### 9. What else reads the root today
 
@@ -794,32 +827,24 @@ no generated flag collides with an existing one. Two risks remain:
   preserve the original document path. Stdin has the request's launch context,
   which may differ from the source document's directory, so relative assets may
   resolve differently or fail.
-- **`md schema about`** reads global `--code-block`. Covered by the “Which flags
-  fold into `--style`?” open question.
+- **`md schema about`** reads global `--code-block`; it keeps a local flag of
+  that name (see “Which flags fold into `--style`?”).
 
-### 10. Bare `md` with no arguments, and help
+### 10. No input, and help
 
-The owner requires exact render behavior for both spellings. The current
-root-only no-input help shortcut contradicts that requirement.
+> **Decided (2026-11-06). With no input on a terminal, `md` and `md render` both print
+> `md --help` to stderr and exit 1.** It is a failure, so stdout stays empty. A data
+> output returns its one failure envelope instead, with exit 1 and empty stderr.
 
-| Option | Pros | Cons |
-|---|---|---|
-| **A. Both forms use the existing render no-input behavior** | preserves the owner’s exact-alias rule; smallest change | bare `md` on a terminal no longer prints root help automatically |
-| **B. Both forms show render help when stdin is a terminal and no input was given** | exact parity with a friendlier empty invocation | changes the explicit command’s current failure behavior |
-| **C. Bare `md` shows root help, explicit `md render` fails** | preserves current behavior | requires the owner to amend the exact-alias decision |
-
-**Recommendation: A.** On a terminal, both forms report the same missing-input
-failure through the existing run-output contract. With redirected stdin,
-both consume it, including the same treatment of empty input. Explicit `-`
-means stdin in both forms. Shared options alone, such as `md -v`, do not
-restore the root-only help shortcut. No code path reads stdin just to decide
-which alias applies.
+With redirected stdin, both consume it, including the same treatment of empty input.
+Explicit `-` means stdin in both forms. Shared options alone, such as `md -v`, are still
+no input. No code path reads stdin just to decide which spelling applies.
 
 `md --help`, `md --version`, and root completion generation remain CLI
 actions. Root help lists commands, shared controls, and the `--style` entry,
 plus: “`md [INPUT] [OPTIONS]` is `md render [INPUT] [OPTIONS]`; see
 `md render --help`.” Explicit `md render --help` describes rendering. Both
-help forms omit per-key style aliases. Files named like commands require
+help forms omit per-key style setters. Files named like commands require
 `./render` or `-- render`; do not resolve an argument as a file before clap
 has determined its role.
 
@@ -834,21 +859,30 @@ has determined its role.
   definition with its existing placement rules.
 - Render options before a subcommand are a usage error (exit 2), including
   `--feature`.
-- `md render doc.md --style "{ 'max-width': 50, margin: 4 }"` sets a
+- `md render doc.md style="{ 'max-width': 50, margin: 4 }"` sets a
   50-cell maximum content width and four-cell horizontal/four-row vertical
   margins; it does not force short content to fill 50 cells. Available width
   still bounds the box according to the existing output-width contract.
-- `--style-margin 4` gives the same output as `--style "{ margin: 4 }"`.
-- A `--style` that sets one key keeps the document's other `style:` keys.
-- `md render --help` and `md --help` list `--style` and no `--style-*` flag.
-- Completing `md render --style-` offers the generated flags; completing
-  `md render --` does not.
-- Each removed flag exits 2 with a message naming its replacement, and
+- `style.margin=4` gives the same output as `style="{ margin: 4 }"`.
+- A setter or `--style` file that sets one key keeps the document's other `style:` keys.
+- `--style=style@style.yaml` applies that key's value, and each row of the `--style`
+  rules table has a test, in JSON, JSON5, YAML, and TOML where the format matters.
+- `page.margin-left` and its siblings are accepted, and `page.left-margin` warns as an
+  unknown key that suggests the new name.
+- `md render --help` and `md --help` list `--style` and no per-key style entry.
+- Completing `md render style.` offers style paths and `style.ul.alignment=`
+  offers its enum values, in each supported shell or with any shell limit
+  recorded; completing `md render --` offers no per-key flag.
+- Each removed flag exits 2 as an unknown argument, and
   completion does not offer it.
-- An unknown key or wrong value type in inline `--style` or an alias exits 2
-  and names the key path; content errors in a style file use the run-error
-  contract below.
-- `md --save` and `md --list-themes` behave as decided under
+- An undeclared key or wrong value type in a setter fails with the matching
+  `dm.schema.*` code and exit 1, names the key path, and renders nothing; the same key
+  under a `"<string>": unknown` schema succeeds with no warning. A style file follows the
+  `--style` rules.
+- A frontmatter key `style.magin` warns under `md render` and fails under `md compose`;
+  with `"<string>": unknown` declared, neither reports it.
+- `md list-themes` lists themes, and `md doc.md --save` and `md --list-themes` fail, as
+  decided under
   “Non-render behaviors on the root”.
 - `CliStyleClaims` and claim-derived override machinery are removed only
   after equivalent effective-style behavior is covered, or the author-approved
@@ -857,7 +891,7 @@ has determined its role.
   behave the same for both render spellings, as the author selects above.
 - Styles do not alter authored frontmatter or make rendering run cleanup;
   plain and data output retain their existing capability and stream contracts.
-- Inline invalid styles exit 2; style-file and stylesheet execution failures
+- Invalid style values, style-file failures, and stylesheet execution failures
   exit 1 with the existing structured failure result when data output is selected.
 - The migration retains valid command-local `--save`, `--theme`, and
   `--code-block` spellings. Completion never executes style preparation or
@@ -873,13 +907,13 @@ the current testing and CI input-discovery conventions; no new CI matrix or
 performance gate is required by this feature.
 
 - **Parity, generated** (`cli/tests/l1/render_alias_parity.rs`): iterate
-  `md render`'s arguments from the clap command (including the hidden
-  aliases), use representative values from the shared type information
+  `md render`'s arguments from the clap command, plus setters from the style
+  catalog, use representative values from the shared type information
   (plus explicit valid combinations for conflicts), and assert that `md …` and
   `md render …` parse to equal `RenderOptions`. A new render option is
   covered without editing the test’s option inventory. Assert effective
-  values as well as parsing: serde success alone cannot prove a dynamic
-  alias reached rendering. Help/version early exits are tested separately.
+  values as well as parsing: serde success alone cannot prove a setter reached
+  rendering. Help/version early exits are tested separately.
 - **Parity, end to end:** a styled fixture rendered through
   `md FILE --style …` and `md render FILE --style …` with
   `--output markdown-plus` gives identical bytes.
@@ -887,33 +921,34 @@ performance gate is required by this feature.
   render/output/request data, not `&Cli`. A source-scan guard is optional
   supplementary evidence, not the sole proof of isolation.
 - **Help:** `md --help` and `md render --help` contain `--style` and no
-  `--style-` line (extend `cli/tests/l1/help.rs`).
+  per-key style line (extend `cli/tests/l1/help.rs`).
 - **Completion:** in-process through `clap_complete::engine::complete`:
-  `--style-` yields `--style-margin` and `--style-max-width`; `--` yields
-  neither.
-- **Alias generation:** semantic schema/parser/typed-value agreement;
-  compound and union branches, booleans, strings, cleanup rules, open metadata,
-  required values, repeat semantics, `--flag=value`, and flag-name collisions.
-- **Merge:** frontmatter `page.max-width: 96` plus `--style "{ ml: 6 }"`
-  keeps `max-width` 96; `--style "{ margin: 2 }" --style-ml 6` gives left 6,
+  `style.` yields `style.page.`; `style.ul.` yields `style.ul.padding-left=`;
+  `style.ul.alignment=` yields its values; `--` yields no per-key flag. Each
+  shell's script is proven for completing after `=`, without taking focus.
+- **Setters:** classification (`./`, `--`, more than one input, a setter before a
+  subcommand, a value holding `=`, a suggestion for a misspelled prefix); semantic
+  schema/parser/typed-value agreement; compound and union branches, booleans,
+  strings, cleanup rules, open metadata, and repeat semantics.
+- **Merge:** frontmatter `page.max-width: 96` plus `style="{ ml: 6 }"`
+  keeps `max-width` 96; `style="{ margin: 2 }" style.ml=6` gives left 6,
   others 2. Also test document `ml: 6` overridden by CLI `margin: 2`,
-  later broad shorthand over earlier specific shorthand, reordered alias
-  flags, nested duplicate spellings, width-mode replacement, null absence,
-  explicit zero/false, and alignment broadcasts across source layers.
-- **Validation:** `--style "{ magin: 4 }"`, `--style "{ margin: "`, and
-  `--style-margin abc` each exit 2 with the key path or position. Parse every
+  later broad shorthand over earlier specific shorthand, reordered setters,
+  nested duplicate spellings, width-mode replacement, null absence,
+  explicit zero/false, and `style.alignment` leaving a document's `table.alignment` alone.
+- **Validation:** `style="{ magin: 4 }"`, `style="{ margin: "`, and
+  `style.margin=abc` each exit 1 with the matching `dm.schema.*` code and the key path. Parse every
   valid JSON5 example in this spec; test duplicate keys, wrong root types,
   invalid overridden layers, vertical-length limits, and forbidden width pairs.
-- **File form** (if local style files are approved under “May `--style` name a file?”): `--style ./dark.yaml` and
+- **File form:** `--style ./dark.yaml`, `--style style@dark.yaml`, and
   `--style '@dark.json5'` apply in a controlled magic-root context. Cover
-  each approved format, relative CSS paths from document/inline/file origins,
+  each format, offsets, relative CSS paths from document/inline/file origins,
   field-origin preservation across multiple files, stdin Markdown plus local
   style, malformed files, missing files, unsupported extensions, `--style -`,
   and remote style-file refusal without a network request. Check data-output
   failures for exit 1, exactly one stdout value, and empty stderr.
-- **Removed flags:** each `REMOVED_FLAGS` entry for this change exits 2 with
-  its replacement; command-local survivors, consumed flag-like values,
-  `--`, equals forms, and removed short aliases retain the specified behavior.
+- **Removed flags:** each removed flag and visible alias exits 2 as an unknown argument
+  on `md render`, and is not offered by completion; command-local survivors keep working.
 - **Existing layout tests** (`layout_flags.rs`, `layout_alignment.rs`,
   `layout_fill.rs`, and the L2 `level2_layout_dimensions.rs`,
   `level2_horizontal_rules.rs`, `level2_code_block_styling.rs`, and other L2
@@ -933,10 +968,12 @@ performance gate is required by this feature.
 - **`darkmatter/schemas/partials/style.yaml`:** update the embedded style
   schema, runtime descriptor/model, and parser together for accepted new keys;
   keep DMLS completion, hover, and validation passive and aligned.
-- **`darkmatter/docs/cli/render.md`:** state the alias rule; replace "Global
-  Flags Relevant to `render`" with `--style`, the precedence, the hidden
-  aliases (one sentence and a completion example), and the remaining render
-  flags.
+- **`darkmatter/docs/cli/render.md`:** the migration table for every removed flag;
+  state the alias rule; replace "Global
+  Flags Relevant to `render`" with `--style`, the precedence, style setters (with
+  a completion example), and the remaining render flags.
+- **`darkmatter/docs/cli/clean.md` and `.claude/skills/darkmatter/cleanup.md`:** remove
+  the `md FILE --save` shorthand.
 - **`darkmatter/docs/cli/index.md`:** the `md --help` sample and the usage
   line; the alias rule in the opening paragraph.
 - **`darkmatter/docs/topics/layouts-and-style.md`:** rewrite "CLI Overrides"
@@ -944,8 +981,8 @@ performance gate is required by this feature.
   frontmatter sections.
 - **`darkmatter/docs/rendering/style.md`, `rendering/mermaid.md`,
   `rendering/code-highlighting.md`:** replace old flag spellings.
-- **`darkmatter/docs/cli/policy.md`:** what `--deny style` means for
-  `--style` (the “Validation and error reporting” open question).
+- **`darkmatter/docs/cli/policy.md`:** `--deny style` makes a `--style` file's excluded
+  keys and a document's unknown `style:` keys fatal; setters are already errors.
 - **`darkmatter/cli/README.md`:** examples.
 - **`.claude/skills/darkmatter/cli.md`, `rendering.md`, `terminal.md`:** the
   `RenderOptions` and `CliStyleClaims` paragraphs.
