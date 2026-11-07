@@ -1,7 +1,7 @@
 ---
 total_phases: 10
 created: 2026-11-06
-phase: 6
+phase: 8
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -85,6 +85,33 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6:
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/path_candidates.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/completion_shells.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/l1/context_construction_guard.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/lib/src/markdown/compose/setters.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/darkmatter/cli.md
 ---
 
 # Dotted Property Paths Implementation Plan
@@ -184,15 +211,15 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 6: Completion Candidates
 
-- [ ] **Candidates**
+- [x] **Candidates**
   - Own `lib/src/markdown/schemas/completion.rs` additions. Implement rule 19, with in-process tests for every row of the spec's key, spelling, and value tables, ordering, deduplication by decoded path, a literal tag narrowing, a replaced baseline property, a separate `$schema` file, values containing spaces, quotes, `$`, backslashes, and `=`, and a dynamic-slot-shaped declaration offering nothing.
 
 ## Phase 7: Completion Adapter and Shells
 
-- [ ] **Adapter**
+- [x] **Adapter**
   - Own `cli/src/args/path_completion.rs`, `cli/src/args/completion.rs`, and the `add = ArgValueCompleter` lines in `cli/src/args/command.rs`. Implement rule 20, including words after the cursor being ignored, invalid earlier setters being ignored silently, and no stdin read.
 
-- [ ] **Shells**
+- [x] **Shells**
   - Own `cli/src/completion_shells.rs` and `cli/src/main.rs:68`. Implement rule 21.
   - Measure one release-build completion on a representative document and record it in the log. This is one sample, not a gate.
 

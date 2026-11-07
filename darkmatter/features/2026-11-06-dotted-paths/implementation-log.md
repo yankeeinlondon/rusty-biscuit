@@ -274,6 +274,127 @@ decisions_for_review:
         A repeated path keeps its first position with its last value, as the old
         map did. Nothing else depends on these choices; each is local to
         `setters.rs`.
+    - |-
+        Tab candidates read the schema through every layer, not through the function
+        the plan names. The plan says to use `for_path` below the root, but that reads
+        only the document's own schema, so `style.<Tab>` would offer nothing.
+        `path_candidates` calls `for_path_in` over `EffectiveSchema::property_shape`,
+        the same merged view `declared_shape` uses.
+        Alternative: extend `for_path` to merge the layers, which would also change
+        what the language server offers. No caller here needs that change.
+        To change it, edit `SchemaView` in `schemas/completion.rs`.
+    - |-
+        Additions to the candidate API the plan did not list. The plan's query has one
+        typed prefix; `PathPosition` also lets `md set` ask about its separate value
+        argument. The plan's four candidate kinds have no way to say "offer files", and
+        the function does no I/O, so `path_value_takes_files` tells the caller to add
+        them.
+        Alternatives: a fifth candidate kind for files, which would be a candidate with
+        no text to insert; or a second query type for values, which duplicates fields.
+        Either is a small change in `schemas/completion.rs` plus the Phase 7 adapter.
+    - |-
+        A candidate's `insert` is the whole word under the cursor, so a setter's value
+        reads `status=draft`. The spec shows `left center right` and says bash needs the
+        value alone. Most shells replace the whole word, so bash's own completer strips
+        the `key=` in Phase 7, rather than every other shell adding it.
+        Alternative: return the value alone and have the adapter add `key=` for other
+        shells. To change it, edit `lead` in `value_candidates`.
+    - |-
+        A path that could only fail when run offers nothing, including a declared object
+        whose present value is a scalar or `null`. So `author: text` offers `author=` but
+        not `author.`, and `items.9.` and `missing.0.` offer nothing. The spec's table
+        speaks only of types, and says validation is the judge; but `md set` and `md
+        compose` refuse these paths outright, so offering them leads straight to an error.
+        Alternative: offer by declared type alone. To change it, edit `node_spellings`
+        and `walk_path`.
+    - |-
+        An object offers both `author.` and `author=` at every level in a setter command,
+        and a container item offers both `items.0.` and `items.0=`. The spec's table says
+        this for objects, though its opening example lists only `author.` and `style.`,
+        and its array row can be read as `items.0=` being for scalars only. I followed the
+        table, since replacing a whole object or item is valid.
+        Alternative: offer only descent where children exist, which shortens the list but
+        hides a valid edit. To change it, edit `node_spellings`.
+    - |-
+        The value being replaced does not narrow its own choices. `md set doc.md block.kind
+        <Tab>` on a `kind: rust` block offers `rust` and `python`, though the spec says a
+        tag narrows the keys and values of its arm. Narrowing there would only ever offer
+        the value already set. Other keys of the block still narrow by that tag.
+        Alternative: narrow by every authored value, which makes a tag impossible to change
+        through Tab. To change it, drop `without_value` from `value_candidates`.
+    - |-
+        A value keeps its plain spelling unless the value parser would read it as something
+        else, and is then JSON-quoted: an enum member `null` is offered as `"null"`, `{a}`
+        as `"{a}"`. The check runs the real parser and binding on each candidate. With no
+        effective schema there is no declared type, so a numeric-looking member would be
+        quoted too. The spec requires the value to decode as intended without saying how.
+        Alternative: always quote, which is simple but puts quotes around every ordinary
+        word. To change it, edit `spell_value`.
+    - |-
+        The bash and zsh registration scripts are produced by asking `clap_complete`
+        for its built-in script and applying small text edits to it. The plan said the
+        scripts would be "adapted from" the built-ins, which reads as keeping a copy.
+        Editing keeps about ten lines instead of about sixty and picks up upstream
+        quoting of the program path. The trade-off is that an edit stops applying if an
+        upgrade rewords the script; `every_registration_edit_applies` fails when that
+        happens. A kept copy would never fail that way, but would drift from upstream
+        unseen. Choosing a copy would change only `completion_shells.rs`.
+    - |-
+        Bash's word shape after `=` differs from what the spec recorded. On bash 5,
+        `x=<Tab>` makes the current word `=` itself with an empty `$2`, and the built-in
+        script overwrites that word, which loses the `=`. The script now keeps it, and
+        `md` accepts both `x =` and the spec's `x = ""` as `x=`. Bash also splits at `:`
+        and at each further `=`, so the rejoin handles those too, which is more than the
+        plan's `key`, `=`, `value`. One ambiguity remains: from the words alone,
+        `x= y<Tab>` looks like `x=y`, so a value deliberately left empty joins the next
+        word. That only changes what an earlier setter holds during completion. Passing
+        `COMP_LINE` to `md` would remove the ambiguity, at the cost of a second source of
+        truth for the words; that change would stay inside `completion_shells.rs`.
+    - |-
+        `md` now shell-unquotes the words bash and zsh hand over, and escapes bash
+        replies with backslashes (`two\ words`). The plan said only that shell quoting
+        comes after path escaping. Without this, an enum member with a space or `$` would
+        be inserted as source text and arrive as several words, and a typed `a\\.b` would
+        be read with its shell escape still on it. Inside an open quote a reply is not
+        escaped, and readline closes the quote. Fish, elvish, and PowerShell keep their
+        built-ins, and fish offers nothing after an open quote because it passes the raw
+        token. Handling that would mean replacing fish's adapter too, which the plan asks
+        to avoid unless needed.
+    - |-
+        On bash 3.2, which macOS ships, a finished candidate carries its own trailing
+        space. `compopt` does not exist there, so `nospace` cannot be switched off per
+        reply, and without this every accepted value would need a typed space. The built-in
+        script has the signal (`_CLAP_COMPLETE_SPACE`) but ignores it. The space is
+        omitted inside an open quote. The alternative is to leave bash 3.2 with no spaces,
+        which only needs deleting that branch of `bash_reply`.
+    - |-
+        Completion honors `--state`, `--set`, and `--magic-root` from the words before
+        the cursor, as the spec lists, but not `--baseline-schema`, `--disable
+        baseline-schema`, or `--disable schema-triggers`. So after one of those flags, Tab
+        still reads the normal baseline and triggers. The candidates are advisory and
+        validation stays the judge, so the cost is a suggestion that may not apply. Adding
+        them means reading those flags in `CommandLine::read` and passing them to the
+        schema assembly, which is contained in `path_completion.rs` and
+        `commands/schema/validate.rs`.
+    - |-
+        `RequestSnapshot::from_process` now has a second production call site, in
+        `completion_request` in `cli/src/request.rs`, with a stated allow-list entry in
+        `context_construction_guard.rs`. The guard's rule was one read, in `main`.
+        `CompleteEnv` answers a Tab press and exits before `main` reaches that read, and
+        the plan asked for the snapshot to be built through `request.rs`. The alternative
+        is capturing the snapshot in `main` before `CompleteEnv` runs, which charges every
+        ordinary `md` run for a read only completion uses at that point, or passing it in
+        a global.
+    - |-
+        `md compose x=<Tab>` for a word whose key is not setter grammar, such as
+        `./foo=ba`, now completes Markdown files. It offered nothing before, because any
+        `=` suppressed files. This follows the plan's one-classification rule. `md schema
+        validate` keeps the older `complete_compose_args`, which suppresses files after any
+        `=`, because this phase does not own that command and it has its own grammar.
+    - |-
+        The L1 subprocess tests landed in Phase 7 in `cli/tests/l1/path_completion.rs`,
+        a file the plan gives to Phase 8. Phase 7 needed end-to-end proof of its wiring.
+        Phase 8 keeps ownership and extends the same file rather than starting another.
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -300,16 +421,19 @@ packages:
     - darkmatter-cli
     - simplified-schema
 message_to_agent: |-
-    For Phase 6: `compose::setters::classify_token` is the one setter grammar, and
-    `SetterPlan` settles overlaps. Completion's overlay should reuse both: applying
-    a plan with raw guesses is the first half of `setters::apply_setter_plan`, which
-    is `pub(crate)` and also binds, so split out the overlay step when you need it
-    rather than copying it. A `SetterPlan::new` error means an earlier setter on the
-    line is invalid, and completion must ignore that setter silently. `declared_shape`
-    needs a path that resolves, so give it the overlay's steps. `md compose` setters
-    now need a value's declared type per document; `cli/tests/l1/compose_setters.rs`
-    is the fixture pattern. `darkmatter/docs/cli/compose.md` still describes setters
-    merging into the `--set` map until Phase 9.
+    For Phase 8: `cli/tests/l1/path_completion.rs` already exists and is registered; extend
+    it rather than adding a file. Fixture trap: `CliProcessFixture::write_file` is relative to
+    the workspace, not to `cwd()`, and `md` runs in `cwd()`, so use that file's `write_in_cwd`.
+    A misplaced document does not fail loudly, because completion falls back to the baseline.
+    Still yours: the sentinel proof (a frontmatter command leaves no file, an interpolated value
+    is not evaluated), the no-read limit through `work_counters` and the L2 Tab round trips. The
+    remote `$schema` case has only a keys-and-baseline assertion so far, with no proof that no
+    request was made. Bash forms to assert: bash 5 sends `x`, `=` with the cursor on `=`, or `x`,
+    `=`, `ce`; bash 3.2 sends `x=ce` whole. To drive real Tabs without focus, use a private
+    detached tmux server (`tmux -L name new-session -d`), `env -i` with a fixed `PATH`, and type
+    a marker after Tab, because `capture-pane` trims trailing spaces. Bash 3.2 must be set up with
+    `eval "$(COMPLETE=bash md)"`; it cannot `source <(...)`. Results by hand on this Mac are in
+    the log under Phase 7. Elvish and PowerShell are not installed here, so record them unproven.
 source_files_during_phase_3:
     - darkmatter/lib/src/markdown/hash/path_edit.rs
     - darkmatter/lib/src/markdown/hash/mod.rs
@@ -366,6 +490,33 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_candidates.rs
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_7:
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/completion_shells.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/l1/context_construction_guard.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/lib/src/markdown/compose/setters.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/darkmatter/cli.md
 ---
 
 # Implementation Log for 2026-11-06-dotted-paths (10 phases)
@@ -952,3 +1103,233 @@ Rule 18 added `dm.setter.invalid` to `docs/cli/data-contracts.md` and
 `docs/errors/composition-problems.md`. `docs/cli/compose.md` belongs to Phase 9. Updated
 `.claude/skills/darkmatter/compose.md`. This phase names no spec frontmatter to set, and the spec
 is unchanged.
+
+## Phase 6
+
+Added the one neutral candidate function that Tab will read (rule 19). Nothing calls it from
+the CLI until Phase 7, so this phase changes no observable behavior of `md`.
+
+### What landed
+
+| Item | Where |
+|---|---|
+| `path_candidates`, `path_value_takes_files`, `PathQuery`, `PathCommand`, `PathPosition`, `PathCandidate`, `PathCandidateKind` | `darkmatter/lib/src/markdown/schemas/completion.rs` |
+| In-process tests of the public API | new `darkmatter/lib/tests/l1/path_candidates.rs`, declared in `tests/l1/main.rs` |
+
+The function is passive: it reads only its query, so it opens no file, evaluates nothing, and
+adds no ambient read for the context-construction and path-lookup guards to judge.
+
+### Findings
+
+- `effective_for` returns `Ok(None)` for a document with no `$schema` or trigger, so `effective:
+  None` is the ordinary case for such a document, not only a failure. The baseline answers
+  through `effective_property_shape`, whose base shape is definition-free.
+- The slot grammar from `2026-11-05-dynamic-schema-types` is not built: `enum({{ list() }})` fails
+  to resolve today, so a slot reaches completion as `None` and offers no value.
+  `a_dynamic_slot_offers_nothing` asks the same question once the schema resolves.
+- `for_path` reads only the document's layer. See `decisions_for_review`.
+
+### Requirement-to-test mapping
+
+All are L1, in-process through the public `path_candidates` (fidelity F1): the boundary is the
+crate's public result, and CLI wiring is Phase 7's and Phase 8's. Modules are under
+`darkmatter/lib/tests/l1/path_candidates.rs`.
+
+| Spec requirement | Tests |
+|---|---|
+| Keys per command and their order | `keys_per_command::compose_offers_schema_keys_with_required_first_then_keys_present`, `set_offers_schema_keys_with_required_first_then_keys_present`, `get_offers_keys_present_in_document_order_then_absent_schema_keys`, `rm_offers_only_keys_present_in_document_order`, `a_document_schema_still_sees_the_baseline`, `rm_ignores_declared_children_that_are_absent` |
+| Spelling: object, union with object arm | `spelling::an_object_in_a_setter_command_descends_and_assigns`, `an_existing_object_selects_and_descends_in_a_path_command`, `an_absent_object_only_descends_in_a_path_command`, `a_union_with_an_object_arm_descends_and_keeps_the_whole_value` |
+| Spelling: anything else, in `key=value` | `spelling::a_scalar_in_a_setter_command_assigns` |
+| Spelling: array | `spelling::an_array_descends_through_its_indexes_and_assigns_whole`, `a_container_item_descends_and_a_scalar_item_does_not`, `an_empty_or_absent_array_has_no_indexes_to_descend` |
+| Spelling: open object, pattern key | `spelling::an_open_object_invents_no_keys`, `a_pattern_key_is_never_offered` |
+| Help text | `spelling::a_description_is_the_help_text_and_only_keys_have_it` |
+| Path escaping, grammar per command | `spelling::a_literal_dot_is_escaped_and_found_through_its_escape`, `a_backslash_in_a_key_round_trips`, `the_typed_parent_is_kept_as_written`, `only_the_receiving_grammar_is_offered`, `a_word_that_is_not_a_setter_offers_nothing_after_its_equals`, `a_scalar_or_null_cannot_be_descended`, `a_path_that_could_only_fail_offers_nothing` |
+| Deduplication by decoded path, earlier setters | `deduplication::a_declared_and_present_key_appears_once_with_its_description`, `an_earlier_setter_is_not_offered_again_by_decoded_path`, `a_parent_whose_child_was_set_stays_available`, `a_whole_key_given_earlier_goes_but_its_children_stay` |
+| Values: enum, literal, suggest, boolean, union, open types | `values::enum_members_arrive_through_a_setter_and_through_set`, `a_value_is_marked_as_finished`, `a_literal_offers_its_value`, `suggestions_are_offered`, `a_boolean_offers_both`, `a_union_offers_each_arm_once_in_order`, `open_types_offer_nothing`, `a_value_below_an_unreachable_path_offers_nothing`, `a_nested_array_element_reads_its_own_type` |
+| Values: file | `values::a_file_type_asks_the_caller_for_files` |
+| Values with spaces, quotes, `$`, backslashes, `=`, read back through `SetterValue::parse` and `bind` | `value_spelling::a_space_stays_plain`, `a_dollar_stays_plain`, `a_backslash_stays_plain`, `an_equals_stays_plain`, `an_inner_quote_stays_plain`, `a_fully_quoted_member_is_quoted_again`, `words_the_parser_would_read_as_another_type_are_quoted`, `a_string_that_looks_numeric_binds_through_its_declared_type` |
+| Literal tag narrowing, including through an overlay | `narrowing::a_literal_tag_narrows_keys_to_its_arm`, `without_a_tag_every_arm_contributes`, `a_setter_applied_to_the_overlay_narrows_the_same_way`, `a_tag_narrows_a_siblings_values`, `the_tag_being_replaced_does_not_narrow_itself`, `a_root_union_narrows_too` |
+| Replaced baseline property, never unioned | `schema_sources::a_replaced_baseline_property_loses_the_baseline_declaration` |
+| Separate `$schema` file, recursive types | `schema_sources::a_separate_schema_file_supplies_keys_values_and_recursive_types` |
+| Baseline fallback, document keys supplement | `schema_sources::with_no_effective_schema_the_baseline_answers`, `with_no_effective_schema_document_keys_still_supplement`, `value_spelling::with_no_effective_schema_the_baseline_answers_for_values` |
+| Dynamic slot, undeclared child | `schema_sources::a_dynamic_slot_offers_nothing`, `a_child_the_schema_does_not_declare_offers_no_values` |
+
+Not covered here, by the plan's split: shell word shapes, the overlay, no-evaluation and no-read
+proofs, and the real `md` path. These are Phases 7 and 8. A missing-definition reference cannot be
+built through the public schema API; `alternatives_for_def_in` already documents and tests it.
+
+### Input Robustness Matrix
+
+Not applicable: this phase adds no reader of a file format or configuration. The value parser is
+unchanged, and the spelling tests only call it. Code-smell grep over the new code: the
+`unwrap_or_else` in `intended_value` keeps a label as text when it is not JSON, which only ever
+reads schema-authored scalars.
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping the gates. It reported
+`packages: [darkmatter, test-toolkit, darkmatter-cli]`, `change_class: package`.
+
+| Gate | Result |
+|---|---|
+| `just lint` in `darkmatter/` | passed, including the Zed WASM check |
+| `just test` in `darkmatter/` | exit 0: 14210 passed, 10 skipped by the recipe's selection; none slow |
+| `just check-tier-coverage darkmatter` (repo root) | exit 0; stranded 0 |
+
+No source changed after these runs; only the skill, this log, and the plan did.
+
+### Dependent packages
+
+- `claudine` and `claudine-cli`: `cargo check --all-targets` passed. The change only adds to the API,
+  so no `claudine` test exercises it.
+- `test-toolkit`, which the scope check selected: `just test test-toolkit`, 477 passed, 4 skipped,
+  with 4 slow tests in `archive_path_guard` and the `kache_*` contracts, the largest 8.174 s. None
+  calls this phase's code.
+
+### Cross-OS check
+
+Not run. The code has no OS-specific behavior: it reads no paths, and `\` is key syntax on every OS.
+Other operating systems are unexecuted and run under scheduled CI.
+
+### Docs, skills, and spec
+
+Nothing a user can see changed, so `docs/` waits for Phase 9. Added a note to
+`.claude/skills/darkmatter/schema.md`. This phase names no spec frontmatter to set, and the spec is
+unchanged.
+
+## Phase 7
+
+Wired the candidates to the shell: `md compose`, `get`, `set`, and `rm` now complete property
+paths and values from the document on the line (rules 20 and 21).
+
+### What landed
+
+| Item | Where |
+|---|---|
+| Value completers, reading the line through the command's own clap declarations | new `darkmatter/cli/src/args/path_completion.rs` |
+| `recover_words`, the bash and zsh adapters, `SHELLS` | new `darkmatter/cli/src/completion_shells.rs` |
+| `completion_overlay`, plus `settle_overlaps`, `plan_setter`, and `apply_guess` split out of `SetterPlan::new` and `apply_setter_plan` | `darkmatter/lib/src/markdown/compose/setters.rs` |
+| `document_schemas`, the assembly `md set` used, now shared | `darkmatter/cli/src/commands/schema/validate.rs`, called from `commands/frontmatter.rs` |
+| `complete_any_files`, ordinary files for a `file` value | `darkmatter/cli/src/args/completion.rs` |
+| `completion_request`, skipping a `--magic-root` that does not exist | `darkmatter/cli/src/request.rs` |
+
+`CommandLine::read` walks the words through `Cli::command()`, so a flag's value (`--output json`)
+is never taken for the input document. The earlier `SetterPlan` and `apply_setter_plan` behavior
+is unchanged: the same helpers run, and the existing `setters` tests and `compose_setters` suites
+pass untouched.
+
+### Findings
+
+- On bash 5, `x=<Tab>` gives `COMP_WORDS` ending `x`, `=`, with `COMP_CWORD` on `=` and `$2` empty.
+  The built-in script's `words[COMP_CWORD]="$2"` erases the `=`. Bash 3.2 keeps `x=ce` as one word
+  and still replaces only what follows the `=`. `$2` keeps backslashes but drops an opening quote.
+  All observed by pressing Tab in `/bin/bash` 3.2.57 and Homebrew bash 5.3.20.
+- `CompleteEnv` removes the `COMPLETE` variable before any completer runs, so a completer cannot
+  read which shell is active. The adapter records it in `WORD_FORM` before calling the engine.
+- A schema file that fails to parse gives no diagnostic and leaves the document's keys and the
+  baseline, as the spec requires. The first probe fixture did this by accident.
+
+### Per-shell results (real Tab, macOS, 2026-11-06)
+
+Run by hand in a private detached tmux server with the debug build, with a marker typed after Tab
+to reveal any space. This is not yet an automated test; the L2 version is Phase 8's.
+
+| Typed, then Tab | bash 3.2.57 | bash 5.3.20 | zsh | fish |
+|---|---|---|---|---|
+| `md compose doc.md style.page.al` | `...alignment=`, no space | same | same | same |
+| `md compose doc.md style.bl` (Tab twice) | `style.block-quote`, no space | same | same | same |
+| `md compose doc.md style.page.alignment=ce` | `...=center `, one space | same | same | same |
+| `md get doc.md author.` | `author.name ` | same | same | same |
+| `md set doc.md style.page.alignment ce` | `center ` | same | same | same |
+| `md compose schemaed.md mode=two` | `mode=two\ words ` | same | same | same |
+| `md compose schemaed.md inc=note` | `inc=notes.txt ` | same | same | same |
+| `md compose schemaed.md mode="pl` | `mode="plain"` | `mode="plain" ` | `mode=plain ` | **nothing offered** |
+
+Elvish and PowerShell are not installed on this host: unproven beyond their word shape, and
+PowerShell's real behavior needs native Windows. Elvish's built-in has no way to suppress a space,
+so `style.` likely takes one there; Phase 8 should confirm where it can and Phase 9 document it.
+
+### Release measurement
+
+One sample, release build, this host: about 40 ms for `md compose schemaed.md <Tab>` outside any
+repository (a document with a separate `$schema` file, measured 0.04 s real on repeat runs), and
+about 80 ms for `md compose README.md <Tab>` in `darkmatter/` inside this monorepo, where
+repository discovery and trigger discovery run. Not a gate.
+
+### Requirement-to-test mapping
+
+The boundary is the shell's words to `md`'s printed candidates, so the wiring is L1 subprocess
+(fidelity F2) through `COMPLETE=<shell> md -- ...`, in
+`darkmatter/cli/tests/l1/path_completion.rs`; pure logic is unit-tested beside it.
+
+| Requirement | Tests |
+|---|---|
+| Keys and order, one level at a time | `compose_offers_schema_keys_document_keys_and_files`, `compose_walks_the_schema_one_level_at_a_time`, `get_set_and_rm_offer_their_own_keys`, `set_offers_values_as_its_own_argument` |
+| Finding the input with rule 13 | `the_input_may_come_after_setters_and_flag_values_are_skipped`, `a_word_that_is_a_path_with_equals_completes_files`, `no_input_offers_only_the_baseline_and_files`; unit `the_compose_input_can_be_anywhere_on_the_line`, `flag_values_are_not_positionals`, `an_inline_flag_value_consumes_no_word`, `words_after_the_escape_are_positionals`, `a_word_naming_a_subcommand_is_only_special_once`, `a_dangling_flag_is_not_an_error` |
+| Words after the cursor ignored | `words_after_the_cursor_are_ignored`; unit `words_after_the_cursor_stay_out_of_the_earlier_words` |
+| Earlier setters: not offered again, narrow, select a schema | `paths_already_given_are_not_offered_again`, `earlier_setters_and_overrides_choose_the_schema_the_keys_come_from`, `an_earlier_setter_selects_a_trigger_schema`, `a_document_schema_supplies_keys_and_values` |
+| Invalid earlier setters dropped one at a time | `invalid_earlier_setters_are_ignored_one_at_a_time`; unit `an_overlay_drops_only_the_setter_composition_would_refuse`, `an_inadmissible_repeat_keeps_the_earlier_valid_value`, `an_overlay_applies_the_plan_in_its_settled_order`, `an_overlay_layers_defaults_under_and_overrides_over_the_document` |
+| Every failure means fewer candidates and no output | `a_broken_document_or_schema_leaves_the_baseline_without_a_word` (broken YAML, missing and invalid `$schema`, remote `$schema`, absent document, absent magic root, bad `--set`); every test's helper asserts empty stderr |
+| No stdin read | `stdin_is_never_read`; unit `stdin_is_never_opened` |
+| `--magic-root` from the line | `a_magic_root_on_the_line_finds_the_document`; unit `magic_roots_are_read_before_the_subcommand_only` |
+| `file` values take ordinary files | `a_file_value_offers_ordinary_files`; unit `any_file_completion_admits_what_markdown_completion_skips`, `the_stdin_marker_is_offered_only_for_input_documents` |
+| Bash word shapes and last-piece replies | `bash_gets_only_the_last_piece_in_every_word_shape`, `bash_escapes_a_value_so_it_arrives_as_one_word`; unit `bash_pieces_rejoin_mid_value`, `the_cursor_right_after_equals_means_an_empty_value`, `bash_3_passes_a_whole_word_through`, `earlier_setters_rejoin_and_the_index_follows`, `every_break_in_a_value_rejoins`, `the_program_name_is_never_joined`, `a_reply_replaces_only_the_last_piece`, `a_reply_is_escaped_unless_a_quote_is_open`, `a_finished_reply_carries_its_own_space_when_bash_cannot_add_one`, `raw_words_lose_their_shell_quoting` |
+| Other shells keep the whole word | `the_shells_that_pass_a_whole_word_get_a_whole_word`, `a_lone_equals_word_is_only_rejoined_for_bash`; unit `other_shells_keep_a_lone_equals_word`, `no_index_means_the_last_word`, `a_missing_current_word_is_empty` |
+| Registration scripts | `registration_scripts_print_for_every_shell`; unit `every_registration_edit_applies`, `the_shells_keep_their_names` |
+
+Not covered yet, by the plan's split: the sentinel proof of no evaluation, proof of no network
+request for a remote `$schema` (only its candidates are asserted), the read limit through
+`work_counters`, and automated real-Tab tests. These are Phase 8's.
+
+### Input Robustness Matrix
+
+The value parser is unchanged, so its matrix still stands. The new readers are advisory, and this
+is the one stated exception: every invalid shape gives fewer candidates and no output, rather than
+a located error. A `--state` or `--set` that is not a JSON5 object is ignored
+(`an_object_argument_ignores_anything_else`).
+
+Code-smell grep over the changed code, all intentional because completion must stay silent:
+`.ok()` on the request, `open_argument`, `Markdown::try_from`, `document_context`, `document_schemas`,
+`effective_for`, and the `--state`/`--set` parse in `path_completion.rs`; `filter_map(... .ok())` on
+earlier path arguments, where an incomplete word is not a path; `.is_ok()` filters in
+`SetterPlan::tolerant` and `completion_overlay`, which drop a setter composition would refuse. No
+`unwrap_or_default` or `#[serde(default)]` was added. `SetterPlan::new` still fails on all of them.
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping the gates. It reported
+`packages: [darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package`.
+
+| Gate | Result |
+|---|---|
+| `just lint` in `darkmatter/` | exit 0, including the Zed WASM check |
+| `just test` in `darkmatter/` | exit 0: 14264 passed, 10 skipped by the recipe's selection; none slow |
+| `just check-tier-coverage darkmatter` (repo root) | exit 0; stranded 0 |
+
+The first full `just test` stopped on three of this phase's own unit tests, which built their
+document with `Markdown::new`, which takes body text and parses no frontmatter. Each was rerun
+alone, the tests were corrected to `Markdown::from`, and the full run then passed. No
+load-sensitive or pre-existing failure occurred. No source changed after these runs; only the
+skill, this log, and the plan did.
+
+### Dependent packages
+
+- `claudine` and `claudine-cli`: `cargo check --all-targets` passed. The public API only gained
+  items, and `apply_setter_plan` keeps its behavior.
+- `darkmatter-lsp` and `zed-dmls-cli`: compiled and linted by `just lint`.
+- `test-toolkit`, which the scope check selected: not run. It has more than 200 tests (477 at
+  Phase 6) and none uses a symbol this phase changed; it does not depend on `completion_shells`,
+  `path_completion`, or the overlay.
+
+### Cross-OS check
+
+Run, because this phase handles file paths and process arguments.
+`just cross-check darkmatter-cli --os windows`: 2050 passed, 76 skipped, exit 0, on the working tree
+patched onto the rig, so it publishes no CI observation. Linux and WSL2 were not run; they run under
+scheduled CI. PowerShell's real Tab behavior is unexecuted.
+
+### Docs, skills, and spec
+
+`docs/` waits for Phase 9, as the plan assigns, including the per-shell limits above. Added
+completion notes to `.claude/skills/darkmatter/cli.md`. This phase names no spec frontmatter to set,
+and the spec is unchanged. The departures from the plan are in `decisions_for_review`.
