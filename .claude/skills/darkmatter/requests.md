@@ -89,12 +89,28 @@ read-set sink, shared the same way as the remote-fetch runtime: an
 makes its own, so separate library compositions never share. A standalone
 `ResolutionContext::new` is isolated. `md compose`, `md graph`, and
 `md validate refs` attach one before their first `prepare_request`, so the
-reference check, pre-flight, lifecycle, and composition share it.
+reference check, pre-flight, lifecycle, and composition share it. Hosts read
+the attached one with `ComposeOptions::data_runtime_handle()`; the
+crate-internal `data_runtime()` returns it or a fresh unshared one, like
+`remote_fetch_runtime()`. `DataRuntime` itself exposes only `new`,
+`read_set`, `stats`, and `same_instance`.
+
+- **Memo shape** (`runtime.rs`): contracts are prepared once per document
+  context and written text; a parsed source is keyed by identity alone
+  (canonical path or normalized URL), and a bound result by source plus the
+  contract key (the unsorted `to_json_schema_with_definitions` serialization,
+  the bare declaration, and the sorted import identities). So two contracts
+  over one file read it once and bind twice. Entries are
+  `Arc<OnceLock<Result<…, Arc<DataError>>>>`, filled without holding the map
+  lock; a memoized error gets the current call site only at projection. The
+  memo holds in every `CacheAccessMode`. `RemoteNotEnabled` (the reference
+  check has no remote permission) is never stored.
 
 - Reads are recorded at the operation boundary, never in `resolve_arg`:
   `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`
   (probed candidates on a miss), contract imports via
-  `DataRuntime::prepare_contract`, and `validate_schema_fn`'s schema files
+  `DataRuntime::prepare_contract` (a failed contract records the host files its
+  `SchemaError` names, `runtime.rs::schema_error_files`), and `validate_schema_fn`'s schema files
   (`PreparationSummary::dependencies`, imports included; embedded schemas add
   none). Record after resolution, before reading, so a failed read stays in the
   set.
@@ -102,8 +118,12 @@ reference check, pre-flight, lifecycle, and composition share it.
   (`shell_expansion::execute_prepared_outcome`'s run closure,
   `MdShellRunner::execute`), never for a cached or skipped one, and after every
   lifecycle event whose stack is non-empty (`lifecycle::md_host::evaluate`, so
-  an `initialize` side effect is never served a bootstrap read). It never
-  clears the read set.
+  an `initialize` side effect is never served a bootstrap read; the stack's
+  steps are not inspected, so an all-`info` or guarded-off stack empties it
+  too). It swaps in empty source, bind, and contract maps (a regenerated
+  imported schema must not be served stale); a generation counter keeps a
+  load already in flight from filling the new maps. It never clears the read
+  set.
 - A body expression the shell stage fills in advance (a later top-level
   `::shell` line, plain `::map` body text) is evaluated before the earlier
   command runs, so it does not see that command's invalidation; an expression

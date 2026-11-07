@@ -53,7 +53,8 @@ $schema:
   (`SchemaOptions::judge`, `TypeDefinitionOptions::judge`): reference carriers
   and arms are skipped, named-type alternatives pass `forms` and `container`
   provisionally.
-- `container` judges with `simplified::narrowing::container_admission`
+- `container` is `Constraint::Container` in the grammar and serializer; it
+  judges with `simplified::narrowing::container_admission`
   (`Container` / `Provisional` / `NotContainer`); `denotes_container` is true
   only for `Container`. Both walk `query::flattened_alternatives`, drop `null`
   arms, and need one container arm. A string `"[string, number]"` is a

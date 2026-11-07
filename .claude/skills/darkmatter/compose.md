@@ -818,6 +818,22 @@ proven-equivalent `+` rewrite. `is_whole_value_span` is the shared syntactic
 classifier, and the caller decides whether its surface is single-pass. See
 `darkmatter/docs/inline/interpolation.md#braces-inside-string-literals`.
 
+### Where an expression ends
+
+One rule, owned by `simplified_schema::expression::scan`: a `{{` expression
+ends at the quote- and brace-balanced `}}`, but only when that span parses
+and the old first-unnested-`}}` span does not; otherwise the old span (kept
+as a private fallback) wins, so no span that parsed before changes. That is
+what lets `{{ load_data(f, "{a: {b: string}}") }}` work. Editors use
+`expression_region_at(text, offset, excluded)` (same lexical rules, no parse
+gate, open regions allowed). Every other end detector routes through these:
+DMLS `overlay` `completion_partial` and the `dsl`/`frontmatter` providers,
+`mask_interpolations`, `protect_interpolation_expressions`, and Claudine's
+`whole_value_span` (old rule first, the scanner as fallback) and
+`SpanScanner` (scanner ranges are opaque). Literal (`{{{ … }}}`) and token
+openers keep their old closing rule. Never add a private `rfind("{{")` or depth scan. See
+the `simplified-schema` skill's "One `{{ }}` closing rule".
+
 ### Escaping an Opener
 
 `\{{` (an odd run of backslashes before `{{`) and `\{\{` are not spans in any

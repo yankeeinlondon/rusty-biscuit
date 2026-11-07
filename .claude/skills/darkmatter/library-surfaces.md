@@ -52,8 +52,10 @@ behavior.
   `expression` category in `claudine/schemas/{action,lifecycle}.yaml`, a row
   in `tests/l1/function_binding_registry.rs`, an alias row in
   `function_catalog_parity.rs`, the recursive-schema goldens
-  (`DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`), and DMLS's
-  `a3_completions.json` (`DMLS_UPDATE_GOLDEN=1`).
+  (`DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`), DMLS's
+  `a3_completions.json` (`DMLS_UPDATE_GOLDEN=1`), and Claudine's insta
+  snapshot `claudine/cli/tests/l1/snapshots/l1__context_command__context_expressions_function_order_snapshot.snap`
+  (only the Claudine suite fails; Darkmatter's `just test` stays green).
 - A binding whose failed argument binding means a domain error registers
   `FunctionBinding::refining_binding_errors` (`load_data`: a scalar `as`
   is `dm.data.not_a_container`, not a type error); a passive per-function

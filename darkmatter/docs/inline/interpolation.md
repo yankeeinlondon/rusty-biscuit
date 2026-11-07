@@ -440,6 +440,33 @@ Handlebars writes a variable as \{{ name }} and a partial as \{\{> header }}.
 - Compose **preserves every backslash**. The Markdown renderer resolves the escape under CommonMark's backslash-before-punctuation rule, so `\{{` displays as `{{`.
 - Parity is counted on the text the scanner receives, after its owning format has decoded it. Inside a double-quoted YAML scalar, write `"\\{{ x }}"` so the decoded value holds one backslash.
 
+## Where an Expression Ends
+
+An expression opens at `{{` and ends at the `}}` that closes it. A `}}`
+inside a quoted string, or inside a nested `{ … }`, does not close it:
+
+```md
+{{ "}}" }}                                  the text }}
+{{ {a: {b: 1}} }}                           the object {a: {b: 1}}
+{{ load_data(f, "{ a: { b: string }}") }}   one call
+```
+
+Strings use the expression lexer's rules: single or double quotes, `\`
+escapes the next character (so `"a\"}}"` is one string), and a string may
+span lines.
+
+This longer reading is used only when its text parses and the reading that
+ends at the first `}}` does not. Any span that parsed under the
+first-`}}` rule therefore keeps its meaning. That matters in prose, where an
+apostrophe would otherwise open a "string" that swallows later expressions:
+`{{ don't }} it's fine {{ x }}` still finds `don't` and `x`. An expression
+that has a real syntax error and a `}}` inside a string still ends at that
+`}}`, so its error describes the shorter text.
+
+`{{{ … }}}` is unaffected: it is still an
+[interpolation literal](#interpolation-literals) that closes at the first
+`}}}`, even inside quotes.
+
 ## Braces Inside String Literals
 
 A quoted string literal inside an expression is text. The lexer copies it verbatim, so `{{ "in {{ area }}" }}` does not contain a nested expression at parse time. Whether those braces are ever interpolated depends on the surface:

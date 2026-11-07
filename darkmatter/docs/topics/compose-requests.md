@@ -190,6 +190,74 @@ match markdown.compose_with_warnings(&request) {
 `md compose --output json` uses it to list every diagnostic of a
 failed run (see [Data contracts](../cli/data-contracts.md)).
 
+## One data runtime per command
+
+A command often runs several passes over one document: `md compose` runs a
+reference check, a pre-flight walk, lifecycle events, and composition. A
+**data runtime** (`DataRuntime`) lets those passes share two things:
+
+- the [`load_data` memo](./caching.md#the-load_data-memo), so a data file
+  is read once for the whole command rather than once per pass;
+- the **read set**, the files and URLs the command's expressions read.
+
+The runtime is shared the same way as the remote-fetch runtime: it is held
+on `ComposeOptions`, and every request, pass, and expression context built
+from a clone of those options shares it. Attach one before building the
+first request:
+
+```rust,ignore
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, DataRuntime};
+
+let runtime = DataRuntime::new();
+let options = ComposeOptions::new().with_data_runtime(runtime.clone());
+let check = ComposeRequest::prepare(options.clone(), &snapshot)?;
+let request = ComposeRequest::prepare(options, &snapshot)?;
+// ... run the check, then compose with `request` ...
+assert_eq!(request.read_set(), runtime.read_set());
+```
+
+`with_shared_data_runtime()` attaches a fresh runtime without keeping a
+handle. `md compose`, `md graph`, and `md validate refs` each attach one, so
+their reference check, pre-flight, lifecycle expressions, and composition
+read through one memo. A root composition run from a library with none
+attached builds its own for that run, so two separate compositions never
+share a memo or a read set.
+
+### Reading the read set
+
+The read set is available in three places:
+
+| Where | When |
+| --- | --- |
+| `ComposeRequest::read_set()` | at any time; empty when no runtime is attached |
+| `ComposeReport::read_set` | after a successful composition |
+| `ComposeFailure::read_set` | after a failed one (`compose_with_warnings`) |
+
+It is a sorted, deduplicated `Vec<String>`. Local files are canonical paths
+written as portable absolute text, and URLs are normalized the way the remote
+runtime normalizes them, with their query kept. It contains:
+
+- every file or URL a read-side expression function resolved: `load_data`,
+  `frontmatter`, `try_frontmatter`, `markdown_title`, `markdown_body_empty`,
+  and `validate_schema`'s document;
+- for `file_exists`, the file it found or, when it found none, every
+  candidate path it probed;
+- the schema files a `load_data` contract imports, and the schema files
+  `validate_schema` reads, with their transitive imports (an embedded schema
+  adds none).
+
+An entry is recorded when the reference resolves, before anything is read.
+An unreadable or malformed file therefore stays in the set, and so does a
+URL whose host policy denied the fetch. A reference that resolves to no file
+(a missing `load_data` or `frontmatter` file) has no concrete path and adds
+nothing; only `file_exists` records the candidates it probed. Reads in the reference check
+count, and emptying the memo after a command never removes an entry, so a
+run that fails in the reference check still reports the file it failed on.
+The set lists what expressions read, not every file a composition touches:
+transcluded files and link targets are not in it.
+`md compose --output json` prints it as
+[`read_set`](../cli/data-contracts.md#read-set).
+
 ## When a request cannot be built
 
 The builder returns `ContextBuildError` instead of letting a bad context fail

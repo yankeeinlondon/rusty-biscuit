@@ -202,10 +202,11 @@ record this output prints.
 | `severity` | `"error"`, `"warning"`, or `"info"` |
 | `message` | the problem in words |
 | `source` | where the problem is, as below, or `null` when no file is known |
-| `expected_type` | for a call argument, the parameter's declared type; otherwise `null` |
-| `actual_type` | for a call argument, the argument's type; otherwise `null` |
+| `expected_type` | for a call argument, the parameter's declared type; for a [contract mismatch](#data-errors), the type the offending value should have had; otherwise `null` |
+| `actual_type` | for a call argument, the argument's type; for a contract mismatch, the kind of value found; otherwise `null` |
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
 | `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
+| `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
 
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`
@@ -234,8 +235,11 @@ A reference problem also carries what the [reference report](./validate.md#the-r
 shows in its rows, as separate fields. So does an expression that failed because
 the file a read-side function names could not be read, such as
 `frontmatter("missing.md")`: its `construct` is the function, as in
-`"frontmatter()"`, and its `reference` is the argument as written. Other
-diagnostics omit these fields.
+`"frontmatter()"`, and its `reference` is the argument as written. A remote
+fetch that fails after its host was allowed (the request fails, or the response
+is not UTF-8 text) has none of these fields; its `message` says what went
+wrong. Other diagnostics omit these fields. The cases `load_data` meets are
+listed under [Data errors](#data-errors).
 
 | Field | Value |
 |---|---|
@@ -244,34 +248,6 @@ diagnostics omit these fields.
 | `reference` | the reference as written |
 | `failure` | the [file-reference failure class](../errors/file-reference-failures.md), such as `"no-match"`, when the reference failed to resolve |
 | `included_via` | the transclusion trail, outermost first, as `{ "file", "line" }` steps; each `line` is the authored line of the `::file` or `::toc-linking` directive |
-
-### Data location
-
-A problem inside a file `load_data` read also says where in that file it is.
-`source` still points at the `load_data` call in the document; `data_location`
-points into the data. It is present only on `dm.data.malformed` and
-`dm.data.contract_mismatch` records, and absent (not `null`) on every other
-diagnostic.
-
-```json
-{ "code": "dm.data.contract_mismatch", "severity": "error",
-  "message": "…",
-  "source": { "file": "/work/notes.md", "line": 4, "column": 3, "inserted": false },
-  "expected_type": "number", "actual_type": "string",
-  "span": { "start": 31, "end": 70 }, "iteration_path": [],
-  "data_location": { "file": "/work/ports.json", "pointer": "/1", "line": 1, "column": 5 } }
-```
-
-| `data_location` field | Value |
-|---|---|
-| `file` | the data file's resolved path, or the URL it was fetched from |
-| `pointer` | the [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) of the offending value, such as `/1`; always present on a contract mismatch, and absent on a syntax error unless the parser can name the value |
-| `line`, `column` | one-based; the column counts characters. Absent when the position cannot be proven, as for a YAML file that uses an alias or a flow collection spread over several lines |
-| `byte_offset` | for a local file that is not valid UTF-8, the zero-based offset of the first invalid byte, with no `line` or `column` |
-
-A contract mismatch lists up to 20 violating values, one record each, in the
-order they appear in the file; one more record of the same code, with no
-`data_location`, says how many were left out.
 
 ## Which diagnostics, in which order
 
@@ -354,7 +330,7 @@ classified by what failed:
 | `dm.expression.parse_failure` | an expression does not parse |
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
-| `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function |
+| `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function; see [Data errors](#data-errors) |
 | `dm.directive.parse_failure` | a `::` directive does not parse |
 | `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener or the failing callback; a static defect is reported once, with `iteration_path: []` |
 | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
@@ -458,6 +434,252 @@ file, so its `source` is `null`:
 `md schema validate --output json`, which reports several files, puts a
 trigger warning that files share in the `warnings` of the first file that
 discovers it, once per invocation, and not in the later files' records.
+
+## Data errors
+
+[`load_data(file, as)`](../functions/load-data.md) reads a data file and checks
+it against the contract `as`. When the call fails, its diagnostic tells a script
+which part failed: the contract, the data, or the file itself. This section lists
+every case, what each record carries, and how many records one failure produces.
+Every case is an error. None is a warning, so `--allow` and `--deny` do not
+apply to them.
+
+```mermaid
+flowchart TD
+    C["load_data(file, as)"] --> K{"is as a container<br/>contract?"}
+    K -->|no| KE["contract errors"]
+    K -->|yes| F{"can the file be found,<br/>read, or fetched?"}
+    F -->|no| FE["dm.expression.evaluation_failure<br/>with reference fields"]
+    F -->|yes| P{"supported format,<br/>and does it parse?"}
+    P -->|no| PE["dm.data.unsupported_format<br/>dm.data.malformed"]
+    P -->|yes| M{"does the data<br/>fit as?"}
+    M -->|no| ME["dm.data.contract_mismatch,<br/>one record per violation"]
+    M -->|yes| V["the value"]
+```
+
+| Code | What triggers it | `data_location` |
+|---|---|---|
+| `dm.data.not_a_container` | `as` does not describe a [container](../topics/schemas/definition.md#container-types): a scalar such as `"string"`, `"unknown"` or `"null"` alone, a union with a scalar arm, or a named import that resolves to a scalar | no |
+| `dm.data.this_import_rejected` | `as` names a type of the calling document (`Os@this`, or a bare name such as `Os`). An inline contract has no types of its own, so import the type from a file (`Os@./types.yaml`). A misspelled type keyword reads as a bare name: `"strng[]"` fails here | no |
+| `dm.data.row_shape_conflict` | the file is CSV or TSV and `as` cannot choose one row shape: one arm reads rows as objects and another as lists, or an element is not a row | no |
+| `dm.data.unsupported_format` | the file's extension names none of the [supported formats](../topics/loading-data.md#formats) (`.txt`, `.md`, no extension) | no |
+| `dm.data.malformed` | the content does not parse under its format's rules: invalid syntax, trailing text, an empty JSON or JSON5 file, a number the format cannot hold exactly, several YAML documents, a YAML duplicate key, non-string key, or tag, a TOML duplicate key, a CSV or TSV quote error or ragged row, or a local file that is not valid UTF-8 | yes |
+| `dm.data.contract_mismatch` | the data parsed but does not fit `as` | yes, on each record but the overflow record |
+
+### Contract errors
+
+A contract problem is reported in one of two places, depending on whether `as` is
+written in the call or computed:
+
+- **A literal `as`** is judged by the call check before anything runs, so no file
+  is read and no `::shell` command runs. The record is located at the `as`
+  argument, and `expected_type` and `actual_type` name the parameter and the
+  argument, as for any [rejected call](#which-diagnostics-in-which-order).
+- **A computed `as`**, such as a frontmatter value, is judged when the call runs.
+  The record is located at the expression, with `null` types.
+
+`dm.data.row_shape_conflict` needs the format as well, so it is found before
+anything runs only when `file` is a literal too. `dm.data.unsupported_format`
+is always found when the call runs.
+
+```json
+{ "code": "dm.data.not_a_container",
+  "message": "load_data(): the contract `string` does not describe a container (an array, tuple, object, or dictionary)",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 27, "inserted": false },
+  "expected_type": "type-definition(container)", "actual_type": "literal \"string\"" }
+```
+
+Two contract problems keep a general code:
+
+- `as` text that is not type syntax at all, such as `"[string, number]"` or
+  `"string[("`, is `dm.expression.incompatible_call` at the `as` argument when it
+  is a literal, and `dm.expression.evaluation_failure` when it is computed.
+- A contract whose named type cannot be resolved (the import file exists but
+  does not export the name, or is not a schema document) is
+  `dm.expression.evaluation_failure`, located at the expression, with no
+  `data_location` and no reference fields. A missing import file is a
+  [file error](#file-errors) that names the import.
+
+```json
+{ "code": "dm.expression.evaluation_failure",
+  "message": "interpolation of `load_data(\"os.yaml\", \"Nope@./types.yaml\")` failed: load_data(): the contract `Nope@./types.yaml` is invalid: as: unknown named type `Nope` in `/work/types.yaml`",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 3, "inserted": false } }
+```
+
+### Malformed data and contract mismatches
+
+A malformed file is one record. Its `data_location` points into the file where
+the parser proves a position; see [Data location](#data-location).
+
+```json
+{ "code": "dm.data.malformed",
+  "message": "interpolation of `load_data(\"bad.json\", \"unknown[]\")` failed: load_data(): `/work/bad.json` is not valid JSON: EOF while parsing a list",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 3, "inserted": false },
+  "expected_type": null, "actual_type": null,
+  "data_location": { "file": "/work/bad.json", "line": 1, "column": 7 } }
+```
+
+A contract mismatch is one failure, but it is reported as one record per
+violating value, so a script can show every bad row at once. Each record has:
+
+- `message`: ``load_data(): `<file>` does not match `<as>`:`` followed by what
+  is wrong with that value, including the value found (`"macOS"`). The value
+  appears only in the message, never in a field.
+- `expected_type`: the type the value should have had (`number`), the whole `as`
+  as written for a record at the data's root (pointer `""`), or `absent` for a
+  key or tuple element the contract does not allow.
+- `actual_type`: the kind of value found (`string`, `number`, `boolean`, `null`,
+  `array`, `object`), or `missing` for a required value that is not there.
+- `source`, `span`, and `iteration_path`: the call, the same on every record.
+
+Given `os.yaml` holding `- macOS` and `- Linux`, the call
+`{{ load_data("os.yaml", "number[]") }}` reports:
+
+```json
+[
+  { "code": "dm.data.contract_mismatch",
+    "message": "load_data(): `/work/os.yaml` does not match `number[]`: [0]: expected number; received text \"macOS\"; conversion failed: not a number",
+    "source": { "file": "/work/doc.md", "line": 1, "column": 12, "inserted": false },
+    "expected_type": "number", "actual_type": "string",
+    "data_location": { "file": "/work/os.yaml", "pointer": "/0", "line": 1, "column": 3 } },
+  { "code": "dm.data.contract_mismatch",
+    "message": "load_data(): `/work/os.yaml` does not match `number[]`: [1]: expected number; received text \"Linux\"; conversion failed: not a number",
+    "source": { "file": "/work/doc.md", "line": 1, "column": 12, "inserted": false },
+    "expected_type": "number", "actual_type": "string",
+    "data_location": { "file": "/work/os.yaml", "pointer": "/1", "line": 2, "column": 3 } }
+]
+```
+
+Records are in **file order**: array items by index, object keys in the order
+the file writes them, and a missing member after the members that are present.
+At most **20** violations are listed. When there are more, one further record
+with the same code counts the rest. It is located at the call, has no
+`data_location`, and has `null` types. A CSV file with 25 bad rows reports rows
+0 to 19, then:
+
+```json
+{ "code": "dm.data.contract_mismatch",
+  "message": "load_data(): `/work/rows.csv` does not match `{port: number}[]`: 5 more violations are not listed",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 8, "inserted": false },
+  "expected_type": null, "actual_type": null }
+```
+
+When two arms of a union are containers of the same kind
+(`{a: string}[] | {b: number}[]`), nothing in the data says which arm was meant,
+so data that fits neither is one record at pointer `""` rather than one per row.
+Its message carries each arm's failure, cut to a few lines.
+
+### File errors
+
+A data file that cannot be found or read is not a `dm.data.*` problem. It keeps
+the code every read-side function uses, `dm.expression.evaluation_failure`, and
+its `message` and terminal output are those of any expression failure.
+Most such records also carry the [reference details](#reference-details), so a
+script can tell what went wrong without parsing the message:
+
+| Failure | `reason` | `construct` | `reference` | `failure` |
+|---|---|---|---|---|
+| the local file does not exist | `file not found` | `load_data()` | the `file` argument as written | `no-match` |
+| an import named in `as` does not exist | `file not found` | `load_data()` | the import, such as `./missing-types.yaml` | `no-match` |
+| the local file exists but cannot be read | omitted | `load_data()` | the `file` argument as written | [`io`](../errors/file-reference-failures.md) |
+| the URL's host is not allowed | `remote check disabled` | `load_data()` | the URL as written | `unsupported-remote` |
+
+```json
+{ "code": "dm.expression.evaluation_failure",
+  "message": "interpolation of `load_data(\"gone.json\", \"unknown[]\")` failed: invalid file path: gone.json",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 3, "inserted": false },
+  "reason": "file not found", "construct": "load_data()",
+  "reference": "gone.json", "failure": "no-match" }
+```
+
+A fetch that fails after its host was allowed, because the request fails or the
+response is not UTF-8 text, keeps the same code but carries no reference
+fields; its `message` says what went wrong. No file error has a
+`data_location`. The other read-side functions (`frontmatter`, `markdown_title`,
+`markdown_body_empty`, `validate_schema`, `file_exists`) report their file
+failures the same way, each naming itself in `construct`.
+
+A data failure stops the command; it can stop it in the reference check, before
+composition starts. See [Data failures](../errors/composition-problems.md#data-failures).
+`md graph` and `md validate refs` report the same records when the documents they
+prepare call `load_data`.
+
+## Data location
+
+`data_location` says where in a loaded data file a problem is, so an editor or a
+script can open the data at the right line. `source` still points at the
+`load_data` call in the Markdown document. It is present only on
+`dm.data.malformed` and `dm.data.contract_mismatch` records (other than the
+overflow record), and absent on every other diagnostic.
+
+| `data_location` field | Value |
+|---|---|
+| `file` | the data file as a portable absolute path, always with `/` separators, or the URL it was fetched from; the same spelling as its [`read_set`](#read-set) entry |
+| `pointer` | the [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) (RFC 6901) of the offending value, such as `/servers/1/port`; `""` is the whole document, and `/` and `~` in a key are written `~1` and `~0` |
+| `line` | the one-based line of that value |
+| `column` | the one-based column of that value, counting characters, not bytes |
+| `byte_offset` | for a local file that is not valid UTF-8, the zero-based offset of the first invalid byte, counted in the file's original bytes |
+
+A field that is not known is **omitted**, never `null` and never a guess. The
+object has `file` and whichever of the others were proven:
+
+```json
+"data_location": { "file": "/work/ports.json", "pointer": "/1", "line": 1, "column": 5 }
+"data_location": { "file": "/work/bad.json", "line": 2, "column": 1 }
+"data_location": { "file": "/work/data.json", "byte_offset": 1 }
+"data_location": { "file": "/work/p.yaml", "pointer": "/items/0" }
+```
+
+`source.file` and `data_location.file` can be spelled differently. `source.file`
+is a native path (`C:\work\doc.md` on Windows), while `data_location.file` is
+portable (`C:/work/ports.json`), so a script that compares a data file with its
+`read_set` entry can compare the strings directly.
+
+### Which value a record points at
+
+- **A contract mismatch always has a pointer.** It names the offending value.
+- **A missing value keeps its own pointer.** A required member `port` that is
+  absent from the first row is `/0/port`, but its `line` and `column` are those
+  of the nearest value that exists, the row `/0`.
+- **An unexpected key or tuple element** is located at its value, not at its key.
+  In `[{"a": "x", "z": 1}]` against `{a: string}[]`, `/0/z` is at the `1`.
+- **A CSV or TSV cell** is located at its raw start, including an opening quote;
+  a problem with a whole row is located at the start of its record.
+- **A malformed document has no pointer** unless the parser proves which value
+  failed, because there is no value tree to point into. Its `line` and `column`
+  are the parser's.
+- **A local file that is not valid UTF-8** reports `file` and `byte_offset`
+  only. A line means nothing in text that cannot be decoded.
+
+### How lines and columns are counted
+
+Positions use the same convention as `source`, so both open the same way in an
+editor:
+
+- Lines and columns are one-based, and a column counts characters: an `é` before
+  the value moves the column by one, not two.
+- LF and CRLF end a line. A lone CR, not followed by LF, does not, so a CRLF file
+  reports the same positions as its LF copy.
+- One leading UTF-8 byte-order mark is removed before counting, so it never
+  shifts a column. `byte_offset` is the exception: it counts the file's
+  original bytes, the mark included.
+- Data fetched from a URL gets lines and columns too, counted in the fetched
+  text.
+
+### YAML positions that cannot be proven
+
+Most YAML problems have a line and column. A few have less, because the parser
+or the position map cannot prove one:
+
+- **Pointer only.** In a YAML file that contains an alias (`*name`) or a flow
+  collection written across several lines (`items: [` … `]`), contract-mismatch
+  records have `file` and `pointer` but no `line` or `column`, for every value in
+  that file. A parser error in such a file keeps the parser's line and column.
+- **A duplicate key** is located at the start of the mapping that holds it, not
+  at the second key: `a: 1` then `a: 2` at the top of a file is line 1,
+  column 1, with no pointer.
+- **A second YAML document** in the file, and **a non-string key**, have no
+  position at all: `data_location` holds `file` alone.
 
 ## Other commands
 

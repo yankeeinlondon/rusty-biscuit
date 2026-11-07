@@ -818,6 +818,20 @@ References; Choosing an Arm: Reporting versus Changing Data).
   schema accepts it; else each top-level property that converts cleanly
   (root unions keep the whole-document rule). Never reintroduce per-surface
   conversion rules there (`coercion_engine_parity::old_frontmatter_rule_code_is_gone`).
+- One failure flattening: `ConversionError::located_failures()` /
+  `coercion::locate_failures` (JSON Pointer path, `ExpectedType`,
+  `ActualKind` incl. `Missing`, the original `ValueFailure`; null arms
+  dropped, one reachable arm descended, ambiguous or same-kind unions one
+  record). Frontmatter annotation, `partial_copy`, and `load_data` all read
+  it; Darkmatter only words and orders the records.
+- A failed soft validation reports on `coerce.rs::partial_copy`'s diagnostic
+  copy: converted siblings, failing values as written, and unexpected keys
+  and tuple elements masked from the retry and then reinserted, so closed
+  objects and fixed tuples still reject them. That copy is never returned as
+  success, and the production binder is not relaxed.
+- `PreparationSummary.dependencies` (`#[non_exhaustive]`) lists the schema
+  files a preparation read, imports included (embedded schemas add none);
+  `validate_schema(...)` records them in the read set.
 - Performance: `EffectiveSchema` keeps a `ConversionPlan` keyed by the digest
   `ValidatorCache::shared_schema_hash` already records, and checks
   `accepts_as_is` with its own compiled validators first. Never hash or

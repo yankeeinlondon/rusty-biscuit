@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-7d8f8f718be0130b
+hash: ef46db3751d8e999-6078bbc7cf08892c
 last_updated: 2026-11-06
 ---
 # Darkmatter
@@ -10,6 +10,7 @@ last_updated: 2026-11-06
     - Export readable Markdown with portable file links; see [compose output](./docs/cli/compose.md)
     - List documents with [`::file-links`](./docs/inline/file-links.md), using directory context labels and terminal-aware icons
 - Transform expression collections with [inline callbacks](./docs/topics/darkmatter-expressions.md#inline-collection-callbacks), such as `map(people, p => p.name)` and `filter(people, p -> p.active)`
+- [Load data files](./docs/topics/loading-data.md) (YAML, JSON, JSON Lines, CSV, TSV, TOML, JSON5) into an expression, checked against a type: `load_data("hosts.csv", "{ name: string, port: number }[]")`
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Run [lifecycle events](./docs/topics/lifecycle/index.md) (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) from a document's frontmatter around `md compose`
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
@@ -89,6 +90,7 @@ host OS input and take focus.
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
     - [Transclusion](./docs/topics/transclusion.md)
+    - [Loading Data](./docs/topics/loading-data.md) — `load_data(file, as)`: formats, CSV rows, optional files, and failures that point into the data file
     - [Frontmatter](./docs/topics/frontmatter.md) and [Frontmatter and Recursion](./docs/topics/frontmatter-recursion.md) — parsing, key order, merges, and what a transcluded child inherits
     - [Lifecycle Events](./docs/topics/lifecycle/index.md) and [Lifecycle Error Handling](./docs/topics/lifecycle/error-handling.md) — the frontmatter stacks `md compose` runs before and after composition, and how failures, cleanup, and Ctrl-C route
     - [Rendering Output Formats](./docs/topics/output-formats.md)

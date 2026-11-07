@@ -250,6 +250,140 @@ the compose-time rules on this page.
 - [Diagnostics](../../../../simplified-schema/docs/topics/diagnostics.md):
   `SchemaError` variants and source-located failures.
 
+## Writing a Type Definition
+
+Some values are themselves type definitions: a property declared
+`type-definition` in a `$schema`, or the `as` argument of
+[`load_data`](../../functions/load-data.md), which says what a data file must
+contain. This section shows what you can write in such a value, how it differs
+from the type it describes, and which definitions count as containers. The
+full grammar is in
+[Semantic Meta-Types](../../../../simplified-schema/docs/topics/language/types.md#semantic-meta-types).
+
+### What You Can Write
+
+A type definition is one complete SimplifiedSchema property definition, written
+the same way as a property in `$schema`. It has three spellings:
+
+| Spelling | Example | Describes |
+| --- | --- | --- |
+| A string | `"{ name: string, port: number }[]"` | the type the string spells: any type expression, with its constraints, and `\|` for a union |
+| A YAML mapping | `{ name: string, port: number }` | an object with those properties |
+| A YAML list | `[string, { nested: number }]` | a union of its items: `string \| { nested: number }` |
+
+```yaml
+$schema:
+    field-definition: type-definition(required)
+field-definition: "string(min(1))[]"
+```
+
+`load_data`'s `as` is always a string, so in an expression only the first
+spelling applies, quoted: `load_data("ports.json", "number(min(1))[]")`. A
+computed `as` that is a list or a mapping fails the call. Constraints written in
+the string are part of the type and are enforced: `[1, 2]` does not match
+`"number(min(10))[]"`.
+
+A definition is only parsed, never resolved: validating a `type-definition`
+value does not open a `Name@./types.yaml` file it names. `load_data` reads the
+import when the call runs.
+
+### Carrier and Denoted Type
+
+A type-definition value has two types, and it helps to keep them apart:
+
+- The **carrier** is what you wrote: a YAML string, mapping, or list.
+- The **denoted type** is the type that text describes.
+
+`"string[] | null"` has a string carrier and denotes "a list of strings, or
+null". `[string, { nested: number }]` has a list carrier and denotes
+`string | { nested: number }`. Every rule below, including the
+[container rule](#container-types), judges the denoted type, never the carrier: a
+YAML list is not a list type.
+
+### Unions and Tuples
+
+A bracketed list of types is a union, not a tuple. Pick the form by what the
+data looks like:
+
+| You want | Write | Matches |
+| --- | --- | --- |
+| one value of either type | `"string \| number"`, or the YAML list `[string, number]` | `"a"`, `4` |
+| a fixed sequence of positions | `"tuple([string, number])"` | `["a", 4]` |
+| a list of any length, each item either type | `"(string \| number)[]"` | `["a", 4, "b"]` |
+
+Inside a string, a bracket list is not valid syntax at all: `"[string, number]"`
+is rejected as malformed, and in a `load_data` call it fails the call check with
+`dm.expression.incompatible_call`. Tuple positions, optional positions, and
+spreads are described under
+[Tuples](../../../../simplified-schema/docs/topics/language/types.md#tuples).
+
+### Constraints That Apply
+
+Two different things can carry constraints:
+
+- **The definition you write** carries the constraints of the type it describes,
+  as in `"string(min(1))[]"` or `"tuple([string, number]; required)"`.
+- **The `type-definition` declaration** in a `$schema` takes only the universal
+  `required`, `non-null`, `eager`, `default(...)`, and `generated`, plus three
+  options that narrow which definitions it accepts: `forms(...)`,
+  `declared-required`, and `container`. Combine them with `;`:
+  `type-definition(container; declared-required)`.
+
+The options judge one definition, so they cannot be used on the array form:
+`type-definition[]` holds a list of independent definitions, and
+`type-definition[](container)` is a schema error. To put a union in such a list,
+nest it as a YAML list item (`- [number, { nested: boolean }]`). What each option
+accepts is in
+[Narrowing a declaration](../../../../simplified-schema/docs/topics/language/schema-types.md#narrowing-a-declaration).
+
+### Container Types
+
+A **container** is a definition whose values hold other values: an array, a
+tuple, an object, or a dictionary. `load_data` requires its `as` to be a
+container, and a `$schema` property declared `type-definition(container)`
+accepts only container definitions. The rule:
+
+- Arrays, tuples, objects (`object` or an inline object), and dictionaries
+  (`{ <string>: number }`) are containers.
+- Scalars are not, and neither are `unknown` and `any` alone, since they also
+  admit a scalar.
+- In a union, `null` arms are dropped, and every remaining arm must be a
+  container. At least one must remain, so `"null"` alone is not a container.
+  `"string[] | null"` is allowed because an empty YAML file reads as `null`.
+- A named type that is not resolved yet, such as `Rows@./rows.yaml`, is accepted
+  provisionally, because its file is not opened while the definition is parsed.
+  It is checked once the import is read. `Rows[]@./rows.yaml` is an array, so it
+  is a container whatever `Rows` is.
+
+| Definition | Container? |
+| --- | --- |
+| `"string[]"`, `"unknown[]"`, `"(string \| number)[]"` | yes: arrays |
+| `"{ name: string, port: number }[]"` | yes: an array of objects |
+| `"tuple([string, number])"` | yes: a tuple |
+| `"{ name: string, tags: string[] }"`, `"object"` | yes: objects |
+| `"{ <string>: number }"` | yes: a dictionary |
+| `"string[] \| null"`, `"string[] \| {a: string}"` | yes: every non-null arm is a container |
+| `"Rows@./rows.yaml"`, `"Rows@./rows.yaml \| null"` | provisionally: decided when the import is read |
+| `"string"`, `"number"`, `"boolean"`, `"enum(a, b)"`, `"literal(a)"` | no: scalars |
+| `"unknown"`, `"any"`, `"null"` | no |
+| `"string \| number"`, `"string[] \| string"`, `"Rows@./rows.yaml \| string"` | no: an arm is not a container |
+
+A definition that fails the rule is reported where it was written:
+
+- In a `$schema` property declared `type-definition(container)`, the value fails
+  validation with *the definition must denote a container (an array, tuple,
+  object, or dictionary, optionally `| null`); `string` does not*.
+- In `load_data`, the call fails with `dm.data.not_a_container`. A literal `as`
+  is rejected before anything runs; a computed one, or an import that turns out
+  to be a scalar, when the call runs. A contract may not name a type of the
+  calling document (`Os@this`, or a bare `Os`); import it from a file instead.
+  See [Data errors](../../cli/data-contracts.md#data-errors).
+
+Over a CSV or TSV file, `load_data` also needs `as` to describe rows, so some
+containers above (`"unknown[]"`, `"object"`, `"string[] | {a: string}"`) are
+refused there; see
+[Choosing the row shape](../loading-data.md#choosing-the-row-shape).
+
 ## Baseline Schemas
 
 A baseline schema is a SimplifiedSchema or JSON Schema that every validated document inherits. The library exposes:
@@ -564,7 +698,7 @@ Allowed root keys: `$schema`, `type`, `properties`, `required`, `additionalPrope
 
 Any other root construct — `$ref`, `allOf`, `anyOf`, `if`/`then`/`else`, `patternProperties`, a schema-valued `additionalProperties`, etc. — produces `SchemaError::Baseline` at load time. The same contract applies to a trigger payload, reported as `SchemaError::TriggerPayloadNotMergeable`.
 
-A baseline with `additionalProperties: false` (for example a SimplifiedSchema root marked [`closed`](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#closed-roots-closed)) is admitted, but its closure is never copied into the document: its properties are merged, and the document stays as open or closed as it declares itself. A baseline therefore cannot lock out per-document extensions. See [Layering](../../../../simplified-schema/docs/topics/schema-object.md#layering).
+A baseline with `additionalProperties: false` (for example a SimplifiedSchema root marked [`closed`](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#closed-roots-closed)) is admitted, but its closure is never copied into the document: its properties are merged, and the document stays as open or closed as it declares itself. A baseline therefore cannot lock out per-document extensions. See [Layering](../../../../simplified-schema/docs/topics/simplified-schema-struct.md#layering).
 
 A property may refer to a definition in the baseline's own root `$defs`, including a recursive one:
 

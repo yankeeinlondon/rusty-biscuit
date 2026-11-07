@@ -166,6 +166,21 @@ features their tier requires.
   default set. JSON output uses `serde_json` directly; no second JSON5
   implementation is carried here.
 
+## Data Loading (`load_data`)
+
+- `biscuit-file` with the `delimited` feature supplies the strict CSV/TSV
+  reader (`read_delimited`) behind `load_data`. That feature is off in
+  `biscuit-file`'s defaults and brings in `csv` and `csv-core`, so it is named
+  explicitly in `lib/Cargo.toml`.
+- The other readers and locators need no extra feature: `read_json_lines`,
+  `detect_from_extension`, `source_position`, and `locate_json`,
+  `locate_jsonl`, `locate_toml`, and `locate_json5` (the last two through the
+  `toml` and `json5` features already enabled). Finding where a value was
+  written belongs to `biscuit-file`, beside each format's parser; Darkmatter
+  only asks for an offset and turns it into a line and column. YAML positions
+  come from `simplified-schema`'s position map instead, because the YAML loader
+  is shared with frontmatter.
+
 ## Shell Directive Execution
 
 - `shared_child` backs the child-process wait in

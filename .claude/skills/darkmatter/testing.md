@@ -233,3 +233,25 @@ sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` i
 - Real Tabs live in `cli/tests/level2/level2_path_completion.rs`: `spawn_program` through
   `env -i` with a fixed `PATH`, so no developer configuration reaches the shell. Assert the
   whole finished line, since `capture-pane` trims a trailing space, then run it.
+
+## `load_data` tests
+
+- Library: `lib/tests/l1/load_data_execution.rs` (results, typed
+  `DataError`, read set), `load_data_diagnostics.rs` (projected records:
+  code, call-site `source`, `data_location`, expected/actual types, reference
+  fields), `load_data_passive.rs` (passive verdicts and static typing; no
+  filesystem context, so nothing can be read), and `load_data_runtime.rs`
+  (one runtime across passes, the memo-emptying rule, remote policy, every
+  surface's read set). CLI: `cli/tests/l1/load_data.rs` (one route per
+  loader family and the envelopes); read-set and mismatch conformance lives
+  in `output_envelope.rs`, not repeated there.
+- Every fixture is a temporary directory and every request is anchored
+  there. A command that rewrites a data file uses `git config --file`
+  (in-place, valid TOML, `git` on every host), not a shell-specific write.
+- Prove memo reuse with a caller-attached runtime
+  (`ComposeOptions::with_data_runtime`) and `DataRuntime::stats()`
+  (`reads`, `parses`, `binds`, `source_hits`, `bind_hits`,
+  `contract_preparations`), never with timing.
+- CSV/TSV readers live in biscuit-file's feature-gated `l1-delimited` target;
+  its `just test` enables `delimited`, so a bare `cargo nextest -p
+  biscuit-file` without the feature skips them.

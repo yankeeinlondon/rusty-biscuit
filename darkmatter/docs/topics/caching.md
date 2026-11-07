@@ -15,8 +15,7 @@ cache, and the two never share a store.
 
 > **Semantic results are never persisted.** Until a `ContentPolicy` defines
 > when cached content becomes stale, no composed or derived result is read
-> from or written to disk (more-context rulings **R18** and **R36**,
-> `darkmatter/fixes/2026-09-16-content-policy-no-cache`). A warm cache cannot
+> from or written to disk. A warm cache cannot
 > replay an earlier run's composed output, warnings, runtime context, or
 > shell/probe output. The persistent semantic-result implementation was
 > deleted, not disabled; see [ContentPolicy](#contentpolicy-prerequisite-for-persisting-semantic-results).
@@ -105,7 +104,7 @@ from:
 
 A transcluded child's context is finalized before its key is computed. The
 child's referenced `ctx.*` groups are added to the request context first (see
-[Context Variables](./context-variables.md#the-request-context-and-its-authority)),
+[Context Variables](./state-management/context-variables.md#the-request-context-and-its-authority)),
 and the lookup and the write both use that one post-extension hash. When a
 child names no group its parent lacks, the parent's phase-wide hash is reused.
 Because one request has one context, a run-local hit cannot hide a missing
@@ -142,6 +141,50 @@ spelling (`::shell --no-cache`, `$(<cmd>)::no-cache`,
 `::shell-block no_cache=true`) bypasses that memoization only. It is unrelated
 to the HTTP `Cache-Control: no-cache` directive described below. See
 [Shell Expansion](../inline/shell-expansion.md).
+
+### The `load_data` memo
+
+[`load_data`](./loading-data.md) has its own memory-only memo, held by the
+command's `DataRuntime` rather than by `RunLocalCache`. It spans the whole
+command, not one compose run: for `md compose`, the reference check,
+pre-flight, lifecycle events, and composition share it (see
+[Compose Requests](./compose-requests.md#one-data-runtime-per-command)).
+
+It has two levels:
+
+- **parsed source**, keyed by the resolved file (canonical path) or
+  normalized URL: the read, decoded, and parsed document;
+- **bound result**, keyed by that source and the resolved contract: the value
+  converted to `as`.
+
+So `load_data(f, "a[]")` and `load_data(f, "b[]")` read and parse `f` once and
+validate it twice. A relative named import in `as` is keyed by the schema
+file it resolves to, not by its text. Each entry is single-flight: concurrent
+calls for one key wait for the first caller's result. A typed failure
+(malformed data, a contract mismatch) is kept too, but without a call-site
+location, so every call that reuses it reports its own document and line. A
+result that only means "not possible yet" is never kept, so a later call
+tries again.
+
+The memo holds in **every** `CacheAccessMode`, `Off` and `Refresh` included.
+Those modes govern the composed-result cache above; repeating a read within
+one command answers no question, so a file is still read once.
+
+The memo is emptied, together with its prepared contracts, after every
+executed command attempt (a frontmatter `$( … )`, a `::shell` line, a shell
+block, or a lifecycle shell step, whether it succeeded or failed) and after
+every lifecycle event whose stack is not empty. A shell command answered from
+shell command memoization ran nothing and leaves the memo alone. Emptying the
+memo never removes an entry from the command's read set. A load already in
+flight when the memo is emptied finishes for its own caller but is not kept
+for later ones.
+
+The memo persists nothing and does not replace the transport cache. A URL's
+body still comes from the [remote transport cache](#remote-transport-cache),
+under the same host policy, freshness rules, and
+[Cache-Control precedence](#cache-control-precedence); the memo only keeps
+what was parsed from that body. Emptying the memo does not fetch a URL
+again within the same command.
 
 ### Reference analysis
 
@@ -313,10 +356,7 @@ No statistic counts directory creation as a write.
 
 Persisting an expensive or agentic semantic result (for example, a website
 summary) requires a `ContentPolicy` that defines when the content becomes
-stale. It does not exist yet. The contract a future implementation must meet is
-recorded in the
-[content-policy-no-cache specification](../../fixes/2026-09-16-content-policy-no-cache/spec.md#contentpolicy-design-constraints).
-In brief:
+stale. It does not exist yet. A future implementation must meet this contract:
 
 - `ContentPolicy` governs content freshness only. It does not grant network
   access, define artifact identity, choose file placement, or permit persisting
@@ -352,5 +392,6 @@ define its own unqualified `ContentPolicy`.
 - `darkmatter/lib/src/markdown/compose/cache/store.rs`
 - `darkmatter/lib/src/markdown/compose/remote_fetch.rs`
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
+- `darkmatter/lib/src/markdown/compose/expression/data/runtime.rs`
 - `darkmatter/lib/src/markdown/reference/graph.rs`
 - `darkmatter/lib/tests/semantic_results_never_persist.rs`

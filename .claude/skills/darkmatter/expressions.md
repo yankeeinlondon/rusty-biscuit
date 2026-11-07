@@ -1,6 +1,6 @@
 # Expression Evaluation Rules
 
-Detail behind the "Testing and verification" section of [SKILL.md](SKILL.md): the expression grammar gate, inserted-text rules, failure policy, undeclared properties, host bindings, and warning identity.
+Detail behind the "Testing and verification" section of [SKILL.md](SKILL.md): the expression grammar gate, inserted-text rules, failure policy, undeclared properties, host bindings, warning identity, and [`load_data`](#load_data-data-files).
 
 The expression-grammar corpus gate is
 `lib/tests/prompts/dasherized_identifier_corpus.rs`, opt-in through the
@@ -387,3 +387,83 @@ Passive callback frames retain declaration locations through
 `LexicalTypes::span_of_name`. These are expression-relative byte ranges and
 survive dropping the parsed callback; a shadowing binding without a span does
 not borrow an outer binding’s location.
+
+## `load_data` (data files)
+
+`load_data(file: file | null, as: type-definition(container))` reads YAML,
+JSON, JSONL/NDJSON, CSV, TSV, TOML, or JSON5 and returns the value fully
+converted to `as`, or fails; a partial value is never returned. User docs:
+`darkmatter/docs/topics/loading-data.md` (behavior) and
+`docs/cli/data-contracts.md` (`data_location`, `read_set`, the `dm.data.*`
+codes). Code: `compose/expression/data/` (`load.rs` is the function;
+`contract.rs`, `parse.rs`, `locate.rs`, `runtime.rs`, `error.rs`). The
+command-scoped memo and read set are in [requests.md](requests.md#data-runtime-and-read-set).
+
+- **Call order** (`load.rs`): prepare the contract, resolve the file and record
+  it in the read set, pick the format from the extension
+  (`biscuit_file::detect_from_extension`, a URL's path included), pick the
+  CSV/TSV row mode, fetch a URL through `fetch_remote_text` (host policy
+  before any memo lookup), parse through the source memo, bind through the
+  bind memo. A `null` file returns `null` before anything is prepared or read.
+- **Contract** (`contract.rs::prepare_contract`): `as` is a quoted string
+  parsed by `parse_property_definition`; a document-local name (`Name`,
+  `Name@this`) at any depth is `dm.data.this_import_rejected`, while imported
+  types may recurse internally. The definition is wrapped in a synthetic
+  one-property `SchemaRoot`, expanded with `expand_named_types` against the
+  document's schema roots, and translated with
+  `shape_from_property_def_with_definitions`. The bare shape is bound (no
+  optional-null wrapper), so `string[]` rejects `null`. A malformed schema or
+  unknown exported type is `DataError::ContractSchema { written, source }`
+  (projected as `dm.expression.evaluation_failure`); a missing import stays in
+  the file-reference family, naming the import.
+- **Container checking is the library's.** Passively and at execution the
+  verdict comes from simplified-schema: `narrowing::container_admission`
+  on the text (named imports `Provisional`), then `denotes_container` on the
+  resolved definition. A computed scalar `as` reaches `dm.data.not_a_container`
+  through `FunctionBinding::refining_binding_errors`
+  (`load.rs::refine_binding_error`), not the binder's type error. A string
+  `"[string, number]"` is malformed type syntax, not `not_a_container`.
+- **CSV/TSV rows** (`contract.rs::classify_rows`, `RowMode::{Object, List}`):
+  every non-null arm and array/tuple element must agree; object/dictionary
+  elements read rows by header, list/tuple elements by position (header row
+  skipped); anything else, or a tuple with no elements, is
+  `dm.data.row_shape_conflict`. The first row is always a header. Rows are
+  built per contract at bind time from the memoized table, so the
+  object-mode duplicate/empty-header error is per contract.
+- **Numbers and formats** (`parse.rs`): JSON/JSONL through
+  `numeric::admit_json_text_numbers`, JSON5 through `admit_json5_text_numbers`
+  and `reject_non_finite_json5`, TOML by walking `Toml::value()` with
+  `admit_integer`/`admit_f64` (biscuit-file's lenient `Toml::as_json_value` is
+  untouched), YAML through `schemas/yaml_documents/load.rs::load_yaml_document`
+  with custom tags rejected on this path only. An inadmissible number is
+  `dm.data.malformed`, located where the parser proves it. One UTF-8 BOM is
+  stripped before parsing and locating.
+- **Codes** (`data/error.rs`, `DATA_DIAGNOSTIC_CODES`, all errors and
+  authoring-fatal, never in the warning-only `COMPOSE_DIAGNOSTIC_CODES`):
+  `dm.data.not_a_container`, `row_shape_conflict`, `this_import_rejected`,
+  `unsupported_format`, `malformed`, `contract_mismatch`. File failures stay
+  `dm.expression.evaluation_failure` with the file-reference fields. A literal
+  file plus literal contract is checked passively (`CallCheck::data_problem`).
+- **Mismatch records** come only from
+  `ConversionError::located_failures()` (null arms dropped, one reachable arm
+  descended, ambiguous or same-kind unions one record, JSON Pointer paths).
+  Projection (`report_diagnostics.rs`) caps them at `CONTRACT_RECORD_CAP` (20)
+  plus one overflow record at the call site with no `data_location`. Order:
+  level by level by source offset (YAML by authored index), then unlocated
+  values, then missing members, engine order breaking ties.
+- **Locating is biscuit-file's** (`data/locate.rs` only asks): `locate_json`,
+  `locate_jsonl`, `locate_toml`, `locate_json5`, `json5_parse_error_offset`,
+  raw `DelimitedField::offset` for CSV/TSV, then `source_position` for the
+  1-based line and character column. YAML uses simplified-schema's
+  `PositionMap::byte_range`, never its top-level fallback. A YAML file with an
+  alias, or with a flow collection spanning lines (`has_multi_line_flow_collection`,
+  although `PositionMap` can locate those), reports pointers only. A missing
+  value keeps its own pointer but is positioned at its parent.
+- **Typed literal returns** (`call_check.rs::expression_type`): a literal
+  `as` types the call as its bare shape (named references `unknown`, explicit
+  null arms kept, `| null` added when `file` may be null, `null` for a literal
+  `null` file), which flows into `map`/`filter` callback locals. No member
+  misspelling check (`h.nmae` is silent), as for any typed value.
+- Tests: `lib/tests/l1/load_data_{execution,diagnostics,passive,runtime}.rs`,
+  `cli/tests/l1/load_data.rs`; biscuit-file's opt-in readers in its
+  `l1-delimited` target.

@@ -164,7 +164,8 @@ name. See
 
 The [read-side functions](../topics/darkmatter-expressions.md#read-side-functions)
 (`file_exists`, `frontmatter`, `markdown_title`, `markdown_body_empty`,
-`validate_schema`, `absolute`, `relative`) resolve in frontmatter interpolation
+`validate_schema`, [`load_data`](../topics/loading-data.md), `absolute`,
+`relative`) resolve in frontmatter interpolation
 just as they do in body interpolation — both passes carry a resolution context
 anchored on the source document's directory and its repository root (implicit
 paths resolve from the document directory first, then the repository root). The motivating pattern relies on this:
@@ -347,6 +348,15 @@ state, not text:
 
 Mixed text (`"a {{ x }}"`) and strings holding more than one expression
 interpolate to a string instead.
+
+A `}}` inside a quoted string or a nested `{ … }` does not end the span (see
+[Where an Expression Ends](./interpolation.md#where-an-expression-ends)), so
+a whole value can hold a nested type or object literal and still keep its
+type:
+
+```yaml
+hosts: "{{ load_data('hosts.yaml', '{ name: string, tags: { <string>: string }}[]') }}"
+```
 
 ## Chained References
 

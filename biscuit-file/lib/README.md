@@ -101,6 +101,8 @@ let yaml: String = toml.as_yaml()?;       // requires `yaml` feature
 let raw: &str = toml.raw();                // original TOML text
 ```
 
+`as_json_value` is a lenient conversion: a `nan` or `inf` float becomes JSON `null`, and a datetime becomes its string form. A caller that must reject values JSON cannot hold walks the native tree from `toml.value()` instead (Darkmatter's `load_data` does).
+
 ### `Json5`
 
 Parse JSON5 from files, strings, or bytes. Convert to JSON, YAML, or TOML.

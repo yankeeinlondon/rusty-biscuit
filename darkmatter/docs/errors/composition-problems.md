@@ -23,6 +23,7 @@ is the whole list, while an expression error may have another behind it.
 | Schema | Every problem in one document is collected, then the run stops | Every problem in that document, none from later documents |
 | Transclusion | A fatal failure, such as a cycle, stops the run; a tolerated failure is reported and composition continues | A fatal error, or a notice in the document and a warning |
 | Expression | The run stops at the first error it meets, which is not always the earliest in the document | One error |
+| Data (`load_data`) | The run stops at the first failure, which can come in the reference check before composition; see [Data failures](#data-failures) | One failure: one record, or one per violating value (up to 20) for a contract mismatch |
 | Shell | The run stops at the first error | One error |
 | Lifecycle | The run stops at the first error, then runs the [cleanup events](../topics/lifecycle/error-handling.md) | One error, plus what cleanup reports |
 
@@ -56,6 +57,83 @@ error block in a terminal.
 
 `md validate refs --fail-fast` and the library's `fail_fast` option stop reference
 checking at the first error. `md compose` always collects them.
+
+## Data failures
+
+A [`load_data`](../functions/load-data.md) call that fails stops the command.
+This section covers when that happens, which surrounding constructs pass the
+failure on, and why it can stop the run before composition starts. The codes and
+fields of the failure are in [Data errors](../cli/data-contracts.md#data-errors).
+
+### A data failure is never recovered
+
+No partial value stands in for data that did not load, and nothing turns the
+failure into a warning:
+
+- **Nothing later in the document runs.** No later expression, directive, or
+  `::shell` command runs, and no document is written. The lifecycle's
+  [cleanup events](../topics/lifecycle/error-handling.md) run as for any other
+  failure.
+- **`||` and the ternary do not absorb it.** `load_data("servers.yaml", "string[]") || []`
+  fails when the file is missing; it does not yield `[]`. A ternary skips the call
+  only when its condition sends it to the other branch, which is how an optional
+  file is written:
+
+  ```md
+  {{ file_exists("servers.yaml") ? load_data("servers.yaml", "string[]") : [] }}
+  ```
+
+  The guard skips a missing file. It does not hide a malformed one: when the file
+  exists, the call runs and its failure stops the command.
+- **Every surface passes it on.** A failure inside a callback (`map(items, i => load_data(…))`),
+  a `::map` or `::filter` body, frontmatter interpolation, a `::block` condition,
+  or nested composition (`as_markdown(…)`) stops the command with its own
+  `dm.data.*` code, located at the call. A failure inside a repeated body also
+  carries its [`iteration_path`](../cli/data-contracts.md#failures-inside-map-and-filter-bodies).
+
+### It can stop the run in the reference check
+
+`md compose` checks a file's references before composing it, and to do that it
+prepares each document, which evaluates its expressions, transcluded documents
+included. A data failure the check can prove on its own stops the command
+there: composition never starts, the data output's `summary` is `null`, and its
+`read_set` still lists the data file.
+
+```mermaid
+flowchart LR
+    R[reference check] -->|data failure proven| X[stop: one failure, summary null]
+    R -->|URL, or computed as that is not type syntax| C[composition]
+    R -->|no failure| C
+    C -->|any load_data failure| Y[stop: one failure]
+    C --> D[document]
+```
+
+For example, `doc.md` holds the line `::file ./child.md`, and `child.md` loads a
+JSON file that ends early (`bad.json` is `{"a": 1,`):
+
+```md
+{{ load_data("bad.json", "unknown[]") }}
+```
+
+The reference check fails on the child's data, and the record names the child
+as its `source`:
+
+```json
+{ "code": "dm.data.malformed",
+  "source": { "file": "/work/child.md", "line": 1, "column": 1, "inserted": false },
+  "data_location": { "file": "/work/bad.json", "line": 2, "column": 1 } }
+```
+
+The check proves every `dm.data.*` failure, a missing or unreadable data file,
+and a contract that names a missing import or an unknown type. It leaves two
+cases to composition, which reports them in the same way:
+
+- **A URL.** The reference check does not fetch remote data, so a
+  `load_data("https://…", …)` call is first tried, and fails if it is going to,
+  during composition.
+- **A computed `as` that is not type syntax**, such as a frontmatter value
+  `"string[("`. A computed `as` that parses but is not a container
+  (`"string"`) is proven in the check.
 
 ## How a problem is located
 
@@ -110,6 +188,7 @@ What each family reports:
 | Problem | `source` |
 | --- | --- |
 | A schema problem | the file, at its [location](../topics/schemas/definition.md#problem-locations) when it has one; a schema that could not be prepared has the file alone |
+| A `load_data` failure | the call, or its `as` argument for a contract the call check rejects; a position inside the data file is in [`data_location`](../cli/data-contracts.md#data-location) |
 | A `when=` condition on `::block` or `::file` that fails or warns | the directive's opener, unless a stage rewrote it (then the file alone) |
 | A `$( … )` frontmatter command | the file and the line of its key; the column is `null` |
 | A `::file` directive that does not parse, or a malformed `::block` | the file |
