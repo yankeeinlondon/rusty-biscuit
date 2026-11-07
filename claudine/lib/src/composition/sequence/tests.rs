@@ -1485,6 +1485,44 @@ mod grammar_tests {
         assert_eq!(parsed.offset.as_deref(), Some("data"));
     }
 
+    /// A `}}` inside a quoted string does not end a whole-value expression,
+    /// so a nested type stays an expression source.
+    #[test]
+    fn a_quoted_closer_keeps_a_whole_value_expression() {
+        let source: serde_json::Map<String, Value> =
+            biscuit_file::serde_yaml_ng::from_str("sequence: \"{{ load_data(f, \\\"{a: {b: string}}\\\") }}\"").unwrap();
+        assert_eq!(
+            classify_source(&source["sequence"]).unwrap(),
+            SequenceSourceSpec::Expression(r#"load_data(f, "{a: {b: string}}")"#.into())
+        );
+        // Prose apostrophes keep the first-`}}` spans, so this is two
+        // expressions in a reference, as before.
+        let prose = "{{ don't }} it's fine {{ x }} and more }}";
+        assert_eq!(reference(prose).reference, prose);
+    }
+
+    /// An escaped quote inside an interpolation's string cannot end the
+    /// interpolation early and expose its `::` or `->` as a separator.
+    #[test]
+    fn escaped_quotes_keep_separators_inside_the_interpolation() {
+        let parsed = reference(r#"{{ env("a\"}}::b") }}/steps.yaml -> data"#);
+        assert_eq!(parsed.reference, r#"{{ env("a\"}}::b") }}/steps.yaml"#);
+        assert_eq!(parsed.offset.as_deref(), Some("data"));
+        assert_eq!(parsed.operator, None);
+
+        let parsed = reference(r#"{{ env("x\"}} -> y") }}/steps.yaml::name(color)"#);
+        assert_eq!(parsed.reference, r#"{{ env("x\"}} -> y") }}/steps.yaml"#);
+        assert_eq!(parsed.offset, None);
+        assert_eq!(parsed.operator, Some(SourceOperator::Name { from: "color".into() }));
+    }
+
+    /// An operator whose first `(` sits inside an interpolation is a typed
+    /// error, never an arithmetic overflow.
+    #[test]
+    fn an_operator_paren_inside_an_interpolation_is_a_typed_error() {
+        assert!(classify_source(&json!("t.yaml::{{ f( }})")).is_err());
+    }
+
     #[test]
     fn whole_value_spans_classify_as_dynamic_sources() {
         assert!(matches!(

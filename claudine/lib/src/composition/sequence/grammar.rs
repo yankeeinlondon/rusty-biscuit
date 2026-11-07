@@ -17,6 +17,7 @@
 //! interpolation segment is literal text, not a separator.
 
 use serde_json::Value;
+use simplified_schema::expression::scan::scan_plain;
 
 use super::super::error::CompositionError;
 use super::super::json_util::json_type_name;
@@ -116,7 +117,7 @@ fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionEr
         ));
     }
 
-    if let Some(inner) = whole_value_span(trimmed, "{{", "}}") {
+    if let Some(inner) = whole_value_span(trimmed, "{{", "}}").or_else(|| whole_value_expression(trimmed)) {
         return Ok(SequenceSourceSpec::Expression(inner.trim().to_string()));
     }
     if let Some(inner) = whole_value_span(trimmed, "$(", ")") {
@@ -150,6 +151,14 @@ fn whole_value_span<'a>(input: &'a str, open: &str, close: &str) -> Option<&'a s
         return None;
     }
     Some(inner)
+}
+
+/// The inner text when the shared expression scanner reads `input` as exactly
+/// one `{{ … }}` expression, so a `}}` inside one of its quoted strings
+/// (`{{ load_data(f, "{a: {b: string}}") }}`) does not end the span early.
+fn whole_value_expression(input: &str) -> Option<&str> {
+    let first = scan_plain(input).expressions.into_iter().next()?;
+    (first.start == 0 && first.end == input.len()).then(|| &input[2..input.len() - 2])
 }
 
 /// Parse `<file-ref> [-> <offset>] [::<operator>(<args>)]`.
@@ -274,16 +283,17 @@ fn split_operator_args(input: &str) -> Vec<String> {
 
     let mut args = Vec::new();
     let mut current = String::new();
-    let mut scanner = SpanScanner::default();
+    let mut scanner = SpanScanner::new(input);
 
-    for ch in input.chars() {
+    for (index, ch) in input.char_indices() {
+        scanner.enter(index);
         if scanner.is_top_level() && ch == ',' {
             args.push(unquote(current.trim()));
             current.clear();
         } else {
             current.push(ch);
         }
-        scanner.consume(ch);
+        scanner.consume(index, ch);
     }
     args.push(unquote(current.trim()));
     args
@@ -304,16 +314,17 @@ fn unquote(input: &str) -> String {
 fn find_span_aware(haystack: &str, needle: &str) -> Option<usize> {
     let bytes = haystack.as_bytes();
     let needle_bytes = needle.as_bytes();
-    let mut scanner = SpanScanner::default();
+    let mut scanner = SpanScanner::new(haystack);
 
     for (index, ch) in haystack.char_indices() {
+        scanner.enter(index);
         if scanner.is_top_level()
             && index + needle_bytes.len() <= bytes.len()
             && &bytes[index..index + needle_bytes.len()] == needle_bytes
         {
             return Some(index);
         }
-        scanner.consume(ch);
+        scanner.consume(index, ch);
     }
     None
 }
@@ -321,43 +332,98 @@ fn find_span_aware(haystack: &str, needle: &str) -> Option<usize> {
 /// Find the `)` matching the `(` at `open`, honoring quotes and nesting.
 fn matching_paren(input: &str, open: usize) -> Option<usize> {
     let mut depth = 0usize;
-    let mut scanner = SpanScanner::default();
+    let mut scanner = SpanScanner::new(input);
 
     for (index, ch) in input.char_indices() {
+        scanner.enter(index);
         if index < open {
-            scanner.consume(ch);
+            scanner.consume(index, ch);
             continue;
         }
-        if !scanner.in_quotes() {
+        if !scanner.in_quotes() && !scanner.in_span() {
             if ch == '(' {
                 depth += 1;
-            } else if ch == ')' {
+            } else if ch == ')' && depth > 0 {
+                // A `(` at `open` inside an opaque interpolation is not
+                // counted, so a later `)` can arrive at depth 0.
                 depth -= 1;
                 if depth == 0 {
                     return Some(index);
                 }
             }
         }
-        scanner.consume(ch);
+        scanner.consume(index, ch);
     }
     None
 }
 
 /// Tracks quote, interpolation, and paren nesting while scanning left to right.
 ///
-/// `consume` is called *after* each position is tested, so a character that
-/// opens a span is itself still seen at the depth it opened from.
-#[derive(Default)]
+/// Each position is passed to `enter` before it is tested and to `consume`
+/// after, so a character that opens a quote or paren is itself still seen at
+/// the depth it opened from. A complete interpolation the shared expression
+/// scanner finds (expression, `{{{ … }}}` literal, or literal token) is opaque
+/// from its first `{`: its quotes, escapes, and parens never change this
+/// scanner's state, so an escaped quote cannot expose a `::` or `->` inside
+/// it. Openers it does not report (unclosed or escaped) keep the `{{`/`}}`
+/// counter.
 struct SpanScanner {
     in_single: bool,
     in_double: bool,
     interpolation: usize,
     parens: usize,
     prev: Option<char>,
+    /// Complete interpolation ranges, ordered by start.
+    spans: Vec<(usize, usize)>,
+    /// End of the opaque span holding the current position, if any.
+    span_end: Option<usize>,
 }
 
 impl SpanScanner {
-    fn consume(&mut self, ch: char) {
+    fn new(input: &str) -> Self {
+        let scan = scan_plain(input);
+        let mut spans: Vec<(usize, usize)> = scan
+            .expressions
+            .iter()
+            .map(|span| (span.start, span.end))
+            .chain(scan.literals.iter().map(|span| (span.start, span.end)))
+            .chain(scan.tokens.iter().map(|span| (span.start, span.end)))
+            .collect();
+        spans.sort_unstable();
+        Self {
+            in_single: false,
+            in_double: false,
+            interpolation: 0,
+            parens: 0,
+            prev: None,
+            spans,
+            span_end: None,
+        }
+    }
+
+    /// Opens the opaque span starting at `index`, if any. A span is only
+    /// entered outside quotes, matching the `{{` counter it replaces.
+    fn enter(&mut self, index: usize) {
+        if self.span_end.is_none()
+            && !self.in_quotes()
+            && let Ok(at) = self.spans.binary_search_by_key(&index, |&(start, _)| start)
+        {
+            self.span_end = Some(self.spans[at].1);
+        }
+    }
+
+    fn in_span(&self) -> bool {
+        self.span_end.is_some()
+    }
+
+    fn consume(&mut self, index: usize, ch: char) {
+        if let Some(end) = self.span_end {
+            if index + ch.len_utf8() >= end {
+                self.span_end = None;
+                self.prev = None;
+            }
+            return;
+        }
         match ch {
             '\'' if !self.in_double => self.in_single = !self.in_single,
             '"' if !self.in_single => self.in_double = !self.in_double,
@@ -383,7 +449,7 @@ impl SpanScanner {
     }
 
     fn is_top_level(&self) -> bool {
-        !self.in_quotes() && self.interpolation == 0 && self.parens == 0
+        !self.in_span() && !self.in_quotes() && self.interpolation == 0 && self.parens == 0
     }
 }
 

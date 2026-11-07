@@ -468,14 +468,24 @@ sequence: <file-ref> [-> <offset.path>] [::<operator>(<args>)]
   typed error on JSONL/NDJSON, whose root is always the list.
 - `::` is an **operator** on the resolved list. Exactly one per reference.
 - Expression (`{{ … }}`) and shell (`$( … )`) sources produce lists directly and
-  take no suffix.
+  take no suffix. A value is an expression source when it is exactly one
+  `{{ … }}` expression, which ends where Darkmatter's expression scanner ends
+  it: a `}}` inside a quoted string does not close it, so
+  `sequence: "{{ load_data(f, \"{a: {b: string}}\") }}"` is an expression,
+  not a file reference.
 - A stored literal token (`"{{!data:v1:…}}"`, the form Claudine uses to save
   text an agent wrote) is refused with `SequenceInvalid`. It is data, and data
   must not choose which steps run. See
   [Values an Agent Writes](../frontmatter-properties.md#values-an-agent-writes).
 
 The suffix parser respects quoted arguments, so a path containing a space or an
-`@`, and an operator argument containing a comma, all survive.
+`@`, and an operator argument containing a comma, all survive. A `->` or `::`
+inside a complete `{{ … }}` interpolation is part of the reference, even inside
+a string with an escaped quote:
+
+```yaml
+sequence: '{{ env("a\"}}::b") }}/steps.yaml -> data'   # reference + offset, no operator
+```
 
 ### Operators
 
