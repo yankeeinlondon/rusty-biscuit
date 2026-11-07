@@ -24,9 +24,8 @@ created: 2026-11-04
 status: finalized-spec
 area: darkmatter
 reviewed: true
-reviewed_by: claude/opus
-reviewed_on: 2026-11-05
-review_note: the clarification process served as a review
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-11-06
 clarified: true
 clarified_by: claude/opus
 needs_rulings: false
@@ -59,6 +58,12 @@ sessions, and those that follow from the three spikes, are recorded under
 [Spikes and risks](#spikes-and-risks). Work that implementation may do
 without pausing for approval is listed under
 [Pre-authorizations](#pre-authorizations).
+
+The inline review on 2026-11-06 preserves the author's settled choices,
+including unlimited input size.
+It makes failure locations, memo lifetime, null typing, and dependency
+ordering explicit. Review notes below explain corrections to conflicting
+requirements; they do not authorize unrelated implementation work.
 
 This spec builds on 2026-11-04-composition-errors, which is complete. That fix
 removed `md compose --output report-json` in favor of `md compose --output json`
@@ -113,6 +118,12 @@ not bytes: `macOS` starts at the third character of `- macOS`.
   documents its codes on the data-contract page. Requirements below were
   revised on 2026-11-06 against what that fix actually built; see
   [Resolved decisions](#resolved-decisions).
+- **2026-11-06-dotted-paths (prerequisite).** This is the other prerequisite
+  declared in frontmatter. It establishes nested frontmatter access and
+  compose setters before this feature's CLI integration. Do not claim all
+  prerequisites are complete merely because composition errors is complete.
+  Expression member access and JSON Pointers retain their own existing
+  grammars; this feature does not reinterpret them as CLI dotted paths.
 
 ## Terms
 
@@ -128,8 +139,10 @@ not bytes: `macOS` starts at the third character of `- macOS`.
   rejects a call that is provably wrong, with the span of the bad argument.
 - **Coercion engine** — `simplified_schema::coercion`, the one place that
   converts a `serde_json::Value` toward a declared type (for example the text
-  `"8080"` to the number `8080`) and validates the result. Its entry point is
-  `coercion::bind`; on failure it returns a `ConversionError`, a tree of
+  `"8080"` to the number `8080`) and validates the result. Its entry point in
+  the simplified-schema library is
+  [coercion::bind](../../../simplified-schema/lib/src/coercion/mod.rs);
+  on failure it returns a `ConversionError`, a tree of
   every failing location.
 - **JSON Pointer** — a path into a data value, such as `/3/port` (fourth
   element, its `port` field). The empty pointer `""` means the whole value.
@@ -141,8 +154,8 @@ not bytes: `macOS` starts at the third character of `- macOS`.
   lifecycle_output}`. Its shape is defined in
   `darkmatter/cli/schemas/output/compose.yaml` and enforced by a conformance
   test (both introduced by 2026-11-04-composition-errors).
-- **Diagnostic record** — one entry of `diagnostics` (`Diagnostic` in
-  `darkmatter/lib/src/markdown/compose/expression/diagnostics.rs`). Its
+- **Diagnostic record** — one entry of `diagnostics` (the darkmatter library's
+  [Diagnostic](../../lib/src/markdown/compose/expression/diagnostics.rs)). Its
   `code` is a stable `dm.<family>.<kind>` string shared with DMLS; its
   `source` is the position in the Markdown document.
 - **Read set** — the list of files and URLs that expressions read during one
@@ -173,6 +186,11 @@ load_data(file: file | null, as: type-definition(container)) -> any | null   (fa
 - `file` is a `FileReference` resolved in the calling document's context,
   exactly like every other file-taking function. Null passes through to null,
   matching the catalog's existing null convention.
+  Use the context derived from the darkmatter library's existing
+  [ComposeRequest](../../lib/src/markdown/compose/context/request.rs);
+  never recapture the process directory, environment, home, or repository.
+  Null still undergoes ordinary argument binding and the passive call check,
+  but execution returns before resolving imports or touching a data file.
 - `as` is a **quoted string** containing a type definition:
   `load_data("claudine/docs/os.yaml", "string[]")`. Named type imports are
   allowed: `"os-list@./schemas/os.yaml"` and `"Name@darkmatter:<stem>"`.
@@ -212,6 +230,16 @@ load_data(file: file | null, as: type-definition(container)) -> any | null   (fa
   expression argument has no schema document of its own, so the reference has
   no clear target. It is rejected with `dm.data.this_import_rejected`
   (R5): passively when `as` is a literal, at execution otherwise.
+  This restriction applies anywhere in the argument's own type expression.
+  It does not prohibit `Name@this` inside an imported schema: there, `this`
+  names that schema under the existing import resolver's rules.
+- Resolve file imports through the existing schema selector and the calling
+  document's schema roots. Imports inside that schema retain the schema's
+  own origin. Resolve the complete definition graph, including recursive
+  definitions, before checking containers or choosing a tabular row shape.
+  A broken or missing import is an expression evaluation failure with the
+  existing typed schema cause; it is not malformed data or a mismatch with
+  data that has not yet been read.
 
 **Acceptance criteria**
 
@@ -250,7 +278,9 @@ Note that `[string, number]` written as a type definition is a **union**
 
 A union is accepted when every non-null arm denotes a container. `X | null`
 is allowed because an empty YAML file parses to null. `unknown`/`any` alone
-is not a container.
+is not a container. At least one non-null container arm is required:
+`"null"` alone is rejected. An unresolved named reference is provisional,
+not proof that its eventual definition is a container.
 
 | `as` | Container? | Notes |
 |---|---|---|
@@ -279,7 +309,8 @@ the call executes.
   (`simplified-schema/lib/src/simplified/narrowing.rs`) and walks union arms
   with `query::flattened_alternatives`.
 - The predicate and R5's failure-flattening rule share the notion "drop null
-  arms"; the doc comment of each names the other so they stay aligned.
+  arms"; cover that shared rule with nullable-container tests rather than
+  reciprocal per-function documentation links.
 
 **Acceptance criteria**
 
@@ -321,12 +352,13 @@ line is meaningless, such as invalid UTF-8).
 |---|---|
 | a byte-order mark at the start | stripped, for every format |
 | CRLF line endings | accepted, for every format |
-| text that is not valid UTF-8 | error naming the file and the byte offset |
+| local text that is not valid UTF-8 | error naming the file and the byte offset (a URL's is a transport failure, R5) |
 | a zero-byte file | YAML → `null`; JSON and JSON5 → error; JSONL → `[]`; CSV and TSV → `[]`; TOML → `{}` |
 | YAML stream with more than one document | error |
 | YAML anchors and aliases | aliases are expanded |
 | YAML custom tags (`!foo`) | error |
-| YAML merge keys, non-string keys | whatever the shared `load_yaml_document` does today, unchanged |
+| YAML duplicate keys or non-string mapping keys | error, matching the shared whole-document YAML loader |
+| YAML merge keys (`<<`) | unchanged shared-loader behavior; no new merge-key expansion |
 | JSON object with a duplicate key | the last value wins (documented) |
 | JSON5, TOML: NaN or infinity | error |
 | JSONL: a whitespace-only line | skipped |
@@ -374,6 +406,11 @@ as follows:
   else. biscuit-file sits below simplified-schema in the dependency order and
   cannot call it, so number admission happens in darkmatter after the
   biscuit-file reader returns.
+  Admit JSONL numbers from each original record's text before numeric spelling
+  is lost; YAML uses the admitted YAML loader. JSON5 and TOML likewise must
+  reject inadmissible numeric tokens before a lossy conversion rounds them.
+  Rejecting non-finite numbers alone is insufficient. Test the same
+  non-exact integer in every numeric format, including JSONL and JSON5.
 - **TOML numbers need new work.** biscuit-file's `toml_to_json`
   (`biscuit-file/lib/src/toml_impl/types.rs`) silently turns NaN and
   infinity into `null` and passes integers through without admission. The
@@ -391,6 +428,12 @@ as follows:
   `serde_json`, the line's start plus `column - 1` bytes) and then into a
   line and character column by the shared helper (R5). A parser's own column
   is never passed through.
+- Loaded values remain data. Strings containing `{{ ... }}`, `$(...)`,
+  directives, `kind`, or `$schema` are not composed, executed, or treated
+  as schema-selection instructions. YAML uses the parsing loader, not the
+  whole-document kind-validation entry point. Only `as` supplies the contract.
+  Reject custom YAML tags on this data-loading path without changing the
+  shared loader's behavior for its other callers.
 
 **Acceptance criteria**
 
@@ -407,6 +450,9 @@ as follows:
 - An unknown extension fails with `dm.data.unsupported_format`.
 - A JSON number, or a TOML integer, outside the exact-`f64` range is rejected
   the same way it is for frontmatter; a TOML `nan` or `inf` is rejected.
+- A loaded string containing an expression or shell syntax stays unchanged,
+  and a YAML mapping containing `kind` or `$schema` causes no schema discovery
+  or extra read. Numeric admission also covers JSONL and JSON5 tokens.
 - biscuit-file built without the new feature does not depend on `csv` or
   `csv-core`.
 - `docs/dependencies.md` lists `csv` and `csv-core` for biscuit-file.
@@ -436,13 +482,23 @@ The rules are strict:
 | a scalar or `unknown` element (`"string[]"`, `"unknown[]"`) | `dm.data.row_shape_conflict`, suggesting `"{ <string>: string }[]"` or `"tuple([…])[]"` |
 | a top-level object or dictionary `as` (`"object"`, `"{ <string>: string }"`) | the same diagnostic and suggestion |
 | a file with no header row | not supported; the first row is always a header (see [Follow-ups](#follow-ups)) |
-| a duplicate or empty header, object-row mode | `dm.data.malformed`, naming the columns, at line 1 |
+| a duplicate or empty header, object-row mode | `dm.data.malformed`, naming the columns, on the header's source line |
 | a duplicate or empty header, list-row mode | allowed (the header is skipped) |
 | a row with more or fewer cells than the header (ragged) | `dm.data.malformed`, with that row's line |
 | an empty cell | the empty string `""`; the coercion engine decides whether that satisfies `as` |
-| a quoted cell containing a newline | allowed; positions report the line where the record starts |
+| a quoted cell containing a newline | allowed; record errors use the record start, cell errors use that field's raw start |
 | a quoted cell containing the delimiter | allowed |
 | a header-only file | `[]` |
+
+LF and CRLF terminate records; CSV-style quotes may enclose either delimiter
+or a line break, and doubled quotes escape a quote. Reject an unterminated
+quoted field, a quote inside an unquoted field, or text between a closing
+quote and the next delimiter or record end as `dm.data.malformed`. The reader
+must enforce these rules even if its underlying CSV parser accepts them.
+Do not trim cells or headers. A blank physical line outside a quoted field
+is skipped, matching the CSV reader; it does not become an empty header or
+row. A delimiter-only line is a record with empty cells. Header diagnostics
+use the header's actual source line, which need not be line 1.
 
 **Cell conversion.** The coercion engine converts cell text with the same
 rules it uses for frontmatter. This spec pins that behavior with a fixture;
@@ -467,6 +523,12 @@ not expect (`"1"` reads as `true`), so the docs state it (R12).
 - When both `file` and `as` are literals, the passive check knows the
   extension and applies the row-shape rule before anything runs; otherwise
   it is applied at execution.
+  An unresolved file import defers this check too: knowing the extension
+  does not supply the imported element type. Walk element unions and all
+  fixed tuple slots; they must select the same row mode. An empty top-level
+  tuple selects no mode and is rejected. Null top-level arms do not select
+  a mode; nullable or unknown row elements do not describe a row and are
+  rejected.
 - TSV uses the same quoting as CSV (a tab delimiter), not the "no quoting,
   escape sequences" TSV variant.
 - The cell-conversion fixture exists so that a later change to the shared
@@ -501,6 +563,12 @@ uses. Any failure is an error (never a warning, never a partial value). The
 failure records come from the engine's `ConversionError` through a
 simplified-schema flattening helper, **never** from `validate_soft`'s JSON
 Schema problems (see the design notes for why).
+This is bare-value binding, with no frontmatter pending-value deferral.
+Preserve the existing function binder's passive refinement semantics: for
+example, a `file(eager)` leaf is checked as file-reference syntax, without
+probing or fetching the leaf. Reading the data source does not authorize
+effects from values inside it. Do not claim these leaves establish file
+existence; a future context-aware data-validation API would be separate work.
 
 **Codes.** Each static or data error has its own diagnostic code, all with
 severity `error`:
@@ -553,11 +621,21 @@ and each `message` are unchanged.
   | `file` | the resolved data file (portable path) or URL |
   | `pointer` | the JSON Pointer of the offending value, for example `/0` |
   | `line`, `column` | 1-based; the column counts characters, not bytes; unaffected by CRLF line endings (the same convention as `source`) |
+  | `byte_offset` | zero-based offset into the original bytes, only for invalid UTF-8; no line or column accompanies it |
 
   `data_location` is present for `dm.data.malformed` and
   `dm.data.contract_mismatch`, and absent (not `null`-filled) otherwise.
   Data loaded from a URL gets line and column too, computed from the fetched
   text.
+
+  **Malformed input has no value tree.** Its `pointer` is absent unless
+  the parser proves one; do not invent an empty pointer to mean "unknown."
+  Parser-proven line and column remain available even for YAML containing
+  aliases or multi-line flow collections. That YAML limitation concerns
+  locating contract violations in a successfully parsed tree, not parser
+  errors. A transport failure, including UTF-8 rejection by the existing
+  remote runtime before text reaches this function, retains its expression
+  evaluation failure and has no `data_location`.
 
   **Line breaks** are LF or CRLF. A lone CR (not followed by LF) is not a
   line break.
@@ -567,6 +645,18 @@ and each `message` are unchanged.
   collection spanning more than one line (`servers: [` … `]`). For such a
   file `data_location` carries `file` and `pointer`, and `line` and `column`
   are absent. A guessed position is never reported in their place.
+
+  For a missing member or tuple slot, keep the missing value's pointer but
+  locate the nearest existing parent container. Locate an unexpected key at
+  its value. If the format cannot prove that parent's position, omit line
+  and column. For CSV/TSV, a field position is its raw start, including an
+  opening quote; a row-level failure points to the record start. Columns
+  are counted on the physical line containing that start.
+
+  **Review note:** these rules separate syntax errors, which may have no
+  pointer, from contract errors, which always have one. They also replace
+  the earlier conflicting claims that all CSV positions use the record's
+  start line and that cell positions use raw field offsets.
 
 **Expected and found values.** `expected_type` and `actual_type`, which the
 record already has, are filled structurally (for example `number` and
@@ -580,6 +670,11 @@ one further record of the same code says how many were not listed. Records
 are in **file order** — array indexes ascending, object keys in the order
 the file writes them, union arms in the order `as` declares them — so the
 cap keeps the first 20 violations in the file.
+Preserve authored mapping order separately from the JSON value if the parser
+or conversion sorts keys. Missing members have no source order: list them
+after present members at the same parent, in contract declaration order.
+The overflow record points at the call site, omits `data_location` and
+expected/found types, and is not counted as another violating location.
 
 **From engine failures to records.** The engine reports a tree: a value
 that matches no arm of a union carries one failure list per arm. The helper
@@ -697,7 +792,8 @@ returns nothing means pointer only.
 
 **Acceptance criteria**
 
-- The `number[]` example fails with one `dm.data.contract_mismatch` record:
+- The `number[]` example fails with three `dm.data.contract_mismatch`
+  records, one for each operating system. The first has:
   `source` at the call, `data_location` `{file: …/os.yaml, pointer: "/0",
   line: 1, column: 3}`, `expected_type` `number`, `actual_type` `string`,
   and `"macOS"` in the message.
@@ -738,6 +834,12 @@ returns nothing means pointer only.
   in `construct`.
 - The human stderr report of a missing file is byte-identical to before.
 - Each `dm.data.*` code in the table has at least one test.
+- Invalid local UTF-8 reports `data_location.file` and `byte_offset`;
+  malformed JSON has a parser position without an invented pointer. Missing
+  members retain their missing pointer and locate the existing parent.
+- Keys containing `/`, `~`, or an empty string round-trip through RFC 6901
+  pointers and their locators. Two bad object fields written in reverse
+  alphabetical order are reported in authored order.
 
 ### R6. Remote reads
 
@@ -753,6 +855,13 @@ today. The format comes from the URL path's extension (R3).
 
 Add `load_data` to `REMOTE_READ_FUNCTIONS` in
 `darkmatter/lib/src/markdown/compose/remote.rs`.
+Authorization is checked before consulting the data memo, as well as before
+transport-cache access. A shared slot never grants a less privileged context
+access to an earlier result. Retain the remote runtime's redirect, freshness,
+and response-cache rules; the data memo adds no independent fetch path and
+persists no parsed result. Named schema imports retain their existing local
+and shipped-schema resolution rules; allowing a data host does not authorize
+remote schema imports.
 
 **Acceptance criteria**
 
@@ -797,25 +906,23 @@ memo key uses the resolved type, not the text as written.
 
 Why: a `{{ load_data(…) }}` inside a `::map` body is evaluated once per item
 (only the collection source itself is evaluated once), so without a memo a
-100-item map reads the same file 100 times. File size needs no separate cap
-because the existing request-wide iteration limits already bound the work
-done with the data.
+100-item map reads the same file 100 times. The author's decision is to add
+no file-size cap. Iteration limits bound later collection traversal and output;
+they do not bound the bytes fetched, parser allocations, alias expansion, or
+the number of distinct memo entries. Document that distinction and retain
+existing parser and coercion depth limits; this feature promises no fixed
+memory bound for an arbitrarily large input. No additional performance spike
+is needed to establish that limitation.
 
-The request's cache access mode (`CacheAccessMode` in
-`darkmatter/lib/src/markdown/compose/cache/types.rs`, set through
-`ComposeOptions::with_cache_access_mode`; there is no CLI flag) governs the
-memo:
+> **Decided (2026-11-06). Read once.** A file is read and parsed once per command, and
+> validated once per contract, **in every cache access mode** (`CacheAccessMode`, a
+> library-only setting). `Refresh` and `Off` govern the compose cache, not this memo: I/O
+> is not cheap, and repeating a read within one command answers no question. The
+> re-read after a command, above, is the one exception, because the file may have changed.
 
-| Mode | Memo |
-|---|---|
-| `ReadWrite` (default) | reuse |
-| `ReadOnly` | reuse (the memo is in-memory, so "do not write the cache" does not apply to it) |
-| `Refresh` | no reuse |
-| `Off` | no reuse |
-
-With no reuse, every call parses and validates again. A file is read again
-from disk; a URL body still comes from the run's existing single-flight
-remote fetch, so "reads again" never means a second network request.
+Two levels make this hold: the source (read, decode, parse) is keyed by the resolved
+file or URL, and the bound result by that source and the resolved `as`. So
+`load_data(f, "a[]")` and `load_data(f, "b[]")` read `f` once and validate twice.
 
 **Design notes**
 
@@ -833,8 +940,29 @@ remote fetch, so "reads again" never means a second network request.
   loads, concurrent callers for the same key wait for that result. Loading
   data never evaluates another `load_data` call, so there is no re-entrancy
   to guard against.
-- The memo reads the cache access mode from the same `ComposeOptions`; the
-  existing per-run patterns ignore the mode, so this is new work.
+- Reuse identity includes the resolved data source, format, resolved contract
+  and complete definition graph, and the context needed to interpret that
+  contract. Equal type text is insufficient when imports or context-sensitive
+  constraints differ. Use existing identity helpers; any new fingerprint uses
+  biscuit-hash. Keep native path identity separate from portable display
+  text, using biscuit-file's canonicalization and portable-path helpers.
+- Cache source-independent values or typed causes, never a fully located
+  diagnostic. Each caller supplies its own call span, document, iteration
+  path, and authored `as` text, even when another caller populated the entry.
+  Preflight-only deferrals and failures that grant no usable result are not
+  memoized; successful results are the required reuse unit.
+- Invalidation advances a generation as it removes entries. A load already
+  in progress may finish for its original caller but cannot populate the new
+  generation. Invalidate after each executed command attempt, including a
+  failed command that may have written files, before any next expression.
+  Skipped commands do not invalidate. A lifecycle invalidation is shared by
+  every request participating in that command. Concurrent external writers
+  are outside this guarantee.
+  The generation is a counter separating reads before and after a command;
+  it prevents a late completion from restoring data the command invalidated.
+- Local invalidation does not discard the existing remote runtime's URL
+  snapshot. A command that changes a remote resource does not force a second
+  fetch in this feature; a new root command gets a new remote snapshot.
 
 **Acceptance criteria**
 
@@ -842,12 +970,11 @@ remote fetch, so "reads again" never means a second network request.
   that file once (observed through a work counter or read-count hook).
 - A call in a `::map` callback and a call in the body of the same document,
   on the same file and `as`, read the file once.
-- The same file with a different `as` is validated separately.
+- The same file with a different `as` is read once and validated separately.
 - The same relative named import written in documents in two folders, naming
   different schema files, is validated separately.
-- Under `Off` and `Refresh`, the same `::map` reads the local file three
-  times; a URL is still fetched once.
-- Under `ReadOnly`, it reads once.
+- Under each of `ReadWrite`, `ReadOnly`, `Refresh`, and `Off`, the same `::map` reads
+  the file once and validates it once; a URL is fetched once.
 - `md compose` on a file-backed document with a `load_data` call and a reference
   check reads the data file once across both passes.
 - A frontmatter command that rewrites the data file before a body `load_data`
@@ -856,6 +983,10 @@ remote fetch, so "reads again" never means a second network request.
 - A URL read under `--allow host=HOST` succeeds when the reference check ran
   first and could not read it.
 - Two library compositions with no caller-supplied slot do not share results.
+- Repeated failures at two call sites retain each site's provenance; neither
+  a data memo hit nor a prior allowed-host read bypasses current policy.
+- An in-flight old-generation load cannot be reused after invalidation, and
+  a failed shell attempt that writes a file also ends reuse.
 
 ### R8. Read set
 
@@ -902,8 +1033,30 @@ S3), which introduces evaluated results in DMLS.
   (below) proves it.
 - Add a field for it to the envelope and to
   `darkmatter/cli/schemas/output/compose.yaml`; the compose conformance test
-  covers it. The field name is chosen at planning; like `data_location`,
-  this changes a shape 2026-11-04-composition-errors defines.
+  covers it. The field is `read_set: string[]`, always present (an empty
+  array when there were no reads), on both successful and failed compose
+  envelopes. Like `data_location`, this extends an existing output contract.
+- Store a deduplicated set and serialize it in stable lexical order, not
+  concurrent completion order. Local entries use biscuit-file's canonical
+  native identity internally and portable absolute path text at the output
+  boundary. URL identity uses the existing remote runtime's normalization,
+  retaining distinctions such as query parameters; do not invent a second
+  normalization rule. The field is command output, never a new persisted
+  remote manifest; existing persistence redaction remains unchanged.
+- `file_exists` is an observation even when false. Record concrete local
+  candidates actually probed when no file exists, using normalized absolute
+  candidate paths because canonicalization cannot succeed. Record an
+  existing resolved source before opening or parsing it, so permission and
+  parse failures are included. An invalid reference with no concrete target
+  contributes no invented path. A remote observation records the normalized
+  URL even if policy denies the fetch; recording it does not authorize I/O.
+- Record schema files actually read while resolving a `load_data` contract
+  or running `validate_schema`, including transitive imports, using existing
+  resolver provenance. This keeps the set faithful to the function's
+  dependencies. Embedded schemas add no filesystem entry. Memo hits retain
+  the dependencies of their original load. This remains an expression-read
+  set, not an inventory of unrelated links, transclusions, or every file
+  consulted anywhere in composition.
 
 **Acceptance criteria**
 
@@ -920,6 +1073,10 @@ S3), which introduces evaluated results in DMLS.
 - `md compose --output json` includes the read set, and the record passes
   the compose conformance test.
 - DMLS behavior is unchanged; no DMLS test is added for the read set.
+- Repeated reads contribute one entry; false `file_exists` probes, a denied
+  URL, imported schema dependencies, and a command that fails before compose
+  returns all obey the rules above. Empty and failed envelopes retain the
+  same `read_set` field shape and ordering.
 
 ### R9. Optional data files
 
@@ -940,6 +1097,15 @@ The same pattern applies to a file a frontmatter command creates. The passes
 that run ahead of composition evaluate expressions before any command runs, so
 an unguarded call on a file that does not exist yet fails before the command
 can create it. `frontmatter()` already behaves this way.
+
+The guard handles absence only. If an old file exists but is malformed or
+fails `as`, the reference check stops before a command can replace it. A
+computed import that is missing behaves the same way. Generate or repair
+such inputs before invoking `md compose`; this feature does not postpone
+known failures until after commands run. The reference check's throwaway
+document prevents its old values from becoming final frontmatter state;
+after an executed command, composition evaluates against the new memo
+generation. Cover this ordering with a regression test.
 
 **Acceptance criteria**
 
@@ -1002,6 +1168,11 @@ source, not an expression.)
   added.
 - `X | null` from an `as` such as `"string[] | null"` keeps the null arm, so
   the existing null-handling rules apply.
+- The file argument's nullability also matters. A definitely null file gives
+  static type `null`; a possibly null file gives the denoted type unioned
+  with `null`; a proven non-null file gives the denoted type alone. A literal
+  contract cannot erase the signature's null passthrough. Invalid literal
+  contracts remain errors even for null files under the passive call check.
 
 **Acceptance criteria**
 
@@ -1010,7 +1181,10 @@ source, not an expression.)
 - With a computed `as`, completion after `h.` offers nothing from `load_data`
   and nothing is reported (the result is `any`).
 - `expression_type` of `load_data(f, "{ a: string }[]")` is an array of
-  `{ a: string }`, and of `load_data(f, "Name@./x.yaml")` is unknown.
+  `{ a: string }` when `f` is non-null, and that array unioned with null
+  when `f` may be null. A named file import projects to unknown.
+- A definitely null file has result type null and opens neither the data
+  file nor any imported contract file. No static type inspection reads one.
 
 ### R11. Balanced, parse-gated `{{ }}` scanning
 
@@ -1035,8 +1209,9 @@ The new rule:
    consumes the next character, and strings may span lines).
 2. A `}}` closes the expression only when every single `{` opened inside it
    is closed.
-3. The scanner uses this new span only when it differs from today's span
-   **and** its text parses as an expression. Otherwise — no closing `}}`, an
+3. Preserve today's span first if its text parses. Otherwise the scanner
+   uses the new span only when it differs from today's span **and** its text
+   parses as an expression. Otherwise — no closing `}}`, an
    unterminated string, an unbalanced `{`, or a parse failure — it uses
    today's span unchanged.
 
@@ -1069,7 +1244,10 @@ package area.
 - The parse gate makes the scanner call `expression::parse`, which lives in
   the same module, so no layering changes. Update the module doc in
   `scan.rs`, which says the scan "is purely lexical". The parse runs only
-  where spans differ, so the cost is negligible.
+  where spans differ. Use the parser's existing recursion limits and avoid
+  repeatedly rescanning a suffix from each closing-delimiter candidate.
+  The completed corpus check is sufficient; no new performance study is
+  required.
 - Unchanged: `{{{ … }}}` literals still close at the first `}}}`, even inside
   quotes, and `{{{a: 1}}}` with no space is a literal, not an object
   expression.
@@ -1090,6 +1268,13 @@ package area.
 
   Presence checks such as `contains("{{")` only decide whether text may hold
   an expression, not where it ends, and are unaffected.
+
+  Editor completion also needs an unfinished expression, which cannot pass
+  the complete-expression parse gate. The shared scanner must expose cursor
+  state separately: determine whether the cursor is within a quoted string,
+  nested brace, or unfinished expression using the same lexical rules,
+  without accepting unfinished text as a valid composition expression.
+  This is how type completion remains possible before the final `}}` exists.
 
 **Acceptance criteria**
 
@@ -1112,8 +1297,13 @@ package area.
   shape.
 - In claudine, `sequence: "{{ load_data(f, \"{a: {b: string}}\") }}"` is an
   expression source, not a file reference.
-- An L1 corpus test runs today's and the new scanner over the shipped corpus
-  and asserts that every changed span parses and that its old span did not.
+- Bounded L1 regression fixtures preserve the changed expression forms from
+  the completed corpus check and the prose counterexamples above. Assert
+  that every changed span parses and its old span did not, and preserve any
+  old span that already parses. Read only explicitly declared shipped inputs
+  or frozen test fixtures; do not rescan the working repository or include
+  internal `prompts/` trees in ordinary tests. The completed spike remains
+  the record of the broad corpus comparison.
 
 ### R12. Documentation
 
@@ -1138,8 +1328,9 @@ package area.
   `docs/cli/data-contracts.md`. The stopping rule for a data failure, including
   that it can stop a command in the reference check, is on
   `docs/errors/composition-problems.md`.
-- The read set (R8) and the per-command memo, with its cache-mode table and its
-  emptying rule (R7), are described on the relevant compose topic page.
+- The read set (R8) and the per-command memo, including that it holds in every cache
+  access mode, and its emptying rule (R7), are described on the relevant compose topic
+  page.
 - The expression-syntax page states the R11 rule in plain terms: a `}}`
   inside a quoted string, or inside a nested `{ … }`, does not end an
   expression; and, next to the object-literal example, that `{{{ … }}}` is
@@ -1189,8 +1380,11 @@ without pausing for approval.
   validator. It then reports convertible text (such as `"8080"` against
   `number`) as a type error. This affects frontmatter with nested
   containers today. `load_data` avoids it by building records from the
-  engine (R5). Implementation fixes it, or files it as a dated fix spec,
-  following the repository's convention.
+  engine (R5). Implementation fixes this defect in the shared failure
+  projection while preserving the existing successful-conversion behavior.
+  A regression test combines an undeclared nested key with convertible
+  numeric text and verifies that only the actual violation is reported.
+  Filing the known defect does not satisfy implementation completion.
 
 ## Spikes and risks
 
@@ -1214,7 +1408,7 @@ Remaining risks:
 - **Shared simplified-schema code.** The relaxed `PositionMap::project`
   root, the scanner, and the merged flattening helper are all used by
   frontmatter. Existing tests plus the new list-root, scalar-root, and
-  corpus tests guard them.
+  bounded scanner regression fixtures guard them.
 - **Cross-package scanner change.** R11 changes claudine's sequence grammar.
   Run claudine's `just test` alongside darkmatter's.
 - **Read-set coverage.** A context built without the shared sink silently
@@ -1236,7 +1430,8 @@ Remaining risks:
   I/O.
 - **Strict CSV/TSV (L1):** every row of the R4 table, including ragged rows,
   duplicate and empty headers in both modes, empty cells, quoted newlines
-  (start-line reporting), TSV quoting, and the cell-conversion fixture.
+  (record and field positions), invalid quoting, leading blank lines, TSV
+  quoting, and the cell-conversion fixture.
 - **Locators (L1, biscuit-file and simplified-schema):** per-format pointer
   to position, including duplicate JSON keys, CSV quoting, a TOML array of
   tables, multibyte and CRLF twins, YAML list and scalar roots, and the two
@@ -1246,8 +1441,8 @@ Remaining risks:
   cases; the union-flattening criteria of R5; the 25-violation cap case; and
   a URL-loaded fixture with positions.
 - **Memoization (L1):** the R7 `::map` read-count test, the callback-plus-body
-  case, the different-`as` and different-folder import cases, each cache access
-  mode, one read across the reference check and composition, and the memo
+  case, the different-`as` and different-folder import cases, every cache access
+  mode reading once, one read across the reference check and composition, and the memo
   emptied after a frontmatter command, a `::shell`, and a lifecycle step.
 - **Read set (L1):** the R8 criteria for `load_data` and the other
   read-side functions, one test per evaluation surface, a URL, and a failure in
@@ -1255,8 +1450,13 @@ Remaining risks:
 - **Typed result (L1 + DMLS):** the R10 criteria, including one DMLS
   completion test after a typed callback parameter.
 - **Scanner (L1, simplified-schema, darkmatter, DMLS, claudine):** the R11
-  criteria and the old-versus-new corpus test.
-- **Optional files (L1):** the three R9 criteria.
+  criteria and bounded old-versus-new regression fixtures; no working-tree
+  or internal-prompt scan.
+- **Optional files (L1):** the R9 criteria, including regeneration ordering
+  and a malformed old file that fails before a command runs. Shell fixtures
+  use the shared test toolkit and portable helper executables, not a POSIX
+  shell command assumed to exist on native Windows. Editor tests stay
+  headless and never activate terminal or browser windows.
 - **End to end:** `md compose` through the normal invocation path for one
   success and one contract failure. The failure case runs
   `md compose --output json` and asserts exit status 1, `outcome:
@@ -1270,7 +1470,8 @@ Remaining risks:
 ## Definition of done
 
 - Every acceptance criterion in R1–R12 has a passing test.
-- The implementation log records the R11 corpus diff, and names the one
+- The implementation log cites the completed scanner corpus comparison and
+  records the bounded regression results. It names the known
   pointer-only case — YAML files containing aliases or multi-line flow
   collections — which the docs name too (hardening is a follow-up).
 - `just test` and `just lint` pass in `darkmatter/`, `simplified-schema/`,
@@ -1284,7 +1485,7 @@ Remaining risks:
 - The catalog entry, generated function page, topic section, data-contract
   page, and rewritten `type-definition` page are in place;
   `docs/dependencies.md` records `csv` and `csv-core`.
-- The `validate_soft` defect is fixed or filed (see
+- The `validate_soft` defect is fixed with its regression test (see
   [Defects found](#defects-found)), and the follow-up specs in
   pre-authorization (c) are filed.
 - The `darkmatter`, `simplified-schema`, and `biscuit-file` skills mention
@@ -1294,7 +1495,8 @@ Remaining risks:
 
 ## Resolved decisions
 
-All decided on 2026-11-05.
+Author decisions were made on 2026-11-05 and 2026-11-06. The inline-review
+clarifications below are dated separately; they preserve those decisions.
 
 - **How is `as` written?** As a quoted string, `"string[]"`. Unquoted type
   syntax collides with variables, indexing, object literals, and the
@@ -1381,11 +1583,14 @@ All decided on 2026-11-05.
   regenerated file's old contents to composition. The shared slot was chosen
   knowing this: reads repeat only where a command could have changed the data.
 - **(2026-11-06) Names and limits.** The `dm.data.*` spellings, the violation
-  cap of 20, the `ReadOnly` (reuse) and `Refresh` (no reuse) memo rows, and the
-  `read_set` field name are confirmed as proposed.
-- **Sequencing.** Implementation began only after
-  2026-11-04-composition-errors was complete (see
-  [Dependencies](#dependencies)).
+  cap of 20, and the `read_set` field name are confirmed as proposed.
+- **(2026-11-06) Read once.** I/O is not cheap, so a file is read and parsed once per
+  command in every cache access mode, and validated once per contract. The only re-read
+  follows a command, which may have changed the file.
+- **Sequencing.** Implementation starts after both declared prerequisites,
+  composition errors and dotted property paths, are complete (see
+  [Dependencies](#dependencies)). This remains an unimplemented spec; it
+  does not assert that implementation has already begun.
 - **Diagnostics.** Typed `dm.data.*` codes, structured fields, a new
   `data_location`, a cap on listed violations, and a tracing span per call
   (R5). Scripts and DMLS need the data position separately from the call
@@ -1404,6 +1609,14 @@ All decided on 2026-11-05.
   without line/column (R5). Both cases are uncommon in data files, the
   fallback is already defined, and the shared simplified-schema change
   (about 1.5 days for both) would grow an already-large spec.
+- **Inline review (2026-11-06): consistency corrections.** Malformed input
+  need not have a pointer, missing values locate their existing parent,
+  CSV cell positions use raw field starts, and null file arguments remain
+  null in static typing. The read set has a stable field name, ordering,
+  and failure-path coverage. The existing shared conversion defect must be
+  fixed rather than merely filed, following the repository's rule to fix
+  discovered defects during implementation. Scanner regression tests use
+  bounded fixtures; the completed broad spike is not rerun in ordinary tests.
 
 ## Open questions
 
@@ -1411,7 +1624,8 @@ No design questions remain open.
 
 ## Follow-ups
 
-Filed as dated active specs under pre-authorization (c):
+Implementation must file these as dated active specs under the existing
+pre-authorization for other specs. They are not asserted to exist yet:
 
 - **General expression-level recovery.** A construct such as
   `try(expr, fallback)` that absorbs an error.
