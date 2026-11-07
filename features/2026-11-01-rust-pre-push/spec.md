@@ -23,9 +23,18 @@ $schema:
   implemented_by: string -> the agent who implemented the plan
 reviewed: false
 implemented: false
+next_spec: 2026-10-26-next-gen-pipeline
+related:
+  - 2026-11-06-rust-evidence-client
+  - 2026-11-06-rust-ci-planner
 ---
 
 # Move the Pre-push Hook's Logic into Rust
+
+> **Pipeline note (2026-11-06):** Phase 1 is this spec's scope. Phase 2 ports
+> evidence code that the D1 store replaces, so that work moves to
+> `2026-11-06-rust-evidence-client` rather than being ported twice, and its
+> `affected_scope.py --apply-to` piece moves to `2026-11-06-rust-ci-planner`.
 
 ## Why
 
