@@ -32,6 +32,7 @@ related:
     - 2026-11-04-composition-errors
 depends-on:
     - 2026-11-04-loading-data
+    - 2026-11-05-render-surface
 ---
 
 # Dynamic Schema Types
