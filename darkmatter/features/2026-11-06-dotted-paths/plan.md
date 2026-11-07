@@ -1,14 +1,44 @@
 ---
 total_phases: 10
 created: 2026-11-06
-phase: 2
+phase: 4
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+- biscuit-file/lib/src/json5/mod.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- biscuit-file/lib/src/json5/scan.rs
+- biscuit-file/lib/src/lib.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/numeric.rs
+- simplified-schema/lib/src/numeric/ingress.rs
+- simplified-schema/lib/src/property_path.rs
+- simplified-schema/lib/src/setter_value.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/property_paths.rs
+- simplified-schema/lib/tests/l1/setter_values.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+- biscuit-file
+- darkmatter
+- darkmatter-cli
+- simplified-schema
+source_files_during_phase_3:
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/write.rs
+- darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+- darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/frontmatter.md
 ---
 
 # Dotted Property Paths Implementation Plan
@@ -78,17 +108,17 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 2: Paths and Values
 
-- [ ] **Property paths**
+- [x] **Property paths**
   - Own `simplified-schema/lib/src/property_path.rs` and `lib.rs`, including the value parser task's export line. Implement rules 1–3 with their error types. Test escapes, round trips (trailing backslash, literal dots, `\\.` sequences), the empty top-level key, `a.`/`.a`/`a..b`, Unicode and whitespace, `items.01`, a 40-digit index, numeric mapping keys, scalar and `null` traversal, parent creation, `NumberUnderMissingParent`, key order on replace, and emptied parents.
 
-- [ ] **Value parser**
+- [x] **Value parser**
   - Own `simplified-schema/lib/src/setter_value.rs`, `numeric::admit_json5_text_numbers`, and biscuit-file's `json5_scan`. Implement rules 5–7. `json_five` 0.3.1 exports `tokenize_str`, whose `tok_spans` slice key and number spellings from the source.
   - Test `{a:1}` and `{ max-width: 50 }` as objects, quoted strings decoding once, `null`, `1.10` under `string` and `string | number`, `numberlike`, `boolish`, duplicates and `NaN` and inexact integers in both JSON5 and YAML flow containers, `{ a:1, max-width: 2 }` reading `a:1` as a key, a tagged YAML value, a block document, and text that parses as neither.
   - Checkpoint: the schema ownership and dependency-direction guards pass.
 
 ## Phase 3: Nested Text Editor
 
-- [ ] **Nested text editor**
+- [x] **Nested text editor**
   - Own `darkmatter/lib/src/markdown/hash/path_edit.rs` and the visibility changes it needs in `hash/write.rs`. Implement rules 8–9 and export through `hash/mod.rs`.
   - Test comments inside a shared parent, sibling scalar spelling, appending to a block mapping at its indent, replacing in a block sequence, removing the last child, LF and CRLF, a flow collection falling back, an anchor whose edit changes an alias elsewhere being refused with no fallback, an indented root, and the read/write/read round trip.
 
