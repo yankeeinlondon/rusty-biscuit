@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::expression::data::contract::ROW_SHAPE_SUGGESTION;
 use darkmatter::markdown::compose::expression::data::{DataError, DataSourceLocation, RowMode};
 use darkmatter::markdown::compose::expression::{ExpressionError, FileRefFailure, FileReferenceDiagnostic};
 use darkmatter::markdown::compose::shell_expansion::{
@@ -226,6 +227,17 @@ loads! {
         => json!([{"a": "1,2", "b": "x\ny"}]);
     tsv_quoted_tabs_load: "d.tsv", "a\tb\n\"1\t2\"\tz\n", "{ a: string, b: string }[]"
         => json!([{"a": "1\t2", "b": "z"}]);
+    // `<<` is an ordinary key: the shared loader expands no merge keys.
+    yaml_merge_keys_stay_ordinary_keys: "d.yaml", "base: &b {x: 1}\nother:\n  <<: *b\n", "{ <string>: { <string>: unknown } }"
+        => json!({"base": {"x": 1}, "other": {"<<": {"x": 1}}});
+    csv_blank_lines_outside_quotes_are_skipped: "d.csv", "\na\n\nx\n\ny\n", "{ a: string }[]"
+        => json!([{"a": "x"}, {"a": "y"}]);
+    csv_a_delimiter_only_line_is_a_row_of_empty_cells: "d.csv", "a,b\n,\n", "{ a: string, b: string }[]"
+        => json!([{"a": "", "b": ""}]);
+    csv_headers_and_cells_are_not_trimmed: "d.csv", "a , b\n x ,y\n", "{ <string>: string }[]"
+        => json!([{"a ": " x ", " b": "y"}]);
+    csv_a_quoted_newline_in_a_list_row_loads: "d.csv", "a,b\n\"x\ny\",z\n", "tuple([string, string])[]"
+        => json!([["x\ny", "z"]]);
 
     // A byte-order mark is stripped for every format family.
     yaml_bom_is_stripped: "d.yaml", "\u{feff}- a\r\n- b\r\n", "string[]" => json!(["a", "b"]);
@@ -250,6 +262,8 @@ loads! {
     empty_jsonl_is_an_empty_list: "d.jsonl", "", "string[]" => json!([]);
     empty_csv_is_an_empty_list: "d.csv", "", "{ a: string }[]" => json!([]);
     empty_tsv_is_an_empty_list: "d.tsv", "", "{ a: string }[]" => json!([]);
+    blank_lines_only_csv_is_an_empty_list: "d.csv", "\n\r\n\n", "{ a: string }[]" => json!([]);
+    toml_floats_load: "d.toml", "a = 1.5\nb = -2.25\n", "{ <string>: number }" => json!({"a": 1.5, "b": -2.25});
     empty_toml_is_an_empty_table: "d.toml", "", "{ <string>: string }" => json!({});
 }
 
@@ -264,7 +278,7 @@ fn an_unknown_extension_is_unsupported() {
 }
 
 /// A malformed document's location: `(line, column)` when the parser proved
-/// one, else `None`.
+/// one, else `None`, which asserts that neither is reported.
 macro_rules! rejects {
     ($($name:ident: $file:literal, $content:expr, $contract:literal => $at:expr;)+) => {
         $(
@@ -274,9 +288,7 @@ macro_rules! rejects {
                 write(dir.path(), $file, $content);
                 let location = malformed(dir.path(), $file, $contract);
                 let expected: Option<(usize, usize)> = $at;
-                if let Some((line, column)) = expected {
-                    assert_eq!(line_column(&location), (Some(line), Some(column)), "{location:?}");
-                }
+                assert_eq!(line_column(&location), expected.unzip(), "{location:?}");
                 assert_eq!(location.byte_offset, None, "{location:?}");
             }
         )+
@@ -290,11 +302,25 @@ rejects! {
     json_inexact_integer_is_malformed: "d.json", "[9007199254740993]", "number[]" => Some((1, 2));
     empty_json_is_malformed: "d.json", "", "string[]" => Some((1, 1));
 
-    yaml_duplicate_key_is_malformed: "d.yaml", "a: 1\na: 2\n", "{ <string>: number }" => None;
+    // The YAML parser locates a duplicate key at the start of the mapping
+    // that holds it.
+    yaml_duplicate_key_is_malformed: "d.yaml", "a: 1\na: 2\n", "{ <string>: number }" => Some((1, 1));
+    yaml_nested_duplicate_key_is_located_at_its_mapping: "d.yaml", "x: 0\nm:\n  a: 1\n  a: 2\n", "{ <string>: unknown }"
+        => Some((3, 3));
+    // The YAML parser reports a second document without a position, and no
+    // other source proves one.
     yaml_multiple_documents_are_malformed: "d.yaml", "- a\n---\n- b\n", "string[]" => None;
     yaml_custom_tag_is_malformed: "d.yaml", "- !foo a\n", "string[]" => Some((1, 3));
-    yaml_invalid_syntax_is_malformed: "d.yaml", "a: [1\n", "{ a: number[] }" => None;
-    yaml_inexact_integer_is_malformed: "d.yaml", "- 9007199254740993\n", "number[]" => None;
+    yaml_invalid_syntax_is_malformed: "d.yaml", "a: [1\n", "{ a: number[] }" => Some((2, 1));
+    yaml_inexact_integer_is_malformed: "d.yaml", "- 9007199254740993\n", "number[]" => Some((1, 3));
+    // The parser accepts a non-string key; the shared loader refuses it
+    // afterwards, and its position map cannot index such a mapping.
+    yaml_non_string_key_is_malformed: "d.yaml", "a:\n  1: x\n", "{ <string>: unknown }" => None;
+    // Aliases only make contract violations pointer-only; a parser error in
+    // a file that holds one keeps the parser's coordinates.
+    yaml_invalid_syntax_after_an_alias_keeps_its_parser_position: "d.yaml", "a: &x 1\nb: *x\nc: d: e\n",
+        "{ <string>: unknown }" => Some((3, 5));
+    yaml_unknown_alias_is_malformed: "d.yaml", "- a\n- *nope\n", "string[]" => Some((2, 3));
 
     toml_duplicate_key_is_malformed: "d.toml", "a = 1\na = 2\n", "{ a: number }" => Some((2, 1));
     toml_trailing_garbage_is_malformed: "d.toml", "a = 1 x\n", "{ a: number }" => Some((1, 5));
@@ -303,10 +329,11 @@ rejects! {
     toml_inexact_integer_is_malformed: "d.toml", "a = 9007199254740993\n", "{ a: number }" => Some((1, 5));
 
     json5_invalid_text_is_malformed: "d.json5", "{a: ]}", "{ a: number }" => Some((1, 5));
-    json5_trailing_text_is_malformed: "d.json5", "[1] x", "number[]" => None;
+    json5_trailing_text_is_malformed: "d.json5", "[1] x", "number[]" => Some((1, 5));
     json5_non_finite_is_malformed: "d.json5", "[Infinity]", "number[]" => Some((1, 2));
     json5_inexact_integer_is_malformed: "d.json5", "[9007199254740993]", "number[]" => Some((1, 2));
-    empty_json5_is_malformed: "d.json5", "", "string[]" => None;
+    empty_json5_is_malformed: "d.json5", "", "string[]" => Some((1, 1));
+    json5_nan_is_malformed: "d.json5", "[1, NaN]", "number[]" => Some((1, 5));
 
     jsonl_malformed_line_reports_its_number: "d.jsonl", "1\n\n{x\n", "number[]" => Some((3, 2));
     jsonl_two_values_on_one_line_are_malformed: "d.jsonl", "1 2\n", "number[]" => Some((1, 3));
@@ -316,6 +343,11 @@ rejects! {
     csv_quote_in_an_unquoted_field_is_malformed: "d.csv", "a\nx\"y\n", "{ a: string }[]" => Some((2, 2));
     csv_text_after_a_closing_quote_is_malformed: "d.csv", "a\n\"x\"y\n", "{ a: string }[]" => Some((2, 4));
     csv_ragged_row_reports_its_line: "d.csv", "a,b\n1,2\n3\n", "{ a: string, b: string }[]" => Some((3, 1));
+    csv_long_row_reports_its_line: "d.csv", "a,b\n1,2\n3,4,5\n", "{ a: string, b: string }[]" => Some((3, 1));
+    csv_ragged_record_with_a_quoted_newline_reports_its_start: "d.csv", "a,b\n1,2\n\"x\ny\"\n",
+        "{ a: string, b: string }[]" => Some((3, 1));
+    csv_ragged_list_row_reports_its_line: "d.csv", "a,b\n1\n", "tuple([string, string])[]" => Some((2, 1));
+    tsv_unterminated_quote_is_malformed: "d.tsv", "a\tb\n1\t\"x\n", "{ a: string, b: string }[]" => Some((2, 3));
     tsv_text_after_a_closing_quote_is_malformed: "d.tsv", "a\tb\n\"x\"y\tz\n", "{ a: string, b: string }[]"
         => Some((2, 4));
 }
@@ -448,6 +480,20 @@ fn a_scalar_row_element_is_a_row_shape_conflict_before_reading() {
     assert_eq!(runtime.stats().reads, 0, "the row mode is chosen before the file is read");
 }
 
+/// A computed contract is judged at execution with the same code and
+/// suggestion the passive check gives a literal one.
+#[test]
+fn a_computed_non_row_contract_is_a_row_shape_conflict_with_the_suggestion() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.csv", "a\n1\n");
+    for contract in ["unknown[]", "object", "{ <string>: string }"] {
+        let content = format!("---\nt: \"{contract}\"\n---\n{{{{ load_data(\"d.csv\", t) }}}}\n");
+        let error = data_error(&failure_of(dir.path(), &content));
+        assert_eq!(error.code(), Some("dm.data.row_shape_conflict"), "{contract}: {error}");
+        assert!(error.to_string().contains(ROW_SHAPE_SUGGESTION), "{contract}: {error}");
+    }
+}
+
 // The cell-conversion fixture: one row of the R4 table per assertion.
 
 #[test]
@@ -563,6 +609,51 @@ fn a_missing_tuple_slot_is_missing() {
     let dir = TempDir::new().unwrap();
     write(dir.path(), "d.json", "[[\"a\"]]");
     assert_eq!(mismatches(dir.path(), "d.json", "tuple([string, number])[]"), [("/0/1".to_string(), ActualKind::Missing)]);
+}
+
+#[test]
+fn a_null_array_element_fails() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.json", "[1, null]");
+    assert_eq!(mismatches(dir.path(), "d.json", "number[]"), [("/1".to_string(), ActualKind::Null)]);
+}
+
+#[test]
+fn an_optional_collection_field_admits_null() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.json", "{\"tags\": null}");
+    assert_eq!(loaded(dir.path(), "d.json", "{ tags: number[] }"), json!({"tags": null}));
+}
+
+#[test]
+fn tuple_slots_fail_for_null_and_the_wrong_type_and_convert_text() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "good.json", "[[\"a\", \"3\"]]");
+    write(dir.path(), "bad.json", "[[\"a\", null], [\"b\", \"x\"], [\"c\", \"3\"], [{}, []]]");
+    assert_eq!(loaded(dir.path(), "good.json", "tuple([string, number])[]"), json!([["a", 3]]));
+    assert_eq!(
+        mismatches(dir.path(), "bad.json", "tuple([string, number])[]"),
+        [
+            ("/0/1".to_string(), ActualKind::Null),
+            ("/1/1".to_string(), ActualKind::String),
+            ("/3/0".to_string(), ActualKind::Object),
+            ("/3/1".to_string(), ActualKind::Array),
+        ]
+    );
+}
+
+#[test]
+fn a_tuple_row_of_the_wrong_type_fails_as_a_whole() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.json", "[\"a\"]");
+    assert_eq!(mismatches(dir.path(), "d.json", "tuple([string])[]"), [("/0".to_string(), ActualKind::String)]);
+}
+
+#[test]
+fn a_null_dictionary_value_fails() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.json", "{\"a\": 1, \"b\": null}");
+    assert_eq!(mismatches(dir.path(), "d.json", "{ <string>: number }"), [("/b".to_string(), ActualKind::Null)]);
 }
 
 #[test]

@@ -93,12 +93,20 @@ reference check, pre-flight, lifecycle, and composition share it.
 
 - Reads are recorded at the operation boundary, never in `resolve_arg`:
   `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`
-  (probed candidates on a miss), and contract imports via
-  `DataRuntime::prepare_contract`. Record after resolution, before reading, so a
-  failed read stays in the set.
+  (probed candidates on a miss), contract imports via
+  `DataRuntime::prepare_contract`, and `validate_schema_fn`'s schema files
+  (`PreparationSummary::dependencies`, imports included; embedded schemas add
+  none). Record after resolution, before reading, so a failed read stays in the
+  set.
 - `invalidate_memo()` runs after every executed command attempt
   (`shell_expansion::execute_prepared_outcome`'s run closure,
-  `MdShellRunner::execute`), never for a cached or skipped one, and never
+  `MdShellRunner::execute`), never for a cached or skipped one, and after every
+  lifecycle event whose stack is non-empty (`lifecycle::md_host::evaluate`, so
+  an `initialize` side effect is never served a bootstrap read). It never
   clears the read set.
+- A body expression the shell stage fills in advance (a later top-level
+  `::shell` line, plain `::map` body text) is evaluated before the earlier
+  command runs, so it does not see that command's invalidation; an expression
+  inside the command itself does. Tests: `lib/tests/l1/load_data_runtime.rs`.
 - `read_set` is on `ComposeReport` (unioned by `merge`) and `ComposeFailure`;
   `ComposeRequest::read_set()` snapshots it.

@@ -59,6 +59,15 @@ behavior.
   is `dm.data.not_a_container`, not a type error); a passive per-function
   verdict a literal call can prove belongs on `CallCheck::data_problem`, so
   composition and DMLS publish its code from `CallCheck::diagnostics`.
+- A runtime `ExpressionError::Data` is projected only in
+  `compose/report_diagnostics.rs`: `DataError::code()`, `data_location` for
+  `dm.data.malformed`/`dm.data.contract_mismatch` (positions from
+  `expression/data/locate.rs`, records from simplified-schema's
+  `ConversionError::located_failures`, never interpreted in darkmatter),
+  capped at `CONTRACT_RECORD_CAP` plus one overflow record. Every
+  `ExpressionError::FileReference` fills `reason`/`construct`/`reference`/
+  `failure` without changing `message`; a host the fetch policy refuses is
+  the typed `FileRefFailure::RemoteDenied`, not text.
 - Consumers read `expression_function_catalog()` (categories in list order,
   descriptors in documentation order: category, then canonical name, then
   authored overload) or `function_descriptors(name)`, which resolves aliases

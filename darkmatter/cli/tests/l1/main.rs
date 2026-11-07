@@ -89,6 +89,7 @@ mod layout_fill;
 mod layout_flags;
 mod layout_style_frontmatter;
 mod literal_glob_hint;
+mod load_data;
 mod md_process_fixture;
 mod path_lookup_guard;
 mod policy_verbs;

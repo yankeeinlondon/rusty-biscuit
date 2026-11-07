@@ -247,6 +247,134 @@ decisions_for_review:
         value-accepting function is. The darkmatter skill now lists every such
         copy. Redo cost if load_data should not be a lifecycle verb: an
         exclusion in the lifecycle schema generator and those four YAML files.
+    - |-
+        Phase 6: a remote host the fetch policy refuses is now its own typed
+        file-reference kind, `RemoteDenied` (slug `remote_denied`, failure class
+        `unsupported-remote`, reason `remote check disabled`). The plan said only
+        "carry the typed diagnostic rather than a string". The existing
+        `RemoteNotEnabled` was not reused because the data memo treats it as "try
+        again later" and never stores it. The remote runtime still stores failures
+        as text, so a failure is classed as a denial by asking the policy (no side
+        effects) whether it refuses the host. The alternative is storing typed slot
+        errors in `remote_fetch.rs`, which is a larger change. The message text is
+        unchanged. Claudine now reports a denied host as
+        `composition.invalid_file_reference` with `kind: remote_denied` instead of
+        `composition.expression_invalid`; its error-architecture doc lists the slug.
+        Redo cost: `expression/error.rs`, `resolve_ctx.rs`, `functions/fs.rs`, and
+        one Claudine test row.
+    - |-
+        Phase 6: reference fields (`reason`, `construct`, `reference`,
+        `failure`) are filled for every `ExpressionError::FileReference`, so
+        `absolute()` and `relative()` get them too, not only read-side functions.
+        `reason` is omitted where no existing reference phrase fits (I/O failures,
+        missing anchors, other invalid syntax) rather than inventing new phrases.
+        Redo cost: one match in `report_diagnostics.rs`.
+    - |-
+        Phase 6: each contract-mismatch record's message reads
+        `load_data(): `<file>` does not match `<as>`: <engine failure text>`; the
+        old `interpolation of … failed:` prefix is dropped for these per-location
+        records. A data code replaces the wrapper code of the surface it failed in
+        (for example a `::map` callback failure). A data failure inside
+        `as_markdown` stays typed and is reported at the outer `as_markdown` call,
+        replacing the generic "nested composition failed" message for that case.
+        `md graph` now keeps a failed document's typed records (wrapped in
+        `ClassifiedFailure`) instead of one unlocated `dm.compose.failure`; stderr
+        text is identical. Redo cost: `report_diagnostics.rs`, `nested.rs`,
+        `cli/src/commands/graph.rs`.
+    - |-
+        Phase 6 file order: records are ordered level by level by source offset
+        (YAML by authored index), then unlocated values, then missing members, with
+        engine (declaration) order breaking ties. The YAML locator actually follows
+        multi-line flow collections, so `data/locate.rs` drops positions for a file
+        that has one, to keep the spec's pointer-only rule. A CSV record at pointer
+        `""` is placed at the header's start. Locating reparses the text per
+        distinct path (cached per path), so a file with thousands of violations
+        parses repeatedly; the cap of 20 bounds the output, not the work. Redo cost:
+        `data/locate.rs`.
+    - |-
+        Phase 6 output schemas: `data_location` was added to the `diagnostic`
+        type of all 17 output schemas, not only the four a `load_data` failure can
+        reach, because the existing guard
+        `every_schema_file_shares_one_diagnostic_type` requires one identical
+        diagnostic type everywhere (one Rust `Diagnostic` serializes into all of
+        them). Line, column, and byte offset are `number` (the schema language has
+        no `integer`), as `source.line` already is. `read_set` is in `compose.yaml`
+        and `render.yaml` (the `DocumentEnvelope`); `md clean` and `md set` do not
+        emit a `DocumentEnvelope`, so they carry no `read_set` (the spec asks only
+        for the compose envelope). The envelope reads the read set from the
+        command's `DataRuntime` when it is written (`ReportSink::reads_from`), one
+        hook covering every exit, instead of pushing a snapshot at each exit path.
+        Redo cost: the schema files, `report.rs`, and `compose.rs`.
+    - |-
+        Phase 6 Markdown-mode (stderr) output is unchanged. A `dm.data.*`
+        failure renders through the existing error block, whose message names the
+        data file; its `data_location` line and column are not shown on stderr.
+        Showing them would be a change to `errors/blocks.rs`.
+    - |-
+        Phase 6 DMLS: completion and hover inside a `type-definition` string
+        argument (chosen by the catalog parameter type, not by the name
+        `load_data`) reuse the frontmatter type-definition routines, widened to
+        `pub(crate)` rather than moved. Named types of the document are not offered
+        there (`Name@this` is rejected for `load_data`, and `$schema` imports
+        resolve relative to the schema file, not the calling document); the
+        `Name@./types.yaml` scaffold still is. An unparseable open expression is
+        read only to the end of the cursor's line, closing the string at the
+        cursor. A definition starting with a quote gets no candidates. Member
+        completion after `h.` for a callback local did not exist before; it was
+        added in `overlay/expressions.rs` from the shared library typing, offered
+        as local-binding items (`h.name`, detail `local: string`). Only the
+        built-in function catalog is consulted, not host catalogs. Redo cost:
+        `providers/type_definition_argument.rs` and `overlay/expressions.rs`.
+    - |-
+        Phase 7 test module names. The plan names the new modules
+        `loading_data.rs`, `loading_data_diagnostics.rs`, `loading_data_runtime.rs`
+        and `cli/tests/l1/loading_data.rs`. Earlier phases had already created
+        `load_data_execution.rs`, `load_data_diagnostics.rs` and
+        `load_data_passive.rs`, so a second `loading_data_diagnostics.rs` beside
+        `load_data_diagnostics.rs` would have split one topic across two
+        near-identical names. The new modules follow the existing prefix
+        (`lib/tests/l1/load_data_runtime.rs`, `cli/tests/l1/load_data.rs`), and
+        matrix gaps were added to the existing execution and diagnostics files.
+        Redo cost: renaming files and their `mod` lines only.
+    - |-
+        Phase 7 empties the `load_data` memo after every lifecycle event whose
+        stack is non-empty, whatever its steps were. Before, only lifecycle
+        shell steps emptied it, and `initialize` cannot run shells, so an
+        `initialize` side effect that rewrote a data file was served the stale
+        bootstrap read (spec R7 says it must not be). The spec says "skipped
+        commands do not invalidate"; this rule also empties the memo for a stack
+        that is all `info` steps or guarded off. The alternative is tracking
+        which actions actually ran and could write, which needs the executor to
+        report that. The cost of the broader rule is at most one extra read per
+        lifecycle event. Redo cost: `lifecycle/md_host.rs::evaluate` and its test
+        in `load_data_runtime.rs`.
+    - |-
+        Phase 7 finding, left unchanged: the shell stage fills the expressions of
+        body text before running commands. A `{{ load_data(...) }}` in a later
+        top-level `::shell` line, or in plain `::map` body text, is evaluated
+        before an earlier command runs, so it does not see data that command
+        rewrote. An expression inside the command itself is filled as that
+        command runs and does see it (the spec's "shell step inside a `::map`"
+        criterion is tested that way). The spec's "invalidate ... before any
+        next expression" could be read to require changing the shell stage to
+        evaluate lazily, a larger change to an existing stage than this feature
+        asked for. If the reviewer wants that, it is a follow-up in the shell
+        stage, not in `load_data`.
+    - |-
+        Phase 7 `validate_schema` now records the schema files it reads,
+        including transitive imports, through a new public field
+        `PreparationSummary::dependencies` (the struct is `#[non_exhaustive]`, so
+        adding it breaks no caller). Embedded schemas add nothing. The
+        alternative, recording inside the schema resolver, would have put
+        read-set knowledge into schema code that has no `DataRuntime`. Redo cost:
+        `schemas/mod.rs` and `functions/fs.rs::validate_schema_fn`.
+    - |-
+        Phase 7 YAML positions: a duplicate key is reported where the YAML
+        parser reports it, at the start of the mapping holding the duplicate,
+        not at the second key. A second YAML document and a non-string key
+        report no line or column, because neither the parser nor the shared
+        position map gives one. Pointing at the exact key would need new locator
+        work in the shared YAML loader (simplified-schema `PositionMap`).
 packages:
     - simplified-schema
     - biscuit-file
@@ -341,33 +469,26 @@ skills_files_updated_during_phase_3:
     - .claude/skills/biscuit-file/references/architecture.md
     - .claude/skills/simplified-schema/SKILL.md
 message_to_agent: |-
-    Phases 4 and 5 are both uncommitted in the working tree (Phases 1-3 are
-    committed). load_data runs end to end: `expression/data/load.rs` (the
-    function and the binding refiner) and `data/parse.rs` (decode, BOM, UTF-8,
-    per-format parsing and number admission). Every failure is a typed
-    `DataError`; `DataError::code()` gives the `dm.data.*` code, and
-    `ExpressionError::from(Arc<DataError>)` keeps the file family as
-    `ExpressionError::FileReference`. Until Phase 6 projects them, data
-    failures still publish as `dm.expression.evaluation_failure` (with the
-    right message). What Phase 6's projection has to work with:
-    `ContractMismatch { identity, format, written, failure, text, table }` -
-    `text` is always present (local and remote), `table` is
-    `Some(TabularSource { mode, data })` for CSV/TSV (field offsets are in
-    `data`); `Malformed { location: DataSourceLocation }` already holds the
-    parser-proven byte offset/line/column (invalid UTF-8: `byte_offset` into
-    the original bytes, no line or column). The passive check already
-    publishes `dm.data.not_a_container`, `dm.data.this_import_rejected`, and
-    `dm.data.row_shape_conflict` through `CallCheck::data_problem` and
-    `CallCheck::diagnostics`, so composition and DMLS show them at the `as`
-    span; do not add a second path for those. A remote fetch error is still
-    an `ExpressionError::Other` string, like `frontmatter()`; rule 4's typed
-    denial projection is yours. Known gap still open from Phase 4:
-    `validate_schema` does not add its schema files to the read set. Adding a
-    catalog function touches several hand-kept copies; the darkmatter skill's
-    library-surfaces.md lists them. Tests: `load_data_execution` and
-    `load_data_passive` in `darkmatter/lib/tests/l1/`. The function registry
-    and parity test modules compile only with `--features
-    effects-instrumentation` (the `just test` recipe enables it).
+    Phase 7 is uncommitted in the working tree (Phases 1-6 are committed). It
+    added tests only, plus two production fixes the docs must now describe:
+    (1) `validate_schema` records the schema files it reads, imports included,
+    in the read set (new public field `PreparationSummary::dependencies`);
+    (2) the `load_data` memo is emptied after every lifecycle event with a
+    non-empty stack (`lifecycle/md_host.rs::evaluate`), so an `initialize`
+    side effect is never served a bootstrap read. Both belong in the Phase 8
+    topic page (`docs/topics/loading-data.md`), the caching/read-set
+    sections, and `library-surfaces.md` (`PreparationSummary.dependencies` is
+    new public surface; the skill's `requests.md` already says both). Also
+    document the limit recorded in decisions_for_review: a body expression the
+    shell stage fills in advance (a later top-level `::shell` line, plain
+    `::map` body text) does not see an earlier command's rewrite; an expression
+    inside the command does. YAML: a duplicate key is located at its mapping's
+    start; a second document and a non-string key have no position. New test
+    modules: `lib/tests/l1/load_data_runtime.rs` (26) and
+    `cli/tests/l1/load_data.rs` (22); requirement-to-test mapping is in the
+    Phase 7 log section. On Windows, `source.file` in diagnostics is a native
+    path while `data_location.file`, `read_set`, and the data-error message use
+    portable paths; tests must compare accordingly.
 source_files_during_phase_4:
     - darkmatter/lib/src/markdown/compose/expression/data/mod.rs
     - darkmatter/lib/src/markdown/compose/expression/data/contract.rs
@@ -449,6 +570,91 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_6:
+    - darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/load.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/output/command/document.rs
+    - darkmatter/lib/src/markdown/output/command/tests.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/load_data_diagnostics.rs
+    - darkmatter/lib/tests/l1/diagnostic_projection.rs
+    - darkmatter/lib/tests/l1/report_diagnostics.rs
+    - darkmatter/lib/tests/l1/shared_diagnostics.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/graph.rs
+    - darkmatter/cli/src/output/mod.rs
+    - darkmatter/cli/src/output/report.rs
+    - darkmatter/cli/schemas/output/clean.yaml
+    - darkmatter/cli/schemas/output/code-block.yaml
+    - darkmatter/cli/schemas/output/compose.yaml
+    - darkmatter/cli/schemas/output/delta.yaml
+    - darkmatter/cli/schemas/output/edit.yaml
+    - darkmatter/cli/schemas/output/get.yaml
+    - darkmatter/cli/schemas/output/graph.yaml
+    - darkmatter/cli/schemas/output/hash.yaml
+    - darkmatter/cli/schemas/output/render.yaml
+    - darkmatter/cli/schemas/output/rm.yaml
+    - darkmatter/cli/schemas/output/schema-about.yaml
+    - darkmatter/cli/schemas/output/schema-detect.yaml
+    - darkmatter/cli/schemas/output/schema-triggers.yaml
+    - darkmatter/cli/schemas/output/schema-validate.yaml
+    - darkmatter/cli/schemas/output/set.yaml
+    - darkmatter/cli/schemas/output/toc.yaml
+    - darkmatter/cli/schemas/output/validate-refs.yaml
+    - darkmatter/cli/tests/l1/compose_data_output.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/cli/tests/l1/output_envelope.rs
+    - darkmatter/dmls/src/providers/type_definition_argument.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/type_definition_arguments.rs
+    - darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+    - claudine/lib/src/composition/error/tests.rs
+docs_updated_during_phase_6:
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/errors/composition-problems.md
+    - darkmatter/docs/errors/file-reference-failures.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/docs/topics/error-architecture.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/library-surfaces.md
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_7:
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+    - darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/load_data_diagnostics.rs
+    - darkmatter/lib/tests/l1/load_data_execution.rs
+    - darkmatter/lib/tests/l1/load_data_runtime.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/load_data.rs
+    - darkmatter/cli/tests/l1/main.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/requests.md
 ---
 
 # Implementation Log for 2026-11-04-loading-data (9 phases)
@@ -1093,3 +1299,394 @@ coercion engine. A smell check of the new parser code found no `.ok()` or
 - No pre-existing failures, and no load-sensitive reruns.
 - Docs: only the generated function table changed. The `load_data` topic
   documentation is Phase 8's (R12), and diagnostic projection is Phase 6's.
+
+## Phase 6
+
+Phase 6 ("Diagnostics and editor authoring") ran in two steps. The
+orchestrator first added the shared type: public `DataLocation` and
+`Diagnostic.data_location`, which is serialized only when set, at every
+struct literal. Then three foreground subagents worked in parallel on
+disjoint files: the library projection, the envelope with the CLI and
+schemas, and DMLS. Last, the orchestrator ran every gate once with no
+subagent running.
+
+### Diagnostic projection (library)
+
+- `compose/report_diagnostics.rs` finds the deepest `ExpressionError` in
+  any failure chain, through callbacks, iteration wrappers, interpolation,
+  conditions, and nested `as_markdown`.
+  - `ExpressionError::Data` takes `DataError::code()`.
+  - A `Malformed` failure gets the parser-proven `data_location`.
+  - A `ContractMismatch` becomes one record per
+    `ConversionError::located_failures()` entry, using R5's
+    expected/actual vocabulary. The record at `""` names `as` as written.
+    Records are put in file order and capped at `CONTRACT_RECORD_CAP` (20).
+    One overflow record at the call site follows, with no `data_location`
+    and no types.
+  - Union arm detail is cut to six lines plus an ellipsis.
+- New `expression/data/locate.rs` places each pointer:
+  - JSON, JSONL, TOML, and JSON5 use the biscuit-file locators.
+  - YAML uses `PositionMap::byte_range`. An alias or a multi-line flow
+    collection makes the file pointer-only.
+  - CSV and TSV use the raw field and record offsets.
+  - Offsets become positions through `source_position` over the
+    BOM-stripped text. A missing value is placed at its nearest existing
+    parent.
+- Rule 4: every `ExpressionError::FileReference` fills `reason`,
+  `construct` (`<function>()`), `reference` (as written), and `failure`.
+  `message` and the human stderr text are unchanged, and tests pin both.
+- A denied remote host is now the typed `FileRefFailure::RemoteDenied`
+  (`resolve_ctx.rs::fetch_remote_text` returns `RemoteTextError`, and
+  `functions/fs.rs::remote_text_error`), used by `load_markdown`,
+  `file_exists`, and `load_data`. The error block for it is unchanged
+  (`errors::blocks` test).
+- Claudine: the slug table test gained `remote_denied`, and
+  `claudine/docs/topics/error-architecture.md` lists it.
+
+### Envelope, CLI, and output schemas
+
+- `DocumentEnvelope.read_set` is always an array. `DocumentOutput::prepare`
+  starts it at `[]`, and `ReportSink::reads_from(&DataRuntime)` reads the
+  command's runtime when the envelope is written. That one hook covers
+  success, expression failure, a failed reference check, early output
+  failures, and lifecycle completion. `md render` evaluates nothing.
+- `md graph` keeps a failed document's typed records (`ClassifiedFailure`);
+  the stderr text is the same.
+- Audit of the 17 output schemas. Every file already declared its own
+  `diagnostic` type, and every one already allowed `reason`, `construct`,
+  `reference`, `failure`, and `included_via`.
+
+  | Schema | `load_data` failure reachable | `data_location` added | `read_set` added |
+  |---|---|---|---|
+  | compose | yes (composition and reference check) | yes | yes |
+  | render | no (evaluates nothing) | yes | yes (same envelope) |
+  | graph | yes (graph preparation) | yes | no (not a `DocumentEnvelope`) |
+  | validate-refs | yes | yes | no |
+  | clean, code-block, delta, edit, get, hash, rm, schema-about, schema-detect, schema-triggers, schema-validate, set, toc | no | yes (identical-type guard) | no |
+
+  `output_commands::every_schema_file_shares_one_diagnostic_type` now also
+  requires an identical `data-location` type in every file.
+- `docs/cli/data-contracts.md` has new "Read set" and "Data location"
+  sections, plus the `dm.data.*` and read-side reference-detail rows.
+
+### Editor authoring (DMLS)
+
+- New `providers/type_definition_argument.rs`. A string argument whose
+  catalog parameter type is `type-definition` gets the frontmatter
+  type-definition completion and hover. Positions are mapped through the
+  lexer's escapes and the YAML `ScalarProjection`.
+  - An unfinished string or call is read through a recovered prefix.
+  - `frontmatter.rs` and `dsl.rs` dispatch to it first.
+  - It does no I/O. A named or computed contract is typed as unknown by
+    the shared library typing.
+- `overlay/expressions.rs` adds member completion after a callback local
+  (`h.` offers `name` and `port`) from the same call-check typing.
+- `dmls/docs/{autocomplete,hover}.md` and the darkmatter skill's
+  `dmls.md` describe this.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+|---|---|
+| R5 OS example (three records, `/0` line 1 column 3, number/string, "macOS" in message) | `load_data_diagnostics::the_os_example_reports_one_record_per_operating_system` |
+| R5 one fixture per format | `load_data_diagnostics::{a_yaml_violation_is_located, a_pretty_json_violation_is_located, a_json_lines_violation_after_a_blank_line_is_located, a_csv_violation_is_located, a_tsv_violation_is_located, a_toml_violation_inside_an_array_of_tables_is_located, a_json5_violation_is_located}` |
+| R5 YAML pointer-only (alias, multi-line flow) | `a_yaml_alias_reports_pointers_only`, `a_yaml_multi_line_flow_sequence_reports_pointers_only`, `data::locate::tests::only_a_flow_collection_across_lines_makes_yaml_pointer_only` |
+| R5 JSON duplicate key: last occurrence | `a_json_duplicate_key_is_located_at_its_last_occurrence` |
+| R5 CSV raw column after quoted delimiter, doubled quote, newline | `a_csv_cell_after_a_quoted_delimiter_doubled_quote_and_newline_is_located_at_its_raw_start` |
+| R5 multibyte and CRLF columns | `a_multibyte_json_value_before_the_violation_keeps_the_ascii_column`, `a_multibyte_yaml_value_before_the_violation_keeps_the_ascii_column`, `a_crlf_yaml_file_keeps_the_lf_position`, `a_crlf_csv_file_keeps_the_lf_position` |
+| R5 undeclared CSV column | `an_undeclared_csv_column_is_one_absent_record_per_row_and_a_converting_cell_is_none` |
+| R5 cap 20 plus overflow | `twenty_five_bad_rows_report_the_first_twenty_and_count_the_rest` |
+| R5 unions (null arm, same-kind arms at `""`, single reachable arm) | `a_nullable_list_never_names_its_null_arm`, `two_same_kind_container_arms_report_one_record_at_the_root`, `the_only_reachable_union_arm_is_descended_into` |
+| R5 missing slot / extra slot or key | `a_missing_tuple_slot_is_missing_and_an_extra_slot_or_key_is_absent` |
+| R5 missing member located at its parent, after its siblings | `a_missing_member_is_located_at_its_parent`, `a_missing_csv_column_is_located_at_its_record`, `a_missing_member_follows_the_present_members_of_its_parent` |
+| R5 URL-loaded location | `a_url_loaded_violation_reports_the_url_pointer_line_and_column` |
+| R5/rule 4 missing file, denied host, each reader names itself, message unchanged | `load_data_on_a_missing_file_reports_the_reference_fields`, `load_data_from_a_denied_host_reports_the_reference_fields`, `frontmatter_from_a_denied_host_reports_the_reference_fields`, `file_exists_on_a_denied_host_reports_the_reference_fields`, `frontmatter_on_a_missing_file_names_frontmatter`, `markdown_title_on_a_missing_file_names_markdown_title`, `markdown_body_empty_on_a_missing_file_names_markdown_body_empty`, `validate_schema_on_a_missing_file_names_validate_schema`, `errors::blocks::tests::a_denied_remote_host_renders_as_the_evaluation_failure_it_replaced` |
+| R5 human stderr byte-identical (CLI) | `output_envelope::a_missing_frontmatter_file_reports_the_same_stderr_text` |
+| R5 every `dm.data.*` code | `a_computed_scalar_contract_reports_not_a_container`, `a_computed_this_import_reports_this_import_rejected`, `a_computed_contract_with_two_row_shapes_reports_row_shape_conflict`, `an_unknown_extension_reports_unsupported_format_at_runtime`, `literal_contract_problems_report_their_data_codes_before_anything_runs`, `malformed_json_reports_its_parser_position_without_a_pointer`, plus contract mismatch throughout |
+| Invalid contract schema stays an evaluation failure | `an_invalid_contract_schema_stays_an_evaluation_failure` |
+| R5 invalid UTF-8 → file + byte_offset | `invalid_utf8_reports_its_file_and_byte_offset_only` |
+| R5 `/`, `~`, empty keys; authored order | `json_keys_with_a_slash_a_tilde_and_no_text_round_trip`, `yaml_keys_with_a_slash_a_tilde_and_no_text_round_trip`, `an_escaped_key_is_located_at_its_own_value`, `{json,toml,yaml}_fields_written_in_reverse_alphabetical_order_keep_it` |
+| Union message cut to six lines | `a_union_message_keeps_six_lines_of_arm_detail_and_an_ellipsis` |
+| Call-site and iteration provenance kept beside data positions | `a_violation_inside_a_map_callback_keeps_its_iteration_path_and_data_location`, `a_violation_in_a_block_condition_reports_its_data_code`, `a_violation_in_frontmatter_interpolation_reports_its_data_code`, `a_violation_inside_nested_composition_reports_its_data_code_at_the_call` |
+| R8 envelope read set (success sorted, empty, failure, reference-check failure) | `output_envelope::{compose_reports_every_expression_read_sorted, compose_without_reads_reports_an_empty_read_set, a_failed_frontmatter_read_reports_its_reference_details, a_malformed_data_file_failing_the_reference_check_is_in_the_read_set}` |
+| Rule 1 conformance with `data_location` (compose, graph, validate-refs); render `[]` without evaluation; schema refusals | `output_envelope::{conforms_compose_contract_mismatch_with_its_data_location, conforms_graph_contract_mismatch_with_its_data_location, conforms_validate_refs_contract_mismatch_with_its_data_location, conforms_render_with_an_empty_read_set_and_no_evaluation, the_schema_refuses_a_payload_outside_the_contract}`, `output_commands::every_schema_file_shares_one_diagnostic_type` |
+| R1 DMLS hover/completion in `as` (body, frontmatter quoting, escapes, nested `}}`, unfinished) | `type_definition_arguments::{body_hover_over_a_type_keyword_shows_the_type_definition_hover, body_completion_inside_the_string_offers_type_names_over_the_partial, frontmatter_expressions_project_through_yaml_quoting, an_expression_typed_value_is_read_as_one_expression, escaped_quotes_before_the_cursor_map_to_authored_bytes, a_nested_type_string_holding_braces_keeps_the_cursor_in_the_argument, completion_tolerates_an_unfinished_string_and_call}` |
+| R10 `h.` completion; computed unknown; named reference unknown with no reads; only type-definition parameters | `a_literal_contract_types_callback_members`, `a_computed_contract_types_as_unknown_without_a_diagnostic`, `a_named_reference_types_as_unknown_and_opens_no_file`, `a_non_type_definition_string_argument_gets_no_type_definition_authoring`, plus unit tests in `providers::type_definition_argument` and `overlay::expressions` |
+
+Input robustness: this phase adds no loader or configuration reader. It
+projects the failures of the Phase 5 loaders. The new schema field shapes
+(`data_location` and `read_set` refusals) are covered by
+`the_schema_refuses_a_payload_outside_the_contract`.
+
+### Gates (macOS, no subagents running)
+
+- darkmatter `just test`: 14,730 passed, 10 skipped (113.7 s), none at or
+  above 5 s.
+- darkmatter `just lint`: exit 0, including the zed-dmls wasm check.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Scope calculator:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter]`, `change_class: package`. The gates were
+  required, and they ran.
+- Dependents:
+  - claudine, filtered `/error|file_reference|composition|remote|diagnostic|frontmatter/`:
+    2,664 passed.
+  - claudine `just lint`: exit 0.
+  - `cargo check --tests -p claudine-cli -p research`: clean.
+- Cross-OS: `data_location.file` and `read_set` hold portable paths, so
+  native Windows was checked through `./scripts/cross-check.sh <pkg> --os windows`,
+  one package at a time:
+  - darkmatter, `load_data_diagnostics report_diagnostics`: 53 + 72 passed.
+  - darkmatter-cli, `output_envelope compose_data_output`: 195 passed.
+  - darkmatter-lsp, `type_definition`: 16 passed.
+- Process notes:
+  - The CLI subagent once ran a scoped filter (195 tests) with
+    `--no-fail-fast`. The run was limited to its own tests.
+  - Five CLI assertions depended on the library projection. Both
+    subagents' work was in the tree before the gates ran, and those
+    assertions pass.
+- No failures, no load-sensitive reruns, and no pre-existing failures.
+
+## Phase 7
+
+Phase 7 ("Prove input and execution contracts") ran as three subagents with
+disjoint files. One closed gaps in the public result matrix, one added the
+runtime evidence, and one added the CLI wiring. The orchestrator then ran
+every gate once, with no subagent running. Phases 5 and 6 already covered
+most of the matrix (about 150 `load_data` tests), so this phase audited
+every spec row against those tests and added only what was missing.
+
+Module naming: the plan names the new modules `loading_data*.rs`. The
+existing modules are `load_data_{execution,diagnostics,passive}.rs`, so the
+new ones follow that prefix: `lib/tests/l1/load_data_runtime.rs` and
+`cli/tests/l1/load_data.rs`. Matrix gaps went into the existing
+`load_data_execution.rs` and `load_data_diagnostics.rs` (see
+decisions_for_review).
+
+### Public result matrix
+
+- A test defect: `rejects!` skipped the position check whenever a row
+  expected `None`, so YAML and JSON5 positions were never asserted. The
+  macro now compares `(line, column)` exactly. Five rows had positions that
+  the parser proves and the implementation already reported:
+  - YAML duplicate key (1,1), at the start of the mapping that holds the
+    duplicate
+  - YAML invalid syntax (2,1)
+  - YAML inexact integer (1,3)
+  - JSON5 trailing text (1,5)
+  - empty JSON5 (1,1)
+- Two rows assert `(None, None)`, each with its reason: YAML multiple
+  documents (the `serde_yaml_ng` error has no location) and a YAML
+  non-string key (rejected after parsing, and `PositionMap` cannot index
+  that key).
+- Malformed YAML containing an alias reports the parser's coordinates:
+  `yaml_invalid_syntax_after_an_alias_keeps_its_parser_position` (3,5),
+  `yaml_unknown_alias_is_malformed` (2,3), and
+  `load_data_diagnostics::malformed_yaml_with_an_alias_reports_its_parser_position_without_a_pointer`.
+- Tests added to `load_data_execution.rs`:
+  - YAML: nested duplicate key (3,3), merge keys stay ordinary keys
+  - JSON5: `nan`
+  - TOML: floats load
+  - CSV:
+    - a long row and a ragged list row
+    - a ragged record after a quoted newline
+    - a quoted newline in a list row
+    - headers and cells are not trimmed
+    - blank lines are skipped
+    - a delimiter-only line is a row of empty cells
+    - a file of blank lines only is an empty list
+  - TSV: an unterminated quote
+  - a computed non-row contract gets the row-shape conflict and its
+    suggestion
+  - field validators: a null array element, an optional collection
+    admitting null, tuple slots (null, wrong type, converting text), a tuple
+    row of the wrong type, a null dictionary value
+- Tests added to `load_data_diagnostics.rs`:
+  - a root mismatch names `as` as written
+  - a nested union with no reachable arm gives one record and drops its
+    null arm
+  - CSV record starts after a multi-line record
+  - a TSV cell after a quoted tab is located at its raw start
+- Smell grep over `expression/data/`, the biscuit-file readers and
+  locators, and the coercion paths `load_data` uses:
+  - Fixed: `parse.rs` TOML floats used `Number::from_f64(..).unwrap_or(Value::Null)`.
+    It could not fire, because admission rejects every non-finite float,
+    but a `null` there would silently replace data. It is now an `expect`
+    that states this guarantee.
+  - Fixed: a `contract.rs` unit test ended in `if let Ok(..)`, so it
+    passed without comparing anything. It now asserts unconditionally.
+  - Kept, with reasons:
+    - `unwrap_or_default()` on a `DataSourceLocation` (`parse.rs`): it
+      leaves a position out when the parser gives none and never invents
+      one.
+    - `key.as_str().unwrap_or_default()` (`parse.rs`, `yaml_documents/load.rs`):
+      non-string keys are rejected before this runs.
+    - `.ok()?` in the biscuit-file locators: a `None` means "pointer
+      only" by design.
+    - the canonical-path fallback and the poisoned-lock recovery in
+      `runtime.rs`
+    - message formatting in `error.rs`
+    - `DelimitedData::headers: Option`: `None` means an empty file, which
+      is R3's empty-list rule.
+    - `skip_serializing_if` on `DataLocation`: the spec says a field is
+      absent, not `null`.
+  - simplified-schema `coercion/` and `numeric/`: no matches.
+- Matrix state around the defects closed:
+  - YAML loader column: duplicate (1,1), nested duplicate (3,3), syntax
+    (2,1), inexact (1,3), tag (1,3), text after an alias (3,5), unknown
+    alias (2,3); multiple documents and a non-string key have no position.
+  - JSON5 column: invalid (1,5), trailing (1,5), empty (1,1), Infinity
+    (1,2), NaN (1,5), inexact (1,2).
+  - Number row, after the TOML float change: TOML integers are admitted
+    and inexact ones rejected; `nan`/`inf` are rejected; finite floats
+    load. JSON, JSONL, JSON5, and YAML reject inexact numbers.
+  - JSON, TOML, JSONL, CSV, and TSV rows are unchanged.
+- `type-definition(container)` payload admission (absent or false off,
+  true on, null or non-boolean refused) was already covered in
+  `simplified-schema/lib/tests/l1/container_contracts.rs`.
+
+### Runtime evidence
+
+`lib/tests/l1/load_data_runtime.rs` has 26 tests.
+
+- Production defects found by a failing test first:
+  1. `validate_schema` did not record the schema files it reads.
+     `PreparationSummary` (`#[non_exhaustive]`) gained `dependencies`, from
+     `EffectiveSchema::dependencies`. `validate_schema_fn` now uses
+     `validate_summarized` and records each file, transitive imports
+     included. Embedded schemas add nothing. This closes the item Phase 4
+     left open.
+  2. A lifecycle step did not empty the `load_data` memo. Only lifecycle
+     shell steps did, and `initialize` cannot run shells, so composition
+     was served a file that an `initialize` side effect had changed (it
+     rendered `1` instead of `2`). `md_host::evaluate` now empties the
+     memo after any event whose stack is non-empty.
+- R7 tests:
+  - `two_transcluded_children_loading_one_file_share_one_read`
+  - `two_library_compositions_without_a_runtime_do_not_share_results`
+  - `the_reference_check_preflight_and_composition_read_once`
+  - `a_shell_step_inside_a_map_body_makes_the_next_item_read_again`
+  - `a_failed_command_that_wrote_a_file_ends_reuse`
+  - `a_read_in_the_frontmatter_bootstrap_is_not_reused_after_initialize`
+- R6/R7 remote tests (wiremock):
+  - `a_url_the_reference_check_could_not_read_is_read_by_composition`
+  - `a_denied_host_reaches_neither_the_server_nor_a_seeded_cache`
+  - `a_computed_url_loads_like_a_literal_one`
+  - `an_invalid_utf8_response_is_a_transport_failure_without_a_data_location`
+  - `a_second_run_replays_the_cached_response`
+  - `a_url_is_fetched_once_per_run_with_the_cache_off`
+  - `a_url_in_the_read_set_is_normalized`
+- R8 tests:
+  - `<function>_records_its_file` for each read-side function: `frontmatter`,
+    `try_frontmatter`, `file_exists`, `markdown_title`,
+    `markdown_body_empty`, `validate_schema`, and `load_data`
+  - `validate_schema_records_the_schema_files_it_reads_with_their_imports`
+  - `validate_schema_records_no_entry_for_an_embedded_schema`
+  - `a_load_data_contract_records_its_transitive_imports`
+  - `a_nested_as_markdown_child_records_its_reads`
+  - `an_initialize_expression_records_its_reads`
+  - `a_composed_expression_records_its_reads`
+  - Already covered by `compose_read_set.rs`, so not repeated: body and
+    frontmatter interpolation, `::block`, `when=`, `::file` targets,
+    `::map`/`::filter` callbacks, a false `file_exists` probe, and repeated
+    reads giving one sorted entry.
+- True concurrency cannot be forced from the public API. The transclusion
+  test checks counts only, and the `Barrier` unit test in `runtime.rs`
+  (`concurrent_callers_share_one_load`) proves single-flight.
+- Finding, not changed (see decisions_for_review): a `{{ load_data }}` in a
+  later top-level `::shell` line, or in plain `::map` body text, is
+  evaluated before the earlier command runs. So "a shell step ends reuse"
+  holds for expressions inside a command, which are filled as each command
+  runs, but not for body expressions the shell stage computed in advance.
+
+### CLI wiring
+
+`cli/tests/l1/load_data.rs` has 22 tests, one `md` spawn each. Every test
+spells its schema path inside its own `#[test]`, so the rows are written by
+hand rather than generated by a macro.
+
+- Per loader family, one success and one malformed route:
+  - YAML: `yaml_loads`, `yaml_malformed`
+  - JSON: `json_loads`, `json_malformed`
+  - JSONL: `jsonl_loads`, `jsonl_malformed`
+  - CSV/TSV (one loader): `csv_loads`, `tsv_malformed`
+  - TOML: `toml_loads`, `toml_malformed`
+  - JSON5: `json5_loads`, `json5_malformed`
+
+  Each asserts the exit status, one envelope, empty stderr, `document:
+  null` on failure, `data_location` line and column with no pointer, the
+  read set, and compose.yaml conformance.
+- `a_contract_mismatch_runs_no_later_action`: pointer `/1` at line 1,
+  column 5. A later `::shell argv-recorder` sentinel never ran. Its control,
+  `conforming_data_lets_the_later_action_run`, shows the sentinel does run
+  when the data conforms.
+- `a_contract_mismatch_in_markdown_mode_is_reported_on_stderr`: exit 1,
+  empty stdout, and stderr names the file, the contract, and `[1]`.
+- `invalid_utf8_reports_only_a_byte_offset`: optional fields are omitted
+  rather than null, and the envelope conforms.
+- `lifecycle_reads_are_in_the_read_set_on_{success,failure}`
+- `graph_reports_a_malformed_data_file_in_its_schema`,
+  `validate_refs_reports_a_malformed_data_file_in_its_schema`
+- `a_missing_data_file_reports_its_reference_details`: the four reference
+  fields. `frontmatter()` is covered by
+  `output_envelope::a_failed_frontmatter_read_reports_its_reference_details`.
+- `a_transcluded_childs_malformed_data_fails_the_reference_check`
+
+### Requirement-to-test mapping (R1–R12 checkpoint)
+
+Each criterion maps to a named test, in this phase or in an earlier phase's
+table, or to a Phase 8 documentation artifact.
+
+| Requirement | Where it is proven |
+|---|---|
+| R1 signature, catalog, example, null file, named/computed contracts, DMLS authoring | Phase 5 table (`load_data_execution`, `load_data_passive`, catalog parity); Phase 6 DMLS rows |
+| R2 container rule | simplified-schema `container_contracts::*` (Phase 2); `load_data_passive::container_rule::*` |
+| R3 formats and malformed input | Phase 5 `loads!`/`rejects!` tables, now position-strict; Phase 7 additions above; CLI `{yaml,json,jsonl,csv,toml,json5}_loads` and `*_malformed` |
+| R4 tabular shape | Phase 5 R4 rows plus the Phase 7 CSV/TSV additions; `load_data_passive::tabular::*` |
+| R5 contract enforcement and diagnostics | Phase 6 table; Phase 7 diagnostics additions; CLI `a_contract_mismatch_runs_no_later_action`, `a_contract_mismatch_in_markdown_mode_is_reported_on_stderr`, `invalid_utf8_reports_only_a_byte_offset`, `graph_…`/`validate_refs_reports_a_malformed_data_file_in_its_schema`, `a_missing_data_file_reports_its_reference_details` |
+| R6 remote reads | `a_url_without_a_remote_runtime_is_not_fetched`, `an_allowed_url_with_a_query_and_fragment_loads_as_json_once`, `load_data_runtime::{a_denied_host_reaches_neither_the_server_nor_a_seeded_cache, a_computed_url_loads_like_a_literal_one, an_invalid_utf8_response_is_a_transport_failure_without_a_data_location}` |
+| R7 repeated reads | Phase 5 R7 rows; `load_data_runtime::{two_transcluded_children_loading_one_file_share_one_read, two_library_compositions_without_a_runtime_do_not_share_results, the_reference_check_preflight_and_composition_read_once, a_shell_step_inside_a_map_body_makes_the_next_item_read_again, a_failed_command_that_wrote_a_file_ends_reuse, a_read_in_the_frontmatter_bootstrap_is_not_reused_after_initialize, a_url_the_reference_check_could_not_read_is_read_by_composition, a_second_run_replays_the_cached_response, a_url_is_fetched_once_per_run_with_the_cache_off}`; runtime unit tests `concurrent_callers_share_one_load`, `invalidation_reads_again_and_a_late_old_load_never_populates_the_new_maps` |
+| R8 read set | `compose_read_set::*` (per surface), `load_data_runtime::*_records_its_file` (each read-side function), `validate_schema_records_the_schema_files_it_reads_with_their_imports`, `a_url_in_the_read_set_is_normalized`, `a_nested_as_markdown_child_records_its_reads`, `an_initialize_expression_records_its_reads`; CLI `output_envelope::*read_set*`, `load_data::lifecycle_reads_are_in_the_read_set_on_{success,failure}`, `a_transcluded_childs_malformed_data_fails_the_reference_check` |
+| R9 optional files | Phase 5 R9 rows (`the_guard_*`, `or_does_not_absorb_a_load_failure`) |
+| R10 typed result | Phase 5 `load_data_passive::typing::*`; Phase 6 DMLS `a_literal_contract_types_callback_members` |
+| R11 parse-gated scanner | Phase 3 and Phase 4 tables (`expression_scanner::*`, `expression_regions::*`, consumer tests in darkmatter, DMLS, and claudine) |
+| R12 documentation | Phase 8 artifact (`docs/topics/loading-data.md`, generated `docs/functions/load-data.md`, data-contract page, `type-definition` rewrite) |
+
+Input robustness: the default outcome is the plan's (a located failure, no
+value, nothing downstream runs). The exceptions it lists (absent optional
+members, nullable arms, converting text, explicit empty values, the
+per-format empty-file rules, last-wins JSON/JSON5 keys, skipped blank JSONL
+lines, list-mode duplicate or empty headers) each have a test named in the
+Phase 5 table or above.
+
+### Gates (macOS, no subagents running)
+
+- darkmatter `just test`: 14,805 passed, 10 skipped (116 s). No `load_data`
+  test is at or above 1 s.
+- darkmatter `just lint`: exit 0, including the zed-dmls wasm check.
+- `just check-tier-coverage darkmatter`: 0 stranded.
+- Scope calculator:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [darkmatter, darkmatter-cli, test-toolkit, claudine,
+  claudine-cli]`, `change_class: package`. The gates were required, and they
+  ran.
+- Dependents:
+  - `cargo check --tests -p claudine -p claudine-cli -p research`: clean.
+  - claudine L1, filtered `/lifecycle|schema|validate|read_set|data/`: 960
+    passed.
+- Cross-OS: the changes touch path identity, `git` commands, and lifecycle
+  ordering, so native Windows was checked with `./scripts/cross-check.sh`:
+  - darkmatter, `load_data validate_schema md_host`: 289 passed.
+  - darkmatter-cli, `load_data:: lifecycle`: the first attempt failed two
+    new tests, both because of path spelling in the test expectations, not
+    product behavior. The data-error message names the file by its portable
+    path, and `source.file` is a native path. After fixing the two
+    assertions: 102 passed.
+- Process notes:
+  - The three subagents started in the background, not the foreground. The
+    orchestrator waited for all three before running any gate.
+  - The runtime subagent ran two early probe runs with `--no-fail-fast`,
+    limited to its own tests.
+  - The CLI subagent reported 24 tests; the file declares 22, and all 22 ran
+    in the full suite.
+- No pre-existing failures, and no load-sensitive reruns.

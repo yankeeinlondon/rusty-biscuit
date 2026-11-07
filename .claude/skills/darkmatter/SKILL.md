@@ -298,6 +298,12 @@ A new leaf adds a row to `args/output.rs::COMMAND_LEAVES`, a schema file under
 that spell the schema path inside each `#[test]`;
 `every_leaf_has_a_schema_file_and_a_conformance_test` fails otherwise. A schema's
 named types are closed, unlike its root object, so a type must list every field.
+One Rust `Diagnostic` serializes into all 17 output schemas, so their
+`diagnostic` and `data-location` types are identical
+(`output_commands::every_schema_file_shares_one_diagnostic_type`); a new
+diagnostic field goes into every file. `DocumentEnvelope.read_set` is always an
+array; `ReportSink::reads_from(&DataRuntime)` reads the command's runtime when
+the envelope is written, so every exit carries it without per-path pushes.
 A schema root is an object: a scalar result is judged under `value`.
 
 Link titles are JSON5 objects or plain text (`docs/topics/hyperlinking.md`); a

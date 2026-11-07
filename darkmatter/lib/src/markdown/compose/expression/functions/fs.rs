@@ -1220,12 +1220,17 @@ pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
         return Ok(Value::Bool(true));
     }
     let schemas = DarkmatterSchemas::new(ctx.file_context());
-    let report = schemas
-        .validate(page)
+    let (report, summary) = schemas
+        .validate_summarized(page)
         .map_err(|e| expression_other(
             "validate_schema",
             format!("validate_schema() error for {raw:?}: {e}"),
         ))?;
+    // The schema files read, imports included, are dependencies of the call
+    // like the page itself; an embedded schema lists no file.
+    for dependency in &summary.dependencies {
+        ctx.data.record_local(dependency);
+    }
     Ok(Value::Bool(report.valid))
 }
 

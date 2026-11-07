@@ -970,6 +970,7 @@ impl DarkmatterSchemas {
         let effective = self.effective_for(source)?;
         let summary = PreparationSummary {
             layers: effective.as_ref().map(|effective| effective.layers.clone()).unwrap_or_default(),
+            dependencies: effective.as_ref().map(|effective| effective.dependencies.clone()).unwrap_or_default(),
         };
         let mut report = match (effective, phase) {
             (Some(effective), None) => {
@@ -1870,6 +1871,10 @@ pub struct ValidationReport {
 pub struct PreparationSummary {
     /// The layers that applied; empty when no schema did.
     pub layers: SchemaLayers,
+    /// The files the schema was prepared from, as
+    /// [`EffectiveSchema::dependencies`] lists them; empty when no schema
+    /// applied.
+    pub dependencies: Vec<PathBuf>,
 }
 
 impl PreparationSummary {

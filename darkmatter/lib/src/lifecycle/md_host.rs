@@ -727,6 +727,9 @@ pub struct MdStackContext<'a> {
 }
 
 /// Runs `event`'s stack of `config` in `context`.
+///
+/// A non-empty stack empties the request's `load_data` memo when it returns,
+/// whatever its outcome, as an executed command does.
 pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &MdEvent) -> LifecycleEventOutcome {
     let host = MdStackHost {
         signal: event.signal,
@@ -761,7 +764,14 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         source_path: context.source_path,
         host: &host,
     };
-    StackExecutor::with_services(inputs, context.effects, &MdDiagnostics).execute_event(config)
+    let outcome = StackExecutor::with_services(inputs, context.effects, &MdDiagnostics).execute_event(config);
+    // A step may have written any file (an `initialize` side effect runs
+    // after the frontmatter bootstrap read), so no read from before it may be
+    // reused. An event with no stack ran nothing.
+    if !config.stack(event.signal).is_empty() {
+        options.invalidate_data_memo();
+    }
+    outcome
 }
 
 /// The user blacklist of `request`'s shell policy; an unreadable policy file

@@ -259,7 +259,9 @@ fn toml_value(value: &biscuit_file::toml_crate::Value, pointer: &mut String) -> 
         }
         TomlValue::Float(float) => {
             let admitted = numeric::admit_f64(*float).map_err(|reason| rejected(pointer, float.to_string(), reason))?;
-            serde_json::Number::from_f64(admitted).map(Value::Number).unwrap_or(Value::Null)
+            // Admission rejects every non-finite float, the only input
+            // `from_f64` refuses; a `null` here would silently replace data.
+            Value::Number(serde_json::Number::from_f64(admitted).expect("an admitted float is finite"))
         }
         TomlValue::Array(items) => {
             let mut converted = Vec::with_capacity(items.len());

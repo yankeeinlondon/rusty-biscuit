@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-11-05
-phase: 6
+phase: 8
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -182,6 +182,91 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
 - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_6:
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/locate.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/output/command/document.rs
+- darkmatter/lib/src/markdown/output/command/tests.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/diagnostic_projection.rs
+- darkmatter/lib/tests/l1/report_diagnostics.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/output/mod.rs
+- darkmatter/cli/src/output/report.rs
+- darkmatter/cli/schemas/output/clean.yaml
+- darkmatter/cli/schemas/output/code-block.yaml
+- darkmatter/cli/schemas/output/compose.yaml
+- darkmatter/cli/schemas/output/delta.yaml
+- darkmatter/cli/schemas/output/edit.yaml
+- darkmatter/cli/schemas/output/get.yaml
+- darkmatter/cli/schemas/output/graph.yaml
+- darkmatter/cli/schemas/output/hash.yaml
+- darkmatter/cli/schemas/output/render.yaml
+- darkmatter/cli/schemas/output/rm.yaml
+- darkmatter/cli/schemas/output/schema-about.yaml
+- darkmatter/cli/schemas/output/schema-detect.yaml
+- darkmatter/cli/schemas/output/schema-triggers.yaml
+- darkmatter/cli/schemas/output/schema-validate.yaml
+- darkmatter/cli/schemas/output/set.yaml
+- darkmatter/cli/schemas/output/toc.yaml
+- darkmatter/cli/schemas/output/validate-refs.yaml
+- darkmatter/cli/tests/l1/compose_data_output.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/output_envelope.rs
+- darkmatter/dmls/src/providers/type_definition_argument.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/type_definition_arguments.rs
+- darkmatter/dmls/tests/l1/expression_call_diagnostics.rs
+- claudine/lib/src/composition/error/tests.rs
+docs_updated_during_phase_6:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/errors/file-reference-failures.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/hover.md
+- claudine/docs/topics/error-architecture.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+- .claude/skills/darkmatter/SKILL.md
+- .claude/skills/darkmatter/library-surfaces.md
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_7:
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/tests/l1/load_data_diagnostics.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/load_data_runtime.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/cli/tests/l1/load_data.rs
+- darkmatter/cli/tests/l1/main.rs
+docs_updated_during_phase_7: []
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+- .claude/skills/darkmatter/requests.md
 ---
 
 # Loading Data Implementation Plan
@@ -334,18 +419,18 @@ Document-loader cases are separate: JSON accepts last-wins duplicates but reject
 
 ## Phase 7: Prove Input and Execution Contracts
 
-- [ ] **Public result matrix**
+- [x] **Public result matrix**
   - Own new darkmatter L1 modules `loading_data.rs`, `loading_data_diagnostics.rs`, and format fixtures; own `lib/tests/l1/main.rs` registration for those two modules and the parallel Runtime evidence task's `loading_data_runtime` module. Use in-process public compose results and `report_diagnostics` records to assert values, codes, pointers, characters, and absence of a published document. Use simplified-schema/biscuit-file public APIs for their shared validators/readers; do not duplicate their private unit assertions in every format.
   - Cover every R3/R4 table entry and R5 union case; include 25 bad rows, schema-order versus file-order keys, unexpected columns with convertible numeric siblings, missing tuple slots, duplicate JSON keys, URL-loaded locations, and the two YAML pointer-only cases. Malformed alias-containing YAML still reports authoritative parser coordinates.
   - Grep changed loaders for `#[serde(default)]`, `Option<T>` presence collapse, `filter_map` on typed fields, `unwrap_or_default`, and `.ok()` on load-bearing parse paths. Inspect each occurrence and remove silent fallback; record intentional exceptions from the matrix.
 
-- [ ] **Runtime evidence**
+- [x] **Runtime evidence**
   - Own `lib/tests/l1/loading_data_runtime.rs`, its runtime fixtures, and lifecycle test additions. The Public result matrix task owns its main.rs registration; this task does not edit that shared root. Assert disk-read, parse, bind, and fetch counts for three-item maps, callback-plus-body reuse, different contracts, different-folder imports, concurrent identical calls, one read in each of the four cache modes, two contracts over one file reading once, successive library root runs (no sharing), one read across the reference check, preflight, and composition, a re-read after a frontmatter command, a `::shell` inside a `::map`, and `initialize`, and a URL that the check could not read but composition does. Use barriers/counters, never sleeps.
   - Assert read-set coverage for body/frontmatter interpolation, block conditions, transclusion when/targets, map and filter callbacks, shell-template expressions, lifecycle expressions before/after compose, nested as_markdown, missing-file existence checks, failed reads, and normalized URLs. Test all existing read-side functions so the shared load_markdown wiring is proven.
   - Use wiremock for allowed/denied hosts, computed URLs, query/fragment extension handling, an invalid-UTF-8 response staying a transport failure with no `data_location`, cache replay, and one network fetch even with semantic memo disabled. Verify policy denial never reads seeded cached bytes.
   - Cover the optional-file ternary for absent/present/malformed files and prove `|| []` does not absorb load_data failure.
 
-- [ ] **CLI wiring**
+- [x] **CLI wiring**
   - Own `cli/tests/l1/loading_data.rs` and its root registration. Use `CliProcessFixture`, hermetic temp files, and no terminal/browser launch. Per loader family prove one success and one invalid-input route, plus one structured contract failure and one Markdown-mode stderr failure; avoid spawning once per field-shape cell.
   - Assert status, one envelope, empty data-mode stderr, `document: null` on failure, `data_location`, `read_set`, schema conformance, and no downstream sentinel action. Include null/omitted optional diagnostic fields, lifecycle read snapshots, a malformed file failing in the reference check with that file in `read_set`, a `load_data` failure through `md graph` and `md validate refs` conforming to their schemas, and the four file-reference fields on `frontmatter()` and `load_data` missing-file failures.
   - Checkpoint for Phase 7: every R1–R12 criterion maps to a named test or the Phase 8 documentation artifact in the implementation log. A matrix defect is closed only after documenting the states of the other shapes in its validator row and loader column.

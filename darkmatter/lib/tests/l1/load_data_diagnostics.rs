@@ -156,6 +156,8 @@ locates! {
         => "/0/port" at 3:4;
     a_missing_csv_column_is_located_at_its_record:
         "r.csv", "name\na\n", "{name: string, port: number(required)}[]" => "/0/port" at 2:1;
+    a_tsv_cell_after_a_quoted_tab_is_located_at_its_raw_start:
+        "q.tsv", "a\tb\n\"x\ty\"\tz\n", "{a: string, b: number}[]" => "/0/b" at 2:7;
     a_missing_member_is_located_at_its_parent:
         "m.json", "[\n  {\"name\": \"a\"}\n]\n", "{name: string, port: number(required)}[]" => "/0/port" at 2:3;
 }
@@ -178,6 +180,15 @@ macro_rules! pointer_only {
 pointer_only! {
     a_yaml_alias_reports_pointers_only: "- &a x\n- *a\n", "number[]" => ["/0", "/1"];
     a_yaml_multi_line_flow_sequence_reports_pointers_only: "items: [\n  x,\n  1\n]\n", "{items: number[]}" => ["/items/0"];
+}
+
+#[test]
+fn csv_row_records_after_a_multi_line_record_use_each_record_start() {
+    let dir = TempDir::new().unwrap();
+    let found =
+        load(dir.path(), "r.csv", "name,note\na,\"x\ny\"\nb,z\n", "{name: string, note: string, port: number(required)}[]");
+    assert_all_mismatches(&found);
+    assert_eq!(places(&found), vec![place("/0/port", 2, 1), place("/1/port", 4, 1)]);
 }
 
 // ── Columns count characters ────────────────────────────────────────────────
@@ -244,6 +255,24 @@ fn two_same_kind_container_arms_report_one_record_at_the_root() {
     let found = load(dir.path(), "u.json", "[{\"c\": 1}]", "{a: string}[] | {b: number}[]");
     assert_eq!(types(&found), vec![typed("", "{a: string}[] | {b: number}[]", "array")]);
     assert_eq!(places(&found), vec![place("", 1, 1)]);
+}
+
+#[test]
+fn a_root_mismatch_names_the_contract_as_written() {
+    let dir = TempDir::new().unwrap();
+    let found = load(dir.path(), "r.json", "{\"a\": 1}", "number[]");
+    assert_eq!(types(&found), vec![typed("", "number[]", "object")]);
+    assert_eq!(places(&found), vec![place("", 1, 1)]);
+}
+
+#[test]
+fn a_nested_union_with_no_reachable_arm_reports_one_record_without_its_null_arm() {
+    let dir = TempDir::new().unwrap();
+    let found = load(dir.path(), "u.yaml", "a: x\n", "{a: number[] | {b: string} | null}");
+    // Each remaining arm in the engine's words; the `null` inside is `b`'s
+    // own optionality, not the union's dropped null arm.
+    assert_eq!(types(&found), vec![typed("/a", "number[] | { b?: null | string, no other keys }", "string")]);
+    assert_eq!(places(&found), vec![place("/a", 1, 4)]);
 }
 
 #[test]
@@ -386,6 +415,17 @@ fn malformed_json_reports_its_parser_position_without_a_pointer() {
         Some(DataLocation { file: entry(dir.path(), "m.json"), pointer: None, line: Some(2), column: Some(3), byte_offset: None })
     );
     assert_eq!((record.expected_type, record.actual_type), (None, None));
+}
+
+#[test]
+fn malformed_yaml_with_an_alias_reports_its_parser_position_without_a_pointer() {
+    let dir = TempDir::new().unwrap();
+    let record = only(load(dir.path(), "m.yaml", "a: &x 1\nb: *x\nc: d: e\n", "{<string>: unknown}"));
+    assert_eq!(record.code, "dm.data.malformed");
+    assert_eq!(
+        record.data_location,
+        Some(DataLocation { file: entry(dir.path(), "m.yaml"), pointer: None, line: Some(3), column: Some(5), byte_offset: None })
+    );
 }
 
 #[test]

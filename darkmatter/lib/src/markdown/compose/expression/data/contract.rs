@@ -744,9 +744,7 @@ mod tests {
         let constrained = prepare_contract("string[](min(1))", &ctx).unwrap();
         assert_ne!(a.key, nullable.key);
         assert_ne!(a.key, constrained.key);
-        if let Ok(spaced) = spaced {
-            assert_eq!(a.key, spaced.key);
-        }
+        assert_eq!(a.key, spaced.unwrap_or_else(|error| panic!("`string []` prepares: {error}")).key);
     }
 
     #[test]

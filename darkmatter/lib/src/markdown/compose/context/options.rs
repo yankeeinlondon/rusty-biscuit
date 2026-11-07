@@ -2436,8 +2436,8 @@ impl ComposeOptions {
         self.data_runtime.clone().unwrap_or_default()
     }
 
-    /// Empties the attached runtime's memo after a command ran. With none
-    /// attached there is no memo anyone else could read.
+    /// Empties the attached runtime's memo after a command or a lifecycle
+    /// stack ran. With none attached there is no memo anyone else could read.
     pub(crate) fn invalidate_data_memo(&self) {
         if let Some(runtime) = &self.data_runtime {
             runtime.invalidate_memo();
