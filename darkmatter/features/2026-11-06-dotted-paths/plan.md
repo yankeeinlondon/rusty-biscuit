@@ -1,9 +1,14 @@
 ---
 total_phases: 10
 created: 2026-11-06
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Dotted Property Paths Implementation Plan
@@ -66,7 +71,7 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 1: Contract Baseline
 
-- [ ] **Contract baseline**
+- [x] **Contract baseline**
   - Create `implementation-log.md` beside this plan, recording these rules, the planning decision in rule 16, and one correction to the spec: `--set` replaces a top-level key whole (`util.rs:188`; observed 2026-11-06), and only `--state` deep-merges (`util.rs:176`). The spec's phrase "recursive merge behavior of those older options" therefore describes `--state`. Neither changes.
   - Confirm `just test` passes at baseline in the three area packages.
   - Checkpoint: every later task has its types, ownership, and outcomes above.
