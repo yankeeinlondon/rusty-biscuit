@@ -264,10 +264,13 @@ fn print_completions(shell: clap_complete::Shell) {
         Shell::Zsh => (r#"source <(COMPLETE=zsh md)"#, "~/.zshrc"),
         Shell::Fish => (r#"COMPLETE=fish md | source"#, "~/.config/fish/config.fish"),
         Shell::PowerShell => (
-            r#"$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
+            // On Windows `md` is a built-in alias of `mkdir`, which outranks `md.exe` and
+            // would prompt for a path here.
+            r#"Remove-Item Alias:md -Force -ErrorAction SilentlyContinue; $env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
             "$PROFILE",
         ),
-        Shell::Elvish => (r#"eval (E:COMPLETE=elvish md | slurp)"#, "~/.elvish/rc.elv"),
+        // Elvish 0.21 refuses `E:X=y cmd` and no longer reads `~/.elvish/rc.elv`.
+        Shell::Elvish => (r#"with E:COMPLETE = elvish { eval (md | slurp) }"#, "~/.config/elvish/rc.elv"),
         _ => {
             eprintln!("Shell {:?} is not supported for dynamic completions", shell);
             return;

@@ -588,6 +588,7 @@ enum JudgedIn {
         base_dir: Option<PathBuf>,
         fallback: Option<PathBuf>,
         context: Box<FileResolutionContext>,
+        supplied: super::validate::SuppliedValues,
     },
 }
 
@@ -601,16 +602,19 @@ impl JudgedIn {
         match file_values {
             super::validate::FileValues::Syntax => Self::Syntax,
             super::validate::FileValues::Resolved { base_dir, fallback, context, callers } => {
+                let supplied = callers.supplied_values().clone();
                 match callers.origin_at(property) {
                     super::validate::ValueOrigin::Caller(origin) => Self::Resolved {
                         base_dir: None,
                         fallback: None,
                         context: Box::new(origin.clone()),
+                        supplied,
                     },
                     super::validate::ValueOrigin::Document => Self::Resolved {
                         base_dir: base_dir.clone(),
                         fallback: fallback.clone(),
                         context: context.clone(),
+                        supplied,
                     },
                 }
             }
@@ -643,9 +647,10 @@ impl MatchKeyword {
             JudgedIn::Syntax => super::format::context_free_path(value)
                 .filter(|path| path.exists())
                 .is_none_or(|path| self.globs.groups.iter().all(|group| group.matches_without_context(&path))),
-            JudgedIn::Resolved { base_dir, fallback, context } => {
-                admits(&self.globs.groups, value, base_dir.as_deref(), fallback.as_deref(), context)
-            }
+            JudgedIn::Resolved { base_dir, fallback, context, supplied } => match supplied.get(value) {
+                Some(origin) => admits(&self.globs.groups, value, None, None, origin),
+                None => admits(&self.globs.groups, value, base_dir.as_deref(), fallback.as_deref(), context),
+            },
         }
     }
 

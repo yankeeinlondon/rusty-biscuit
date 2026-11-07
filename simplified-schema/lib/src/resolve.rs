@@ -928,6 +928,11 @@ pub mod observed {
         pub read: BTreeSet<PathBuf>,
         /// Every location probed, present or absent.
         pub searched: BTreeSet<PathBuf>,
+        /// One entry per schema source opened from the disk, in order and
+        /// normalized like [`Self::read`]; a read served by an open buffer
+        /// is not an open. Test instrumentation for read-once contracts.
+        #[cfg(feature = "work-counters")]
+        pub opened: Vec<PathBuf>,
     }
 
     /// Runs `resolve`, returning its result with everything it observed.
@@ -964,6 +969,21 @@ pub mod observed {
             let normalized = super::canonical_path(path);
             for frame in frames.iter_mut() {
                 frame.read.insert(normalized.clone());
+            }
+        });
+    }
+
+    /// Records a schema source opened from the disk.
+    #[cfg_attr(not(feature = "work-counters"), allow(unused_variables))]
+    pub(super) fn opened(path: &Path) {
+        #[cfg(feature = "work-counters")]
+        FRAMES.with_borrow_mut(|frames| {
+            if frames.is_empty() {
+                return;
+            }
+            let normalized = super::canonical_path(path);
+            for frame in frames.iter_mut() {
+                frame.opened.push(normalized.clone());
             }
         });
     }

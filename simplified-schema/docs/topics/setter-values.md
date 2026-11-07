@@ -10,6 +10,7 @@ use simplified_schema::coercion::Shape;
 let value = SetterValue::parse("1.10")?;
 assert_eq!(value.bind(Some(&Shape::text())), json!("1.10"));
 assert_eq!(value.bind(Some(&Shape::number())), json!(1.1));
+assert_eq!(value.bind(Some(&Shape::Any)), json!("1.10"));
 assert_eq!(value.bind(None), json!(1.1));
 ```
 
@@ -54,14 +55,16 @@ Falling back to text is only for syntax. A parsed container that cannot be admit
 
 `SetterValue::bind(declared)` returns the final `serde_json::Value`. The host looks up the declared [`Shape`](./conversion.md) for the value's place, if it has one.
 
-| Form | Under a declared type | With no declaration, or `unknown` |
+| Form | Under a declared type | With no declaration |
 |---|---|---|
-| `Text` | the [conversion engine](./conversion.md), as text: `1.10` under `string` is `"1.10"`, `5` under `number` is `5`, `02134` under `numberlike` stays text | a guess from its JSON5 reading: `5` is `5`; a number admission would refuse stays text |
-| `Quoted` | that string, unconverted; validation judges it as it judges authored `"5"` | that string |
+| `Text` | the [conversion engine](./conversion.md), as text: `1.10` under `string` is `"1.10"`, `5` under `number` is `5`, `02134` under `numberlike` stays text, `1.10` under `unknown` stays `"1.10"` | a guess from its JSON5 reading: `5` is `5`; a number admission would refuse stays text |
+| `Quoted` | the same engine, as text: `"5"` under `number` is `5`, under `string` or `unknown` it stays `"5"` | that string |
 | `Null` | null; validation decides whether the type allows it | null |
-| `Container` | converted field by field | as parsed |
+| `Container` | converted field by field, and as parsed under `unknown` | as parsed |
+
+`unknown` is a declared type that converts nothing. It is not the same as no declaration: only no declaration guesses.
 
 - A value that does not fit is returned unconverted, so schema validation is what reports it.
-- Under `boolish`, which keeps a boolean as it was sent, an unquoted `true` or `false` becomes that boolean, while `On` stays text.
-- `bind` adds no text-to-container conversion, so text under an object type stays text and fails validation.
+- Under `boolish`, which keeps a boolean as it was sent, an unquoted `true` or `false` becomes that boolean, while `On` and a quoted `"true"` stay text.
+- `bind` adds no text-to-container conversion, so text or a quoted string under an object type stays text and fails validation.
 - A container's numbers have already lost their spelling: `{version:1.10}` gives `"1.1"` under a nested `string`. Quote it, or use a path to that one field.

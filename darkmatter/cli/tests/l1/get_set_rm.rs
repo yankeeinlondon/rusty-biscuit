@@ -1151,7 +1151,7 @@ mod set_validation {
             "---\n$schema:\n  author:\n    name: string\n    \"<string>\": unknown\nauthor:\n  name: Ann\n---\n# Body\n",
         );
         set_saved(&fixture, "author.mistake", "1");
-        assert_eq!(get_json(&fixture, "author.mistake"), json!(1));
+        assert_eq!(get_json(&fixture, "author.mistake"), json!("1"));
     }
 
     #[test]
@@ -1296,5 +1296,437 @@ mod rm_paths {
         fixture.command().args(["rm", "doc.md", "", "title"]).assert().success();
         assert_eq!(get_json(&fixture, "title"), json!(""));
         assert_eq!(get_json(&fixture, ""), json!(""));
+    }
+}
+
+/// `md set` reads a value through the schema the request selected, not the compiled
+/// one.
+mod set_selected_baseline {
+    use super::*;
+
+    const CUSTOM: &str = "$schema:\n  version: string\n";
+    const JSON: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"version":{"type":"string"}}}"#;
+
+    fn set_markdown(fixture: &CliProcessFixture, env: &[(&str, &str)], key: &str) -> String {
+        let builder = env.iter().fold(fixture.command_builder(), |builder, (key, value)| builder.application_input(key, value));
+        let mut command = builder.build();
+        command.args(["set", "doc.md", key, "1.10", "--output", "markdown"]);
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn a_custom_baseline_environment_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-custom-baseline-env");
+        fixture.write_file("cwd/doc.md", "---\ntitle: T\n---\n");
+        fixture.write_file("cwd/base.yaml", CUSTOM);
+        let text = set_markdown(&fixture, &[("BASELINE_SCHEMA", "./base.yaml")], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+
+    #[test]
+    fn a_raw_json_schema_baseline_environment_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-json-baseline-env");
+        fixture.write_file("cwd/doc.md", "---\ntitle: T\n---\n");
+        fixture.write_file("cwd/base.json", JSON);
+        let text = set_markdown(&fixture, &[("BASELINE_SCHEMA", "./base.json")], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_environment_leaves_a_compiled_key_undeclared() {
+        let fixture = CliProcessFixture::named("set-disabled-baseline-env");
+        fixture.write_file("cwd/doc.md", "---\n$schema:\n  other: string\n---\n");
+        let text = set_markdown(&fixture, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")], "title");
+        assert!(text.contains("title: 1.1\n"), "{text}");
+    }
+
+    #[test]
+    fn a_document_schema_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-document-schema");
+        fixture.write_file("cwd/doc.md", "---\n$schema:\n  version: string\n---\n");
+        let text = set_markdown(&fixture, &[], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+
+    #[test]
+    fn a_raw_json_schema_document_declares_the_type() {
+        let fixture = CliProcessFixture::named("set-raw-document");
+        fixture.write_file("cwd/doc.md", "---\n$schema: ./doc.json\n---\n");
+        fixture.write_file("cwd/doc.json", JSON);
+        let text = set_markdown(&fixture, &[], "version");
+        assert!(text.contains("version: '1.10'\n"), "{text}");
+    }
+}
+
+/// `md set` writes the value its schema judged, whichever way it was typed.
+mod set_declared_values {
+    use super::*;
+    use serde_json::{Value, json};
+
+    const DOCUMENT: &str = concat!(
+        "---\n",
+        "$schema:\n",
+        "  x: unknown\n",
+        "  alias: any\n",
+        "  count: number\n",
+        "  label: string\n",
+        "  flag: boolish\n",
+        "  nums: number[]\n",
+        "  author:\n",
+        "    age: number\n",
+        "    any: unknown\n",
+        "  scores:\n",
+        "    \"<string>\": number\n",
+        "  names:\n",
+        "    \"<string>\": string\n",
+        "  loose:\n",
+        "    \"<string>\": unknown\n",
+        "nums: [1]\n",
+        "author:\n",
+        "  age: 1 # how old\n",
+        "  any: 1\n",
+        "scores: {a: 1}\n",
+        "names: {a: b}\n",
+        "loose: {a: b}\n",
+        "keep: \"as   written\" # stays\n",
+        "---\n",
+        "Body\n",
+    );
+
+    /// What `md set` reports it set.
+    fn set_value(document: &str, extra: &[(&str, &str)], key: &str, value: &str) -> Value {
+        let fixture = CliProcessFixture::named("set-declared-value");
+        fixture.write_file("cwd/doc.md", document);
+        for (name, content) in extra {
+            fixture.write_file(format!("cwd/{name}"), content);
+        }
+        let output = fixture.command().args(["set", "doc.md", key, value, "--output", "json"]).output().unwrap();
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["outcome"], "success", "{key}={value}: {report}");
+        report["value"].clone()
+    }
+
+    #[test]
+    fn unknown_keeps_text_at_any_depth() {
+        for key in ["x", "alias", "author.any", "loose.a", "loose.new"] {
+            assert_eq!(set_value(DOCUMENT, &[], key, "1.10"), json!("1.10"), "{key}");
+        }
+        assert_eq!(set_value(DOCUMENT, &[], "x", "true"), json!("true"));
+    }
+
+    #[test]
+    fn a_container_under_unknown_is_a_container() {
+        assert_eq!(set_value(DOCUMENT, &[], "x", "{a:1}"), json!({ "a": 1 }));
+        assert_eq!(set_value(DOCUMENT, &[], "x", r#""{a:1}""#), json!("{a:1}"));
+    }
+
+    #[test]
+    fn a_quoted_number_is_written_as_a_number_at_any_depth() {
+        for key in ["count", "author.age", "nums.0", "scores.a", "scores.new"] {
+            assert_eq!(set_value(DOCUMENT, &[], key, r#""5""#), json!(5), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_declared_string_keeps_its_spelling_at_any_depth() {
+        for key in ["label", "names.a", "names.new"] {
+            assert_eq!(set_value(DOCUMENT, &[], key, "1.10"), json!("1.10"), "{key}");
+            assert_eq!(set_value(DOCUMENT, &[], key, r#""5""#), json!("5"), "{key}");
+        }
+    }
+
+    #[test]
+    fn boolish_keeps_the_form_it_was_sent_in() {
+        assert_eq!(set_value(DOCUMENT, &[], "flag", "true"), json!(true));
+        assert_eq!(set_value(DOCUMENT, &[], "flag", r#""true""#), json!("true"));
+    }
+
+    #[test]
+    fn an_undeclared_key_keeps_its_guess_and_its_quotes() {
+        assert_eq!(set_value(DOCUMENT, &[], "other", "1.10"), json!(1.1));
+        assert_eq!(set_value(DOCUMENT, &[], "other", r#""5""#), json!("5"));
+    }
+
+    #[test]
+    fn a_problem_elsewhere_does_not_stop_a_quoted_number_converting() {
+        let document = "---\n$schema:\n  count: number\n  title: string(required)\n---\n";
+        assert_eq!(set_value(document, &[], "count", r#""5""#), json!(5));
+    }
+
+    #[test]
+    fn a_rejected_quoted_value_writes_nothing() {
+        let fixture = CliProcessFixture::named("set-quoted-rejected");
+        fixture.write_file("cwd/doc.md", DOCUMENT);
+        let output = fixture.command().args(["set", "doc.md", "count", r#""abc""#, "--save"]).output().unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), DOCUMENT);
+    }
+
+    #[test]
+    fn a_converted_value_changes_only_its_own_bytes() {
+        let fixture = CliProcessFixture::named("set-quoted-bytes");
+        fixture.write_file("cwd/doc.md", DOCUMENT);
+        let output = fixture.command().args(["set", "doc.md", "author.age", r#""5""#, "--save"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let expected = DOCUMENT.replace("  age: 1 # how old\n", "  age: 5 # how old\n");
+        assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), expected);
+    }
+
+    #[test]
+    fn writing_the_same_value_changes_no_bytes() {
+        let fixture = CliProcessFixture::named("set-same-bytes");
+        fixture.write_file("cwd/doc.md", DOCUMENT);
+        let output = fixture.command().args(["set", "doc.md", "author.age", r#""1""#, "--save"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), DOCUMENT);
+    }
+
+    /// A raw JSON Schema's `$ref` and `allOf` project to `unknown`, yet neither
+    /// keeps text: only its validator knows these are numbers. The missing required
+    /// `absent` is a problem elsewhere, which never blocks an edit.
+    mod raw_json_schema {
+        use super::*;
+
+        const SCHEMA: &str = r##"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": { "number": { "type": "number" }, "text": { "type": "string" } },
+            "properties": {
+                "by_ref": { "$ref": "#/$defs/number" },
+                "text_ref": { "$ref": "#/$defs/text" },
+                "all_of": { "allOf": [{ "type": "number" }, { "minimum": 0 }] },
+                "open": {},
+                "items": { "type": "array", "items": { "$ref": "#/$defs/number" } },
+                "absent": { "type": "string" }
+            },
+            "required": ["absent"]
+        }"##;
+        const RAW_DOCUMENT: &str = "---\n$schema: ./schema.json\nitems: [1]\n---\n";
+
+        fn set_raw(key: &str, value: &str) -> Value {
+            set_value(RAW_DOCUMENT, &[("schema.json", SCHEMA)], key, value)
+        }
+
+        #[test]
+        fn a_number_behind_a_ref_is_written_as_a_number() {
+            for (key, value) in [("by_ref", "5"), ("by_ref", r#""5""#), ("items.0", "5"), ("items.0", r#""5""#)] {
+                assert_eq!(set_raw(key, value), json!(5), "{key}={value}");
+            }
+        }
+
+        #[test]
+        fn a_number_behind_an_all_of_keeps_its_guess() {
+            assert_eq!(set_raw("all_of", "5"), json!(5));
+        }
+
+        #[test]
+        fn text_a_raw_schema_accepts_keeps_its_spelling() {
+            assert_eq!(set_raw("text_ref", "1.10"), json!("1.10"));
+            assert_eq!(set_raw("open", "1.10"), json!("1.10"));
+        }
+
+        /// A required key that `properties` does not declare fails the schema as a
+        /// whole, not any one property.
+        const UNDECLARED_REQUIRED: &str = r##"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": { "number": { "type": "number" } },
+            "properties": {
+                "by_ref": { "$ref": "#/$defs/number" },
+                "items": { "type": "array", "items": { "$ref": "#/$defs/number" } },
+                "group": { "type": "object", "properties": { "count": { "$ref": "#/$defs/number" } } }
+            },
+            "required": ["ghost"]
+        }"##;
+
+        fn with_undeclared_required(document: &str) -> CliProcessFixture {
+            let fixture = CliProcessFixture::named("set-undeclared-required");
+            fixture.write_file("cwd/doc.md", document);
+            fixture.write_file("cwd/schema.json", UNDECLARED_REQUIRED);
+            fixture
+        }
+
+        fn saved(fixture: &CliProcessFixture, key: &str, value: &str) -> String {
+            let output = fixture.command().args(["set", "doc.md", key, value, "--save"]).output().unwrap();
+            assert!(output.status.success(), "{key}={value}: {output:?}");
+            std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap()
+        }
+
+        fn refusal_code(fixture: &CliProcessFixture, args: &[&str]) -> Value {
+            let output = fixture.command().args(args).args(["--output", "json"]).output().unwrap();
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+            report["diagnostics"][0]["code"].clone()
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_block_a_quoted_number_and_a_later_edit_repairs_it() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\n---\n");
+
+            let edited = saved(&fixture, "by_ref", r#""5""#);
+            assert_eq!(edited, "---\n$schema: ./schema.json\nby_ref: 5\n---\n");
+            let validate = || fixture.command().args(["schema", "validate", "doc.md"]).output().unwrap();
+            assert!(!validate().status.success(), "the missing key is still a problem of the document");
+
+            saved(&fixture, "ghost", "here");
+            assert!(validate().status.success());
+        }
+
+        #[test]
+        fn validating_a_document_missing_an_undeclared_key_reports_only_that_key() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\nby_ref: \"5\"\n---\n");
+            let output = fixture.command().args(["schema", "validate", "doc.md", "--output", "json"]).output().unwrap();
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(text.contains("ghost"), "{text}");
+            assert!(!text.contains("by_ref"), "a value that converts is not a problem: {text}");
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_block_a_quoted_number_in_an_array() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\nitems: [1]\n---\n");
+            let edited = saved(&fixture, "items.0", r#""5""#);
+            let frontmatter: Value = serde_yaml_ng::from_str(edited.split("---").nth(1).unwrap()).unwrap();
+            assert_eq!(frontmatter["items"], json!([5]));
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_block_a_quoted_number_in_an_object() {
+            let fixture = with_undeclared_required("---\n$schema: ./schema.json\n---\n");
+            let edited = saved(&fixture, "group", r#"{count:"5"}"#);
+            let frontmatter: Value = serde_yaml_ng::from_str(edited.split("---").nth(1).unwrap()).unwrap();
+            assert_eq!(frontmatter["group"], json!({ "count": 5 }));
+        }
+
+        #[test]
+        fn a_missing_undeclared_key_does_not_excuse_a_value_that_does_not_fit() {
+            let document = "---\n$schema: ./schema.json\n---\n";
+            let fixture = with_undeclared_required(document);
+            let code = refusal_code(&fixture, &["set", "doc.md", "by_ref", "not-a-number", "--save"]);
+            assert_eq!(code, json!("dm.schema.type_mismatch"));
+            assert_eq!(std::fs::read_to_string(fixture.cwd().join("doc.md")).unwrap(), document);
+        }
+
+        /// The union's arm comes from the document as a whole, which one value's own
+        /// path cannot see: `n` is text in the other arm.
+        #[test]
+        fn a_root_union_reads_a_quoted_number_through_the_arm_the_document_selects() {
+            let schema = r##"{
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$defs": { "number": { "type": "number" }, "text": { "type": "string" } },
+                "anyOf": [
+                    { "type": "object", "properties": { "kind": { "const": "a" }, "n": { "$ref": "#/$defs/number" } }, "required": ["kind"] },
+                    { "type": "object", "properties": { "kind": { "const": "b" }, "n": { "$ref": "#/$defs/text" } }, "required": ["kind"] }
+                ]
+            }"##;
+            let read = |kind: &str| set_value(&format!("---\n$schema: ./schema.json\nkind: {kind}\n---\n"), &[("schema.json", schema)], "n", r#""5""#);
+            assert_eq!(read("a"), json!(5));
+            assert_eq!(read("b"), json!("5"));
+        }
+
+        /// `allOf` drives no conversion anywhere, so a quoted value, which says it is
+        /// a string, stays one. An authored one is refused the same way, and a number
+        /// written unquoted is read as a number.
+        #[test]
+        fn a_quoted_number_behind_an_all_of_is_refused_like_an_authored_one() {
+            let fixture = CliProcessFixture::named("set-all-of-contract");
+            fixture.write_file("cwd/schema.json", SCHEMA);
+            fixture.write_file("cwd/doc.md", RAW_DOCUMENT);
+            let code = refusal_code(&fixture, &["set", "doc.md", "all_of", r#""5""#]);
+            assert_eq!(code, json!("dm.schema.type_mismatch"));
+
+            fixture.write_file("cwd/authored.md", "---\n$schema: ./schema.json\nabsent: x\nall_of: \"5\"\n---\n");
+            let authored = fixture.command().args(["schema", "validate", "authored.md"]).output().unwrap();
+            assert!(!authored.status.success(), "{authored:?}");
+        }
+
+        /// Text that a `$ref`'d string accepts keeps its spelling, whatever that
+        /// string's constraint asks of its content.
+        const CONSTRAINED: &str = r##"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": {
+                "version": { "type": "string", "pattern": "^[0-9.]+$" },
+                "numberlike": { "type": "string", "format": "darkmatter-numberlike" },
+                "typed": { "type": "string", "enum": ["1.10", "2.0"] },
+                "untyped": { "enum": ["1.10", "2.0"] },
+                "mixed": { "enum": [5, "a"] },
+                "number": { "type": "number" }
+            },
+            "properties": {
+                "version": { "$ref": "#/$defs/version" },
+                "numberlike": { "$ref": "#/$defs/numberlike" },
+                "typed": { "$ref": "#/$defs/typed" },
+                "untyped": { "$ref": "#/$defs/untyped" },
+                "mixed": { "$ref": "#/$defs/mixed" },
+                "number": { "$ref": "#/$defs/number" },
+                "string_all_of": { "allOf": [{ "type": "string" }, { "pattern": "^1" }] }
+            }
+        }"##;
+
+        fn set_constrained(key: &str, value: &str) -> Value {
+            set_value("---\n$schema: ./schema.json\n---\n", &[("schema.json", CONSTRAINED)], key, value)
+        }
+
+        #[test]
+        fn a_ref_to_a_pattern_string_keeps_its_spelling() {
+            assert_eq!(set_constrained("version", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn a_ref_to_a_format_string_keeps_its_spelling() {
+            assert_eq!(set_constrained("numberlike", "0.10"), json!("0.10"));
+        }
+
+        #[test]
+        fn a_ref_to_a_typed_enum_of_strings_keeps_its_spelling() {
+            assert_eq!(set_constrained("typed", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn a_ref_to_an_untyped_enum_of_strings_keeps_its_spelling() {
+            assert_eq!(set_constrained("untyped", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn an_all_of_string_keeps_its_spelling() {
+            assert_eq!(set_constrained("string_all_of", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn a_ref_to_a_number_still_reads_a_number() {
+            assert_eq!(set_constrained("number", "1.10"), json!(1.1));
+        }
+
+        #[test]
+        fn a_ref_to_a_mixed_enum_reads_each_member_as_itself() {
+            assert_eq!(set_constrained("mixed", "5"), json!(5));
+            assert_eq!(set_constrained("mixed", "a"), json!("a"));
+        }
+
+        #[test]
+        fn a_problem_of_the_whole_document_does_not_change_how_text_reads() {
+            let schema = r##"{
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "$defs": { "version": { "type": "string", "pattern": "^[0-9.]+$" } },
+                "properties": { "version": { "$ref": "#/$defs/version" }, "open": {} },
+                "not": { "required": ["bad"] }
+            }"##;
+            let document = "---\n$schema: ./schema.json\nbad: 1\n---\n";
+            assert_eq!(set_value(document, &[("schema.json", schema)], "version", "1.10"), json!("1.10"));
+            assert_eq!(set_value(document, &[("schema.json", schema)], "open", "1.10"), json!("1.10"));
+        }
+
+        #[test]
+        fn text_a_pattern_refuses_is_refused_at_its_own_path() {
+            let fixture = CliProcessFixture::named("set-constrained-refused");
+            fixture.write_file("cwd/schema.json", CONSTRAINED);
+            fixture.write_file("cwd/doc.md", "---\n$schema: ./schema.json\n---\n");
+            let code = refusal_code(&fixture, &["set", "doc.md", "version", "abc"]);
+            assert_eq!(code, json!("dm.schema.constraint"));
+        }
     }
 }

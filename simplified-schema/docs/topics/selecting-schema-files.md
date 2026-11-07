@@ -131,6 +131,28 @@ Outside `with`, resolution reads only the disk. The snapshot is plain
 `with` returns, so the host captures it once per preparation and may run
 that preparation on any thread.
 
+### Reading each file once across resolutions
+
+Each resolution call reads the files it needs once, but two separate calls
+read a file they share twice. A host operation that runs several resolutions
+(one per global of a catalog, or a baseline, a trigger, and a document
+`$schema` for one completion) can wrap them in
+`resolve::buffers::with_reads_retained(|| ...)`: inside it, the first read of
+a file from the disk is kept and every later read of that path in the scope
+gets the same bytes. A scope started inside another joins it, and nothing is
+kept after the outermost one returns. To read a file it will then resolve
+(to recognize a catalog, say), the host calls `resolve::buffers::read_to_string`,
+which reads the way the resolver does:
+
+```rust
+let resolved = buffers::with_reads_retained(|| {
+    let text = buffers::read_to_string(&path)?; // opened here
+    let first = resolve_yaml_schema(&ctx_reference, base_dir, &ctx, ShippedSources::NONE)?;
+    let second = resolve_yaml_schema(&current_reference, base_dir, &ctx, ShippedSources::NONE)?;
+    Ok((text, first, second)) // a file both references import was opened once
+});
+```
+
 ### As an error
 
 `SchemaFileSelection::into_result()` turns the selection into the same

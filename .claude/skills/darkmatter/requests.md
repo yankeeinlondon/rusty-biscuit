@@ -69,9 +69,12 @@ pattern cannot steer coercion.
 file-name view); the grammar rejects a non-glob-reference pattern at definition
 time (`file_match::definition_error`). A context-bound validator judges each
 value from its own `cwd`: the document's folder for frontmatter, the caller's
-origin for a caller-supplied top-level property (`validate::CallerOrigins`,
-from the schema stage's `caller_input_records`; the keyword finds its property
-in its schema location). Never judge `match()` from the process directory or
+origin for a caller-supplied value (`validate::CallerOrigins`: a top-level
+property from the schema stage's `caller_input_records`, found through the
+keyword's schema location; a value below a top-level property by its projected
+absolute text, `with_supplied_values`, since a keyword sees no instance path;
+`run_with_registry` then judges an authored copy of that exact absolute path
+again, `without_supplied_values`). Never judge `match()` from the process directory or
 from "any containing root". `find_files()` and `::file-links <glob>` call
 `list_files` in the document's context and report skipped out-of-tree file
 symlinks as `dm.glob.skipped_symlink` (`compose/glob_listing.rs`).

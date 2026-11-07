@@ -405,8 +405,8 @@ a failed load is exit 1 with no fallback. Opting out keeps document `$schema`
 and triggers; `--disable schema-triggers` is independent. JSON `schema` stays null
 for a document without `$schema`. Compatibility: `last_updated: not-a-date`
 with no `$schema` now fails validate as it fails compose. Compose keeps
-`--baseline-schema`/`--disable baseline-schema`/the env (live
-`env_disables_baseline_schema`); DMLS layers built-in → extensions →
+`--baseline-schema`/`--disable baseline-schema`/the env from its request snapshot
+(`commands::compose::compose_baseline`), and does not read `BASELINE_SCHEMA`; DMLS layers built-in → extensions →
 triggers → document. Each document with a distinct schema/context compiles the
 merged baseline (validator cache keys on the full resolution context), so
 tests that judge only document schemas pass `--disable baseline-schema` to stay in
@@ -616,7 +616,7 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
   `x-darkmatter-match-property` because its `$defs` location cannot (the
   keyword factory reads it for the caller origin). The eager-file rewrite
   compiles a property-level union arm alone, so it judges the arm with
-  `CallerOrigins::whole_instance(<owning top-level property's origin>)`
+  `CallerOrigins::scoped_to(<owning top-level property>)`
   (`rewrite.rs::ArmValidators::enter_property`) and retains validators by
   arm address *and* that origin; never compile such an arm with the
   property-keyed map or with no origins
@@ -692,12 +692,29 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
   `file` arm for a root union; empty means a bare `file`.
   `file_match::file_match_groups` is public for consumers such as Claudine.
 - `completion::path_candidates` answers what Tab may offer next in a `PropertyPath`
-  or its value, per `PathCommand`, reading the layered `property_shape` (not
-  `for_path`, which sees only the document's layer). `effective: None` reads the
-  baseline, and the two are never combined. `insert` is the whole word, with no
+  or its value, per `PathCommand`. `PathSchema::Effective` reads
+  `EffectiveSchema::declared_property_shape`, the layers that schema was actually
+  assembled with: its custom, compiled, or absent baseline, then triggers and the
+  document, a raw JSON Schema layer through `RawDeclarations` (not `for_path`, which
+  sees only the document's layer, nor `property_shape`, the editor's projection over
+  the compiled baseline). `PathSchema::CompiledBaseline` is the fallback and
+  `PathSchema::Nothing` the request that selected no schema; none are combined.
+  `cli/src/args/path_completion.rs::select_schema` picks one from the command's own
+  policy. `insert` is the whole word, with no
   shell quoting; a value keeps its label unless `SetterValue` would read it as
   something else. `path_value_takes_files` tells the caller to add files, since
   this code does no I/O.
+- `completion::declared_shape` is what a setter is read through. Past a pattern key or
+  an element of an element it walks the lowered `Shape`, because `def_at_path` stops
+  there. Unquoted text under an `unknown` result is checked by `keeps_text_at`: a raw
+  JSON Schema projects `$ref` and `allOf` to `unknown`, which reads as undeclared unless
+  the schema accepts that exact text there (a `pattern`, `format`, or `enum` behind the
+  `$ref` makes the fit depend on content, so never probe with a fixed string). `md set`
+  then writes the value validation judges, `cli/src/commands/frontmatter.rs::value_as_judged`,
+  read from `EffectiveSchema::data_copy`. `coerce.rs::partial_copy` never sets the root
+  aside, so a required key `properties` does not declare, which fails the root's
+  complete-schema assertion, does not stop the other values converting. A host must not
+  validate a converted copy and persist the original.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries; `uncounted-keys(a, b)`

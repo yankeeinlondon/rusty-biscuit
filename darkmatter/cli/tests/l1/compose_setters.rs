@@ -142,6 +142,17 @@ mod classifying {
         assert_eq!(composed(&fixture, &["./a.b=c.md"]), "from the file");
     }
 
+    /// `\` separates folders only on native Windows, and classification does not
+    /// know that: the word without the leading `.\` is an escaped key.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_with_a_dot_folder_needs_its_leading_dot_backslash() {
+        let fixture = with_document("setters-classify-windows", "---\ntitle: old\n---\n{{ title }}\n");
+        fixture.write_file("cwd/dir/.config=1.md", "from the file\n");
+        assert_eq!(composed(&fixture, &[r".\dir\.config=1.md"]), "from the file");
+        assert_eq!(composed(&fixture, &["doc.md", r"dir\.config=1.md"]), "old");
+    }
+
     #[test]
     fn two_paths_are_still_refused() {
         let fixture = with_document("setters-two-paths", AUTHOR);
@@ -472,7 +483,7 @@ mod origins {
         let fixture = fixture_with_files("setters-origin-nested", "./beside.png");
         let out = composed(&fixture, &["sub/doc.md", "author.avatar=launch.png"]);
         let launch = biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join("launch.png");
-        assert!(out.ends_with(launch.to_str().unwrap()), "{out}");
+        assert!(out.ends_with(&biscuit_file::to_portable_string(&launch)), "{out}");
     }
 
     #[test]
@@ -489,6 +500,38 @@ mod origins {
         fixture.write_file("cwd/launch.md", "launch");
         let out = composed(&fixture, &["sub/doc.md", "spec=launch.md"]);
         assert!(out.contains("launch.md"), "{out}");
+    }
+
+    const UNION: &str = "kind: schema\ntypes:\n  node:\n    avatar: file(eager; match(./assets/*.png))\n    cover: file(eager; match(./assets/*.png))\n    children: node[]\n$schema:\n  - kind: literal(image)\n    author: node\n  - kind: literal(other)\n    title: string(required)\n";
+
+    fn union_fixture(name: &str) -> CliProcessFixture {
+        let fixture = CliProcessFixture::named(name);
+        fixture.write_file("cwd/s.yaml", UNION);
+        fixture.write_file("cwd/assets/avatar.png", "launch");
+        fixture.write_file(
+            "cwd/sub/doc.md",
+            "---\n$schema: ../s.yaml\nkind: image\nauthor:\n  cover: ./assets/mine.png\n  children: []\n---\n{{ author.avatar }} {{ author.cover }}\n",
+        );
+        fixture.write_file("cwd/sub/assets/mine.png", "document");
+        fixture
+    }
+
+    #[test]
+    fn a_union_arm_selects_with_the_origin_of_a_nested_file_setter() {
+        let fixture = union_fixture("setters-origin-union");
+        let out = composed(&fixture, &["sub/doc.md", "author.avatar=assets/avatar.png"]);
+        let launch = biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join("assets").join("avatar.png");
+        let (avatar, cover) = out.split_once(' ').unwrap();
+        assert_eq!(avatar, biscuit_file::to_portable_string(&launch));
+        assert!(!cover.contains(fixture.cwd().to_str().unwrap()) && cover.ends_with("mine.png"), "{out}");
+    }
+
+    #[test]
+    fn a_union_arm_selects_with_the_origin_of_a_whole_set_object() {
+        let fixture = union_fixture("setters-origin-union-set");
+        let out = composed(&fixture, &["sub/doc.md", "--set", r#"{"author":{"avatar":"assets/avatar.png","cover":"assets/avatar.png","children":[]}}"#]);
+        let launch = biscuit_file::canonicalize_simplified(fixture.cwd()).unwrap().join("assets").join("avatar.png");
+        assert_eq!(out, format!("{0} {0}", biscuit_file::to_portable_string(&launch)));
     }
 }
 
@@ -541,4 +584,215 @@ fn a_data_output_reports_success_with_the_setter_applied() {
     let report: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(report["outcome"], json!("success"), "{report:#}");
     assert!(report["document"].as_str().unwrap().contains("Alice a@x"), "{report:#}");
+}
+
+/// A setter is read through the schema the request selected, not the compiled one.
+mod selected_baseline {
+    use super::*;
+
+    const CUSTOM: &str = "$schema:\n  version: string\n";
+    const DOCUMENT: &str = "---\n$schema:\n  other: string\n---\n{{ title }}\n";
+
+    fn frontmatter(fixture: &CliProcessFixture, args: &[&str]) -> Value {
+        let mut full = args.to_vec();
+        full.extend_from_slice(&["--frontmatter", "--output", "markdown"]);
+        let text = composed(fixture, &full);
+        let yaml = text.split("---").nth(1).unwrap_or_default();
+        serde_yaml_ng::from_str(yaml).unwrap()
+    }
+
+    #[test]
+    fn a_custom_baseline_flag_declares_the_type() {
+        let fixture = with_document("setters-custom-baseline", "---\ntitle: T\n---\n");
+        fixture.write_file("cwd/base.yaml", CUSTOM);
+        let found = frontmatter(&fixture, &["doc.md", "version=1.10", "--baseline-schema", "base.yaml"]);
+        assert_eq!(found["version"], json!("1.10"));
+    }
+
+    #[test]
+    fn a_disabled_baseline_flag_leaves_a_compiled_key_undeclared() {
+        let fixture = with_document("setters-disabled-baseline", DOCUMENT);
+        let found = frontmatter(&fixture, &["doc.md", "title=1.10", "--disable", "baseline-schema"]);
+        assert_eq!(found["title"], json!(1.1));
+    }
+
+    #[test]
+    fn a_disabled_baseline_environment_leaves_a_compiled_key_undeclared() {
+        let fixture = with_document("setters-disabled-baseline-env", DOCUMENT);
+        let output = fixture
+            .command_builder()
+            .application_input("DARKMATTER_NO_BASELINE_SCHEMA", "1")
+            .build()
+            .args(["compose", "doc.md", "title=1.10", "--frontmatter"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("title: 1.1\n"), "{text}");
+    }
+
+    #[test]
+    fn a_document_schema_declares_the_type() {
+        let fixture = with_document("setters-document-schema", "---\n$schema:\n  version: string\n---\n");
+        let found = frontmatter(&fixture, &["doc.md", "version=1.10"]);
+        assert_eq!(found["version"], json!("1.10"));
+    }
+
+    #[test]
+    fn a_raw_json_schema_document_declares_the_type() {
+        let fixture = with_document("setters-raw-document", "---\n$schema: ./doc.json\n---\n");
+        fixture.write_file(
+            "cwd/doc.json",
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"version":{"type":"string"}}}"#,
+        );
+        let found = frontmatter(&fixture, &["doc.md", "version=1.10"]);
+        assert_eq!(found["version"], json!("1.10"));
+    }
+
+    #[test]
+    fn a_raw_json_schema_trigger_declares_the_type() {
+        let fixture = with_document("setters-raw-trigger", "---\nlang: rust\n---\n");
+        with_repository(&fixture);
+        fixture.write_file(
+            "cwd/schemas/lang.trigger.yaml",
+            "kind: schema-trigger\nmatch:\n  lang: enum(rust; required)\n$schema: ./payload.json\n",
+        );
+        fixture.write_file(
+            "cwd/schemas/payload.json",
+            r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"version":{"type":"string"}}}"#,
+        );
+        let found = frontmatter(&fixture, &["doc.md", "version=1.10"]);
+        assert_eq!(found["version"], json!("1.10"));
+    }
+
+    #[test]
+    fn a_disabled_trigger_declares_nothing() {
+        let fixture = with_document("setters-disabled-trigger", "---\nlang: rust\n---\n");
+        with_repository(&fixture);
+        fixture.write_file(
+            "cwd/schemas/lang.trigger.yaml",
+            "kind: schema-trigger\nmatch:\n  lang: enum(rust; required)\n$schema:\n  edition: string\n",
+        );
+        let found = frontmatter(&fixture, &["doc.md", "edition=1.10", "--disable", "schema-triggers"]);
+        assert_eq!(found["edition"], json!(1.1));
+    }
+}
+
+/// `md set` and `md compose` read one value the same way.
+mod set_parity {
+    use super::*;
+
+    const DOCUMENT: &str = concat!(
+        "---\n",
+        "$schema:\n",
+        "  x: unknown\n",
+        "  count: number\n",
+        "  author:\n",
+        "    age: number\n",
+        "    any: unknown\n",
+        "  scores:\n",
+        "    \"<string>\": number\n",
+        "  names:\n",
+        "    \"<string>\": string\n",
+        "author: {age: 1, any: 1}\n",
+        "scores: {a: 1}\n",
+        "names: {a: b}\n",
+        "---\n",
+        "Body\n",
+    );
+
+    fn frontmatter_of(text: &str) -> Value {
+        serde_yaml_ng::from_str(text.split("---").nth(1).unwrap_or_default()).unwrap()
+    }
+
+    fn at<'v>(frontmatter: &'v Value, key: &str) -> &'v Value {
+        key.split('.').fold(frontmatter, |value, segment| &value[segment])
+    }
+
+    /// One value through both commands, each a composition or an edit of its own.
+    fn both_read(key: &str, raw: &str, expected: &Value) {
+        let fixture = with_document("setters-set-parity", DOCUMENT);
+        let setter = format!("{key}={raw}");
+        let composed_text = composed(&fixture, &["doc.md", &setter, "--frontmatter", "--output", "markdown"]);
+        assert_eq!(at(&frontmatter_of(&composed_text), key), expected, "compose {setter}");
+
+        let (code, set_text, stderr) = run(&fixture, &["set", "doc.md", key, raw, "--output", "markdown"]);
+        assert_eq!(code, Some(0), "set {setter}: {stderr}");
+        assert_eq!(at(&frontmatter_of(&set_text), key), expected, "set {setter}");
+    }
+
+    #[test]
+    fn unknown_keeps_text() {
+        both_read("x", "1.10", &json!("1.10"));
+        both_read("author.any", "1.10", &json!("1.10"));
+    }
+
+    #[test]
+    fn a_container_under_unknown_is_a_container() {
+        both_read("x", "{a:1}", &json!({ "a": 1 }));
+    }
+
+    #[test]
+    fn a_quoted_number_is_a_number() {
+        both_read("count", r#""5""#, &json!(5));
+        both_read("author.age", r#""5""#, &json!(5));
+    }
+
+    #[test]
+    fn a_pattern_key_declares_its_type() {
+        both_read("scores.a", r#""5""#, &json!(5));
+        both_read("names.a", "1.10", &json!("1.10"));
+    }
+
+    /// `$ref` and `allOf` project to `unknown`, yet neither keeps text.
+    #[test]
+    fn a_number_a_raw_schema_cannot_name_stays_a_number() {
+        let fixture = with_document("setters-raw-parity", "---\n$schema: ./schema.json\n---\nBody\n");
+        fixture.write_file(
+            "cwd/schema.json",
+            r##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+                "$defs":{"number":{"type":"number"}},
+                "properties":{"by_ref":{"$ref":"#/$defs/number"},"all_of":{"allOf":[{"type":"number"},{"minimum":0}]}}}"##,
+        );
+        for (key, setter) in [("by_ref", "by_ref=5"), ("all_of", "all_of=5")] {
+            let text = composed(&fixture, &["doc.md", setter, "--frontmatter", "--output", "markdown"]);
+            assert_eq!(at(&frontmatter_of(&text), key), &json!(5), "{setter}");
+        }
+    }
+
+    /// A `$ref`'d string's constraint may ask something of the text's content, so
+    /// the text itself is what is asked about.
+    #[test]
+    fn text_a_raw_constrained_string_accepts_keeps_its_spelling() {
+        let fixture = with_document("setters-raw-constrained", "---\n$schema: ./schema.json\n---\nBody\n");
+        fixture.write_file(
+            "cwd/schema.json",
+            r##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+                "$defs":{"version":{"type":"string","pattern":"^[0-9.]+$"},"pick":{"enum":["1.10","2.0"]}},
+                "properties":{"version":{"$ref":"#/$defs/version"},"pick":{"$ref":"#/$defs/pick"}}}"##,
+        );
+        for (key, setter) in [("version", "version=1.10"), ("pick", "pick=1.10")] {
+            let text = composed(&fixture, &["doc.md", setter, "--frontmatter", "--output", "markdown"]);
+            assert_eq!(at(&frontmatter_of(&text), key), &json!("1.10"), "{setter}");
+        }
+    }
+
+    /// `allOf` drives no conversion, and a quoted value says it is a string.
+    #[test]
+    fn a_quoted_number_behind_an_all_of_is_refused() {
+        let fixture = with_document("setters-raw-all-of", "---\n$schema: ./schema.json\n---\nBody\n");
+        fixture.write_file(
+            "cwd/schema.json",
+            r##"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object",
+                "properties":{"all_of":{"allOf":[{"type":"number"},{"minimum":0}]}}}"##,
+        );
+        let envelope = failure(&fixture, &["doc.md", r#"all_of="5""#]);
+        assert_eq!(envelope["diagnostics"][0]["code"], json!("dm.schema.type_mismatch"), "{envelope}");
+    }
+
+    #[test]
+    fn an_undeclared_key_keeps_its_guess_and_its_quotes() {
+        both_read("other", "1.10", &json!(1.1));
+        both_read("other", r#""5""#, &json!("5"));
+    }
 }

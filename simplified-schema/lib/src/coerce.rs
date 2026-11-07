@@ -605,7 +605,12 @@ fn partial_copy(
     templates: &NestedTemplates,
 ) -> Option<Value> {
     let relaxed = plan.relaxed(json_schema);
-    let mut failing: Vec<Vec<PathSegment>> = failing_paths(&error.failures);
+    // The root is never set aside: that would keep every property as written,
+    // and report a value that does convert as if it could not.
+    let below_root = |failures: &[ValueFailure]| -> Vec<Vec<PathSegment>> {
+        failing_paths(failures).into_iter().filter(|path| !path.is_empty()).collect()
+    };
+    let mut failing = below_root(&error.failures);
     for _ in 0..PARTIAL_COPY_ROUNDS {
         let set_aside = failing.clone();
         let pending = pending.clone();
@@ -632,7 +637,7 @@ fn partial_copy(
                 {
                     return Some(candidate.clone());
                 }
-                let more: Vec<_> = failing_paths(&again.failures)
+                let more: Vec<_> = below_root(&again.failures)
                     .into_iter()
                     .filter(|path| !failing.contains(path))
                     .collect();

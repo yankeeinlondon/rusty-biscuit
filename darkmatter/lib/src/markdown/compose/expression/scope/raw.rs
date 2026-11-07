@@ -64,6 +64,17 @@ impl RawDeclarations {
         self.properties.get(name).map(Option::as_ref)
     }
 
+    /// These declarations as an object shape; a declared `unknown` stays declared.
+    #[must_use]
+    pub fn to_schema_shape(&self) -> SchemaShape {
+        let mut shape = SchemaShape::new();
+        for (name, def) in &self.properties {
+            let def = def.clone().unwrap_or_else(|| PropertyDef::Single(PropertyAtom::bare(SimplifiedType::Unknown)));
+            shape.properties.insert(name.clone(), def);
+        }
+        shape
+    }
+
     /// Every declared name, in declaration order.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.properties.keys().map(String::as_str)

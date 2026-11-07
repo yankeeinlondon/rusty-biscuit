@@ -465,6 +465,7 @@ Each entry point chooses its baseline separately:
 |---|---|---|---|
 | `md schema validate` | built-in baseline | `--schema <path>`, `BASELINE_SCHEMA` | `--disable baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA` |
 | `md compose` | built-in baseline | `--baseline-schema <path>` | `--disable baseline-schema`, `DARKMATTER_NO_BASELINE_SCHEMA` |
+| `md get`, `md set`, `md rm` | built-in baseline | `BASELINE_SCHEMA` | `DARKMATTER_NO_BASELINE_SCHEMA` |
 | DMLS | built-in baseline, then [extension baselines](./dmls-schema-support.md#extensibility-through-configuration) | — | — |
 | `DarkmatterSchemas` | none | `with_baseline(...)`, `with_baseline_from_file(...)`, `with_darkmatter_baseline_json_schema()` | — |
 
@@ -1482,7 +1483,7 @@ arm, a caller in `launch/` who supplies `[a.md]` for `spec: node[]` gets
 `["launch/a.md"]` (its `./*.md` is judged from `launch/`), while a document-authored `other: node[]`
 holding `./a.md` gets `["a.md"]`. The rewrite holds each arm's validator, per
 origin, for the rest of the call, so a list of 1,000 union items costs one
-lookup per distinct arm and origin, not 1,000 compilations. Only compiled validators are reused: every item, and
+lookup per distinct arm and origin, not 1,000 compilations. A file value supplied below a document-authored property (`author.avatar=assets/me.png`) is judged from the caller's origin whichever arm or property holds it, and everything authored beside it keeps the document's. Keywords see no instance path, so the supplied value is recognized by its projected absolute text; composition then judges any copy of that exact absolute path the document authors a second time, from the document's folder, so a setter never lets a document's value past a `match()` it fails alone. Only compiled validators are reused: every item, and
 whether its file exists, is judged on every call, so a file created or
 removed between two compositions changes the outcome.
 

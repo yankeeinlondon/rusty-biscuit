@@ -406,7 +406,7 @@ impl Markdown {
         // same schema assembly and projection are retained for validation,
         // post-shell trigger matching, and final body presentation.
         let mut trigger_registry = None;
-        let prepared_schemas =
+        let mut prepared_schemas =
             schema_validation::prepare_schemas(self, options, &mut trigger_registry)?;
         // A skipped schema trigger is reported before anything can fail or
         // run, so a later failure still carries it, and a policy denying it
@@ -427,6 +427,7 @@ impl Markdown {
         )?;
         caller_projection.install(self);
         caller_projection.install_provenance(options);
+        prepared_schemas.adopt_supplied_values(&caller_projection);
 
         // A call the design-time check proves wrong rejects the document
         // before any of its expressions (and so any sibling effect) runs.
@@ -701,7 +702,7 @@ impl Markdown {
         // Build effective state for replacement/interpolation and condition checks.
         let esb_start = perf.is_enabled().then(std::time::Instant::now);
         let effective_state = document_state_builder(self, options)
-            .with_presentation_values(caller_projection.presentation_values())
+            .with_presentation_values(caller_projection.presentation_values(self.frontmatter().as_map()))
             .with_current_authority(options.current_authority())
             .build()?;
         if let Some(start) = esb_start {

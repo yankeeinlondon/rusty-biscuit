@@ -3291,6 +3291,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "xpty",
 ]
 
 [[package]]

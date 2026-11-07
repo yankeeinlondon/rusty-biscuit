@@ -85,13 +85,15 @@ on a pipe alike, because its deliverable is the Markdown document.
 
 ## Validation
 
-`md set` validates what it changed and nothing else, so it stays useful for repairing a document that has other problems. It reads the same schema `md schema validate` does: the baseline, triggers, and the document's `$schema`. Take a document with `count: number` that is missing a required `title`:
+`md set` validates what it changed and nothing else, so it stays useful for repairing a document that has other problems. It reads the same schema `md schema validate` does: the baseline that `BASELINE_SCHEMA` or `DARKMATTER_NO_BASELINE_SCHEMA` selects, triggers, and the document's `$schema`. A value is read through the type those layers declare, so with `BASELINE_SCHEMA=./base.yaml` declaring `version: string`, `md set a.md version 1.10` writes the text `1.10`; with the baseline disabled, `title` is undeclared unless another layer declares it. What gets written is the converted value that was validated, at the top level and in a nested path alike: `md set a.md count '"5"'` under `count: number` writes the number `5`, and only that value's bytes change. Take a document with `count: number` that is missing a required `title`:
 
 | Command | Result |
 |---|---|
 | `md set a.md count 5` | writes `count: 5`; the missing `title` does not block it |
 | `md set a.md count abc` | fails with exit status 1; nothing is written |
 | `md set a.md title Notes` | writes, repairing the document |
+
+A problem elsewhere never changes how your value is read. Under a raw JSON Schema that requires a key the document lacks, `md set a.md count '"5"'` still writes the number `5` where `count` is a `$ref` to a number, and a later `md set` adds the missing key.
 
 ```mermaid
 flowchart TD
@@ -168,6 +170,8 @@ An ordinary call such as `md set doc.md title "New Title"` is unchanged. These d
 | `md set doc.md note '{foo}'` | the text `{foo}` | the object `{foo: null}`, read as a YAML flow mapping; quote it to keep the text |
 | `md set doc.md version 1.10` under `version: string` | the number `1.1` | the text `"1.10"` |
 | `md set doc.md count abc` under `count: number` | wrote it | refused, with no write |
+| `md set doc.md count '"5"'` under `count: number` | wrote the text `5` | the number `5` |
+| `md set doc.md x 1.10` under `x: unknown` | the number `1.1` | the text `"1.10"` |
 | `md set doc.md meta '{a:1,a:2}'` | the text | refused: a parsed object must be valid |
 | a key name holding `\\` or `\.` | taken literally | write each backslash as `\\`, as in [Spelling a path](./index.md#spelling-a-path) |
 

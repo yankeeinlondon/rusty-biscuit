@@ -58,7 +58,7 @@ use serde_json::Value;
 use super::EffectiveSchema;
 use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def_with_definitions};
 use crate::markdown::compose::setters::{TokenClass, classify_token};
-use simplified_schema::coercion::Shape;
+use simplified_schema::coercion::{Additional, Shape};
 pub use simplified_schema::completion::*;
 use simplified_schema::simplified::query::{Alternative, resolved_alternatives};
 use simplified_schema::simplified::{
@@ -410,49 +410,120 @@ pub fn for_path(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathSt
 /// The type declared for the value at `path`, for reading a value written on a
 /// command line through `SetterValue::bind`.
 ///
-/// The declaration comes from every layer [`EffectiveSchema::property_shape`]
-/// merges (the compiled base properties, matching triggers, then the document's
-/// `$schema`), and a union narrows by `frontmatter`'s literal tags. A custom
-/// baseline has no SimplifiedSchema here, so its properties read as undeclared;
-/// validation still judges them.
+/// The declaration comes from the layers `effective` was assembled with
+/// ([`EffectiveSchema::declared_property_shape`]), and a union narrows by
+/// `frontmatter`'s literal tags. A key those layers do not declare is undeclared,
+/// even when the compiled baseline would declare it. A pattern key declares every
+/// key it matches.
 ///
 /// `None` when the path leaves the schema, or the declaration has no conversion
-/// shape: the caller then treats the value as undeclared.
-pub fn declared_shape(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathStep<'_>]) -> Option<Shape> {
-    let root = SchemaRoot::Single(effective.property_shape(&[], frontmatter));
-    let (def, site) = def_at_path(&root, effective, frontmatter, path)?;
-    let shape = shape_from_property_def_with_definitions(&def, &NoNamedTypes, effective.layered_definitions()).ok()?;
-    match (site, path.last()) {
-        (AlternativeSite::Item, Some(PathStep::Index(index))) => element_shape(&shape, *index),
+/// shape: the caller then treats the value as undeclared. So is an `unknown` the
+/// schema does not actually keep `written` at, which is how a raw JSON Schema's
+/// `$ref` or `allOf` reads ([`keeps_text_at`]). Only unquoted text is in question:
+/// `written` is `None` when there is no value yet, as in completion, and every
+/// other form reads the same under `unknown` as undeclared.
+pub fn declared_shape(
+    effective: &EffectiveSchema,
+    frontmatter: &Value,
+    path: &[PathStep<'_>],
+    written: Option<&SetterValue>,
+) -> Option<Shape> {
+    let root = SchemaRoot::Single(effective.declared_property_shape(frontmatter));
+    // A definition stops at a pattern key and at an element of an element; the
+    // shape it lowers to knows both.
+    let (reached, (def, site)) =
+        (1..=path.len()).rev().find_map(|depth| Some((depth, def_at_path(&root, effective, frontmatter, &path[..depth])?)))?;
+    let lowered = shape_from_property_def_with_definitions(&def, &NoNamedTypes, effective.layered_definitions()).ok()?;
+    let at_definition = match (site, path[reached - 1]) {
+        (AlternativeSite::Item, PathStep::Index(index)) => child_shape(&lowered, PathStep::Index(index))?,
+        _ => lowered,
+    };
+    let shape = path[reached..].iter().try_fold(at_definition, |shape, step| child_shape(&shape, *step))?;
+    match written {
+        Some(SetterValue::Text { raw }) if declares_nothing(&shape) => keeps_text_at(effective, frontmatter, path, raw).then_some(shape),
         _ => Some(shape),
     }
 }
 
-/// The shape of element `index` of a value shaped `shape`: [`def_at_path`] stops
-/// at the array's own definition for a path ending on an index.
-fn element_shape(shape: &Shape, index: usize) -> Option<Shape> {
-    match shape {
-        Shape::Array(array) => Some(array.items.as_ref().clone()),
-        Shape::Tuple(tuple) => tuple
+/// The shape of the child of a value shaped `shape`: [`def_at_path`] stops at the
+/// array's own definition for a path ending on an index. A key several patterns
+/// match must satisfy them all, which no one shape says, so it has none.
+fn child_shape(shape: &Shape, step: PathStep<'_>) -> Option<Shape> {
+    match (shape, step) {
+        (Shape::Array(array), PathStep::Index(_)) => Some(array.items.as_ref().clone()),
+        (Shape::Tuple(tuple), PathStep::Index(index)) => tuple
             .prefix
             .get(index)
             .map(|slot| slot.shape.clone())
             .or_else(|| tuple.rest.as_deref().cloned()),
-        Shape::Union(arms) => {
-            let mut elements: Vec<Shape> = arms.iter().filter_map(|arm| element_shape(arm, index)).collect();
-            match elements.len() {
-                0 => None,
-                1 => elements.pop(),
-                _ => Some(Shape::Union(elements)),
+        (Shape::Object(object), PathStep::Key(key)) => {
+            if let Some(property) = object.properties.iter().find(|property| property.name == key) {
+                return Some(property.shape.clone());
+            }
+            let mut matching = object.patterns.iter().filter(|pattern| pattern.matcher.matches(key));
+            match (matching.next(), matching.next(), &object.additional) {
+                (Some(only), None, _) => Some(only.shape.clone()),
+                (None, _, Additional::Shape(additional)) => Some(additional.as_ref().clone()),
+                _ => None,
             }
         }
-        Shape::Assert(inner, _) | Shape::Deferrable(inner) => element_shape(inner, index),
-        Shape::Ref(reference) => {
+        (Shape::Union(arms), _) => {
+            let mut children: Vec<Shape> = arms.iter().filter_map(|arm| child_shape(arm, step)).collect();
+            match children.len() {
+                0 => None,
+                1 => children.pop(),
+                _ => Some(Shape::Union(children)),
+            }
+        }
+        (Shape::Assert(inner, _) | Shape::Deferrable(inner), _) => child_shape(inner, step),
+        (Shape::Ref(reference), _) => {
             let target = reference.target()?;
-            element_shape(&target, index)
+            child_shape(&target, step)
         }
         _ => None,
     }
+}
+
+fn declares_nothing(shape: &Shape) -> bool {
+    match shape {
+        Shape::Any => true,
+        Shape::Deferrable(inner) => declares_nothing(inner),
+        _ => false,
+    }
+}
+
+/// Whether the schema accepts `text` at `path`, as written, leaving aside problems
+/// elsewhere in the document.
+///
+/// A declared `unknown` does. A raw JSON Schema layer also projects what it cannot
+/// name to `unknown`, so reading a value as text there could turn a number the
+/// schema requires into a string its conversion cannot recover from `allOf`. The
+/// question is about this text because a string's fit can depend on its content:
+/// a `pattern`, a `format`, or an `enum` behind a `$ref`.
+fn keeps_text_at(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathStep<'_>], text: &str) -> bool {
+    let mut probe = frontmatter.clone();
+    let slot = path.iter().try_fold(&mut probe, |value, step| match step {
+        PathStep::Key(key) => value.get_mut(*key),
+        PathStep::Index(index) => value.get_mut(*index),
+    });
+    let Some(slot) = slot else {
+        return true;
+    };
+    *slot = Value::String(text.to_string());
+    let target: Vec<String> = path
+        .iter()
+        .map(|step| match step {
+            PathStep::Key(key) => (*key).to_string(),
+            PathStep::Index(index) => index.to_string(),
+        })
+        .collect();
+    !effective.validate_raw(&probe).problems.iter().any(|problem| {
+        // A required or unknown-key problem names a child, never this value, and
+        // one at the root is about the whole document.
+        let about_a_value = problem.property.is_none() && problem.offending_properties.is_empty();
+        let at = problem.instance_path.segments();
+        about_a_value && !at.is_empty() && at.iter().zip(&target).all(|(left, right)| left == right)
+    })
 }
 
 /// The command a path is completed for. Each one decides which keys are offered
@@ -484,13 +555,25 @@ pub enum PathPosition<'a> {
     },
 }
 
+/// The schema a completion question reads. Only one is ever read: a document may
+/// replace a baseline declaration, so they are never combined.
+#[derive(Clone, Copy)]
+pub enum PathSchema<'a> {
+    /// The schema the request selected.
+    Effective(&'a EffectiveSchema),
+    /// The compiled baseline, when the request's own selection could not be worked
+    /// out.
+    CompiledBaseline,
+    /// The request selected no schema at all, as with a disabled baseline and a
+    /// document without `$schema`: only present keys remain.
+    Nothing,
+}
+
 /// One completion question for [`path_candidates`].
 #[derive(Clone, Copy)]
 pub struct PathQuery<'a> {
-    /// The document's effective schema. `None` when no document resolved or its
-    /// schema failed, which falls back to the compiled baseline; the two are
-    /// never combined, because a document may replace a baseline declaration.
-    pub effective: Option<&'a EffectiveSchema>,
+    /// What declares the keys and values.
+    pub schema: PathSchema<'a>,
     /// The frontmatter with the line's earlier setters already applied. Anything
     /// but an object reads as an empty document.
     pub frontmatter: &'a Value,
@@ -543,7 +626,7 @@ pub fn path_candidates(query: &PathQuery<'_>) -> Vec<PathCandidate> {
     let no_frontmatter = Value::Object(serde_json::Map::new());
     let frontmatter = readable_frontmatter(query, &no_frontmatter);
     match word_target(query) {
-        WordTarget::Path(typed) => key_candidates(query, &SchemaView::new(query.effective, frontmatter, &no_definitions), typed),
+        WordTarget::Path(typed) => key_candidates(query, &SchemaView::new(query.schema, frontmatter, &no_definitions), typed),
         WordTarget::Value(target) => value_candidates(query, frontmatter, &target, &no_definitions),
         WordTarget::Nothing => Vec::new(),
     }
@@ -563,7 +646,7 @@ pub fn path_value_takes_files(query: &PathQuery<'_>) -> bool {
         return false;
     };
     let cleared = without_value(frontmatter, &steps);
-    let view = SchemaView::new(query.effective, &cleared, &no_definitions);
+    let view = SchemaView::new(query.schema, &cleared, &no_definitions);
     let Some((def, site)) = def_at_path(&view.root, view.definitions, view.frontmatter, &steps) else {
         return false;
     };
@@ -623,16 +706,21 @@ struct SchemaView<'a> {
 }
 
 impl<'a> SchemaView<'a> {
-    fn new(effective: Option<&'a EffectiveSchema>, frontmatter: &'a Value, no_definitions: &'a DefinitionTable) -> Self {
-        match effective {
-            Some(effective) => Self {
-                root: SchemaRoot::Single(effective.property_shape(&[], frontmatter)),
+    fn new(schema: PathSchema<'a>, frontmatter: &'a Value, no_definitions: &'a DefinitionTable) -> Self {
+        match schema {
+            PathSchema::Effective(effective) => Self {
+                root: SchemaRoot::Single(effective.declared_property_shape(frontmatter)),
                 definitions: effective,
                 frontmatter,
             },
             // The baseline is definition-free, so an empty table reads all of it.
-            None => Self {
+            PathSchema::CompiledBaseline => Self {
                 root: SchemaRoot::Single(super::frontmatter_shape::effective_property_shape(&[], None, frontmatter)),
+                definitions: no_definitions,
+                frontmatter,
+            },
+            PathSchema::Nothing => Self {
+                root: SchemaRoot::Single(SchemaShape::default()),
                 definitions: no_definitions,
                 frontmatter,
             },
@@ -852,11 +940,14 @@ fn value_candidates(
     // The value being replaced must not narrow its own choices: a tag that is
     // set already still offers the others.
     let cleared = without_value(frontmatter, &steps);
-    let view = SchemaView::new(query.effective, &cleared, no_definitions);
+    let view = SchemaView::new(query.schema, &cleared, no_definitions);
     let Some((def, site)) = def_at_path(&view.root, view.definitions, view.frontmatter, &steps) else {
         return Vec::new();
     };
-    let declared = query.effective.and_then(|effective| declared_shape(effective, &cleared, &steps));
+    let declared = match query.schema {
+        PathSchema::Effective(effective) => declared_shape(effective, &cleared, &steps, None),
+        PathSchema::CompiledBaseline | PathSchema::Nothing => None,
+    };
     let is_array = site == AlternativeSite::Item;
     let offered = alternatives_for_def_in(&def, site, &Value::Null, view.definitions).map_or_else(Vec::new, |completion| completion.values);
 

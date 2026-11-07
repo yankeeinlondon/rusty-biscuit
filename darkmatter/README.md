@@ -64,6 +64,7 @@ just lint
 just doctest
 just test-l2       # real terminal/editor resources
 just test-browser  # headless browser protocol
+just test-optional-shells  # fish and Elvish script loads; needs both shells, never run by CI
 ```
 
 Deterministic L1 tests that execute `md` use the per-test

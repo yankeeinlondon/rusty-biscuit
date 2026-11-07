@@ -40,7 +40,12 @@ fn recorder_file(fixture: &CliProcessFixture) -> PathBuf {
 /// What a Tab press prints, one candidate per line, with help removed. Asserts
 /// that it succeeded and said nothing else.
 fn complete_in(fixture: &CliProcessFixture, shell: &str, index: Option<usize>, words: &[&str]) -> Vec<String> {
-    let mut command = fixture.command();
+    complete_with_env(fixture, shell, index, &[], words)
+}
+
+fn complete_with_env(fixture: &CliProcessFixture, shell: &str, index: Option<usize>, env: &[(&str, &str)], words: &[&str]) -> Vec<String> {
+    let builder = env.iter().fold(fixture.command_builder(), |builder, (key, value)| builder.application_input(key, value));
+    let mut command = builder.build();
     command
         .env("COMPLETE", shell)
         .env(ARGV_RECORDER_FILE, recorder_file(fixture))
@@ -355,6 +360,24 @@ fn registration_scripts_print_for_every_shell() {
     }
 }
 
+/// The setup lines that differ from the obvious one, each for a measured reason: Elvish
+/// 0.21 refuses `E:X=y cmd` and reads only the newer startup file, and on Windows `md`
+/// is PowerShell's alias of `mkdir`. The real-shell tests run these where a shell exists.
+#[test]
+fn the_setup_lines_are_the_ones_measured_in_real_shells() {
+    let fixture = CliProcessFixture::named("completion-setup-lines");
+    let printed = |shell: &str| {
+        let output = fixture.command().args(["--completions", shell]).output().unwrap();
+        assert!(output.status.success(), "{shell}: {output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let elvish = printed("elvish");
+    assert!(elvish.contains("~/.config/elvish/rc.elv"), "{elvish}");
+    assert!(elvish.contains("with E:COMPLETE = elvish { eval (md | slurp) }"), "{elvish}");
+    let powershell = printed("powershell");
+    assert!(powershell.contains("Remove-Item Alias:md -Force -ErrorAction SilentlyContinue; $env:COMPLETE"), "{powershell}");
+}
+
 /// Every file under `directory` with its bytes, so a test can show a Tab changed nothing.
 fn files_under(directory: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     let mut files = BTreeMap::new();
@@ -530,8 +553,7 @@ fn registration(fixture: &CliProcessFixture, shell: &str) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-/// Whether `program` starts at all. Only a few shells are guaranteed per platform;
-/// the tests for the others report themselves unproven when it does not.
+/// Whether `program` starts at all, for an L1 test's `expect_level!` gate.
 fn shell_starts(program: &str) -> bool {
     Command::new(program).arg("--version").output().is_ok_and(|output| output.status.success())
 }
@@ -579,18 +601,42 @@ fn the_zsh_script_loads() {
     assert!(printed.contains("_clap_dynamic_completer_md"), "{printed}");
 }
 
-/// Fish is optional on every platform: where it is absent this proves nothing and
-/// says so, and the implementation log records which hosts ran it.
-#[test]
-fn the_fish_script_loads_where_fish_is_installed() {
-    if !shell_starts("fish") {
-        eprintln!("unproven: fish is not installed on this host");
-        return;
+/// Fish and Elvish ship on no platform and no CI runner provides them, so their
+/// loaders compile only under the opt-in `optional-shell-tests` feature
+/// (`just test-optional-shells`). A selected run on a host without the shell fails;
+/// an unselected run proves nothing about either script.
+#[cfg(feature = "optional-shell-tests")]
+mod optional_shells {
+    use super::*;
+
+    #[test]
+    fn the_fish_script_loads() {
+        expect_level!(Level::L1, shell_starts("fish"), "fish");
+        let fixture = CliProcessFixture::named("completion-script-fish");
+        let script = registration(&fixture, "fish");
+        let printed = run_shell("fish", &["--no-config", "-c"], &format!("{script}\ncomplete -c md"));
+        assert!(printed.contains("complete"), "{printed}");
     }
-    let fixture = CliProcessFixture::named("completion-script-fish");
-    let script = registration(&fixture, "fish");
-    let printed = run_shell("fish", &["--no-config", "-c"], &format!("{script}\ncomplete -c md"));
-    assert!(printed.contains("complete"), "{printed}");
+
+    /// Elvish gives a script its `edit:` module only at an interactive prompt, so a
+    /// stand-in namespace receives the registration here; the script still parses,
+    /// compiles, and runs, and the function it registers answers through Elvish's own
+    /// word passing.
+    #[test]
+    fn the_elvish_script_loads() {
+        expect_level!(Level::L1, shell_starts("elvish"), "elvish");
+        let fixture = fixture("completion-script-elvish");
+        let script = registration(&fixture, "elvish");
+        let program = format!(
+            "var edit: = (ns [&completion:=(ns [&arg-completer=[&]])])\n{script}\n$edit:completion:arg-completer[md] md compose doc.md style.page.alignment=ce"
+        );
+        let mut elvish = Command::new("elvish");
+        fixture.command_builder().host_path().child_environment().apply(&mut elvish);
+        let output = elvish.args(["-norc", "-c", &program]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim_end(), "style.page.alignment=center");
+    }
 }
 
 #[cfg(windows)]
@@ -602,4 +648,179 @@ fn the_powershell_script_loads() {
     let fixture = CliProcessFixture::named("completion-script-powershell");
     let script = registration(&fixture, "powershell");
     run_shell("powershell", &["-NoProfile", "-NonInteractive", "-Command"], &script);
+}
+
+/// Tab reads the schema the command on the line would use.
+mod selected_baseline {
+    use super::*;
+
+    const CUSTOM: &str = "$schema:\n  version: string\n  status: enum(custom)\n";
+    const LANG_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  lang: enum(rust; required)\n$schema:\n  edition: enum(stable)\n";
+
+    fn custom_fixture(name: &str) -> CliProcessFixture {
+        let fixture = fixture(name);
+        write_in_cwd(&fixture, "base.yaml", CUSTOM);
+        fixture
+    }
+
+    fn fish_env(fixture: &CliProcessFixture, env: &[(&str, &str)], words: &[&str]) -> Vec<String> {
+        complete_with_env(fixture, "fish", None, env, words)
+    }
+
+    #[test]
+    fn a_custom_baseline_flag_offers_its_values() {
+        let fixture = custom_fixture("completion-custom-flag-values");
+        let found = fish(&fixture, &["md", "compose", "--baseline-schema", "base.yaml", "doc.md", "status="]);
+        assert_eq!(found, ["status=custom"]);
+    }
+
+    #[test]
+    fn a_custom_baseline_flag_after_the_document_counts() {
+        let fixture = custom_fixture("completion-custom-flag-after");
+        let found = fish(&fixture, &["md", "compose", "doc.md", "--baseline-schema=base.yaml", "status="]);
+        assert_eq!(found, ["status=custom"]);
+    }
+
+    #[test]
+    fn a_custom_baseline_flag_leaves_no_compiled_values() {
+        let fixture = custom_fixture("completion-custom-flag-replaces");
+        let found = fish(&fixture, &["md", "compose", "--baseline-schema", "base.yaml", "doc.md", "style.page.alignment="]);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_custom_baseline_answers_with_no_document() {
+        let fixture = custom_fixture("completion-custom-no-document");
+        let found = paths_only(fish(&fixture, &["md", "compose", "--baseline-schema", "base.yaml", "sta"]));
+        assert_eq!(found, ["status="]);
+    }
+
+    #[test]
+    fn a_custom_baseline_answers_when_the_document_schema_fails() {
+        let fixture = custom_fixture("completion-custom-broken-document");
+        write_in_cwd(&fixture, "broken.md", "---\n$schema: ./missing.yaml\n---\n");
+        let found = fish(&fixture, &["md", "compose", "--baseline-schema", "base.yaml", "broken.md", "status="]);
+        assert_eq!(found, ["status=custom"]);
+    }
+
+    #[test]
+    fn a_baseline_that_cannot_load_leaves_the_compiled_one() {
+        let fixture = fixture("completion-custom-unloadable");
+        let found = fish(&fixture, &["md", "compose", "--baseline-schema", "missing.yaml", "doc.md", "style.page.alignment="]);
+        holds(&found, &["style.page.alignment=left"]);
+    }
+
+    #[test]
+    fn compose_ignores_a_custom_baseline_in_the_environment() {
+        let fixture = custom_fixture("completion-compose-env-ignored");
+        let env = [("BASELINE_SCHEMA", "./base.yaml")];
+        let found = fish_env(&fixture, &env, &["md", "compose", "doc.md", "style.page.alignment="]);
+        holds(&found, &["style.page.alignment=left"]);
+        assert!(fish_env(&fixture, &env, &["md", "compose", "doc.md", "status="]).is_empty());
+    }
+
+    #[test]
+    fn get_offers_a_custom_baseline_key_from_the_environment() {
+        let fixture = custom_fixture("completion-env-get");
+        let found = paths_only(fish_env(&fixture, &[("BASELINE_SCHEMA", "./base.yaml")], &["md", "get", "doc.md", "sta"]));
+        assert_eq!(found, ["status"]);
+    }
+
+    #[test]
+    fn set_offers_a_custom_baseline_value_from_the_environment() {
+        let fixture = custom_fixture("completion-env-set");
+        let found = paths_only(fish_env(&fixture, &[("BASELINE_SCHEMA", "./base.yaml")], &["md", "set", "doc.md", "status", ""]));
+        assert_eq!(found, ["custom"]);
+    }
+
+    #[test]
+    fn set_leaves_no_compiled_keys_under_a_custom_baseline_from_the_environment() {
+        let fixture = custom_fixture("completion-env-set-replaces");
+        let found = paths_only(fish_env(&fixture, &[("BASELINE_SCHEMA", "./base.yaml")], &["md", "set", "doc.md", "sty"]));
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn rm_offers_only_present_keys_under_a_custom_baseline() {
+        let fixture = custom_fixture("completion-env-rm");
+        let found = paths_only(fish_env(&fixture, &[("BASELINE_SCHEMA", "./base.yaml")], &["md", "rm", "doc.md", "sta"]));
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_flag_offers_no_compiled_values() {
+        let fixture = fixture("completion-disabled-flag");
+        let found = fish(&fixture, &["md", "compose", "--disable", "baseline-schema", "doc.md", "style.page.alignment="]);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_flag_keeps_present_keys() {
+        let fixture = fixture("completion-disabled-flag-present");
+        let found = paths_only(fish(&fixture, &["md", "compose", "doc.md", "--disable=baseline-schema", "tit"]));
+        assert_eq!(found, ["title="]);
+    }
+
+    #[test]
+    fn a_disabled_baseline_flag_offers_nothing_with_no_document() {
+        let fixture = fixture("completion-disabled-no-document");
+        let found = paths_only(fish(&fixture, &["md", "compose", "--disable", "baseline-schema", "sty"]));
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_flag_offers_nothing_when_the_document_schema_fails() {
+        let fixture = fixture("completion-disabled-broken-document");
+        write_in_cwd(&fixture, "broken.md", "---\n$schema: ./missing.yaml\n---\n");
+        let found = fish(&fixture, &["md", "compose", "--disable", "baseline-schema", "broken.md", "style.page.alignment="]);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_environment_offers_no_compiled_values_to_compose() {
+        let fixture = fixture("completion-disabled-env-compose");
+        let found = fish_env(&fixture, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")], &["md", "compose", "doc.md", "style.page.alignment="]);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_disabled_baseline_environment_offers_no_compiled_keys_to_set() {
+        let fixture = fixture("completion-disabled-env-set");
+        let found = paths_only(fish_env(&fixture, &[("DARKMATTER_NO_BASELINE_SCHEMA", "1")], &["md", "set", "doc.md", "sty"]));
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn a_disabled_trigger_flag_offers_no_trigger_values() {
+        let fixture = fixture("completion-disabled-trigger");
+        assert!(fixture.initialize_repository());
+        write_in_cwd(&fixture, "schemas/lang.trigger.yaml", LANG_TRIGGER);
+        let line = |disable: &'static [&'static str]| -> Vec<&'static str> {
+            ["md", "compose"].iter().chain(disable).chain(&["doc.md", "lang=rust", "edition="]).copied().collect()
+        };
+        assert_eq!(fish(&fixture, &line(&[])), ["edition=stable"], "the trigger applies without the flag");
+        assert!(fish(&fixture, &line(&["--disable", "schema-triggers"])).is_empty());
+    }
+
+    #[test]
+    fn a_document_schema_offers_its_values() {
+        let fixture = fixture("completion-document-schema-control");
+        write_in_cwd(&fixture, "own.yaml", "$schema:\n  status: enum(custom)\n");
+        write_in_cwd(&fixture, "owned.md", "---\n$schema: ./own.yaml\n---\n");
+        assert_eq!(fish(&fixture, &["md", "compose", "owned.md", "status="]), ["status=custom"]);
+    }
+
+    #[test]
+    fn no_resolvable_document_falls_back_on_the_compiled_baseline() {
+        let fixture = fixture("completion-no-document-fallback");
+        let found = fish(&fixture, &["md", "compose", "missing.md", "style.page.alignment="]);
+        holds(&found, &["style.page.alignment=left", "style.page.alignment=center", "style.page.alignment=right"]);
+    }
+
+    #[test]
+    fn a_failing_document_schema_falls_back_on_the_compiled_baseline() {
+        let fixture = fixture("completion-broken-document-fallback");
+        write_in_cwd(&fixture, "broken.md", "---\n$schema: ./missing.yaml\n---\n");
+        holds(&fish(&fixture, &["md", "compose", "broken.md", "style.page.alignment="]), &["style.page.alignment=left"]);
+    }
 }

@@ -79,6 +79,12 @@ will never execute. CI enables the tier features for its reusable all-tier
 build; `just test-l2`, `just test-l3`, and `just test-browser` enable only the
 features their tier requires.
 
+## Windows Console Test Dependency
+
+- `xpty` (development, Windows only, `darkmatter-cli`) opens the windowless
+  ConPTY pseudoconsole that PowerShell's real Tab test types into. The workspace
+  already builds it for `worktree-cli`, `claudine-cli`, and `biscuit-terminal`.
+
 ## Source-guard Test Dependencies
 
 - `toml` (test-only, `darkmatter` and `darkmatter-cli`) — the shared

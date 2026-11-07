@@ -3,7 +3,7 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::completion::{
-    PathCandidate, PathCandidateKind, PathCommand, PathPosition, PathQuery, declared_shape, path_candidates, path_value_takes_files,
+    PathCandidate, PathCandidateKind, PathCommand, PathPosition, PathQuery, PathSchema, declared_shape, path_candidates, path_value_takes_files,
 };
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, frontmatter_as_json};
 use serde_json::{Value, json};
@@ -12,19 +12,24 @@ use simplified_schema::{PropertyPath, SetterValue};
 
 use PathCommand::{Compose, Get, Rm, Set};
 
-/// A document with no `$schema` and no trigger has no effective schema, which is
-/// how a caller comes to pass `None` and get the baseline.
+/// A document's effective schema under the default compiled baseline.
 fn loaded(document: &str) -> (Option<EffectiveSchema>, Value) {
     let markdown: Markdown = document.into();
-    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
+        .with_darkmatter_baseline_json_schema()
+        .expect("the compiled baseline loads");
     let effective = api.effective_for(&markdown).expect("the schema resolves");
     (effective, frontmatter_as_json(&markdown))
+}
+
+fn path_schema(effective: Option<&EffectiveSchema>) -> PathSchema<'_> {
+    effective.map_or(PathSchema::CompiledBaseline, PathSchema::Effective)
 }
 
 fn candidates(document: &str, command: PathCommand, word: &str) -> Vec<PathCandidate> {
     let (effective, frontmatter) = loaded(document);
     path_candidates(&PathQuery {
-        effective: effective.as_ref(),
+        schema: path_schema(effective.as_ref()),
         frontmatter: &frontmatter,
         command,
         position: PathPosition::Path(word),
@@ -40,7 +45,7 @@ fn set_values(document: &str, path: &str, typed: &str) -> Vec<String> {
     let (effective, frontmatter) = loaded(document);
     let path = PropertyPath::parse(path).unwrap();
     path_candidates(&PathQuery {
-        effective: effective.as_ref(),
+        schema: path_schema(effective.as_ref()),
         frontmatter: &frontmatter,
         command: Set,
         position: PathPosition::Value { path: &path, typed },
@@ -53,7 +58,7 @@ fn set_values(document: &str, path: &str, typed: &str) -> Vec<String> {
 
 fn baseline(command: PathCommand, word: &str) -> Vec<PathCandidate> {
     path_candidates(&PathQuery {
-        effective: None,
+        schema: PathSchema::CompiledBaseline,
         frontmatter: &Value::Null,
         command,
         position: PathPosition::Path(word),
@@ -319,7 +324,7 @@ mod deduplication {
         let (effective, frontmatter) = loaded(document);
         let earlier: Vec<PropertyPath> = earlier.iter().map(|path| PropertyPath::parse(path).unwrap()).collect();
         path_candidates(&PathQuery {
-            effective: effective.as_ref(),
+            schema: path_schema(effective.as_ref()),
             frontmatter: &frontmatter,
             command: Compose,
             position: PathPosition::Path(word),
@@ -448,7 +453,7 @@ covers: [a.png]
             let (effective, frontmatter) = loaded(DOCUMENT);
             let path = PropertyPath::parse(path).unwrap();
             path_value_takes_files(&PathQuery {
-                effective: effective.as_ref(),
+                schema: path_schema(effective.as_ref()),
                 frontmatter: &frontmatter,
                 command: Set,
                 position: PathPosition::Value { path: &path, typed: "" },
@@ -465,7 +470,7 @@ covers: [a.png]
 
         let (effective, frontmatter) = loaded(DOCUMENT);
         let word = |command, word| PathQuery {
-            effective: effective.as_ref(),
+            schema: path_schema(effective.as_ref()),
             frontmatter: &frontmatter,
             command,
             position: PathPosition::Path(word),
@@ -490,13 +495,36 @@ covers: [a.png]
 mod value_spelling {
     use super::*;
 
+    /// Every offered value, read back through the value parser and the declared
+    /// type, is the member it stands for.
+    #[test]
+    fn every_candidate_decodes_to_its_member_under_each_declared_shape() {
+        for (schema, members) in [
+            ("\"enum('5', on, '1.10')\"", vec![json!("5"), json!("on"), json!("1.10")]),
+            ("\"enum('null', 'true', '{a}')\"", vec![json!("null"), json!("true"), json!("{a}")]),
+            ("literal(5)", vec![json!(5)]),
+            ("\"literal('5')\"", vec![json!("5")]),
+            ("literal(true)", vec![json!(true)]),
+        ] {
+            let document = format!("---\n$schema:\n  pick: {schema}\n---\n");
+            let words = set_values(&document, "pick", "");
+            assert_eq!(words.len(), members.len(), "{schema}: {words:?}");
+            let (effective, frontmatter) = loaded(&document);
+            let shape = declared_shape(effective.as_ref().unwrap(), &frontmatter, &[PathStep::Key("pick")], None);
+            for (word, member) in words.iter().zip(&members) {
+                let read = SetterValue::parse(word).unwrap().bind(shape.as_ref());
+                assert_eq!(read, *member, "{schema}: {word}");
+            }
+        }
+    }
+
     fn assert_reads_back(member_yaml: &str, expected: &str, spelled: &str) {
         let document = format!("---\n$schema:\n  pick:\n    - literal({member_yaml})\n---\n");
         let words = set_values(&document, "pick", "");
         assert_eq!(words, [spelled], "{member_yaml}");
 
         let (effective, frontmatter) = loaded(&document);
-        let shape = declared_shape(effective.as_ref().unwrap(), &frontmatter, &[PathStep::Key("pick")]);
+        let shape = declared_shape(effective.as_ref().unwrap(), &frontmatter, &[PathStep::Key("pick")], None);
         let read = SetterValue::parse(&words[0]).unwrap().bind(shape.as_ref());
         assert_eq!(read, json!(expected), "{member_yaml}");
 
@@ -549,7 +577,7 @@ mod value_spelling {
     fn with_no_effective_schema_the_baseline_answers_for_values() {
         let path = PropertyPath::parse("style.page.alignment").unwrap();
         let words: Vec<String> = path_candidates(&PathQuery {
-            effective: None,
+            schema: PathSchema::CompiledBaseline,
             frontmatter: &Value::Null,
             command: Set,
             position: PathPosition::Value { path: &path, typed: "" },
@@ -603,7 +631,7 @@ BLOCK
         let overlay = json!({ "block": { "kind": "rust" } });
         let earlier = [PropertyPath::parse("block.kind").unwrap()];
         let words: Vec<String> = path_candidates(&PathQuery {
-            effective: effective.as_ref(),
+            schema: path_schema(effective.as_ref()),
             frontmatter: &overlay,
             command: Compose,
             position: PathPosition::Path("block."),
@@ -672,7 +700,7 @@ mod schema_sources {
         let frontmatter = frontmatter_as_json(&markdown);
         let ask = |word: &str| -> Vec<String> {
             path_candidates(&PathQuery {
-                effective: effective.as_ref(),
+                schema: path_schema(effective.as_ref()),
                 frontmatter: &frontmatter,
                 command: Compose,
                 position: PathPosition::Path(word),
@@ -701,7 +729,7 @@ mod schema_sources {
     fn with_no_effective_schema_document_keys_still_supplement() {
         let frontmatter = json!({ "mine": 1 });
         let words: Vec<String> = path_candidates(&PathQuery {
-            effective: None,
+            schema: PathSchema::CompiledBaseline,
             frontmatter: &frontmatter,
             command: Compose,
             position: PathPosition::Path("mi"),
@@ -725,7 +753,7 @@ mod schema_sources {
         let frontmatter = frontmatter_as_json(&markdown);
         let path = PropertyPath::parse("status").unwrap();
         let query = |position| PathQuery {
-            effective: effective.as_ref(),
+            schema: path_schema(effective.as_ref()),
             frontmatter: &frontmatter,
             command: Set,
             position,
@@ -747,12 +775,350 @@ mod schema_sources {
         let overlay = json!({ "tree": { "x": 1 } });
         let path = PropertyPath::parse("tree.x").unwrap();
         let found = path_candidates(&PathQuery {
-            effective: effective.as_ref(),
+            schema: path_schema(effective.as_ref()),
             frontmatter: &overlay,
             command: Set,
             position: PathPosition::Value { path: &path, typed: "" },
             earlier_paths: &[],
         });
         assert!(found.is_empty(), "{found:?}");
+    }
+}
+
+/// The baseline a request selected, in place of the compiled one.
+mod selected_baseline {
+    use super::*;
+
+    const CUSTOM: &str = "$schema:\n  version: string\n  status: enum(custom)\n";
+
+    struct Selected {
+        effective: EffectiveSchema,
+        frontmatter: Value,
+        _dir: tempfile::TempDir,
+    }
+
+    /// `document`'s effective schema under the baseline `configure` selects, with
+    /// `files` written beside it.
+    fn select(
+        document: &str,
+        files: &[(&str, &str)],
+        configure: impl FnOnce(DarkmatterSchemas, &std::path::Path) -> DarkmatterSchemas,
+    ) -> Selected {
+        let dir = tempfile::TempDir::new().unwrap();
+        for (name, text) in files {
+            std::fs::write(dir.path().join(name), text).unwrap();
+        }
+        let path = dir.path().join("doc.md");
+        std::fs::write(&path, document).unwrap();
+        let markdown = Markdown::try_from(path.as_path()).unwrap();
+        let api = configure(DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path().to_path_buf())), dir.path());
+        let effective = api.effective_for(&markdown).unwrap().expect("a layer applies");
+        Selected {
+            effective,
+            frontmatter: frontmatter_as_json(&markdown),
+            _dir: dir,
+        }
+    }
+
+    fn with_file(name: &'static str) -> impl FnOnce(DarkmatterSchemas, &std::path::Path) -> DarkmatterSchemas {
+        move |api, dir| api.with_baseline_from_file(dir.join(name)).unwrap()
+    }
+
+    fn custom(document: &str) -> Selected {
+        select(document, &[("base.yaml", CUSTOM)], with_file("base.yaml"))
+    }
+
+    fn read(selected: &Selected, key: &str, raw: &str) -> Value {
+        let value = SetterValue::parse(raw).unwrap();
+        let shape = declared_shape(&selected.effective, &selected.frontmatter, &[PathStep::Key(key)], Some(&value));
+        value.bind(shape.as_ref())
+    }
+
+    fn compose_words(selected: &Selected, word: &str) -> Vec<String> {
+        path_candidates(&PathQuery {
+            schema: PathSchema::Effective(&selected.effective),
+            frontmatter: &selected.frontmatter,
+            command: Compose,
+            position: PathPosition::Path(word),
+            earlier_paths: &[],
+        })
+        .into_iter()
+        .map(|candidate| candidate.insert)
+        .collect()
+    }
+
+    #[test]
+    fn a_custom_baseline_declares_the_type_a_value_is_read_through() {
+        assert_eq!(read(&custom("---\ntitle: T\n---\n"), "version", "1.10"), json!("1.10"));
+    }
+
+    #[test]
+    fn a_parsed_custom_baseline_declares_the_type_a_value_is_read_through() {
+        let schema = simplified_schema::parse_yaml_schema(&serde_yaml_ng::from_str(&CUSTOM["$schema:\n".len()..]).unwrap()).unwrap();
+        let selected = select("---\ntitle: T\n---\n", &[], |api, _| api.with_baseline(schema).unwrap());
+        assert_eq!(read(&selected, "version", "1.10"), json!("1.10"));
+    }
+
+    #[test]
+    fn a_custom_baseline_replaces_the_compiled_declarations() {
+        assert_eq!(read(&custom("---\ntitle: T\n---\n"), "title", "1.10"), json!(1.1));
+        assert_eq!(compose_words(&custom("---\ntitle: T\n---\n"), "sty"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_custom_baseline_offers_its_own_keys_and_values() {
+        let selected = custom("---\ntitle: T\n---\n");
+        assert_eq!(compose_words(&selected, "sta"), ["status="]);
+        assert_eq!(compose_words(&selected, "status="), ["status=custom"]);
+    }
+
+    #[test]
+    fn a_document_schema_outranks_a_custom_baseline() {
+        let selected = custom("---\n$schema:\n  version: number\n---\n");
+        assert_eq!(read(&selected, "version", "5"), json!(5));
+    }
+
+    #[test]
+    fn no_baseline_leaves_the_compiled_declarations_undeclared() {
+        let selected = select("---\n$schema:\n  other: string\n---\n", &[], |api, _| api);
+        assert_eq!(read(&selected, "title", "1.10"), json!(1.1));
+        assert_eq!(compose_words(&selected, "sty"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_compiled_baseline_still_declares_when_selected() {
+        let selected = select("---\n$schema:\n  other: string\n---\n", &[], |api, _| api.with_darkmatter_baseline_json_schema().unwrap());
+        assert_eq!(read(&selected, "title", "1.10"), json!("1.10"));
+        assert_eq!(compose_words(&selected, "sty"), ["style.", "style="]);
+    }
+
+    #[test]
+    fn a_raw_json_schema_baseline_declares_what_it_can_prove() {
+        const RAW: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"version":{"type":"string"},"status":{"enum":["custom"]}}}"#;
+        let selected = select("---\ntitle: T\n---\n", &[("base.json", RAW)], with_file("base.json"));
+        assert_eq!(read(&selected, "version", "1.10"), json!("1.10"));
+        assert_eq!(compose_words(&selected, "status="), ["status=custom"]);
+    }
+
+    #[test]
+    fn a_raw_json_schema_value_as_the_baseline_declares_what_it_can_prove() {
+        let raw = json!({"type": "object", "properties": {"version": {"type": "string"}}});
+        let selected = select("---\ntitle: T\n---\n", &[], |api, _| api.with_baseline_json_schema(raw).unwrap());
+        assert_eq!(read(&selected, "version", "1.10"), json!("1.10"));
+    }
+
+    #[test]
+    fn a_raw_json_schema_document_replaces_a_baseline_declaration() {
+        const RAW: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"title":{"type":"number"}}}"#;
+        let selected = select("---\n$schema: ./doc.json\n---\n", &[("doc.json", RAW)], |api, _| {
+            api.with_darkmatter_baseline_json_schema().unwrap()
+        });
+        assert_eq!(read(&selected, "title", "5"), json!(5));
+    }
+
+    #[test]
+    fn a_custom_baselines_recursive_types_resolve_at_any_depth() {
+        const RECURSIVE: &str = "types:\n  item:\n    name: enum(one, two)\n    children: item[]\n$schema:\n  tree: item\n";
+        let selected = select("---\ntree:\n  children:\n    - name: one\n---\n", &[("base.yaml", RECURSIVE)], with_file("base.yaml"));
+        assert_eq!(compose_words(&selected, "tree.children.0.name="), ["tree.children.0.name=one", "tree.children.0.name=two"]);
+    }
+
+    /// Completion's reads: each schema file one selection reaches is opened once,
+    /// however many globals or import sites name it.
+    #[cfg(feature = "work-counters")]
+    mod read_once {
+        use super::*;
+        use std::collections::BTreeMap;
+
+        const TYPES: &str = "kind: schema\ntypes:\n  shared: {name: string}\n";
+        /// A custom catalog in the shipped catalog's arrangement: `ctx` and
+        /// `current` import the same named type.
+        const CATALOG: &str = concat!(
+            "kind: schema\n",
+            "$schema:\n",
+            "  fm:\n",
+            "    status: enum(custom)\n",
+            "  ctx: shared@./types.yaml\n",
+            "  current: shared@./types.yaml\n",
+            "  env: object\n",
+            "  err: {message: string}\n",
+            "  timing: {elapsed: number}\n",
+        );
+        const DOCUMENT: &str = "---\nstatus: custom\n---\n";
+
+        /// `document`'s effective schema under the baseline `configure` selects,
+        /// with how many times each schema file was opened, by file name.
+        fn opened(
+            document: &str,
+            files: &[(&str, &str)],
+            configure: impl FnOnce(DarkmatterSchemas, &std::path::Path) -> DarkmatterSchemas,
+        ) -> (Selected, BTreeMap<String, usize>) {
+            let (selected, observed) = simplified_schema::resolve::observed::collect(|| select(document, files, configure));
+            let mut counts = BTreeMap::new();
+            for path in observed.opened {
+                *counts.entry(path.file_name().unwrap().to_string_lossy().into_owned()).or_default() += 1;
+            }
+            (selected, counts)
+        }
+
+        fn once(names: &[&str]) -> BTreeMap<String, usize> {
+            names.iter().map(|name| ((*name).to_string(), 1)).collect()
+        }
+
+        fn words(selected: &Selected, command: PathCommand, position: PathPosition<'_>) -> Vec<String> {
+            path_candidates(&PathQuery {
+                schema: PathSchema::Effective(&selected.effective),
+                frontmatter: &selected.frontmatter,
+                command,
+                position,
+                earlier_paths: &[],
+            })
+            .into_iter()
+            .map(|candidate| candidate.insert)
+            .collect()
+        }
+
+        fn catalog() -> (Selected, BTreeMap<String, usize>) {
+            opened(DOCUMENT, &[("base.yaml", CATALOG), ("types.yaml", TYPES)], with_file("base.yaml"))
+        }
+
+        #[test]
+        fn get_reads_a_custom_catalog_and_its_repeated_import_once() {
+            let (selected, opened) = catalog();
+            assert!(words(&selected, Get, PathPosition::Path("sta")).contains(&"status".to_string()));
+            assert_eq!(opened, once(&["base.yaml", "types.yaml"]));
+        }
+
+        #[test]
+        fn set_reads_a_custom_catalog_and_its_repeated_import_once() {
+            let (selected, opened) = catalog();
+            let path = PropertyPath::parse("status").unwrap();
+            assert_eq!(words(&selected, Set, PathPosition::Value { path: &path, typed: "cu" }), ["custom"]);
+            assert_eq!(opened, once(&["base.yaml", "types.yaml"]));
+        }
+
+        #[test]
+        fn rm_reads_a_custom_catalog_and_its_repeated_import_once() {
+            let (selected, opened) = catalog();
+            assert!(words(&selected, Rm, PathPosition::Path("sta")).contains(&"status".to_string()));
+            assert_eq!(opened, once(&["base.yaml", "types.yaml"]));
+        }
+
+        #[test]
+        fn an_ordinary_yaml_baseline_and_its_repeated_import_are_read_once() {
+            let base = "$schema:\n  status: enum(custom)\n  a: shared@./types.yaml\n  b: shared@./types.yaml\n";
+            let (selected, opened) = opened(DOCUMENT, &[("base.yaml", base), ("types.yaml", TYPES)], with_file("base.yaml"));
+            assert!(words(&selected, Get, PathPosition::Path("sta")).contains(&"status".to_string()));
+            assert_eq!(opened, once(&["base.yaml", "types.yaml"]));
+        }
+
+        #[test]
+        fn a_raw_json_schema_baseline_is_read_once() {
+            const RAW: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"status":{"enum":["custom"]}}}"#;
+            let (selected, opened) = opened(DOCUMENT, &[("base.json", RAW)], with_file("base.json"));
+            let path = PropertyPath::parse("status").unwrap();
+            assert_eq!(words(&selected, Set, PathPosition::Value { path: &path, typed: "cu" }), ["custom"]);
+            assert_eq!(opened, once(&["base.json"]));
+        }
+
+        #[test]
+        fn a_document_schema_and_its_repeated_import_are_read_once() {
+            let schema = "$schema:\n  first: shared@./types.yaml\n  second: shared@./types.yaml\n";
+            let document = "---\n$schema: ./s.yaml\nfirst: {name: x}\n---\n";
+            let (selected, opened) = opened(document, &[("s.yaml", schema), ("types.yaml", TYPES)], |api, _| {
+                api.with_darkmatter_baseline_json_schema().unwrap()
+            });
+            assert!(words(&selected, Get, PathPosition::Path("sec")).contains(&"second.".to_string()));
+            assert_eq!(opened, once(&["s.yaml", "types.yaml"]));
+        }
+
+        #[test]
+        fn the_built_in_and_a_disabled_baseline_open_no_file() {
+            let document = "---\n$schema:\n  status: enum(custom)\n---\n";
+            let (built_in, opened_built_in) =
+                opened(document, &[("base.yaml", CATALOG)], |api, _| api.with_darkmatter_baseline_json_schema().unwrap());
+            let (disabled, opened_disabled) = opened(document, &[("base.yaml", CATALOG)], |api, _| api);
+            for (selected, opened) in [(built_in, opened_built_in), (disabled, opened_disabled)] {
+                assert!(words(&selected, Get, PathPosition::Path("sta")).contains(&"status".to_string()));
+                assert!(opened.is_empty(), "{opened:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_schema_at_all_offers_only_what_is_present() {
+        let frontmatter = json!({ "title": "T" });
+        let words = |word| -> Vec<String> {
+            path_candidates(&PathQuery {
+                schema: PathSchema::Nothing,
+                frontmatter: &frontmatter,
+                command: Compose,
+                position: PathPosition::Path(word),
+                earlier_paths: &[],
+            })
+            .into_iter()
+            .map(|candidate| candidate.insert)
+            .collect()
+        };
+        assert_eq!(words(""), ["title="]);
+        assert_eq!(words("style.page.alignment="), Vec::<String>::new());
+    }
+}
+
+mod declared_shape_paths {
+    use super::*;
+    use simplified_schema::coercion::Shape;
+
+    const DOCUMENT: &str = concat!(
+        "---\n",
+        "$schema:\n",
+        "  named:\n",
+        "    \"<string>\": string\n",
+        "  starting:\n",
+        "    \"<starting::a>\": number\n",
+        "  loose:\n",
+        "    \"<string>\": unknown\n",
+        "  closed:\n",
+        "    only: string\n",
+        "  deep:\n",
+        "    \"<string>\":\n",
+        "      name: string\n",
+        "named: {}\n",
+        "starting: {}\n",
+        "loose: {}\n",
+        "closed: {}\n",
+        "deep: {}\n",
+        "---\n",
+    );
+
+    fn shape_at(path: &[PathStep<'_>]) -> Option<Shape> {
+        let (effective, frontmatter) = loaded(DOCUMENT);
+        declared_shape(effective.as_ref().unwrap(), &frontmatter, path, None)
+    }
+
+    fn reads_as(shape: Option<&Shape>, text: &str) -> Value {
+        SetterValue::parse(text).unwrap().bind(shape)
+    }
+
+    #[test]
+    fn a_pattern_key_declares_the_keys_it_matches() {
+        let named = shape_at(&[PathStep::Key("named"), PathStep::Key("any")]);
+        assert_eq!(reads_as(named.as_ref(), "1.10"), json!("1.10"));
+        let started = shape_at(&[PathStep::Key("starting"), PathStep::Key("abc")]);
+        assert_eq!(reads_as(started.as_ref(), "1.10"), json!(1.1));
+        let unknown = shape_at(&[PathStep::Key("loose"), PathStep::Key("any")]);
+        assert_eq!(reads_as(unknown.as_ref(), "1.10"), json!("1.10"));
+    }
+
+    #[test]
+    fn a_descent_through_a_pattern_key_continues() {
+        let name = shape_at(&[PathStep::Key("deep"), PathStep::Key("any"), PathStep::Key("name")]);
+        assert_eq!(reads_as(name.as_ref(), "1.10"), json!("1.10"));
+    }
+
+    #[test]
+    fn a_key_no_pattern_matches_is_undeclared() {
+        assert!(shape_at(&[PathStep::Key("starting"), PathStep::Key("zzz")]).is_none());
+        assert!(shape_at(&[PathStep::Key("closed"), PathStep::Key("other")]).is_none());
     }
 }

@@ -227,7 +227,7 @@ impl<'a> ArmValidators<'a> {
     /// Judges the property-level arms met from here on from the origin of
     /// top-level property `name`.
     fn enter_property(&mut self, name: &str) {
-        self.owner = CallerOrigins::whole_instance(self.root_cache.caller_origins().origin_of(name));
+        self.owner = self.root_cache.caller_origins().scoped_to(name);
     }
 
     /// The validator for an eligible property-level arm, judged from the

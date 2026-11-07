@@ -1091,6 +1091,9 @@ The rules:
 - **Authored application values keep drop-and-warn.** An optional, non-eager
   property declared in the authored `$schema` and holding an invalid value is
   still dropped with a warning (see [Required vs Optional](#required-vs-optional)).
+  A file inside an object the caller supplied is the exception: the launch leaves
+  it to composition, which reads it from the launch directory and fails the run
+  if it is missing there.
 - **The authored `$schema` applies last and takes ownership.** Redeclaring a
   property in `$schema` replaces the trigger's declaration, so the authored
   type and cleanup rules apply instead. This can weaken Claudine's type; the

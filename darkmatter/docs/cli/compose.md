@@ -121,8 +121,9 @@ Name a file that looks like a setter with `./` in front. On native Windows, wher
 - A missing parent is created. A number under a missing parent, an index out of range, and a path through text or `null` fail: see [When a path cannot be followed](./index.md#when-a-path-cannot-be-followed).
 - A setter can change which schema applies. Setters are first applied to a temporary copy to select the schema, and then each value is read once through that schema, so `lang=rust edition=1.10` reads `edition` through a trigger that matches `lang: rust`, whichever comes first on the line. There is no second attempt: a trigger that would match only after a later conversion fails with a schema problem that names the setter.
 - A setter's `{{ ... }}` stays authored text, evaluated by composition as `--set` values are.
+- A file value resolves from the directory you ran `md` in, at any depth. Run from `work/` with `work/assets/me.png` present, `md compose sub/doc.md author.avatar=assets/me.png` stores the absolute path of that file, and `sub/`'s own `assets/me.png` is not a fallback. The same holds for each file inside a whole object, whether written `'author={avatar:"assets/me.png"}'` or through `--set`. A value the document itself wrote beside it, such as `author.cover: ./cover.png`, still resolves from the document's folder. A `--state` default counts as the document's own value, so it resolves from the document's folder too.
 
-The schema decides whether a setter is allowed. The frontmatter root is open by default, so an undeclared top-level key is fine. A declared nested object is closed by default, so `author.mistake=1` fails with `dm.schema.unknown_key`, unless the schema opens it with a pattern key such as `"<string>": unknown`.
+The schema composition selected decides how a setter's value is read and whether it is allowed: the baseline from `--baseline-schema` or `--disable baseline-schema`, matching triggers, and the document's `$schema`. With `--baseline-schema base.yaml` declaring `version: string`, `version=1.10` stays the text `1.10`, and a key declared `unknown` keeps its text too: `x=1.10` is `"1.10"` under `x: unknown`. The frontmatter root is open by default, so an undeclared top-level key is fine. A declared nested object is closed by default, so `author.mistake=1` fails with `dm.schema.unknown_key`, unless the schema opens it with a pattern key such as `"<string>": unknown`.
 
 **Overlapping setters** resolve by how specific they are, not by their order on the line. The same path given twice takes the last value.
 
@@ -144,6 +145,7 @@ md compose doc.md author=7 author.name=Bob
 | `md compose doc.md a.b=c.md` | composed the file `a.b=c.md` | a setter; write `./a.b=c.md` for the file |
 | `md compose doc.md nested.deep=7` | failed: read as a second input | sets `deep` inside `nested` |
 | `md compose doc.md version=1.10` under `version: string` | the number `1.1` | the text `"1.10"` |
+| `md compose doc.md x=1.10` under `x: unknown` | the number `1.1` | the text `"1.10"` |
 | `md compose doc.md 'meta={a:1,a:2}'` | kept the last value | fails: a parsed object must be valid |
 | `md compose doc.md 'meta={a:NaN}'` | the text `{a:NaN}` | fails, for the same reason |
 | `md compose doc.md 'style={ max-width: 50 }'` | the text | the object `{max-width: 50}` |

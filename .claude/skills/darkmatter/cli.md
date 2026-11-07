@@ -88,7 +88,8 @@ another). User docs: `docs/cli/index.md#property-paths` and `#command-line-value
   and completion alike. A token whose key misses the setter grammar is a path, so
   `a..b=1` fails as a second input rather than as a bad setter.
 - Values: `SetterValue::parse`, then `bind` through
-  `schemas::completion::declared_shape`. `md set` and setters share both.
+  `schemas::completion::declared_shape`, which reads the baseline the request
+  selected. `md set` and setters share both.
 - Setters stay a raw ordered plan (`ComposeOptions::with_setters`, `SetterPlan`),
   bound per document by `apply_setter_plan` right after schemas are prepared, so
   they reach transcluded children and a child's own schema reads them.
@@ -108,6 +109,11 @@ shell side and `cli/src/args/path_completion.rs` the value completers.
   the word form in a static rather than reading the variable.
 - The bash and zsh scripts are the built-in ones with text edits, which
   `every_registration_edit_applies` pins against a `clap_complete` upgrade.
+- Elvish and PowerShell keep the built-in adapters. Elvish's Tab is modal (typing
+  filters its list until Enter accepts), and it needs its editor module, so its
+  L1 script test supplies a stand-in namespace. PowerShell's real Tab test runs in
+  ConPTY on native Windows, reading the line through a PSReadLine key handler.
+  `print_completions`' PowerShell line removes the `md` alias of `mkdir`.
 - Passive and silent: every failure means fewer candidates. `completion_overlay`
   drops only the setter composition would refuse, where `SetterPlan::new` fails
   the whole plan. A misplaced test document therefore does not fail loudly: it

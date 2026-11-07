@@ -1081,13 +1081,33 @@ fn apply_compose_baseline_schema(
     no_baseline_schema: bool,
     request: &MdRequest,
 ) -> Result<ComposeOptions> {
+    Ok(match compose_baseline(baseline_schema, no_baseline_schema, request)? {
+        ComposeBaseline::None => options,
+        ComposeBaseline::Custom(schema) => options.with_baseline_schema(schema),
+        ComposeBaseline::Darkmatter => options.with_darkmatter_baseline_schema(),
+    })
+}
+
+/// The baseline `md compose` selected.
+enum ComposeBaseline {
+    None,
+    Custom(simplified_schema::SchemaRoot),
+    Darkmatter,
+}
+
+/// Selects the baseline: `--disable baseline-schema`, then `--baseline-schema`,
+/// then a disabling [`NO_BASELINE_SCHEMA_ENV`], then the built-in one. Unlike
+/// `md schema validate`, `BASELINE_SCHEMA` selects nothing here.
+fn compose_baseline(baseline_schema: Option<&PathBuf>, no_baseline_schema: bool, request: &MdRequest) -> Result<ComposeBaseline> {
     if no_baseline_schema {
-        return Ok(options);
+        return Ok(ComposeBaseline::None);
     }
 
     if let Some(path) = baseline_schema {
         let resolved = resolve_file_path(path, request.launch_context()?)?;
-        let raw = std::fs::read_to_string(&resolved)
+        // Read as the schema resolver reads a source, so a completion's read-once
+        // accounting sees it.
+        let raw = simplified_schema::resolve::buffers::read_to_string(&resolved)
             .wrap_err_with(|| format!("Failed to read baseline schema: {}", resolved.display()))?;
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).wrap_err_with(|| {
             format!(
@@ -1098,25 +1118,38 @@ fn apply_compose_baseline_schema(
         let schema_value = yaml.get("$schema").unwrap_or(&yaml);
         let schema = simplified_schema::parse_yaml_schema(schema_value)
             .wrap_err_with(|| format!("Invalid baseline schema: {}", resolved.display()))?;
-        return Ok(options.with_baseline_schema(schema));
+        return Ok(ComposeBaseline::Custom(schema));
     }
 
-    if env_disables_baseline_schema() {
-        return Ok(options);
+    if disables_baseline_schema(request.snapshot().env().get(NO_BASELINE_SCHEMA_ENV).map(String::as_str)) {
+        return Ok(ComposeBaseline::None);
     }
 
-    Ok(options.with_darkmatter_baseline_schema())
+    Ok(ComposeBaseline::Darkmatter)
+}
+
+/// The schema entry point composition assembles for the baseline flags given, at
+/// the launch context, for a caller with no use for a whole compose request.
+///
+/// ## Errors
+///
+/// As composition refuses the same baseline.
+pub(crate) fn compose_baseline_schemas(baseline_schema: Option<&PathBuf>, no_baseline_schema: bool, request: &MdRequest) -> Result<darkmatter::markdown::schemas::DarkmatterSchemas> {
+    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new(request.launch_context()?.clone());
+    Ok(match compose_baseline(baseline_schema, no_baseline_schema, request)? {
+        ComposeBaseline::None => schemas,
+        ComposeBaseline::Custom(schema) => schemas.with_baseline(schema)?,
+        ComposeBaseline::Darkmatter => schemas.with_darkmatter_baseline_json_schema()?,
+    })
 }
 
 /// Environment variable whose truthy value switches the embedded baseline
 /// schema off; see [`disables_baseline_schema`] for the accepted values.
 pub(crate) const NO_BASELINE_SCHEMA_ENV: &str = "DARKMATTER_NO_BASELINE_SCHEMA";
 
-/// Reads [`NO_BASELINE_SCHEMA_ENV`] from the live process environment.
-///
-/// Shared with `md clean`, whose schema resolution is at full compose parity.
-/// `md schema validate` reads the variable from its captured request instead
-/// and applies [`disables_baseline_schema`] to that value.
+/// Reads [`NO_BASELINE_SCHEMA_ENV`] from the live process environment, for
+/// `md clean`. Every other route reads the variable from its captured request and
+/// applies [`disables_baseline_schema`] to that value.
 pub(crate) fn env_disables_baseline_schema() -> bool {
     disables_baseline_schema(std::env::var(NO_BASELINE_SCHEMA_ENV).ok().as_deref())
 }

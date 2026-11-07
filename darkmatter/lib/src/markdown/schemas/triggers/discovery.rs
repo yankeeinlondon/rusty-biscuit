@@ -476,10 +476,11 @@ pub fn enumerate_root_files(root: &Path) -> Result<Vec<PathBuf>, SchemaError> {
 
 /// Where [`scan_with_source`] reads schema-root folders and files from.
 ///
-/// [`scan`] reads the filesystem directly. A host that keeps schema-root
-/// contents in memory (DMLS) supplies them here, so its registry is the one
-/// discovery computes from those contents. Either method may read the
-/// filesystem; the trait only decides where the bytes come from.
+/// [`scan`] reads the filesystem, through any open source buffers. A host
+/// that keeps schema-root contents in memory (DMLS) supplies them here, so
+/// its registry is the one discovery computes from those contents. Either
+/// method may read the filesystem; the trait only decides where the bytes
+/// come from.
 pub trait SchemaRootSource {
     /// The files [`enumerate_root_files`] returns for `root`.
     ///
@@ -508,6 +509,12 @@ pub trait SchemaRootSource {
 }
 
 /// The filesystem [`SchemaRootSource`] that [`scan`] uses.
+///
+/// File text is read as the resolver reads a schema source
+/// ([`buffers::read_to_string`](simplified_schema::resolve::buffers::read_to_string)):
+/// inside a [`with_reads_retained`](simplified_schema::resolve::buffers::with_reads_retained)
+/// scope, a root file discovery reads is not read again when the same
+/// operation later resolves it as a `$schema` target, import, or example.
 pub(crate) struct FilesystemRoots;
 
 impl SchemaRootSource for FilesystemRoots {
@@ -516,7 +523,7 @@ impl SchemaRootSource for FilesystemRoots {
     }
 
     fn root_file_text(&mut self, path: &Path) -> Result<std::sync::Arc<str>, SchemaError> {
-        std::fs::read_to_string(path).map(Into::into).map_err(|source| SchemaError::Io {
+        simplified_schema::resolve::buffers::read_to_string(path).map(Into::into).map_err(|source| SchemaError::Io {
             path: path.to_path_buf(),
             source,
         })

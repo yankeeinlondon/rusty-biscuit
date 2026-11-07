@@ -598,9 +598,12 @@ mod file_payload_memo {
             std::fs::metadata(path)
         }
 
+        /// A dependency's bytes as resolution reads them: an open or
+        /// retained buffer's text, so the fingerprint hashes what the payload
+        /// was resolved from and a retaining scope opens no file twice.
         pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
             injected(path)?;
-            std::fs::read(path)
+            simplified_schema::resolve::buffers::read_to_string(path).map(String::into_bytes)
         }
     }
 
@@ -925,9 +928,11 @@ pub(crate) fn refused_trigger_file(error: &SchemaError) -> Option<PathBuf> {
 /// envelope, valid or not: a claimed envelope that discovery skips as invalid
 /// is still a trigger file, never a schema. An unreadable file returns
 /// `false` — it is not the cycle detector's concern (the resolver surfaces
-/// it separately) — as does unclaimed YAML, malformed or not.
+/// it separately) — as does unclaimed YAML, malformed or not. The text is
+/// read as the resolver read it, so a retaining scope serves the bytes the
+/// `$schema` just resolved from instead of opening the file again.
 fn file_claims_trigger_envelope(path: &Path) -> bool {
-    let Ok(content) = std::fs::read_to_string(path) else {
+    let Ok(content) = simplified_schema::resolve::buffers::read_to_string(path) else {
         return false;
     };
     !matches!(parse_trigger_envelope_from_str(&content), Ok(None))

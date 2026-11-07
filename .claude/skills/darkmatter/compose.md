@@ -55,7 +55,13 @@ schema, then each value is read once through its declared type. A setter is not 
 `set_overrides`, so any new reader of caller overrides must also consult
 `options.setters`. Caller records cover only what a setter supplied:
 `setter_bindings.whole_keys` joins `caller_input_records`, and a nested setter is a
-`NestedSetterRecord`, so an authored sibling keeps its own origin. Failures are
+`NestedSetterRecord`, so an authored sibling keeps its own origin. The schema stage
+walks both into `SuppliedLeaf`s (`schema_validation::CallerInput`, every string below
+a top-level property), which arm selection, classification, and projection share;
+`PreparedSchemas::adopt_supplied_values` carries their origins to later validation,
+and `reported_from_caller_origin` rewrites a no-match verdict on a value no union arm
+projected, which the validator looked for in the document's folder.
+Failures are
 `MarkdownError::Setter` (`dm.setter.invalid`, `source: null`); a schema problem on a
 setter's value keeps `dm.schema.*`, names the setter, and has no position.
 

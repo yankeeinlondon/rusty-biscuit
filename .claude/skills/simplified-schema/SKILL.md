@@ -81,6 +81,7 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Build from a file (`file` feature) | `try_from_yaml`, `try_from_markdown`, `try_from_json_schema`, `resolve` (by extension), each taking `impl Into<SchemaSource>` |
 | Use a captured context / editor buffer | `SchemaSource::from(path).bound(ctx).with_text(buffer)` |
 | Resolve over every unsaved buffer (targets, imports, examples, unsaved-only files) | `resolve::buffers::with(&SourceBuffers, \|\| …)` (thread-scoped; reads and selection only) |
+| Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |
 | Validate | `validate_strict` / `validate_soft` → `Result<ValidationSuccess, ValidationFailure>` |
@@ -160,6 +161,8 @@ segments, because `0` is an index or a key depending on the value it meets, so
 `IndexMap`, not on source text.
 
 `SetterValue::parse` sees only text; `bind` takes the `Shape` the host looked up.
+`Shape::Any` is a declared shape, so text stays text under it; only `None` guesses. A
+quoted string binds through the declared shape like text, and stays a string under `None`.
 Syntax rejection is text, but a parsed container that fails admission is an error,
 never text: `biscuit_file::json5_scan` finds duplicates and number spellings that
 `serde_json::Value` has already lost, `numeric::admit_json5_text_numbers` judges

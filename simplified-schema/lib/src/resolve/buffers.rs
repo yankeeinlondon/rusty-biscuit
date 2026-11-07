@@ -11,6 +11,10 @@
 //!
 //! The snapshot is plain data (`Send + Sync`): the host captures it once per
 //! preparation and may carry it to whichever thread prepares.
+//!
+//! [`with_reads_retained`] uses the same snapshot for a second purpose: for
+//! the length of one host operation, every file read from the disk is kept as
+//! if it were open, so separate resolutions in that operation share one read.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -80,6 +84,46 @@ impl SourceBuffers {
 
 thread_local! {
     static ACTIVE: RefCell<SourceBuffers> = RefCell::new(SourceBuffers::default());
+    /// How many [`with_reads_retained`] scopes are running on this thread.
+    static RETAINING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Runs `resolve` with the snapshot in force, also keeping each schema
+/// source it reads from the disk as an open buffer for the rest of `resolve`:
+/// one host operation that runs several separate resolutions (a catalog's
+/// globals, say) reads each file once. The kept texts are dropped when
+/// `resolve` returns; nothing persists past the call. Inside a running scope
+/// this joins it, so what an inner operation reads stays kept for the outer
+/// one.
+pub fn with_reads_retained<T>(resolve: impl FnOnce() -> T) -> T {
+    if RETAINING.get() > 0 {
+        return resolve();
+    }
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            RETAINING.set(RETAINING.get() - 1);
+        }
+    }
+    let current = ACTIVE.with_borrow(Clone::clone);
+    with(&current, || {
+        RETAINING.set(RETAINING.get() + 1);
+        let _leave = Leave;
+        resolve()
+    })
+}
+
+/// `path`'s text, read as the resolver reads a schema source: the open
+/// buffer in force, else the file's, kept for the rest of a
+/// [`with_reads_retained`] scope. For a host reading a schema file it then
+/// resolves (a baseline, a catalog) before handing the text on.
+///
+/// ## Errors
+///
+/// The read's I/O error; [`std::io::ErrorKind::InvalidData`] when the file
+/// is not UTF-8.
+pub fn read_to_string(path: &Path) -> std::io::Result<String> {
+    String::from_utf8(read(path)?).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }
 
 /// Runs `resolve` with `buffers` in force on this thread, restoring the
@@ -117,10 +161,18 @@ pub(super) fn first_open(probed: &[PathBuf]) -> Option<PathBuf> {
 
 /// `path`'s bytes: the open buffer's text in force, else the file's.
 pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
-    match text(path) {
-        Some(text) => Ok(text.as_bytes().to_vec()),
-        None => std::fs::read(path),
+    if let Some(text) = text(path) {
+        return Ok(text.as_bytes().to_vec());
     }
+    let bytes = std::fs::read(path)?;
+    super::observed::opened(path);
+    // Non-UTF-8 bytes fail the read's caller, so there is nothing to keep.
+    if RETAINING.get() > 0
+        && let Ok(text) = std::str::from_utf8(&bytes)
+    {
+        ACTIVE.with_borrow_mut(|active| active.insert(path, Arc::from(text)));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -144,6 +196,24 @@ mod tests {
         assert_eq!(found, Some(dir.path().join("new.yaml")));
         assert_eq!(read(&file).unwrap(), b"disk");
         assert_eq!(first_open(&[dir.path().join("new.yaml")]), None);
+    }
+
+    /// A retaining scope serves a file's first read for the rest of the scope,
+    /// joins an enclosing scope, and keeps nothing once it ends.
+    #[test]
+    fn a_retaining_scope_reads_each_file_once_and_forgets_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("types.yaml");
+        std::fs::write(&file, "first").unwrap();
+
+        let (outer, inner) = with_reads_retained(|| {
+            let outer = read(&file).unwrap();
+            std::fs::write(&file, "second").unwrap();
+            (outer, with_reads_retained(|| read_to_string(&file).unwrap()))
+        });
+        assert_eq!((outer.as_slice(), inner.as_str()), (b"first".as_slice(), "first"));
+        assert_eq!(read(&file).unwrap(), b"second", "nothing is kept past the scope");
+        assert!(text(&file).is_none());
     }
 
     /// The resolver's reads, through the public entry point: an unsaved

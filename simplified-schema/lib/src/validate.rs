@@ -157,8 +157,23 @@ pub enum ValueOrigin<'a> {
 /// arm the eager-file rewrite judges alone) instead takes
 /// [`Self::whole_instance`]: the arm's location no longer names that
 /// property, so every value it judges takes the property's origin.
+///
+/// A value a caller supplied below a document-authored property shares its
+/// keyword with the authored values beside it, and a keyword sees no instance
+/// path, so such a value is named by its projected text
+/// ([`Self::with_supplied_values`]). Projected text is absolute, so a relative
+/// sibling never takes the caller's origin; an authored value spelling the same
+/// absolute path as a supplied one does here, so a host judging both also judges
+/// that authored copy without the supplied values
+/// ([`Self::without_supplied_values`]).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct CallerOrigins(Origins);
+pub struct CallerOrigins {
+    origins: Origins,
+    supplied: SuppliedValues,
+}
+
+/// Projected caller values and the contexts that authored them.
+pub(crate) type SuppliedValues = Arc<std::collections::BTreeMap<String, biscuit_file::FileResolutionContext>>;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Origins {
@@ -177,7 +192,7 @@ impl CallerOrigins {
     pub fn new(
         origins: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
     ) -> Self {
-        Self(Origins::ByProperty(Arc::new(origins.into_iter().collect())))
+        Self { origins: Origins::ByProperty(Arc::new(origins.into_iter().collect())), supplied: SuppliedValues::default() }
     }
 
     /// Origins for a validator whose whole instance is the value of one
@@ -186,8 +201,42 @@ impl CallerOrigins {
     pub fn whole_instance(origin: ValueOrigin<'_>) -> Self {
         match origin {
             ValueOrigin::Document => Self::default(),
-            ValueOrigin::Caller(context) => Self(Origins::WholeInstance(Arc::new(context.clone()))),
+            ValueOrigin::Caller(context) => {
+                Self { origins: Origins::WholeInstance(Arc::new(context.clone())), supplied: SuppliedValues::default() }
+            }
         }
+    }
+
+    /// These origins for a validator whose whole instance is the value of
+    /// `property`: [`Self::whole_instance`], keeping the supplied values.
+    #[must_use]
+    pub fn scoped_to(&self, property: &str) -> Self {
+        Self { supplied: Arc::clone(&self.supplied), ..Self::whole_instance(self.origin_of(property)) }
+    }
+
+    /// Adds caller values by their projected, absolute text: a `match()` judging
+    /// exactly that text judges it in the paired context, wherever it sits.
+    #[must_use]
+    pub fn with_supplied_values(
+        mut self,
+        values: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
+    ) -> Self {
+        let added = values.into_iter().collect::<Vec<_>>();
+        if !added.is_empty() {
+            Arc::make_mut(&mut self.supplied).extend(added);
+        }
+        self
+    }
+
+    /// These origins with no value recognized by its text.
+    #[must_use]
+    pub fn without_supplied_values(mut self) -> Self {
+        self.supplied = SuppliedValues::default();
+        self
+    }
+
+    pub(crate) fn supplied_values(&self) -> &SuppliedValues {
+        &self.supplied
     }
 
     /// Where `property`'s value came from.
@@ -198,7 +247,7 @@ impl CallerOrigins {
     /// Where the value a keyword judges came from; `property` is the
     /// top-level property its location names, if any.
     pub(crate) fn origin_at(&self, property: Option<&str>) -> ValueOrigin<'_> {
-        let context = match &self.0 {
+        let context = match &self.origins {
             Origins::ByProperty(by_property) => property.and_then(|property| by_property.get(property)),
             Origins::WholeInstance(context) => Some(context.as_ref()),
         };
@@ -206,13 +255,17 @@ impl CallerOrigins {
     }
 
     fn is_empty(&self) -> bool {
-        matches!(&self.0, Origins::ByProperty(by_property) if by_property.is_empty())
+        self.supplied.is_empty() && matches!(&self.origins, Origins::ByProperty(by_property) if by_property.is_empty())
     }
 
     /// Cache-key bytes: each property and the directories that root its
     /// patterns. The full contexts are compared on lookup.
     fn key_bytes(&self, bytes: &mut Vec<u8>) {
-        match &self.0 {
+        for value in self.supplied.keys() {
+            bytes.push(0xfb);
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        match &self.origins {
             Origins::ByProperty(by_property) => {
                 for (property, origin) in by_property.iter() {
                     bytes.push(0xfd);

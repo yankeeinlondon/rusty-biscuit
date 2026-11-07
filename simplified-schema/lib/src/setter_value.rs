@@ -106,14 +106,16 @@ impl SetterValue {
 
     /// The final value, read through the type declared for its place.
     ///
-    /// Under a declared type, text goes through the conversion engine as text:
-    /// `1.10` under `string` stays `"1.10"`, and `5` under `number` is `5`. A
-    /// parsed container binds recursively. A value that does not fit is returned
-    /// unconverted, so schema validation is what reports it. With no declaration,
-    /// or one that declares no structure (`unknown`), text is guessed from its
-    /// JSON5 reading: `5` is the number `5`. A number admission would reject stays
-    /// text there. Under `boolish`, which keeps a boolean as sent, an unquoted
-    /// `true` or `false` is sent as that boolean, while `On` stays text.
+    /// Under a declared type, text and a decoded quoted string both go through
+    /// the conversion engine as text: `1.10` under `string` stays `"1.10"`, and
+    /// `5` or `"5"` under `number` is `5`. `unknown` is a declared type that
+    /// converts nothing, so `1.10` under it stays `"1.10"`. A parsed container
+    /// binds recursively. A value that does not fit is returned unconverted, so
+    /// schema validation is what reports it. With no declaration, text is guessed
+    /// from its JSON5 reading: `5` is the number `5`, a number admission would
+    /// reject stays text, and a quoted string stays that string. Under `boolish`,
+    /// which keeps a boolean as sent, an unquoted `true` or `false` is sent as
+    /// that boolean, while `On` and a quoted `"true"` stay text.
     ///
     /// ## Examples
     ///
@@ -125,17 +127,21 @@ impl SetterValue {
     /// let value = SetterValue::parse("1.10").unwrap();
     /// assert_eq!(value.bind(Some(&Shape::text())), json!("1.10"));
     /// assert_eq!(value.bind(Some(&Shape::number())), json!(1.1));
+    /// assert_eq!(value.bind(Some(&Shape::Any)), json!("1.10"));
     /// assert_eq!(value.bind(None), json!(1.1));
+    ///
+    /// let quoted = SetterValue::parse("\"5\"").unwrap();
+    /// assert_eq!(quoted.bind(Some(&Shape::number())), json!(5));
+    /// assert_eq!(quoted.bind(None), json!("5"));
     /// ```
     pub fn bind(&self, declared: Option<&Shape>) -> Value {
-        let declared = declared.filter(|shape| !declares_nothing(shape));
         match (self, declared) {
             (Self::Text { raw }, None) => guess_scalar(raw),
             (Self::Text { raw }, Some(shape)) if keeps_booleans_as_sent(shape) && matches!(raw.as_str(), "true" | "false") => {
                 Value::Bool(raw == "true")
             }
-            (Self::Text { raw }, Some(shape)) => bound_or_original(shape, Value::String(raw.clone())),
-            (Self::Quoted(text), _) => Value::String(text.clone()),
+            (Self::Text { raw: text } | Self::Quoted(text), Some(shape)) => bound_or_original(shape, Value::String(text.clone())),
+            (Self::Quoted(text), None) => Value::String(text.clone()),
             (Self::Null, _) => Value::Null,
             (Self::Container(value), None) => value.clone(),
             (Self::Container(value), Some(shape)) => bound_or_original(shape, value.clone()),
@@ -162,14 +168,6 @@ fn admit_json5_container(raw: &str) -> Result<(), SetterValueError> {
     admit_json5_text_numbers(raw).map_err(|error| SetterValueError::Number {
         message: error.to_string(),
     })
-}
-
-fn declares_nothing(shape: &Shape) -> bool {
-    match shape {
-        Shape::Any => true,
-        Shape::Deferrable(inner) => declares_nothing(inner),
-        _ => false,
-    }
 }
 
 fn keeps_booleans_as_sent(shape: &Shape) -> bool {

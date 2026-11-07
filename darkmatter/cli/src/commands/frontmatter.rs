@@ -197,12 +197,16 @@ fn set_schema_key(mut md: Markdown, path: &PropertyPath, parsed: &SetterValue) -
 }
 
 /// Applies `parsed` at `path` and judges the result, returning the edited document
-/// and the value as bound through its declared type.
+/// and the value it holds.
 ///
 /// The edit is made first with the undeclared reading, because the value can
 /// change which schema applies; the schema of that state declares the type the
-/// value is then read through, once. Nothing is written here, so a failure of
-/// any kind leaves the source alone.
+/// value is then read through, once. The document keeps the value as validation
+/// reads it ([`value_as_judged`]), because that is the value that is judged. It
+/// differs from the bound one where the declaration
+/// could not name the type: a raw JSON Schema `$ref` projects to `unknown`, so the
+/// value arrives as text and only the validator knows it is a number. Nothing is
+/// written here, so a failure of any kind leaves the source alone.
 fn set_checked(
     md: Markdown,
     path: &PropertyPath,
@@ -222,17 +226,22 @@ fn set_checked(
 
     let declared = overlay_schema.as_ref().and_then(|effective| {
         let steps = path.resolve_map(overlay.frontmatter().as_map());
-        declared_shape(effective, &frontmatter_as_json(&overlay), steps.steps())
+        declared_shape(effective, &frontmatter_as_json(&overlay), steps.steps(), Some(parsed))
     });
-    let bound = parsed.bind(declared.as_ref());
-    let (edited, after) = if bound == guess {
+    let mut value = parsed.bind(declared.as_ref());
+    let (mut edited, mut after) = if value == guess {
         (overlay, overlay_schema)
     } else {
         let mut edited = md.clone();
-        set_at(edited.frontmatter_mut().as_map_mut(), path, bound.clone())?;
+        set_at(edited.frontmatter_mut().as_map_mut(), path, value.clone())?;
         let after = effective_for(&edited)?;
         (edited, after)
     };
+    if let Some(judged) = after.as_ref().and_then(|schema| value_as_judged(schema, &edited, path)).filter(|judged| *judged != value) {
+        set_at(edited.frontmatter_mut().as_map_mut(), path, judged.clone())?;
+        after = effective_for(&edited)?;
+        value = judged;
+    }
 
     let problems = blocking_problems(
         &problems_of(before.as_ref(), &md),
@@ -240,7 +249,7 @@ fn set_checked(
         path.segments(),
     );
     if problems.is_empty() {
-        return Ok((edited, bound));
+        return Ok((edited, value));
     }
     Err(MarkdownError::SchemaValidationFailed {
         path: document_label(&md),
@@ -250,6 +259,13 @@ fn set_checked(
         source: None,
     }
     .into())
+}
+
+/// The value at `path` in the copy of `document` that `schema` judges.
+fn value_as_judged(schema: &EffectiveSchema, document: &Markdown, path: &PropertyPath) -> Option<Value> {
+    let instance = frontmatter_as_json(document);
+    let copy = schema.data_copy(&instance);
+    path.resolve(&copy).value().cloned()
 }
 
 /// The schema entry point for one document, set up as `md schema validate` sets

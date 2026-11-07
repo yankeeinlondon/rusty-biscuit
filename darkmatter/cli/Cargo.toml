@@ -30,6 +30,11 @@ required-features = ["test-fixtures"]
 [features]
 terminal-tests = ["dep:biscuit-test-harness"]
 test-fixtures = ["dep:test-toolkit"]
+# Opt-in L1 tests that load `md`'s fish and Elvish scripts in the real shells.
+# No CI runner provides either shell, so neither CI `features` nor
+# `local-features` lists this; `just test-optional-shells` selects it on a
+# host that has both, and a selected test fails when its shell cannot start.
+optional-shell-tests = []
 
 [dependencies]
 darkmatter = { path = "../lib" }
@@ -80,6 +85,11 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # one Tab press prepares. Dev-dependency features, so no non-test build of `md`
 # compiles them.
 darkmatter = { path = "../lib", features = ["cleanup-test-hooks", "work-counters"] }
+
+# A windowless console (ConPTY) for PowerShell's real Tab test; already built for
+# worktree-cli, claudine-cli, and biscuit-terminal.
+[target.'cfg(windows)'.dev-dependencies]
+xpty = "0.3.6"
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a

@@ -291,6 +291,53 @@ struct BaselineSchema {
     /// common baseline-only / baseline+document paths (F29).
     json_schema: Arc<Value>,
     advisories: Vec<SchemaAdvisory>,
+    declarations: BaselineDeclarations,
+}
+
+/// What a baseline declares, for reading it the way the document and trigger
+/// layers are read rather than through its compiled JSON Schema alone.
+#[derive(Clone)]
+enum BaselineDeclarations {
+    /// Darkmatter's own baseline, whose shape is compiled in and definition-free.
+    Darkmatter,
+    /// A caller's baseline. A raw JSON Schema one holds its conservative
+    /// projection ([`RawDeclarations`](crate::markdown::compose::expression::RawDeclarations)).
+    Custom {
+        shape: Arc<SchemaShape>,
+        definitions: Arc<DefinitionTable>,
+    },
+}
+
+impl BaselineDeclarations {
+    fn custom(simplified: Option<&SchemaRoot>, definitions: Arc<DefinitionTable>, json_schema: &Value) -> Self {
+        let shape = match simplified {
+            Some(SchemaRoot::Single(shape)) => shape.clone(),
+            _ => declarations_of_json_schema(json_schema),
+        };
+        Self::Custom { shape: Arc::new(shape), definitions }
+    }
+
+    fn shape(&self) -> SchemaShape {
+        match self {
+            Self::Darkmatter => match darkmatter_base_schema_ref() {
+                SchemaRoot::Single(shape) => shape.clone(),
+                SchemaRoot::Union(_) => SchemaShape::default(),
+            },
+            Self::Custom { shape, .. } => shape.as_ref().clone(),
+        }
+    }
+
+    fn definitions(&self) -> Option<&Arc<DefinitionTable>> {
+        match self {
+            Self::Darkmatter => None,
+            Self::Custom { definitions, .. } => Some(definitions),
+        }
+    }
+}
+
+/// The declarations a layer with no SimplifiedSchema projection can prove.
+fn declarations_of_json_schema(json_schema: &Value) -> SchemaShape {
+    crate::markdown::compose::expression::RawDeclarations::from_json_schema(json_schema).to_schema_shape()
 }
 
 /// A resolved trigger payload layer, ready to merge into the effective schema.
@@ -348,6 +395,10 @@ impl DarkmatterSchemas {
         self
     }
 
+    pub(crate) fn caller_origins(&self) -> &validate::CallerOrigins {
+        self.cache.caller_origins()
+    }
+
     /// Marks the top-level properties in `records` as caller-supplied: a
     /// bare or `./` `match()` pattern on one of them is judged from the
     /// record's origin (typically the launch directory) rather than from the
@@ -373,6 +424,18 @@ impl DarkmatterSchemas {
         self
     }
 
+    /// Whether this instance's baseline is Darkmatter's own compiled one.
+    #[must_use]
+    pub fn uses_darkmatter_baseline(&self) -> bool {
+        matches!(self.baseline, Some(BaselineSchema { declarations: BaselineDeclarations::Darkmatter, .. }))
+    }
+
+    /// The context this instance resolves through.
+    #[must_use]
+    pub fn file_resolution_context(&self) -> &biscuit_file::FileResolutionContext {
+        &self.file_resolution_context
+    }
+
     /// Attaches a parsed SimplifiedSchema as the baseline.
     ///
     /// ## Errors
@@ -396,7 +459,8 @@ impl DarkmatterSchemas {
             message: "baseline could not be converted to JSON Schema".into(),
             source: Some(Box::new(err)),
         })?;
-        self.set_baseline_json(json, Vec::new())?;
+        let declarations = BaselineDeclarations::custom(Some(schema), Arc::new(definitions.clone()), &json);
+        self.set_baseline_json(json, Vec::new(), declarations)?;
         Ok(self)
     }
 
@@ -413,18 +477,32 @@ impl DarkmatterSchemas {
     /// depending on the failure shape; a catalog
     /// that does not load is a [`SchemaError::Baseline`] whose message is the
     /// field-located [`catalog::CatalogError`].
-    pub fn with_baseline_from_file(mut self, path: impl AsRef<Path>) -> Result<Self, SchemaError> {
-        let path = path.as_ref();
+    ///
+    /// ## Notes
+    ///
+    /// One call reads each schema file once: the bytes read to recognize a
+    /// catalog are the ones resolved, and a file several catalog globals
+    /// import is read for the first of them only.
+    pub fn with_baseline_from_file(self, path: impl AsRef<Path>) -> Result<Self, SchemaError> {
+        simplified_schema::resolve::buffers::with_reads_retained(|| self.load_baseline_file(path.as_ref()))
+    }
+
+    fn load_baseline_file(mut self, path: &Path) -> Result<Self, SchemaError> {
         let base = path.parent().unwrap_or_else(|| Path::new("."));
-        if std::fs::read_to_string(path).is_ok_and(|text| catalog::is_global_catalog(&text)) {
-            let loaded = catalog::GlobalCatalog::from_file(
+        // Read through the retaining scope, so resolving the file below reuses these bytes.
+        let text = simplified_schema::resolve::buffers::read_to_string(path).ok();
+        if let Some(text) = text.as_deref().filter(|text| catalog::is_global_catalog(text)) {
+            let loaded = catalog::GlobalCatalog::from_text(
                 path,
+                text,
                 catalog::DARKMATTER_GLOBALS,
                 &self.file_resolution_context,
             )
             .map_err(|error| SchemaError::Baseline { message: error.to_string(), source: None })?;
             let (schema, definitions) = loaded.baseline().expect("Darkmatter's requirements include `fm`");
-            self.set_baseline_json(to_json_schema_with_definitions(&schema, &definitions)?, Vec::new())?;
+            let json = to_json_schema_with_definitions(&schema, &definitions)?;
+            let declarations = BaselineDeclarations::custom(Some(&schema), definitions, &json);
+            self.set_baseline_json(json, Vec::new(), declarations)?;
             return Ok(self);
         }
         // Drive resolution through the file-reference path so YAML/JSON
@@ -441,7 +519,9 @@ impl DarkmatterSchemas {
                     source: Some(Box::new(other)),
                 },
             })?;
-        self.set_baseline_json(resolved.json_schema, resolved.advisories)?;
+        let declarations =
+            BaselineDeclarations::custom(resolved.simplified.as_ref(), resolved.definitions, &resolved.json_schema);
+        self.set_baseline_json(resolved.json_schema, resolved.advisories, declarations)?;
         Ok(self)
     }
 
@@ -452,7 +532,8 @@ impl DarkmatterSchemas {
     /// Returns [`SchemaError::Baseline`] when the value is not a simple
     /// object schema.
     pub fn with_baseline_json_schema(mut self, value: Value) -> Result<Self, SchemaError> {
-        self.set_baseline_json(value, Vec::new())?;
+        let declarations = BaselineDeclarations::custom(None, Arc::default(), &value);
+        self.set_baseline_json(value, Vec::new(), declarations)?;
         Ok(self)
     }
 
@@ -468,6 +549,7 @@ impl DarkmatterSchemas {
         self.baseline = Some(BaselineSchema {
             json_schema,
             advisories: Vec::new(),
+            declarations: BaselineDeclarations::Darkmatter,
         });
         Ok(self)
     }
@@ -476,11 +558,13 @@ impl DarkmatterSchemas {
         &mut self,
         value: Value,
         advisories: Vec<SchemaAdvisory>,
+        declarations: BaselineDeclarations,
     ) -> Result<(), SchemaError> {
         simplified_schema::resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
             advisories,
+            declarations,
         });
         Ok(())
     }
@@ -627,18 +711,21 @@ impl DarkmatterSchemas {
                 // file — triggers activate by placement and match, never by
                 // reference. The loader refuses a trigger file as a schema
                 // document, so its refusal is reported as that reference.
-                let r = resolve::resolve_schema_with_roots(
-                    value,
-                    &base_dir,
-                    trigger_roots,
-                    &self.file_resolution_context,
-                )
-                .map_err(|error| match triggers::assemble::refused_trigger_file(&error) {
-                    Some(path) => triggers::assemble::trigger_schema_referenced(&path),
-                    None => error,
-                })?;
-                triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
-                Some(r)
+                // That check reads the bytes the resolution just read.
+                Some(simplified_schema::resolve::buffers::with_reads_retained(|| {
+                    let r = resolve::resolve_schema_with_roots(
+                        value,
+                        &base_dir,
+                        trigger_roots,
+                        &self.file_resolution_context,
+                    )
+                    .map_err(|error| match triggers::assemble::refused_trigger_file(&error) {
+                        Some(path) => triggers::assemble::trigger_schema_referenced(&path),
+                        None => error,
+                    })?;
+                    triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
+                    Ok::<_, SchemaError>(r)
+                })?)
             }
             None => None,
         };
@@ -689,8 +776,23 @@ impl DarkmatterSchemas {
             resolved.as_ref(),
         );
         let definitions = resolved.as_ref().map(|r| Arc::clone(&r.definitions)).unwrap_or_default();
+        let raw_document = resolved
+            .as_ref()
+            .filter(|document| document.simplified.is_none())
+            .map(|document| SchemaRoot::Single(declarations_of_json_schema(&document.json_schema)));
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
+            raw_document,
+            baseline_declarations: self.baseline.as_ref().map(|baseline| baseline.declarations.clone()),
+            declared_trigger_shapes: trigger_layers
+                .iter()
+                .map(|layer| {
+                    layer
+                        .shape
+                        .clone()
+                        .unwrap_or_else(|| Arc::new(declarations_of_json_schema(&layer.json_schema)))
+                })
+                .collect(),
             definitions,
             trigger_shapes: trigger_layers.iter().filter_map(|layer| layer.shape.clone()).collect(),
             trigger_definitions: trigger_layers
@@ -954,6 +1056,15 @@ pub struct EffectiveSchema {
     /// editor's full property shape, with matching trigger payloads layered
     /// in, is [`Self::property_shape`].
     pub simplified: Option<SchemaRoot>,
+    /// The projection of an authored document schema [`Self::simplified`] cannot
+    /// represent; only [`Self::declared_property_shape`] reads it.
+    raw_document: Option<SchemaRoot>,
+    /// The baseline this schema was actually assembled with; `None` when it has
+    /// none.
+    baseline_declarations: Option<BaselineDeclarations>,
+    /// Every matching trigger payload in layering order, a raw JSON Schema one
+    /// as its projection. [`Self::trigger_shapes`] leaves those out.
+    declared_trigger_shapes: Vec<Arc<SchemaShape>>,
     /// The cyclic named types [`Self::simplified`] reaches through
     /// [`TypeExpr::Ref`]; empty when nothing recurses.
     definitions: Arc<DefinitionTable>,
@@ -1064,8 +1175,8 @@ impl EffectiveSchema {
         &self.definitions
     }
 
-    /// The definition a [`TypeExpr::Ref`] in [`Self::simplified`] or in one
-    /// of [`Self::trigger_shapes`] names. A [`DefKey`] identifies one
+    /// The definition a [`TypeExpr::Ref`] in [`Self::simplified`], one of
+    /// [`Self::trigger_shapes`], or a custom baseline names. A [`DefKey`] identifies one
     /// definition wherever it is reached, so one lookup serves every layer.
     ///
     /// Look a reference up here, not by its `$defs` key: each table's keys
@@ -1074,25 +1185,31 @@ impl EffectiveSchema {
     pub fn definition(&self, key: &DefKey) -> Option<&Definition> {
         std::iter::once(&self.definitions)
             .chain(&self.trigger_definitions)
+            .chain(self.baseline_definitions())
             .find_map(|table| table.get(key))
     }
 
     /// One table holding every definition [`Self::definition`] finds: the
-    /// document's, then each trigger layer's it lacks. A reference from any
+    /// document's, then each trigger layer's and a custom baseline's it lacks. A reference from any
     /// layer resolves in it to the body [`Self::definition`] returns, so the
     /// expression type layer looks references up here. Merged on first use;
-    /// the document's own table when no trigger adds one.
+    /// the document's own table when no other layer adds one.
     pub fn layered_definitions(&self) -> &Arc<DefinitionTable> {
         self.layered_definitions.get_or_init(|| {
-            if self.trigger_definitions.is_empty() {
+            let baseline = self.baseline_definitions().filter(|table| !table.is_empty());
+            if self.trigger_definitions.is_empty() && baseline.is_none() {
                 return Arc::clone(&self.definitions);
             }
             let mut merged = self.definitions.as_ref().clone();
-            for table in &self.trigger_definitions {
+            for table in self.trigger_definitions.iter().chain(baseline) {
                 merged.absorb(table);
             }
             Arc::new(merged)
         })
+    }
+
+    fn baseline_definitions(&self) -> Option<&Arc<DefinitionTable>> {
+        self.baseline_declarations.as_ref().and_then(BaselineDeclarations::definitions)
     }
 
     /// The conservative projection of [`Self::json_schema`], the merged
@@ -1144,11 +1261,33 @@ impl EffectiveSchema {
     /// when it merges the same layers into [`Self::json_schema`], so an
     /// authored redeclaration wins over a trigger's. Root unions and
     /// `frontmatter` behave as in [`effective_property_shape`].
+    ///
+    /// The base is always the compiled baseline, whatever this schema was
+    /// assembled with: this is the editor's projection. A request that selects its
+    /// baseline reads [`Self::declared_property_shape`].
     pub fn property_shape(&self, extension_shapes: &[SchemaShape], frontmatter: &Value) -> SchemaShape {
         frontmatter_shape::layered_property_shape(
             extension_shapes,
             &self.trigger_shapes,
             self.simplified.as_ref(),
+            frontmatter,
+        )
+    }
+
+    /// The top-level properties this schema itself declares, in the layers
+    /// [`Self::json_schema`] merges: the baseline it was assembled with (custom,
+    /// compiled, or none), the matching triggers, then the document.
+    ///
+    /// A layer with no SimplifiedSchema projection contributes what its JSON Schema
+    /// proves, so it still replaces a lower layer's declaration of a shared key.
+    /// Root unions and `frontmatter` behave as in [`effective_property_shape`].
+    pub fn declared_property_shape(&self, frontmatter: &Value) -> SchemaShape {
+        let base = self.baseline_declarations.as_ref().map_or_else(SchemaShape::default, BaselineDeclarations::shape);
+        simplified_schema::layered_property_shape(
+            base,
+            &[],
+            &self.declared_trigger_shapes,
+            self.simplified.as_ref().or(self.raw_document.as_ref()),
             frontmatter,
         )
     }
@@ -1228,9 +1367,14 @@ impl EffectiveSchema {
         let origins = build_origin_map_with_triggers(Some(&resolved), &[], false, &json_schema);
         let dependencies = build_dependencies(Some(&resolved), &[]);
         let advisories = resolved.advisories.clone();
+        let raw_document =
+            resolved.simplified.is_none().then(|| SchemaRoot::Single(declarations_of_json_schema(&resolved.json_schema)));
         Ok(Self {
             definitions: Arc::clone(&resolved.definitions),
             simplified: resolved.simplified,
+            raw_document,
+            baseline_declarations: None,
+            declared_trigger_shapes: Vec::new(),
             trigger_shapes: Vec::new(),
             trigger_definitions: Vec::new(),
             layers: SchemaLayers { document: true, ..SchemaLayers::default() },
@@ -1395,6 +1539,9 @@ impl EffectiveSchema {
             CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?;
         let projected = Self {
             simplified: projected,
+            raw_document: self.raw_document.clone(),
+            baseline_declarations: self.baseline_declarations.clone(),
+            declared_trigger_shapes: self.declared_trigger_shapes.clone(),
             definitions,
             trigger_shapes: self.trigger_shapes.clone(),
             trigger_definitions: self.trigger_definitions.clone(),

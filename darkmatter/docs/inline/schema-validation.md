@@ -117,7 +117,7 @@ A few behaviours worth knowing:
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
 - Conversion collects **every** independent per-property failure into one aggregate rather than stopping at the first, so a schema with two bad definitions reports two problems (and DMLS anchors one diagnostic per property). A structural failure that makes further traversal meaningless is still a single error.
-- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* in a single schema; in a root union an existing file outside an arm's declared globs rules that arm out (see [Root unions](#root-unions-and-file-match)).
+- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values, at any depth, use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* in a single schema; in a root union an existing file outside an arm's declared globs rules that arm out (see [Root unions](#root-unions-and-file-match)).
 
 ## Validation Phases
 
@@ -636,7 +636,8 @@ fail because no single unprobed identity exists. Path functions, comparisons,
 lifecycle state, and frontmatter expressions consume the native semantic
 identity. Markdown body text uses a separate portable presentation value;
 direct variables and static member/index selections share this presentation
-behavior without changing effective frontmatter. The raw record remains
+behavior without changing effective frontmatter, for a file at any depth below a
+top-level property too. The raw record remains
 unchanged so fresh preparation can apply another active document's schema
 without recapturing ambient state.
 
@@ -658,6 +659,9 @@ and its glob then selects the `fix` arm (below). When the arms disagree on
 the file mode (`spec: string` in one, `spec: file` in the other) or one omits
 the property, the caller value stays raw, and the eager-`file` rewrite leaves
 it raw too rather than re-anchor it as though the document had authored it.
+Refusing a caller's file value that no arm accepts names the launch directory
+it was judged from, at any depth, whether the file is missing there or found
+there but excluded by every arm.
 
 A raw JSON Schema root may declare `properties` beside its `anyOf`. They
 apply whichever arm is chosen, exactly as they do without the union:

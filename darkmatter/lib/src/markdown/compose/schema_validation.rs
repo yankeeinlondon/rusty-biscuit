@@ -152,10 +152,11 @@ impl PendingDeferral<'_> {
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &crate::markdown::compose::ComposeRequest) -> MarkdownResult<()> {
     let mut trigger_registry = None;
-    let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
+    let mut prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
     let data = DataPaths::default();
     let projection = prepare_caller_projection(markdown, options, &prepared, &data)?;
     projection.install(markdown);
+    prepared.adopt_supplied_values(&projection);
     let consumer = source_path(markdown, options);
     let mut report = ComposeReport::new();
     let provenance = FrontmatterProvenance::all_authored(markdown.frontmatter());
@@ -210,6 +211,18 @@ pub fn effective_schema_for(
 }
 
 impl PreparedSchemas {
+    /// Judges the file values `projection` installed below a top-level property
+    /// from the contexts that authored them, in every later validation.
+    pub(crate) fn adopt_supplied_values(&mut self, projection: &CallerProjection) {
+        if projection.supplied.is_empty() {
+            return;
+        }
+        if let Some(schemas) = self.schemas.take() {
+            let origins = schemas.caller_origins().clone().with_supplied_values(projection.supplied.iter().cloned());
+            self.schemas = Some(schemas.with_caller_origins(origins));
+        }
+    }
+
     /// The schema triggers discovery skipped as invalid, in discovery order;
     /// empty when discovery did not run.
     pub(crate) fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
@@ -237,9 +250,15 @@ pub(crate) struct CallerProjection {
     modes: HashMap<String, CallerFileMode>,
     classified: HashSet<String>,
     provenance: HashMap<String, super::expression::resolve_ctx::CallerFileProvenance>,
-    /// File values of nested setters, as native paths below a document-authored
-    /// parent.
+    /// File values supplied below a top-level property, as native paths. Each is
+    /// written over the value at its own path, so what is authored beside it stays.
     nested_native: Vec<(Vec<ValuePathSegment>, serde_json::Value)>,
+    /// Each projected path of `nested_native` and the context that authored it.
+    supplied: Vec<(String, biscuit_file::FileResolutionContext)>,
+    /// Why a caller's file value had no projection when no union arm applied. The
+    /// value was never projected, so the final verdict would judge it from the
+    /// document; a verdict accepting it there must not stand.
+    unprojected: Option<Box<ValidationProblem>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,26 +281,96 @@ impl CallerProjection {
             let [ValuePathSegment::Key(key), below @ ..] = path.as_slice() else {
                 continue;
             };
-            let mut current = markdown.frontmatter_mut().as_map_mut().get_mut(key);
-            for step in below {
-                current = current.and_then(|parent| match step {
-                    ValuePathSegment::Key(key) => parent.get_mut(key),
-                    ValuePathSegment::Index(index) => parent.get_mut(index),
-                });
-            }
-            if let Some(slot) = current {
+            let parent = markdown.frontmatter_mut().as_map_mut().get_mut(key);
+            if let Some(slot) = parent.and_then(|parent| slot_below(parent, below)) {
                 *slot = value.clone();
             }
         }
     }
 
-    pub(crate) fn presentation_values(&self) -> HashMap<String, serde_json::Value> {
-        self.presentation.clone()
+    /// Top-level values whose rendered text differs from `frontmatter`: a caller's
+    /// file in its portable spelling. A file below a top-level property brings the
+    /// whole property, since a read of it or of a sibling is answered from this value.
+    pub(crate) fn presentation_values(
+        &self,
+        frontmatter: &crate::markdown::types::FrontmatterMap,
+    ) -> HashMap<String, serde_json::Value> {
+        let mut values = self.presentation.clone();
+        for (path, native) in &self.nested_native {
+            let ([ValuePathSegment::Key(key), below @ ..], Some(text)) = (path.as_slice(), native.as_str()) else {
+                continue;
+            };
+            let portable = biscuit_file::to_portable_string(Path::new(text));
+            if portable == text {
+                continue;
+            }
+            if !values.contains_key(key)
+                && let Some(authored) = frontmatter.get(key)
+            {
+                values.insert(key.clone(), authored.clone());
+            }
+            if let Some(slot) = values.get_mut(key).and_then(|value| slot_below(value, below))
+                && slot.as_str() == Some(text)
+            {
+                *slot = serde_json::Value::String(portable);
+            }
+        }
+        values
+    }
+
+    /// The pointers of authored strings spelling a value supplied below a
+    /// top-level property.
+    fn authored_copies(
+        &self,
+        frontmatter: &crate::markdown::types::FrontmatterMap,
+        options: &crate::markdown::compose::ComposeRequest,
+    ) -> HashSet<String> {
+        let mut copies = HashSet::new();
+        if self.supplied.is_empty() {
+            return copies;
+        }
+        for (key, value) in frontmatter {
+            if !self.native.contains_key(key) && !options.exclude_keys.contains(key) {
+                self.collect_authored_copies(value, caller_occurrence(key), &mut copies);
+            }
+        }
+        copies
+    }
+
+    fn collect_authored_copies(&self, value: &serde_json::Value, pointer: String, copies: &mut HashSet<String>) {
+        match value {
+            serde_json::Value::String(text) => {
+                if self.supplied.iter().any(|(supplied, _)| supplied == text)
+                    && !self.nested_native.iter().any(|(path, _)| nested_occurrence(path) == pointer)
+                {
+                    copies.insert(pointer);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    self.collect_authored_copies(item, format!("{pointer}/{index}"), copies);
+                }
+            }
+            serde_json::Value::Object(members) => {
+                for (key, member) in members {
+                    self.collect_authored_copies(member, format!("{pointer}{}", caller_occurrence(key)), copies);
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn install_provenance(&self, options: &mut crate::markdown::compose::ComposeRequest) {
         options.caller_file_provenance = self.provenance.clone();
     }
+}
+
+/// The value `steps` below `value`, if the path exists.
+fn slot_below<'v>(value: &'v mut serde_json::Value, steps: &[ValuePathSegment]) -> Option<&'v mut serde_json::Value> {
+    steps.iter().try_fold(value, |parent, step| match step {
+        ValuePathSegment::Key(key) => parent.get_mut(key),
+        ValuePathSegment::Index(index) => parent.get_mut(index),
+    })
 }
 
 /// Trigger discovery runs only for a request inside a repository; the schema
@@ -476,19 +565,20 @@ pub(crate) fn run_with_registry(
     // A launch-preparing caller judges the instance at its runtime phase so a
     // required-but-not-eager property may still be absent; every other caller
     // keeps the unphased authoring verdict.
-    let report = match options.schema_phase {
-        Some(phase) => schemas.validate_for_phase(markdown, phase),
-        None => schemas.validate(markdown),
-    }
-    .map_err(|err| {
-        MarkdownError::SchemaValidationFailed {
+    let judge = |schemas: &DarkmatterSchemas| {
+        match options.schema_phase {
+            Some(phase) => schemas.validate_for_phase(markdown, phase),
+            None => schemas.validate(markdown),
+        }
+        .map_err(|err| MarkdownError::SchemaValidationFailed {
             path: path.clone(),
             problems: Vec::new(),
             summary: format!("schema could not be prepared: {err}"),
             description: description.clone(),
             source: Some(Box::new(err)),
-        }
-    })?;
+        })
+    };
+    let report = judge(schemas)?;
 
     for advisory in &report.advisories {
         compose_report.add_schema_advisory(advisory, consumer);
@@ -535,7 +625,7 @@ pub(crate) fn run_with_registry(
             !deferral.defers_problem(p, &report.deferred, fm_map, data)
         })
         .cloned()
-        .map(|problem| attributed_to_setter(problem, options))
+        .map(|problem| attributed_to_setter(reported_from_caller_origin(problem, options), options))
         .collect();
 
     if !report.valid && !composition_independent.is_empty() {
@@ -548,6 +638,36 @@ pub(crate) fn run_with_registry(
             // `problems`, so there is no upstream `SchemaError` cause.
             source: None,
         });
+    }
+    if let Some(problem) = projection.unprojected.as_deref() {
+        return Err(MarkdownError::SchemaValidationFailed {
+            path,
+            problems: vec![attributed_to_setter(problem.clone(), options)],
+            summary: "frontmatter did not satisfy the schema".to_string(),
+            description,
+            source: None,
+        });
+    }
+    // The verdict above recognized a supplied value by its text, so it also took
+    // the caller's origin for a copy the document authors. Such a copy is the
+    // document's, so a `match()` it fails from there still refuses it.
+    let authored_copies = projection.authored_copies(fm_map, options);
+    if !authored_copies.is_empty() {
+        let origins = schemas.caller_origins().clone().without_supplied_values();
+        let problems: Vec<_> = judge(&schemas.clone().with_caller_origins(origins))?
+            .problems
+            .into_iter()
+            .filter(|problem| authored_copies.contains(&problem.path))
+            .collect();
+        if !problems.is_empty() {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path,
+                problems,
+                summary: "frontmatter did not satisfy the schema".to_string(),
+                description,
+                source: None,
+            });
+        }
     }
 
     // Eager-`file` normalization (Decision #4: "a document with final
@@ -747,7 +867,7 @@ pub(crate) fn prepare_caller_projection(
     .map_err(|failure| {
         MarkdownError::SchemaValidationFailed {
             path: source_path(markdown, options),
-            problems: vec![*failure.problem],
+            problems: vec![attributed_to_setter(*failure.problem, options)],
             summary: "frontmatter did not satisfy the schema".to_string(),
             description: markdown
                 .frontmatter()
@@ -816,6 +936,7 @@ fn resolve_caller_file_overrides(
     composition_pending: &HashSet<String>,
 ) -> Result<CallerProjection, CallerProjectionFailure> {
     let records = caller_input_records(options);
+    let input = CallerInput::new(options, &records);
     let mut resolved = CallerProjection::default();
     resolved.classified.extend(
         records
@@ -823,22 +944,24 @@ fn resolve_caller_file_overrides(
             .filter(|key| !options.exclude_keys.contains(*key))
             .cloned(),
     );
+    resolved.classified.extend(input.leaves.iter().map(|leaf| nested_occurrence(&leaf.path)));
     let document_context = options.local_expression_resolution_context();
     let Some(effective) = effective else {
         return Ok(resolved);
     };
     let root = effective.json_schema.as_ref();
-    let Some(fragments_by_property) = collect_applicable_root_schema_fragments(
+    let applicable = collect_applicable_root_schema_fragments(
         root,
         root,
         instance,
         &document_context,
-        &records,
+        &input,
         composition_pending,
-    ) else {
+    );
+    resolved.unprojected = input.unprojected.take();
+    let Some(fragments_by_property) = applicable else {
         return Ok(resolved);
     };
-    resolve_nested_setter_files(options, root, &fragments_by_property, &mut resolved)?;
     for (key, record) in &records {
         if options.exclude_keys.contains(key) {
             continue;
@@ -877,6 +1000,7 @@ fn resolve_caller_file_overrides(
             }
         }
     }
+    resolve_supplied_leaves(&input, root, &fragments_by_property, &mut resolved)?;
     Ok(resolved)
 }
 
@@ -895,55 +1019,220 @@ fn attributed_to_setter(
     problem
 }
 
-/// Projects the file value of each nested setter from the launch area, as a
-/// whole-key caller value is. An ordinary value, and every authored value beside
-/// a setter, stays as it is.
-fn resolve_nested_setter_files(
-    options: &crate::markdown::compose::ComposeRequest,
+/// Projects each supplied string below a top-level property from its own origin,
+/// as a whole-key caller value is. An ordinary value, and every authored value
+/// beside a setter, stays as it is.
+fn resolve_supplied_leaves(
+    input: &CallerInput<'_>,
     root: &serde_json::Value,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
     resolved: &mut CallerProjection,
 ) -> Result<(), CallerProjectionFailure> {
-    if options.setter_bindings.nested.is_empty() {
-        return Ok(());
-    }
-    let origin = crate::markdown::compose::context::options::caller_origin(
-        options.resolution_context(),
-        options.file_ref_fallback_dir.as_deref(),
-    );
-    for record in &options.setter_bindings.nested {
-        let [ValuePathSegment::Key(key), below @ ..] = record.path.as_slice() else {
+    for leaf in &input.leaves {
+        let Some(key) = leaf.top_level_key() else {
             continue;
         };
-        if options.exclude_keys.contains(key) {
+        if resolved.modes.contains_key(key) {
             continue;
         }
-        let mut fragments = Vec::new();
-        for fragment in fragments_by_property.get(key).into_iter().flatten() {
-            fragments_below(fragment, root, below, &[], &mut fragments);
-        }
-        let selections: Vec<_> = fragments
-            .iter()
-            .filter_map(|fragment| Some((*fragment, select_file_mode(&record.raw, fragment, root, &origin)?)))
-            .collect();
-        let Some((_, mode)) = selections.first().copied() else {
+        let Some((mode, fragments)) = leaf.selection(root, fragments_by_property) else {
             continue;
         };
-        if selections.iter().any(|(_, other)| *other != mode) {
-            continue;
-        }
-        let occurrence = nested_occurrence(&record.path);
-        for (fragment, _) in selections {
-            if let Some(value) = resolve_caller_file_value(&record.raw, fragment, root, &origin, &record.argument, &occurrence, mode)? {
-                resolved.nested_native.push((record.path.clone(), value.native));
-                for provenance in value.provenance {
-                    resolved.provenance.insert(provenance.occurrence, provenance.value);
-                }
-                break;
+        let occurrence = nested_occurrence(&leaf.path);
+        resolved.modes.insert(occurrence.clone(), mode);
+        if let Some(value) = leaf.project(&fragments, root, mode)? {
+            resolved.nested_native.push((leaf.path.clone(), value.native.clone()));
+            if let Some(text) = value.native.as_str() {
+                resolved.supplied.push((text.to_string(), leaf.origin.clone()));
+            }
+            for provenance in value.provenance {
+                resolved.provenance.insert(provenance.occurrence, provenance.value);
             }
         }
     }
     Ok(())
+}
+
+/// What a caller supplied, for the stages that judge it: the whole-key records,
+/// and every string below a top-level property with the context that authored it.
+struct CallerInput<'a> {
+    records: &'a crate::markdown::compose::CallerInputRecords,
+    leaves: Vec<SuppliedLeaf>,
+    /// The first failure to project a value when a union had no arm to apply.
+    unprojected: std::cell::RefCell<Option<Box<ValidationProblem>>>,
+}
+
+impl<'a> CallerInput<'a> {
+    fn new(
+        options: &crate::markdown::compose::ComposeRequest,
+        records: &'a crate::markdown::compose::CallerInputRecords,
+    ) -> Self {
+        let mut leaves = Vec::new();
+        let setter_origin = crate::markdown::compose::context::options::caller_origin(
+            options.resolution_context(),
+            options.file_ref_fallback_dir.as_deref(),
+        );
+        for record in &options.setter_bindings.nested {
+            let excluded = matches!(record.path.first(), Some(ValuePathSegment::Key(key)) if options.exclude_keys.contains(key));
+            if !excluded {
+                collect_leaves(&record.raw, &mut record.path.clone(), &record.argument, &setter_origin, &mut leaves);
+            }
+        }
+        for (key, record) in records {
+            if !options.exclude_keys.contains(key) && !record.raw().is_string() {
+                let mut path = vec![ValuePathSegment::Key(key.clone())];
+                collect_leaves(record.raw(), &mut path, key, record.origin(), &mut leaves);
+            }
+        }
+        Self { records, leaves, unprojected: std::cell::RefCell::default() }
+    }
+
+    fn note_unprojected(&self, problem: Box<ValidationProblem>) {
+        self.unprojected.borrow_mut().get_or_insert(problem);
+    }
+}
+
+/// `problem`, reporting from the caller's origin where it says no file matched a
+/// caller's value. No union arm applied, so the value stayed raw and the validator
+/// looked in the document's folder, which is not where that value is judged.
+fn reported_from_caller_origin(
+    mut problem: ValidationProblem,
+    options: &crate::markdown::compose::ComposeRequest,
+) -> ValidationProblem {
+    let Some(FileReferenceDiagnostic::NoMatch { raw, .. }) = &problem.file_reference else {
+        return problem;
+    };
+    let raw = raw.clone();
+    let records = caller_input_records(options);
+    let input = CallerInput::new(options, &records);
+    let whole_key = input
+        .records
+        .iter()
+        .find(|(key, record)| record.raw().as_str() == Some(raw.as_str()) && caller_occurrence(key) == problem.path);
+    let leaf = input
+        .leaves
+        .iter()
+        .find(|leaf| leaf.raw.as_str() == Some(raw.as_str()) && nested_occurrence(&leaf.path) == problem.path);
+    let origin = match (whole_key, leaf) {
+        (Some((_, record)), _) => record.origin(),
+        (None, Some(leaf)) => &leaf.origin,
+        (None, None) => return problem,
+    };
+    match biscuit_file::FileReference::new(&raw).and_then(|reference| reference.resolve_in_context(origin)) {
+        Ok(Some(_)) => {
+            problem.message =
+                format!("`{raw}` resolved from `{}`, but no schema arm accepts it", origin.cwd().display());
+            problem.file_reference = None;
+        }
+        Ok(None) => {
+            let failure = simplified_schema::format::FileReferenceFailure::NoMatch {
+                raw: raw.clone(),
+                resolved_from: Some(origin.cwd().to_path_buf()),
+            };
+            problem.message = failure.to_string();
+            problem.file_reference = Some(FileReferenceDiagnostic::NoMatch {
+                raw,
+                resolved_from: Some(origin.cwd().to_path_buf()),
+            });
+        }
+        Err(_) => {}
+    }
+    problem
+}
+
+/// One string a caller supplied below a top-level property.
+struct SuppliedLeaf {
+    path: Vec<ValuePathSegment>,
+    raw: serde_json::Value,
+    /// The setter as written, or the record's property, naming the value in a failure.
+    label: String,
+    origin: biscuit_file::FileResolutionContext,
+}
+
+fn collect_leaves(
+    value: &serde_json::Value,
+    path: &mut Vec<ValuePathSegment>,
+    label: &str,
+    origin: &biscuit_file::FileResolutionContext,
+    leaves: &mut Vec<SuppliedLeaf>,
+) {
+    match value {
+        serde_json::Value::String(_) => leaves.push(SuppliedLeaf {
+            path: path.clone(),
+            raw: value.clone(),
+            label: label.to_string(),
+            origin: origin.clone(),
+        }),
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                path.push(ValuePathSegment::Index(index));
+                collect_leaves(item, path, label, origin, leaves);
+                path.pop();
+            }
+        }
+        serde_json::Value::Object(members) => {
+            for (key, member) in members {
+                path.push(ValuePathSegment::Key(key.clone()));
+                collect_leaves(member, path, label, origin, leaves);
+                path.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+impl SuppliedLeaf {
+    fn top_level_key(&self) -> Option<&str> {
+        match self.path.first() {
+            Some(ValuePathSegment::Key(key)) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// The file mode the fragments at this path agree on, and those that name it.
+    /// `None` when this value is no file there, or they name different modes.
+    fn selection<'r>(
+        &self,
+        root: &'r serde_json::Value,
+        fragments_by_property: &HashMap<String, Vec<&'r serde_json::Value>>,
+    ) -> Option<(CallerFileMode, Vec<&'r serde_json::Value>)> {
+        let [_, below @ ..] = self.path.as_slice() else {
+            return None;
+        };
+        let mut fragments = Vec::new();
+        for fragment in fragments_by_property.get(self.top_level_key()?).into_iter().flatten() {
+            fragments_below(fragment, root, below, &[], &mut fragments);
+        }
+        let mut selected = fragments
+            .into_iter()
+            .filter_map(|fragment| Some((fragment, select_file_mode(&self.raw, fragment, root, &self.origin)?)));
+        let (first, mode) = selected.next()?;
+        let mut naming = vec![first];
+        for (fragment, other) in selected {
+            if other != mode {
+                return None;
+            }
+            naming.push(fragment);
+        }
+        Some((mode, naming))
+    }
+
+    fn project(
+        &self,
+        fragments: &[&serde_json::Value],
+        root: &serde_json::Value,
+        mode: CallerFileMode,
+    ) -> Result<Option<ResolvedCallerFileValue>, CallerProjectionFailure> {
+        let occurrence = nested_occurrence(&self.path);
+        for fragment in fragments {
+            let projected = resolve_caller_file_value(&self.raw, fragment, root, &self.origin, &self.label, &occurrence, mode)
+                .map_err(|failure| failure.at(&occurrence))?;
+            if projected.is_some() {
+                return Ok(projected);
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// Every schema fragment that can describe the value `steps` below `schema`,
@@ -967,17 +1256,31 @@ fn fragments_below<'r>(
             fragments_below(arm, root, steps, entered, found);
         }
     }
-    let child = match step {
-        ValuePathSegment::Key(key) => schema
-            .get("properties")
-            .and_then(|properties| properties.get(key))
-            .or_else(|| schema.get("additionalProperties").filter(|fragment| fragment.is_object())),
-        ValuePathSegment::Index(index) => schema
-            .get("prefixItems")
-            .and_then(|items| items.get(index))
-            .or_else(|| schema.get("items").filter(|fragment| fragment.is_object())),
-    };
-    if let Some(child) = child {
+    let mut children = Vec::new();
+    match step {
+        ValuePathSegment::Key(key) => {
+            children.extend(schema.get("properties").and_then(|properties| properties.get(key)));
+            children.extend(
+                schema
+                    .get("patternProperties")
+                    .and_then(serde_json::Value::as_object)
+                    .into_iter()
+                    .flatten()
+                    .filter(|(pattern, _)| fancy_regex::Regex::new(pattern).is_ok_and(|regex| regex.is_match(key).unwrap_or(false)))
+                    .map(|(_, fragment)| fragment),
+            );
+            if children.is_empty() {
+                children.extend(schema.get("additionalProperties").filter(|fragment| fragment.is_object()));
+            }
+        }
+        ValuePathSegment::Index(index) => children.extend(
+            schema
+                .get("prefixItems")
+                .and_then(|items| items.get(index))
+                .or_else(|| schema.get("items").filter(|fragment| fragment.is_object())),
+        ),
+    }
+    for child in children {
         fragments_below(child, root, rest, &[], found);
     }
 }
@@ -1001,6 +1304,7 @@ fn classify_caller_overrides(
         return HashMap::new();
     };
     let records = caller_input_records(options);
+    let input = CallerInput::new(options, &records);
     let document_context = options.local_expression_resolution_context();
     let root = effective.json_schema.as_ref();
     let Some(fragments_by_property) = collect_applicable_root_schema_fragments(
@@ -1008,12 +1312,12 @@ fn classify_caller_overrides(
         root,
         instance,
         &document_context,
-        &records,
+        &input,
         composition_pending,
     ) else {
         return HashMap::new();
     };
-    records
+    let mut modes: HashMap<String, CallerFileMode> = records
         .iter()
         .filter_map(|(key, record)| {
             if options.exclude_keys.contains(key) {
@@ -1026,7 +1330,16 @@ fn classify_caller_overrides(
                 .collect();
             (modes.len() == 1).then(|| (key.clone(), modes[0]))
         })
-        .collect()
+        .collect();
+    for leaf in &input.leaves {
+        if leaf.top_level_key().is_some_and(|key| modes.contains_key(key)) {
+            continue;
+        }
+        if let Some((mode, _)) = leaf.selection(root, &fragments_by_property) {
+            modes.insert(nested_occurrence(&leaf.path), mode);
+        }
+    }
+    modes
 }
 
 /// The caller's values with the base their file references resolve from.
@@ -1160,6 +1473,17 @@ fn select_file_mode_on_path<'r>(
                     .is_ok_and(|validator| validator.is_valid(value))
                 })
                 .collect();
+            let pending = value.as_str().is_some_and(crate::markdown::literal_token::holds_pending_syntax);
+            if applicable.is_empty() && combinator != "allOf" && !pending {
+                // The file does not exist where the caller named it, which rules
+                // out the file arm. It is still that arm's value to report: left
+                // unclassified, it would be judged from the document's folder.
+                let modes: Vec<_> = arms
+                    .iter()
+                    .filter_map(|arm| select_file_mode_on_path(value, arm, root, context, entered))
+                    .collect();
+                return modes.first().copied().filter(|mode| modes.iter().all(|other| other == mode));
+            }
             if applicable.len() != 1 {
                 return None;
             }
@@ -1192,10 +1516,10 @@ fn without_match_keyword(schema: &serde_json::Value) -> serde_json::Value {
 /// arm cannot apply.
 fn collect_applicable_root_schema_fragments<'a>(
     schema: &'a serde_json::Value,
-    root: &serde_json::Value,
+    root: &'a serde_json::Value,
     instance: &serde_json::Value,
     document_context: &super::expression::ResolutionContext,
-    records: &crate::markdown::compose::CallerInputRecords,
+    input: &CallerInput<'_>,
     composition_pending: &HashSet<String>,
 ) -> Option<HashMap<String, Vec<&'a serde_json::Value>>> {
     let mut selected: HashMap<String, Vec<&serde_json::Value>> = schema
@@ -1216,19 +1540,22 @@ fn collect_applicable_root_schema_fragments<'a>(
                 root,
                 instance,
                 document_context,
-                records,
+                input,
                 composition_pending,
             )?;
-            if root_schema_arm_applies(
+            let (applicability, failure) = root_schema_arm_applies(
                 arm,
                 root,
                 instance,
                 document_context,
-                records,
+                input,
                 composition_pending,
                 &arm_fragments,
-            ) == RootArmApplicability::None
-            {
+            );
+            if applicability == RootArmApplicability::None {
+                if let Some(failure) = failure {
+                    input.note_unprojected(failure);
+                }
                 return None;
             }
             for (key, fragments) in arm_fragments {
@@ -1249,33 +1576,38 @@ fn collect_applicable_root_schema_fragments<'a>(
                     root,
                     instance,
                     document_context,
-                    records,
+                    input,
                     composition_pending,
                 )?;
-                let applicability = root_schema_arm_applies(
+                let (applicability, failure) = root_schema_arm_applies(
                     arm,
                     root,
                     instance,
                     document_context,
-                    records,
+                    input,
                     composition_pending,
                     &fragments,
                 );
-                Some((applicability, fragments))
+                Some((applicability, failure, fragments))
             })
             .collect();
         let with = |wanted: RootArmApplicability| -> Vec<_> {
             judged
                 .iter()
-                .filter(|(applicability, _)| *applicability == wanted)
-                .map(|(_, fragments)| fragments)
+                .filter(|(applicability, _, _)| *applicability == wanted)
+                .map(|(_, _, fragments)| fragments)
                 .collect()
         };
         let exact = with(RootArmApplicability::Exact);
         let pending = with(RootArmApplicability::Pending);
         let contending = match (exact.len(), pending.len()) {
             (1, _) | (0, 1) => exact.into_iter().chain(pending).take(1).collect(),
-            (0, 0) => judged.iter().map(|(_, fragments)| fragments).collect(),
+            (0, 0) => {
+                if let Some(failure) = judged.iter().find_map(|(_, failure, _)| failure.clone()) {
+                    input.note_unprojected(failure);
+                }
+                judged.iter().map(|(_, _, fragments)| fragments).collect()
+            }
             (0, _) => pending,
             _ => exact,
         };
@@ -1283,7 +1615,7 @@ fn collect_applicable_root_schema_fragments<'a>(
         let selected_arm = match contending.as_slice() {
             [fragments] => *fragments,
             arms => {
-                undecided = caller_file_fragments_shared_by(arms, root, records);
+                undecided = caller_file_fragments_shared_by(arms, root, input);
                 &undecided
             }
         };
@@ -1308,10 +1640,11 @@ fn collect_applicable_root_schema_fragments<'a>(
 /// the same mode; an arm that omits it or types it otherwise would read the
 /// projected absolute path as a different value. The first arm's fragments
 /// stand for all of them, since the mode alone decides how the value resolves.
+/// A value supplied below a property qualifies its property by the same rule.
 fn caller_file_fragments_shared_by<'a>(
     arms: &[&HashMap<String, Vec<&'a serde_json::Value>>],
-    root: &serde_json::Value,
-    records: &crate::markdown::compose::CallerInputRecords,
+    root: &'a serde_json::Value,
+    input: &CallerInput<'_>,
 ) -> HashMap<String, Vec<&'a serde_json::Value>> {
     let Some((first, rest)) = arms.split_first() else {
         return HashMap::new();
@@ -1326,7 +1659,8 @@ fn caller_file_fragments_shared_by<'a>(
             .collect();
         (modes.len() == 1).then(|| modes[0])
     };
-    records
+    let mut shared: HashMap<String, Vec<&'a serde_json::Value>> = input
+        .records
         .iter()
         .filter_map(|(key, record)| {
             let mode = arm_mode(first, key, record)?;
@@ -1334,7 +1668,20 @@ fn caller_file_fragments_shared_by<'a>(
                 .all(|arm| arm_mode(arm, key, record) == Some(mode))
                 .then(|| (key.clone(), first[key].clone()))
         })
-        .collect()
+        .collect();
+    for leaf in &input.leaves {
+        let Some(key) = leaf.top_level_key() else {
+            continue;
+        };
+        let leaf_mode = |arm: &HashMap<String, Vec<&'a serde_json::Value>>| leaf.selection(root, arm).map(|(mode, _)| mode);
+        if let Some(mode) = leaf_mode(first)
+            && rest.iter().all(|arm| leaf_mode(arm) == Some(mode))
+            && let Some(fragments) = first.get(key)
+        {
+            shared.entry(key.to_string()).or_insert_with(|| fragments.clone());
+        }
+    }
+    shared
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1349,10 +1696,10 @@ fn root_schema_arm_applies(
     root: &serde_json::Value,
     instance: &serde_json::Value,
     document_context: &super::expression::ResolutionContext,
-    records: &crate::markdown::compose::CallerInputRecords,
+    input: &CallerInput<'_>,
     composition_pending: &HashSet<String>,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
-) -> RootArmApplicability {
+) -> (RootArmApplicability, Option<Box<ValidationProblem>>) {
     // The arm converts alone, with its root's definitions, and then under
     // the keywords a raw root declares beside its `anyOf`: the wrapped arm the
     // validator judges below holds the arm in an `allOf`, which drives no
@@ -1366,26 +1713,27 @@ fn root_schema_arm_applies(
     if let Some(siblings) = simplified_schema::validate::root_union_sibling_schema(root) {
         candidate = coerce_frontmatter_with_pending(&siblings, &candidate, composition_pending).value;
     }
-    if !project_root_arm_caller_values(&mut candidate, root, records, fragments_by_property) {
-        return RootArmApplicability::None;
-    }
+    let supplied = match project_root_arm_caller_values(&mut candidate, root, input, fragments_by_property) {
+        Ok(supplied) => supplied,
+        Err(failure) => return (RootArmApplicability::None, Some(failure.problem)),
+    };
     let wrapped = simplified_schema::validate::wrap_arm_as_root_schema(arm, root);
     let Ok(validator) = simplified_schema::validate::build_validator_with_callers(
         &wrapped,
         Some(&document_context.cwd),
         None,
         &document_context.file_resolution_context,
-        caller_origins(records),
+        caller_origins(input.records).with_supplied_values(supplied),
     ) else {
-        return RootArmApplicability::None;
+        return (RootArmApplicability::None, None);
     };
     if validator.is_valid(&candidate) {
-        return RootArmApplicability::Exact;
+        return (RootArmApplicability::Exact, None);
     }
     if composition_pending.is_empty() {
-        return RootArmApplicability::None;
+        return (RootArmApplicability::None, None);
     }
-    if validator.iter_errors(&candidate).all(|error| {
+    let applicability = if validator.iter_errors(&candidate).all(|error| {
         error
             .instance_path()
             .iter()
@@ -1400,19 +1748,21 @@ fn root_schema_arm_applies(
         RootArmApplicability::Pending
     } else {
         RootArmApplicability::None
-    }
+    };
+    (applicability, None)
 }
 
+/// Writes each caller file value this arm types into `candidate`, as projected
+/// from its own origin, and returns those written below a top-level property.
 fn project_root_arm_caller_values(
     candidate: &mut serde_json::Value,
     root: &serde_json::Value,
-    records: &crate::markdown::compose::CallerInputRecords,
+    input: &CallerInput<'_>,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
-) -> bool {
-    let Some(object) = candidate.as_object_mut() else {
-        return false;
-    };
-    for (key, record) in records {
+) -> Result<Vec<(String, biscuit_file::FileResolutionContext)>, CallerProjectionFailure> {
+    let mut projected_keys = HashSet::new();
+    let mut supplied = Vec::new();
+    for (key, record) in input.records {
         let Some(fragments) = fragments_by_property.get(key) else {
             continue;
         };
@@ -1424,37 +1774,51 @@ fn project_root_arm_caller_values(
             continue;
         }
         let mode = modes[0];
-        let projected = fragments.iter().find_map(|fragment| {
+        projected_keys.insert(key.as_str());
+        for fragment in fragments {
             if select_file_mode(record.raw(), fragment, root, record.origin()) != Some(mode) {
-                return None;
+                continue;
             }
-            match resolve_caller_file_value(
-                record.raw(),
-                fragment,
-                root,
-                record.origin(),
-                key,
-                &caller_occurrence(key),
-                mode,
-            ) {
-                Ok(Some(projected)) => Some(Ok(projected)),
-                Ok(None) => None,
-                Err(error) => Some(Err(error)),
+            let projected =
+                resolve_caller_file_value(record.raw(), fragment, root, record.origin(), key, &caller_occurrence(key), mode)?;
+            if let Some(projected) = projected {
+                if let Some(object) = candidate.as_object_mut() {
+                    object.insert(key.clone(), projected.native);
+                }
+                break;
             }
-        });
-        match projected {
-            Some(Ok(projected)) => {
-                object.insert(key.clone(), projected.native);
-            }
-            Some(Err(_)) => return false,
-            None => {}
         }
     }
-    true
+    for leaf in &input.leaves {
+        if leaf.top_level_key().is_some_and(|key| projected_keys.contains(key)) {
+            continue;
+        }
+        let Some((mode, fragments)) = leaf.selection(root, fragments_by_property) else {
+            continue;
+        };
+        if let Some(projected) = leaf.project(&fragments, root, mode)?
+            && let Some(slot) = slot_below(candidate, &leaf.path)
+        {
+            if let Some(text) = projected.native.as_str() {
+                supplied.push((text.to_string(), leaf.origin.clone()));
+            }
+            *slot = projected.native;
+        }
+    }
+    Ok(supplied)
 }
 
 struct CallerProjectionFailure {
     problem: Box<ValidationProblem>,
+}
+
+impl CallerProjectionFailure {
+    /// This failure, as the value at JSON pointer `occurrence`.
+    fn at(mut self, occurrence: &str) -> Self {
+        self.problem.path = occurrence.to_string();
+        self.problem.instance_path = JsonPointer::parse(occurrence);
+        self
+    }
 }
 
 struct ResolvedCallerFileValue {

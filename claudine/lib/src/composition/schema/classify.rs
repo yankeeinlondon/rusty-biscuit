@@ -617,8 +617,9 @@ pub fn build_schema_status_report_for_mode(
         );
     report.problems.retain(|problem| {
         matches!(problem.kind, ValidationProblemKind::Missing)
-            || !top_level_pointer_segment(&problem.path)
-                .is_some_and(|name| caller_resolved.contains(&name))
+            || !(caller_resolved.contains(&problem.path)
+                || top_level_pointer_segment(&problem.path)
+                    .is_some_and(|name| caller_resolved.contains(&name)))
     });
     Ok(status_report_from_validation(
         &effective,

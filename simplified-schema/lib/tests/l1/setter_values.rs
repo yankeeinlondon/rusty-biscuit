@@ -334,16 +334,81 @@ fn with_no_declaration_text_is_guessed_as_today() {
 }
 
 #[test]
-fn a_type_declaring_no_structure_guesses_too() {
-    assert_eq!(parse("5").bind(Some(&Shape::Any)), json!(5));
-    assert_eq!(parse("5").bind(Some(&Shape::Deferrable(Box::new(Shape::Any)))), json!(5));
+fn unknown_is_a_declared_type_that_keeps_text() {
+    for shape in [Shape::Any, Shape::Deferrable(Box::new(Shape::Any))] {
+        for raw in ["5", "1.10", "0x10", "true", "false", "Alice", "NaN", "9007199254740993", "{{ title }}"] {
+            assert_eq!(parse(raw).bind(Some(&shape)), json!(raw), "{raw} under {shape:?}");
+        }
+    }
     assert_eq!(parse("5").bind(Some(&Shape::Deferrable(Box::new(Shape::text())))), json!("5"));
 }
 
 #[test]
-fn a_quoted_string_is_not_converted_by_binding() {
-    assert_eq!(parse(r#""5""#).bind(Some(&Shape::number())), json!("5"));
-    assert_eq!(parse(r#""5""#).bind(Some(&Shape::text())), json!("5"));
+fn container_syntax_under_unknown_is_still_a_container() {
+    for (raw, expected) in [
+        ("{a:1}", json!({ "a": 1 })),
+        ("{ max-width: 50 }", json!({ "max-width": 50 })),
+        ("[1, true]", json!([1, true])),
+        ("{foo}", json!({ "foo": null })),
+    ] {
+        assert_eq!(parse(raw).bind(Some(&Shape::Any)), expected, "{raw}");
+        assert_eq!(parse(raw).bind(None), expected, "{raw}, undeclared");
+    }
+}
+
+#[test]
+fn a_quoted_string_is_decoded_once_then_read_through_the_declared_type() {
+    let scalars = Shape::Union(vec![Shape::text(), Shape::number()]);
+    for (raw, shape, expected) in [
+        (r#""5""#, Shape::number(), json!(5)),
+        (r#""1.10""#, Shape::number(), json!(1.1)),
+        (r#""5""#, Shape::text(), json!("5")),
+        (r#""5""#, Shape::Any, json!("5")),
+        (r#""5""#, scalars, json!("5")),
+        (r#""true""#, Shape::boolean(), json!(true)),
+        (r#""02134""#, numberlike(), json!("02134")),
+        (r#""true""#, boolish(), json!("true")),
+        (r#""On""#, boolish(), json!("On")),
+        (r#""\"x\"""#, Shape::text(), json!(r#""x""#)),
+    ] {
+        assert_eq!(parse(raw).bind(Some(&shape)), expected, "{raw} under {shape:?}");
+    }
+}
+
+#[test]
+fn a_quoted_string_the_type_rejects_stays_as_decoded_for_validation_to_report() {
+    for (raw, shape, expected) in [
+        (r#""abc""#, Shape::number(), json!("abc")),
+        (r#""9007199254740993""#, Shape::number(), json!("9007199254740993")),
+        (r#""5""#, Shape::boolean(), json!("5")),
+        (r#""{{ title }}""#, Shape::number(), json!("{{ title }}")),
+    ] {
+        assert_eq!(parse(raw).bind(Some(&shape)), expected, "{raw} under {shape:?}");
+    }
+}
+
+#[test]
+fn a_quoted_string_never_becomes_a_container() {
+    for shape in [closed_object(vec![("a", Shape::number())]), Shape::array(Shape::number()), Shape::Any] {
+        assert_eq!(parse(r#""{a:1}""#).bind(Some(&shape)), json!("{a:1}"), "{shape:?}");
+        assert_eq!(parse(r#""[1]""#).bind(Some(&shape)), json!("[1]"), "{shape:?}");
+    }
+}
+
+#[test]
+fn with_no_declaration_a_quoted_string_stays_that_string() {
+    for (raw, expected) in [(r#""5""#, "5"), (r#""true""#, "true"), (r#""null""#, "null"), (r#""{a:1}""#, "{a:1}")] {
+        assert_eq!(parse(raw).bind(None), json!(expected), "{raw}");
+    }
+}
+
+#[test]
+fn a_container_keeps_its_native_values_under_unknown_children() {
+    let shape = closed_object(vec![("free", Shape::Any), ("flag", boolish()), ("count", Shape::number())]);
+    assert_eq!(
+        parse(r#"{free: 1.5, flag: true, count: "5"}"#).bind(Some(&shape)),
+        json!({ "free": 1.5, "flag": true, "count": 5 }),
+    );
 }
 
 #[test]

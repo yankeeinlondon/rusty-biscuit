@@ -114,6 +114,11 @@ test-l3 *args="":
 test-browser *args="":
     @just _test_browser {{ LIBRARY }} --features browser-tests {{ args }}
 
+# Opt-in L1 loaders for `md`'s fish and Elvish completion scripts, which no CI
+# runner can run. Needs both shells: a missing one fails, never skips.
+test-optional-shells *args="":
+    @just _test {{ CLI }} --features test-fixtures,optional-shell-tests path_completion::optional_shells:: {{ args }}
+
 # not applicable: darkmatter has no real-resource (device / network) tier
 test-real:
     @echo "test-real: not applicable for darkmatter"

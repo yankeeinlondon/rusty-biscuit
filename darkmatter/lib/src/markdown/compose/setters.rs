@@ -321,7 +321,7 @@ pub(crate) fn apply_setter_plan(
             let walked = setter.path.resolve_map(overlay.frontmatter().as_map());
             let declared = effective
                 .as_ref()
-                .and_then(|effective| declared_shape(effective, &overlay_json, walked.steps()));
+                .and_then(|effective| declared_shape(effective, &overlay_json, walked.steps(), Some(&setter.value)));
             setter.value.bind(declared.as_ref())
         })
         .collect();

@@ -198,7 +198,7 @@ A path command never destroys what you did not name. To replace `nick: Ken` with
 
 ## Command-Line Values
 
-`md set` and `md compose` setters read a value in the same way, in two steps. The text decides the value's form, then the type the document's schema declares for that place decides how plain text is read.
+`md set` and `md compose` setters read a value in the same way, in two steps. The text decides the value's form, then the type the document's schema declares for that place decides how plain text and a quoted string are read.
 
 **Step 1, the form.** The whole text is read as JSON5:
 
@@ -215,17 +215,26 @@ JSON5 goes first because YAML would read `{a:1}` as a key named `a:1`. Only a va
 
 An object or array that parsed must also be valid, and never falls back to text: a repeated key (`{a:1,a:2}`), a non-finite number (`{a:NaN}`), and a whole number no double can hold exactly (`{a:9007199254740993}`) all fail, and nothing is written or composed.
 
-**Step 2, the type.** Plain text then goes through the same [conversion](../../../simplified-schema/docs/topics/conversion.md) authored frontmatter gets:
+**Step 2, the type.** Plain text and a quoted string then go through the same [conversion](../../../simplified-schema/docs/topics/conversion.md) authored frontmatter gets:
 
-| You write | Declared `string` | Declared `number` | Declared `numberlike` | Declared `boolish` | Not declared, or `unknown` |
-|---|---|---|---|---|---|
-| `5` | `"5"` | `5` | `"5"` | refused | `5` |
-| `1.10` | `"1.10"` | `1.1` | `"1.10"` | refused | `1.1` |
-| `02134` | `"02134"` | `2134` | `"02134"` | refused | `"02134"` |
-| `true` | `"true"` | refused | refused | `true` | `true` |
-| `On` | `"On"` | refused | refused | `"On"` | `"On"` |
+| You write | Declared `string` | Declared `number` | Declared `numberlike` | Declared `boolish` | Declared `unknown` | Not declared |
+|---|---|---|---|---|---|---|
+| `5` | `"5"` | `5` | `"5"` | refused | `"5"` | `5` |
+| `1.10` | `"1.10"` | `1.1` | `"1.10"` | refused | `"1.10"` | `1.1` |
+| `02134` | `"02134"` | `2134` | `"02134"` | refused | `"02134"` | `"02134"` |
+| `true` | `"true"` | refused | refused | `true` | `"true"` | `true` |
+| `On` | `"On"` | refused | refused | `"On"` | `"On"` | `"On"` |
+| `'"5"'` | `"5"` | `5` | `"5"` | refused | `"5"` | `"5"` |
+| `'"true"'` | `"true"` | refused | refused | `"true"` | `"true"` | `"true"` |
 
 A refused value stays as you wrote it at this step, so schema validation is what reports it. A bare `NaN` or `9007199254740993` with no declared type stays text.
+
+- **Not declared** is the only column that guesses a type from the text. Quoting is how to keep a string there: `'"5"'` is the text `5`.
+- **`unknown` is a declared type that converts nothing**, so `1.10` stays the text `1.10`. It says nothing about structure, so container syntax is still read as a container: `{a:1}` is the object `{a: 1}` under `unknown`, as it is everywhere else. Quote it to keep the text: `'"{a:1}"'`.
+- **A pattern key declares every key it matches.** Under `scores: {"<string>": number}`, `scores.a` is declared `number`, and under `"<string>": unknown`, `author.mistake=1` is the text `1`.
+- **Quoting never builds a container.** Under an object or array type, `'"{a:1}"'` stays text and validation refuses it.
+- **A raw JSON Schema** declares what it can name. A property typed through a construct it cannot name, such as `$ref` or `allOf`, is read as text only if the schema accepts that exact text there, so `1.10` keeps its spelling behind a `$ref` to a string with a `pattern`, a `format`, or an `enum` that accepts it. Otherwise it is read as not declared, and validation then converts it as it converts authored frontmatter: `'"5"'` behind a `$ref` to a number is the number `5`.
+- **`allOf` drives no conversion.** `5` behind an `allOf` requiring a number is the number `5`, because unquoted text with no type it can be read through is guessed. `'"5"'` there is refused, because a quoted value says it is the string `5`, and nothing converts it. An authored `"5"` in the document is refused the same way.
 
 An object or array has already lost its numbers' spelling when its fields are converted, so `author={version:1.10}` gives `"1.1"` under a `version: string`. Write `author.version=1.10`, or quote it: `'author={version:"1.10"}'`.
 
@@ -243,11 +252,16 @@ source <(COMPLETE=zsh md)
 # Fish (~/.config/fish/config.fish)
 COMPLETE=fish md | source
 
+# Elvish (~/.config/elvish/rc.elv)
+with E:COMPLETE = elvish { eval (md | slurp) }
+
 # PowerShell ($PROFILE)
-$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
+Remove-Item Alias:md -Force -ErrorAction SilentlyContinue; $env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
 ```
 
 `md --completions <SHELL>` prints the setup command for your shell, for `bash`, `elvish`, `fish`, `powershell`, or `zsh`.
+
+On Windows, PowerShell ships `md` as an alias of `mkdir`, and an alias outranks a program, so without the first part of that line `md` never reaches this tool. Afterward `md` is this tool in that session, and `mkdir` still makes directories.
 
 ### Completing a path
 
@@ -312,32 +326,62 @@ flowchart LR
 ```
 
 - **It reads** the input document, the local files its schema needs, the configured schema roots to discover triggers, and a directory's listing when completing a file.
+- **It reads each file once per Tab.** A file that several places name is opened only the first time: a type file that both `ctx` and `current` of a custom global catalog import, or that the baseline, a trigger, and the document's `$schema` all import, is read once. So is a file in a schema root: trigger discovery reads every file there, and a `$schema` target, import, baseline, or `example(...)` file among them is not read again.
 - **It never** evaluates an expression, runs a command, makes a network request (even with `--allow host=HOST` on the line), reads stdin, opens a candidate file, or writes anything.
-- **It also honors** `--state`, `--set`, and `--magic-root` when they come before the cursor. It does not honor `--baseline-schema` or `--disable`, so after those flags Tab still reads the normal baseline and triggers.
+- **It also honors** `--state`, `--set`, and `--magic-root` when they come before the cursor.
+- **It reads the schema the command would use.** `md compose` follows `--baseline-schema`, `--disable baseline-schema`, `--disable schema-triggers`, and `DARKMATTER_NO_BASELINE_SCHEMA` when they come before the cursor. `md get`, `md set`, and `md rm` follow `BASELINE_SCHEMA` and `DARKMATTER_NO_BASELINE_SCHEMA`. [Selecting the baseline](../topics/schemas/definition.md#selecting-the-baseline) has the full rules. For example, with `base.yaml` declaring `status: enum(custom)`:
+
+    ```sh
+    md compose --baseline-schema base.yaml doc.md status=<Tab>      # status=custom
+    md compose --baseline-schema base.yaml doc.md style.<Tab>       # nothing: this baseline has no style
+    md compose --disable baseline-schema doc.md style.<Tab>         # nothing, unless doc.md has its own style
+    BASELINE_SCHEMA=./base.yaml md set doc.md status <Tab>          # custom
+    ```
+
 - **It prints no errors.** Whatever it cannot work out, it leaves out, and validation stays the judge of what is allowed:
 
 | Situation | Tab still offers |
 |---|---|
-| no input document, or input from stdin | the baseline's keys such as `style.*`, plus files and flags |
-| the document does not parse | the baseline's keys |
-| the document's schema is missing, invalid, or remote | the document's own keys and the baseline's |
+| no input document, or input from stdin | the selected baseline's keys, such as the built-in `style.*`, plus files and flags |
+| the document does not parse | the selected baseline's keys |
+| the document's schema is missing, invalid, or remote | the document's own keys and the selected baseline's |
+| the selected baseline file cannot be loaded | the built-in baseline's keys |
+| the baseline is disabled and nothing else declares a key | only keys already in the document |
 | an earlier setter is incomplete or invalid | everything else; that setter is ignored |
 
 ### Per-shell limits
 
-The "Real Tab" column is an automated run of a finished path, ending by running the command, in a real terminal. Other cells describe what has been checked and what has not.
+The "Real Tab" column is an automated run in a real terminal that presses Tab through `style.page.alignment=center` and then runs the command. Each cell names the system it was last observed on. A "Real Tab" test for a shell the host does not have is skipped, so that shell is unproven on that host.
+
+The bash, zsh, and PowerShell script-load tests are part of `just test` wherever the platform ships the shell, and they fail when it cannot start. Neither fish nor Elvish ships with any platform, and the CI runners have neither. Their script-load tests are compiled only when a developer selects them, on a host that has both shells:
+
+```bash
+cd darkmatter && just test-optional-shells
+```
+
+A selected test fails when its shell cannot start. Elsewhere, including every CI run, the fish and Elvish script-load columns are unproven.
 
 | Shell | Words `md` receives | Registration script loads | Real Tab |
 |---|---|---|---|
-| bash 5 | tested | tested | tested |
-| bash 3.2 (ships with macOS) | tested | tested | tested |
-| zsh | tested | tested | tested |
-| fish | tested | tested | tested |
-| PowerShell | tested | tested on native Windows | not tested |
-| elvish | tested | not tested | not tested |
+| bash 5 | tested | macOS | macOS |
+| bash 3.2 (ships with macOS) | tested | macOS | macOS |
+| zsh | tested | macOS | macOS |
+| fish | tested | macOS | macOS |
+| Elvish 0.21 | tested | macOS, with a stand-in for its editor module, which exists only at a prompt | macOS, with the extra Enter below |
+| Windows PowerShell 5.1 | tested | native Windows | native Windows |
+| PowerShell 7.6 | tested | native Windows, through the Real Tab run | native Windows |
 
-- **elvish:** its completion script has no way to suppress the space after a candidate, so accepting `style.` is likely to end the word. If it does, delete the space. Keys still complete.
-- **PowerShell:** expect candidates to work as listed above, but its behavior after a real Tab press has not been observed.
+PowerShell on macOS and Linux has not been observed.
+
+- **Elvish:** Tab opens a list, even for one candidate, and writes the highlighted candidate into the line. While the list is open, typing only narrows the list and never reaches the line. Press Enter to keep the candidate and go on typing; the word stays open, with no space added. Press Escape to close the list and get back what you typed. A candidate holding `=` appears in quotes, and what you type after the closing quote is still the same word:
+
+  ```text
+  md compose doc.md style.pa<Tab><Enter>          md compose doc.md style.page.
+  al<Tab><Enter>                                  md compose doc.md 'style.page.alignment='
+  ce<Tab><Enter>                                  md compose doc.md 'style.page.alignment=center'
+  ```
+
+- **PowerShell:** Tab writes the first candidate whole, so `style.pa<Tab>` gives `style.page.` straight away, and pressing Tab again moves to the next candidate (`style.page=`). No space follows any candidate, including a finished value, so type the space yourself before the next argument.
 - **fish:** offers nothing for a value after an opening quote (`mode="pl<Tab>`). Complete first, or type the value.
 - **bash:** a setter deliberately left empty just before the cursor (`x= y<Tab>`) reads as `x=y` while completing. That changes only what Tab offers, not what the command does when run.
 

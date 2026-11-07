@@ -185,12 +185,16 @@ impl DarkmatterSchemas {
                 let json = serde_json::to_value(value).map_err(|error| SchemaError::FrontmatterShape {
                     message: format!("$schema is not representable as JSON: {error}"),
                 })?;
-                let resolved = super::resolve::resolve_schema_with_roots(&json, &base_dir, &schema_roots, context)
-                    .map_err(|error| match super::triggers::assemble::refused_trigger_file(&error) {
-                        Some(path) => super::triggers::assemble::trigger_schema_referenced(&path),
-                        None => error,
-                    })?;
-                super::triggers::assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
+                // The trigger check reads the bytes the resolution just read.
+                let resolved = simplified_schema::resolve::buffers::with_reads_retained(|| {
+                    let resolved = super::resolve::resolve_schema_with_roots(&json, &base_dir, &schema_roots, context)
+                        .map_err(|error| match super::triggers::assemble::refused_trigger_file(&error) {
+                            Some(path) => super::triggers::assemble::trigger_schema_referenced(&path),
+                            None => error,
+                        })?;
+                    super::triggers::assemble::check_document_schema_not_trigger(&resolved.referenced_files)?;
+                    Ok::<_, SchemaError>(resolved)
+                })?;
                 let label = match value.as_str() {
                     Some(reference) => reference.to_string(),
                     None => "the inline `$schema`".to_string(),
