@@ -8,6 +8,11 @@ In **Simplified Schema** we three container types:
 
 Let's hit each of these as it's own section.
 
+> **Note:** all container types are considered **iterables** and variables of this type can be used as the source for:
+> 
+> - [Map and Filter Directives in Darkmatter](darkmatter/docs/inline/map-and-filter.md)
+> - [Map and Filter Expressions in Darkmatter]()
+
 ## Objects
 
 Objects in **Simplified Schema** are a key/value type and can be defined through four distinct syntaxes:
@@ -63,3 +68,4 @@ Grammar #2 and #3 are both valid ways in YAML to express a key/value object and 
 Grammar #4 is the odd duckling:
 
 - first off please known that `|-` symbol in YAML indicates that the property is a string and will take it's value as being all of the lines below which are indented.
+-
