@@ -416,6 +416,9 @@ impl Markdown {
             report.add_warning(ComposeWarning::from_invalid_trigger(finding, consumer.clone()));
         }
         stop_if_blocked(report, options, None)?;
+        if !options.setters.is_empty() {
+            options.setter_bindings = super::setters::apply_setter_plan(self, options, &prepared_schemas, &mut provenance)?;
+        }
         let caller_projection = schema_validation::prepare_caller_projection(
             self,
             options,
@@ -1087,14 +1090,18 @@ fn finish_document(
 }
 
 /// Attributes a frontmatter interpolation failure to where its value came
-/// from: a key a caller override supplied names the override (R5); any other
-/// key is anchored to its authored span in the document.
+/// from: a value inside a setter names that setter, a key a caller override
+/// supplied names the override (R5), and any other key is anchored to its
+/// authored span in the document.
 fn attribute_frontmatter_failure(
     failure: frontmatter_interpolation::LocatedFrontmatterError,
     options: &crate::markdown::compose::ComposeRequest,
     authored: Option<biscuit_terminal::errors::SourceContext>,
     on_disk: &biscuit_terminal::errors::SourceContext,
 ) -> crate::markdown::types::MarkdownError {
+    if let Some(argument) = failing_setter(&failure, options) {
+        return (*failure.error).with_supplier(format!("the command-line setter `{argument}`"));
+    }
     let supplied_by_override = match failure.error.as_ref() {
         crate::markdown::types::MarkdownError::Interpolation { key: Some(key), .. } => options
             .set_overrides
@@ -1107,6 +1114,25 @@ fn attribute_frontmatter_failure(
         return (*failure.error).with_supplier("a command-line override (`--set`)");
     }
     failure.into_anchored(authored).with_on_disk_source(on_disk)
+}
+
+/// The setter that supplied the value a frontmatter failure happened in. With no
+/// proven location, only a setter that replaced the whole key is certain.
+fn failing_setter<'o>(
+    failure: &frontmatter_interpolation::LocatedFrontmatterError,
+    options: &'o crate::markdown::compose::ComposeRequest,
+) -> Option<&'o str> {
+    if let Some(location) = &failure.location {
+        return options.setters.argument_covering(&location.path);
+    }
+    let crate::markdown::types::MarkdownError::Interpolation { key: Some(key), .. } = failure.error.as_ref() else {
+        return None;
+    };
+    options
+        .setters
+        .names_whole_key(key)
+        .then(|| options.setters.argument_covering(&[frontmatter_interpolation::ValuePathSegment::Key(key.clone())]))
+        .flatten()
 }
 
 /// Records frontmatter undeclared-property reads, each located at its top-level key.

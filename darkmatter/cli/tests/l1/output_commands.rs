@@ -277,6 +277,63 @@ fn conforms_rm_missing_property_fails() {
     assert_eq!(read_document(&fixture), GOOD, "a failed removal writes nothing");
 }
 
+#[test]
+fn conforms_get_nested_paths_stay_flat() {
+    let fixture = with_document("output-get-nested", "---\nauthor:\n  name: Alice\ntitle: Notes\n---\n# Doc\n");
+    let value = conforms(
+        include_str!("../../schemas/output/get.yaml"),
+        &fixture,
+        &["get", "doc.md", "author.name", "title", "--output", "json"],
+        0,
+    );
+    assert_eq!(value, json!({ "author.name": "Alice", "title": "Notes" }));
+}
+
+#[test]
+fn conforms_set_nested_path_is_written_as_given() {
+    let fixture = with_document("output-set-nested", GOOD);
+    let value = conforms(
+        include_str!("../../schemas/output/set.yaml"),
+        &fixture,
+        &["set", "doc.md", "extra.deep", "1", "--output", "json"],
+        0,
+    );
+    assert_eq!(value["property"], "extra.deep");
+    assert_eq!(value["value"], 1);
+}
+
+#[test]
+fn conforms_set_rejected_value_has_no_document() {
+    let source = "---\n$schema:\n  count: number\n---\n# Doc\n";
+    let fixture = with_document("output-set-rejected", source);
+    let value = conforms(
+        include_str!("../../schemas/output/set.yaml"),
+        &fixture,
+        &["set", "doc.md", "count", "abc", "--save", "--output", "json"],
+        1,
+    );
+    assert_eq!(value["outcome"], "failure");
+    assert_eq!(value["document"], Value::Null);
+    assert_eq!(read_document(&fixture), source);
+}
+
+#[test]
+fn conforms_rm_nested_path_keeps_top_level_remaining() {
+    let fixture = with_document("output-rm-nested", "---\nauthor:\n  name: Alice\ntitle: Notes\n---\n# Doc\n");
+    let value = conforms(include_str!("../../schemas/output/rm.yaml"), &fixture, &["rm", "doc.md", "author.name", "--output", "json"], 0);
+    assert_eq!(value["removed"], json!(["author.name"]));
+    assert_eq!(value["remaining"], json!(["author", "title"]));
+}
+
+#[test]
+fn conforms_rm_conflict_fails() {
+    let source = "---\nauthor:\n  name: Alice\n---\n# Doc\n";
+    let fixture = with_document("output-rm-conflict", source);
+    let value = conforms(include_str!("../../schemas/output/rm.yaml"), &fixture, &["rm", "doc.md", "author", "author.name", "--output", "json"], 1);
+    assert_eq!(value["outcome"], "failure");
+    assert_eq!(read_document(&fixture), source);
+}
+
 /// `md edit` with the argv recorder as its editor.
 #[cfg(unix)]
 fn edit(fixture: &CliProcessFixture, args: &[&str]) -> Output {

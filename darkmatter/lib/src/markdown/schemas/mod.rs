@@ -2284,7 +2284,9 @@ fn base_dir_for(source: &Markdown, context: &biscuit_file::FileResolutionContext
     }
 }
 
-pub(crate) fn frontmatter_as_json(source: &Markdown) -> Value {
+/// `source`'s frontmatter as the value a schema judges: everything but the
+/// `$schema` control key.
+pub fn frontmatter_as_json(source: &Markdown) -> Value {
     let map = source.frontmatter().as_map();
     let mut object = serde_json::Map::with_capacity(map.len());
     for (k, v) in map {

@@ -124,6 +124,36 @@ impl DataPaths {
             .retain(|path| path.first() != Some(&ValuePathSegment::Key(key.to_string())));
     }
 
+    /// Makes the value at `path` authored again, keeping every other value's
+    /// origin.
+    ///
+    /// A mark on an ancestor covers `path` too, so it is split into marks on the
+    /// values beside the path; `root` is the frontmatter that names them.
+    pub(crate) fn clear_path(&mut self, path: &[ValuePathSegment], root: &Value) {
+        self.paths.retain(|existing| !existing.starts_with(path));
+        let Some(ancestor) = self.paths.iter().find(|marked| path.starts_with(marked)).cloned() else {
+            return;
+        };
+        self.paths.remove(&ancestor);
+        let mut prefix = Vec::with_capacity(path.len());
+        let mut current = Some(root);
+        for step in path {
+            let on_route = prefix.len() >= ancestor.len();
+            if on_route {
+                for sibling in children_of(current).filter(|sibling| sibling != step) {
+                    let mut marked = prefix.clone();
+                    marked.push(sibling);
+                    self.paths.insert(marked);
+                }
+            }
+            current = match step {
+                ValuePathSegment::Key(key) => current.and_then(|value| value.get(key)),
+                ValuePathSegment::Index(index) => current.and_then(|value| value.get(index)),
+            };
+            prefix.push(step.clone());
+        }
+    }
+
     /// Whether the value at `path` is data.
     pub(crate) fn is_data(&self, path: &[ValuePathSegment]) -> bool {
         self.paths.iter().any(|marked| path.starts_with(marked))
@@ -168,6 +198,12 @@ impl DataPaths {
     }
 }
 
+fn children_of(value: Option<&Value>) -> impl Iterator<Item = ValuePathSegment> + '_ {
+    let keys = value.and_then(Value::as_object).into_iter().flatten().map(|(key, _)| ValuePathSegment::Key(key.clone()));
+    let indexes = value.and_then(Value::as_array).into_iter().flatten().enumerate().map(|(index, _)| ValuePathSegment::Index(index));
+    keys.chain(indexes)
+}
+
 /// Origin of one document's frontmatter during composition.
 ///
 /// Captured once, after caller overrides and inherited state are merged and
@@ -200,6 +236,15 @@ impl FrontmatterProvenance {
     /// authored string.
     pub(crate) fn authored_source(&self, key: &str) -> Option<&str> {
         self.authored.get(key).map(String::as_str)
+    }
+
+    /// Records `value` as the authored text of top-level `key`, which a person
+    /// has just supplied; a non-string value has no authored text.
+    pub(crate) fn set_authored_source(&mut self, key: &str, value: Option<&Value>) {
+        match value.and_then(Value::as_str) {
+            Some(text) => self.authored.insert(key.to_string(), text.to_string()),
+            None => self.authored.remove(key),
+        };
     }
 
     /// Whether `key`'s authored value is a whole-value `$( … )` shell
@@ -265,6 +310,36 @@ mod tests {
         data.clear_key("a");
         assert!(!data.is_data_key("a"));
         assert!(data.is_data(&[key("b"), key("c")]));
+    }
+
+    #[test]
+    fn clearing_a_path_keeps_the_values_beside_it() {
+        let mut data = DataPaths::default();
+        data.mark_key("a");
+        let root = json!({"a": {"b": {"c": 1, "d": 2}, "e": 3, "items": [4, 5]}});
+        data.clear_path(&[key("a"), key("b"), key("c")], &root);
+        assert!(!data.is_data(&[key("a"), key("b"), key("c")]));
+        assert!(data.is_data(&[key("a"), key("b"), key("d")]));
+        assert!(data.is_data(&[key("a"), key("e")]));
+        assert!(data.is_data(&[key("a"), key("items"), ValuePathSegment::Index(1)]));
+        assert!(!data.is_data(&[key("a")]));
+
+        let mut data = DataPaths::default();
+        data.mark_key("items");
+        data.clear_path(&[key("items"), ValuePathSegment::Index(1)], &json!({"items": [4, 5, 6]}));
+        assert!(data.is_data(&[key("items"), ValuePathSegment::Index(0)]));
+        assert!(!data.is_data(&[key("items"), ValuePathSegment::Index(1)]));
+        assert!(data.is_data(&[key("items"), ValuePathSegment::Index(2)]));
+    }
+
+    #[test]
+    fn clearing_a_path_drops_marks_below_it_and_leaves_others() {
+        let mut data = DataPaths::default();
+        data.mark(vec![key("a"), key("b"), key("c")]);
+        data.mark(vec![key("z")]);
+        data.clear_path(&[key("a"), key("b")], &json!({"a": {"b": {"c": 1}}, "z": 2}));
+        assert!(!data.is_data(&[key("a"), key("b"), key("c")]));
+        assert!(data.is_data_key("z"));
     }
 
     #[test]

@@ -174,6 +174,11 @@ impl CommandRun {
         self.document = Some(document.to_path_buf());
     }
 
+    /// Adds run-level diagnostics that reach a data output whatever the result.
+    pub fn add_diagnostics(&mut self, diagnostics: impl IntoIterator<Item = Diagnostic>) {
+        self.diagnostics.extend(diagnostics);
+    }
+
     /// The resolved output.
     #[must_use]
     pub fn output(&self) -> &ResolvedOutput {

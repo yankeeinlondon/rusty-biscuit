@@ -615,6 +615,19 @@ pub(crate) fn parameter_binding_block(
         .hint("Use `file(eager)` when the reference needs filesystem search or recursive matching.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::Setter`].
+pub(crate) fn setter_block(argument: &str, path: &str, reason: &str) -> StatusBlock {
+    let body = format!(
+        "<dim>Setter:</dim> <inverse>{}</inverse>\n<dim>Path:</dim> {}\n{}",
+        Prose::escape_text(argument),
+        Prose::escape_text(path),
+        Prose::escape_text_outside_code_spans(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "invalid setter"))
+        .body(Prose::new(body).with_line_breaks(LineBreaks::Hard))
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
 ///
 /// When `problems` is empty the failure represents a schema *preparation*
@@ -1256,6 +1269,7 @@ mod tests {
             instance_path: simplified_schema::JsonPointer::parse("/title"),
             schema_path: None,
             offending_property: None,
+            offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
         }

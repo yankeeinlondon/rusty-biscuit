@@ -119,6 +119,7 @@ pub(crate) mod schema_validation;
 pub(crate) mod link_title_warnings;
 pub(crate) mod site_scope;
 pub use schema_validation::effective_schema_for;
+pub mod setters;
 pub mod subtree;
 mod unknown_identifiers;
 mod util;

@@ -296,6 +296,9 @@ fn text_goes_through_the_declared_type() {
         ("yes", Shape::boolean(), json!(true)),
         ("02134", numberlike(), json!("02134")),
         ("On", boolish(), json!("On")),
+        ("true", boolish(), json!(true)),
+        ("false", boolish(), json!(false)),
+        ("yes", boolish(), json!("yes")),
     ] {
         assert_eq!(parse(raw).bind(Some(&shape)), expected, "{raw} under {shape:?}");
     }

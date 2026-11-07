@@ -121,6 +121,7 @@ pub(crate) fn locating_problem(segments: &[String]) -> ValidationProblem {
         instance_path: pointer,
         schema_path: None,
         offending_property: None,
+        offending_properties: Vec::new(),
         file_reference: None,
         caller_file: None,
     }

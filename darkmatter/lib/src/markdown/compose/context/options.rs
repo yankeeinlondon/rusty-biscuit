@@ -63,13 +63,22 @@ pub fn caller_input_records_for_overrides<'a>(
     context: &biscuit_file::FileResolutionContext,
     launch_area: Option<&std::path::Path>,
 ) -> CallerInputRecords {
-    let origin = context.for_trusted_external_cwd(launch_area.unwrap_or_else(|| context.request_cwd()));
+    let origin = caller_origin(context, launch_area);
     overrides
         .into_iter()
         .filter_map(serde_json::Value::as_object)
         .flatten()
         .map(|(key, value)| (key.clone(), CallerInputRecord::new(value.clone(), origin.clone())))
         .collect()
+}
+
+/// The context a caller's value was authored in: the launch area when one is
+/// recorded, and else the request directory of `context`.
+pub(crate) fn caller_origin(
+    context: &biscuit_file::FileResolutionContext,
+    launch_area: Option<&std::path::Path>,
+) -> biscuit_file::FileResolutionContext {
+    context.for_trusted_external_cwd(launch_area.unwrap_or_else(|| context.request_cwd()))
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -235,6 +244,14 @@ pub struct ComposeOptions {
     /// Origin of the values this document receives from the document that
     /// transcludes it. Never propagated to grandchildren.
     pub(crate) inherited_origin: InheritedOrigin,
+
+    /// The command line's `key=value` setters, applied per document after
+    /// `set_overrides`. A key `data_overrides` names keeps that value.
+    pub(crate) setters: crate::markdown::compose::setters::SetterPlan,
+
+    /// What `setters` wrote into the current document, as caller input. Derived
+    /// per document from `setters`, so no cache key holds it.
+    pub(crate) setter_bindings: crate::markdown::compose::setters::SetterBindings,
 
     /// Raw caller overrides and their per-property authoring contexts.
     pub(crate) caller_input_records: CallerInputRecords,
@@ -672,6 +689,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("set_overrides", &self.set_overrides)
             .field("data_overrides", &self.data_overrides)
             .field("inherited_origin", &self.inherited_origin)
+            .field("setters", &self.setters)
             .field("caller_input_records", &self.caller_input_records)
             .field("max_transclusion_depth", &self.max_transclusion_depth)
             .field("allow_remote_transclusion", &self.allow_remote_transclusion)
@@ -961,6 +979,8 @@ impl ComposeOptions {
             set_overrides: None,
             data_overrides: None,
             inherited_origin: InheritedOrigin::default(),
+            setters: crate::markdown::compose::setters::SetterPlan::default(),
+            setter_bindings: crate::markdown::compose::setters::SetterBindings::default(),
             caller_input_records: CallerInputRecords::new(),
             caller_file_provenance: std::collections::HashMap::new(),
             max_transclusion_depth: 16,
@@ -1227,6 +1247,19 @@ impl ComposeOptions {
         self
     }
 
+    /// Sets the command line's `key=value` setters.
+    ///
+    /// A setter is applied to each document after [`with_set_overrides`](Self::with_set_overrides)
+    /// and read through that document's schema, so it reaches a transcluded child
+    /// as a value of the child's declared type. A nested setter keeps its
+    /// siblings. Its value is authored, like a `--set` value.
+    #[must_use]
+    pub fn with_setters(mut self, setters: crate::markdown::compose::setters::SetterPlan) -> Self {
+        self.setter_bindings = setters.provisional_bindings();
+        self.setters = setters;
+        self
+    }
+
     /// Sets override values that overwrite existing frontmatter keys as
     /// **data**.
     ///
@@ -1295,6 +1328,8 @@ impl ComposeOptions {
     pub(crate) fn clear_root_overrides(&mut self) {
         self.set_overrides = None;
         self.data_overrides = None;
+        self.setters = crate::markdown::compose::setters::SetterPlan::default();
+        self.setter_bindings = crate::markdown::compose::setters::SetterBindings::default();
         self.inherited_origin = InheritedOrigin::default();
     }
 
@@ -2977,6 +3012,8 @@ impl ComposeOptions {
             set_overrides,
             data_overrides,
             inherited_origin,
+            setters,
+            setter_bindings: _,
             caller_input_records,
             caller_file_provenance,
             max_transclusion_depth,
@@ -3128,6 +3165,11 @@ impl ComposeOptions {
         }
         enc.field("inherited_origin");
         inherited_origin.encode(&mut enc);
+        enc.field("setters");
+        enc.count(setters.arguments().len());
+        for argument in setters.arguments() {
+            enc.str(argument);
+        }
         enc.field("caller_input_records");
         enc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
@@ -3622,6 +3664,11 @@ impl ComposeOptions {
         }
         cenc.field("inherited_origin");
         inherited_origin.encode(&mut cenc);
+        cenc.field("setters");
+        cenc.count(setters.arguments().len());
+        for argument in setters.arguments() {
+            cenc.str(argument);
+        }
         cenc.field("caller_input_records");
         cenc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
@@ -4203,6 +4250,24 @@ mod tests {
         }
         assert_ne!(rid(&unopened), rid(&variants[2]));
         assert_ne!(unopened.compose_cache_fingerprint(), variants[2].compose_cache_fingerprint());
+    }
+
+    #[test]
+    fn setters_participate_in_graph_and_cache_identity() {
+        use crate::markdown::compose::setters::{SetterPlan, TokenClass, classify_token};
+        let plan = |token: &str| {
+            let TokenClass::Setter(setter) = classify_token(token) else {
+                panic!("`{token}` is a setter");
+            };
+            SetterPlan::new([setter]).unwrap()
+        };
+        let a = fixed_opts().with_setters(plan("a.b=1"));
+        let b = fixed_opts().with_setters(plan("a.b=1.0"));
+        assert_ne!(id(&a), id(&b));
+        assert_ne!(fp(&a), fp(&b));
+        assert_ne!(id(&a), id(&fixed_opts()));
+        assert_eq!(id(&a), id(&a.clone()));
+        assert_eq!(fp(&a), fp(&a.clone()));
     }
 
     #[test]

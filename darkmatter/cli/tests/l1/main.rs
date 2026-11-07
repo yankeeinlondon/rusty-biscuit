@@ -61,6 +61,7 @@ mod compose_schema_file_rewrite;
 mod compose_scope_matrix;
 mod compose_shell;
 mod compose_shell_template;
+mod compose_setters;
 mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;

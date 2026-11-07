@@ -901,7 +901,8 @@ fn build_problem(
     };
     let kind = classify_kind(err.kind());
     let code = classify_code(err.kind());
-    let offending_property = offending_property_of(err.kind());
+    let offending_properties = offending_properties_of(err.kind());
+    let offending_property = offending_properties.first().cloned();
     let (message, file_reference) = match darkmatter_file_reference_outcome(err, anchors) {
         Some((message, diagnostic)) => (message, Some(diagnostic)),
         None => (
@@ -927,6 +928,7 @@ fn build_problem(
         instance_path,
         schema_path,
         offending_property,
+        offending_properties,
         file_reference,
         caller_file: None,
     }
@@ -953,14 +955,14 @@ fn is_darkmatter_file_format_name(format: &str) -> bool {
     format == format::DARKMATTER_FILE_FORMAT || format == format::DARKMATTER_FILE_REFERENCE_FORMAT
 }
 
-/// The specific undeclared key for an `additionalProperties` /
-/// `unevaluatedProperties` failure, whose instance path points at the *parent*
-/// object. `None` for every other error kind.
-fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
+/// The undeclared keys of an `additionalProperties` / `unevaluatedProperties`
+/// failure, whose instance path points at the *parent* object. Empty for every
+/// other error kind.
+fn offending_properties_of(kind: &ValidationErrorKind) -> Vec<String> {
     match kind {
         ValidationErrorKind::AdditionalProperties { unexpected }
-        | ValidationErrorKind::UnevaluatedProperties { unexpected } => unexpected.first().cloned(),
-        _ => None,
+        | ValidationErrorKind::UnevaluatedProperties { unexpected } => unexpected.clone(),
+        _ => Vec::new(),
     }
 }
 
@@ -2788,6 +2790,7 @@ mod tests {
             instance_path: JsonPointer::parse(path),
             schema_path: None,
             offending_property: None,
+            offending_properties: Vec::new(),
             file_reference: None,
             caller_file: None,
         }
@@ -3189,6 +3192,18 @@ mod tests {
             .find(|p| p.code == ValidationProblemCode::UnknownKey)
             .expect("unknown-key problem");
         assert_eq!(unknown.offending_property.as_deref(), Some("bogus"));
+    }
+
+    #[test]
+    fn every_unknown_key_of_an_object_is_named() {
+        let schema = json!({ "type": "object", "additionalProperties": false, "properties": { "known": { "type": "string" } } });
+        let v = build_structural_validator(&schema).unwrap();
+        let problems = collect_problems(&v, &json!({ "first": 1, "second": 2 }), &PositionMap::new());
+        let [unknown] = problems.as_slice() else {
+            panic!("one problem names both keys: {problems:#?}");
+        };
+        assert_eq!(unknown.offending_properties, ["first", "second"]);
+        assert_eq!(unknown.offending_property.as_deref(), Some("first"));
     }
 
     #[cfg(feature = "file")]

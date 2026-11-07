@@ -389,6 +389,16 @@ fn load_api(
     Ok((api, selection))
 }
 
+/// The [`DarkmatterSchemas`] an ordinary run of `md schema validate` would use,
+/// at the launch context: the same baseline selection, with no `--schema`.
+///
+/// ## Errors
+///
+/// As [`load_api`].
+pub(crate) fn request_schemas(request: &MdRequest) -> Result<DarkmatterSchemas, SchemaError> {
+    load_api(None, false, request).map(|(api, _)| api)
+}
+
 /// The baseline [`load_api`] selected.
 enum Baseline {
     None,

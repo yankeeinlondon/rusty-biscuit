@@ -152,6 +152,128 @@ decisions_for_review:
         it describes that node; this tidies the common case but sometimes deletes a
         comment about something else.
         To change it, adjust `remove_node` and `in_place`.
+    - |-
+        `md set` judges a document with the validation that defers pending values,
+        not the plain one the plan names. The plan says `EffectiveSchema::validate`,
+        which judges a whole `{{ template }}` as written, so `md set a.md count
+        '{{ fm.n }}'` under `number` would be refused. The spec says pending values
+        keep the existing composition rules, and composition accepts that value until
+        it renders. A malformed template is still refused.
+        Alternative: follow the plan, which is stricter but blocks a value compose
+        would accept.
+        To change it, call `validate` in `problems_of` in `commands/frontmatter.rs`,
+        and update `a_pending_value_is_written_unevaluated`.
+    - |-
+        Under `boolish`, an unquoted `true` or `false` is written as a boolean. Read
+        strictly, the plan's "goes through the conversion engine as text" keeps it as
+        the string "true", because `boolish` keeps what it is sent. The baseline
+        declares `draft: boolish`, so `md set doc.md draft true` would write
+        `draft: 'true'` and break a call that writes `draft: true` today. `On` and
+        `yes` stay text, as the spec requires. `string | boolean` is not changed, so
+        `true` stays text there, under the spec's union rules.
+        Alternative: keep text everywhere, which is simpler, and accept the quoted
+        result, which still reads as truthy.
+        Compose setters in Phase 5 inherit this because they share `bind`. To change
+        it, remove `keeps_booleans_as_sent` in `setter_value.rs` and its rows in
+        `text_goes_through_the_declared_type`, then decide what
+        `test_set_boolean_value` should expect.
+    - |-
+        A declared type comes from Darkmatter's compiled baseline, matching triggers,
+        and the document's schema, even when the baseline is replaced or disabled. The
+        plan names `def_at_path` without saying how a baseline reaches it, and only
+        `EffectiveSchema::property_shape` merges the layers, always with the compiled
+        baseline. So a key only a custom `BASELINE_SCHEMA` declares reads as undeclared
+        (`1.10` becomes 1.1 before validation judges it), and a key the disabled
+        baseline declares still reads through that type. Validation always uses the
+        real baseline selection, so a wrong type is never written unnoticed.
+        Alternative: derive the conversion from the merged JSON Schema, which covers
+        custom baselines but would add a second route from schema to type, for a rare
+        setup.
+        To change it, edit `declared_shape` in `schemas/completion.rs`, which Phase 5
+        also calls.
+    - |-
+        What `md set` accepts for `$schema`, where the spec only says "a valid schema
+        reference". Unquoted text is always a reference, so `$schema 2` is the bare
+        name "2". An inline object or array is also accepted if it parses as a schema,
+        because `$schema` can be written that way, and an edit inside one such as
+        `$schema.count number` judges the whole result. `null`, numbers, and booleans
+        are refused; `md rm` removes the key. No schema file is read, so a reference to
+        a file that does not exist is accepted.
+        Alternative: accept only strings, which would stop inline schemas being set at
+        all.
+        To change it, edit `set_schema_key` in `commands/frontmatter.rs`.
+    - |-
+        `md rm` keeps today's message, `Property "x" not found in frontmatter`, for a
+        key that does not exist, including listing every missing path, because existing
+        tests and scripts may read it. The plan routes all failures through
+        `PathEditError`, whose wording is "`x` does not exist". An out-of-range index, a
+        scalar parent, and a conflict use `PathEditError`'s own messages.
+        Alternative: one wording everywhere, which means less code but changes an
+        existing message.
+        To change it, delete the `not_found` block in `rm_value` and update `rm.rs`.
+    - |-
+        Additions the plan did not list, outside the phase's named files. The library
+        gains `schemas::completion::declared_shape`, which is rule 7's Darkmatter caller
+        and which Phase 5 also needs, and `frontmatter_as_json` becomes public so the
+        CLI judges the same value the library does. `CommandRun::add_diagnostics` lets a
+        skipped trigger's warning reach a data output even when the edit then fails.
+        `schema/validate.rs` exposes `request_schemas`, so `md set` selects its baseline
+        as `md schema validate` does. `--help` text for the three commands now describes
+        paths. On stdin, `md set` discovers triggers from the launch directory's
+        repository, since a pipe has no directory of its own.
+        Alternative for the library function: keep it in the CLI, then move it in Phase 5.
+    - |-
+        A schema problem on a value a setter supplied names the setter in its
+        message and has a null line and column, in a `dm.schema.*` record. The
+        plan says schema failures keep their codes and says nothing about their
+        positions, but left alone they pointed at the old on-disk scalar, which
+        the spec forbids. The record's file stays, as for any schema problem.
+        Alternative: report these as `dm.setter.invalid`, which loses the
+        schema's code that a consumer may branch on.
+        To change it, edit `SetterPlan::attribute_problem` and its callers in
+        `schema_validation.rs`.
+    - |-
+        A `dm.setter.invalid` record keeps `source: null` even when `md compose`
+        knows its document, so `with_document_fallback` skips that code. The plan
+        requires null, and the fallback would otherwise have filled in the file.
+        When a path cannot be applied in a document, the message names that
+        document, which is how a child is named (plan rule 16).
+        Alternative: a file with null line and column, like other failures with
+        no position. It reads as though the value were in that file, and the
+        spec says it is not.
+        To change it, remove the code check in `with_document_fallback`.
+    - |-
+        A nested setter on a `file` value resolves from the launch directory, as a
+        top-level one does, and its absolute path stays in the frontmatter. Two
+        things differ from a top-level setter: `{{ author.avatar }}` prints the
+        absolute path rather than the portable one, and a `match()` glob on it is
+        judged from the document's folder, because presentation values and caller
+        origins are keyed by top-level property. A whole object or a `--set` object
+        keeps today's limit: a file value inside one is not projected at all.
+        Alternative: extend both to paths, which changes `CallerOrigins` in
+        simplified-schema and the effective state's presentation map, for a rare
+        case.
+        To change it, start at `resolve_nested_setter_files` in
+        `schema_validation.rs`.
+    - |-
+        Added a public `ValidationProblem::offending_properties`, listing every
+        undeclared key of a failure. The plan compares problems without one: an
+        object's undeclared keys are one problem, and `offending_property` holds
+        only the first. That let `md set doc.md author.mistake 1` write when
+        `author` already had another undeclared key, a Phase 4 defect now fixed in
+        `blocking_problems` and tested, and it hid the setter in the same case.
+        Alternative: one problem per key, which is simpler to read but changes
+        how many diagnostics every consumer reports.
+        To change it, expand the problems in `validate.rs` and drop the field.
+    - |-
+        `apply_setter_plan` returns what it wrote, and the pipeline stores that on
+        the request, rather than taking a mutable request as the plan's signature
+        suggests. The pre-flight walks hold a shared request and need only the
+        document and provenance. A nested setter into a key `--set` supplied
+        records the whole key, so the `--set` record cannot restore the old value.
+        A repeated path keeps its first position with its last value, as the old
+        map did. Nothing else depends on these choices; each is local to
+        `setters.rs`.
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -178,17 +300,16 @@ packages:
     - darkmatter-cli
     - simplified-schema
 message_to_agent: |-
-    Phase 3 added `darkmatter::markdown::hash::{PathEdit, PathEditRefusal,
-    edit_frontmatter_paths, edited_document_text}`. For Phase 4, `edited_text` should
-    call `edited_document_text(&md, &edits)` on the Markdown whose map already holds
-    the pure edit: it runs the editor, applies the fallback, and verifies both. Build
-    `PathEdit::Set(path.resolve_map(md.frontmatter().as_map()).steps().to_vec())` after
-    `set_at`; build removals with `plan.targets().map(PathEdit::Remove)` from the plan
-    made on the unedited map, in any order. A refusal means write nothing and report
-    a run failure (exit 1). Calling with no edits while the map differs from the source
-    is itself a refusal, so always pass the real edits. The editor does not reflow, so
-    keep `at_width` after it. Four existing tests ran past 5 s under the full suite but
-    take 2 to 3 s alone; they are listed in the Phase 3 log.
+    For Phase 6: `compose::setters::classify_token` is the one setter grammar, and
+    `SetterPlan` settles overlaps. Completion's overlay should reuse both: applying
+    a plan with raw guesses is the first half of `setters::apply_setter_plan`, which
+    is `pub(crate)` and also binds, so split out the overlay step when you need it
+    rather than copying it. A `SetterPlan::new` error means an earlier setter on the
+    line is invalid, and completion must ignore that setter silently. `declared_shape`
+    needs a path that resolves, so give it the overlay's steps. `md compose` setters
+    now need a value's declared type per document; `cli/tests/l1/compose_setters.rs`
+    is the fixture pattern. `darkmatter/docs/cli/compose.md` still describes setters
+    merging into the `--set` map until Phase 9.
 source_files_during_phase_3:
     - darkmatter/lib/src/markdown/hash/path_edit.rs
     - darkmatter/lib/src/markdown/hash/mod.rs
@@ -199,6 +320,52 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_4:
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/commands/frontmatter.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/output/command.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - simplified-schema/lib/src/setter_value.rs
+    - simplified-schema/lib/tests/l1/setter_values.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_5:
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/frontmatter.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/tests/l1/compose_setters.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/setters.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/compose/value_origin.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/compose_setters.rs
+    - darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/validation.rs
+docs_updated_during_phase_5:
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/errors/composition-problems.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/compose.md
 ---
 
 # Implementation Log for 2026-11-06-dotted-paths (10 phases)
@@ -566,3 +733,222 @@ and run under scheduled CI.
 Updated `.claude/skills/darkmatter/frontmatter.md`, because it told agents not to add a YAML
 writer and now has to name this one. No `docs/` page changed, since no command behaves
 differently yet; Phase 9 owns those. This phase names no spec frontmatter to set.
+
+## Phase 4
+
+Connected `md get`, `md set`, and `md rm` to property paths, the shared value parser, and
+the nested text editor (rules 4 and 9 to 12).
+
+### What landed
+
+| Item | Where |
+|---|---|
+| `run_get`, `run_set`, `run_rm` on `PropertyPath`; `set_checked`, `blocking_problems`, `set_schema_key`; `edited_text` removed in favor of `edited_document_text` | `darkmatter/cli/src/commands/frontmatter.rs` |
+| `declared_shape` | `darkmatter/lib/src/markdown/schemas/completion.rs` |
+| `frontmatter_as_json` made public | `darkmatter/lib/src/markdown/schemas/mod.rs` |
+| `CommandRun::add_diagnostics` | `darkmatter/cli/src/output/command.rs` |
+| `request_schemas` | `darkmatter/cli/src/commands/schema/validate.rs` |
+| Unquoted `true`/`false` under `boolish` | `simplified-schema/lib/src/setter_value.rs` |
+
+`restore_properties_text` no longer has a caller in these commands. It stays because it is
+a public library function that was out of this phase's scope.
+
+### Defect the tests found in my first version
+
+`md set doc.md draft true` wrote `draft: 'true'`, because the baseline declares `draft:
+boolish`. `test_set_boolean_value`, an existing test, caught it. It is fixed in `bind` and
+listed in `decisions_for_review`.
+
+### Behavior worth knowing
+
+- `3` under `string | number` is written as the string `'3'`, as the spec's union rule
+  requires. Baseline keys with that type, such as some `style` values, do this.
+- A failed `md set` reports `dm.schema.*` codes with a null line, so a command-line value is
+  never attributed to the old value's position.
+- `md set` now prepares a schema on every run, taking about 0.25 s per test run in a debug
+  build against 0.04 s for `md get`. This is an observation from test timings, not a
+  benchmark.
+
+### Requirement-to-test mapping
+
+All new tests are L1 and spawn the real `md` through `CliProcessFixture` with fixture-owned
+documents and schemas (fidelity F2). The boundary is the CLI's exit status, output envelope,
+and file bytes. Tests are in `darkmatter/cli/tests/l1/get_set_rm.rs` under the module named
+in each row, unless another file is named.
+
+| Requirement | Tests |
+|---|---|
+| Rule 4 and rule 10: a malformed path exits 2 with no read | `malformed_paths::each_command_fails_as_usage_before_reading_anything`, `one_malformed_path_among_good_ones_stops_get_and_rm`, `stdin_is_not_consumed_for_a_malformed_path` |
+| Rule 10: nested reads, top-level unchanged | `get_paths::a_nested_value_is_read_and_an_ordinary_key_is_unchanged`; existing `test_get_*` |
+| Grammar: dots, `\.`, `\\`, `C:\dir`, `''`, `$schema`, Unicode | `get_paths::a_dot_always_separates_and_an_escaped_dot_names_a_literal_key`, `backslashes_follow_the_two_escapes`, `the_empty_argument_special_keys_and_unicode_are_ordinary_keys` |
+| Grammar: index versus key, `items.01`, signs, `-`, huge index, scalar and null traversal | `get_paths::a_number_is_an_index_on_an_array_and_a_key_on_a_mapping`, `an_unreachable_path_is_missing_and_prints_empty`; `set_paths::a_number_on_a_mapping_is_a_key` |
+| Out-of-range rows: `get`, `set`, `rm` | `get_paths::an_unreachable_path_is_missing_and_prints_empty`, `set_paths::an_array_element_is_edited_and_an_index_out_of_range_names_the_length`, `rm_paths::an_index_out_of_range_or_a_scalar_parent_is_an_error` |
+| Explicit null; flat multi-path `get` | `get_paths::an_explicit_null_stays_null_in_data_output`, `several_paths_give_a_flat_object_keyed_as_written`; `output_commands::conforms_get_nested_paths_stay_flat` |
+| `a.b` never literal; `a\.b` is, through `get` and `rm` | `set_paths::a_dotted_path_never_writes_a_literal_key_and_an_escaped_one_does` |
+| Parents table | `set_paths::a_missing_parent_is_created`, `a_number_under_a_missing_parent_is_refused`, `a_parent_that_cannot_hold_the_key_is_named_with_its_type`; `rm_paths::removing_the_last_child_leaves_the_parent` |
+| Replacing a whole value | `set_paths::a_whole_scalar_or_null_can_be_replaced_by_naming_it`, `the_empty_top_level_key_can_be_set` |
+| Rule 9: comments, read/write/read, flow fallback, alias refusal, stdin | `set_paths::a_nested_edit_keeps_comments_and_spelling_in_the_shared_parent`, `repeated_edits_round_trip_through_the_file`, `a_flow_collection_falls_back_and_still_edits_the_value`, `an_edit_an_alias_reads_is_refused_with_no_fallback`, `stdin_without_save_prints_the_edited_document`; `rm_paths::removing_an_anchor_an_alias_needs_is_refused` |
+| Rule 5 and 7: `string`, `number`, `numberlike`, `boolish`, `string \| number`, array elements, undeclared guess, `{a:1}`, YAML flow, quoted, `null`, empty | `set_values::a_declared_type_reads_the_text`, `numberlike_boolish_and_unions_follow_the_shared_rules`, `an_array_element_reads_through_the_element_type`, `an_undeclared_key_keeps_the_guess`, `containers_read_the_same_in_json5_and_yaml_flow`, `a_quoted_string_decodes_once_and_null_is_null`; `boolish` rows in `setter_values::text_goes_through_the_declared_type` (F1) |
+| Rule 6: admission failures, with no write | `set_values::an_inadmissible_container_fails_and_never_becomes_text` |
+| Pending values stay unevaluated | `set_values::a_pending_value_is_written_unevaluated` |
+| Rule 11, the three rows of the spec's table | `set_validation::a_valid_value_writes_despite_a_problem_elsewhere`, `a_value_the_type_rejects_writes_nothing`, `setting_the_missing_key_repairs_the_document` |
+| Rule 11: broken schema, separate file, `$schema`, ancestors, closed versus open, union narrowing, triggers, skipped-trigger warning | `set_validation::a_broken_schema_fails_with_an_explanation_and_no_write`, `a_schema_in_a_separate_file_applies`, `setting_schema_checks_only_the_reference`, `a_bare_schema_name_stays_a_string_and_an_inline_schema_is_read`, `a_required_child_of_a_new_or_replaced_object_blocks`, `a_nested_key_a_closed_object_does_not_declare_is_refused`, `a_pattern_key_opens_the_object`, `a_literal_tag_narrows_the_declared_type`, `a_trigger_selected_by_the_edit_reads_the_value_and_a_broken_trigger_is_only_a_warning` |
+| Rule 12: conflicts, original indexes, missing target, `removed` order, `remaining`, required key removal | `rm_paths::a_duplicate_or_an_ancestor_with_its_descendant_cancels_the_command`, `array_removals_use_original_indexes_in_either_order`, `a_missing_target_cancels_the_whole_command`, `removing_the_last_child_leaves_the_parent`, `the_empty_key_and_a_required_key_can_be_removed`, `removing_a_nested_key_keeps_its_siblings_and_their_comments` |
+| Source bytes unchanged after a failure | `assert_refused` compares the file's bytes in every refusal above |
+| Output contracts, no schema change | `output_commands::conforms_get_*`, `conforms_set_*`, `conforms_rm_*`, including new `conforms_set_nested_path_is_written_as_given`, `conforms_set_rejected_value_has_no_document`, `conforms_rm_nested_path_keeps_top_level_remaining`, `conforms_rm_conflict_fails`; `set_values::a_failed_value_reports_through_the_data_output_with_no_document`, `set_paths::the_result_carries_the_path_as_written_and_the_value_as_bound` |
+
+### Input Robustness Matrix
+
+Phase 2's parser and its matrix are unchanged, so this phase only wires them; the CLI proves
+that with a control value and invalid shapes (`set_values` above). Code-smell grep over
+`frontmatter.rs` and `declared_shape`: no `unwrap_or_default` or `#[serde(default)]`. Two
+intentional exceptions:
+
+- `.ok()` in `declared_shape`: a declaration with no conversion shape reads as undeclared, and
+  validation still judges the value.
+- `filter_map` in `element_shape`: a union arm that is not a collection has no element, so it
+  is not a candidate.
+
+The `.ok()` in `resolved_input` is existing code.
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping the gates. It reported
+`packages: [darkmatter, darkmatter-cli, simplified-schema, test-toolkit]`,
+`change_class: package`.
+
+| Gate | Result |
+|---|---|
+| `just lint` in `darkmatter/` | exit 0, rerun after the last source edit |
+| `just test` in `darkmatter/` | exit 0: 14088 passed, 10 skipped by the recipe's selection; none at or above 5 s |
+| `just check-tier-coverage darkmatter` | exit 0 |
+| `just lint` in `simplified-schema/` | exit 0 |
+| `just test` in `simplified-schema/` | 1479 passed, 0 skipped; second run 1291 passed, 0 skipped |
+
+After the full `darkmatter` run, the last edits were `--help` text and one test rename. I reran
+lint and `get_set_rm::` plus the help tests for those: 127 passed.
+
+### Dependent packages
+
+`darkmatter-cli` and `darkmatter-lsp` ran in full under `just test`. `cargo check --all-targets`
+exited 0 for `claudine` and `claudine-cli`, whose code uses only additive changes here; their
+test suites were not run.
+
+`test-toolkit`, which the scope check selected: `just test test-toolkit` exited 0 with 477 passed
+and 4 skipped, and two existing tests ran past 5 s (`archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path`
+6.278 s, `kache_host_contracts::report_resolves_the_worktree_base_by_the_wt_contract` 5.724 s). Neither calls this
+phase's code, and I left them as they are.
+
+### Cross-OS check
+
+Not run. The change adds no OS-specific code: a `\` here is key syntax, and file opening uses the
+existing `open_argument` and `canonicalize_simplified`. Other operating systems are unexecuted
+and run under scheduled CI.
+
+### Skills, docs, and spec
+
+Updated `.claude/skills/darkmatter/frontmatter.md`. `darkmatter/docs/cli/get.md`, `set.md`, and
+`rm.md` still describe top-level keys, because the plan gives them to Phase 9. This phase names no
+spec frontmatter to set, and the spec is unchanged.
+
+## Phase 5
+
+Replaced `md compose`'s early setter map with an ordered plan, bound per document through
+that document's schema (rules 13 to 18).
+
+### What landed
+
+| Item | Where |
+|---|---|
+| `classify_token`, `RawSetter`, `SetterPlan`, `apply_setter_plan`, `apply_setter_plan_for_preflight`, `SetterBindings` | new `darkmatter/lib/src/markdown/compose/setters.rs` |
+| `ComposeOptions::with_setters`, `setters` and `setter_bindings` fields, setters in both identity encoders | `compose/context/options.rs` |
+| Plan applied after `prepare_schemas`, before caller-file projection | `compose/pipeline/mod.rs`, and both walks in `compose/preflight/collect.rs` |
+| `DataPaths::clear_path`, `FrontmatterProvenance::set_authored_source` | `compose/value_origin.rs` |
+| Nested file setters projected from the launch directory | `compose/schema_validation.rs` |
+| `MarkdownError::Setter`, `dm.setter.invalid` with `source: null`, status block | `types.rs`, `compose/report_diagnostics.rs`, `errors/blocks.rs` |
+| `parse_compose_setter`, `parse_shorthand_value`, and the map parameter removed | `cli/src/commands/compose.rs`, `cli/src/commands/mod.rs` |
+| `ValidationProblem::offending_properties` | `simplified-schema/lib/src/validation.rs`, `validate.rs` |
+
+### Defects the tests found
+
+- A schema problem on a setter's value pointed at the old on-disk scalar. It now names the
+  setter and has a null position.
+- `dm.setter.invalid` picked up a file from `with_document_fallback`. That code is now exempt.
+- `md set` wrote a second undeclared key into a closed object, from Phase 4: the validator
+  reports an object's undeclared keys as one problem, and only the first was visible. Fixed
+  in `blocking_problems`, with `a_second_undeclared_key_is_refused_though_the_object_already_has_one`.
+
+### Requirement-to-test mapping
+
+CLI tests are L1 and spawn the real `md` through `CliProcessFixture` with fixture-owned
+documents, schemas, and repositories (fidelity F2). The boundary is the exit status, the
+output envelope, and the composed text. They are in `darkmatter/cli/tests/l1/compose_setters.rs`
+under the module named in each row. A successful `md compose` on a file crosses the reference
+check, the pre-flight walk, and the pipeline.
+
+| Requirement | Tests |
+|---|---|
+| Rule 13: classification | `setters::tests::a_word_that_fits_the_grammar_is_a_setter`, `a_word_that_does_not_fit_is_a_path` (includes `.\dir\.config=1.md`), `an_empty_key_is_its_own_class` (F1); `classifying::a_dotted_key_is_a_setter_and_dot_slash_makes_it_a_path`, `two_paths_are_still_refused`, `an_empty_key_is_a_setter_error` |
+| Rule 14: overlaps | `setters::tests::ancestors_come_first_and_independent_paths_keep_their_order`, `the_last_value_of_a_path_wins_and_decoded_paths_are_compared`, `an_overridden_value_is_never_read`, `a_scalar_or_null_ancestor_fails_in_both_orders`, `a_replaced_scalar_ancestor_does_not_block_the_value_that_won` (F1); `precedence::whole_object_plus_descendant_is_the_same_in_both_orders`, `a_scalar_ancestor_fails_in_both_orders_and_composes_nothing`, `a_scalar_ancestor_is_found_before_the_document_is_read`, `a_repeated_path_takes_the_last_value`, `an_overridden_value_needs_only_valid_syntax` |
+| `author.name=Alice` keeps siblings, reaches expressions; undotted as before; no write | `applying::a_nested_setter_keeps_its_siblings_and_reaches_expressions`, `a_setter_may_come_before_the_document`, `a_missing_parent_is_created_and_shows_in_the_composed_frontmatter`, `an_undotted_setter_behaves_as_before`, `a_setter_applies_to_stdin_input`, `an_array_element_is_overridden_for_this_run`, `the_file_on_disk_is_not_changed`, `an_escaped_dot_names_a_literal_key` |
+| Precedence over `--set`, `--state`; data overrides win | `precedence::a_setter_outranks_set_and_state`, `a_whole_object_setter_outranks_a_more_specific_set_value`, `a_dotted_set_key_stays_a_literal_key`; `darkmatter/lib/tests/l1/compose_setters.rs`: `a_setter_applies_after_set_overrides`, `a_data_override_keeps_the_key_it_names`, `an_empty_plan_changes_nothing` |
+| `items.9=x`, parents, admission | `failing::an_index_out_of_range_names_the_length_and_has_no_source`, `bounds_are_checked_against_an_ancestor_setter`, `a_scalar_parent_and_a_number_under_a_missing_parent_fail`, `an_inadmissible_container_never_becomes_text`, `a_failure_prints_to_stderr_in_markdown_mode` |
+| Rule 7 through compose: `string`, `number`, `numberlike`, `boolish`, unions, undeclared, quoted, containers, nested type, null, wrong value | `values::a_declared_type_reads_the_text`, `an_undeclared_key_keeps_the_guess`, `a_quoted_string_decodes_once_and_containers_read_alike`, `a_nested_value_reads_through_its_declared_type`, `null_is_accepted_only_where_the_type_permits`, `a_wrong_value_fails_schema_validation_and_is_not_placed_on_disk` |
+| Closed versus open object, required child | `values::a_closed_object_refuses_an_undeclared_child_and_a_pattern_opens_it`, `an_undeclared_child_beside_an_authored_one_is_still_given_to_its_setter`, `a_required_child_a_more_specific_setter_supplies_is_satisfied` |
+| Rule 15: schema selection | `selecting_a_schema::a_setter_selects_the_trigger_that_reads_another_in_either_order`, `a_set_that_replaces_the_schema_selects_the_same_way`, `a_trigger_on_a_converted_type_fails_clearly_with_no_retry` |
+| Rule 16: children | `reaching_children::a_child_reads_a_setter_through_its_own_schema`, `a_nested_setter_keeps_a_childs_siblings`, `a_path_a_child_cannot_hold_fails_the_run_and_names_the_child`, `a_setter_chooses_a_transclusion_target` (reference check) |
+| Rule 17: origins and provenance | `origins::an_authored_file_value_beside_a_setter_keeps_its_own_origin`, `a_nested_file_setter_resolves_from_the_launch_directory`, `a_nested_file_setter_does_not_fall_back_to_the_documents_directory`, `a_top_level_file_setter_keeps_resolving_from_the_launch_directory`; `value_origin::tests::clearing_a_path_keeps_the_values_beside_it`, `clearing_a_path_drops_marks_below_it_and_leaves_others` (F1) |
+| Pending values, failure naming the setter, pre-flight | `pending_values::a_template_in_a_setter_is_authored_at_any_depth`, `a_template_under_a_number_stays_pending_and_binds_after`, `a_failing_template_names_its_setter`, `the_shell_report_sees_a_command_a_setter_supplies`, `the_shell_report_fails_on_a_setter_the_document_cannot_hold` |
+| Rule 18: `dm.setter.invalid`, envelope | `assert_setter_failure` on every failure above; `a_data_output_reports_success_with_the_setter_applied` |
+| Cache identity | `options::tests::setters_participate_in_graph_and_cache_identity` (F1) |
+| Unknown-key naming | `validate::tests::every_unknown_key_of_an_object_is_named` (F1); `get_set_rm::set_validation::a_second_undeclared_key_is_refused_though_the_object_already_has_one` |
+
+The checkpoint holds: `compose_state_set`, the composition-errors tests, and every other existing
+test pass, and none needed a changed expectation. The only edits to existing tests moved the
+setter parser's unit tests and added the new field to struct literals.
+
+### Input Robustness Matrix
+
+Phase 2's parser and its matrix are unchanged; this phase wires them, shown by a control value
+and invalid shapes (`failing::an_inadmissible_container_never_becomes_text`). Code-smell grep over
+`setters.rs` and the new `schema_validation.rs` code: no `unwrap_or_default`, `.ok()`, or
+`#[serde(default)]`. The `filter_map` calls read schema shape or a value just written; none is on
+a load-bearing parse.
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping the gates. It reported
+`packages: [darkmatter, darkmatter-cli, simplified-schema, test-toolkit]`, `change_class: package`.
+
+| Gate | Result |
+|---|---|
+| `just lint` in `darkmatter/` | passed, including the Zed WASM check |
+| `just test` in `darkmatter/` | exit 0: 14151 passed, 10 skipped by the recipe's selection; none slow |
+| `just check-tier-coverage darkmatter` | exit 0 |
+| `just lint` in `simplified-schema/` | passed |
+| `just test` in `simplified-schema/` | exit 0: 1480 passed; second run 1292 passed; 0 skipped |
+
+No source changed after these runs; only the skill, this log, and the plan did.
+
+### Dependent packages
+
+- `claudine` and `claudine-cli`: `cargo check --all-targets` passed. `claudine` has over 200 tests,
+  so I ran those touching overrides and caller records: `test(caller) | test(set_override) |
+  test(override)`, 99 passed.
+- `messenger` reads `offending_property`: `test(research)`, 1 passed.
+- `test-toolkit`, which the scope check selected: `just test test-toolkit`, 477 passed, 4 skipped.
+  `archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path` took 5.295 s. It was
+  slow in Phase 4 too, does not call this phase's code, and is left as it is.
+
+### Cross-OS check
+
+Not run. The change adds no OS-specific code: `\` in a setter key is key syntax on every OS, and
+file values go through the existing `FileReference` projection. Other operating systems are
+unexecuted and run under scheduled CI.
+
+### Docs, skills, and spec
+
+Rule 18 added `dm.setter.invalid` to `docs/cli/data-contracts.md` and
+`docs/errors/composition-problems.md`. `docs/cli/compose.md` belongs to Phase 9. Updated
+`.claude/skills/darkmatter/compose.md`. This phase names no spec frontmatter to set, and the spec
+is unchanged.

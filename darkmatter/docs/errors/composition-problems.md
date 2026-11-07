@@ -116,8 +116,10 @@ What each family reports:
 | An undeclared property | the file and the line of its first read (for a read in frontmatter, its key's line); the column is `null` |
 | Another warning | the document that reported it |
 | Any other failure that holds no file, such as a caller's `--set` value that could not bind | the document named on the command line |
+| A schema problem on a value a `key.path=value` setter supplied | the file, with a `null` line and column; the message names the setter, because the value was never at the on-disk scalar |
+| A `dm.setter.invalid` setter that cannot be applied | `null`, whatever the document; the message names the argument, its path, and the document a path could not reach |
 
-`source` is `null` only when no file is known: input read from stdin or built in
+Apart from `dm.setter.invalid`, `source` is `null` only when no file is known: input read from stdin or built in
 memory, or a lifecycle `error:` step, whose message is the author's own text.
 
 Reference graphs keep a second set of numbers. `ReferenceOrigin::line` and `span`

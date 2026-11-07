@@ -237,6 +237,9 @@ pub(crate) struct CallerProjection {
     modes: HashMap<String, CallerFileMode>,
     classified: HashSet<String>,
     provenance: HashMap<String, super::expression::resolve_ctx::CallerFileProvenance>,
+    /// File values of nested setters, as native paths below a document-authored
+    /// parent.
+    nested_native: Vec<(Vec<ValuePathSegment>, serde_json::Value)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +253,25 @@ impl CallerProjection {
         let frontmatter = markdown.frontmatter_mut().as_map_mut();
         for (key, value) in &self.native {
             frontmatter.insert(key.clone(), value.clone());
+        }
+        self.install_nested(markdown);
+    }
+
+    fn install_nested(&self, markdown: &mut Markdown) {
+        for (path, value) in &self.nested_native {
+            let [ValuePathSegment::Key(key), below @ ..] = path.as_slice() else {
+                continue;
+            };
+            let mut current = markdown.frontmatter_mut().as_map_mut().get_mut(key);
+            for step in below {
+                current = current.and_then(|parent| match step {
+                    ValuePathSegment::Key(key) => parent.get_mut(key),
+                    ValuePathSegment::Index(index) => parent.get_mut(index),
+                });
+            }
+            if let Some(slot) = current {
+                *slot = value.clone();
+            }
         }
     }
 
@@ -501,8 +523,9 @@ pub(crate) fn run_with_registry(
             if matches!(
                 p.code,
                 simplified_schema::ValidationProblemCode::InvalidFileReference
-            ) && top_level_pointer_segment(&p.path)
+            ) && (top_level_pointer_segment(&p.path)
                 .is_some_and(|name| projection.native.contains_key(&name))
+                || projection.nested_native.iter().any(|(path, _)| nested_occurrence(path) == p.path))
             {
                 return false;
             }
@@ -512,6 +535,7 @@ pub(crate) fn run_with_registry(
             !deferral.defers_problem(p, &report.deferred, fm_map, data)
         })
         .cloned()
+        .map(|problem| attributed_to_setter(problem, options))
         .collect();
 
     if !report.valid && !composition_independent.is_empty() {
@@ -558,6 +582,7 @@ pub(crate) fn run_with_registry(
                 };
                 fm_map.insert(key, value);
             }
+            projection.install_nested(markdown);
         }
     }
 
@@ -612,6 +637,7 @@ pub(crate) fn validate_typed_shell_values(
         .filter(|problem| {
             top_level_pointer_segment(&problem.path).is_some_and(|name| keys.contains(&name))
         })
+        .map(|problem| attributed_to_setter(problem, options))
         .collect();
     if problems.is_empty() {
         return Ok(());
@@ -812,6 +838,7 @@ fn resolve_caller_file_overrides(
     ) else {
         return Ok(resolved);
     };
+    resolve_nested_setter_files(options, root, &fragments_by_property, &mut resolved)?;
     for (key, record) in &records {
         if options.exclude_keys.contains(key) {
             continue;
@@ -851,6 +878,117 @@ fn resolve_caller_file_overrides(
         }
     }
     Ok(resolved)
+}
+
+/// `problem`, named for the setter that supplied its value. A key a data override
+/// supplied never took the setter's value.
+fn attributed_to_setter(
+    mut problem: ValidationProblem,
+    options: &crate::markdown::compose::ComposeRequest,
+) -> ValidationProblem {
+    let data_owned = top_level_pointer_segment(&problem.path).is_some_and(|name| {
+        options.data_overrides.as_ref().and_then(serde_json::Value::as_object).is_some_and(|data| data.contains_key(&name))
+    });
+    if !data_owned {
+        options.setters.attribute_problem(&mut problem);
+    }
+    problem
+}
+
+/// Projects the file value of each nested setter from the launch area, as a
+/// whole-key caller value is. An ordinary value, and every authored value beside
+/// a setter, stays as it is.
+fn resolve_nested_setter_files(
+    options: &crate::markdown::compose::ComposeRequest,
+    root: &serde_json::Value,
+    fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
+    resolved: &mut CallerProjection,
+) -> Result<(), CallerProjectionFailure> {
+    if options.setter_bindings.nested.is_empty() {
+        return Ok(());
+    }
+    let origin = crate::markdown::compose::context::options::caller_origin(
+        options.resolution_context(),
+        options.file_ref_fallback_dir.as_deref(),
+    );
+    for record in &options.setter_bindings.nested {
+        let [ValuePathSegment::Key(key), below @ ..] = record.path.as_slice() else {
+            continue;
+        };
+        if options.exclude_keys.contains(key) {
+            continue;
+        }
+        let mut fragments = Vec::new();
+        for fragment in fragments_by_property.get(key).into_iter().flatten() {
+            fragments_below(fragment, root, below, &[], &mut fragments);
+        }
+        let selections: Vec<_> = fragments
+            .iter()
+            .filter_map(|fragment| Some((*fragment, select_file_mode(&record.raw, fragment, root, &origin)?)))
+            .collect();
+        let Some((_, mode)) = selections.first().copied() else {
+            continue;
+        };
+        if selections.iter().any(|(_, other)| *other != mode) {
+            continue;
+        }
+        let occurrence = nested_occurrence(&record.path);
+        for (fragment, _) in selections {
+            if let Some(value) = resolve_caller_file_value(&record.raw, fragment, root, &origin, &record.argument, &occurrence, mode)? {
+                resolved.nested_native.push((record.path.clone(), value.native));
+                for provenance in value.provenance {
+                    resolved.provenance.insert(provenance.occurrence, provenance.value);
+                }
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every schema fragment that can describe the value `steps` below `schema`,
+/// through references and combinators, which a path alone cannot choose among.
+fn fragments_below<'r>(
+    schema: &'r serde_json::Value,
+    root: &'r serde_json::Value,
+    steps: &[ValuePathSegment],
+    entered: &[&'r serde_json::Value],
+    found: &mut Vec<&'r serde_json::Value>,
+) {
+    let Some((step, rest)) = steps.split_first() else {
+        found.push(schema);
+        return;
+    };
+    if let Ok(Some(target)) = caller_reference_target(schema, root, entered) {
+        fragments_below(target, root, steps, &[entered, &[target]].concat(), found);
+    }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        for arm in schema.get(combinator).and_then(serde_json::Value::as_array).into_iter().flatten() {
+            fragments_below(arm, root, steps, entered, found);
+        }
+    }
+    let child = match step {
+        ValuePathSegment::Key(key) => schema
+            .get("properties")
+            .and_then(|properties| properties.get(key))
+            .or_else(|| schema.get("additionalProperties").filter(|fragment| fragment.is_object())),
+        ValuePathSegment::Index(index) => schema
+            .get("prefixItems")
+            .and_then(|items| items.get(index))
+            .or_else(|| schema.get("items").filter(|fragment| fragment.is_object())),
+    };
+    if let Some(child) = child {
+        fragments_below(child, root, rest, &[], found);
+    }
+}
+
+fn nested_occurrence(path: &[ValuePathSegment]) -> String {
+    path.iter()
+        .map(|step| match step {
+            ValuePathSegment::Key(key) => caller_occurrence(key),
+            ValuePathSegment::Index(index) => format!("/{index}"),
+        })
+        .collect()
 }
 
 fn classify_caller_overrides(
@@ -901,7 +1039,8 @@ fn caller_input_records(options: &crate::markdown::compose::ComposeRequest) -> c
         return options.caller_input_records().clone();
     }
     crate::markdown::compose::caller_input_records_for_overrides(
-        [&options.set_overrides, &options.data_overrides].into_iter().flatten(),
+        // The later a layer, the higher its precedence.
+        [&options.set_overrides, &options.setter_bindings.whole_keys, &options.data_overrides].into_iter().flatten(),
         options.resolution_context(),
         options.file_ref_fallback_dir.as_deref(),
     )
@@ -1638,6 +1777,7 @@ fn caller_projection_failure(
             instance_path: JsonPointer::parse(&pointer),
             schema_path: None,
             offending_property: None,
+            offending_properties: Vec::new(),
             file_reference: Some(diagnostic),
             caller_file: Some(CallerFileReferenceProvenance {
                 origin: origin.clone(),
@@ -2534,6 +2674,7 @@ mod tests {
                 instance_path: simplified_schema::JsonPointer::parse(path),
                 schema_path: None,
                 offending_property: None,
+                offending_properties: Vec::new(),
                 file_reference: None,
                 caller_file: None,
             };

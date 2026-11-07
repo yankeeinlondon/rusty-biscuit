@@ -112,7 +112,8 @@ impl SetterValue {
     /// unconverted, so schema validation is what reports it. With no declaration,
     /// or one that declares no structure (`unknown`), text is guessed from its
     /// JSON5 reading: `5` is the number `5`. A number admission would reject stays
-    /// text there.
+    /// text there. Under `boolish`, which keeps a boolean as sent, an unquoted
+    /// `true` or `false` is sent as that boolean, while `On` stays text.
     ///
     /// ## Examples
     ///
@@ -130,6 +131,9 @@ impl SetterValue {
         let declared = declared.filter(|shape| !declares_nothing(shape));
         match (self, declared) {
             (Self::Text { raw }, None) => guess_scalar(raw),
+            (Self::Text { raw }, Some(shape)) if keeps_booleans_as_sent(shape) && matches!(raw.as_str(), "true" | "false") => {
+                Value::Bool(raw == "true")
+            }
             (Self::Text { raw }, Some(shape)) => bound_or_original(shape, Value::String(raw.clone())),
             (Self::Quoted(text), _) => Value::String(text.clone()),
             (Self::Null, _) => Value::Null,
@@ -164,6 +168,14 @@ fn declares_nothing(shape: &Shape) -> bool {
     match shape {
         Shape::Any => true,
         Shape::Deferrable(inner) => declares_nothing(inner),
+        _ => false,
+    }
+}
+
+fn keeps_booleans_as_sent(shape: &Shape) -> bool {
+    match shape {
+        Shape::Boolean { as_sent } => *as_sent,
+        Shape::Assert(inner, _) | Shape::Deferrable(inner) => keeps_booleans_as_sent(inner),
         _ => false,
     }
 }

@@ -157,12 +157,16 @@ let meta: PostMeta = md.fm_parse()?;
 
 ## CLI Operations
 
-Use `md get`, `md set`, and `md rm` (top-level commands) for structured changes. `set` and
-`rm` compute the edited document from the parsed frontmatter, then splice only
-the changed top-level properties into the loaded source with
-`restore_properties_text` (`Markdown::source_text()` is the loaded text), so
-every other byte is kept. When that editor refuses the source (an indented
-root, an ambiguous edit), they fall back to re-serializing the whole document. When a
+Use `md get`, `md set`, and `md rm` (top-level commands) for structured changes. All
+three name a value by `PropertyPath` (`author.name`, `items.0`, `a\.b`), parsed before
+the document is read: a malformed path exits 2, anything else that fails exits 1 with the
+source untouched. `set` reads its value with `SetterValue`, binds it through
+`schemas::completion::declared_shape`, and blocks on a problem at or under the changed path
+or one the edit introduced (`commands/frontmatter.rs::blocking_problems`); `$schema` only
+checks that it can be a schema. `rm` plans with `RemovalPlan` and stays structural. Both
+write through `hash::edited_document_text`, described below, so comments on unnamed values
+survive; a source the editor refuses is re-serialized and verified, and a change to an
+unnamed value (an alias) is refused. When a
 document carries a managed `hash:` property, use the command's normal write
 path so Darkmatter can keep the stored hash consistent.
 

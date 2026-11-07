@@ -1,7 +1,7 @@
 ---
 total_phases: 10
 created: 2026-11-06
-phase: 4
+phase: 6
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -39,6 +39,52 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_4:
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- simplified-schema/lib/src/setter_value.rs
+- simplified-schema/lib/tests/l1/setter_values.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_5:
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/setters.rs
+- darkmatter/lib/src/markdown/compose/util.rs
+- darkmatter/lib/src/markdown/compose/value_origin.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/tests/l1/compose_setters.rs
+- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+- darkmatter/lib/tests/l1/main.rs
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/validation.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/errors/composition-problems.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/compose.md
 ---
 
 # Dotted Property Paths Implementation Plan
@@ -124,13 +170,13 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 4: Frontmatter Commands
 
-- [ ] **Frontmatter commands**
+- [x] **Frontmatter commands**
   - Own `cli/src/commands/frontmatter.rs` and `cli/tests/l1/get_set_rm.rs`. Implement rules 4 and 9–12, with `md set` and `md compose` both using the shared parser. Update the doc comments on `requested_value`, `set_value`, `rm_value`, and `edited_text`.
   - Test each row of the spec's grammar, Parents, and `md set` validation tables, multi-path `get`, `'$schema'`, `''`, `'a\.b'`, `rm` conflicts and original indexes, exit 2 with no read for a malformed path, and source bytes unchanged after every failure. Confirm `conforms_*` tests for `get.yaml`, `set.yaml`, and `rm.yaml` pass with no schema change.
 
 ## Phase 5: Compose Setters
 
-- [ ] **Compose setters**
+- [x] **Compose setters**
   - Own new `lib/src/markdown/compose/setters.rs`, `compose/util.rs`, the three call sites that gain `apply_setter_plan`, `context/options.rs`, `value_origin.rs`, the caller-record paths in `schema_validation.rs`, `report_diagnostics.rs`, `cli/src/commands/compose.rs`, and the dispatch in `cli/src/commands/mod.rs`. Implement rules 13–18. Remove `parse_compose_setter`, `parse_shorthand_value`, and the map parameter; move their tests.
   - Test `author.name=Alice` keeping siblings and reaching expressions, undotted setters behaving as before, precedence over `--set` and `--state`, both argument orders of whole-object plus descendant, both orders of scalar ancestor plus descendant, repeated paths, `items.9=x`, `a.b=c.md` versus `./a.b=c.md`, `version=1.10` under `string`, a `lang=rust edition=1.10` trigger in both orders, a `--set` replacing `$schema`, a trigger on a converted type failing clearly, `dm.schema.unknown_key` under a closed object versus none under `"<string>": unknown`, a child document binding through its own schema, an authored file value beside a setter keeping its own origin, a setter's `{{ }}`, and `dm.setter.invalid` with `source: null`.
   - Run the reference-check and preflight paths through the same fixtures, because both prepare frontmatter.

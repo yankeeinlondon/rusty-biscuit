@@ -51,6 +51,8 @@
 use serde_json::Value;
 
 use super::EffectiveSchema;
+use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def_with_definitions};
+use simplified_schema::coercion::Shape;
 pub use simplified_schema::completion::*;
 use simplified_schema::simplified::query::{Alternative, resolved_alternatives};
 use simplified_schema::simplified::{
@@ -395,6 +397,54 @@ pub fn for_property_value(
 /// reference-resolution contract.
 pub fn for_path(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathStep<'_>]) -> Option<AlternativeCompletion> {
     for_path_in(effective.simplified.as_ref()?, effective, frontmatter, path)
+}
+
+/// The type declared for the value at `path`, for reading a value written on a
+/// command line through `SetterValue::bind`.
+///
+/// The declaration comes from every layer [`EffectiveSchema::property_shape`]
+/// merges (the compiled base properties, matching triggers, then the document's
+/// `$schema`), and a union narrows by `frontmatter`'s literal tags. A custom
+/// baseline has no SimplifiedSchema here, so its properties read as undeclared;
+/// validation still judges them.
+///
+/// `None` when the path leaves the schema, or the declaration has no conversion
+/// shape: the caller then treats the value as undeclared.
+pub fn declared_shape(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathStep<'_>]) -> Option<Shape> {
+    let root = SchemaRoot::Single(effective.property_shape(&[], frontmatter));
+    let (def, site) = def_at_path(&root, effective, frontmatter, path)?;
+    let shape = shape_from_property_def_with_definitions(&def, &NoNamedTypes, effective.layered_definitions()).ok()?;
+    match (site, path.last()) {
+        (AlternativeSite::Item, Some(PathStep::Index(index))) => element_shape(&shape, *index),
+        _ => Some(shape),
+    }
+}
+
+/// The shape of element `index` of a value shaped `shape`: [`def_at_path`] stops
+/// at the array's own definition for a path ending on an index.
+fn element_shape(shape: &Shape, index: usize) -> Option<Shape> {
+    match shape {
+        Shape::Array(array) => Some(array.items.as_ref().clone()),
+        Shape::Tuple(tuple) => tuple
+            .prefix
+            .get(index)
+            .map(|slot| slot.shape.clone())
+            .or_else(|| tuple.rest.as_deref().cloned()),
+        Shape::Union(arms) => {
+            let mut elements: Vec<Shape> = arms.iter().filter_map(|arm| element_shape(arm, index)).collect();
+            match elements.len() {
+                0 => None,
+                1 => elements.pop(),
+                _ => Some(Shape::Union(elements)),
+            }
+        }
+        Shape::Assert(inner, _) | Shape::Deferrable(inner) => element_shape(inner, index),
+        Shape::Ref(reference) => {
+            let target = reference.target()?;
+            element_shape(&target, index)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

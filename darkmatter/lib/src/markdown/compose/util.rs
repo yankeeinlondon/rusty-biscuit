@@ -150,7 +150,9 @@ fn get_attribute_name_for_syntax(
 ///
 /// This mutates frontmatter with external-state defaults, the directive `set`
 /// overlay's origin, authored `--set` overrides, and data overrides using the
-/// same rules the real compose pipeline uses.
+/// same rules the real compose pipeline uses. Setters come later: reading them
+/// needs the schemas this preparation feeds, so each caller follows with
+/// [`apply_setter_plan`](super::setters::apply_setter_plan).
 ///
 /// ## Returns
 ///

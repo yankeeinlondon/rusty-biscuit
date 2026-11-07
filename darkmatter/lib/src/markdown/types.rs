@@ -328,6 +328,18 @@ pub enum MarkdownError {
         property: String,
     },
 
+    /// A command-line setter could not be applied. A command-line value has no
+    /// authored line or column, so this names the argument instead.
+    #[error("Invalid setter `{argument}` at `{path}`: {reason}")]
+    Setter {
+        /// The argument as written.
+        argument: String,
+        /// The setter's path, in canonical spelling.
+        path: String,
+        /// Why it failed.
+        reason: String,
+    },
+
     /// A caller-supplied schema-typed file value could not be materialized.
     #[error("Parameter binding failed for `{property}` value `{provided}`: {reason}")]
     ParameterBinding {
@@ -848,6 +860,7 @@ impl BlockError for MarkdownError {
                 provided,
                 reason,
             } => blocks::parameter_binding_block(property, provided, reason),
+            MarkdownError::Setter { argument, path, reason } => blocks::setter_block(argument, path, reason),
             MarkdownError::BlockedDiagnostics { blocking, .. } => blocks::blocked_diagnostics_block(blocking),
         }
     }

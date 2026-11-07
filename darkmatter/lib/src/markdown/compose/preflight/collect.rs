@@ -607,7 +607,9 @@ fn collect_document(
     // frontmatter-shell expansion cannot be approved condition-blind: its
     // approved shape (with `$(...)`) differs from its executed shape. Reject it
     // here rather than letting it surface as a late `NotPreApproved`.
-    let prepared_provenance = prepare_frontmatter_for_compose(&mut markdown.clone(), options);
+    let mut with_setters = markdown.clone();
+    let mut prepared_provenance = prepare_frontmatter_for_compose(&mut with_setters, options);
+    crate::markdown::compose::setters::apply_setter_plan_for_preflight(&mut with_setters, options, &mut prepared_provenance)?;
     let mut pending = pending_shell_literals(&prepared, &prepared_provenance, &prepared_ctx);
     pending.extend(still_inherited_pending(&prepared, &inherited.pending));
     let for_children = InheritedDiscovery {
@@ -1256,6 +1258,7 @@ fn scan_one_frontmatter(
 ) -> MarkdownResult<()> {
     let mut fm_clone = markdown.clone();
     let mut provenance = prepare_frontmatter_for_compose(&mut fm_clone, options);
+    crate::markdown::compose::setters::apply_setter_plan_for_preflight(&mut fm_clone, options, &mut provenance)?;
     let mut preflight_exclude_keys = options.exclude_keys.clone();
     preflight_exclude_keys.insert("$schema".to_string());
     let mut best_effort_missing_context = None;
@@ -1719,6 +1722,7 @@ fn unobserved_keys(
             .flatten()
             .filter_map(Value::as_object)
             .any(|overrides| overrides.contains_key(key))
+            || options.setters.names_whole_key(key)
     };
     let mut unobserved: Vec<String> = inherited
         .iter()

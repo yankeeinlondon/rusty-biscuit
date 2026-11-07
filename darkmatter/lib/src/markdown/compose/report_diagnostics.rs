@@ -54,6 +54,9 @@ pub const TRANSCLUSION_FAILURE_CODE: &str = "dm.transclusion.failure";
 pub const REFERENCE_FAILURE_CODE: &str = "dm.reference.failure";
 /// A caller-supplied value did not bind to its parameter.
 pub const PARAMETER_BINDING_CODE: &str = "dm.compose.parameter_binding";
+/// A command-line setter could not be applied. Its `source` stays null, because
+/// a command-line value has no place in any file.
+pub const SETTER_INVALID_CODE: &str = "dm.setter.invalid";
 /// A lifecycle event failed.
 pub const LIFECYCLE_FAILURE_CODE: &str = "dm.lifecycle.failure";
 /// A composition failure no narrower code classifies.
@@ -86,12 +89,13 @@ pub fn warning_diagnostic(warning: &ComposeWarning) -> Diagnostic {
 /// Names `document`, the composed document, as the file of each of
 /// `diagnostics` that names none. For a host that knows the document it asked
 /// for: a failure's typed error may hold no file of its own. `None` changes
-/// nothing, so input with no named origin keeps a null `source`.
+/// nothing, so input with no named origin keeps a null `source`, and so does a
+/// [`SETTER_INVALID_CODE`] record, whose value the document never held.
 pub fn with_document_fallback(diagnostics: &mut [Diagnostic], document: Option<&Path>) {
     let Some(document) = document else {
         return;
     };
-    for diagnostic in diagnostics.iter_mut().filter(|diagnostic| diagnostic.source.is_none()) {
+    for diagnostic in diagnostics.iter_mut().filter(|diagnostic| diagnostic.source.is_none() && diagnostic.code != SETTER_INVALID_CODE) {
         diagnostic.source = Some(DiagnosticSource::file_only(Some(document.to_path_buf())));
     }
 }
@@ -380,6 +384,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         MarkdownError::ParameterBinding { .. } | MarkdownError::CallerFileClassificationChanged { .. } => {
             (PARAMETER_BINDING_CODE, None)
         }
+        MarkdownError::Setter { .. } => (SETTER_INVALID_CODE, None),
         _ => (COMPOSE_FAILURE_CODE, None),
     };
     Diagnostic {

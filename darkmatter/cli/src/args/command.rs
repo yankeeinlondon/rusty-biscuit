@@ -235,13 +235,13 @@ pub enum Command {
         output: OutputTarget,
     },
 
-    /// Get frontmatter properties from a markdown document.
+    /// Get frontmatter values from a markdown document, by property path.
     Get {
         /// Input file path (use "-" for stdin)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: PathBuf,
 
-        /// Frontmatter property names to retrieve
+        /// Property paths to retrieve: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
         #[arg(value_name = "PROP", required = true, num_args = 1..)]
         props: Vec<String>,
 
@@ -255,17 +255,17 @@ pub enum Command {
         compact: bool,
     },
 
-    /// Set a frontmatter property on a markdown document.
+    /// Set the value at a frontmatter property path in a markdown document.
     Set {
         /// Input file path (use "-" for stdin; outputs to stdout)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: PathBuf,
 
-        /// Frontmatter property name to set
+        /// Property path to set: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
         #[arg(value_name = "PROP")]
         prop: String,
 
-        /// Value to set (parsed as JSON if valid, otherwise treated as a string)
+        /// Value to set: JSON5 or a YAML flow mapping, otherwise text, read through the type the schema declares
         #[arg(value_name = "VALUE")]
         value: String,
 
@@ -278,13 +278,13 @@ pub enum Command {
         output: OutputTarget,
     },
 
-    /// Remove one or more frontmatter properties from a markdown document.
+    /// Remove the values at one or more frontmatter property paths from a markdown document.
     Rm {
         /// Input file path (supports @ file references)
         #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
         input: PathBuf,
 
-        /// Property names to remove
+        /// Property paths to remove: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
         #[arg(value_name = "PROP", required = true, num_args = 1..)]
         props: Vec<String>,
 

@@ -22,6 +22,7 @@ mod function_binding_conversions;
 #[cfg(feature = "effects-instrumentation")]
 mod function_catalog_parity;
 mod compose_diagnostic_identity;
+mod compose_setters;
 mod compose_expression_failure_contract;
 mod context_construction_guard;
 mod context_functions;

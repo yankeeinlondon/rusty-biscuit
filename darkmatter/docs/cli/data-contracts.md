@@ -286,6 +286,7 @@ classified by what failed:
 | `dm.transclusion.failure` | a transclusion fails for another reason |
 | `dm.reference.failure` | a file reference does not resolve |
 | `dm.compose.parameter_binding` | a supplied value does not bind to its parameter |
+| `dm.setter.invalid` | a `key.path=value` setter cannot be applied: its value is an invalid container, its path meets a scalar parent or an index out of range in a document, or a scalar setter overlaps a setter below it. The message names the argument and its path; `source` is null, because a command-line value is in no file |
 | `dm.lifecycle.failure` | a lifecycle event fails (an `error:` action, a failed action) |
 | `dm.hash.no_stored_hash` | `md hash --diff` found no stored hash to compare against |
 | `dm.hash.changed` | `md hash --diff` found the document differs from its stored hash |

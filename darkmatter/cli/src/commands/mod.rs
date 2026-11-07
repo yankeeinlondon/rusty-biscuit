@@ -171,7 +171,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                     parsed.input.as_ref(),
                     state.as_deref(),
                     set.as_deref(),
-                    parsed.shorthand_setters,
+                    parsed.setters,
                     ComposeOutputWidth::from_resolved(&resolved),
                     show,
                     frontmatter,
