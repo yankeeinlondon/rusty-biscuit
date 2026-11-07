@@ -494,16 +494,6 @@ packages:
     - darkmatter
     - darkmatter-cli
     - simplified-schema
-message_to_agent: |-
-    For Phase 10: Phase 9 changed only Markdown. The scope check still selects `darkmatter` for
-    those files alone, as a test input a test reads, so they are not gate-exempt. `just test` and
-    `just lint` in `darkmatter/` passed with them in place. `md validate refs` cannot judge
-    `compose.md`, `data-contracts.md`, `numbers.md`, `composition-problems.md`,
-    `foundations.md`, or the simplified-schema README, because it evaluates their illustrative
-    `{{ ... }}` text and fails. The committed versions fail the same way, so this predates the
-    feature. Their links and anchors were checked by a script; the only misses are three old
-    repo-rooted links in that README. The release measurement and per-shell results for closure
-    are in the log under Phases 7 and 8.
 source_files_during_phase_3:
     - darkmatter/lib/src/markdown/hash/path_edit.rs
     - darkmatter/lib/src/markdown/hash/mod.rs
@@ -622,6 +612,96 @@ skills_files_updated_during_phase_9:
     - .claude/skills/darkmatter/cli.md
     - .claude/skills/os/macos.md
     - .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_10:
+    - darkmatter/cli/tests/l1/compose_setters.rs
+docs_updated_during_phase_10: []
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+source_code:
+    - biscuit-file/lib/src/json5/mod.rs
+    - biscuit-file/lib/src/json5/scan.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/src/args/command.rs
+    - darkmatter/cli/src/args/completion.rs
+    - darkmatter/cli/src/args/mod.rs
+    - darkmatter/cli/src/args/path_completion.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/frontmatter.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/completion_shells.rs
+    - darkmatter/cli/src/lib.rs
+    - darkmatter/cli/src/main.rs
+    - darkmatter/cli/src/output/command.rs
+    - darkmatter/cli/src/request.rs
+    - darkmatter/cli/tests/l1/compose_setters.rs
+    - darkmatter/cli/tests/l1/context_construction_guard.rs
+    - darkmatter/cli/tests/l1/get_set_rm.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/output_commands.rs
+    - darkmatter/cli/tests/l1/path_completion.rs
+    - darkmatter/cli/tests/l1/property_paths.rs
+    - darkmatter/cli/tests/level2/level2_path_completion.rs
+    - darkmatter/cli/tests/level2/main.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/setters.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/compose/value_origin.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/hash/path_edit.rs
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/compose_setters.rs
+    - darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+    - darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/path_candidates.rs
+    - simplified-schema/lib/src/lib.rs
+    - simplified-schema/lib/src/numeric.rs
+    - simplified-schema/lib/src/numeric/ingress.rs
+    - simplified-schema/lib/src/property_path.rs
+    - simplified-schema/lib/src/setter_value.rs
+    - simplified-schema/lib/src/validate.rs
+    - simplified-schema/lib/src/validation.rs
+    - simplified-schema/lib/tests/l1/main.rs
+    - simplified-schema/lib/tests/l1/property_paths.rs
+    - simplified-schema/lib/tests/l1/setter_values.rs
+documentation:
+    - .claude/skills/biscuit-file/references/api.md
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/testing.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/os/windows.md
+    - .claude/skills/simplified-schema/SKILL.md
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/cli/get.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/cli/rm.md
+    - darkmatter/docs/cli/set.md
+    - darkmatter/docs/errors/composition-problems.md
+    - darkmatter/docs/topics/frontmatter.md
+    - darkmatter/docs/topics/numbers.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/foundations.md
+    - simplified-schema/docs/topics/property-paths.md
+    - simplified-schema/docs/topics/setter-values.md
+completed_phase: 10
+implemented: true
 ---
 
 # Implementation Log for 2026-11-06-dotted-paths (10 phases)
@@ -1655,3 +1735,102 @@ cross-OS check was needed. The Windows notes in the docs (`.\dir\.config=1.md`) 
 and the Phase 8 cross-check.
 
 No spec frontmatter was named for this phase, and the spec is unchanged.
+
+## Phase 10
+
+Ran the integrated validation and closed the plan. The review found one coverage gap: the plan
+asks for the `.\dir\.config=1.md` classification under `#[cfg(windows)]`, and the only coverage was
+an all-OS assertion on the classifier, so nothing proved the real command on native Windows.
+
+### What landed
+
+| Item | Where |
+|---|---|
+| `classifying::a_windows_path_with_a_dot_folder_needs_its_leading_dot_backslash`, `#[cfg(windows)]`: `.\dir\.config=1.md` opens that file, and `dir\.config=1.md` beside `doc.md` is a setter rather than a second input | `darkmatter/cli/tests/l1/compose_setters.rs` |
+
+No product code changed. The test only asserts behavior the spec already states.
+
+### Requirement-to-test mapping
+
+| Requirement | Test or check | Boundary and fidelity |
+|---|---|---|
+| A file named like a setter opens with `.\` on native Windows | the test above, first assertion | CLI process, native Windows, F2 |
+| `dir\.config=1.md` reads as a setter there | the test above, second assertion: a second input would exit 1 with "expected at most one input path" | CLI process, native Windows, F2 |
+| Every spec acceptance criterion | the table under Phase 8, unchanged | as listed there |
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping, because a test source changed. Over that file it reports
+`packages: [darkmatter-cli, test-toolkit]`.
+
+| Gate | Result |
+|---|---|
+| `just test` in `darkmatter/`, rerun after the new test | exit 0: 14296 passed, 10 skipped by the recipe's selection; none at or above 5 s |
+| `just lint` in `darkmatter/`, rerun after the new test | exit 0, including the Zed WASM check |
+| `just test` in `simplified-schema/` | exit 0: 1480 passed in the first run, 1292 in the second; 0 skipped |
+| `just lint` in `simplified-schema/` | exit 0 |
+| `just test` in `biscuit-file/` | exit 0: 1198 passed; then 6 passed, 67 skipped by selection |
+| `just lint` in `biscuit-file/` | exit 0 |
+| `just test-l2 level2_path_completion` in `darkmatter/` | exit 0: 4 passed. The full `just test-l2` was not run; the plan names the new target |
+| `just check-tier-coverage darkmatter` (from the root) | exit 0; stranded 0 |
+| `just test test-toolkit` (selected by the scope check) | exit 0: 477 passed, 4 skipped. Two tests took over the 5 s budget: `kache_host_contracts::report_resolves_the_worktree_base_by_the_wt_contract` (5.03 s) and `archive_path_guard::no_archive_executed_target_bakes_in_a_producer_path` (5.56 s). This feature did not touch either; recorded, not fixed |
+| `cargo --color=never check --all-targets -p claudine -p claudine-cli` | exit 0 |
+| `git diff --check` over the working tree | exit 0 |
+
+The new test is `#[cfg(windows)]`, so the macOS count stays 14296 and its reruns add no macOS
+coverage; they confirm the edit left the build clean. The two `simplified-schema` and `biscuit-file`
+runs were made before that edit, which touches neither package. No test failed in any run, and no
+test was load-sensitive apart from the two slow `test-toolkit` tests noted above. `git diff --check`
+over each of this feature's six implementation and docs commits reports nothing. Against `main`, it
+reports trailing whitespace in ten files from other commits on this branch, including older lines of
+`simplified-schema/README.md`, which this feature also edits; those were left alone.
+
+### Guards
+
+All passed in the runs above: `schema_language_ownership_guard` and `dependency_direction_guard`
+(schema ownership), `context_construction_guard` in lib and CLI, `path_lookup_guard` in lib and CLI,
+and in `output_commands`, `every_leaf_has_a_schema_file_and_a_conformance_test` with the 14
+`conforms_get_*`, `conforms_set_*`, and `conforms_rm_*` cases.
+
+### Comment review
+
+Reviewed the doc comments on the changed behavior in `cli/src/commands/frontmatter.rs` and the `get`,
+`set`, and `rm` help text in `cli/src/args/command.rs`; they match the code. `edited_text`, which the
+plan names, no longer exists, so its comment has nothing to drift. `parse_compose_setter`,
+`parse_shorthand_value`, and the removed doc claims appear nowhere in `darkmatter/lib/src`, `darkmatter/cli/src`,
+`darkmatter/docs`, `simplified-schema/docs`, or the Darkmatter skill. The new modules have no `TODO`, `FIXME`, `todo!`, or `unimplemented!`.
+The robustness grep matches only the `.ok()` calls already recorded as intentional under Phase 2.
+
+### Where the closure evidence lives
+
+- Test names per acceptance criterion: "Acceptance criteria to tests" under Phase 8.
+- Release measurement: "Release measurement" under Phase 7, one sample, about 40 ms outside a
+  repository and about 80 ms inside this monorepo. Not remeasured; no product code changed since.
+- Per-shell results: "Per-shell results" under Phase 8. Bash 5.3.20, bash 3.2.57, zsh, and fish are
+  proven with real Tab. Elvish has its word shape proven only, because it is not installed.
+  PowerShell has its word shape proven and its script loading on native Windows, with real Tab unproven.
+- Departures from the plan and spec: the `decisions_for_review` list, which this phase did not
+  add to.
+
+### Operating systems
+
+| OS | Status in this phase |
+|---|---|
+| macOS | full gates above |
+| native Windows | `just cross-check darkmatter-cli --os windows compose_setters::classifying`: exit 0, 4 passed, 2156 filtered out, on a patched tree, so it publishes no CI observation. Targeted evidence only. The last full `darkmatter-cli` Windows run is the one under Phase 8, 2079 passed |
+| Linux | **unexecuted**; runs under the repository's scheduled CI |
+| WSL2 | **unexecuted**; runs under the repository's scheduled CI |
+
+`simplified-schema`, `biscuit-file`, and the `darkmatter` library have no native Windows run recorded
+in this plan, only `darkmatter-cli` does, so scheduled CI is their first evidence there.
+
+### Dependent packages
+
+`claudine` and `claudine-cli` compile, as above. No library code changed in this phase, so no
+dependent's tests were run.
+
+### Docs, skills, and spec
+
+No docs or skills changed. The `-E` quoting trap hit while filtering the Windows run is already in
+`.claude/skills/os/build-hosts.md`, and the Darkmatter skill needed no change. The feature stays in
+the active directory: implementation complete, ready for review.

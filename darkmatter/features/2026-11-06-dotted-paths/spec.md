@@ -28,8 +28,9 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-11-06
 clarified: true
-implemented: false
-review_iterations: 0
+implemented: true
+review_iterations: 4
+completed: true
 packages:
     - darkmatter-cli
     - darkmatter
@@ -40,6 +41,7 @@ related:
 depends-on:
     - 2026-11-04-composition-errors
 next_spec: 2026-11-04-loading-data
+implemented_by: claude/opus
 ---
 
 # Dotted Property Paths

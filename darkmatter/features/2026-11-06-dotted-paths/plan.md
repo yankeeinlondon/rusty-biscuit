@@ -1,7 +1,7 @@
 ---
 total_phases: 10
 created: 2026-11-06
-phase: 10
+phase: 11
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -147,6 +147,96 @@ skills_files_updated_during_phase_9:
 - .claude/skills/darkmatter/cli.md
 - .claude/skills/os/macos.md
 - .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_10:
+- darkmatter/cli/tests/l1/compose_setters.rs
+docs_updated_during_phase_10: []
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+source_code:
+- biscuit-file/lib/src/json5/mod.rs
+- biscuit-file/lib/src/json5/scan.rs
+- biscuit-file/lib/src/lib.rs
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/completion.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/frontmatter.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/src/completion_shells.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/src/main.rs
+- darkmatter/cli/src/output/command.rs
+- darkmatter/cli/src/request.rs
+- darkmatter/cli/tests/l1/compose_setters.rs
+- darkmatter/cli/tests/l1/context_construction_guard.rs
+- darkmatter/cli/tests/l1/get_set_rm.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/output_commands.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/property_paths.rs
+- darkmatter/cli/tests/level2/level2_path_completion.rs
+- darkmatter/cli/tests/level2/main.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/schema_validation.rs
+- darkmatter/lib/src/markdown/compose/setters.rs
+- darkmatter/lib/src/markdown/compose/util.rs
+- darkmatter/lib/src/markdown/compose/value_origin.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/path_edit.rs
+- darkmatter/lib/src/markdown/hash/write.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/completion.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/load.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/tests/l1/compose_setters.rs
+- darkmatter/lib/tests/l1/error_snapshots/markdown_error.rs
+- darkmatter/lib/tests/l1/frontmatter_path_edit.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/path_candidates.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/numeric.rs
+- simplified-schema/lib/src/numeric/ingress.rs
+- simplified-schema/lib/src/property_path.rs
+- simplified-schema/lib/src/setter_value.rs
+- simplified-schema/lib/src/validate.rs
+- simplified-schema/lib/src/validation.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/property_paths.rs
+- simplified-schema/lib/tests/l1/setter_values.rs
+documentation:
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/darkmatter/compose.md
+- .claude/skills/darkmatter/frontmatter.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/os/macos.md
+- .claude/skills/os/windows.md
+- .claude/skills/simplified-schema/SKILL.md
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/get.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/rm.md
+- darkmatter/docs/cli/set.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/topics/frontmatter.md
+- darkmatter/docs/topics/numbers.md
+- simplified-schema/README.md
+- simplified-schema/docs/topics/foundations.md
+- simplified-schema/docs/topics/property-paths.md
+- simplified-schema/docs/topics/setter-values.md
+completed_phase: 10
+implemented: true
 ---
 
 # Dotted Property Paths Implementation Plan
@@ -284,11 +374,11 @@ The matrix applies to the value parser, the one new input reader. Default: inval
 
 These tasks run in order.
 
-- [ ] **Integrated validation**
+- [x] **Integrated validation**
   - Run `just test` and `just lint` from `darkmatter/`, `simplified-schema/`, and `biscuit-file/`, and `just test-l2` from `darkmatter/` for the new target. Run `cargo check --all-targets -p claudine -p claudine-cli` because `ComposeOptions` changes beside them. Use `cargo --color=never`; do not run `cargo fmt` or `cargo test`.
   - Keep tests portable across macOS, Linux, native Windows, and WSL2, including the `.\dir\.config=1.md` classification under `#[cfg(windows)]`. Label the other operating systems unexecuted in the log; they run under the repository's scheduled CI.
 
-- [ ] **Closure evidence**
+- [x] **Closure evidence**
   - Run `git diff --check`, review changed behavior comments, and confirm the schema ownership, context construction, path lookup, and output conformance guards passed. Update the log with test names, the release measurement, per-shell results, and any departure from the spec. Check off tasks and report implementation complete, ready for review. Leave commits, pushes, and lifecycle movement outside this plan.
 
 ## Dependency Graph
