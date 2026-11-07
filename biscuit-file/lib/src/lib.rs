@@ -162,7 +162,10 @@ pub use self::yaml::{
 pub use self::yaml::{analyze_parse_count, reset_analyze_parse_count};
 
 #[cfg(feature = "json5")]
-pub use self::json5::{Json5, Json5Error, Json5Source};
+pub use self::json5::{
+    Json5, Json5DuplicateKey, Json5Error, Json5Number, Json5Scan, Json5Source,
+    json5_is_well_formed, json5_scan,
+};
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
