@@ -37,7 +37,8 @@ related:
     - 2026-11-04-composition-errors
 depends-on:
     - 2026-11-04-composition-errors
-next_spec: 2026-11-05-dynamic-schema-types
+    - 2026-11-06-dotted-paths
+next_spec: 2026-11-05-render-surface
 references:
     spikes/sp1-scanner-corpus-diff.md: Compares today's double-brace expression scanner with several quote-aware variants over 6,909 repository files and recommends the balanced, parse-gated rule adopted in R11. Also lists every other double-brace detector and whether it must move to the shared scanner.
     spikes/sp2-line-column-per-format.md: Tests a JSON Pointer to line/column locator for each supported format and fixes the per-format locators, their owning crates, the line-break rule, and the one pointer-only case (YAML with aliases or multi-line flow collections) used in R3 and R5.
@@ -502,10 +503,9 @@ simplified-schema flattening helper, **never** from `validate_soft`'s JSON
 Schema problems (see the design notes for why).
 
 **Codes.** Each static or data error has its own diagnostic code, all with
-severity `error`. The spellings are **proposed** (to confirm during
-planning):
+severity `error`:
 
-| Code (proposed) | When | Raised by |
+| Code | When | Raised by |
 |---|---|---|
 | `dm.data.not_a_container` | `as` is not a container | R2 |
 | `dm.data.row_shape_conflict` | `as` cannot pick a CSV/TSV row shape | R4 |
@@ -575,7 +575,7 @@ record already has, are filled structurally (for example `number` and
 
 **Many violations.** A contract mismatch is still **one** composition
 failure, but its diagnostics list every violating location, one record
-each, up to a cap of **20** (the number is proposed). If there are more,
+each, up to a cap of **20**. If there are more,
 one further record of the same code says how many were not listed. Records
 are in **file order** — array indexes ascending, object keys in the order
 the file writes them, union arms in the order `as` declares them — so the
@@ -804,13 +804,13 @@ done with the data.
 The request's cache access mode (`CacheAccessMode` in
 `darkmatter/lib/src/markdown/compose/cache/types.rs`, set through
 `ComposeOptions::with_cache_access_mode`; there is no CLI flag) governs the
-memo. The rows marked proposed are to confirm during planning:
+memo:
 
 | Mode | Memo |
 |---|---|
 | `ReadWrite` (default) | reuse |
-| `ReadOnly` | reuse (proposed: the memo is in-memory and per run, so "do not write the cache" does not apply to it) |
-| `Refresh` | no reuse (proposed) |
+| `ReadOnly` | reuse (the memo is in-memory, so "do not write the cache" does not apply to it) |
+| `Refresh` | no reuse |
 | `Off` | no reuse |
 
 With no reuse, every call parses and validates again. A file is read again
@@ -935,6 +935,11 @@ For a data file that may be absent, the documented pattern is:
 Note that `load_data(f, "string[]") || []` does **not** recover: `||` does
 not absorb errors (`darkmatter/lib/src/markdown/compose/expression/mod.rs`;
 documented in `darkmatter/docs/topics/darkmatter-expressions.md`).
+
+The same pattern applies to a file a frontmatter command creates. The passes
+that run ahead of composition evaluate expressions before any command runs, so
+an unguarded call on a file that does not exist yet fails before the command
+can create it. `frontmatter()` already behaves this way.
 
 **Acceptance criteria**
 
@@ -1375,6 +1380,9 @@ All decided on 2026-11-05.
   lifecycle step, because the check runs no shell and would otherwise serve a
   regenerated file's old contents to composition. The shared slot was chosen
   knowing this: reads repeat only where a command could have changed the data.
+- **(2026-11-06) Names and limits.** The `dm.data.*` spellings, the violation
+  cap of 20, the `ReadOnly` (reuse) and `Refresh` (no reuse) memo rows, and the
+  `read_set` field name are confirmed as proposed.
 - **Sequencing.** Implementation began only after
   2026-11-04-composition-errors was complete (see
   [Dependencies](#dependencies)).
@@ -1400,10 +1408,6 @@ All decided on 2026-11-05.
 ## Open questions
 
 No design questions remain open.
-
-To confirm during planning (proposals, not open design questions): the
-`dm.data.*` code spellings, the violation cap of 20, the `ReadOnly` and
-`Refresh` memo rows, and the read-set field name.
 
 ## Follow-ups
 
