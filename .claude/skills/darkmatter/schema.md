@@ -691,6 +691,13 @@ Baseline, Selecting the Baseline; both stay Darkmatter's); Content Policy's typi
   AND-ed groups: one alternative of every group for a property, one per
   `file` arm for a root union; empty means a bare `file`.
   `file_match::file_match_groups` is public for consumers such as Claudine.
+- `completion::path_candidates` answers what Tab may offer next in a `PropertyPath`
+  or its value, per `PathCommand`, reading the layered `property_shape` (not
+  `for_path`, which sees only the document's layer). `effective: None` reads the
+  baseline, and the two are never combined. `insert` is the whole word, with no
+  shell quoting; a value keeps its label unless `SetterValue` would read it as
+  something else. `path_value_takes_files` tells the caller to add files, since
+  this code does no I/O.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries; `uncounted-keys(a, b)`

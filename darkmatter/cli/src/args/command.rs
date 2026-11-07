@@ -2,10 +2,11 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::output::{ALL_TARGETS, COMPOSE_TARGETS, target_parser};
+use crate::args::path_completion;
 use biscuit_terminal::output::OutputTarget;
 use crate::args::{
     HashKind, RemoteFreshness, SchemaTarget, ValidateTarget,
-    complete_compose_args, complete_indent_values,
+    complete_indent_values,
     complete_markdown_files, complete_theme_names, parse_indent_size, parse_positive_limit,
     parse_theme_name,
 };
@@ -75,7 +76,7 @@ pub enum Command {
         #[arg(
             value_name = "ARGS",
             num_args = 0..,
-            add = ArgValueCompleter::new(complete_compose_args)
+            add = ArgValueCompleter::new(path_completion::complete_compose_word)
         )]
         args: Vec<String>,
 
@@ -242,7 +243,7 @@ pub enum Command {
         input: PathBuf,
 
         /// Property paths to retrieve: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
-        #[arg(value_name = "PROP", required = true, num_args = 1..)]
+        #[arg(value_name = "PROP", required = true, num_args = 1.., add = ArgValueCompleter::new(path_completion::complete_get_path))]
         props: Vec<String>,
 
         /// What to print. `plain` writes raw values: strings unquoted, null as
@@ -262,11 +263,11 @@ pub enum Command {
         input: PathBuf,
 
         /// Property path to set: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
-        #[arg(value_name = "PROP")]
+        #[arg(value_name = "PROP", add = ArgValueCompleter::new(path_completion::complete_set_path))]
         prop: String,
 
         /// Value to set: JSON5 or a YAML flow mapping, otherwise text, read through the type the schema declares
-        #[arg(value_name = "VALUE")]
+        #[arg(value_name = "VALUE", add = ArgValueCompleter::new(path_completion::complete_set_value))]
         value: String,
 
         /// Write the change back to the source file (no formatted output)
@@ -285,7 +286,7 @@ pub enum Command {
         input: PathBuf,
 
         /// Property paths to remove: `author.name`, `items.0`, and `a\.b` for a key with a dot in its name
-        #[arg(value_name = "PROP", required = true, num_args = 1..)]
+        #[arg(value_name = "PROP", required = true, num_args = 1.., add = ArgValueCompleter::new(path_completion::complete_rm_path))]
         props: Vec<String>,
 
         /// What to print; a data format reports the removed, remaining, and filename fields

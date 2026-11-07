@@ -32,10 +32,6 @@ pub fn complete_markdown_files_from(
     base_dir: &Path,
     current: &OsStr,
 ) -> Vec<CompletionCandidate> {
-    let current_str = current.to_string_lossy();
-    let mut candidates = Vec::new();
-    let mut seen = BTreeSet::new();
-
     let is_markdown = |p: &Path| {
         p.extension()
             .and_then(|ext| ext.to_str())
@@ -43,10 +39,30 @@ pub fn complete_markdown_files_from(
             .unwrap_or(false)
     };
 
+    let current_str = current.to_string_lossy();
+    let mut candidates = complete_paths_from(base_dir, current, &is_markdown);
     if !current_str.is_empty() && "-".starts_with(current_str.as_ref()) {
-        seen.insert("-".to_string());
         candidates.push(CompletionCandidate::new("-"));
+        candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
     }
+    candidates
+}
+
+/// Completes every file and directory path, for a `file`-typed value rather than
+/// an input document. It enumerates the requested directory and opens nothing.
+pub fn complete_any_files(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_paths_from(Path::new("."), current, &|_| true)
+}
+
+/// Directories, and the files `accepts` admits, under what `current` has typed.
+fn complete_paths_from(
+    base_dir: &Path,
+    current: &OsStr,
+    accepts: &dyn Fn(&Path) -> bool,
+) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let mut candidates = Vec::new();
+    let mut seen = BTreeSet::new();
 
     let has_trailing_sep = current_str.ends_with('/') || current_str.ends_with('\\');
     let current_path = Path::new(current_str.as_ref());
@@ -85,7 +101,7 @@ pub fn complete_markdown_files_from(
             }
 
             let is_dir = path.is_dir();
-            if !is_dir && !is_markdown(&path) {
+            if !is_dir && !accepts(&path) {
                 continue;
             }
 
@@ -343,5 +359,25 @@ mod tests {
     fn compose_arg_completion_skips_file_suggestions_for_setters() {
         let values = completion_values(complete_compose_args(OsStr::new("name=Al")));
         assert!(values.is_empty());
+    }
+
+    #[test]
+    fn any_file_completion_admits_what_markdown_completion_skips() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("notes.txt"), "").unwrap();
+        std::fs::write(temp_dir.path().join("guide.md"), "").unwrap();
+        std::fs::create_dir(temp_dir.path().join("sub")).unwrap();
+
+        let any = completion_values(complete_paths_from(temp_dir.path(), OsStr::new(""), &|_| true));
+        assert_eq!(any, ["guide.md", "notes.txt", "sub/"]);
+        let markdown = completion_values(complete_markdown_files_from(temp_dir.path(), OsStr::new("")));
+        assert_eq!(markdown, ["guide.md", "sub/"]);
+    }
+
+    #[test]
+    fn the_stdin_marker_is_offered_only_for_input_documents() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        assert_eq!(completion_values(complete_markdown_files_from(temp_dir.path(), OsStr::new("-"))), ["-"]);
+        assert!(completion_values(complete_paths_from(temp_dir.path(), OsStr::new("-"), &|_| true)).is_empty());
     }
 }

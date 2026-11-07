@@ -12,6 +12,7 @@ use serde_json::Value;
 use simplified_schema::completion::PathStep;
 use simplified_schema::{PathEditError, PropertyPath, SetterValue, set_at};
 
+use super::context::effective_state::{ConflictWinner, deep_merge};
 use super::schema_validation::{PreparedSchemas, prepare_schemas};
 use super::value_origin::{FrontmatterProvenance, ValuePathSegment};
 use crate::markdown::Markdown;
@@ -106,31 +107,27 @@ impl SetterPlan {
     /// [`MarkdownError::Setter`] for a value that cannot be admitted, and for a
     /// scalar or `null` value at an ancestor of another setter, in either order.
     pub fn new(setters: impl IntoIterator<Item = RawSetter>) -> MarkdownResult<Self> {
-        let mut surviving: Vec<RawSetter> = Vec::new();
-        for setter in setters {
-            match surviving.iter_mut().find(|kept| kept.path == setter.path) {
-                Some(kept) => *kept = setter,
-                None => surviving.push(setter),
-            }
-        }
-        surviving.sort_by_key(|setter| setter.path.segments().len());
-
-        let mut planned: Vec<PlannedSetter> = Vec::with_capacity(surviving.len());
-        for setter in surviving {
-            let value = SetterValue::parse(&setter.raw).map_err(|error| setter_error(&setter.argument, &setter.path, error.to_string()))?;
-            if let Some(ancestor) = planned.iter().find(|ancestor| {
-                is_proper_prefix(ancestor.path.segments(), setter.path.segments()) && !matches!(ancestor.value, SetterValue::Container(_))
-            }) {
-                let reason = format!("`{}` replaces `{}` with a value that cannot hold it", ancestor.argument, ancestor.path);
-                return Err(setter_error(&setter.argument, &setter.path, reason));
-            }
-            planned.push(PlannedSetter {
-                argument: setter.argument,
-                path: setter.path,
-                value,
-            });
+        let mut planned: Vec<PlannedSetter> = Vec::new();
+        for setter in settle_overlaps(setters) {
+            let setter = plan_setter(setter, &planned)?;
+            planned.push(setter);
         }
         Ok(Self { setters: planned })
+    }
+
+    /// As [`Self::new`], dropping what `new` would refuse and keeping the rest.
+    ///
+    /// A value that cannot be admitted is removed before overlaps are settled, so
+    /// it does not take away an earlier valid value of the same path.
+    fn tolerant(setters: impl IntoIterator<Item = RawSetter>) -> Self {
+        let readable = setters.into_iter().filter(|setter| SetterValue::parse(&setter.raw).is_ok());
+        let mut planned: Vec<PlannedSetter> = Vec::new();
+        for setter in settle_overlaps(readable) {
+            if let Ok(setter) = plan_setter(setter, &planned) {
+                planned.push(setter);
+            }
+        }
+        Self { setters: planned }
     }
 
     /// Whether the command line had no setters.
@@ -203,6 +200,41 @@ impl SetterPlan {
             nested: Vec::new(),
         }
     }
+}
+
+/// One entry per decoded path, the last value at the first position, shortest
+/// paths first.
+fn settle_overlaps(setters: impl IntoIterator<Item = RawSetter>) -> Vec<RawSetter> {
+    let mut surviving: Vec<RawSetter> = Vec::new();
+    for setter in setters {
+        match surviving.iter_mut().find(|kept| kept.path == setter.path) {
+            Some(kept) => *kept = setter,
+            None => surviving.push(setter),
+        }
+    }
+    surviving.sort_by_key(|setter| setter.path.segments().len());
+    surviving
+}
+
+/// Reads one surviving value, given the shorter setters already planned.
+fn plan_setter(setter: RawSetter, planned: &[PlannedSetter]) -> MarkdownResult<PlannedSetter> {
+    let value = SetterValue::parse(&setter.raw).map_err(|error| setter_error(&setter.argument, &setter.path, error.to_string()))?;
+    if let Some(ancestor) = planned.iter().find(|ancestor| {
+        is_proper_prefix(ancestor.path.segments(), setter.path.segments()) && !matches!(ancestor.value, SetterValue::Container(_))
+    }) {
+        let reason = format!("`{}` replaces `{}` with a value that cannot hold it", ancestor.argument, ancestor.path);
+        return Err(setter_error(&setter.argument, &setter.path, reason));
+    }
+    Ok(PlannedSetter {
+        argument: setter.argument,
+        path: setter.path,
+        value,
+    })
+}
+
+/// Writes a setter's unbound guess: the value before any schema has been chosen.
+fn apply_guess(target: &mut Markdown, setter: &PlannedSetter) -> Result<(), PathEditError> {
+    set_at(target.frontmatter_mut().as_map_mut(), &setter.path, setter.value.bind(None))
 }
 
 fn is_proper_prefix(ancestor: &[String], descendant: &[String]) -> bool {
@@ -279,8 +311,7 @@ pub(crate) fn apply_setter_plan(
 
     let mut overlay = markdown.clone();
     for setter in &active {
-        set_at(overlay.frontmatter_mut().as_map_mut(), &setter.path, setter.value.bind(None))
-            .map_err(|error| located_failure(setter, error))?;
+        apply_guess(&mut overlay, setter).map_err(|error| located_failure(setter, error))?;
     }
     let effective = prepared.effective_for(&overlay);
     let overlay_json = frontmatter_as_json(&overlay);
@@ -329,6 +360,53 @@ pub(crate) fn apply_setter_plan_for_preflight(
     let mut trigger_registry = None;
     let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
     apply_setter_plan(markdown, options, &prepared, provenance).map(drop)
+}
+
+/// A document as shell completion should read it, with the words before the cursor
+/// applied.
+#[derive(Debug, Clone)]
+pub struct CompletionOverlay {
+    /// A temporary copy of the document. Select its schema from this copy, too.
+    pub markdown: Markdown,
+    /// The setters that took effect, which completion should not offer again.
+    pub paths: Vec<PropertyPath>,
+}
+
+/// Builds the copy of `markdown` that completion reads: `--state` defaults under
+/// the document, `--set` over it, then `setters` through the same ordered plan
+/// composition uses, each value read as an unbound guess.
+///
+/// Completion is advisory, so one setter that composition would refuse is dropped
+/// here and the others still apply. Nothing is evaluated.
+#[must_use]
+pub fn completion_overlay(
+    markdown: &Markdown,
+    defaults: Option<&Value>,
+    overrides: Option<&Value>,
+    setters: impl IntoIterator<Item = RawSetter>,
+) -> CompletionOverlay {
+    let mut overlay = markdown.clone();
+    if let Some(defaults) = defaults {
+        let frontmatter = overlay.frontmatter_mut().as_map_mut();
+        let current = Value::Object(frontmatter.iter().map(|(key, value)| (key.clone(), value.clone())).collect());
+        if let Value::Object(merged) = deep_merge(&current, defaults, ConflictWinner::Base) {
+            *frontmatter = merged.into_iter().collect();
+        }
+    }
+    if let Some(overrides) = overrides.and_then(Value::as_object) {
+        let frontmatter = overlay.frontmatter_mut().as_map_mut();
+        for (key, value) in overrides {
+            frontmatter.insert(key.clone(), value.clone());
+        }
+    }
+    let plan = SetterPlan::tolerant(setters);
+    let paths = plan
+        .setters
+        .iter()
+        .filter(|setter| apply_guess(&mut overlay, setter).is_ok())
+        .map(|setter| setter.path.clone())
+        .collect();
+    CompletionOverlay { markdown: overlay, paths }
 }
 
 fn document_name(markdown: &Markdown) -> Option<String> {
@@ -509,6 +587,60 @@ mod tests {
     fn an_empty_plan_is_empty() {
         assert!(plan(&[]).unwrap().is_empty());
         assert!(SetterPlan::default().is_empty());
+    }
+
+    fn overlay_of(document: &str, tokens: &[&str]) -> (Value, Vec<String>) {
+        let overlay = completion_overlay(&Markdown::from(document), None, None, tokens.iter().map(|token| raw(token)));
+        let paths = overlay.paths.iter().map(ToString::to_string).collect();
+        (frontmatter_as_json(&overlay.markdown), paths)
+    }
+
+    #[test]
+    fn an_overlay_applies_the_plan_in_its_settled_order() {
+        let (frontmatter, paths) = overlay_of("---\nkept: 1\n---\n", &["a.b=1", "a={c:2}", "n=1.10"]);
+        assert_eq!(frontmatter, serde_json::json!({"kept": 1, "a": {"c": 2, "b": 1}, "n": 1.1}));
+        assert_eq!(paths, ["a", "n", "a.b"]);
+    }
+
+    #[test]
+    fn an_overlay_drops_only_the_setter_composition_would_refuse() {
+        // An inadmissible value, a child of a scalar ancestor, and an index past
+        // the end each fail `SetterPlan::new` or the edit, one at a time.
+        let (frontmatter, paths) = overlay_of(
+            "---\nitems: [a]\ntext: t\n---\n",
+            &["bad={x:1,x:2}", "s=1", "s.child=2", "items.9=z", "text.deep=1", "ok=yes"],
+        );
+        assert_eq!(frontmatter, serde_json::json!({"items": ["a"], "text": "t", "s": 1, "ok": "yes"}));
+        assert_eq!(paths, ["s", "ok"]);
+    }
+
+    #[test]
+    fn an_inadmissible_repeat_keeps_the_earlier_valid_value() {
+        let (frontmatter, paths) = overlay_of("", &["a=1", "a={x:1,x:2}"]);
+        assert_eq!(frontmatter, serde_json::json!({"a": 1}));
+        assert_eq!(paths, ["a"]);
+    }
+
+    #[test]
+    fn an_overlay_layers_defaults_under_and_overrides_over_the_document() {
+        let defaults = serde_json::json!({"a": 9, "deep": {"x": 1, "y": 2}, "only_default": 1});
+        let overrides = serde_json::json!({"b": 8, "c": {"replaced": true}});
+        let overlay = completion_overlay(
+            &Markdown::from("---\na: 1\nb: 2\nc: {kept: 1}\ndeep: {y: 3}\n---\n"),
+            Some(&defaults),
+            Some(&overrides),
+            [raw("c.more=1")],
+        );
+        assert_eq!(
+            frontmatter_as_json(&overlay.markdown),
+            serde_json::json!({
+                "a": 1,
+                "b": 8,
+                "c": {"replaced": true, "more": 1},
+                "deep": {"y": 3, "x": 1},
+                "only_default": 1,
+            })
+        );
     }
 
     #[test]

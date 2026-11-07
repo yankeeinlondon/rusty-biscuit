@@ -65,7 +65,7 @@ fn main() {
     // exits cleanly instead of panicking on write to a closed pipe.
     reset_sigpipe();
 
-    CompleteEnv::with_factory(Cli::command).complete();
+    CompleteEnv::with_factory(Cli::command).shells(darkmatter_cli::completion_shells::SHELLS).complete();
 
     if let Err(e) = run() {
         // A usage error the policy verbs found after parsing exits as clap's

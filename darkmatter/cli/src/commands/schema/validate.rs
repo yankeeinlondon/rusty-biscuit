@@ -399,6 +399,19 @@ pub(crate) fn request_schemas(request: &MdRequest) -> Result<DarkmatterSchemas, 
     load_api(None, false, request).map(|(api, _)| api)
 }
 
+/// [`request_schemas`] for a document in `context`: its own resolution context,
+/// with trigger discovery when it is inside a repository. The caller decides how
+/// to report what discovery skipped.
+///
+/// ## Errors
+///
+/// As [`load_api`], or when trigger discovery fails.
+pub(crate) fn document_schemas(request: &MdRequest, context: biscuit_file::FileResolutionContext) -> Result<DarkmatterSchemas, SchemaError> {
+    let in_repository = context.repository_root().is_some();
+    let schemas = request_schemas(request)?.with_file_resolution_context(context);
+    if in_repository { schemas.with_trigger_discovery() } else { Ok(schemas) }
+}
+
 /// The baseline [`load_api`] selected.
 enum Baseline {
     None,

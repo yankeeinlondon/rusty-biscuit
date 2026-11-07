@@ -6,6 +6,8 @@
 //! directory, home directory, or environment itself: document arguments,
 //! transclusion targets, and schema file values all resolve against contexts
 //! built from this one snapshot. See `darkmatter/docs/topics/compose-requests.md`.
+//! Shell completion returns before `main` reaches that read, and takes its own
+//! through [`completion_request`].
 
 use std::cell::OnceCell;
 use std::fmt;
@@ -62,6 +64,16 @@ pub fn with_magic_roots(
         snapshot = snapshot.with_magic_root(resolved, PathPosition::Start);
     }
     Ok(snapshot)
+}
+
+/// The request for one Tab press, from the `--magic-root` words before the cursor.
+///
+/// A directory that does not exist yet is left out, because completion never
+/// reports a problem. `None` when the current directory cannot be read.
+pub fn completion_request(magic_roots: &[PathBuf]) -> Option<MdRequest> {
+    let snapshot = RequestSnapshot::from_process().ok()?;
+    let usable: Vec<PathBuf> = magic_roots.iter().filter(|root| snapshot.request_dir().join(root).is_dir()).cloned().collect();
+    with_magic_roots(snapshot, &usable).ok().map(MdRequest::new)
 }
 
 /// One `md` invocation's request snapshot and its lazily built launch context.

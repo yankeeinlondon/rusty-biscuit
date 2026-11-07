@@ -23,6 +23,7 @@ mod function_binding_conversions;
 mod function_catalog_parity;
 mod compose_diagnostic_identity;
 mod compose_setters;
+mod path_candidates;
 mod compose_expression_failure_contract;
 mod context_construction_guard;
 mod context_functions;

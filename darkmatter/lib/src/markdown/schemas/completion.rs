@@ -12,6 +12,9 @@
 //! [`for_path`] asks it at any depth, following the cursor's [`PathStep`]s
 //! through inline objects, array elements, and recursive references.
 //!
+//! [`path_candidates`] answers a third, for `md`'s shell completion: what may
+//! come next in a [`PropertyPath`] or its value, for one command.
+//!
 //! ## Recursive references
 //!
 //! A recursive named type, or a shared acyclic one, is a [`TypeExpr::Ref`]
@@ -48,16 +51,21 @@
 //! }
 //! ```
 
+use std::collections::{HashMap, HashSet};
+
 use serde_json::Value;
 
 use super::EffectiveSchema;
 use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def_with_definitions};
+use crate::markdown::compose::setters::{TokenClass, classify_token};
 use simplified_schema::coercion::Shape;
 pub use simplified_schema::completion::*;
 use simplified_schema::simplified::query::{Alternative, resolved_alternatives};
 use simplified_schema::simplified::{
-    Constraint, DefKey, Definition, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SimplifiedType, TypeExpr,
+    Constraint, DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot, SimplifiedType,
+    TypeExpr,
 };
+use simplified_schema::{PropertyPath, ResolveStop, SetterValue};
 
 /// Resolves a reference in the document's table or a trigger payload's, as
 /// [`EffectiveSchema::definition`] does.
@@ -444,6 +452,481 @@ fn element_shape(shape: &Shape, index: usize) -> Option<Shape> {
             element_shape(&target, index)
         }
         _ => None,
+    }
+}
+
+/// The command a path is completed for. Each one decides which keys are offered
+/// and how a candidate is spelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathCommand {
+    /// `md compose`, whose paths are `key=value` setters.
+    Compose,
+    /// `md set`, which takes the path and the value as separate arguments.
+    Set,
+    /// `md get`.
+    Get,
+    /// `md rm`.
+    Rm,
+}
+
+/// The word being completed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathPosition<'a> {
+    /// A word naming a path. Under [`PathCommand::Compose`] it may already hold
+    /// a setter's `=`, which asks for that key's values.
+    Path(&'a str),
+    /// A value given as its own argument, as `md set` takes one.
+    Value {
+        /// The path the value is for.
+        path: &'a PropertyPath,
+        /// The value typed so far.
+        typed: &'a str,
+    },
+}
+
+/// One completion question for [`path_candidates`].
+#[derive(Clone, Copy)]
+pub struct PathQuery<'a> {
+    /// The document's effective schema. `None` when no document resolved or its
+    /// schema failed, which falls back to the compiled baseline; the two are
+    /// never combined, because a document may replace a baseline declaration.
+    pub effective: Option<&'a EffectiveSchema>,
+    /// The frontmatter with the line's earlier setters already applied. Anything
+    /// but an object reads as an empty document.
+    pub frontmatter: &'a Value,
+    /// The receiving command.
+    pub command: PathCommand,
+    /// The word being completed.
+    pub position: PathPosition<'a>,
+    /// Paths given earlier on the line, which are not offered again.
+    pub earlier_paths: &'a [PropertyPath],
+}
+
+/// What accepting a [`PathCandidate`] does next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathCandidateKind {
+    /// `style.page.`: continue into the children, with no space after it.
+    Descend,
+    /// `title=`: the value comes next, with no space after it.
+    Assign,
+    /// `title`: names a whole node, so a space follows.
+    Select,
+    /// A finished value, so a space follows.
+    Value,
+}
+
+/// One completion, independent of any shell or editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathCandidate {
+    /// The complete text of the word under the cursor, property-path escaped and
+    /// spelled so `md` decodes the intended value, but with no shell quoting.
+    /// For a setter's value this includes `key=`; a shell that replaces only
+    /// the text after `=` must strip it.
+    pub insert: String,
+    /// The schema's description of the key, when it has one.
+    pub help: Option<String>,
+    /// What accepting it does next.
+    pub kind: PathCandidateKind,
+}
+
+/// The candidates for one word, in the order they should be shown.
+///
+/// Reads only `query`: it opens no file, evaluates nothing, and reports nothing,
+/// so a word it cannot make sense of simply has no candidates. A candidate that
+/// would fail at once when run, such as a child of a scalar, is left out.
+///
+/// See [`path_value_takes_files`] for values that come from the filesystem,
+/// which this function does not walk.
+#[must_use]
+pub fn path_candidates(query: &PathQuery<'_>) -> Vec<PathCandidate> {
+    let no_definitions = DefinitionTable::default();
+    let no_frontmatter = Value::Object(serde_json::Map::new());
+    let frontmatter = readable_frontmatter(query, &no_frontmatter);
+    match word_target(query) {
+        WordTarget::Path(typed) => key_candidates(query, &SchemaView::new(query.effective, frontmatter, &no_definitions), typed),
+        WordTarget::Value(target) => value_candidates(query, frontmatter, &target, &no_definitions),
+        WordTarget::Nothing => Vec::new(),
+    }
+}
+
+/// Whether the value being completed may be a file path, so a caller should add
+/// ordinary files to [`path_candidates`]. `false` for a word naming a path.
+#[must_use]
+pub fn path_value_takes_files(query: &PathQuery<'_>) -> bool {
+    let WordTarget::Value(target) = word_target(query) else {
+        return false;
+    };
+    let no_definitions = DefinitionTable::default();
+    let no_frontmatter = Value::Object(serde_json::Map::new());
+    let frontmatter = readable_frontmatter(query, &no_frontmatter);
+    let Some((steps, _)) = walk_path(frontmatter, &target.path) else {
+        return false;
+    };
+    let cleared = without_value(frontmatter, &steps);
+    let view = SchemaView::new(query.effective, &cleared, &no_definitions);
+    let Some((def, site)) = def_at_path(&view.root, view.definitions, view.frontmatter, &steps) else {
+        return false;
+    };
+    let is_array = site == AlternativeSite::Item;
+    resolved_alternatives(&def, view.definitions)
+        .into_iter()
+        .any(|alternative| alternative.is_array == is_array && matches!(alternative.atom.ty, TypeExpr::Primitive(SimplifiedType::File)))
+}
+
+fn readable_frontmatter<'a>(query: &PathQuery<'a>, no_frontmatter: &'a Value) -> &'a Value {
+    if query.frontmatter.is_object() { query.frontmatter } else { no_frontmatter }
+}
+
+enum WordTarget<'a> {
+    Path(&'a str),
+    Value(ValueTarget<'a>),
+    Nothing,
+}
+
+struct ValueTarget<'a> {
+    path: PropertyPath,
+    typed: &'a str,
+    /// The `key=` a candidate repeats, so it is the whole word.
+    lead: &'a str,
+}
+
+fn word_target<'a>(query: &PathQuery<'a>) -> WordTarget<'a> {
+    match query.position {
+        PathPosition::Value { path, typed } => WordTarget::Value(ValueTarget {
+            path: path.clone(),
+            typed,
+            lead: "",
+        }),
+        PathPosition::Path(typed) if query.command != PathCommand::Compose || !typed.contains('=') => WordTarget::Path(typed),
+        PathPosition::Path(typed) => match classify_token(typed) {
+            TokenClass::Setter(setter) => {
+                let (lead, value) = typed.split_at(typed.len() - setter.raw.len());
+                WordTarget::Value(ValueTarget {
+                    path: setter.path,
+                    typed: value,
+                    lead,
+                })
+            }
+            TokenClass::Path | TokenClass::EmptyKey => WordTarget::Nothing,
+        },
+    }
+}
+
+/// The schema one question reads, over the same layers [`declared_shape`] reads.
+///
+/// [`for_path`] is not enough here: it reads only the document's own layer, so it
+/// would never reach a baseline or trigger property such as `style`.
+struct SchemaView<'a> {
+    root: SchemaRoot,
+    definitions: &'a dyn DefinitionLookup,
+    frontmatter: &'a Value,
+}
+
+impl<'a> SchemaView<'a> {
+    fn new(effective: Option<&'a EffectiveSchema>, frontmatter: &'a Value, no_definitions: &'a DefinitionTable) -> Self {
+        match effective {
+            Some(effective) => Self {
+                root: SchemaRoot::Single(effective.property_shape(&[], frontmatter)),
+                definitions: effective,
+                frontmatter,
+            },
+            // The baseline is definition-free, so an empty table reads all of it.
+            None => Self {
+                root: SchemaRoot::Single(super::frontmatter_shape::effective_property_shape(&[], None, frontmatter)),
+                definitions: no_definitions,
+                frontmatter,
+            },
+        }
+    }
+
+    /// The keys the schema declares directly under `steps`, the root when empty.
+    fn declared_keys(&self, steps: &[PathStep<'_>]) -> Vec<AlternativeKey> {
+        if steps.is_empty() {
+            let SchemaRoot::Single(shape) = &self.root else {
+                return Vec::new();
+            };
+            return shape
+                .properties
+                .iter()
+                .map(|(name, def)| AlternativeKey {
+                    name: name.clone(),
+                    required: def.is_required(),
+                    description: declared_description(def),
+                    arms: Vec::new(),
+                })
+                .collect();
+        }
+        for_path_in(&self.root, self.definitions, self.frontmatter, steps).map_or_else(Vec::new, |completion| completion.keys)
+    }
+
+    /// Whether the value at `steps` may be something other than an inline
+    /// object. An undeclared value may be anything.
+    fn admits_non_object(&self, steps: &[PathStep<'_>]) -> bool {
+        let Some((def, site)) = def_at_path(&self.root, self.definitions, self.frontmatter, steps) else {
+            return true;
+        };
+        let is_array = site == AlternativeSite::Item;
+        resolved_alternatives(&def, self.definitions)
+            .into_iter()
+            .any(|alternative| alternative.is_array != is_array || !matches!(alternative.atom.ty, TypeExpr::InlineObject(_)))
+    }
+}
+
+fn declared_description(def: &PropertyDef) -> Option<String> {
+    match def {
+        PropertyDef::Single(atom) => atom.description.clone(),
+        PropertyDef::Union(atoms) => atoms.iter().find_map(|atom| atom.description.clone()),
+    }
+}
+
+/// Splits a typed path at its last unescaped dot. A trailing dot leaves an empty
+/// partial segment, which asks for every child.
+fn split_typed(typed: &str) -> (Option<&str>, &str) {
+    let mut last_dot = None;
+    let mut characters = typed.char_indices().peekable();
+    while let Some((position, character)) = characters.next() {
+        match character {
+            '\\' if matches!(characters.peek(), Some((_, '.' | '\\'))) => {
+                characters.next();
+            }
+            '.' => last_dot = Some(position),
+            _ => {}
+        }
+    }
+    match last_dot {
+        Some(position) => (Some(&typed[..position]), &typed[position + 1..]),
+        None => (None, typed),
+    }
+}
+
+/// How `path` walks `frontmatter`: its typed steps, including those past the end
+/// of what is present, and the value when it is there. `None` when running the
+/// path could only fail: a scalar or `null` parent, an index out of range, or a
+/// number under a missing parent.
+fn walk_path<'a>(frontmatter: &'a Value, path: &'a PropertyPath) -> Option<(Vec<PathStep<'a>>, Option<&'a Value>)> {
+    let resolved = path.resolve(frontmatter);
+    match resolved.stop() {
+        ResolveStop::Found(value) => Some((resolved.steps().to_vec(), Some(value))),
+        ResolveStop::MissingKey => {
+            let missing = resolved.unresolved();
+            let number_under_missing = missing.iter().skip(1).any(|segment| !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_digit()));
+            (!number_under_missing).then(|| {
+                let mut steps = resolved.steps().to_vec();
+                steps.extend(missing.iter().map(|segment| PathStep::Key(segment.as_str())));
+                (steps, None)
+            })
+        }
+        ResolveStop::OutOfRange { .. } | ResolveStop::NotContainer { .. } => None,
+    }
+}
+
+fn key_candidates(query: &PathQuery<'_>, view: &SchemaView<'_>, typed: &str) -> Vec<PathCandidate> {
+    let (parent_text, partial) = split_typed(typed);
+    let Ok(decoded_partial) = PropertyPath::parse(partial) else {
+        return Vec::new();
+    };
+    let decoded_partial = decoded_partial.segments()[0].as_str();
+    let parent = match parent_text.map(PropertyPath::parse) {
+        None => None,
+        Some(Ok(parent)) if parent.segments().iter().all(|segment| !segment.is_empty()) => Some(parent),
+        Some(_) => return Vec::new(),
+    };
+    let (parent_steps, parent_value) = match &parent {
+        None => (Vec::new(), Some(view.frontmatter)),
+        Some(parent) => match walk_path(view.frontmatter, parent) {
+            Some(walked) => walked,
+            None => return Vec::new(),
+        },
+    };
+    if parent_value.is_some_and(|value| !value.is_object() && !value.is_array()) {
+        return Vec::new();
+    }
+
+    let parent_is_array = parent_value.is_some_and(Value::is_array);
+    let children = if parent_is_array {
+        let length = parent_value.and_then(Value::as_array).map_or(0, Vec::len);
+        (0..length).map(|index| (index.to_string(), None)).collect()
+    } else {
+        let present = parent_value
+            .and_then(Value::as_object)
+            .map_or_else(Vec::new, |object| object.keys().cloned().collect());
+        ordered_children(query.command, view.declared_keys(&parent_steps), present)
+    };
+
+    let lead = parent_text.map_or_else(String::new, |text| format!("{text}."));
+    let parent_segments = parent.as_ref().map_or(&[][..], PropertyPath::segments);
+    let mut candidates = Vec::new();
+    for (position, (name, help)) in children.iter().enumerate() {
+        let Ok(spelled) = PropertyPath::from_segments([name.as_str()]) else {
+            continue;
+        };
+        let spelled = spelled.to_string();
+        let segments = parent_segments.iter().map(String::as_str).chain([name.as_str()]);
+        let Ok(path) = PropertyPath::from_segments(segments) else {
+            continue;
+        };
+        let matches_partial = spelled.starts_with(partial) || name.starts_with(decoded_partial);
+        if name.is_empty() || !matches_partial || query.earlier_paths.contains(&path) || !command_can_spell(query.command, &path) {
+            continue;
+        }
+        let step = if parent_is_array { PathStep::Index(position) } else { PathStep::Key(name) };
+        let mut steps = parent_steps.clone();
+        steps.push(step);
+        let present = parent_value.and_then(|value| match step {
+            PathStep::Key(key) => value.get(key),
+            PathStep::Index(index) => value.get(index),
+        });
+        for (suffix, kind) in node_spellings(query.command, view, &steps, present) {
+            candidates.push(PathCandidate {
+                insert: format!("{lead}{spelled}{suffix}"),
+                help: help.clone(),
+                kind,
+            });
+        }
+    }
+    candidates
+}
+
+/// Child keys in the command's order, each once, keeping the schema's description
+/// on a key that is also present.
+fn ordered_children(command: PathCommand, declared: Vec<AlternativeKey>, present: Vec<String>) -> Vec<(String, Option<String>)> {
+    let descriptions: HashMap<String, Option<String>> = declared.iter().map(|key| (key.name.clone(), key.description.clone())).collect();
+    let (required, optional): (Vec<_>, Vec<_>) = declared.into_iter().partition(|key| key.required);
+    let declared_names = required.into_iter().chain(optional).map(|key| key.name);
+    let names: Vec<String> = match command {
+        PathCommand::Compose | PathCommand::Set => declared_names.chain(present).collect(),
+        PathCommand::Get => present.into_iter().chain(declared_names).collect(),
+        PathCommand::Rm => present,
+    };
+    let mut seen = HashSet::new();
+    names
+        .into_iter()
+        .filter(|name| seen.insert(name.clone()))
+        .map(|name| {
+            let help = descriptions.get(&name).cloned().flatten();
+            (name, help)
+        })
+        .collect()
+}
+
+fn command_can_spell(command: PathCommand, path: &PropertyPath) -> bool {
+    command != PathCommand::Compose || matches!(classify_token(&format!("{path}=")), TokenClass::Setter(setter) if setter.path == *path)
+}
+
+/// How one node may be written for `command`, descent first.
+fn node_spellings(
+    command: PathCommand,
+    view: &SchemaView<'_>,
+    steps: &[PathStep<'_>],
+    present: Option<&Value>,
+) -> Vec<(&'static str, PathCandidateKind)> {
+    // `rm` can only remove what is there, so declared keys open nothing for it.
+    let declares_keys = || command != PathCommand::Rm && !view.declared_keys(steps).is_empty();
+    let descends = match present {
+        Some(Value::Object(object)) => !object.is_empty() || declares_keys(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(_) => false,
+        None => declares_keys(),
+    };
+    let mut spellings = Vec::new();
+    if descends {
+        spellings.push((".", PathCandidateKind::Descend));
+    }
+    if command == PathCommand::Compose {
+        spellings.push(("=", PathCandidateKind::Assign));
+    } else if present.is_some() || !descends || view.admits_non_object(steps) {
+        spellings.push(("", PathCandidateKind::Select));
+    }
+    spellings
+}
+
+fn value_candidates(
+    query: &PathQuery<'_>,
+    frontmatter: &Value,
+    target: &ValueTarget<'_>,
+    no_definitions: &DefinitionTable,
+) -> Vec<PathCandidate> {
+    let Some((steps, _)) = walk_path(frontmatter, &target.path) else {
+        return Vec::new();
+    };
+    // The value being replaced must not narrow its own choices: a tag that is
+    // set already still offers the others.
+    let cleared = without_value(frontmatter, &steps);
+    let view = SchemaView::new(query.effective, &cleared, no_definitions);
+    let Some((def, site)) = def_at_path(&view.root, view.definitions, view.frontmatter, &steps) else {
+        return Vec::new();
+    };
+    let declared = query.effective.and_then(|effective| declared_shape(effective, &cleared, &steps));
+    let is_array = site == AlternativeSite::Item;
+    let offered = alternatives_for_def_in(&def, site, &Value::Null, view.definitions).map_or_else(Vec::new, |completion| completion.values);
+
+    let mut values: Vec<(String, Value)> = Vec::new();
+    let alternatives = resolved_alternatives(&def, view.definitions);
+    let alternatives = alternatives.iter().filter(|alternative| alternative.is_array == is_array);
+    for (arm, alternative) in alternatives.enumerate() {
+        values.extend(offered.iter().filter(|value| value.arm == arm).map(|value| (value.label.clone(), intended_value(value))));
+        if matches!(alternative.atom.ty, TypeExpr::Primitive(SimplifiedType::Boolean)) {
+            values.extend([("true".to_string(), Value::Bool(true)), ("false".to_string(), Value::Bool(false))]);
+        }
+    }
+
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .filter_map(|(label, intended)| {
+            let spelled = spell_value(&label, &intended, declared.as_ref());
+            let matches_typed = spelled.starts_with(target.typed) || label.starts_with(target.typed);
+            (matches_typed && seen.insert(spelled.clone())).then(|| PathCandidate {
+                insert: format!("{}{spelled}", target.lead),
+                help: None,
+                kind: PathCandidateKind::Value,
+            })
+        })
+        .collect()
+}
+
+/// A copy of `frontmatter` without the value at `steps`. An array element becomes
+/// `null`, so its neighbors keep their positions.
+fn without_value(frontmatter: &Value, steps: &[PathStep<'_>]) -> Value {
+    let mut copy = frontmatter.clone();
+    let Some((last, parents)) = steps.split_last() else {
+        return copy;
+    };
+    let parent = parents.iter().try_fold(&mut copy, |value, step| match step {
+        PathStep::Key(key) => value.get_mut(*key),
+        PathStep::Index(index) => value.get_mut(*index),
+    });
+    match (parent, last) {
+        (Some(Value::Object(object)), PathStep::Key(key)) => {
+            object.remove(*key);
+        }
+        (Some(Value::Array(items)), PathStep::Index(index)) => {
+            if let Some(item) = items.get_mut(*index) {
+                *item = Value::Null;
+            }
+        }
+        _ => {}
+    }
+    copy
+}
+
+/// The scalar an [`AlternativeValue`] stands for: its insertion text quotes a
+/// string and nothing else, and its label is the decoded text.
+fn intended_value(value: &AlternativeValue) -> Value {
+    if value.insert_text.starts_with('"') {
+        return Value::String(value.label.clone());
+    }
+    serde_json::from_str(&value.label).unwrap_or_else(|_| Value::String(value.label.clone()))
+}
+
+/// The text `md` reads back as `intended`: the label when the value parser and
+/// `declared` agree on it, otherwise a quoted string. A member named `null`, `5`,
+/// or `{a}` would otherwise arrive as something else.
+fn spell_value(label: &str, intended: &Value, declared: Option<&Shape>) -> String {
+    let reads_back = SetterValue::parse(label).is_ok_and(|value| value.bind(declared) == *intended);
+    match intended {
+        Value::String(text) if !reads_back => Value::String(text.clone()).to_string(),
+        _ => label.to_string(),
     }
 }
 

@@ -4,6 +4,7 @@ mod completion;
 mod enums;
 pub mod output;
 mod parsers;
+pub mod path_completion;
 mod render;
 pub mod policy;
 mod target;
@@ -13,7 +14,7 @@ pub use cli::Cli;
 pub use command::Command;
 pub use render::RenderOptions;
 pub use completion::{
-    complete_compose_args, complete_compose_args_from,
+    complete_any_files, complete_compose_args, complete_compose_args_from,
     complete_indent_values, complete_markdown_files, complete_markdown_files_from,
     complete_theme_names, complete_width_values,
 };

@@ -2,7 +2,7 @@
 
 use crate::args::Cli;
 use crate::commands::render::document_value;
-use crate::commands::schema::validate::request_schemas;
+use crate::commands::schema::validate::document_schemas;
 use crate::commands::trigger_findings::{emit_warnings, finding_diagnostic};
 use crate::io::{DocumentArgumentError, OpenedArgument, load_markdown, open_argument, parse_argument, resolve_file_path};
 use crate::output::command::{CommandRun, Completed, DataShape};
@@ -261,17 +261,11 @@ fn edit_schemas(
     run: &mut CommandRun,
     request: &MdRequest,
 ) -> Result<DarkmatterSchemas> {
-    let schemas = request_schemas(request).map_err(|error| schema_failure(md, error))?;
     let context = match opened {
         Some((argument, document)) => request.document_context(Some(argument.reference()), document)?,
         None => request.launch_context()?.clone(),
     };
-    let in_repository = context.repository_root().is_some();
-    let schemas = schemas.with_file_resolution_context(context);
-    if !in_repository {
-        return Ok(schemas);
-    }
-    let schemas = schemas.with_trigger_discovery().map_err(|error| schema_failure(md, error))?;
+    let schemas = document_schemas(request, context).map_err(|error| schema_failure(md, error))?;
     if run.is_data() {
         run.add_diagnostics(schemas.discovery_findings().iter().map(finding_diagnostic));
     } else {

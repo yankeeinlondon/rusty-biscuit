@@ -72,3 +72,24 @@ by `Feature::mermaid_fallback()` and folded into
 `no-mermaid-rendering` (lowers to `MermaidMode::Text`, beating `--mermaid`
 and `embed-mermaid-font`). `--mermaid` itself selects `MermaidMode::Automatic`.
 Convention: the `cli` skill; user docs: `darkmatter/docs/cli/render.md#features`.
+
+## Shell completion of property paths
+
+`COMPLETE=<shell> md -- <words>` is the entry point; `CompleteEnv` answers and
+exits before `main` captures its request. `cli/src/completion_shells.rs` owns the
+shell side and `cli/src/args/path_completion.rs` the value completers.
+
+- `recover_words()` is the one reader of the line. A completer receives only the
+  current word; the engine and the completers both see the recovered words.
+- Bash splits at `=` and `:` from version 4 on. `x=<Tab>` has `=` as the current
+  word with an empty `$2`; bash 3.2 keeps `x=ce` whole. A reply replaces only the
+  last piece, so `bash_reply` strips through the typed `=` or `:` and escapes it.
+- `CompleteEnv` removes `COMPLETE` before completers run, so the adapter records
+  the word form in a static rather than reading the variable.
+- The bash and zsh scripts are the built-in ones with text edits, which
+  `every_registration_edit_applies` pins against a `clap_complete` upgrade.
+- Passive and silent: every failure means fewer candidates. `completion_overlay`
+  drops only the setter composition would refuse, where `SetterPlan::new` fails
+  the whole plan. A misplaced test document therefore does not fail loudly: it
+  falls back to the baseline, and `CliProcessFixture::write_file` is relative to
+  the workspace, not `cwd()`.

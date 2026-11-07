@@ -10,6 +10,7 @@ pub mod args;
 pub mod artifact;
 pub mod collection_failure;
 pub mod commands;
+pub mod completion_shells;
 pub mod io;
 pub mod output;
 pub mod render;

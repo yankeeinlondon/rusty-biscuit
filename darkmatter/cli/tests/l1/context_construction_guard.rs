@@ -15,7 +15,21 @@ const fn allow(gate: Gate, path: &'static str, identifier: &'static str, count: 
 
 const ALLOWLIST: &[Allowance] = &[
     allow(Gate::Construction, "main.rs", "RequestSnapshot::from_process", 1, "the `md` binary's one process read (R8)"),
+    allow(
+        Gate::Construction,
+        "request.rs",
+        "RequestSnapshot::from_process",
+        1,
+        "shell completion's own process read: `CompleteEnv` answers a Tab press and exits before `main` reaches its read",
+    ),
     allow(Gate::AmbientState, "main.rs", "std::env::var", 1, "`RUST_LOG` tracing filter"),
+    allow(
+        Gate::AmbientState,
+        "completion_shells.rs",
+        "std::env::var",
+        4,
+        "the variables `md`'s registered shell functions set to describe a Tab press: cursor index, separator, space handling, open quote",
+    ),
     allow(Gate::AmbientState, "artifact.rs", "std::env::var", 1, "`MD_DRY_RUN` test hook that skips launching a viewer"),
     allow(
         Gate::AmbientState,
