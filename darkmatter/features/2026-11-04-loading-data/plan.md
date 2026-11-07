@@ -1,14 +1,104 @@
 ---
 total_phases: 9
 created: 2026-11-05
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+packages:
+- simplified-schema
+- biscuit-file
+- biscuit-file-cli
+- darkmatter
+- darkmatter-lsp
+source_files_during_phase_2:
+- simplified-schema/lib/src/coerce.rs
+- simplified-schema/lib/src/coercion/error.rs
+- simplified-schema/lib/src/coercion/mod.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/container_contracts.rs
+- simplified-schema/lib/tests/l1/located_failures.rs
+- simplified-schema/lib/tests/l1/soft_validation_repair.rs
+- biscuit-file/lib/Cargo.toml
+- biscuit-file/lib/src/detect.rs
+- biscuit-file/lib/src/format.rs
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/json_lines.rs
+- biscuit-file/lib/src/delimited.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/test_layout.rs
+- biscuit-file/lib/tests/l1/format_detection.rs
+- biscuit-file/lib/tests/l1/json_lines.rs
+- biscuit-file/lib/tests/l1-delimited/main.rs
+- biscuit-file/lib/tests/l1-delimited/delimited_reader.rs
+- biscuit-file/cli/src/main.rs
+- biscuit-file/cli/tests/cli_tests.rs
+- biscuit-file/justfile
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+- darkmatter/lib/src/markdown/schemas/about.rs
+- darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+- darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+- darkmatter/lib/tests/l1/meta_schema_phase3.rs
+- darkmatter/lib/tests/l1/schema_language_ownership_guard.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- Cargo.lock
+docs_updated_during_phase_2:
+- biscuit-file/README.md
+- biscuit-file/lib/README.md
+- biscuit-file/docs/dependencies.md
+- docs/dependencies.md
+- simplified-schema/docs/topics/conversion.md
+- simplified-schema/docs/topics/custom-vocabulary.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/validation.md
+- simplified-schema/docs/topics/language/schema-types.md
+- simplified-schema/docs/topics/language/types.md
+docs_created_during_phase_2:
+- biscuit-file/docs/topics/data-readers.md
+skills_files_updated_during_phase_2:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/biscuit-file/references/architecture.md
+- .claude/skills/biscuit-file/references/detect.md
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/simplified-schema/declaration-narrowing.md
+source_files_during_phase_3:
+- biscuit-file/lib/Cargo.toml
+- biscuit-file/lib/src/lib.rs
+- biscuit-file/lib/src/source_position.rs
+- biscuit-file/lib/src/data_locations.rs
+- biscuit-file/lib/tests/l1/main.rs
+- biscuit-file/lib/tests/l1/source_position.rs
+- biscuit-file/lib/tests/l1/data_locations.rs
+- biscuit-file/lib/tests/l1-delimited/main.rs
+- biscuit-file/lib/tests/l1-delimited/delimited_locations.rs
+- simplified-schema/lib/src/positions.rs
+- simplified-schema/lib/src/expression/scan.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/expression_scanner.rs
+- simplified-schema/lib/tests/l1/expression_regions.rs
+- simplified-schema/lib/tests/l1/scanner_corpus.rs
+- simplified-schema/lib/tests/fixtures/scanner/regressions.md
+docs_updated_during_phase_3:
+- biscuit-file/docs/topics/data-readers.md
+- biscuit-file/docs/dependencies.md
+- biscuit-file/lib/README.md
+- docs/dependencies.md
+- simplified-schema/docs/topics/foundations.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/biscuit-file/SKILL.md
+- .claude/skills/biscuit-file/references/architecture.md
+- .claude/skills/simplified-schema/SKILL.md
 ---
 
 # Loading Data Implementation Plan
@@ -86,24 +176,24 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 2: Schema Contracts and File Readers
 
-- [ ] **Schema contracts**
+- [x] **Schema contracts**
   - Own simplified-schema's narrowing, grammar/types/options/lowering, format validator, coercion failure helper, and partial-copy repair. Add the `container` option, provisional named-reference checking, and shared failure flattening from rules 12/20/21. Update their behavior comments in the same edits.
   - Add public-result tests for both R2 tables, bracket unions, null-only rejection, format-payload absent/false/true/null/wrong-type handling, union reachability, and validate_soft convertible siblings alongside nested structural errors.
   - Prerequisite: Phase 1. Checkpoint: the schema ownership guard can consume these APIs without adding coercion interpretation to darkmatter.
 
-- [ ] **File readers**
+- [x] **File readers**
   - Own biscuit-file enum/detection changes, JSONL reader, delimited reader and feature declarations, exports, bf exhaustive dispatch, and dependency documentation. Return `JsonLines { values, line_offsets }` from `read_json_lines(&str)`; return `DelimitedData { headers, rows }` from `read_delimited(&str, delimiter: u8)`, retaining header and row field offsets/start lines. Keep object/list mapping and mode-dependent header checks in darkmatter.
   - Return typed reader errors with byte offsets; reject invalid JSON records and strict quote violations. Add feature-gated tests registered in the area's consolidated L1 root; add a dedicated delimited-required target and CI test-feature metadata so opt-in tests actually execute.
   - Checkpoint: default/no-default builds exclude csv dependencies; new feature builds parse quoted CSV/TSV and preserve physical offsets; bf reports unsupported conversion clearly.
 
 ## Phase 3: Source Locators and Scanner Core
 
-- [ ] **Source locators**
+- [x] **Source locators**
   - Own biscuit-file's `source_position` and `data_locations` modules and their exports; implement rule 7 using the Phase 2 record offsets. Enable serde_json `raw_value` in the owning crate rather than relying on another workspace member's features.
   - Own the narrow simplified-schema `PositionMap::project` root relaxation, coordinated after Schema contracts. Leave top-level fallback and frontmatter root admission unchanged.
   - Test root/nested pointers, escaped pointer segments, missing-child parent fallback, JSON duplicate keys and surrogate escapes, JSONL blank lines, delimited quotes/newlines, TOML array-of-tables/dotted keys, JSON5 comments/escapes/trailing commas, multibyte characters, CRLF, and lone CR position conversion.
 
-- [ ] **Scanner core**
+- [x] **Scanner core**
   - Own only simplified-schema's expression scanner and new region API. Implement rule 24, update the lexical-only module comment, and preserve old behavior for prose, unterminated strings, invalid expressions, literals, tokens, and escaped openers.
   - Add R11 unit cases and the fixed-input corpus comparison from rule 25. Include nested objects, escaped quotes, multiline strings, quoted opening braces, and an incomplete editor region after a nested type string.
   - Checkpoint for Phases 2 and 3: focused reader, position, scanner, coercion, and format tests pass; public exports compile with the intended feature boundaries.
