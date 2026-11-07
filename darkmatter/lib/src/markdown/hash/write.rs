@@ -419,7 +419,7 @@ fn validated(
 
 /// Prepends a frontmatter block holding `yaml` (already terminated) to a
 /// document that has none, keeping a leading BOM first.
-fn new_frontmatter_block(document: &str, yaml: &str) -> String {
+pub(super) fn new_frontmatter_block(document: &str, yaml: &str) -> String {
     let (bom, rest) = match document.strip_prefix('\u{feff}') {
         Some(rest) => ("\u{feff}", rest),
         None => ("", document),
@@ -430,7 +430,7 @@ fn new_frontmatter_block(document: &str, yaml: &str) -> String {
 
 /// The terminator of a new block's lines: the document's first line
 /// terminator, or LF when the document has none.
-fn new_block_terminator(document: &str) -> &str {
+pub(super) fn new_block_terminator(document: &str) -> &str {
     line_spans(document)
         .first()
         .map(|line| &document[line.content_end..line.end])
@@ -448,7 +448,7 @@ pub enum FrontmatterPathSegment {
 }
 
 /// Renders a path as `a.b[2].c`.
-fn dotted_path(path: &[FrontmatterPathSegment]) -> String {
+pub(super) fn dotted_path(path: &[FrontmatterPathSegment]) -> String {
     let mut out = String::new();
     for segment in path {
         match segment {
@@ -748,14 +748,14 @@ pub(crate) fn locate_frontmatter_value_range(
 }
 
 /// The character column of byte `offset` on its line of `text`.
-fn column_of(text: &str, offset: usize) -> usize {
+pub(super) fn column_of(text: &str, offset: usize) -> usize {
     let line_start = text[..offset].rfind(['\n', '\r']).map_or(0, |index| index + 1);
     text[line_start..offset].chars().count()
 }
 
 #[derive(Debug)]
-struct TextNode {
-    range: Range<usize>,
+pub(super) struct TextNode {
+    pub(super) range: Range<usize>,
     key_end: usize,
 }
 
@@ -819,7 +819,7 @@ fn line_spans(source: &str) -> Vec<LineSpan> {
 /// top-level keys start at column 0. An indented root is valid YAML, and
 /// readers accept it, but the editors locate top-level nodes by column, so it
 /// is refused here, before any key is located or inserted.
-fn validate_block_mapping(yaml: &str) -> MarkdownResult<()> {
+pub(super) fn validate_block_mapping(yaml: &str) -> MarkdownResult<()> {
     let first_content = first_content_line(yaml);
     if first_content.is_some_and(|line| {
         let trimmed = line.trim_start();
@@ -942,7 +942,7 @@ fn locate_node(yaml: &str, target: &str) -> MarkdownResult<Option<TextNode>> {
     }
 }
 
-fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
+pub(super) fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
     let lines = line_spans(yaml);
     let mut nodes = IndexMap::new();
     let mut index = 0;
@@ -1003,7 +1003,7 @@ fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
 
 /// The key/value separator of a top-level key line. A colon inside a plain
 /// key (`a:b: c`) or a quoted one is content, not the separator.
-fn mapping_colon(line: &str) -> Option<usize> {
+pub(super) fn mapping_colon(line: &str) -> Option<usize> {
     simplified_schema::simplified::mapping_separator(line, false)
 }
 
@@ -1044,7 +1044,7 @@ fn parse_semantic_key(raw: &str) -> MarkdownResult<String> {
 }
 
 /// Serializes one `key: value` entry with LF terminators.
-fn serialize_entry(key: &str, value: &serde_json::Value) -> MarkdownResult<String> {
+pub(super) fn serialize_entry(key: &str, value: &serde_json::Value) -> MarkdownResult<String> {
     let mut map = indexmap::IndexMap::new();
     map.insert(key.to_string(), value);
     serde_yaml_ng::to_string(&map)
@@ -1078,7 +1078,7 @@ fn line_terminators(text: &str) -> Vec<&str> {
 /// Re-terminates LF-terminated `serialized` output line by line: line *i*
 /// takes `terminators[i]`, and a line past the end of `terminators` (or whose
 /// original was unterminated) repeats the previous line's terminator.
-fn apply_terminators(serialized: &str, terminators: &[&str]) -> String {
+pub(super) fn apply_terminators(serialized: &str, terminators: &[&str]) -> String {
     let mut out = String::with_capacity(serialized.len() + terminators.len());
     let mut previous = "\n";
     for (index, line) in serialized.split_inclusive('\n').enumerate() {
@@ -1097,7 +1097,7 @@ fn apply_terminators(serialized: &str, terminators: &[&str]) -> String {
 
 /// The terminator of the line ending at `insert_at`, or LF at the start of
 /// `document`.
-fn preceding_terminator(document: &str, insert_at: usize) -> &'static str {
+pub(super) fn preceding_terminator(document: &str, insert_at: usize) -> &'static str {
     let before = &document.as_bytes()[..insert_at];
     if before.ends_with(b"\r\n") {
         "\r\n"
@@ -1227,7 +1227,7 @@ fn insert_date_after_colon(node_text: &str, colon: usize, today: &str) -> String
 /// Where the comment in `value`, a scalar's text to the end of its line,
 /// starts: the first `#` that opens `value` or follows whitespace, after any
 /// quoted scalar that opens it (see [`quoted_scalar_end`]).
-fn yaml_comment_start(value: &str) -> Option<usize> {
+pub(super) fn yaml_comment_start(value: &str) -> Option<usize> {
     let from = quoted_scalar_end(value)?;
     value[from..]
         .char_indices()

@@ -244,6 +244,7 @@ mod shared_acyclic_selection;
 mod shipped_schema_corpus;
 mod set_overlay_integration;
 mod frontmatter_merge_order;
+mod frontmatter_path_edit;
 mod shell_block_integration;
 mod shell_expansion_coordinates;
 mod shell_result_values;

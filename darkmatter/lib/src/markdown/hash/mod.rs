@@ -17,6 +17,7 @@ mod compute;
 mod explain;
 mod kind;
 mod options;
+mod path_edit;
 mod save;
 mod stored;
 mod write;
@@ -27,6 +28,7 @@ pub use compute::{ComputedHash, DetailedValue, FmHashPair, SectionTuple};
 pub use explain::HashExplanation;
 pub use kind::{KindRelation, MdHashKind, ParseMdHashKindError, select_kind};
 pub use options::{DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashOptions, last_updated_stamp};
+pub use path_edit::{PathEdit, PathEditRefusal, edit_frontmatter_paths, edited_document_text};
 pub use save::SaveDecision;
 pub use stored::{StoredHash, StoredHashValue};
 pub use write::{

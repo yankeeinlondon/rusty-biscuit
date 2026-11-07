@@ -315,8 +315,9 @@ returns one `LeafSpan { path, range, decoded }` per requested string leaf.
 `range` is the scalar's absolute byte range: quotes and a block scalar's
 header are included, and the final line break is excluded. Splicing an
 encoded scalar into exactly that range leaves every other byte and line
-ending intact. This, with `restore_properties_text`, is the sanctioned
-text-preserving writer. Do not build another YAML editor.
+ending intact. This, with `restore_properties_text` and the nested editor
+below, is the sanctioned text-preserving writer. Do not build another YAML
+editor.
 
 - Each path is located within its own top-level property. An unmodeled
   construct elsewhere never blocks it.
@@ -373,6 +374,32 @@ text-preserving writer. Do not build another YAML editor.
   where a `prologue:`/`epilogue:` value was typed, for a plain flow item too,
   and is `None` unless the node decodes to the expected text; a reference's
   location comes from it after the leaf locator refuses, never from its key.
+
+## Text-Preserving Nested Edits
+
+`hash::edit_frontmatter_paths(source, &expected, &[PathEdit])` (`hash/path_edit.rs`)
+is the sanctioned writer for a value below the top level: `PathEdit::Set(steps)`
+writes what `expected` holds there, and `PathEdit::Remove(steps)` takes the node's
+own lines. `expected` is the map the pure `simplified_schema::{set_at, RemovalPlan}`
+edit produced; steps come from `PropertyPath::resolve_map` over that map, or from
+`RemovalPlan::targets`. `hash::edited_document_text(&edited, &edits)` adds the
+serialized fallback, so a writer calls only that.
+
+- Every result is reloaded through `Markdown::try_from_content` and compared with
+  `expected` before it is returned; a located position is never trusted on its own.
+- `UnsupportedForm` (flow collection, alias, or tag on the walked path; an indented
+  root; YAML only the lenient loader reads) falls back to serialization, verified
+  the same way, and that fallback keeps the source's fences and body bytes.
+  `Markdown::as_string` does not: the loaded body has lost its final line break and
+  its line endings.
+- `WouldChangeUnnamed` (an alias reads the edited node, or loses its anchor) has no
+  fallback. It is decided by comparing values, so it also reports any other change
+  outside the named paths.
+- A compact `- - x` and a flow bracket closing at column 0 are unsupported forms,
+  because the locator and top-level scanner cannot read them.
+- A comment stays on a value's first line when the value grows, because a block
+  scalar's last line would read it as content. A new key goes past a `|+` scalar's
+  blank lines, because the locator's span stops before them.
 
 ## `style:` Frontmatter
 
