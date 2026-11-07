@@ -1,7 +1,7 @@
 ---
 total_phases: 10
 created: 2026-11-06
-phase: 8
+phase: 10
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -112,6 +112,41 @@ docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
 - .claude/skills/darkmatter/cli.md
+source_files_during_phase_8:
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/property_paths.rs
+- darkmatter/cli/tests/level2/level2_path_completion.rs
+- darkmatter/cli/tests/level2/main.rs
+- darkmatter/lib/tests/l1/compose_setters.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/os/windows.md
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/data-contracts.md
+- darkmatter/docs/cli/get.md
+- darkmatter/docs/cli/index.md
+- darkmatter/docs/cli/rm.md
+- darkmatter/docs/cli/set.md
+- darkmatter/docs/errors/composition-problems.md
+- darkmatter/docs/topics/frontmatter.md
+- darkmatter/docs/topics/numbers.md
+- simplified-schema/README.md
+- simplified-schema/docs/topics/foundations.md
+docs_created_during_phase_9:
+- simplified-schema/docs/topics/property-paths.md
+- simplified-schema/docs/topics/setter-values.md
+skills_files_updated_during_phase_9:
+- .claude/skills/biscuit-file/references/api.md
+- .claude/skills/darkmatter/cli.md
+- .claude/skills/os/macos.md
+- .claude/skills/simplified-schema/SKILL.md
 ---
 
 # Dotted Property Paths Implementation Plan
@@ -229,20 +264,20 @@ The matrix applies to the value parser, the one new input reader. Default: inval
 
 ## Phase 8: Prove Input and Execution Contracts
 
-- [ ] **Completion evidence**
+- [x] **Completion evidence**
   - Own `cli/tests/l1/path_completion.rs`, plus L2 `cli/tests/level2/level2_path_completion.rs`.
   - In L1, assert each shell's word shape, bash's split in both versions' forms, no diagnostic on stdout or stderr for a broken document or schema, and no evaluation or request: a document with a frontmatter command writing a sentinel file, an interpolated value, and a remote `$schema` leaves no sentinel and still offers local keys. Assert the no-read limit through `work_counters`.
   - In L2, run `style.pa<Tab>` through `ce<Tab>` to `style.page.alignment=center` in bash and zsh with no stray space. Fish and elvish join where the backend supports them. Record bash 3.2, fish, elvish, and PowerShell results or mark them unproven.
 
-- [ ] **Command evidence**
+- [x] **Command evidence**
   - Own `cli/tests/l1/property_paths.rs` and `cli/tests/l1/main.rs`, including the completion task's registration. Map every spec acceptance criterion to a named test in the log, and add a real CLI case for any that only has an in-process test and needs command wiring: exit status, envelope, persistence, or failure with no mutation.
 
 ## Phase 9: Documentation and Guidance
 
-- [ ] **Current documentation**
+- [x] **Current documentation**
   - Own `darkmatter/docs/cli/get.md`, `set.md`, `rm.md`, `compose.md`, `index.md`, `docs/topics/frontmatter.md`, `docs/cli/data-contracts.md`, `docs/errors/composition-problems.md`, and `simplified-schema/docs/` pages for the path type and value parser. Replace "does not evaluate dotted paths" and the key grammar. Remove `compose.md:94`'s claim that `--set` takes dot-notation, and the statement that setters merge into the `--set` map. Add migration examples for the value changes, a section on what completion reads, and any per-shell limit. Write for a developer new to this repository. No page names this feature.
 
-- [ ] **Guidance**
+- [x] **Guidance**
   - Own `.claude/skills/darkmatter/cli.md`, `frontmatter.md`, `completion`-related notes in `schema.md`, `.claude/skills/simplified-schema/`, `.claude/skills/biscuit-file/` for `json5_scan`, and `.claude/skills/os/` for any shell or Windows fact learned the hard way.
 
 ## Phase 10: Validation and Closure

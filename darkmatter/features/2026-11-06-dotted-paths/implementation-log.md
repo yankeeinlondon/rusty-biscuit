@@ -395,6 +395,80 @@ decisions_for_review:
         The L1 subprocess tests landed in Phase 7 in `cli/tests/l1/path_completion.rs`,
         a file the plan gives to Phase 8. Phase 7 needed end-to-end proof of its wiring.
         Phase 8 keeps ownership and extends the same file rather than starting another.
+    - |-
+        The read limit is proven by what can be observed, not by counting file
+        opens. The plan says to assert it through the work counters, and the spec
+        says each schema file is read once. The counters and the schema resolver's
+        own list of read files show one schema preparation, one trigger scan, one
+        parse of a file imported twice, and no read of an unrelated schema or of a
+        child document's schema. They cannot count a second read of a file whose
+        parsed table was already held. That case is settled by reading the code:
+        the resolver reuses a namespace it has already loaded for that file.
+        Alternatives: add a counter at the file-read call, which is a small
+        production change to simplified-schema; or trace system calls, which needs
+        elevated rights on macOS and is not portable. A named pipe was tried as a
+        read-once file, and a schema path that is not a regular file is refused
+        before it is read, so it proves nothing.
+        To choose a read counter, add a `Work` kind at `buffers::read` and tighten
+        `one_tab_prepares_once_and_reads_only_the_documents_schema_files`.
+    - |-
+        A shell that a host does not have reports itself unproven and the test
+        passes, rather than failing. The spec says an L1 prerequisite uses
+        `expect_level!` and cannot silently skip, and also says to select
+        platform-specific tests deliberately and record an absent shell as
+        unproven. So bash (Unix), bash 3.2 and zsh (macOS), and PowerShell
+        (Windows) are required where they are guaranteed, while fish is optional
+        everywhere and prints `unproven`. CI will mostly not run fish. Elvish has
+        no script test at all, because none could be checked here and an unrun test
+        would claim more than is known. PowerShell's script load is proven on native
+        Windows; its real Tab behavior is not.
+        Alternatives: install every shell on the CI images, which adds a cost CI has
+        no other need for; or fail when a shell is absent, which turns a missing
+        optional shell into a red build.
+        To change it, provision the shell and turn its early return into
+        `expect_level!`.
+    - |-
+        The real Tab test types the dot itself: `style.pa<Tab>` stops at `style.page`,
+        and the test then types `.`. The spec's sequence, `style.pa<Tab>` then
+        `ge.<Tab>`, reads as if Tab might not advance at all. Tab stops there because
+        both `style.page.` and `style.page=` are valid continuations, as the spec's
+        own spelling table requires, so no shell can pick one. The finished line is
+        still exactly `style.page.alignment=center`, with no stray space in any shell
+        tested, and the command then runs.
+        Alternative: offer only `style.page.` for an object key, so one Tab reaches the
+        dot, which removes the way to replace a whole object by Tab.
+        To choose it, change the object-key row in `path_candidates` and its tests.
+    - |-
+        Two dotted grammars remain on `md`, and the docs say so. `md schema validate
+        post.md user.email=x` keeps its own older assignment rules (a YAML value
+        and its own key splitting), not `PropertyPath` and the shared value parser.
+        The spec's scope lists `get`, `set`, `rm`, and `compose` only, so nothing
+        changed; `docs/cli/index.md` names the exception.
+        Alternative: move those assignments onto `PropertyPath` and `SetterValue`,
+        so one spelling works everywhere, at the cost of changing what a value such
+        as `tags=[a, b]` means there.
+        To choose it, change `commands/schema/assignment.rs` and its docs in
+        `topics/schemas/definition.md`.
+    - |-
+        Migration tables sit at the end of each command's own page, rather than on
+        one migration page. The plan asks for migration examples without saying
+        where. A reader of `md set` finds what changed for `md set`, and `get`, `rm`,
+        and `compose` each list only their own differences. The grammar and value
+        rules are one section each in `docs/cli/index.md`, as the spec asks, and every
+        page links there.
+        Alternative: one migration page, which is shorter overall but sits away from
+        the command being read.
+        To choose it, move the "Migrating older calls" sections; no other text
+        depends on them.
+    - |-
+        The per-shell table in `docs/cli/index.md` says "tested" or "not tested" for
+        each of three levels, and does not claim support for elvish or for
+        PowerShell's real Tab. It says elvish is "likely" to add a space after `style.`,
+        because that comes from reading its built-in script, with no run behind it.
+        The spec allows either a pass or a documented limit for each shell.
+        Alternative: run both shells to replace those words with facts, which needs
+        elvish installed and a native-Windows real-terminal run.
+        To change it, update that table and its list when evidence exists.
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -421,19 +495,15 @@ packages:
     - darkmatter-cli
     - simplified-schema
 message_to_agent: |-
-    For Phase 8: `cli/tests/l1/path_completion.rs` already exists and is registered; extend
-    it rather than adding a file. Fixture trap: `CliProcessFixture::write_file` is relative to
-    the workspace, not to `cwd()`, and `md` runs in `cwd()`, so use that file's `write_in_cwd`.
-    A misplaced document does not fail loudly, because completion falls back to the baseline.
-    Still yours: the sentinel proof (a frontmatter command leaves no file, an interpolated value
-    is not evaluated), the no-read limit through `work_counters` and the L2 Tab round trips. The
-    remote `$schema` case has only a keys-and-baseline assertion so far, with no proof that no
-    request was made. Bash forms to assert: bash 5 sends `x`, `=` with the cursor on `=`, or `x`,
-    `=`, `ce`; bash 3.2 sends `x=ce` whole. To drive real Tabs without focus, use a private
-    detached tmux server (`tmux -L name new-session -d`), `env -i` with a fixed `PATH`, and type
-    a marker after Tab, because `capture-pane` trims trailing spaces. Bash 3.2 must be set up with
-    `eval "$(COMPLETE=bash md)"`; it cannot `source <(...)`. Results by hand on this Mac are in
-    the log under Phase 7. Elvish and PowerShell are not installed here, so record them unproven.
+    For Phase 10: Phase 9 changed only Markdown. The scope check still selects `darkmatter` for
+    those files alone, as a test input a test reads, so they are not gate-exempt. `just test` and
+    `just lint` in `darkmatter/` passed with them in place. `md validate refs` cannot judge
+    `compose.md`, `data-contracts.md`, `numbers.md`, `composition-problems.md`,
+    `foundations.md`, or the simplified-schema README, because it evaluates their illustrative
+    `{{ ... }}` text and fails. The committed versions fail the same way, so this predates the
+    feature. Their links and anchors were checked by a script; the only misses are three old
+    repo-rooted links in that README. The release measurement and per-shell results for closure
+    are in the log under Phases 7 and 8.
 source_files_during_phase_3:
     - darkmatter/lib/src/markdown/hash/path_edit.rs
     - darkmatter/lib/src/markdown/hash/mod.rs
@@ -517,6 +587,41 @@ docs_updated_during_phase_7: []
 docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
 - .claude/skills/darkmatter/cli.md
+source_files_during_phase_8:
+- darkmatter/cli/Cargo.toml
+- darkmatter/cli/src/args/path_completion.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/path_completion.rs
+- darkmatter/cli/tests/l1/property_paths.rs
+- darkmatter/cli/tests/level2/level2_path_completion.rs
+- darkmatter/cli/tests/level2/main.rs
+- darkmatter/lib/tests/l1/compose_setters.rs
+docs_updated_during_phase_8: []
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+- .claude/skills/darkmatter/testing.md
+- .claude/skills/os/windows.md
+source_files_during_phase_9: []
+docs_updated_during_phase_9:
+    - darkmatter/docs/cli/compose.md
+    - darkmatter/docs/cli/data-contracts.md
+    - darkmatter/docs/cli/get.md
+    - darkmatter/docs/cli/index.md
+    - darkmatter/docs/cli/rm.md
+    - darkmatter/docs/cli/set.md
+    - darkmatter/docs/errors/composition-problems.md
+    - darkmatter/docs/topics/frontmatter.md
+    - darkmatter/docs/topics/numbers.md
+    - simplified-schema/README.md
+    - simplified-schema/docs/topics/foundations.md
+docs_created_during_phase_9:
+    - simplified-schema/docs/topics/property-paths.md
+    - simplified-schema/docs/topics/setter-values.md
+skills_files_updated_during_phase_9:
+    - .claude/skills/biscuit-file/references/api.md
+    - .claude/skills/darkmatter/cli.md
+    - .claude/skills/os/macos.md
+    - .claude/skills/simplified-schema/SKILL.md
 ---
 
 # Implementation Log for 2026-11-06-dotted-paths (10 phases)
@@ -1333,3 +1438,220 @@ scheduled CI. PowerShell's real Tab behavior is unexecuted.
 `docs/` waits for Phase 9, as the plan assigns, including the per-shell limits above. Added
 completion notes to `.claude/skills/darkmatter/cli.md`. This phase names no spec frontmatter to set,
 and the spec is unchanged. The departures from the plan are in `decisions_for_review`.
+
+## Phase 8
+
+Proved the input and execution contracts with real processes and real shells. No product
+behavior changed. The one production edit is a seam: `DocumentSite::load` now takes its
+request, so a unit test can measure one Tab press in its own temp directory instead of
+scanning this checkout.
+
+### What landed
+
+| Item | Where |
+|---|---|
+| No evaluation, no command, no request, no write, with controls | `darkmatter/cli/tests/l1/path_completion.rs` |
+| The read limit, through `work_counters` and `observed::collect` | unit test in `darkmatter/cli/src/args/path_completion.rs` |
+| `work-counters` on the dev-dependency, so only test builds compile it | `darkmatter/cli/Cargo.toml` |
+| Registration scripts loading in real shells | `darkmatter/cli/tests/l1/path_completion.rs` |
+| Real Tab round trips, ending by running the command | new `darkmatter/cli/tests/level2/level2_path_completion.rs` |
+| Evidence that spans commands | new `darkmatter/cli/tests/l1/property_paths.rs` |
+| "Only `PropertyPath` splits a path" guards | `property_paths.rs`, `darkmatter/lib/tests/l1/compose_setters.rs` |
+
+### Findings
+
+- The sentinel is the `darkmatter-argv-recorder` program, not `touch`, which native Windows
+  lacks. It records which commands ran, and the control asserts composing runs exactly
+  `frontmatter`, then `body`, while a Tab leaves the whole fixture workspace unchanged.
+- The fixture's first draft had a duplicate `title` key, so it did not parse. A document that
+  fails to parse also runs nothing, so "no sentinel" alone would have passed; the assertion that
+  local keys are offered is what caught it. A no-effect test needs a positive assertion and a
+  control.
+- Interpolation is proven through a union: `kind: a` narrows to one arm, and
+  `kind: "{{ 'a' }}"` offers both, so the value was not evaluated.
+- A Tab with `--allow host=127.0.0.1` on the line still makes no request. A remote `$schema`
+  and a remote import in a local schema both leave `server.requests()` empty, and the control
+  shows the same server does answer an allowed composition.
+- `ExpressionParse` is 648 and `ValidatorCompile` 19 on the first press, whatever the document:
+  that is the baseline schema. The test therefore compares warmed presses and asserts the
+  document's own expressions add nothing, rather than asserting zero.
+- A YAML list under `$schema` is a union of object arms, not an array. `md set items.0.count abc`
+  under such a schema saved, because the document was already invalid at the parent `items` and
+  rule 11 does not blame an edit for that. This looked like a bug and is not.
+- The first draft's no-diagnostics test took 5.3 s as one test across five shells. It is now
+  one test per shell. `run_shell` first set a directory and `HOME` on the shell's command, which
+  `spawn_site_guard` rejected; the shells read and write no profile, so both were removed rather
+  than adding a file-wide allow-list entry.
+- On this host, a bare `ls` in `/tmp` hung for over 90 s twice during probing, while `/bin/ls` did
+  not. The shell aliases `ls`. The cause was not investigated; it is not related to `md`.
+
+### Per-shell results
+
+"Real Tab" is the automated L2 round trip on this Mac, 2026-11-06: `style.pa<Tab>` to `style.page`,
+type `.`, Tab, type `al`, Tab to `style.page.alignment=`, type `ce`, Tab, type `zz=1`, assert the
+whole line is `md compose doc.md style.page.alignment=center zz=1`, press Enter, and assert the
+composed output says `Align: center!`. A stray space at any step fails the whole-line assertion.
+
+| Shell | Word shape (L1) | Script loads (L1) | Real Tab (L2) |
+|---|---|---|---|
+| bash 5.3.20 | proven | proven | proven |
+| bash 3.2.57 | proven | proven | proven |
+| zsh | proven | proven | proven |
+| fish | proven | proven | proven |
+| elvish | proven | **unproven**: not installed, no script test | **unproven** |
+| PowerShell | proven | proven on native Windows | **unproven**: needs native Windows |
+
+Mutation check of the L2 test: with bash's no-space rule disabled, it failed on the line
+`md compose doc.md style.page.alignment= center`, then the source was restored. Linux and WSL2 run
+these under scheduled CI, where a bash 3 and usually zsh and fish are absent and report unproven.
+
+### Acceptance criteria to tests
+
+CLI tests are in `darkmatter/cli/tests/l1/` unless a crate is named. `get_set_rm` and
+`compose_setters` are the earlier phases' files; `property_paths` is this phase's.
+
+| Criterion | Tests |
+|---|---|
+| Read, edit, and remove a nested value; siblings and bytes kept | `property_paths::an_edit_survives_every_later_command_and_what_was_not_named_survives_the_edits`, `get_set_rm::set_paths::a_nested_edit_keeps_comments_and_spelling_in_the_shared_parent`, `get_set_rm::rm_paths::removing_a_nested_key_keeps_its_siblings_and_their_comments` |
+| `a.b` never writes a literal key; `a\.b` does, and `get`/`rm` reach it | `get_set_rm::set_paths::a_dotted_path_never_writes_a_literal_key_and_an_escaped_one_does`, `property_paths::an_edit_survives_every_later_command_and_what_was_not_named_survives_the_edits` |
+| `a.b=1` overrides one value, visible to expressions and validation | `compose_setters::applying::a_nested_setter_keeps_its_siblings_and_reaches_expressions`, `compose_setters::values::a_nested_value_reads_through_its_declared_type` |
+| Top-level contracts kept; differences intentional | `output_commands::conforms_get_*`, `conforms_set_*`, `conforms_rm_*`; `get_set_rm::test_set_save_*`, `test_rm_keeps_every_other_byte`, `test_set_then_rm_round_trip_restores_original_bytes`; `compose_state_set` |
+| `./a.b=c.md` is a path, `a.b=c.md` a setter, `'$schema'` works | `compose_setters::classifying::a_dotted_key_is_a_setter_and_dot_slash_makes_it_a_path`, `get_set_rm::get_paths::the_empty_argument_special_keys_and_unicode_are_ordinary_keys` |
+| `items.1.name`, numbers on mappings, every out-of-range row | `get_set_rm::get_paths::a_number_is_an_index_on_an_array_and_a_key_on_a_mapping`, `get_set_rm::set_paths::a_number_on_a_mapping_is_a_key`, `property_paths::an_index_that_does_not_exist_is_the_same_case_for_every_command` |
+| Each Parents row; a failed edit writes nothing | `get_set_rm::set_paths::a_missing_parent_is_created`, `a_number_under_a_missing_parent_is_refused`, `a_parent_that_cannot_hold_the_key_is_named_with_its_type`, `get_set_rm::rm_paths::removing_the_last_child_leaves_the_parent`, `property_paths::a_null_or_scalar_parent_refuses_every_mutation_and_can_be_replaced_by_name` |
+| `1.10` under `string`; `count=5` declared and not; `{a:1}` alike in both commands | `property_paths::a_declared_string_keeps_its_spelling`, `a_declared_number_is_a_number`, `an_undeclared_number_is_a_number`, `a_json5_object_is_an_object` |
+| Both orders of `author={...} author.name=Bob` | `compose_setters::precedence::whole_object_plus_descendant_is_the_same_in_both_orders` |
+| `dm.schema.unknown_key` under a closed object, none under a pattern | `compose_setters::values::a_closed_object_refuses_an_undeclared_child_and_a_pattern_opens_it` |
+| `{ max-width: 50 }`; rejected syntax stays text; admission errors fail | `property_paths::a_yaml_flow_object_is_an_object`, `a_rejected_syntax_stays_text`, `compose_setters::failing::an_inadmissible_container_never_becomes_text`, `get_set_rm::set_values::an_inadmissible_container_fails_and_never_becomes_text`; simplified-schema `setter_values` |
+| Output schemas conform | `output_commands::conforms_get_nested_paths_stay_flat`, `conforms_set_nested_path_is_written_as_given`, `conforms_set_rejected_value_has_no_document`, `conforms_rm_nested_path_keeps_top_level_remaining`, `conforms_rm_conflict_fails` |
+| Only `PropertyPath` parses; typed paths in diagnostics | `property_paths::only_property_path_splits_a_path_in_the_commands`, lib `compose_setters::only_property_path_splits_a_path_in_the_library`, `property_paths::a_rejected_value_names_its_place_whether_a_number_was_an_index_or_a_key`; simplified-schema `property_paths::the_pointer_comes_from_the_typed_walk_and_escapes_its_keys` |
+| `parse(print(segments)) == segments` | simplified-schema `property_paths::round_trip_holds_for_the_hard_spellings`, `parse_of_print_is_the_segments` |
+| Empty key, syntax errors, Unicode, escapes, huge indexes, scalar/null, removal order and conflicts, scalar ancestor in both orders | `property_paths::whitespace_and_unicode_in_a_key_are_kept_by_every_command`, `get_set_rm::malformed_paths::each_command_fails_as_usage_before_reading_anything`, `get_set_rm::rm_paths::array_removals_use_original_indexes_in_either_order`, `a_duplicate_or_an_ancestor_with_its_descendant_cancels_the_command`, `compose_setters::precedence::a_scalar_ancestor_fails_in_both_orders_and_composes_nothing` |
+| Flat `get`; `rm.remaining`; comments; alias refused; read/write/read | `get_set_rm::get_paths::several_paths_give_a_flat_object_keyed_as_written`, `get_set_rm::rm_paths::removing_the_last_child_leaves_the_parent`, `get_set_rm::set_paths::an_edit_an_alias_reads_is_refused_with_no_fallback`, `repeated_edits_round_trip_through_the_file` |
+| `md set` validation rows; broken schema; setting `$schema` | `get_set_rm::set_validation::a_valid_value_writes_despite_a_problem_elsewhere`, `a_value_the_type_rejects_writes_nothing`, `setting_the_missing_key_repairs_the_document`, `a_broken_schema_fails_with_an_explanation_and_no_write`, `setting_schema_checks_only_the_reference` |
+| Trigger in either order; `--set` replacing `$schema`; converted trigger explained | `compose_setters::selecting_a_schema::a_setter_selects_the_trigger_that_reads_another_in_either_order`, `a_set_that_replaces_the_schema_selects_the_same_way`, `a_trigger_on_a_converted_type_fails_clearly_with_no_retry` |
+| Quotes decode once; shared conversion; pending and caller origins kept | `property_paths::a_quoted_string_decodes_once`, `get_set_rm::set_values::numberlike_boolish_and_unions_follow_the_shared_rules`, `a_pending_value_is_written_unevaluated`, `compose_setters::origins::an_authored_file_value_beside_a_setter_keeps_its_own_origin`, `a_template_in_a_setter_is_authored_at_any_depth` |
+| A setter failure names its argument and path, with no authored position | `compose_setters::assert_setter_failure` (used by its failure tests), `property_paths::a_rejected_value_names_its_place_whether_a_number_was_an_index_or_a_key` |
+| Completion table rows, separate `$schema`, required first, tag narrowing | lib `path_candidates` (every row); `path_completion::a_document_schema_supplies_keys_and_values`, `earlier_setters_and_overrides_choose_the_schema_the_keys_come_from` |
+| No evaluation, command, or request; no diagnostic text | `path_completion::a_tab_runs_no_command_and_writes_nothing_while_composing_the_same_document_does`, `a_remote_schema_is_never_requested_and_local_keys_remain`, `a_remote_import_inside_a_local_schema_is_never_requested`, `an_interpolated_tag_is_not_evaluated_to_narrow_a_union`, `a_failure_adds_no_text_in_{bash,zsh,fish,elvish,powershell}` |
+| What a Tab may read | unit `args::path_completion::tests::one_tab_prepares_once_and_reads_only_the_documents_schema_files` |
+| Unparseable document, unresolved schema, no input each still complete | `path_completion::a_broken_document_or_schema_leaves_the_baseline_without_a_word`, `no_input_offers_only_the_baseline_and_files` |
+| The Tab round trip in each shell, or its documented limit | level2 `level2_path_completion::a_tab_round_trip_in_{modern_bash,bash_3,zsh,fish}`; the table above for elvish and PowerShell, with the limits written in Phase 9 |
+
+Fidelity: the shell boundary is F3 in L2 (real shell, real terminal, detached tmux, no focus); word
+shapes and effects are F2 subprocess in L1; the read limit is in-process, because counters live in
+the process that does the work.
+
+### Input Robustness Matrix
+
+No reader was added or changed, so the matrix stands from Phase 7. `property_paths` adds
+control rows through the real CLI: a good value at the same path succeeds where `abc` fails.
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping, because source files changed.
+
+| Gate | Result |
+|---|---|
+| `just test` in `darkmatter/` | exit 0: 14296 passed, 10 skipped by the recipe's selection; none slow |
+| `just lint` in `darkmatter/` | exit 0, including the Zed WASM check |
+| `just check-tier-coverage darkmatter` | exit 0; stranded 0 |
+| `just test-l2 level2_path_completion` | 4 passed |
+
+The first full run stopped on `spawn_site_guard` (described above), and it passed after the fix.
+No pre-existing or load-sensitive failure occurred, and nothing was skipped beyond the recipe's selection.
+
+### Dependent packages
+
+`claudine` and `claudine-cli`: `cargo check --all-targets` passed. No library code changed in this
+phase, so the other dependents have nothing new to exercise and their tests were not run.
+
+### Cross-OS check
+
+`just cross-check darkmatter-cli --os windows`, run because a `#[cfg(windows)]` test was added and
+the new tests spawn programs. The first run failed on two of this phase's tests, both test defects:
+`touch` does not exist there, and Windows PowerShell has no `--version` flag. After the fixes: 2079
+passed, 80 skipped, exit 0, on a patched tree, so it publishes no CI observation. Linux and WSL2 were
+not run; they run under scheduled CI.
+
+### Docs, skills, and spec
+
+`docs/` waits for Phase 9, as the plan assigns. Added the Tab-evidence patterns to
+`.claude/skills/darkmatter/testing.md` and the two Windows facts to `.claude/skills/os/windows.md`.
+This phase names no spec frontmatter to set, and the spec is unchanged.
+
+## Phase 9
+
+Wrote the documentation and guidance. No compiled code changed, so `source_files_during_phase_9`
+is empty. Every example and error text in the new docs was run against the debug `md` in a scratch
+directory first.
+
+### What landed
+
+| Item | Where |
+|---|---|
+| Shared sections: Property Paths, Command-Line Values, Shell Completions (paths, values, what it reads, per-shell limits) | `darkmatter/docs/cli/index.md` |
+| Paths, migration tables; validation flow for `set`, conflict rules for `rm`, setter classification and overlaps for `compose` | `darkmatter/docs/cli/{get,set,rm,compose}.md` |
+| Removed "does not evaluate dotted paths", the old key grammar, `compose.md`'s claim that `--set` takes dot notation, and "setters merge into the `--set` map" | same |
+| Editing Nested Values: what is kept, the fallback, the alias refusal | `darkmatter/docs/topics/frontmatter.md` |
+| Paths as written and exit 2 for a malformed path; the setter family and examples | `darkmatter/docs/cli/data-contracts.md`, `darkmatter/docs/errors/composition-problems.md` |
+| A setter's non-finite number now fails inside a container (drift) | `darkmatter/docs/topics/numbers.md` |
+| New pages for the two library types, linked from the README | `simplified-schema/docs/topics/{property-paths,setter-values}.md`, `simplified-schema/README.md`, `foundations.md` |
+| Guidance | `.claude/skills/darkmatter/cli.md`, `.claude/skills/simplified-schema/SKILL.md`, `.claude/skills/biscuit-file/references/api.md`, `.claude/skills/os/macos.md` |
+
+`.claude/skills/darkmatter/frontmatter.md` and `schema.md` already describe the final behavior
+from Phases 3, 4, and 6, so they did not change.
+
+### Findings
+
+- My first value table was wrong in two columns. Running every cell showed `numberlike` refuses
+  `true` and `On`, and `boolish` refuses `5`, `1.10`, and `02134`. The table now reports what ran.
+- `[x, y]` as a value is text, because only a value starting with `{` is tried as YAML. The docs
+  say so and show `'["x", "y"]'`.
+- `md compose p.md v=7` beats a child's `::file ch.md set.v=9`. `--set` does the same, so the docs
+  say a setter reaches children "just as `--set` does".
+- **A probe touched another repository.** A scratch script ran `mkdir repo; cd repo; git init`.
+  This host's `CDPATH` sent the `cd` to `/Users/ken/coding/personal/repo`, an existing repository
+  with uncommitted work, so `git init` re-initialized it. Checked afterward: its commits and
+  working-tree changes are untouched, `.git/config` was rewritten and holds only `[core]`, and
+  `hooks/sendemail-validate.sample` is new. Nothing was reverted there. The trap is now in
+  `.claude/skills/os/macos.md`.
+
+### Requirement-to-check mapping
+
+Documentation has no test to add, so each requirement maps to how it was checked.
+
+| Requirement | Check |
+|---|---|
+| Examples and messages are real | ran against `target/debug/md` in a scratch directory |
+| Links and anchors resolve | `md validate refs` on the seven pages it can judge; a script over all thirteen changed pages for the rest |
+| No page names this feature | grep for dated names and `features/`/`fixes/` over the changed pages: none |
+| Elvish and PowerShell not over-claimed | per-shell table follows the Phase 8 results |
+
+`md validate refs` fails on `compose.md`, `data-contracts.md`, `numbers.md`,
+`composition-problems.md`, `foundations.md`, and the simplified-schema README, because it evaluates
+their illustrative `{{ ... }}` text. The same files fail the same way at `HEAD`, so this is
+pre-existing. The script's only misses are three old repo-rooted links in that README
+(`darkmatter/README.md`, `claudine/README.md`, `darkmatter/dmls/README.md`), left as they were.
+
+### Gates (macOS, 2026-11-06)
+
+The scope check does not allow skipping. Over the working tree it reported
+`packages: [darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package`, because Phase 8's
+uncommitted sources are still in the tree. Run over this phase's Markdown files alone, it still
+reports `packages: [darkmatter]`, with the reason "changed test input read by package(s) darkmatter",
+as one Linux L1 cell. So a test reads these pages, and the run below, made after the edits, covers it.
+
+| Gate | Result |
+|---|---|
+| `just lint` in `darkmatter/` | exit 0, including the Zed WASM check |
+| `just test` in `darkmatter/` | exit 0: 14296 passed, 10 skipped by the recipe's selection; none slow |
+| `just check-tier-coverage darkmatter` | exit 0; stranded 0 |
+
+### Dependent packages and cross-OS
+
+No compiled code changed, so dependents have nothing new to exercise and were not run, and no
+cross-OS check was needed. The Windows notes in the docs (`.\dir\.config=1.md`) come from the spec
+and the Phase 8 cross-check.
+
+No spec frontmatter was named for this phase, and the spec is unchanged.
