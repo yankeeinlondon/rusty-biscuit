@@ -1,0 +1,4 @@
+{
+  // JSON5 allows comments, unquoted keys, and trailing commas
+  hosts: ['alpha', 'beta',],
+}

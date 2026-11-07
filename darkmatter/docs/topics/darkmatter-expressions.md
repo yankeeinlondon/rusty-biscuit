@@ -75,6 +75,14 @@ The principles worth carrying around:
 - **One implementation, every surface.** The same lexer, parser, and AST serve
   body interpolation, frontmatter, `when=` conditions, `$()` ternaries, and the
   language server. A grammar change is never local to one surface.
+- **A `}}` inside a string or a nested `{ … }` does not end an expression.**
+  Scanning skips quoted strings and counts single braces, so
+  `{{ "}}" }}` is the text `}}`, `{{ {a: {b: 1}} }}` is an object, and
+  `{{ load_data(f, "{ a: { b: string }}") }}` is one call. The longer
+  reading is used only when it parses and the reading that ends at the
+  first `}}` does not, so prose such as `{{ don't }} it's fine {{ x }}`
+  still finds `don't` and `x`. See
+  [Interpolation § Where an Expression Ends](../inline/interpolation.md#where-an-expression-ends).
 - **Parsing is context-free.** Nothing in these stages reads frontmatter, the
   filesystem, or the function catalog. The same text always yields the same AST;
   an unknown variable or an unknown function is an *evaluation* concern, not a
@@ -471,6 +479,11 @@ the table above says:
   `f64`: `9007199254740993` is an error ("cannot be represented exactly").
   See [Numbers](./numbers.md)
 - boolean literals: `true`, `false`
+- array and object literals: `[1, 2]`, `{a: 1, b: [2, 3]}`. An object
+  literal can be the whole expression, nested braces included:
+  `{{ {a: {b: 1}} }}` is the object `{a: {b: 1}}`. Three opening braces are
+  still an [interpolation literal](#interpolation-literals), whatever
+  follows: `{{{a: 1}}}` is the text `{{a: 1}}`, not an object
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
 ## Interpolation Literals
@@ -836,6 +849,11 @@ it agrees with boolean OR on every input; returning the operand is what lets
 | `"" \|\| "bar"` | `"bar"` | true |
 | `false \|\| 0` | `0` | false |
 
+`||` supplies a default for a falsy value, not for a failure. An operand that
+fails to evaluate (a missing file passed to `frontmatter(…)` or `load_data(…)`)
+is an error, and the error stops the expression; test with `file_exists(…)`
+first instead (see [Loading Data](./loading-data.md#files-that-may-be-missing)).
+
 Because the value is the same everywhere, a defaulted collection works inside a
 condition exactly as it does inside `{{ … }}`:
 
@@ -1116,7 +1134,7 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through. | `join("sub", "note.md")` ⇒ `"sub/note.md"` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through. | `link("fixture.md")` ⇒ `"[fixture.md](/path/to/fixture.md)"` (display only: result includes an absolute path, which is not portable) |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through. | `link("fixture.md", "Fixture")` ⇒ `"[Fixture](/path/to/fixture.md)"` (display only: result includes an absolute destination path, which is not portable) |
-| Filesystem | `load_data(file, as)` | Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file (chosen by its extension) and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. Null passes through without reading anything. | `load_data("fixture.yaml", "string[]")` ⇒ `["macOS", "Linux", "Windows"]` |
+| Filesystem | `load_data(file, as)` | Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file (chosen by its extension) and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. Null passes through without reading anything. | `load_data("fixture.yaml", "string[]")` ⇒ `["macOS", "Linux", "Windows"]`<br>`load_data("fixture.json", "{name: string, tags: string[]}")` ⇒ `{name: "Ada", tags: ["math", "engines"]}`<br>`load_data("fixture.jsonl", "{id: number, ok: boolean}[]")` ⇒ `[{id: 1, ok: true}, {id: 2, ok: false}]`<br>`load_data("fixture.csv", "{name: string, active: boolean, stars: number}[]")` ⇒ `[{name: "Ada", active: true, stars: 1000}, {name: "Grace", active: false, stars: 250}]`<br>`load_data("fixture.tsv", "tuple([string, number])[]")` ⇒ `[["web", 8080], ["db", 5432]]`<br>`load_data("fixture.toml", "{package: {name: string, version: string}}")` ⇒ `{package: {name: "demo", version: "1.0.0"}}`<br>`load_data("fixture.json5", "{hosts: string[]}")` ⇒ `{hosts: ["alpha", "beta"]}`<br>`load_data(null, "string[]")` ⇒ `null` |
 | Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown file's body holds only whitespace; null is false. | `markdown_body_empty("fixture.md")` ⇒ `false` |
 | Filesystem | `markdown_title(file)` | Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through. | `markdown_title("fixture.md")` ⇒ `"Fixture Title"` |
 | Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename, or empty text when there is none; null passes through. | `parent_dir("sub/note.md")` ⇒ `"sub"` |
@@ -1316,10 +1334,16 @@ runs no function.
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
 | `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
 | `validate_schema(path, obj)` | the file's frontmatter with `obj` merged over it, validated in memory | yes (body only) |
+| `load_data(path, as)` | a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file, converted to the type `as` | yes (body only) |
 | `absolute(path)` | the absolute path a reference names, existing or not | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
 | `find_files(pattern)` | every file a glob reference matches | **no** |
+
+`load_data(path, as)` reads structured data rather than a Markdown file. Its
+`as` argument is a quoted type definition (`"string[]"`), and the data must fit
+it. Formats, CSV rows, optional files, and failures are described in
+[Loading Data](./loading-data.md).
 
 `frontmatter(path, …)` and `markdown_title(path)` decode a stored
 [literal token](../inline/interpolation.md#literal-tokens) to the text it

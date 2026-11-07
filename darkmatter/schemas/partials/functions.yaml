@@ -796,6 +796,13 @@ types:
             category(Filesystem);
             fallible;
             example(load_data("fixture.yaml", "string[]") => ["macOS", "Linux", "Windows"]);
+            example(load_data("fixture.json", "{name: string, tags: string[]}") => {name: "Ada", tags: ["math", "engines"]});
+            example(load_data("fixture.jsonl", "{id: number, ok: boolean}[]") => [{id: 1, ok: true}, {id: 2, ok: false}]);
+            example(load_data("fixture.csv", "{name: string, active: boolean, stars: number}[]") => [{name: "Ada", active: true, stars: 1000}, {name: "Grace", active: false, stars: 250}]);
+            example(load_data("fixture.tsv", "tuple([string, number])[]") => [["web", 8080], ["db", 5432]]);
+            example(load_data("fixture.toml", "{package: {name: string, version: string}}") => {package: {name: "demo", version: "1.0.0"}});
+            example(load_data("fixture.json5", "{hosts: string[]}") => {hosts: ["alpha", "beta"]});
+            example(load_data(null, "string[]") => null);
         ) -> Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file (chosen by its extension) and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. Null passes through without reading anything.
     markdown_body_empty: |-
         function(

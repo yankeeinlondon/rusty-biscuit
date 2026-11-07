@@ -116,9 +116,10 @@ pub use call_check::{
     classify_argument_with_definitions, expression_type,
 };
 pub use catalog::{
-    CatalogCategory, ExpressionFunctionDescriptor, FunctionCatalog, FunctionExample, FunctionParameterDescriptor,
-    ReservedRootDescriptor, RootEvaluation, RootMembers, expression_function_catalog, expression_function_descriptors,
-    function_descriptors, generate_expression_function_table, reserved_root_descriptors,
+    CatalogCategory, EXPRESSION_FUNCTION_PAGES, ExpressionFunctionDescriptor, ExpressionFunctionPage, FunctionCatalog,
+    FunctionExample, FunctionParameterDescriptor, ReservedRootDescriptor, RootEvaluation, RootMembers,
+    expression_function_catalog, expression_function_descriptors, function_descriptors,
+    generate_expression_function_page, generate_expression_function_table, reserved_root_descriptors,
 };
 #[cfg(any(test, feature = "effects-instrumentation"))]
 pub use functions::test_hooks as function_test_hooks;
