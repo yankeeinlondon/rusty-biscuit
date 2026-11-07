@@ -19,6 +19,23 @@ Both forms use the same argument definitions and command dispatch, including
 `--indent`, output selection, features, and diagnostic policy. For example,
 `md README.md --indent 2` is an alias for `md render README.md --indent 2`.
 
+A render option belongs to one spelling or the other, never both: given
+before a subcommand it is a usage error (exit code 2), because nothing
+combines the two levels.
+
+```bash
+md --feature embed-mermaid-font render README.md   # exit 2
+md render README.md --feature embed-mermaid-font   # the render form
+md --mermaid toc README.md                         # exit 2
+```
+
+Shared controls (`--width`, `-v`/`--verbose`, `--debug`, `--magic-root`) are
+not render options and may precede any subcommand.
+
+A file named like a command, or like a `style…=VALUE` setter, follows `--`
+(or starts with `./`): `md -- render` renders the file `render`, and
+`md render -- toc` renders the file `toc`.
+
 ## Reporting
 
 ### Usage
@@ -49,15 +66,12 @@ md render README.md --output html --show
 
 # Override list indentation
 md render README.md --indent 2
-
-# Choose how code blocks pick their light/dark variant
-md render README.md --code-block dark    # always a dark code panel
-md render README.md --code-block same    # match the terminal's mode
 ```
 
 ### Arguments
 
-- `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads stdin when piped; otherwise errors.
+- `[ARGS]...`: the Markdown file path (supports `@` file references; `-` for stdin) and any `style…=VALUE` setters, in any order. A word is a setter when the text before its first `=` is `style` or starts with `style.`; every other word is the file. More than one file is a usage error (exit code 2). If no file is given, reads stdin when piped; otherwise errors. Setters are **planned**: they are recognized but do not change the rendering yet.
+- `-- [INPUT]...`: everything after `--` is the file, never a setter or a command.
 
 ### Options
 
@@ -66,6 +80,13 @@ md render README.md --code-block same    # match the terminal's mode
 - `--max-width <N>`: Cap the content width inside `--width`. It exists only on this command and `md FILE`; zero is a usage error.
 - `--show`: Write output to a temp file and open it with the system default app. See [Opening the Output](#opening-the-output).
 - `--indent <#>`: Enforce a nested-list indentation step of 2, 4, or 8 spaces per level. Default: 4. For an eight-space step, cleanup uses CommonMark-valid marker padding on parent items when needed to preserve the same list tree.
+- `--style <FILE>`: a JSON, JSON5, YAML, or TOML style file (repeatable; later files merge over earlier ones). **Planned**: the option is accepted but its files are not read yet.
+- `--mermaid`: in terminal output, render Mermaid diagrams in automatic mode: an
+  image where the terminal shows images, otherwise a text drawing when the
+  diagram has one and it fits, otherwise the highlighted code block (see
+  [Mermaid in the terminal](#mermaid-in-the-terminal) below). HTML, Markdown,
+  and JSON output ignore it.
+- `--feature <NAME>`: turn on a named feature (see [Features](#features) below)
 
 ### Global Flags Relevant to `render`
 
@@ -74,25 +95,11 @@ These are top-level flags (not render-specific) but affect `render` behavior:
 - `--list-themes`: list the available theme names and exit
 - `--theme <NAME>`: prose theme
 - `--code-theme <NAME>`: code theme override (selects *which* theme pair, e.g. `dracula`)
-- `--code-block <inverse|dark|light|same>`: selects *which variant* of the code
-  theme a code block uses relative to the page color mode (default `inverse`):
-    - `inverse` (default): the opposite variant from the terminal, so the code
-      panel contrasts with the page (a dark terminal gets a light panel, and a
-      light terminal gets a dark panel).
-    - `dark`: always the dark variant.
-    - `light`: always the light variant.
-    - `same`: match the terminal's own mode.
-  The panel's light/dark choice is derived from the terminal (the same source as
-  the page), so it stays consistent regardless of environment color detection.
-  A theme name is mode-agnostic, because every theme is a light and dark pair.
-  HTML output always uses the `inverse` variant.
 - `--line-numbers`: include code line numbers in terminal rendering
-- `--mermaid`: in terminal output, render Mermaid diagrams in automatic mode: an
-  image where the terminal shows images, otherwise a text drawing when the
-  diagram has one and it fits, otherwise the highlighted code block (see
-  [Mermaid in the terminal](#mermaid-in-the-terminal) below). HTML, Markdown,
-  and JSON output ignore it.
-- `--feature <NAME>`: turn on a named feature (see [Features](#features) below)
+
+The code panel's light/dark variant is the document's `style.page.code.mode`
+(`inverse`, the default, `dark`, `light`, or `same`); there is no render flag
+for it, and `--code-block` is an unknown argument here.
 
 ### Environment
 
@@ -101,10 +108,9 @@ These are top-level flags (not render-specific) but affect `render` behavior:
 
 ### Features
 
-`--feature <NAME>` turns on an opt-in by name. It is accepted at the top level
-(`md --feature NAME doc.md`, before a subcommand) and on `render`
-(`md render doc.md --feature NAME`); both lists are combined. The top-level
-form is also accepted before other subcommands (`md --feature NAME compose doc.md`).
+`--feature <NAME>` turns on an opt-in by name. It is a render option, so it is
+written `md doc.md --feature NAME` or `md render doc.md --feature NAME`; before
+any subcommand (`md --feature NAME render doc.md`) it is a usage error.
 
 - Repeatable and comma-separated: `--feature a --feature b` is the same as
   `--feature a,b`.
@@ -184,7 +190,7 @@ never draw text. A feature always wins over the variable.
 
 ```bash
 MERMAID_FALLBACK=code-block md --mermaid flow.md          # source, not a drawing
-md --mermaid render flow.md --feature no-mermaid-partial-warning   # drawing, no note
+md render --mermaid flow.md --feature no-mermaid-partial-warning   # drawing, no note
 ```
 
 ### Output Behavior

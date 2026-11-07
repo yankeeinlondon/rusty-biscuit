@@ -32,22 +32,27 @@ fn default_render_is_an_alias_with_the_same_options() {
 }
 
 #[test]
-fn render_features_are_combined_once_during_normalization() {
+fn render_features_are_never_combined_across_levels() {
     use clap::Parser;
     use darkmatter_cli::args::{Cli, Command, Feature};
 
-    for args in [
-        vec!["md", "doc.md", "--feature", "embed-mermaid-font,no-mermaid-rendering"],
-        vec!["md", "--feature", "embed-mermaid-font", "render", "doc.md", "--feature", "no-mermaid-rendering"],
-    ] {
-        let cli = Cli::try_parse_from(args).unwrap();
-        for _ in 0..2 {
-            let Command::Render(options) = cli.command_or_render() else {
-                panic!("expected render");
-            };
-            assert_eq!(options.features, [Feature::EmbedMermaidFont, Feature::NoMermaidRendering]);
-        }
+    let cli = Cli::try_parse_from(["md", "doc.md", "--feature", "embed-mermaid-font,no-mermaid-rendering"]).unwrap();
+    for _ in 0..2 {
+        let Command::Render(options) = cli.command_or_render() else {
+            panic!("expected render");
+        };
+        assert_eq!(options.features, [Feature::EmbedMermaidFont, Feature::NoMermaidRendering]);
     }
+
+    // A root `--feature` before `render` is a usage error, not a prefix of
+    // `render`'s own list.
+    let cli = Cli::try_parse_from(["md", "--feature", "embed-mermaid-font", "render", "doc.md", "--feature", "no-mermaid-rendering"])
+        .unwrap();
+    let Command::Render(options) = cli.command_or_render() else {
+        panic!("expected render");
+    };
+    assert_eq!(options.features, [Feature::NoMermaidRendering]);
+    assert!(darkmatter_cli::commands::validate_subcommand_usage(&cli).is_err());
 }
 
 #[test]
@@ -280,14 +285,17 @@ fn test_block_rendering_transclusion_cycle_non_tty() {
     );
 }
 
+/// The code panel's mode is a document style value (`style.page.code.mode`);
+/// `--code-block` belongs to `md schema about` alone.
 #[test]
-fn render_accepts_code_block_flag() {
-    let fixture = CliProcessFixture::named("render_accepts_code_block_flag");
-    let tmp = md_file("# Title\n\n```rust\nfn main() {}\n```\n");
+fn render_accepts_every_frontmatter_code_mode() {
+    let fixture = CliProcessFixture::named("render_accepts_every_frontmatter_code_mode");
     for mode in ["inverse", "dark", "light", "same"] {
+        let tmp = md_file(&format!(
+            "---\nstyle:\n  page:\n    code:\n      mode: {mode}\n---\n# Title\n\n```rust\nfn main() {{}}\n```\n"
+        ));
         fixture
             .command()
-            .args(["--code-block", mode])
             .arg(tmp.path())
             .assert()
             .success()
@@ -296,13 +304,30 @@ fn render_accepts_code_block_flag() {
 }
 
 #[test]
-fn render_rejects_invalid_code_block_value() {
-    let fixture = CliProcessFixture::named("render_rejects_invalid_code_block_value");
-    let tmp = md_file("# Title\n");
+fn render_rejects_an_invalid_frontmatter_code_mode() {
+    let fixture = CliProcessFixture::named("render_rejects_an_invalid_frontmatter_code_mode");
+    let tmp = md_file("---\nstyle:\n  page:\n    code:\n      mode: sideways\n---\n# Title\n");
     fixture
         .command()
-        .args(["--code-block", "sideways"])
         .arg(tmp.path())
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains("style.page.code.mode"));
+}
+
+#[test]
+fn render_code_block_flag_is_an_unknown_argument() {
+    let fixture = CliProcessFixture::named("render_code_block_flag_is_an_unknown_argument");
+    let tmp = md_file("# Title\n");
+    for prefix in [&[][..], &["render"][..]] {
+        fixture
+            .command()
+            .args(prefix)
+            .arg(tmp.path())
+            .args(["--code-block", "dark"])
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("unexpected argument '--code-block'"));
+    }
 }

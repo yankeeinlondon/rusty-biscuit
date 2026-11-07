@@ -15,12 +15,18 @@
 //!   post-padding content width for `max-width`.
 //! - [`Length::Css(_)`] → [`StyleApplyError::InvalidCssLength`].
 
+use std::sync::Arc;
+
+use biscuit_file::FileReferenceError;
 use biscuit_terminal::components::horizontal_rule::{RuleAlignment, RuleStyle, RuleWeight};
 use renderable::layout::{Length, TargetValue, Width};
 use thiserror::Error;
 
 use crate::layout::{DarkmatterPage, PageComponent};
-use crate::style::schema::{CommonStyle, StyleFrontmatter};
+use crate::style::bespoke::{BespokeStyleOverrides, StyleAssetResolver, apply_bespoke_knobs, apply_stylesheet};
+use crate::style::layer::PreparedStyle;
+use crate::style::presentation::PresentationDefaults;
+use crate::style::schema::{CommonStyle, ComponentEdges, StyleFrontmatter};
 #[cfg(test)]
 use crate::style::schema::WidthOrMode;
 use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
@@ -208,6 +214,22 @@ pub enum StyleApplyError {
     #[error("failed to read stylesheet `{path}`: {reason}")]
     StylesheetRead { path: String, reason: String },
 
+    /// `style.page.stylesheet` is not a valid file reference, or resolving
+    /// it failed (an escape from its tree, a missing anchor, an I/O probe
+    /// failure). The [`FileReferenceError`] is the error's source and
+    /// [`StyleApplyError::file_reference_error`].
+    #[error("could not resolve stylesheet `{reference}`: {error}")]
+    StylesheetReference {
+        reference: String,
+        #[source]
+        error: SharedFileReferenceError,
+    },
+
+    /// A `style.page.stylesheet` has no recorded origin, so there is no
+    /// context to resolve it in.
+    #[error("no file context to resolve stylesheet `{reference}` in")]
+    StylesheetContextMissing { reference: String },
+
     /// The value of `style.page.stylesheet` was empty.
     #[error("empty stylesheet value")]
     EmptyStylesheet,
@@ -222,9 +244,49 @@ pub enum StyleApplyError {
     #[error("invalid meta shape at `{path}`: {reason}")]
     InvalidMetaShape { path: String, reason: String },
 
-    /// `style.page.code.theme` specified an unknown theme name.
-    #[error("invalid code theme: `{value}`")]
-    InvalidCodeTheme { value: String },
+}
+
+impl StyleApplyError {
+    pub(crate) fn stylesheet_reference(reference: &str, error: FileReferenceError) -> Self {
+        Self::StylesheetReference {
+            reference: reference.to_string(),
+            error: SharedFileReferenceError(Arc::new(error)),
+        }
+    }
+
+    /// The file-reference failure behind a stylesheet error, for a diagnostic
+    /// that names its class (`ResolutionFailure`).
+    pub fn file_reference_error(&self) -> Option<&FileReferenceError> {
+        match self {
+            Self::StylesheetReference { error, .. } => Some(&error.0),
+            _ => None,
+        }
+    }
+}
+
+/// A [`FileReferenceError`] shared so [`StyleApplyError`] stays `Clone` and
+/// comparable; two are equal when they say the same thing.
+#[derive(Debug, Clone)]
+pub struct SharedFileReferenceError(pub Arc<FileReferenceError>);
+
+impl PartialEq for SharedFileReferenceError {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.to_string() == other.0.to_string()
+    }
+}
+
+impl std::fmt::Display for SharedFileReferenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+// Transparent: the wrapper displays as its error, so it reports that error's
+// own source rather than repeating it in an error chain.
+impl std::error::Error for SharedFileReferenceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
 }
 
 /// Lower a [`Length`] onto a [`renderable::layout::Length`] for component
@@ -247,6 +309,48 @@ fn length_to_layout_length(
         Length::Zero | Length::Ch(_) | Length::Percent(_) => Ok(length.clone()),
         Length::Css(_) => Err(StyleApplyError::ComponentInvalidCssLength { bucket, field }),
     }
+}
+
+/// Lower a bucket's `padding`, then its `padding-left`/`padding-right`, onto
+/// `edges`, returning whether anything was set.
+///
+/// A side overrides only its own edge, so a bucket that sets only
+/// `padding-left` keeps the policy's inherited top, bottom, and right
+/// padding. A CLI fill claim (`fill_claimed`) keeps the claimed sides; it
+/// leaves `padding` itself to the bucket, as before the sides existed.
+fn lower_padding(
+    edges: &mut renderable::layout::Edges,
+    style: &CommonStyle,
+    bucket: &'static str,
+    fill_claimed: bool,
+) -> Result<bool, StyleApplyError> {
+    lower_padding_sides(
+        edges,
+        style.padding.as_ref(),
+        if fill_claimed { None } else { style.padding_left.as_ref() },
+        if fill_claimed { None } else { style.padding_right.as_ref() },
+        bucket,
+    )
+}
+
+/// Applies `padding` to every edge, then each horizontal side over it.
+fn lower_padding_sides(
+    edges: &mut renderable::layout::Edges,
+    padding: Option<&ComponentEdges>,
+    left: Option<&Length>,
+    right: Option<&Length>,
+    bucket: &'static str,
+) -> Result<bool, StyleApplyError> {
+    if let Some(padding) = padding {
+        *edges = padding.as_edges().clone();
+    }
+    if let Some(left) = left {
+        edges.left = TargetValue::universal(length_to_layout_length(left, bucket, "padding-left")?);
+    }
+    if let Some(right) = right {
+        edges.right = TargetValue::universal(length_to_layout_length(right, bucket, "padding-right")?);
+    }
+    Ok(padding.is_some() || left.is_some() || right.is_some())
 }
 
 /// Apply parsed page-level style onto a [`DarkmatterPage`] builder.
@@ -275,48 +379,48 @@ pub fn apply_page_style(
     // Store horizontal margins as the authored `Length` so the frame resolves
     // percentages per target (terminal cells vs. browser `%`).
     if !overrides.margin_left
-        && let Some(len) = page_style.left_margin.as_ref()
+        && let Some(len) = page_style.margin_left.as_ref()
     {
-        page = page.with_margin_left_length(horizontal_length(len, "left-margin")?);
+        page = page.with_margin_left_length(horizontal_length(len, "margin-left")?);
     }
     if !overrides.margin_right
-        && let Some(len) = page_style.right_margin.as_ref()
+        && let Some(len) = page_style.margin_right.as_ref()
     {
-        page = page.with_margin_right_length(horizontal_length(len, "right-margin")?);
+        page = page.with_margin_right_length(horizontal_length(len, "margin-right")?);
     }
 
     // Vertical margins (already u16 row counts in the schema).
     if !overrides.margin_top
-        && let Some(rows) = page_style.top_margin
+        && let Some(rows) = page_style.margin_top
     {
         page = page.with_margin_top(rows);
     }
     if !overrides.margin_bottom
-        && let Some(rows) = page_style.bottom_margin
+        && let Some(rows) = page_style.margin_bottom
     {
         page = page.with_margin_bottom(rows);
     }
 
     // Horizontal padding — authored `Length`, resolved per target.
     if !overrides.padding_left
-        && let Some(len) = page_style.left_padding.as_ref()
+        && let Some(len) = page_style.padding_left.as_ref()
     {
-        page = page.with_padding_left_length(horizontal_length(len, "left-padding")?);
+        page = page.with_padding_left_length(horizontal_length(len, "padding-left")?);
     }
     if !overrides.padding_right
-        && let Some(len) = page_style.right_padding.as_ref()
+        && let Some(len) = page_style.padding_right.as_ref()
     {
-        page = page.with_padding_right_length(horizontal_length(len, "right-padding")?);
+        page = page.with_padding_right_length(horizontal_length(len, "padding-right")?);
     }
 
     // Vertical padding.
     if !overrides.padding_top
-        && let Some(rows) = page_style.top_padding
+        && let Some(rows) = page_style.padding_top
     {
         page = page.with_padding_top(rows);
     }
     if !overrides.padding_bottom
-        && let Some(rows) = page_style.bottom_padding
+        && let Some(rows) = page_style.padding_bottom
     {
         page = page.with_padding_bottom(rows);
     }
@@ -631,6 +735,21 @@ pub fn apply_hr_style(
         page = page.with_hr_alignment(alignment);
     }
 
+    // A rule's padding moves it inside the content width, as `--fill pad`
+    // and `--fill indent` did; a CLI fill claim keeps its own.
+    if !overrides.fill {
+        let mut policy = page.component_policy(PageComponent::Hr).cloned().unwrap_or_default();
+        if lower_padding_sides(
+            &mut policy.layout.padding,
+            hr.padding.as_ref(),
+            hr.padding_left.as_ref(),
+            hr.padding_right.as_ref(),
+            "hr",
+        )? {
+            page = page.with_component_policy(PageComponent::Hr, policy);
+        }
+    }
+
     if let Some(kind) = hr.kind {
         page = page.with_hr_kind(kind);
     }
@@ -800,8 +919,7 @@ fn apply_list_bucket(
         changed = true;
     }
 
-    if let Some(padding) = style.padding.as_ref() {
-        policy.layout.padding = padding.as_edges().clone();
+    if lower_padding(&mut policy.layout.padding, style, bucket, fill_claimed)? {
         changed = true;
     }
 
@@ -890,8 +1008,7 @@ fn apply_common_style(
         changed = true;
     }
 
-    if let Some(padding) = style.padding.as_ref() {
-        policy.layout.padding = padding.as_edges().clone();
+    if lower_padding(&mut policy.layout.padding, style, bucket, fill_claimed)? {
         changed = true;
     }
 
@@ -915,6 +1032,56 @@ fn apply_common_style(
     } else {
         Ok(page)
     }
+}
+
+/// Apply an effective style, prepared from its layers, onto a
+/// [`DarkmatterPage`].
+///
+/// This is the page-construction entry for a [`PreparedStyle`]: every
+/// layer was validated and merged by
+/// [`prepare_style_layers`](super::prepare_style_layers), passively, and this
+/// is where assets are executed. It sets, in order:
+///
+/// 1. the presentation `defaults` resolves over the merged style (prose and
+///    code themes, code-block mode, line numbers; see
+///    [`PresentationDefaults`]);
+/// 2. page, component, list, rule, disclosure, and color style;
+/// 3. the bespoke knobs, with `style.page.stylesheet` resolved by `assets`
+///    in the context of the layer that won that field: the document's for a
+///    document value, a style file's own, or the launch context for a
+///    setter. A later style file that sets other fields does not move it.
+///
+/// No CLI claim applies here: precedence was decided by the layer order.
+///
+/// ## Errors
+///
+/// Any [`StyleApplyError`] the individual `apply_*` functions return,
+/// including a stylesheet that cannot be resolved or read by a target that
+/// reads one.
+pub fn apply_prepared_style(
+    page: DarkmatterPage,
+    prepared: &PreparedStyle,
+    assets: StyleAssetResolver,
+    defaults: &PresentationDefaults,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let style = prepared.style();
+    let page = defaults.resolve(style).apply_to(page);
+    let page = apply_page_style(page, style, PageStyleOverrides::default())?;
+    let page = apply_component_style(page, style, ComponentStyleOverrides::default())?;
+    let page = apply_list_style(page, style, ListStyleOverrides::default())?;
+    let page = apply_hr_style(page, style, HrStyleOverrides::default())?;
+    let page = apply_disclosure_style(page, style, DisclosureStyleOverrides::default())?;
+    let page = apply_color_style(page, style)?;
+    let page = apply_bespoke_knobs(page, style, BespokeStyleOverrides::default())?;
+    let Some(sheet) = style.page.as_ref().and_then(|page| page.stylesheet.as_deref()) else {
+        return Ok(page);
+    };
+    // Preparation records an origin for every merged leaf; a style built some
+    // other way has no context to resolve its stylesheet in.
+    let origin = prepared
+        .origin("page.stylesheet")
+        .ok_or_else(|| StyleApplyError::StylesheetContextMissing { reference: sheet.trim().to_string() })?;
+    apply_stylesheet(page, style, assets, &origin.context)
 }
 
 /// Validate a horizontal page-frame [`Length`] for storage, rejecting CSS units.
@@ -1187,7 +1354,7 @@ mod tests {
     #[test]
     fn length_ch_lowers_to_u16() {
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Ch(4)),
+            margin_left: Some(Length::Ch(4)),
             ..PageStyle::default()
         });
         let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
@@ -1197,7 +1364,7 @@ mod tests {
     #[test]
     fn length_zero_lowers_to_zero() {
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Zero),
+            margin_left: Some(Length::Zero),
             ..PageStyle::default()
         });
         let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
@@ -1209,7 +1376,7 @@ mod tests {
         // The page frame now retains the authored `Length`; the terminal
         // resolves the percent (10% of 80 = 8) and the browser emits `10%`.
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Percent(10.0)),
+            margin_left: Some(Length::Percent(10.0)),
             ..PageStyle::default()
         });
         let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
@@ -1224,14 +1391,14 @@ mod tests {
     fn length_css_for_terminal_layout_returns_error() {
         use renderable::stylesheet::CssSizing;
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Css(CssSizing::px(10.0))),
+            margin_left: Some(Length::Css(CssSizing::px(10.0))),
             ..PageStyle::default()
         });
         let err = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::InvalidCssLength {
-                field: "left-margin"
+                field: "margin-left"
             }
         );
     }
@@ -1241,7 +1408,7 @@ mod tests {
         // Frontmatter says 4ch; override claims margin_left so it should be
         // ignored.
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Ch(4)),
+            margin_left: Some(Length::Ch(4)),
             ..PageStyle::default()
         });
         let overrides = PageStyleOverrides {
@@ -1257,7 +1424,7 @@ mod tests {
     #[test]
     fn cli_override_false_applies_frontmatter() {
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Ch(4)),
+            margin_left: Some(Length::Ch(4)),
             ..PageStyle::default()
         });
         let overrides = PageStyleOverrides::default();
@@ -1268,8 +1435,8 @@ mod tests {
     #[test]
     fn vertical_margin_row_count_applied() {
         let style = style_with_page(PageStyle {
-            top_margin: Some(1),
-            bottom_margin: Some(0),
+            margin_top: Some(1),
+            margin_bottom: Some(0),
             ..PageStyle::default()
         });
         let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
@@ -1282,8 +1449,8 @@ mod tests {
         // 10% left margin + 10% right margin of 100 = 10 + 10 = 20.
         // Content width = 100 - 20 = 80. 50% of 80 = 40.
         let style = style_with_page(PageStyle {
-            left_margin: Some(Length::Percent(10.0)),
-            right_margin: Some(Length::Percent(10.0)),
+            margin_left: Some(Length::Percent(10.0)),
+            margin_right: Some(Length::Percent(10.0)),
             max_width: Some(Length::Percent(50.0)),
             ..PageStyle::default()
         });
@@ -1389,10 +1556,10 @@ mod tests {
     #[test]
     fn padding_lowers_horizontal_and_vertical() {
         let style = style_with_page(PageStyle {
-            left_padding: Some(Length::Ch(3)),
-            right_padding: Some(Length::Ch(3)),
-            top_padding: Some(1),
-            bottom_padding: Some(1),
+            padding_left: Some(Length::Ch(3)),
+            padding_right: Some(Length::Ch(3)),
+            padding_top: Some(1),
+            padding_bottom: Some(1),
             ..PageStyle::default()
         });
         let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();

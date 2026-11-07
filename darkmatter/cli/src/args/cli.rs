@@ -1,7 +1,7 @@
 use clap::Parser;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::{
-    CliFill, CodeBlockArg, PageAlignmentArg, PageBackgroundArg,
+    CliFill, PageAlignmentArg, PageBackgroundArg,
     complete_theme_names, parse_cli_fill,
     parse_theme_name,
 };
@@ -10,102 +10,125 @@ use darkmatter::markdown::highlighting::ThemePair;
 use renderable::style::PaintColor;
 use std::path::PathBuf;
 
+/// The root help's heading for options every command shares.
+const SHARED_HEADING: &str = "Shared controls";
+
+/// The root help's heading for the render options it lists.
+const RENDER_HEADING: &str = "Render";
+
+/// `md --help`'s layout: the root is also `md render`, so it says so and
+/// points at the full render help instead of listing every render option.
+const ROOT_HELP_TEMPLATE: &str = "\
+{before-help}{about-with-newline}
+{usage-heading} {usage}
+
+`md [ARGS] [OPTIONS]` is `md render [ARGS] [OPTIONS]`; see `md render --help`.
+
+{all-args}{after-help}";
+
 /// Command-line interface for the darkmatter markdown renderer.
 ///
 /// Use `md --help` to see all available options.
 #[derive(Parser)]
 #[command(name = "md", about = "Darkmatter CLI", version)]
 #[command(subcommand_precedence_over_arg = true, disable_help_subcommand = true)]
+// Root help only: the root shows commands, shared controls, and `--style`; the
+// flattened render options stay visible on `md render --help`, so they are
+// hidden here rather than in `RenderOptions`.
+#[command(help_template = ROOT_HELP_TEMPLATE)]
+#[command(
+    mut_arg("args", |arg| arg.hide(true)),
+    mut_arg("literal_args", |arg| arg.hide(true)),
+    mut_arg("style", |arg| arg.help_heading(RENDER_HEADING)),
+    mut_arg("output", |arg| arg.hide(true)),
+    mut_arg("show", |arg| arg.hide(true)),
+    mut_arg("max_width", |arg| arg.hide(true)),
+    mut_arg("indent", |arg| arg.hide(true)),
+    mut_arg("deny", |arg| arg.hide(true)),
+    mut_arg("features", |arg| arg.hide(true)),
+    mut_arg("mermaid", |arg| arg.hide(true)),
+)]
 pub struct Cli {
     /// Options used when no subcommand is supplied.
     #[command(flatten)]
     pub render: crate::args::RenderOptions,
 
     /// Theme for prose content (kebab-case name)
-    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
+    #[arg(hide = true, long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub theme: Option<ThemePair>,
 
     /// Theme for code blocks (overrides derived theme)
-    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
+    #[arg(hide = true, long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub code_theme: Option<ThemePair>,
 
-    /// Choose the code block theme variant relative to the page color mode:
-    /// `inverse` (default, dark page -> light panel), `dark`, `light`, or `same`.
-    #[arg(long, value_enum, value_name = "MODE", default_value_t = CodeBlockArg::Inverse, global = true)]
-    pub code_block: CodeBlockArg,
-
     /// List available themes
-    #[arg(long)]
+    #[arg(hide = true, long)]
     pub list_themes: bool,
 
     /// Shorthand for `clean --save` with top-level [INPUT]
-    #[arg(long)]
+    #[arg(hide = true, long)]
     pub save: bool,
-
-    /// Render mermaid diagrams to terminal as images, or as text drawings
-    /// where the terminal shows no images; other diagrams stay code blocks.
-    #[arg(long)]
-    pub mermaid: bool,
 
     // ── Layout flags (Phase 5) ──────────────────────────────────────────
     /// Margin on all sides (cells)
-    #[arg(short = 'm', long, value_name = "N")]
+    #[arg(hide = true, short = 'm', long, value_name = "N")]
     pub margin: Option<u16>,
 
     /// Horizontal margin (left + right)
-    #[arg(long, value_name = "N")]
+    #[arg(hide = true, long, value_name = "N")]
     pub mx: Option<u16>,
 
     /// Vertical margin (top + bottom)
-    #[arg(long, value_name = "N")]
+    #[arg(hide = true, long, value_name = "N")]
     pub my: Option<u16>,
 
     /// Top margin
-    #[arg(long, visible_alias = "margin-top", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "margin-top", value_name = "N")]
     pub mt: Option<u16>,
 
     /// Bottom margin
-    #[arg(long, visible_alias = "margin-bottom", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "margin-bottom", value_name = "N")]
     pub mb: Option<u16>,
 
     /// Left margin
-    #[arg(long, visible_alias = "margin-left", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "margin-left", value_name = "N")]
     pub ml: Option<u16>,
 
     /// Right margin
-    #[arg(long, visible_alias = "margin-right", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "margin-right", value_name = "N")]
     pub mr: Option<u16>,
 
     /// Padding on all sides (cells)
-    #[arg(long, value_name = "N")]
+    #[arg(hide = true, long, value_name = "N")]
     pub padding: Option<u16>,
 
     /// Horizontal padding (left + right)
-    #[arg(long, value_name = "N")]
+    #[arg(hide = true, long, value_name = "N")]
     pub px: Option<u16>,
 
     /// Vertical padding (top + bottom)
-    #[arg(long, value_name = "N")]
+    #[arg(hide = true, long, value_name = "N")]
     pub py: Option<u16>,
 
     /// Top padding
-    #[arg(long, visible_alias = "padding-top", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "padding-top", value_name = "N")]
     pub pt: Option<u16>,
 
     /// Bottom padding
-    #[arg(long, visible_alias = "padding-bottom", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "padding-bottom", value_name = "N")]
     pub pb: Option<u16>,
 
     /// Left padding
-    #[arg(long, visible_alias = "padding-left", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "padding-left", value_name = "N")]
     pub pl: Option<u16>,
 
     /// Right padding
-    #[arg(long, visible_alias = "padding-right", value_name = "N")]
+    #[arg(hide = true, long, visible_alias = "padding-right", value_name = "N")]
     pub pr: Option<u16>,
 
     /// Page background style
     #[arg(
+        hide = true,
         long,
         visible_alias = "page-background",
         value_enum,
@@ -120,7 +143,7 @@ pub struct Cli {
     /// in the 0-255 range. Tailwind palette names (`red-500`, `slate-50`,
     /// etc.) and CSS special keywords (`transparent`, `inherit`,
     /// `currentColor`) are also accepted.
-    #[arg(long, value_name = "COLOR", value_parser = PaintColor::from_css_str)]
+    #[arg(hide = true, long, value_name = "COLOR", value_parser = PaintColor::from_css_str)]
     pub page_bg_color: Option<PaintColor>,
 
     /// Width the output is wrapped to: N columns, N%, `auto` (`OUTPUT_COLUMNS`,
@@ -131,6 +154,7 @@ pub struct Cli {
         value_name = "WIDTH",
         value_parser = crate::args::output::parse_width,
         global = true,
+        help_heading = SHARED_HEADING,
         add = ArgValueCompleter::new(crate::args::complete_width_values)
     )]
     pub width: Option<WidthRequest>,
@@ -140,6 +164,7 @@ pub struct Cli {
     /// Accepts `--line-numbers` (defaults to `true`) or
     /// `--line-numbers <true|false>` for explicit control.
     #[arg(
+        hide = true,
         long,
         value_name = "BOOL",
         num_args = 0..=1,
@@ -149,75 +174,75 @@ pub struct Cli {
     pub line_numbers: Option<bool>,
 
     /// Default alignment for all components
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub alignment: Option<PageAlignmentArg>,
 
     /// Image alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_images: Option<PageAlignmentArg>,
 
     /// List alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_lists: Option<PageAlignmentArg>,
 
     /// Unordered list alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_ul: Option<PageAlignmentArg>,
 
     /// Ordered list alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_ol: Option<PageAlignmentArg>,
 
     /// List item alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_li: Option<PageAlignmentArg>,
 
     /// Block quote alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_block_quotes: Option<PageAlignmentArg>,
 
     /// Table alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_tables: Option<PageAlignmentArg>,
 
     /// Code block alignment
-    #[arg(long, value_enum, value_name = "ALIGN")]
+    #[arg(hide = true, long, value_enum, value_name = "ALIGN")]
     pub align_code_blocks: Option<PageAlignmentArg>,
 
     /// Default fill for all components
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill: Option<CliFill>,
 
     /// Image fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_images: Option<CliFill>,
 
     /// List fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_lists: Option<CliFill>,
 
     /// Unordered list fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_ul: Option<CliFill>,
 
     /// Ordered list fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_ol: Option<CliFill>,
 
     /// List item fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_li: Option<CliFill>,
 
     /// Block quote fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_block_quotes: Option<CliFill>,
 
     /// Table fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_tables: Option<CliFill>,
 
     /// Code block fill
-    #[arg(long, value_name = "FILL", value_parser = parse_cli_fill)]
+    #[arg(hide = true, long, value_name = "FILL", value_parser = parse_cli_fill)]
     pub fill_code_blocks: Option<CliFill>,
 
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
@@ -225,7 +250,8 @@ pub struct Cli {
         short = 'v',
         long = "verbose",
         action = clap::ArgAction::Count,
-        global = true
+        global = true,
+        help_heading = SHARED_HEADING
     )]
     pub verbose: u8,
 
@@ -239,17 +265,18 @@ pub struct Cli {
         long = "magic-root",
         value_name = "DIR",
         action = clap::ArgAction::Append,
-        value_hint = clap::ValueHint::DirPath
+        value_hint = clap::ValueHint::DirPath,
+        help_heading = SHARED_HEADING
     )]
     pub magic_roots: Vec<PathBuf>,
 
     /// Enable developer debug logging (1=INFO, 2=DEBUG, 3=TRACE, 4=TRACE+locations).
     /// Alternatively, set RUST_LOG environment variable.
-    #[arg(long = "debug", value_name = "LEVEL", global = true, hide = true)]
+    #[arg(long = "debug", value_name = "LEVEL", global = true, hide = true, help_heading = SHARED_HEADING)]
     pub debug_level: Option<u8>,
 
     /// Generate shell completions for the specified shell
-    #[arg(long, value_name = "SHELL")]
+    #[arg(long, value_name = "SHELL", help_heading = SHARED_HEADING)]
     pub completions: Option<clap_complete::Shell>,
 
     /// Subcommand (read, clean, compose, toc, delta)
@@ -280,7 +307,7 @@ impl Cli {
                 | Command::Validate { target: ValidateTarget::Refs { output, .. } }
                 | Command::Schema {
                     target:
-                        SchemaTarget::Validate { output, .. } | SchemaTarget::Triggers { output, .. } | SchemaTarget::About { output },
+                        SchemaTarget::Validate { output, .. } | SchemaTarget::Triggers { output, .. } | SchemaTarget::About { output, .. },
                 },
             ) => Some(*output),
             Some(Command::Schema { target: SchemaTarget::Detect { output, .. } }) => Some(output.target()),
@@ -288,17 +315,12 @@ impl Cli {
         target.is_some_and(OutputTarget::is_data)
     }
 
-    /// Normalizes default rendering to `render`, combining top-level and
-    /// subcommand features once before dispatch.
+    /// The explicit command, or `render` with the root's render options.
+    ///
+    /// Nothing is combined: a root render option before a subcommand is a
+    /// usage error (`commands::validate_subcommand_usage`).
     pub fn command_or_render(&self) -> crate::args::Command {
-        match self.command.clone() {
-            Some(crate::args::Command::Render(mut options)) => {
-                options.features.splice(0..0, self.render.features.iter().copied());
-                crate::args::Command::Render(options)
-            }
-            Some(command) => command,
-            None => crate::args::Command::Render(self.render.clone()),
-        }
+        self.command.clone().unwrap_or_else(|| crate::args::Command::Render(self.render.clone()))
     }
 }
 
@@ -541,15 +563,14 @@ mod tests {
     }
 
     #[test]
-    fn schema_about_parses_as_schema_target() {
+    fn schema_about_code_block_defaults_to_inverse() {
         let cli = Cli::try_parse_from(["md", "schema", "about"]).unwrap();
         assert!(matches!(
             cli.command,
             Some(crate::args::Command::Schema {
-                target: crate::args::SchemaTarget::About { .. },
+                target: crate::args::SchemaTarget::About { code_block: crate::args::CodeBlockArg::Inverse, .. },
             })
         ));
-        assert_eq!(cli.code_block, CodeBlockArg::Inverse);
     }
 
     #[test]
@@ -559,22 +580,17 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(crate::args::Command::Schema {
-                target: crate::args::SchemaTarget::About { .. },
+                target: crate::args::SchemaTarget::About { code_block: crate::args::CodeBlockArg::Light, .. },
             })
         ));
-        assert_eq!(cli.code_block, CodeBlockArg::Light);
     }
 
     #[test]
-    fn render_code_block_flag_defaults_to_inverse() {
-        let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
-        assert_eq!(cli.code_block, CodeBlockArg::Inverse);
-    }
-
-    #[test]
-    fn render_code_block_flag_parses_dark() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--code-block", "dark"]).unwrap();
-        assert_eq!(cli.code_block, CodeBlockArg::Dark);
+    fn code_block_is_an_unknown_argument_outside_schema_about() {
+        for args in [&["md", "doc.md", "--code-block", "dark"][..], &["md", "render", "doc.md", "--code-block", "dark"][..]] {
+            let error = Cli::try_parse_from(args).err().expect("--code-block belongs to `schema about`");
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument, "{args:?}");
+        }
     }
 
     #[test]

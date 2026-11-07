@@ -52,11 +52,13 @@ real (un-inverted) mode so body text stays readable. The variant is chosen from
 the **terminal's** color mode (the same source the page uses), so the panel stays
 consistent regardless of environment color detection.
 
-### `--code-block` / `CodeBlockMode`
+### `style.page.code.mode` / `CodeBlockMode`
 
-The inversion is the default, but is configurable per render via the global
-`--code-block <inverse|dark|light|same>` flag — backed by the
-[`CodeBlockMode`] enum and `DarkmatterPage::with_code_block_mode(...)`:
+The inversion is the default, but is configurable per document through the
+`style.page.code.mode` frontmatter value (`inverse`, `dark`, `light`, or
+`same`) — backed by the [`CodeBlockMode`] enum and
+`DarkmatterPage::with_code_block_mode(...)`. `md schema about --code-block
+<MODE>` sets the same mode for that report:
 
 | Mode | Code-block variant |
 |------|--------------------|
@@ -104,7 +106,7 @@ byte-identically to a `YamlBlock`. (Resolved in
 The browser path renders the highlighted markup from the page's resolved
 `HtmlOptions` — the same options that build the injected `.code-block` panel
 background — so markup and stylesheet always agree on theme and variant
-(review-1 finding 2). The `--code-block` override and
+(review-1 finding 2). `style.page.code.mode` and
 `DarkmatterPage::with_code_block_mode` therefore apply to **both** terminal and
 browser. A `CodeBlock::with_theme(theme)` / `md code-block --theme` override
 wins over the page/context theme on both surfaces.
@@ -120,7 +122,7 @@ wins over the page/context theme on both surfaces.
 - `darkmatter/lib/src/markdown/render_tree/code_renderer.rs` —
   `TerminalCodeRenderer`, which threads `CodeBlockMode` and resolves the
   terminal code-block variant via `CodeHighlighter::new`.
-- `darkmatter/cli/src/args.rs` — the global `--code-block` flag.
+- `darkmatter/cli/src/args/target.rs` — `md schema about --code-block`.
 - HTML/browser inversion site: `markdown/render_tree/code_renderer.rs`
   (`render_browser_code`) and the `as_html` path.
 

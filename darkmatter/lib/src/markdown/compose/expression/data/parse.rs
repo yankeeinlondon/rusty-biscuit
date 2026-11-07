@@ -18,9 +18,11 @@ use std::sync::Arc;
 use biscuit_file::{DataFormat, DelimitedError, Json5, JsonLinesError, Toml, YamlValue, source_position};
 use serde_json::Value;
 use simplified_schema::SchemaError;
+use simplified_schema::coercion::PathSegment;
 use simplified_schema::numeric::{self, JsonNumberError};
 
 use super::error::{DataError, DataSourceLocation};
+use super::locate::SourceLocator;
 use super::runtime::{DataSourceIdentity, SourceContent};
 use crate::markdown::schemas::yaml_documents::{first_tag_start, load_yaml_document, pointer_string};
 
@@ -98,6 +100,76 @@ pub(crate) fn parse_text(
         message: failure.message,
         location: failure.location,
     })
+}
+
+/// A local data document read by [`parse_local_document`]: its value and
+/// the text its positions are read from.
+#[derive(Debug, Clone)]
+pub struct LocalDataDocument {
+    format: DataFormat,
+    text: Arc<str>,
+    value: Value,
+}
+
+impl LocalDataDocument {
+    pub fn format(&self) -> DataFormat {
+        self.format
+    }
+
+    pub fn value(&self) -> &Value {
+        &self.value
+    }
+
+    pub fn into_value(self) -> Value {
+        self.value
+    }
+
+    /// The BOM-stripped text the value was parsed from.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The 1-based line and character column at which the value at each of
+    /// `paths` starts, in order; `None` where the format's locator cannot
+    /// prove a position (a YAML file with an alias or a flow collection
+    /// across lines is never positioned), never a guessed one.
+    pub fn positions(&self, paths: &[Vec<PathSegment>]) -> Vec<Option<(usize, usize)>> {
+        let mut locator = SourceLocator::new(self.format, &self.text, None);
+        paths.iter().map(|path| locator.place(path, false).position).collect()
+    }
+}
+
+/// Reads a local data file's `bytes` as `format` with exactly the rules
+/// `load_data` applies: one leading byte-order mark removed, the whole text
+/// consumed, JSON and JSON5 keeping the last of duplicate keys, YAML and
+/// TOML rejecting them, a second YAML document or a tag rejected, and every
+/// number admitted through `simplified_schema::numeric`.
+///
+/// Only the tree formats (JSON, JSON5, JSON Lines, YAML, TOML) are read; a
+/// CSV or TSV table has no value without a row mode.
+///
+/// ## Errors
+///
+/// [`DataError::UnsupportedFormat`] for a tabular or non-data `format`, and
+/// [`DataError::Malformed`] for bytes that are not UTF-8 or text the format
+/// rejects, located as [`decode_local`] and [`parse_text`] locate it.
+pub fn parse_local_document(
+    bytes: Vec<u8>,
+    format: DataFormat,
+    identity: &DataSourceIdentity,
+) -> Result<LocalDataDocument, DataError> {
+    let tree = matches!(
+        format,
+        DataFormat::Json | DataFormat::Json5 | DataFormat::Jsonl | DataFormat::Yaml | DataFormat::Toml
+    );
+    if !tree {
+        return Err(DataError::UnsupportedFormat { identity: identity.clone(), extension: None });
+    }
+    let text = decode_local(bytes, identity, format)?;
+    match parse_text(&text, format, identity)? {
+        SourceContent::Tree(value) => Ok(LocalDataDocument { format, text, value }),
+        SourceContent::Table(_) => Err(DataError::UnsupportedFormat { identity: identity.clone(), extension: None }),
+    }
 }
 
 /// The line and character column of `offset` in `text`. An offset inside a
@@ -335,6 +407,32 @@ mod tests {
             Ok(SourceContent::Tree(value)) => value,
             other => panic!("{text:?} as {format:?}: {other:?}"),
         }
+    }
+
+    fn key(name: &str) -> PathSegment {
+        PathSegment::Key(name.to_string())
+    }
+
+    #[test]
+    fn a_local_document_keeps_the_reader_rules_and_positions_each_value() {
+        let json = parse_local_document(b"{\"a\": 1, \"a\": 2,\n \"b\": {\"c\": 3}}".to_vec(), DataFormat::Json, &identity())
+            .expect("JSON keeps the last duplicate");
+        assert_eq!(json.value(), &serde_json::json!({"a": 2, "b": {"c": 3}}));
+        assert_eq!(json.positions(&[vec![key("b"), key("c")], vec![key("z")]]), [Some((2, 13)), None]);
+
+        let yaml = parse_local_document(b"\xEF\xBB\xBFpage:\n  color: red\n".to_vec(), DataFormat::Yaml, &identity())
+            .expect("YAML reads");
+        assert_eq!(yaml.positions(&[vec![key("page"), key("color")]]), [Some((2, 10))]);
+        assert!(matches!(
+            parse_local_document(b"a: 1\na: 2\n".to_vec(), DataFormat::Yaml, &identity()),
+            Err(DataError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn a_local_document_is_a_tree_format_only() {
+        let refused = parse_local_document(b"a,b\n1,2\n".to_vec(), DataFormat::Csv, &identity());
+        assert!(matches!(refused, Err(DataError::UnsupportedFormat { .. })), "{refused:?}");
     }
 
     #[test]

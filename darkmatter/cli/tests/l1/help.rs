@@ -23,6 +23,41 @@ fn test_help_flag() {
         .stdout(predicate::str::contains("graph"));
 }
 
+/// Root help is the command list, the shared controls, `--style`, and the
+/// sentence that `md` is `md render`; every other render option is on
+/// `md render --help`.
+#[test]
+fn root_help_points_at_render_help_for_render_options() {
+    let fixture = CliProcessFixture::named("root_help_points_at_render_help_for_render_options");
+    let help = |args: &[&str]| {
+        let output = fixture.command().args(args).output().expect("md help runs");
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        // Help wraps at the detected width; compare on collapsed whitespace.
+        String::from_utf8_lossy(&output.stdout).split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let root = help(&["--help"]);
+    for expected in [
+        "`md [ARGS] [OPTIONS]` is `md render [ARGS] [OPTIONS]`; see `md render --help`.",
+        "Commands:",
+        "Shared controls:",
+        "--width <WIDTH>",
+        "--verbose",
+        "--magic-root <DIR>",
+        "--style <FILE>",
+    ] {
+        assert!(root.contains(expected), "`md --help` lacks {expected:?}:\n{root}");
+    }
+    for hidden in ["--output", "--show", "--indent", "--deny", "--feature", "--mermaid", "--max-width", "--margin", "--theme", "--save", "--list-themes"] {
+        assert!(!root.contains(&format!("{hidden} ")), "`md --help` lists {hidden}:\n{root}");
+    }
+
+    let render = help(&["render", "--help"]);
+    for expected in ["[ARGS]...", "--style <FILE>", "--output <TARGET>", "--show", "--max-width <N>", "--indent", "--deny <ID>", "--feature <NAME>", "--mermaid", "--width <WIDTH>"] {
+        assert!(render.contains(expected), "`md render --help` lacks {expected:?}:\n{render}");
+    }
+    assert!(!render.contains("is `md render"), "the alias sentence is root-only:\n{render}");
+}
+
 #[test]
 fn test_version_flag() {
     let fixture = CliProcessFixture::named("test_version_flag");

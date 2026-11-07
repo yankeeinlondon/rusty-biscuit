@@ -382,8 +382,8 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
 /// use the nord theme — its panel background and at least one of its signature
 /// syntax foregrounds — and must not use the dracula panel background.
 ///
-/// Pins `--code-block dark` so each pair resolves to its own (distinct) dark
-/// theme. Under the default `inverse` mode on a dark terminal both nord and
+/// Pins `style.page.code.mode: dark` so each pair resolves to its own
+/// (distinct) dark theme. Under the default `inverse` mode on a dark terminal both nord and
 /// dracula would resolve to their light theme — and they share the same one
 /// (OneHalfLight) — collapsing the panel backgrounds and erasing the
 /// discriminator this test relies on.
@@ -391,10 +391,10 @@ fn level2_style_page_code_theme_changes_terminal_rendering() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_cli_code_theme_overrides_style_page_code_theme() {
-    let doc_with_fm = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n---\n\n\
+    let doc_with_fm = "---\nstyle:\n  page:\n    code:\n      theme: dracula\n      mode: dark\n---\n\n\
         ```rust\nfn _cli_override_marker() { let x = 1; }\n```\n";
 
-    let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --code-block dark --max-width 60")
+    let Some((with_fm, _)) = run_md(doc_with_fm, "--code-theme nord --max-width 60")
     else {
         return;
     };

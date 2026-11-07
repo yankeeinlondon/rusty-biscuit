@@ -17,6 +17,15 @@ use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter_cli::render::apply_cli_layout_flags;
 use renderable::layout::{Alignment, Length};
 
+/// Page inputs with no document file: the stylesheet context is a scratch
+/// directory and no theme variable is set.
+fn page_inputs() -> darkmatter_cli::render::PageInputs {
+    darkmatter_cli::render::PageInputs::new(
+        biscuit_file::FileResolutionContext::new(std::env::temp_dir()),
+        darkmatter::style::PresentationDefaults::default(),
+    )
+}
+
 fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
     use darkmatter::markdown::Markdown;
     use darkmatter_cli::render::apply_style_frontmatter;
@@ -24,7 +33,7 @@ fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
     let md = Markdown::try_from_content(raw).unwrap();
     let term = Terminal::new_optimistic(80);
     let page = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
-    apply_style_frontmatter(page, &md, &cli, None, false).expect("style apply")
+    apply_style_frontmatter(page, &md, &cli, &page_inputs(), biscuit_terminal::output::OutputTarget::Terminal, false).expect("style apply")
 }
 
 #[test]
@@ -379,7 +388,7 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
     let term = Terminal::new_optimistic(120);
     let cli_only = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
     let after_style =
-        apply_style_frontmatter(cli_only.clone(), &md, &cli, None, false).expect("style apply");
+        apply_style_frontmatter(cli_only.clone(), &md, &cli, &page_inputs(), biscuit_terminal::output::OutputTarget::Terminal, false).expect("style apply");
 
     assert_eq!(
         after_style.page_margin(),
@@ -441,22 +450,22 @@ fn style_prop_fixture_resolves_to_expected_page_margins() {
     assert_eq!(
         tv_cells(&m.left),
         2,
-        "fixture left-margin: 2ch must reach the page"
+        "fixture margin-left: 2ch must reach the page"
     );
     assert_eq!(
         tv_cells(&m.right),
         4,
-        "fixture right-margin: 4ch must reach the page"
+        "fixture margin-right: 4ch must reach the page"
     );
     assert_eq!(
         tv_cells(&m.top),
         1,
-        "fixture top-margin: 1 must reach the page"
+        "fixture margin-top: 1 must reach the page"
     );
     assert_eq!(
         tv_cells(&m.bottom),
         0,
-        "fixture bottom-margin: 0 must reach the page"
+        "fixture margin-bottom: 0 must reach the page"
     );
 }
 
@@ -487,7 +496,7 @@ terminal is reasonably wide.\n";
     let term = Terminal::new_optimistic(100);
     let page = DarkmatterPage::new(&term);
     let page = apply_cli_layout_flags(page, &cli);
-    let page = apply_style_frontmatter(page, &md, &cli, None, false).expect("style apply");
+    let page = apply_style_frontmatter(page, &md, &cli, &page_inputs(), biscuit_terminal::output::OutputTarget::Terminal, false).expect("style apply");
 
     // Structural guard: the apply pipeline put the fill where the renderer
     // will look for it.

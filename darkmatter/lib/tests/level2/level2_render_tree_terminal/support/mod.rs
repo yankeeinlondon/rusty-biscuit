@@ -894,7 +894,7 @@ pub(super) fn render_unmatched_policy_page_to_tempfile(
 // this drives the resolved bytes through a real WezTerm pane so a regression in
 // the decorated-frame offset/width is observable on the cell grid.
 //
-// Built at the pane's true column width with `style.page.left-margin: 25%` and
+// Built at the pane's true column width with `style.page.margin-left: 25%` and
 // `style.page.max-width: 50%`, the captured paragraph rows must (a) begin at
 // the 25%-of-width left offset and (b) cap their content at 50% of the
 // post-margin width — mirroring [`length_to_cells`]'s `f32::round`.

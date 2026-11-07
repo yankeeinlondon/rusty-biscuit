@@ -22,8 +22,9 @@ use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
+use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, InvalidTriggerFinding, LoadedYamlDocument, SchemaLayers, TriggerSource, YamlOutcome,
+    DarkmatterSchemas, EffectiveSchema, InvalidTriggerFinding, LoadedYamlDocument, SchemaLayers, TriggerSource, YamlOutcome,
 };
 use simplified_schema::{
     SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemCode, ValidationProblemKind, ValidationTimings,
@@ -417,6 +418,57 @@ pub(crate) fn document_schemas(request: &MdRequest, context: biscuit_file::FileR
 /// When trigger discovery fails.
 pub(crate) fn discover_document_triggers(schemas: DarkmatterSchemas) -> Result<DarkmatterSchemas, SchemaError> {
     if schemas.file_resolution_context().repository_root().is_some() { schemas.with_trigger_discovery() } else { Ok(schemas) }
+}
+
+/// A document's effective schema, selected passively, and the schema triggers
+/// its discovery skipped as invalid.
+pub(crate) struct SelectedDocumentSchema {
+    /// `None` when no schema layer applies to the document.
+    pub(crate) schema: Option<EffectiveSchema>,
+    pub(crate) trigger_findings: Vec<InvalidTriggerFinding>,
+}
+
+/// The effective schema of `document` from `schemas` (a baseline selection)
+/// in the document's `context`, with trigger discovery when
+/// `discover_triggers` and the context is inside a repository.
+///
+/// Passive: the document is not composed, and its `$schema` is read as
+/// written, never overlaid by anything a caller supplies.
+///
+/// ## Errors
+///
+/// When trigger discovery fails or the document's schema cannot be assembled.
+pub(crate) fn effective_document_schema(
+    schemas: DarkmatterSchemas,
+    document: &Markdown,
+    context: FileResolutionContext,
+    discover_triggers: bool,
+) -> Result<SelectedDocumentSchema, SchemaError> {
+    let schemas = schemas.with_file_resolution_context(context);
+    let schemas = if discover_triggers { discover_document_triggers(schemas)? } else { schemas };
+    Ok(SelectedDocumentSchema { trigger_findings: schemas.discovery_findings().to_vec(), schema: schemas.effective_for(document)? })
+}
+
+/// [`effective_document_schema`] with the baseline an ordinary run selects
+/// ([`request_schemas`], so `BASELINE_SCHEMA` and
+/// `DARKMATTER_NO_BASELINE_SCHEMA` are read from the request's snapshot) and
+/// trigger discovery, in the context of the document `opened` names, or the
+/// launch context for a document read from stdin.
+///
+/// ## Errors
+///
+/// The context builder's error, or a [`SchemaError`] from the baseline,
+/// trigger discovery, or the document's schema.
+pub(crate) fn select_document_schema(
+    document: &Markdown,
+    opened: Option<&OpenedArgument>,
+    request: &MdRequest,
+) -> Result<SelectedDocumentSchema> {
+    let context = match opened {
+        Some(opened) => opened.document_context(request)?,
+        None => request.launch_context()?.clone(),
+    };
+    Ok(effective_document_schema(request_schemas(request)?, document, context, true)?)
 }
 
 /// The baseline [`load_api`] selected.

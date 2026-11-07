@@ -11,67 +11,85 @@ use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::markdown::compose::policy::{STYLE_DEPRECATED_CODE, STYLE_UNKNOWN_KEY_CODE};
-use darkmatter::markdown::highlighting::{ColorMode, ThemePair, detect_code_theme, detect_prose_theme};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::style::{
-    StyleWarning, StyleWarningKind, apply_bespoke_style, apply_cli_claims, apply_color_style,
+    PresentationDefaults, StyleAssetResolver, StyleFrontmatter, StyleWarning, StyleWarningKind, apply_bespoke_style, apply_cli_claims, apply_color_style,
     apply_component_style, apply_disclosure_style, apply_hr_style, apply_list_style,
     apply_page_style, bespoke_style_overrides_from_claims,
     component_style_overrides_from_claims, disclosure_style_overrides_from_claims,
     from_frontmatter, hr_style_overrides_from_claims, into_strict,
     list_style_overrides_from_claims, page_style_overrides_from_claims,
 };
-use std::path::PathBuf;
+use crate::io::OpenedArgument;
+use crate::request::MdRequest;
+use biscuit_file::FileResolutionContext;
+use biscuit_terminal::output::OutputTarget;
+use std::path::{Path, PathBuf};
 
-/// Resolved theme configuration for an output path that needs one.
-///
-/// The page surface and the nested code-block panel must share a single
-/// source of truth. The `color_mode` is always taken from the [`Terminal`]
-/// that will actually render the page, so the prose/code themes and the
-/// layout context cannot drift.
-#[derive(Debug)]
-pub(crate) struct ResolvedTheme {
-    pub(crate) prose: ThemePair,
-    pub(crate) code: ThemePair,
-    pub(crate) color_mode: ColorMode,
+/// What a page build takes from the request rather than from the document.
+#[derive(Debug, Clone)]
+pub struct PageInputs {
+    /// The context the document's `style.page.stylesheet` resolves in: the
+    /// opened document's own, or the launch context for standard input.
+    pub document_context: FileResolutionContext,
+    /// The `THEME` and `CODE_THEME` values the request captured.
+    pub presentation: PresentationDefaults,
 }
 
-impl ResolvedTheme {
-    pub(crate) fn from_cli(cli: &Cli, terminal: &Terminal) -> Self {
-        let prose = cli.theme.unwrap_or_else(detect_prose_theme);
-        let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
-        let color_mode = terminal.color_mode();
-        Self {
-            prose,
-            code,
-            color_mode,
-        }
+impl PageInputs {
+    pub fn new(document_context: FileResolutionContext, presentation: PresentationDefaults) -> Self {
+        Self { document_context, presentation }
+    }
+
+    /// The inputs of a document opened through `opened`, or of standard input.
+    ///
+    /// ## Errors
+    ///
+    /// The document or launch context cannot be built.
+    pub fn for_opened(request: &MdRequest, opened: Option<&OpenedArgument>) -> Result<Self> {
+        let document_context = match opened {
+            Some(opened) => opened.document_context(request)?,
+            None => request.launch_context()?.clone(),
+        };
+        Ok(Self::new(document_context, PresentationDefaults::from_snapshot(request.snapshot())))
+    }
+
+    /// The inputs of the document at `resolved`, a file the request already
+    /// opened (its opening spelling is gone), or of standard input.
+    ///
+    /// ## Errors
+    ///
+    /// The document or launch context cannot be built.
+    pub fn for_resolved(request: &MdRequest, resolved: Option<&Path>) -> Result<Self> {
+        let document_context = match resolved {
+            Some(path) => request.document_context(None, path)?,
+            None => request.launch_context()?.clone(),
+        };
+        Ok(Self::new(document_context, PresentationDefaults::from_snapshot(request.snapshot())))
     }
 }
 
-/// Build the page that renders terminal output: CLI flags (`--mermaid` selects
-/// automatic Mermaid mode), `style:` frontmatter, then `features`.
+/// Build the page that renders terminal output: CLI flags, `style:`
+/// frontmatter, then `features`. `mermaid` (`md render --mermaid`) selects
+/// automatic Mermaid mode.
+#[allow(clippy::too_many_arguments, reason = "the render dispatch rewrite replaces these inputs with prepared values")]
 pub fn terminal_page(
     md: &Markdown,
     input_path: Option<&PathBuf>,
+    inputs: &PageInputs,
     cli: &Cli,
     term: &Terminal,
     strict_style: bool,
     features: &[Feature],
+    mermaid: bool,
 ) -> Result<DarkmatterPage> {
-    // Resolve the theme from the same `Terminal` that will render the page.
-    // This keeps the page surface and the nested code-block panel aligned on
-    // a single `color_mode` source of truth.
-    let theme = ResolvedTheme::from_cli(cli, term);
-
+    // The color mode comes from the `Terminal` that will render the page, so
+    // the page surface and the nested code-block panel share one source.
     let mut page = DarkmatterPage::new(term)
-        .with_prose_theme(theme.prose.kebab_name())
-        .with_code_theme(theme.code.kebab_name())
-        .with_color_mode(theme.color_mode)
-        .with_code_block_mode(cli.code_block.into())
+        .with_color_mode(term.color_mode())
         .with_image_mode(terminal_image_mode_from_env())
-        .with_mermaid_mode(if cli.mermaid {
+        .with_mermaid_mode(if mermaid {
             MermaidMode::Automatic
         } else {
             MermaidMode::Off
@@ -88,12 +106,7 @@ pub fn terminal_page(
 
     // Apply page-level frontmatter style after CLI flags so CLI wins on
     // overlapping fields via PageStyleOverrides.
-    page = apply_style_frontmatter(page, md, cli, input_path, strict_style)?;
-
-    // Handle line numbers: CLI flag overrides default.
-    if let Some(on) = cli.line_numbers {
-        page = page.with_line_numbers(on);
-    }
+    page = apply_style_frontmatter(page, md, cli, inputs, OutputTarget::Terminal, strict_style)?;
 
     Ok(apply_features(page, features))
 }
@@ -140,7 +153,8 @@ pub fn apply_style_frontmatter(
     page: DarkmatterPage,
     md: &Markdown,
     cli: &Cli,
-    input_path: Option<&PathBuf>,
+    inputs: &PageInputs,
+    target: OutputTarget,
     strict_style: bool,
 ) -> Result<DarkmatterPage> {
     let (style, all_warnings) =
@@ -160,6 +174,11 @@ pub fn apply_style_frontmatter(
     };
 
     log_style_warnings(&warnings);
+
+    // Theme, code-block mode, and line numbers resolve after the flags and
+    // the document merge, so a flag still wins and an omitted one leaves the
+    // document's value.
+    let page = inputs.presentation.resolve(&with_cli_presentation(&style, cli)).apply_to(page);
 
     let claims = crate::style_claims::cli_style_claims(cli);
 
@@ -182,11 +201,31 @@ pub fn apply_style_frontmatter(
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
     let bespoke_overrides = bespoke_style_overrides_from_claims(&claims);
-    let source_path = input_path
-        .filter(|p| p.to_str() != Some("-"))
-        .map(|p| p.as_path());
-    apply_bespoke_style(page, &style, bespoke_overrides, source_path)
-        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
+    apply_bespoke_style(
+        page,
+        &style,
+        bespoke_overrides,
+        StyleAssetResolver::for_target(target),
+        &inputs.document_context,
+    )
+    .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
+}
+
+/// `style` with the presentation flags (`--theme`, `--code-theme`,
+/// `--line-numbers`) written over it, as the top layer.
+fn with_cli_presentation(style: &StyleFrontmatter, cli: &Cli) -> StyleFrontmatter {
+    let mut style = style.clone();
+    let page = style.page.get_or_insert_with(Default::default);
+    if let Some(theme) = cli.theme {
+        page.theme = Some(theme);
+    }
+    if let Some(theme) = cli.code_theme {
+        page.code.get_or_insert_with(Default::default).theme = Some(theme);
+    }
+    if let Some(on) = cli.line_numbers {
+        style.code_block.get_or_insert_with(Default::default).line_numbers = Some(on);
+    }
+    style
 }
 
 /// Splits `warnings` under a denied `style` into the issues that block (the
@@ -203,7 +242,13 @@ fn denied_style_issues(warnings: Vec<StyleWarning>, md: &Markdown) -> (Vec<Style
 /// a notice that stays in the debug log.
 fn style_warning_report(warning: &StyleWarning) -> Option<(&'static str, String)> {
     match &warning.kind {
-        StyleWarningKind::UnknownKey => Some((STYLE_UNKNOWN_KEY_CODE, format!("unknown style key `{}`", warning.path))),
+        StyleWarningKind::UnknownKey => Some((
+            STYLE_UNKNOWN_KEY_CODE,
+            match &warning.suggestion {
+                Some(key) => format!("unknown style key `{}`; use `{key}`", warning.path),
+                None => format!("unknown style key `{}`", warning.path),
+            },
+        )),
         StyleWarningKind::Deprecated { replacement } => Some((
             STYLE_DEPRECATED_CODE,
             format!("deprecated style key `{}`; use `{replacement}`", warning.path),
@@ -361,6 +406,18 @@ mod tests {
         assert!(matches!(informational[0].kind, StyleWarningKind::KnownButInactive { .. }));
     }
 
+    #[test]
+    fn unknown_style_key_report_names_the_suggested_key() {
+        let renamed = StyleWarning::new("style.page.left-margin", StyleWarningKind::UnknownKey)
+            .with_suggestion("page.margin-left");
+        let (code, message) = style_warning_report(&renamed).expect("reported");
+        assert_eq!(code, STYLE_UNKNOWN_KEY_CODE);
+        assert_eq!(message, "unknown style key `style.page.left-margin`; use `page.margin-left`");
+
+        let typo = StyleWarning::new("style.page.bogus", StyleWarningKind::UnknownKey);
+        assert_eq!(style_warning_report(&typo).expect("reported").1, "unknown style key `style.page.bogus`");
+    }
+
     // -----------------------------------------------------------------
     // Strict-style preserves informational `KnownButInactive` warnings
     // -----------------------------------------------------------------
@@ -368,6 +425,10 @@ mod tests {
     /// Build a `DarkmatterPage` at a deterministic width for warning-log tests.
     fn test_page() -> DarkmatterPage {
         DarkmatterPage::new(&Terminal::new_optimistic(80))
+    }
+
+    fn test_inputs() -> PageInputs {
+        PageInputs::new(FileResolutionContext::new(std::env::temp_dir()), PresentationDefaults::default())
     }
 
     #[test]
@@ -383,7 +444,7 @@ style:\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
-        apply_style_frontmatter(test_page(), &md, &cli, None, true)
+        apply_style_frontmatter(test_page(), &md, &cli, &test_inputs(), OutputTarget::Html, true)
             .expect("a denied style must succeed on a schema-clean wired key");
     }
 
@@ -398,7 +459,7 @@ style:\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
-        let page = apply_style_frontmatter(test_page(), &md, &cli, None, false).expect("apply");
+        let page = apply_style_frontmatter(test_page(), &md, &cli, &test_inputs(), OutputTarget::Html, false).expect("apply");
         assert!(page.stylesheet().is_some(), "sub-spec #7 key should be applied");
     }
 }

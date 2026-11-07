@@ -145,7 +145,7 @@ fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let page = apply_hr_style(page, &style, HrStyleOverrides::default())
         .expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 

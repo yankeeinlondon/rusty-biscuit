@@ -151,7 +151,7 @@ fn set_value(
         }
     }
     let resolved = resolved_input(input, request);
-    document_value(data, &md, text, resolved.as_ref(), output, cli).map(Completed::success)
+    document_value(data, &md, text, resolved.as_ref(), output, cli, request).map(Completed::success)
 }
 
 /// The document to edit, with the opened argument and resolved file that give it

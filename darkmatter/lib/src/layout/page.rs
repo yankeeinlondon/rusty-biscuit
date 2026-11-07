@@ -298,6 +298,12 @@ impl DarkmatterPage {
             .map_err(|e| PageRenderError::Render(e.to_string()))
     }
 
+    /// How code blocks choose their theme variant relative to the page color
+    /// mode (see [`CodeBlockMode`]).
+    pub fn code_block_mode(&self) -> CodeBlockMode {
+        self.code_block_mode
+    }
+
     /// Whether line numbers are enabled for code blocks.
     pub fn line_numbers(&self) -> bool {
         self.line_numbers

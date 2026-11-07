@@ -2,7 +2,7 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::output::{ALL_TARGETS, SchemaDetectOutput, detect_target_parser, target_parser};
-use crate::args::{GraphFormat, complete_compose_args, complete_markdown_files};
+use crate::args::{CodeBlockArg, GraphFormat, complete_compose_args, complete_markdown_files};
 use biscuit_terminal::output::OutputTarget;
 use std::path::PathBuf;
 
@@ -146,5 +146,10 @@ pub enum SchemaTarget {
         /// What to print; a data format always carries the whole catalog
         #[arg(long, value_name = "TARGET", default_value = "terminal", value_parser = target_parser(ALL_TARGETS))]
         output: OutputTarget,
+
+        /// Choose the code block theme variant relative to the page color mode:
+        /// `inverse` (dark page -> light panel), `dark`, `light`, or `same`.
+        #[arg(long, value_enum, value_name = "MODE", default_value = "inverse")]
+        code_block: CodeBlockArg,
     },
 }

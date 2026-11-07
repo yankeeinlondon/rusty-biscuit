@@ -89,7 +89,7 @@ use crate::style::{
 /// - **alpha background paint:** `block-quote.bg-color: red-500/50`;
 /// - **alpha foreground paint:** `block-quote.color: slate-200/50`;
 /// - **page-inheriting color:** `page.color: slate-200` (attached to the root);
-/// - **page-frame padding/max-width:** `page.top-padding` / `page.left-padding`
+/// - **page-frame padding/max-width:** `page.padding-top` / `page.padding-left`
 ///   / `page.max-width` (viewport concerns owned by the page frame);
 /// - **component policy layout (alignment + fixed/max width):**
 ///   `table.alignment: center` + `table.width: 40`, `block-quote.max-width: 50`;
@@ -105,8 +105,8 @@ const STYLED_CORPUS: &str = "\
 style:
     page:
         color: slate-200
-        top-padding: 1
-        left-padding: 2
+        padding-top: 1
+        padding-left: 2
         max-width: 100
     block-quote:
         bg-color: red-500/50
@@ -167,7 +167,7 @@ fn styled_page(md: &Markdown) -> DarkmatterPage {
         apply_list_style(page, &style, ListStyleOverrides::default()).expect("apply_list_style");
     let page = apply_hr_style(page, &style, HrStyleOverrides::default()).expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), crate::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 

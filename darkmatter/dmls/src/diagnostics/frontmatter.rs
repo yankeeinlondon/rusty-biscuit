@@ -1298,7 +1298,10 @@ fn style_diagnostics(ctx: &DocumentContext, ast: &FrontmatterAst, out: &mut Vec<
         let (code_value, message) = match &warning.kind {
             StyleWarningKind::UnknownKey => (
                 code::STYLE_UNKNOWN_KEY,
-                format!("unknown style key `{}`", warning.path),
+                match &warning.suggestion {
+                    Some(key) => format!("unknown style key `{}`; use `{key}`", warning.path),
+                    None => format!("unknown style key `{}`", warning.path),
+                },
             ),
             StyleWarningKind::Deprecated { replacement } => (
                 code::STYLE_DEPRECATED_KEY,

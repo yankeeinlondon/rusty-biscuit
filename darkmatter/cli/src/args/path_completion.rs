@@ -33,7 +33,7 @@ use simplified_schema::PropertyPath;
 use crate::args::policy::{self, PolicyCommand, PolicyVerb, ResolvedPolicy};
 use crate::args::{Cli, complete_any_files, complete_markdown_files};
 use crate::commands::compose::compose_baseline_schemas;
-use crate::commands::schema::validate::{discover_document_triggers, request_schemas};
+use crate::commands::schema::validate::{effective_document_schema, request_schemas};
 use crate::completion_shells::recover_words;
 use crate::io::{OpenedArgument, open_argument};
 use crate::request::{MdRequest, completion_request};
@@ -385,10 +385,8 @@ fn document_effective(
     overlay: &Markdown,
     request: &MdRequest,
 ) -> Option<Option<EffectiveSchema>> {
-    let context = request.document_context(Some(argument.reference()), argument.path()).ok()?;
-    let schemas = schemas.with_file_resolution_context(context);
-    let schemas = if policy.discovers_triggers() { discover_document_triggers(schemas).ok()? } else { schemas };
-    schemas.effective_for(overlay).ok()
+    let context = argument.document_context(request).ok()?;
+    effective_document_schema(schemas, overlay, context, policy.discovers_triggers()).ok().map(|selected| selected.schema)
 }
 
 #[cfg(test)]

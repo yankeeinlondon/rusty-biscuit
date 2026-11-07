@@ -166,10 +166,10 @@ fn level2_blockquote_center_alignment_indents_more_than_left() {
 const STYLE_PROP_FIXTURE: &str = r#"---
 style:
     page:
-        left-margin: 2ch
-        right-margin: 4ch
-        top-margin: 1
-        bottom-margin: 0
+        margin-left: 2ch
+        margin-right: 4ch
+        margin-top: 1
+        margin-bottom: 0
 ---
 
 # StylePropFixtureHeading
@@ -180,8 +180,8 @@ Sentinel_paragraph_for_left_margin_check.
 #[test]
 #[serial(level2_terminal)]
 fn level2_style_fixture_applies_top_and_left_margins_in_real_terminal() {
-    // Acceptance: `style.page.top-margin: 1` adds a blank row above the
-    // rendered title, and `style.page.left-margin: 2ch` leaves >=2 leading
+    // Acceptance: `style.page.margin-top: 1` adds a blank row above the
+    // rendered title, and `style.page.margin-left: 2ch` leaves >=2 leading
     // columns on non-empty content rows when rendered through the real
     // terminal pipeline. The fixture is composed inline to mirror
     // `darkmatter/example-docs/rendering/style-prop.md` page-level frontmatter.
@@ -196,25 +196,25 @@ fn level2_style_fixture_applies_top_and_left_margins_in_real_terminal() {
         .unwrap_or_else(|| panic!("heading not found in pane capture:\n{}", frame.plain));
 
     // Top-margin: 1 — at least one row above the heading must be blank
-    // (after rtrim of left-margin spaces).
+    // (after rtrim of margin-left spaces).
     assert!(
         marker_idx >= 1,
-        "top-margin: 1 must leave at least one row above the heading, got idx {marker_idx}. plain:\n{}",
+        "margin-top: 1 must leave at least one row above the heading, got idx {marker_idx}. plain:\n{}",
         frame.plain
     );
     let above = rtrim(lines[marker_idx - 1]);
     assert!(
         above.is_empty(),
-        "row directly above heading should be blank (top-margin: 1), got: {above:?}. plain:\n{}",
+        "row directly above heading should be blank (margin-top: 1), got: {above:?}. plain:\n{}",
         frame.plain
     );
 
     // Left-margin: 2ch — the heading line itself starts with >=2 leading
-    // columns (the heading row carries the left-margin prefix too).
+    // columns (the heading row carries the margin-left prefix too).
     let head_leading = lines[marker_idx].chars().take_while(|c| *c == ' ').count();
     assert!(
         head_leading >= 2,
-        "expected >=2 leading columns for left-margin: 2ch on heading, got {head_leading}: {:?}. plain:\n{}",
+        "expected >=2 leading columns for margin-left: 2ch on heading, got {head_leading}: {:?}. plain:\n{}",
         lines[marker_idx],
         frame.plain
     );

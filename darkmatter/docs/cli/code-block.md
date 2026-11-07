@@ -27,7 +27,6 @@ md code-block src/main.rs --output markdown >> notes.md
 | `--title <TITLE>` | a title in the block's header row |
 | `--line-numbering` | show line numbers |
 | `--highlight <RANGE>` | highlight lines, such as `1,4-6`; a value that does not parse is a usage error (exit status 2) |
-| `--code-block <MODE>` | the theme variant: `inverse` (default), `dark`, `light`, or `same` |
 | `--output <TARGET>` | what to print; see [Output](#output) |
 | `--width <WIDTH>` | the width of a styled panel; see [Width](#width) |
 

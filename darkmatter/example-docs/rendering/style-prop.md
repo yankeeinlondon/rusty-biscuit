@@ -1,10 +1,10 @@
 ---
 style:
     page:
-        left-margin: 2ch
-        right-margin: 4ch
-        top-margin: 1
-        bottom-margin: 0
+        margin-left: 2ch
+        margin-right: 4ch
+        margin-top: 1
+        margin-bottom: 0
     table:
         alignment: right
         max-width: 50%

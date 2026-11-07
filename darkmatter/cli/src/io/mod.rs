@@ -29,15 +29,25 @@ pub fn load_document(
     path: Option<&PathBuf>,
     request: &MdRequest,
 ) -> Result<(Markdown, Option<PathBuf>)> {
+    let (markdown, opened) = load_opened_document(path, request)?;
+    Ok((markdown, opened.map(OpenedArgument::into_path)))
+}
+
+/// [`load_document`], keeping the opened argument (`None` for stdin), whose
+/// opening spelling derives the document's own context.
+pub fn load_opened_document(
+    path: Option<&PathBuf>,
+    request: &MdRequest,
+) -> Result<(Markdown, Option<OpenedArgument>)> {
     if let Some(p) = path {
         if p.to_str() == Some("-") {
             // Explicit stdin marker
             Ok((read_from_stdin()?, None))
         } else {
-            let resolved = open_argument(p, request)?.into_path();
-            let markdown = Markdown::try_from(resolved.as_path())
-                .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
-            Ok((markdown, Some(resolved)))
+            let opened = open_argument(p, request)?;
+            let markdown = Markdown::try_from(opened.path())
+                .wrap_err_with(|| format!("Failed to read file: {:?}", opened.path()))?;
+            Ok((markdown, Some(opened)))
         }
     } else {
         // No path provided - check if stdin has data

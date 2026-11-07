@@ -2,7 +2,8 @@
 //!
 //! Covers the original five keys (`width`, `max-width`, `alignment`, `color`,
 //! `bg-color`) plus the Phase 5 surface (`margin`, `padding`, `border`,
-//! `emphasis`, `word-wrap`) and the width-mode syntax (`width: auto`,
+//! `emphasis`, `word-wrap`), the horizontal padding sides (`padding-left`,
+//! `padding-right`), and the width-mode syntax (`width: auto`,
 //! `width: fit-content`).
 
 use renderable::layout::{Alignment, Edges, Length, TargetValue, Width};
@@ -154,7 +155,7 @@ impl<'de> Deserialize<'de> for ComponentEdges {
     }
 }
 
-fn deserialize_optional_component_edges<'de, D>(de: D) -> Result<Option<ComponentEdges>, D::Error>
+pub(crate) fn deserialize_optional_component_edges<'de, D>(de: D) -> Result<Option<ComponentEdges>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -405,6 +406,13 @@ pub struct CommonStyle {
     pub margin: Option<ComponentEdges>,
     #[serde(deserialize_with = "deserialize_optional_component_edges")]
     pub padding: Option<ComponentEdges>,
+    /// Left padding. Within one style layer it is applied after `padding`,
+    /// which it overrides on that side.
+    #[serde(deserialize_with = "deserialize_optional_length")]
+    pub padding_left: Option<Length>,
+    /// Right padding; see `padding_left`.
+    #[serde(deserialize_with = "deserialize_optional_length")]
+    pub padding_right: Option<Length>,
     #[serde(deserialize_with = "deserialize_optional_component_border")]
     pub border: Option<ComponentBorder>,
     pub emphasis: Option<ComponentEmphasis>,
@@ -415,8 +423,10 @@ pub struct CommonStyle {
 impl CommonStyle {
     /// Convert this `CommonStyle` into a CSS declaration overlay.
     ///
-    /// Handles `width`, `max-width`, `text-align`, `color`, and
-    /// `background-color`. Returns `None` when no style fields are set.
+    /// Handles `width`, `max-width`, `text-align`, `color`,
+    /// `background-color`, and padding (`padding`, then `padding-left` and
+    /// `padding-right` over it, as `padding-*` longhands). Returns `None`
+    /// when none of these is set.
     ///
     /// ## Examples
     ///
@@ -499,6 +509,37 @@ impl CommonStyle {
         {
             css = css.add(CssColorProp::BackgroundColor, css_color);
             has_any = true;
+        }
+
+        // `padding` sets every side, then `padding-left`/`padding-right`
+        // override theirs, as in terminal layout. Longhands only, so the
+        // declaration order cannot change which value wins.
+        let mut sides: [Option<&Length>; 4] = [None; 4];
+        if let Some(padding) = &self.padding {
+            let edges = padding.as_edges();
+            for (slot, edge) in sides.iter_mut().zip([&edges.top, &edges.right, &edges.bottom, &edges.left]) {
+                if let renderable::layout::TargetValue::Universal(len) = edge {
+                    *slot = Some(len);
+                }
+            }
+        }
+        if let Some(left) = &self.padding_left {
+            sides[3] = Some(left);
+        }
+        if let Some(right) = &self.padding_right {
+            sides[1] = Some(right);
+        }
+        let props = [
+            CssSizingProp::TopPadding,
+            CssSizingProp::RightPadding,
+            CssSizingProp::BottomPadding,
+            CssSizingProp::LeftPadding,
+        ];
+        for (prop, side) in props.into_iter().zip(sides) {
+            if let Some(sizing) = side.and_then(length_to_css_sizing) {
+                css = css.add(prop, sizing);
+                has_any = true;
+            }
         }
 
         if has_any { Some(css) } else { None }

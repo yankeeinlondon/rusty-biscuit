@@ -314,7 +314,7 @@ impl std::fmt::Display for ClassifiedFailure {
 impl std::error::Error for ClassifiedFailure {}
 
 /// The shared records a failed run reports for `error`.
-pub(crate) fn failure_diagnostics(error: &Report) -> Vec<Diagnostic> {
+pub fn failure_diagnostics(error: &Report) -> Vec<Diagnostic> {
     for cause in error.chain() {
         if let Some(classified) = cause.downcast_ref::<ClassifiedFailure>() {
             return classified.diagnostics.clone();

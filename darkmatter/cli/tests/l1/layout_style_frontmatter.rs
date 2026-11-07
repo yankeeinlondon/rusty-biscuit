@@ -176,15 +176,15 @@ fn deny_style_fails_on_unknown_key() {
 fn deny_style_fails_on_deprecated_key() {
     let fixture = CliProcessFixture::named("deny_style_fails_on_deprecated_key");
     // `--deny style` promotes `Deprecated` warnings to errors. The
-    // canonical key is `style.page.left-margin`; the alias
-    // `style.page.left_margin` should trigger a Deprecated warning, which
+    // canonical key is `style.page.max-width`; the alias
+    // `style.page.max_width` should trigger a Deprecated warning, which
     // strict mode turns into an error. Route through `--output html` to
     // exercise the frontmatter pipeline.
     let tmp = md_file(
         "---\n\
         style:\n\
         \x20   page:\n\
-        \x20       left_margin: 2ch\n\
+        \x20       max_width: 80ch\n\
         ---\n\n# Doc\n",
     );
 
@@ -280,9 +280,35 @@ fn style_non_strict_renders_with_unknown_key() {
 }
 
 #[test]
+fn removed_page_spacing_name_warns_with_its_replacement() {
+    let fixture = CliProcessFixture::named("removed_page_spacing_name_warns_with_its_replacement");
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   page:\n\
+        \x20       left-margin: 2ch\n\
+        ---\n\n# Doc\n",
+    );
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stderr = common::unwrapped(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("unknown style key `style.page.left-margin`; use `page.margin-left`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn style_cli_margin_overrides_frontmatter() {
     // Spec test #2: CLI flag overrides frontmatter. The fixture has
-    // `left-margin: 2ch`; `--ml 7` claims that field via
+    // `margin-left: 2ch`; `--ml 7` claims that field via
     // `PageStyleOverrides::margin_left = true`, so the CLI value (7) wins.
     let page = {
         // Mirror the cli's parse → apply_cli → apply_style_frontmatter
@@ -304,12 +330,12 @@ fn style_cli_margin_overrides_frontmatter() {
     assert_eq!(
         tv_cells(&page.page_margin().left),
         7,
-        "CLI override must win over frontmatter left-margin"
+        "CLI override must win over frontmatter margin-left"
     );
     assert_eq!(
         tv_cells(&page.page_margin().right),
         4,
-        "frontmatter right-margin (4ch) must still apply when not claimed"
+        "frontmatter margin-right (4ch) must still apply when not claimed"
     );
 }
 

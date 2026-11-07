@@ -4,15 +4,14 @@
 //! `style.hyperlinks.*`, `style.hyperlinks.local-style`, and
 //! `style.images.local-style`.
 
-use std::path::Path;
-
+use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
+use biscuit_terminal::output::OutputTarget;
 use biscuit_terminal::utils::{UnicodeWidthChar, UnicodeWidthStr};
 use renderable::layout::{Alignment, Length, Width};
 #[cfg(test)]
 use renderable::layout::TargetValue;
 
 use crate::layout::{DarkmatterPage, PageRenderError};
-use crate::markdown::highlighting::ThemePair;
 use crate::style::apply::StyleApplyError;
 use crate::style::schema::{CommonStyle, StyleFrontmatter};
 #[cfg(test)]
@@ -74,39 +73,151 @@ pub struct BespokeStyleOverrides {
     pub code_theme: bool,
 }
 
+/// Which page assets a page build may read, decided by its output target.
+///
+/// Only a browser-backed target (HTML, MarkdownPlus) reads a local
+/// `style.page.stylesheet`; every other target (terminal, plain, the source
+/// and data outputs) validates the value without touching the filesystem. A
+/// remote (HTTP(S)) stylesheet is never fetched by any target: a browser
+/// target emits it as a `<link>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StyleAssetResolver {
+    reads_local_css: bool,
+}
+
+impl StyleAssetResolver {
+    /// The resolver for pages rendered as `target`.
+    pub const fn for_target(target: OutputTarget) -> Self {
+        Self {
+            reads_local_css: matches!(target, OutputTarget::Html | OutputTarget::MarkdownPlus),
+        }
+    }
+
+    /// A resolver that only validates: it reads no asset and attaches no
+    /// stylesheet to the page.
+    pub const fn passive() -> Self {
+        Self { reads_local_css: false }
+    }
+
+    /// Whether this resolver reads local CSS and attaches stylesheets.
+    pub const fn reads_local_css(self) -> bool {
+        self.reads_local_css
+    }
+
+    /// Resolves a `style.page.stylesheet` value written in `context`.
+    ///
+    /// The value is a [`FileReference`]: a local reference resolves against
+    /// `context` (the context of the style layer that supplied the value) and
+    /// is read; an HTTP(S) URL becomes a [`PageStylesheet::Remote`] link
+    /// without a request. A passive resolver checks the value the same way,
+    /// reads nothing, and returns `Ok(None)`.
+    ///
+    /// ## Errors
+    ///
+    /// - [`StyleApplyError::EmptyStylesheet`] when the value is empty.
+    /// - [`StyleApplyError::UnsupportedStylesheetScheme`] for `file://`.
+    /// - [`StyleApplyError::StylesheetReference`] when the value is not a
+    ///   valid file reference, or when resolving it fails; it carries the
+    ///   [`FileReferenceError`](biscuit_file::FileReferenceError).
+    /// - [`StyleApplyError::StylesheetNotFound`] when no file matches.
+    /// - [`StyleApplyError::StylesheetRead`] when the file cannot be read.
+    pub fn resolve_stylesheet(
+        self,
+        value: &str,
+        context: &FileResolutionContext,
+    ) -> Result<Option<PageStylesheet>, StyleApplyError> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(StyleApplyError::EmptyStylesheet);
+        }
+        // `FileReference` refuses every non-HTTP(S) scheme too; this keeps the
+        // stylesheet's own error for the one users reach for.
+        if trimmed.starts_with("file://") {
+            return Err(StyleApplyError::UnsupportedStylesheetScheme {
+                scheme: "file://".into(),
+            });
+        }
+        let reference = FileReference::new(trimmed).map_err(|error| StyleApplyError::stylesheet_reference(trimmed, error))?;
+        if !self.reads_local_css {
+            return Ok(None);
+        }
+        if reference.class().kind == FileReferenceKind::Url {
+            return Ok(Some(PageStylesheet::Remote {
+                href: trimmed.to_string(),
+            }));
+        }
+        let detailed = reference.resolve_detailed(context);
+        let first_probe = detailed.probed_paths().next();
+        let resolved = detailed
+            .into_convenience()
+            .map_err(|error| StyleApplyError::stylesheet_reference(trimmed, error))?
+            .ok_or_else(|| StyleApplyError::StylesheetNotFound {
+                path: first_probe.map_or_else(|| trimmed.to_string(), |path| path.display().to_string()),
+            })?;
+        let css = std::fs::read_to_string(&resolved).map_err(|e| StyleApplyError::StylesheetRead {
+            path: resolved.display().to_string(),
+            reason: e.to_string(),
+        })?;
+        Ok(Some(PageStylesheet::Inline { source: resolved, css }))
+    }
+}
+
 /// Apply parsed bespoke style onto a [`DarkmatterPage`] builder.
 ///
-/// This is the integration point for sub-spec #7 knobs that do not fit the
-/// standard page/component layout and color maps.
+/// This is the integration point for knobs that do not fit the standard
+/// page/component layout and color maps: `style.page.stylesheet`,
+/// `style.page.meta`, `style.page.code.theme` (unless `overrides` claims it),
+/// and the hyperlink and image local styles.
 ///
-/// ## Phase 2
+/// `assets` decides whether a stylesheet is read (see
+/// [`StyleAssetResolver`]); a local one resolves in `context`, the context of
+/// the source that wrote it. A caller holding a
+/// [`PreparedStyle`](super::PreparedStyle) uses
+/// [`apply_prepared_style`](super::apply_prepared_style), which takes that
+/// context from the winning field's origin.
 ///
-/// Wires `style.page.stylesheet` and `style.page.meta` into the page builder.
-/// Local stylesheets are read from disk and inlined; remote stylesheets are
-/// stored as href references. Meta tags are parsed from the opaque JSON object
-/// into typed [`MetaTag`] entries.
+/// ## Errors
 ///
-/// ## Phase 3
-///
-/// Wires `style.page.code.theme` into the page builder, with CLI override
-/// precedence. Returns [`StyleApplyError::InvalidCodeTheme`] for unknown theme
-/// names.
+/// A stylesheet error from [`StyleAssetResolver::resolve_stylesheet`], an
+/// invalid `style.page.meta` shape, or a `width`/`max-width` conflict in a
+/// hyperlink or image bucket.
 pub fn apply_bespoke_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
     overrides: BespokeStyleOverrides,
-    source_path: Option<&Path>,
+    assets: StyleAssetResolver,
+    context: &FileResolutionContext,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let page = apply_stylesheet(page, style, assets, context)?;
+    apply_bespoke_knobs(page, style, overrides)
+}
+
+/// Resolves `style.page.stylesheet`, if set, onto `page`.
+pub(crate) fn apply_stylesheet(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    assets: StyleAssetResolver,
+    context: &FileResolutionContext,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    match style.page.as_ref().and_then(|page| page.stylesheet.as_deref()) {
+        Some(sheet) => Ok(match assets.resolve_stylesheet(sheet, context)? {
+            Some(stylesheet) => page.with_stylesheet(stylesheet),
+            None => page,
+        }),
+        None => Ok(page),
+    }
+}
+
+/// Every bespoke knob except the stylesheet, which alone needs a context.
+pub(crate) fn apply_bespoke_knobs(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    overrides: BespokeStyleOverrides,
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut page = page;
 
     // Page-level knobs
     if let Some(page_style) = style.page.as_ref() {
-        // Stylesheet
-        if let Some(sheet) = page_style.stylesheet.as_deref() {
-            let stylesheet = resolve_stylesheet(sheet, source_path)?;
-            page = page.with_stylesheet(stylesheet);
-        }
-
         // Meta tags
         if let Some(meta_value) = page_style.meta.as_ref() {
             let meta = parse_page_meta(meta_value)?;
@@ -117,11 +228,8 @@ pub fn apply_bespoke_style(
 
         // Code theme — CLI takes precedence over frontmatter.
         if !overrides.code_theme
-            && let Some(theme_name) = page_style.code.as_ref().and_then(|c| c.theme.as_deref())
+            && let Some(theme) = page_style.code.as_ref().and_then(|c| c.theme)
         {
-            let theme = ThemePair::try_from(theme_name).map_err(|_| StyleApplyError::InvalidCodeTheme {
-                value: theme_name.to_string(),
-            })?;
             page = page.with_page_code_theme(theme);
         }
     }
@@ -174,72 +282,6 @@ pub fn apply_bespoke_style(
     }
 
     Ok(page)
-}
-
-/// Resolve a stylesheet string into a [`PageStylesheet`].
-///
-/// ## Errors
-///
-/// - [`StyleApplyError::EmptyStylesheet`] when the value is empty.
-/// - [`StyleApplyError::UnsupportedStylesheetScheme`] when the value uses
-///   `file://`.
-/// - [`StyleApplyError::StylesheetNotFound`] when a local path does not exist.
-/// - [`StyleApplyError::StylesheetRead`] when a local path cannot be read.
-fn resolve_stylesheet(
-    value: &str,
-    source_path: Option<&Path>,
-) -> Result<PageStylesheet, StyleApplyError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(StyleApplyError::EmptyStylesheet);
-    }
-
-    // Reject file:// scheme.
-    if trimmed.starts_with("file://") {
-        return Err(StyleApplyError::UnsupportedStylesheetScheme {
-            scheme: "file://".into(),
-        });
-    }
-
-    // Remote: http(s) URLs.
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        return Ok(PageStylesheet::Remote {
-            href: trimmed.to_string(),
-        });
-    }
-
-    // Local path: resolve relative to source document or CWD.
-    let path = std::path::PathBuf::from(trimmed);
-    let resolved = if path.is_absolute() {
-        path
-    } else if let Some(source) = source_path
-        && let Some(parent) = source.parent()
-    {
-        parent.join(path)
-    } else {
-        std::env::current_dir()
-            .map_err(|e| StyleApplyError::StylesheetRead {
-                path: trimmed.to_string(),
-                reason: e.to_string(),
-            })?
-            .join(path)
-    };
-
-    if !resolved.exists() {
-        return Err(StyleApplyError::StylesheetNotFound {
-            path: resolved.display().to_string(),
-        });
-    }
-
-    let css = std::fs::read_to_string(&resolved).map_err(|e| StyleApplyError::StylesheetRead {
-        path: resolved.display().to_string(),
-        reason: e.to_string(),
-    })?;
-
-    Ok(PageStylesheet::Inline {
-        source: resolved,
-        css,
-    })
 }
 
 /// Parse `style.page.meta` into [`PageMeta`].
@@ -344,7 +386,11 @@ pub fn is_local_image(src: &str) -> bool {
 /// For every field that `local` sets, the local value wins. Unset fields fall
 /// back to `base`. This is the rule for `style.hyperlinks.local-style` and
 /// `style.images.local-style`.
+///
+/// A local `padding` replaces the whole padding, so it also drops the base's
+/// `padding-left`/`padding-right`; a local side still applies over it.
 pub fn merge_common_style(base: &CommonStyle, local: &CommonStyle) -> CommonStyle {
+    let base_side = |side: &Option<Length>| if local.padding.is_some() { None } else { side.clone() };
     CommonStyle {
         width: local.width.clone().or_else(|| base.width.clone()),
         max_width: local.max_width.clone().or_else(|| base.max_width.clone()),
@@ -353,6 +399,8 @@ pub fn merge_common_style(base: &CommonStyle, local: &CommonStyle) -> CommonStyl
         bg_color: local.bg_color.clone().or_else(|| base.bg_color.clone()),
         margin: local.margin.clone().or_else(|| base.margin.clone()),
         padding: local.padding.clone().or_else(|| base.padding.clone()),
+        padding_left: local.padding_left.clone().or_else(|| base_side(&base.padding_left)),
+        padding_right: local.padding_right.clone().or_else(|| base_side(&base.padding_right)),
         border: local.border.clone().or_else(|| base.border.clone()),
         emphasis: local.emphasis.clone().or_else(|| base.emphasis.clone()),
         word_wrap: local.word_wrap.or(base.word_wrap),
@@ -589,7 +637,8 @@ mod tests {
             page.clone(),
             &style,
             BespokeStyleOverrides::default(),
-            None,
+            StyleAssetResolver::passive(),
+            &scratch(),
         )
         .unwrap();
 
@@ -600,15 +649,27 @@ mod tests {
 
     // ---------- Phase 2: stylesheet tests ----------
 
+    fn browser() -> StyleAssetResolver {
+        StyleAssetResolver::for_target(OutputTarget::Html)
+    }
+
+    fn scratch() -> FileResolutionContext {
+        FileResolutionContext::new(std::env::temp_dir())
+    }
+
+    fn resolve_stylesheet(value: &str, context: &FileResolutionContext) -> Result<PageStylesheet, StyleApplyError> {
+        browser().resolve_stylesheet(value, context).map(|sheet| sheet.expect("a browser target attaches a stylesheet"))
+    }
+
     #[test]
     fn resolve_stylesheet_empty_returns_error() {
-        let err = resolve_stylesheet("", None).unwrap_err();
+        let err = resolve_stylesheet("", &scratch()).unwrap_err();
         assert_eq!(err, StyleApplyError::EmptyStylesheet);
     }
 
     #[test]
     fn resolve_stylesheet_file_scheme_returns_error() {
-        let err = resolve_stylesheet("file:///etc/passwd", None).unwrap_err();
+        let err = resolve_stylesheet("file:///etc/passwd", &scratch()).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::UnsupportedStylesheetScheme {
@@ -619,7 +680,7 @@ mod tests {
 
     #[test]
     fn resolve_stylesheet_remote_https() {
-        let sheet = resolve_stylesheet("https://example.com/style.css", None).unwrap();
+        let sheet = resolve_stylesheet("https://example.com/style.css", &scratch()).unwrap();
         assert_eq!(
             sheet,
             PageStylesheet::Remote {
@@ -630,7 +691,7 @@ mod tests {
 
     #[test]
     fn resolve_stylesheet_remote_http() {
-        let sheet = resolve_stylesheet("http://example.com/style.css", None).unwrap();
+        let sheet = resolve_stylesheet("http://example.com/style.css", &scratch()).unwrap();
         assert_eq!(
             sheet,
             PageStylesheet::Remote {
@@ -641,26 +702,30 @@ mod tests {
 
     #[test]
     fn resolve_stylesheet_local_missing_returns_error() {
-        let err = resolve_stylesheet("/nonexistent/path/to/style.css", None).unwrap_err();
-        assert!(matches!(err, StyleApplyError::StylesheetNotFound { .. }));
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path().to_path_buf());
+        let err = resolve_stylesheet("missing.css", &context).unwrap_err();
+        assert!(matches!(err, StyleApplyError::StylesheetNotFound { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn resolve_stylesheet_invalid_reference_keeps_the_file_reference_error() {
+        let err = resolve_stylesheet("@", &scratch()).unwrap_err();
+        assert!(matches!(err, StyleApplyError::StylesheetReference { .. }), "{err:?}");
+        assert!(err.file_reference_error().is_some());
     }
 
     #[test]
     fn resolve_stylesheet_local_relative_reads_file() {
-        // Write a temp CSS file and resolve it relative to a fake source path.
         let dir = tempfile::tempdir().unwrap();
-        let css_path = dir.path().join("style.css");
-        std::fs::write(&css_path, "body { color: red; }").unwrap();
+        std::fs::write(dir.path().join("style.css"), "body { color: red; }").unwrap();
+        let context = FileResolutionContext::new(dir.path().to_path_buf());
 
-        let source = dir.path().join("doc.md");
-        let sheet = resolve_stylesheet("style.css", Some(&source)).unwrap();
-        assert_eq!(
-            sheet,
-            PageStylesheet::Inline {
-                source: css_path,
-                css: "body { color: red; }".into(),
-            }
-        );
+        let PageStylesheet::Inline { source, css } = resolve_stylesheet("style.css", &context).unwrap() else {
+            panic!("a local stylesheet is inlined");
+        };
+        assert_eq!(css, "body { color: red; }");
+        assert!(source.ends_with("style.css"), "{}", source.display());
     }
 
     #[test]
@@ -668,15 +733,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let css_path = dir.path().join("style.css");
         std::fs::write(&css_path, "h1 { font-size: 2em; }").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(elsewhere.path().to_path_buf());
 
-        let sheet = resolve_stylesheet(css_path.to_str().unwrap(), None).unwrap();
-        assert_eq!(
-            sheet,
-            PageStylesheet::Inline {
-                source: css_path,
-                css: "h1 { font-size: 2em; }".into(),
-            }
-        );
+        let sheet = resolve_stylesheet(css_path.to_str().unwrap(), &context).unwrap();
+        assert!(matches!(sheet, PageStylesheet::Inline { ref css, .. } if css == "h1 { font-size: 2em; }"), "{sheet:?}");
+    }
+
+    #[test]
+    fn passive_resolver_validates_without_reading() {
+        let passive = StyleAssetResolver::for_target(OutputTarget::Terminal);
+        assert!(!passive.reads_local_css());
+        assert_eq!(passive.resolve_stylesheet("missing.css", &scratch()), Ok(None));
+        assert_eq!(passive.resolve_stylesheet("https://example.com/a.css", &scratch()), Ok(None));
+        assert_eq!(passive.resolve_stylesheet(" ", &scratch()), Err(StyleApplyError::EmptyStylesheet));
+        assert!(matches!(
+            passive.resolve_stylesheet("file:///a.css", &scratch()),
+            Err(StyleApplyError::UnsupportedStylesheetScheme { .. })
+        ));
     }
 
     // ---------- Phase 2: meta tests ----------
@@ -799,7 +873,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let css_path = dir.path().join("style.css");
         std::fs::write(&css_path, "body { margin: 0; }").unwrap();
-        let source = dir.path().join("doc.md");
+        let context = FileResolutionContext::new(dir.path().to_path_buf());
 
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
@@ -814,7 +888,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), Some(&source))
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), browser(), &context)
             .unwrap();
 
         assert!(page.stylesheet().is_some());
@@ -835,14 +909,15 @@ mod tests {
         let style = StyleFrontmatter {
             page: Some(PageStyle {
                 code: Some(crate::style::schema::CodeStyle {
-                    theme: Some("dracula".into()),
+                    theme: Some(ThemePair::Dracula),
+                    ..Default::default()
                 }),
                 ..PageStyle::default()
             }),
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
 
         assert_eq!(page.page_code_theme(), Some(&ThemePair::Dracula));
@@ -852,6 +927,7 @@ mod tests {
     fn apply_bespoke_style_code_theme_cli_override_skips_frontmatter() {
         use biscuit_terminal::terminal::Terminal;
         use crate::layout::DarkmatterPage;
+        use crate::markdown::highlighting::ThemePair;
         use crate::style::schema::{PageStyle, StyleFrontmatter};
 
         let term = Terminal::new_optimistic(80);
@@ -859,7 +935,8 @@ mod tests {
         let style = StyleFrontmatter {
             page: Some(PageStyle {
                 code: Some(crate::style::schema::CodeStyle {
-                    theme: Some("dracula".into()),
+                    theme: Some(ThemePair::Dracula),
+                    ..Default::default()
                 }),
                 ..PageStyle::default()
             }),
@@ -868,36 +945,8 @@ mod tests {
 
         let overrides = BespokeStyleOverrides { code_theme: true };
 
-        let page = apply_bespoke_style(page, &style, overrides, None).unwrap();
+        let page = apply_bespoke_style(page, &style, overrides, StyleAssetResolver::passive(), &scratch()).unwrap();
         assert!(page.page_code_theme().is_none(), "CLI override should skip frontmatter code theme");
-    }
-
-    #[test]
-    fn apply_bespoke_style_invalid_code_theme_returns_error() {
-        use biscuit_terminal::terminal::Terminal;
-        use crate::layout::DarkmatterPage;
-        use crate::style::schema::{PageStyle, StyleFrontmatter};
-
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term);
-        let style = StyleFrontmatter {
-            page: Some(PageStyle {
-                code: Some(crate::style::schema::CodeStyle {
-                    theme: Some("not-a-real-theme".into()),
-                }),
-                ..PageStyle::default()
-            }),
-            ..StyleFrontmatter::default()
-        };
-
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
-            .unwrap_err();
-        assert_eq!(
-            err,
-            StyleApplyError::InvalidCodeTheme {
-                value: "not-a-real-theme".into(),
-            }
-        );
     }
 
     // ---------- Phase 4: hyperlink tests ----------
@@ -973,7 +1022,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap_err();
         assert_eq!(
             err,
@@ -1002,7 +1051,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap_err();
         assert_eq!(
             err,
@@ -1036,7 +1085,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
 
         assert_eq!(
@@ -1074,7 +1123,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[link](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1116,7 +1165,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[local](./file.md) and [remote](https://example.com)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1164,7 +1213,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown =
             "[x](https://example.com '{ style: \"color: green\" }')".into();
@@ -1212,7 +1261,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[link](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1255,7 +1304,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[local](./file.md)".into();
         let output = page.render(&md).unwrap();
@@ -1300,7 +1349,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let err = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap_err();
         assert_eq!(
             err,
@@ -1334,7 +1383,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
 
         assert_eq!(
@@ -1372,7 +1421,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1408,7 +1457,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let html = page.render_to_browser(&md).unwrap();
@@ -1444,7 +1493,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let output = page.render(&md).unwrap();
@@ -1485,7 +1534,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[hi](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1521,7 +1570,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[abcdefghij](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1562,7 +1611,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[ab](https://example.com)".into();
         let output = page.render(&md).unwrap();
@@ -1598,7 +1647,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "[x](https://example.com)".into();
         let err = page.render(&md).unwrap_err();
@@ -1633,7 +1682,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](./local.png)".into();
         let err = page.render(&md).unwrap_err();
@@ -1668,7 +1717,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![a](./local.png)".into();
         let output = page.render(&md).unwrap();
@@ -1745,7 +1794,7 @@ mod tests {
             ..StyleFrontmatter::default()
         };
 
-        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), StyleAssetResolver::passive(), &scratch())
             .unwrap();
         let md: Markdown = "![alt](https://example.com/remote.png)".into();
         let output = page.render(&md).unwrap();

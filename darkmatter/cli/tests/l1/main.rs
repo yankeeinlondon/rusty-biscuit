@@ -96,6 +96,7 @@ mod policy_verbs;
 mod prose_escape_guard;
 mod reference_report;
 mod render_basic;
+mod render_style_files;
 mod rm;
 mod schema_about;
 mod schema_detect;

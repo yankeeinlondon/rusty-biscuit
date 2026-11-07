@@ -1,12 +1,11 @@
 //! `md render` (implicit and explicit) subcommand implementation.
 
-use crate::args::policy::{self, PolicyCommand};
-use crate::args::{Cli, Feature, RenderOptions};
+use crate::args::{Cli, Feature, PreparedRenderOptions, RenderOptions};
 use crate::artifact::{OutputArtifact, html_page, open_output_artifact};
-use crate::io::load_document;
+use crate::io::{OpenedArgument, load_opened_document};
 use crate::output::report::ReportSink;
 use crate::output::{OutputEnvironment, ResolvedOutput, resolve_output, stderr_terminal, stderr_warning, write_stdout};
-use crate::render::terminal_page;
+use crate::render::{PageInputs, terminal_page};
 use crate::request::MdRequest;
 use biscuit_terminal::output::{OutputTarget, WidthRequest};
 use biscuit_terminal::terminal::Terminal;
@@ -21,22 +20,23 @@ use tracing::{debug, instrument};
 /// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
 #[instrument(skip_all, fields(command = "render"))]
 pub fn run_render(options: &RenderOptions, cli: &Cli, request: &MdRequest) -> Result<()> {
-    let policy = policy::resolve_for(PolicyCommand::Render, &[], &options.deny, &[], None)?;
-    let target = options.output.unwrap_or(OutputTarget::Terminal);
+    let prepared = PreparedRenderOptions::prepare(options)?;
+    let target = prepared.output.unwrap_or(OutputTarget::Terminal);
     let output = source_markdown_width(
         resolve_output(target, cli.width, WidthRequest::Auto, cli.verbose, &OutputEnvironment::detect())?,
     );
     let render = Render {
-        options,
+        options: &prepared,
+        max_width: options.max_width,
         cli,
         request,
-        strict_style: policy.denies("style"),
-        blocking: policy.blocking_policy(),
+        strict_style: prepared.policy.denies("style"),
+        blocking: prepared.policy.blocking_policy(),
         output: &output,
     };
     if target.is_data() {
-        let file = options.input.as_ref().filter(|path| path.to_str() != Some("-")).map(|path| path.display().to_string());
-        let sink = ReportSink::new(&output, file, options.show, false);
+        let file = prepared.input.as_ref().filter(|path| path.to_str() != Some("-")).map(|path| path.display().to_string());
+        let sink = ReportSink::new(&output, file, prepared.show, false);
         let result = render.run(Some(&sink));
         return sink.finish(result);
     }
@@ -57,7 +57,9 @@ fn source_markdown_width(mut output: ResolvedOutput) -> ResolvedOutput {
 }
 
 struct Render<'a> {
-    options: &'a RenderOptions,
+    options: &'a PreparedRenderOptions,
+    /// `md render --max-width`, which preparation does not carry.
+    max_width: Option<u16>,
     cli: &'a Cli,
     request: &'a MdRequest,
     strict_style: bool,
@@ -68,9 +70,10 @@ struct Render<'a> {
 impl Render<'_> {
     fn run(&self, sink: Option<&ReportSink>) -> Result<()> {
         debug!("rendering document");
-        let (mut md, resolved) = load_document(self.options.input.as_ref(), self.request)?;
+        let (mut md, opened) = load_opened_document(self.options.input.as_ref(), self.request)?;
         // Page-relative assets (images, `style:` files) resolve beside the file
         // the argument opened, not beside its spelling (`@doc.md` has no parent).
+        let resolved = opened.as_ref().map(|opened| opened.path().to_path_buf());
         let input = resolved.as_ref();
         if let Some(sink) = sink {
             sink.composes(md.source().as_ref());
@@ -104,23 +107,27 @@ impl Render<'_> {
             sink.document(document_markdown(&md, true, self.output.options.width));
             return Ok(());
         }
-        self.write(&md, input)
+        self.write(&md, input, opened.as_ref())
     }
 
-    fn write(&self, md: &Markdown, input: Option<&PathBuf>) -> Result<()> {
+    fn write(&self, md: &Markdown, input: Option<&PathBuf>, opened: Option<&OpenedArgument>) -> Result<()> {
         let features: &[Feature] = &self.options.features;
         let target = self.output.target;
         let page = match target {
             OutputTarget::Terminal | OutputTarget::Plain => {
-                terminal_page(md, input, self.cli, &Terminal::default(), self.strict_style, features)?
+                let inputs = PageInputs::for_opened(self.request, opened)?;
+                terminal_page(md, input, &inputs, self.cli, &Terminal::default(), self.strict_style, features, self.options.mermaid)?
             }
-            OutputTarget::Html | OutputTarget::MarkdownPlus => html_page(md, self.cli, input, self.strict_style, features)?,
+            OutputTarget::Html | OutputTarget::MarkdownPlus => {
+                let inputs = PageInputs::for_opened(self.request, opened)?;
+                html_page(md, self.cli, &inputs, self.strict_style, features)?
+            }
             // The source text needs no page; its style is never read.
             _ => darkmatter::layout::DarkmatterPage::new(&Terminal::new_optimistic(120)),
         };
         // `md render --max-width` is this subcommand's own flag; a root flag
         // reached the page through the style claims above.
-        let page = match self.options.max_width {
+        let page = match self.max_width {
             Some(max_width) => page.with_max_width(u32::from(max_width)),
             None => page,
         };
@@ -168,11 +175,15 @@ pub(crate) fn document_value<D>(
     input: Option<&PathBuf>,
     output: &ResolvedOutput,
     cli: &Cli,
+    request: &MdRequest,
 ) -> Result<CommandValue<D>> {
     let target = output.target;
+    let inputs = || PageInputs::for_resolved(request, input.map(PathBuf::as_path));
     let page = match target {
-        OutputTarget::Terminal | OutputTarget::Plain => terminal_page(document, input, cli, &Terminal::default(), false, &[])?,
-        OutputTarget::Html | OutputTarget::MarkdownPlus => html_page(document, cli, input, false, &[])?,
+        OutputTarget::Terminal | OutputTarget::Plain => {
+            terminal_page(document, input, &inputs()?, cli, &Terminal::default(), false, &[], false)?
+        }
+        OutputTarget::Html | OutputTarget::MarkdownPlus => html_page(document, cli, &inputs()?, false, &[])?,
         OutputTarget::Markdown => return Ok(CommandValue::new(data, empty_document()).with_markdown(text)),
         OutputTarget::Json | OutputTarget::Json5 | OutputTarget::Yaml | OutputTarget::Toml => {
             return Ok(CommandValue::new(data, empty_document()));

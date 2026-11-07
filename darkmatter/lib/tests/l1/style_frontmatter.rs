@@ -37,10 +37,10 @@ fn fixture_parses_to_expected_style_frontmatter() {
 
     // Acceptance criteria: page.
     let page = style.page.as_ref().expect("page bucket");
-    assert_eq!(page.left_margin, Some(Length::Ch(2)));
-    assert_eq!(page.right_margin, Some(Length::Ch(4)));
-    assert_eq!(page.top_margin, Some(1));
-    assert_eq!(page.bottom_margin, Some(0));
+    assert_eq!(page.margin_left, Some(Length::Ch(2)));
+    assert_eq!(page.margin_right, Some(Length::Ch(4)));
+    assert_eq!(page.margin_top, Some(1));
+    assert_eq!(page.margin_bottom, Some(0));
 
     // Acceptance criteria: table.
     let table = style.table.as_ref().expect("table bucket");
@@ -125,19 +125,19 @@ fn fixture_applies_expected_page_margins() {
     let m = applied.page_margin();
     assert_eq!(
         edge_ch(&m.left), 2,
-        "left margin should come from style.page.left-margin"
+        "left margin should come from style.page.margin-left"
     );
     assert_eq!(
         edge_ch(&m.right), 4,
-        "right margin should come from style.page.right-margin"
+        "right margin should come from style.page.margin-right"
     );
     assert_eq!(
         edge_ch(&m.top), 1,
-        "top margin should come from style.page.top-margin"
+        "top margin should come from style.page.margin-top"
     );
     assert_eq!(
         edge_ch(&m.bottom), 0,
-        "bottom margin should come from style.page.bottom-margin"
+        "bottom margin should come from style.page.margin-bottom"
     );
 }
 
@@ -203,7 +203,7 @@ fn fixture_render_to_browser_runs_without_error() {
 #[test]
 fn cli_flag_overrides_frontmatter_left_margin() {
     // Spec test #2: CLI flag wins over frontmatter on overlapping fields.
-    // The fixture says `style.page.left-margin: 2ch`. Simulate a CLI that
+    // The fixture says `style.page.margin-left: 2ch`. Simulate a CLI that
     // already set `--margin-left 7` by pre-setting margin_left on the page
     // and claiming the field via PageStyleOverrides.
     let style = fixture_style();
@@ -230,10 +230,10 @@ fn cli_flag_overrides_frontmatter_left_margin() {
 
 #[test]
 fn percent_margin_retained_and_resolved_per_target() {
-    // Spec test #3 (revised for review-1 finding 3): `style.page.left-margin:
+    // Spec test #3 (revised for review-1 finding 3): `style.page.margin-left:
     // 10%`. The page frame retains the authored `Length`; the terminal resolves
     // it (10% of 80 = 8 cells) and the browser emits `10%` against the viewport.
-    let yaml = "---\nstyle:\n    page:\n        left-margin: 10%\n---\n\n# Doc\n";
+    let yaml = "---\nstyle:\n    page:\n        margin-left: 10%\n---\n\n# Doc\n";
     let md = Markdown::try_from_content(yaml).expect("parse markdown");
     let (style, _w) = from_frontmatter(md.frontmatter()).expect("parse style");
 
@@ -260,8 +260,8 @@ fn percent_max_width_resolves_post_margin() {
     let yaml = "---\n\
         style:\n\
         \x20   page:\n\
-        \x20       left-margin: 10%\n\
-        \x20       right-margin: 10%\n\
+        \x20       margin-left: 10%\n\
+        \x20       margin-right: 10%\n\
         \x20       max-width: 50%\n\
         ---\n\n# Doc\n";
     let md = Markdown::try_from_content(yaml).expect("parse markdown");
@@ -354,7 +354,7 @@ fn code_theme_frontmatter_applies_via_apply_bespoke_style() {
     let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
 
     let page = page_with_width(80);
-    let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style");
 
     assert_eq!(
@@ -372,10 +372,99 @@ fn code_theme_cli_override_skips_frontmatter_in_bespoke_apply() {
 
     let page = page_with_width(80);
     let overrides = BespokeStyleOverrides { code_theme: true };
-    let page = apply_bespoke_style(page, &style, overrides, None).expect("apply_bespoke_style");
+    let page = apply_bespoke_style(page, &style, overrides, darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir())).expect("apply_bespoke_style");
 
     assert!(
         page.page_code_theme().is_none(),
         "CLI code_theme override should skip frontmatter value"
     );
+}
+
+/// The render-surface keys reach their typed fields through
+/// `from_frontmatter`.
+#[test]
+fn render_surface_keys_reach_typed_fields() {
+    use darkmatter::markdown::highlighting::CodeBlockMode;
+
+    let yaml = "---\nstyle:\n\
+                \x20   page:\n\
+                \x20       margin-left: 2ch\n\
+                \x20       padding-bottom: 3\n\
+                \x20       theme: Base16-Ocean\n\
+                \x20       code:\n\
+                \x20           theme: vs-dark\n\
+                \x20           mode: same\n\
+                \x20   code-block:\n\
+                \x20       line-numbers: false\n\
+                \x20       padding-left: 2\n\
+                \x20   table:\n\
+                \x20       padding-right: 10%\n\
+                \x20   hr:\n\
+                \x20       padding-left: 4ch\n\
+                ---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+    assert!(!warnings.iter().any(|w| w.is_schema_issue()), "{warnings:?}");
+
+    let page = style.page.expect("page");
+    assert_eq!(page.margin_left, Some(Length::Ch(2)));
+    assert_eq!(page.padding_bottom, Some(3));
+    assert_eq!(page.theme, Some(ThemePair::Base16Ocean));
+    let code = page.code.expect("page.code");
+    assert_eq!(code.theme, Some(ThemePair::VisualStudioDark));
+    assert_eq!(code.mode, Some(CodeBlockMode::Same));
+
+    let code_block = style.code_block.expect("code-block");
+    assert_eq!(code_block.line_numbers, Some(false));
+    assert_eq!(code_block.common.padding_left, Some(Length::Ch(2)));
+    assert_eq!(style.table.expect("table").common.padding_right, Some(Length::Percent(10.0)));
+    assert_eq!(style.hr.expect("hr").padding_left, Some(Length::Ch(4)));
+}
+
+/// Removed page spacing names, in kebab or snake case, are unknown keys
+/// whose warning names the CSS-order key, ranged at the authored key.
+#[test]
+fn removed_page_spacing_names_warn_with_their_replacement() {
+    let yaml = "---\nstyle:\n    page:\n        left-margin: 2ch\n        bottom_padding: 1\n    top-margin: 1\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+    let found: Vec<(&str, Option<&str>, bool)> = warnings
+        .iter()
+        .filter(|w| w.kind == StyleWarningKind::UnknownKey)
+        .map(|w| (w.path.as_str(), w.suggestion.as_deref(), w.source_span.is_some()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("style.page.left-margin", Some("page.margin-left"), true),
+            ("style.page.bottom_padding", Some("page.padding-bottom"), true),
+            ("style.top-margin", Some("margin-top"), true),
+        ]
+    );
+    let page = style.page.expect("page");
+    assert_eq!((page.margin_left, page.padding_bottom), (None, None));
+    assert!(into_strict(from_frontmatter(md.frontmatter()).unwrap()).is_err());
+}
+
+/// Shorthands and top-level page keys are accepted (no unknown-key warning),
+/// validated, and normalized onto the page's typed fields.
+#[test]
+fn page_shorthands_are_accepted_at_top_level_and_under_page() {
+    let yaml = "---\nstyle:\n    margin: 2\n    mx: 10%\n    max-width: 80ch\n    page:\n        py: 1\n        pl: 2ch\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+    assert!(!warnings.iter().any(|w| w.is_schema_issue()), "{warnings:?}");
+    let page = style.page.expect("page");
+    assert_eq!(
+        (page.margin_left, page.margin_right, page.margin_top, page.margin_bottom),
+        (Some(Length::Percent(10.0)), Some(Length::Percent(10.0)), Some(2), Some(2))
+    );
+    assert_eq!((page.padding_left, page.padding_top, page.padding_bottom), (Some(Length::Ch(2)), Some(1), Some(1)));
+    assert_eq!(page.max_width, Some(Length::Ch(80)));
+
+    for bad in ["margin: 10%", "my: 2ch", "page:\n        py: 65536", "max-width: 0"] {
+        let yaml = format!("---\nstyle:\n    {bad}\n---\n\n# Doc\n");
+        let md = Markdown::try_from_content(&yaml).expect("parse markdown");
+        assert!(from_frontmatter(md.frontmatter()).is_err(), "{bad}");
+    }
 }

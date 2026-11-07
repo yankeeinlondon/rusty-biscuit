@@ -6,25 +6,84 @@ kind: schema
 types:
     style:
         page:
-            left-margin: &style-length
+            margin-left: &style-length
                 - "string -> Horizontal length such as 2ch or 10%."
                 - "number(integer; min(0)) -> Character-cell length."
-            right-margin: *style-length
-            top-margin: &style-rows "number(integer; min(0); max(65535)) -> Terminal row count."
-            bottom-margin: *style-rows
-            left-padding: *style-length
-            right-padding: *style-length
-            top-padding: *style-rows
-            bottom-padding: *style-rows
-            max-width: *style-length
+            margin-right: *style-length
+            margin-top: &style-rows "number(integer; min(0); max(65535)) -> Terminal row count."
+            margin-bottom: *style-rows
+            padding-left: *style-length
+            padding-right: *style-length
+            padding-top: *style-rows
+            padding-bottom: *style-rows
+            max-width: &style-page-width
+                - "string(pattern([1-9])) -> Positive horizontal length such as 80ch or 50%."
+                - "number(integer; min(1)) -> Positive character-cell length."
             alignment: &style-alignment "enum(left, center, right) -> Horizontal alignment."
             color: &style-color "string -> Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
             bg-color: *style-color
-            background: "enum(transparent, subtle, pronounced) -> Page background fill strategy."
-            stylesheet: "file -> CSS file reference or URL used for browser rendering."
-            meta: "object -> Browser metadata passed through to generated HTML."
+            background: &style-background "enum(transparent, subtle, pronounced) -> Page background fill strategy."
+            theme: "string(not-empty; suggest(base16-ocean, github, gruvbox, one-half, solarized, nord, dracula, monokai, vs-dark)) -> Theme pair name."
+            stylesheet: &style-stylesheet "file -> CSS file reference or URL used for browser rendering."
+            meta: &style-meta "object -> Browser metadata passed through to generated HTML."
             code:
-                theme: "string -> Syntax-highlighting theme pair for code blocks."
+                theme: "string(not-empty; suggest(base16-ocean, github, gruvbox, one-half, solarized, nord, dracula, monokai, vs-dark)) -> Theme pair name."
+                mode: &style-code-mode "enum(inverse, dark, light, same) -> Code-block theme variant relative to the page color mode."
+            # Shorthands. A value that sets a vertical side is a row count. Theme
+            # declarations are written out at each site: a `suggest(...)` list
+            # cannot be reached through a YAML alias.
+            margin: &style-all-sides "number(integer; min(0); max(65535)) -> All four sides; also a row count."
+            padding: *style-all-sides
+            mx: &style-x-sides
+                - "string -> Left and right; a horizontal length such as 2ch or 10%."
+                - "number(integer; min(0)) -> Left and right, in character cells."
+            my: &style-y-sides "number(integer; min(0); max(65535)) -> Top and bottom, in terminal rows."
+            px: *style-x-sides
+            py: *style-y-sides
+            ml: *style-length
+            mr: *style-length
+            mt: *style-rows
+            mb: *style-rows
+            pl: *style-length
+            pr: *style-length
+            pt: *style-rows
+            pb: *style-rows
+
+        # Every page key and shorthand is also accepted at the top level of
+        # `style`, where it applies to the page.
+        margin-left: *style-length
+        margin-right: *style-length
+        margin-top: *style-rows
+        margin-bottom: *style-rows
+        padding-left: *style-length
+        padding-right: *style-length
+        padding-top: *style-rows
+        padding-bottom: *style-rows
+        max-width: *style-page-width
+        alignment: *style-alignment
+        color: *style-color
+        bg-color: *style-color
+        background: *style-background
+        theme: "string(not-empty; suggest(base16-ocean, github, gruvbox, one-half, solarized, nord, dracula, monokai, vs-dark)) -> Theme pair name."
+        stylesheet: *style-stylesheet
+        meta: *style-meta
+        code:
+            theme: "string(not-empty; suggest(base16-ocean, github, gruvbox, one-half, solarized, nord, dracula, monokai, vs-dark)) -> Theme pair name."
+            mode: *style-code-mode
+        margin: *style-all-sides
+        padding: *style-all-sides
+        mx: *style-x-sides
+        my: *style-y-sides
+        px: *style-x-sides
+        py: *style-y-sides
+        ml: *style-length
+        mr: *style-length
+        mt: *style-rows
+        mb: *style-rows
+        pl: *style-length
+        pr: *style-length
+        pt: *style-rows
+        pb: *style-rows
 
         table: &style-common
             width: &style-width
@@ -37,6 +96,8 @@ types:
             bg-color: *style-color
             margin: *style-length
             padding: *style-length
+            padding-left: *style-length
+            padding-right: *style-length
             border: &style-border
                 - "boolean -> Enables or disables a thin border on all sides."
                 - "enum(thin, medium, thick, none) -> Border weight on all sides."
@@ -69,6 +130,8 @@ types:
             left-margin: *style-length
             margin: *style-length
             padding: *style-length
+            padding-left: *style-length
+            padding-right: *style-length
             border: *style-border
             emphasis: *style-emphasis
             word-wrap: *style-word-wrap
@@ -100,14 +163,25 @@ types:
             bg-color: *style-color
             kind: "enum(dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod) -> Horizontal-rule glyph style."
             weight: "enum(thin, medium, thick) -> Horizontal-rule weight."
+            padding: *style-length
+            padding-left: *style-length
+            padding-right: *style-length
+
+        disclosure: *style-common
+        code-block:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
             margin: *style-length
             padding: *style-length
+            padding-left: *style-length
+            padding-right: *style-length
             border: *style-border
             emphasis: *style-emphasis
             word-wrap: *style-word-wrap
-
-        disclosure: *style-common
-        code-block: *style-common
+            line-numbers: "boolean -> Whether code blocks show a line-number gutter."
 
         # Cleanup formatting rules (`md clean`, DMLS formatting). Defaults are
         # runtime rule defaults, never written into frontmatter; the runtime

@@ -3,12 +3,15 @@
 use serde_json::Value;
 
 use crate::style::color;
+use crate::markdown::highlighting::ThemePair;
 use crate::style::descriptor::{
-    self, LeafType, SchemaLeaf, is_canonical_container, join_path, kebabify, leaf_for_canonical,
+    self, LeafType, SchemaLeaf, is_canonical_container, join_path, kebabify, leaf_for_key,
 };
 use crate::style::error::StyleParseError;
-use crate::style::length::{HorizontalLengthError, parse_horizontal_typed};
+use crate::style::length::{HorizontalLengthError, is_zero_length, parse_horizontal_typed};
+use crate::style::schema::page::{CODE_BLOCK_MODE_EXPECTED, code_block_mode_from_name};
 use crate::style::schema::StyleFrontmatter;
+use crate::style::normalize;
 use crate::style::walker;
 use crate::style::warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
@@ -25,15 +28,25 @@ pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 8;
 ///
 /// Returns `(StyleFrontmatter::default(), vec![])` for `Value::Null`.
 ///
+/// The value is normalized as one style layer before typed deserialization
+/// (see [`crate::style::normalize`]): `margin: 2` and a top-level `ml: 6`
+/// reach the page's margin fields, and `alignment` reaches every component
+/// below the component's own `alignment`. Warnings report the paths as
+/// written.
+///
 /// ## Errors
 ///
+/// - `StyleParseError::Conflict` — two spellings of one field, such as `ml`
+///   beside `page.margin-left`.
 /// - `StyleParseError::Structure` — wrong JSON type at a known path
-///   (e.g. `top-margin: "2ch"`).
+///   (e.g. `margin-top: "2ch"`, `code-block.line-numbers: "yes"`).
 /// - `StyleParseError::InvalidLength` — string that can't be parsed as a
-///   horizontal length (e.g. `"2px"`, `"-2"`).
+///   horizontal length (e.g. `"2px"`, `"-2"`), or a zero page `max-width`.
 /// - `StyleParseError::InvalidPercent` — percent value outside `0.0..=100.0`.
 /// - `StyleParseError::InvalidColor` — color string that doesn't match any
 ///   accepted form.
+/// - `StyleParseError::InvalidValue` — unknown theme name or code-block
+///   mode.
 /// - `StyleParseError::Serde` — fallback for serde-level failures not caught
 ///   by the pre-validator (currently: bad `background` enum variant, wrong
 ///   shape for `code`).
@@ -47,13 +60,24 @@ pub fn from_json_value(
     // Pass 1: collect schema-validation warnings (unknown keys, snake aliases).
     let mut warnings = walker::walk(value);
 
-    // Pass 2a: typed pre-validation. Catches typed-leaf failures with full
-    // path-aware diagnostics before serde sees them.
+    // Pass 2a: typed pre-validation of the value as written. Catches
+    // typed-leaf failures with path-aware diagnostics at the author's
+    // spelling before serde sees them.
     pre_validate(value)?;
 
-    // Pass 2b: typed deserialize. Serde's `alias` accepts both spellings, so
-    // the value is parsed in its original form — no rewriting needed.
-    let parsed: StyleFrontmatter = serde_json::from_value(value.clone())?;
+    // Pass 2b: typed deserialize of the normalized value: top-level page
+    // keys, page shorthands, and the `alignment` broadcast land on their
+    // canonical fields, and documented snake-case aliases on their kebab-case
+    // keys.
+    let normalized = normalize::normalize_document_value(value).map_err(|conflicts| {
+        let first = &conflicts[0];
+        StyleParseError::Conflict {
+            path: format!("style.{}", first.canonical.join(".")),
+            first: format!("style.{}", first.first.join(".")),
+            second: format!("style.{}", first.second.join(".")),
+        }
+    })?;
+    let parsed: StyleFrontmatter = serde_json::from_value(normalized)?;
 
     // Pass 3: emit `KnownButInactive` for every leaf that is in the schema.
     annotate_known_but_inactive(value, &mut warnings);
@@ -76,7 +100,7 @@ pub fn from_json_value(
 /// requires a `Deprecated { replacement: "center" }` warning so strict mode
 /// can reject the legacy spelling. The schema walker only handles
 /// snake-case → kebab-case aliasing, so this special case lives here.
-fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>) {
+pub(crate) fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>) {
     let Value::Object(root) = value else {
         return;
     };
@@ -99,7 +123,7 @@ fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>)
 /// the first typed error encountered; serde-level failures (alignment
 /// strings, enums) are deferred to `serde_json::from_value` so this stays
 /// focused on the four named typed variants.
-fn pre_validate(value: &Value) -> Result<(), StyleParseError> {
+pub(crate) fn pre_validate(value: &Value) -> Result<(), StyleParseError> {
     pre_validate_inner(value, "")
 }
 
@@ -118,7 +142,7 @@ fn pre_validate_inner(value: &Value, canonical_path: &str) -> Result<(), StylePa
             validate_markdown_rules(child)?;
             continue;
         }
-        if let Some(leaf) = leaf_for_canonical(&canonical_child) {
+        if let Some(leaf) = leaf_for_key(&canonical_child, key) {
             validate_leaf(leaf, child, &canonical_child)?;
             continue;
         }
@@ -139,14 +163,18 @@ fn validate_leaf(
         LeafType::HorizontalLength => validate_horizontal_length(value, canonical_path),
         LeafType::WidthOrMode => validate_width_or_mode(value, canonical_path),
         LeafType::RowCount => validate_row_count(value, canonical_path),
+        LeafType::PositivePageWidth => validate_positive_page_width(value, canonical_path),
         LeafType::Color => validate_color(value, canonical_path),
-        // Alignment, BackgroundEnum, StringValue, OpaqueValue — let serde
-        // handle these. Bad alignment / background variants surface as Serde
-        // errors; StringValue and OpaqueValue are permissive by design.
+        LeafType::ThemeName => validate_theme_name(value, canonical_path),
+        LeafType::CodeBlockMode => validate_code_block_mode(value, canonical_path),
+        LeafType::Boolean => validate_boolean(value, canonical_path),
+        LeafType::OpaqueValue => validate_object(value, canonical_path),
+        // Alignment, BackgroundEnum, StringValue — let serde handle these.
+        // Bad alignment / background variants surface as Serde errors;
+        // StringValue is permissive by design.
         LeafType::Alignment
         | LeafType::BackgroundEnum
         | LeafType::StringValue
-        | LeafType::OpaqueValue
         | LeafType::HrKind
         | LeafType::HrWeight
         | LeafType::HrAlignment
@@ -161,7 +189,7 @@ fn validate_leaf(
 /// rendering accepts exactly what cleanup accepts. Unknown
 /// rule names and snake-case spellings are rejected here: the rules have no
 /// aliases.
-fn validate_markdown_rules(value: &Value) -> Result<(), StyleParseError> {
+pub(crate) fn validate_markdown_rules(value: &Value) -> Result<(), StyleParseError> {
     if value.is_null() {
         return Ok(());
     }
@@ -229,6 +257,85 @@ fn validate_horizontal_length(value: &Value, canonical_path: &str) -> Result<(),
     }
 }
 
+fn validate_positive_page_width(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    validate_horizontal_length(value, canonical_path)?;
+    let zero = match value {
+        Value::Number(n) => n.as_u64() == Some(0),
+        Value::String(s) => parse_horizontal_typed(s).is_ok_and(|length| is_zero_length(&length)),
+        _ => false,
+    };
+    if zero {
+        return Err(StyleParseError::InvalidLength {
+            path: format!("style.{}", canonical_path),
+            raw: match value {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            },
+            reason: "max-width must be greater than zero",
+        });
+    }
+    Ok(())
+}
+
+fn validate_theme_name(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::String(s) if ThemePair::try_from(s.as_str()).is_ok() => Ok(()),
+        Value::String(s) => Err(StyleParseError::InvalidValue {
+            path: format!("style.{}", canonical_path),
+            raw: s.clone(),
+            reason: format!(
+                "theme must be one of {}",
+                ThemePair::all().iter().map(|theme| theme.kebab_name()).collect::<Vec<_>>().join(", ")
+            ),
+        }),
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "string",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
+fn validate_code_block_mode(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::String(s) if code_block_mode_from_name(s).is_some() => Ok(()),
+        Value::String(s) => Err(StyleParseError::InvalidValue {
+            path: format!("style.{}", canonical_path),
+            raw: s.clone(),
+            reason: CODE_BLOCK_MODE_EXPECTED.to_string(),
+        }),
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "string",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
+fn validate_object(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null | Value::Object(_) => Ok(()),
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "object",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
+fn validate_boolean(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null | Value::Bool(_) => Ok(()),
+        other => Err(StyleParseError::Structure {
+            path: format!("style.{}", canonical_path),
+            expected: "boolean",
+            actual: json_type_name(other).to_string(),
+        }),
+    }
+}
+
 fn validate_row_count(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
     match value {
         Value::Null => Ok(()),
@@ -287,7 +394,7 @@ fn json_type_name(v: &Value) -> &'static str {
 /// Per-segment kebabify mirrors the walker, so a document like
 /// `style.block_quote.max_width` still produces a single `KnownButInactive`
 /// at the canonical path `style.block-quote.max-width`.
-fn annotate_known_but_inactive(value: &Value, warnings: &mut Vec<StyleWarning>) {
+pub(crate) fn annotate_known_but_inactive(value: &Value, warnings: &mut Vec<StyleWarning>) {
     annotate_inner(value, "", warnings);
 }
 
@@ -299,7 +406,7 @@ fn annotate_inner(value: &Value, canonical_path: &str, warnings: &mut Vec<StyleW
         let canonical_segment = kebabify(key);
         let canonical_child = join_path(canonical_path, &canonical_segment);
 
-        if let Some(leaf) = leaf_for_canonical(&canonical_child) {
+        if let Some(leaf) = leaf_for_key(&canonical_child, key) {
             if leaf.sub_spec > ACTIVE_STYLE_WIRING_SUB_SPEC {
                 warnings.push(StyleWarning::new(
                     format!("style.{}", leaf.canonical),
@@ -356,14 +463,14 @@ pub fn from_frontmatter(
 /// the raw frontmatter text (R-4 item 6).
 ///
 /// Keys are the full dotted path using the spellings the author wrote (e.g.
-/// `style.page.left_margin`), so a [`StyleWarning::path`](StyleWarning) is a
+/// `style.page.max_width`), so a [`StyleWarning::path`](StyleWarning) is a
 /// direct lookup. Coordinates are 1-based and relative to `yaml` (line 1 = the
 /// first line of `yaml`); `length` is the key token's length in characters.
 ///
 /// ## Notes
 ///
 /// The scan understands block mappings only. Keys inside a flow mapping
-/// (`page: { left-margin: 2ch }`) are not indexed, so a warning under one
+/// (`page: { margin-left: 2ch }`) are not indexed, so a warning under one
 /// keeps `source_span = None` — a graceful degradation, never a wrong span.
 pub fn build_yaml_position_map(yaml: &str) -> indexmap::IndexMap<String, StyleSpan> {
     let mut out = indexmap::IndexMap::new();
@@ -479,11 +586,11 @@ mod tests {
     }
 
     #[test]
-    fn page_left_margin_parses() {
-        let (s, w) = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
+    fn page_margin_left_parses() {
+        let (s, w) = from_json_value(&json!({"page": {"margin-left": "2ch"}})).unwrap();
         let schema_warnings: Vec<_> = w.iter().filter(|w| w.is_schema_issue()).collect();
         assert!(schema_warnings.is_empty());
-        assert_eq!(s.page.unwrap().left_margin, Some(Length::Ch(2)));
+        assert_eq!(s.page.unwrap().margin_left, Some(Length::Ch(2)));
     }
 
     #[test]
@@ -496,14 +603,14 @@ mod tests {
 
     #[test]
     fn deprecated_alias_produces_warning_but_parse_succeeds() {
-        let (s, w) = from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
+        let (s, w) = from_json_value(&json!({"page": {"max_width": "80ch"}})).unwrap();
         let schema_warnings: Vec<_> = w.iter().filter(|w| w.is_schema_issue()).collect();
         assert_eq!(schema_warnings.len(), 1);
         assert!(matches!(
             schema_warnings[0].kind,
             StyleWarningKind::Deprecated { .. }
         ));
-        assert_eq!(s.page.unwrap().left_margin, Some(Length::Ch(2)));
+        assert_eq!(s.page.unwrap().max_width, Some(Length::Ch(80)));
     }
 
     /// Valid cleanup rules are accepted silently, even by strict mode: they
@@ -559,10 +666,10 @@ mod tests {
 
     #[test]
     fn invalid_length_returns_typed_variant() {
-        let err = from_json_value(&json!({"page": {"left-margin": "2px"}})).unwrap_err();
+        let err = from_json_value(&json!({"page": {"margin-left": "2px"}})).unwrap_err();
         match err {
             StyleParseError::InvalidLength { path, raw, reason } => {
-                assert_eq!(path, "style.page.left-margin");
+                assert_eq!(path, "style.page.margin-left");
                 assert_eq!(raw, "2px");
                 assert!(reason.contains("unsupported unit"), "got: {}", reason);
             }
@@ -597,16 +704,16 @@ mod tests {
 
     #[test]
     fn vertical_margin_string_returns_structure() {
-        // Spec test #4: `top-margin: "2ch"` must surface as Structure with
+        // Spec test #4: `margin-top: "2ch"` must surface as Structure with
         // the canonical path.
-        let err = from_json_value(&json!({"page": {"top-margin": "2ch"}})).unwrap_err();
+        let err = from_json_value(&json!({"page": {"margin-top": "2ch"}})).unwrap_err();
         match err {
             StyleParseError::Structure {
                 path,
                 expected,
                 actual,
             } => {
-                assert_eq!(path, "style.page.top-margin");
+                assert_eq!(path, "style.page.margin-top");
                 assert_eq!(expected, "integer");
                 assert_eq!(actual, "string");
             }
@@ -615,9 +722,52 @@ mod tests {
     }
 
     #[test]
+    fn render_surface_values_fail_with_their_canonical_path() {
+        let cases = [
+            (json!({"page": {"max-width": 0}}), "style.page.max-width"),
+            (json!({"max-width": "0%"}), "style.max-width"),
+            (json!({"margin": "10%"}), "style.margin"),
+            (json!({"page": {"my": "2ch"}}), "style.page.my"),
+            (json!({"pt": 70000}), "style.pt"),
+            (json!({"page": {"theme": "neon"}}), "style.page.theme"),
+            (json!({"code": {"theme": ""}}), "style.code.theme"),
+            (json!({"page": {"code": {"mode": "auto"}}}), "style.page.code.mode"),
+            (json!({"code-block": {"line-numbers": "no"}}), "style.code-block.line-numbers"),
+            (json!({"hr": {"padding-left": "-2"}}), "style.hr.padding-left"),
+        ];
+        for (value, expected) in cases {
+            let path = match from_json_value(&value) {
+                Err(StyleParseError::InvalidLength { path, .. })
+                | Err(StyleParseError::Structure { path, .. })
+                | Err(StyleParseError::InvalidValue { path, .. }) => path,
+                other => panic!("{value}: expected a typed error, got {other:?}"),
+            };
+            assert_eq!(path, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn render_surface_keys_are_wired_and_report_nothing() {
+        let (_, w) = from_json_value(&json!({
+            "ml": 2, "page": {"theme": "github", "code": {"mode": "dark", "theme": "nord"}},
+            "code-block": {"line-numbers": true, "padding-left": 2},
+            "hr": {"padding": 1, "padding-left": 4, "padding-right": 0},
+            "table": {"padding-right": "2ch"}
+        }))
+        .unwrap();
+        let inactive: Vec<&str> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .map(|w| w.path.as_str())
+            .collect();
+        assert!(inactive.is_empty(), "{inactive:?}");
+        assert!(!w.iter().any(|w| w.is_schema_issue()), "{w:?}");
+    }
+
+    #[test]
     fn vertical_margin_integer_succeeds() {
-        let (s, _) = from_json_value(&json!({"page": {"top-margin": 1}})).unwrap();
-        assert_eq!(s.page.unwrap().top_margin, Some(1));
+        let (s, _) = from_json_value(&json!({"page": {"margin-top": 1}})).unwrap();
+        assert_eq!(s.page.unwrap().margin_top, Some(1));
     }
 
     #[test]
@@ -670,7 +820,7 @@ mod tests {
         // Sub-spec #2 wires page-level keys, so they no longer emit
         // `KnownButInactive` warnings.
         let (_, w) = from_json_value(&json!({
-            "page": {"left-margin": "2ch"}
+            "page": {"margin-left": "2ch"}
         }))
         .unwrap();
         let inactive: Vec<_> = w
@@ -683,7 +833,7 @@ mod tests {
     #[test]
     fn deprecated_alias_for_wired_page_key_still_warns_only_deprecated() {
         let (_, w) = from_json_value(&json!({
-            "page": {"left_margin": "2ch"}
+            "page": {"max_width": "80ch"}
         }))
         .unwrap();
         let inactive: Vec<_> = w
@@ -700,7 +850,7 @@ mod tests {
             .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
             .collect();
         assert_eq!(deprecated.len(), 1);
-        assert_eq!(deprecated[0].path, "style.page.left_margin");
+        assert_eq!(deprecated[0].path, "style.page.max_width");
     }
 
     #[test]
@@ -792,8 +942,8 @@ mod tests {
         // After sub-spec #7, every valid v1 schema key is wired.
         let v = json!({
             "page": {
-                "left-margin": "2ch", "right-margin": "4ch",
-                "top-margin": 1, "bottom-margin": 0,
+                "margin-left": "2ch", "margin-right": "4ch",
+                "margin-top": 1, "margin-bottom": 0,
                 "max-width": "80%", "alignment": "center",
                 "background": "subtle",
                 "stylesheet": "https://example.com/style.css",
@@ -846,8 +996,8 @@ mod tests {
     #[test]
     fn test_doc_all_known_but_inactive() {
         let v = json!({
-            "page":  {"left-margin": "2ch", "right-margin": "4ch",
-                       "top-margin": 1, "bottom-margin": 0},
+            "page":  {"margin-left": "2ch", "margin-right": "4ch",
+                       "margin-top": 1, "margin-bottom": 0},
             "table": {"alignment": "right", "max-width": "50%"},
             "ol":    {"alignment": "right"},
             "ul":    {"alignment": "left", "left-margin": "4ch", "max-width": "40"}
@@ -873,10 +1023,10 @@ mod tests {
     fn matches_test_doc_acceptance_criteria() {
         let v = json!({
             "page": {
-                "left-margin": "2ch",
-                "right-margin": "4ch",
-                "top-margin": 1,
-                "bottom-margin": 0
+                "margin-left": "2ch",
+                "margin-right": "4ch",
+                "margin-top": 1,
+                "margin-bottom": 0
             },
             "table": {
                 "alignment": "right",
@@ -892,10 +1042,10 @@ mod tests {
 
         let (s, _w) = from_json_value(&v).unwrap();
         let p = s.page.expect("page");
-        assert_eq!(p.left_margin, Some(Length::Ch(2)));
-        assert_eq!(p.right_margin, Some(Length::Ch(4)));
-        assert_eq!(p.top_margin, Some(1));
-        assert_eq!(p.bottom_margin, Some(0));
+        assert_eq!(p.margin_left, Some(Length::Ch(2)));
+        assert_eq!(p.margin_right, Some(Length::Ch(4)));
+        assert_eq!(p.margin_top, Some(1));
+        assert_eq!(p.margin_bottom, Some(0));
 
         let t = s.table.expect("table");
         assert_eq!(t.common.alignment, Some(Alignment::Right));
@@ -921,7 +1071,7 @@ mod tests {
     #[test]
     fn from_frontmatter_with_style_key() {
         let mut fm = Frontmatter::new();
-        fm.insert("style", json!({"page": {"left-margin": "2ch"}}))
+        fm.insert("style", json!({"page": {"margin-left": "2ch"}}))
             .unwrap();
         let (s, _w) = from_frontmatter(&fm).unwrap();
         assert!(s.page.is_some());
@@ -929,7 +1079,7 @@ mod tests {
 
     #[test]
     fn into_strict_passes_clean_parse() {
-        let parsed = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
+        let parsed = from_json_value(&json!({"page": {"margin-left": "2ch"}})).unwrap();
         let s = into_strict(parsed).unwrap();
         assert!(s.page.is_some());
     }
@@ -948,7 +1098,7 @@ mod tests {
 
     #[test]
     fn into_strict_fails_on_deprecated_alias() {
-        let parsed = from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
+        let parsed = from_json_value(&json!({"page": {"max_width": "80ch"}})).unwrap();
         assert!(matches!(
             into_strict(parsed),
             Err(StyleParseError::Strict { .. })
@@ -1202,7 +1352,7 @@ mod tests {
 
     #[test]
     fn from_frontmatter_populates_warning_span_from_raw_source() {
-        // A snake-cased leaf under `style.page` is Deprecated; with the raw
+        // A removed page spacing name is an unknown key; with the raw
         // frontmatter text available its warning is ranged at the key.
         let raw = "style:\n  page:\n    left_margin: 2ch\n";
         let mut map = crate::markdown::FrontmatterMap::new();
@@ -1215,7 +1365,8 @@ mod tests {
         let warning = warnings
             .iter()
             .find(|w| w.path == "style.page.left_margin")
-            .expect("deprecated left_margin warning");
+            .expect("unknown left_margin warning");
+        assert_eq!(warning.suggestion.as_deref(), Some("page.margin-left"));
         assert_eq!(
             warning.source_span,
             Some(StyleSpan { line: 3, column: 5, length: 11 }),

@@ -34,6 +34,8 @@ When performing a composition argument the caller can send in a style object to 
 
 The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `8`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. Sub-spec #9 keys are schema-valid and lowered by the applicator; they follow the same `KnownButInactive` discipline if the active constant has not yet advanced to `9`. After sub-spec #9, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive` from a fully wired phase.
 
+The later render-surface keys (`page.theme`, `page.code.mode`, `code-block.line-numbers`, every `padding-left`/`padding-right`, and `hr.padding`) are lowered and carry the active sub-spec `8` in the descriptor, so they emit no `KnownButInactive`; the rest of the sub-spec #9 surface still reports it.
+
 ## Schema & Parser Architecture (Sub-Spec #1)
 
 The `style:` frontmatter is parsed by the `darkmatter::style` module into a typed, sparse tree of Rust structs anchored to `renderable` primitives. No darkmatter-local layout, style, or color runtime types are introduced — every length is `renderable::layout::Length`, every alignment is `renderable::layout::Alignment`, and every color is `renderable::color::Color` (wrapped only by `StyleColor` for opacity).
@@ -127,13 +129,15 @@ Most component buckets embed a flattened `CommonStyle` providing the shared muta
 | `alignment` | `Option<renderable::layout::Alignment>` | `alignment` | — |
 | `margin` | `Option<ComponentEdges>` | `margin` | — |
 | `padding` | `Option<ComponentEdges>` | `padding` | — |
+| `padding_left` | `Option<renderable::layout::Length>` | `padding-left` | — |
+| `padding_right` | `Option<renderable::layout::Length>` | `padding-right` | — |
 | `color` | `Option<StyleColor>` | `color` | — |
 | `bg_color` | `Option<StyleColor>` | `bg-color` | `bg_color` |
 | `border` | `Option<ComponentBorder>` | `border` | — |
 | `emphasis` | `Option<ComponentEmphasis>` | `emphasis` | — |
 | `word_wrap` | `Option<ComponentWordWrap>` | `word-wrap` | `word_wrap` |
 
-`width` accepts either a length (`40`, `50%`) or a keyword (`auto`, `fit-content`) and lowers to `renderable::layout::Width` with the correct mode (Decision D3). `margin` and `padding` accept the same length forms as `width` and apply to all four sides. `border`, `emphasis`, and `word-wrap` are compound values validated during typed deserialization; see [Sub-Spec #9](#sub-spec-9-style-everywhere) for details.
+`width` accepts either a length (`40`, `50%`) or a keyword (`auto`, `fit-content`) and lowers to `renderable::layout::Width` with the correct mode (Decision D3). `margin` and `padding` accept the same length forms as `width` and apply to all four sides; `padding-left` and `padding-right` then set one side each over `padding` (always in that order within a bucket, and a side alone keeps the other edges' inherited padding). `border`, `emphasis`, and `word-wrap` are compound values validated during typed deserialization; see [Sub-Spec #9](#sub-spec-9-style-everywhere) for details.
 
 #### Per-Component Buckets
 
@@ -809,7 +813,7 @@ The integration order in `darkmatter-cli` extends sub-spec #4's pipeline:
 6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
 7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
 8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
 10. `render / render_to_browser`
 
 Color has no CLI override in this sub-spec; frontmatter is the only color source.
@@ -905,6 +909,8 @@ pub enum HrAlignment {
 | `alignment` | `Option<HrAlignment>` | `alignment` | `full` \| `left` \| `center` \| `right`; `centered` is deprecated alias for `center` |
 | `kind` | `Option<HrKind>` | `kind` | Visual style of the rule |
 | `weight` | `Option<HrWeight>` | `weight` | Stroke weight |
+| `padding` | `Option<ComponentEdges>` | `padding` | All four sides of the `Hr` component policy's `Layout.padding` |
+| `padding_left`, `padding_right` | `Option<Length>` | `padding-left`, `padding-right` | One side each, after `padding`; moves the rule inside the content width (`padding-left: 4` at width 50 draws 46 cells, 4 in). A CLI `--fill` claim on `hr` keeps its own padding |
 
 `width` and `max-width` conflict: setting both in the same `style.hr` bucket returns `StyleApplyError` before rendering, matching the exclusivity rule from sub-specs #3 and #4.
 
@@ -953,7 +959,7 @@ The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
 6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
 7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
 8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
 10. `render / render_to_browser`
 
 ### `--deny style` and HR
@@ -1013,11 +1019,11 @@ After this sub-spec ships, `ACTIVE_STYLE_WIRING_SUB_SPEC` advances to `7` and no
 
 ### `style.page.stylesheet`
 
-Adds page-level CSS to HTML output. Terminal output ignores this field entirely (no warning beyond debug-level tracing).
+Adds page-level CSS to HTML output. Every target checks the value without reading anything (it must be non-empty, not `file://`, and a valid `biscuit_file::FileReference`); only HTML and MarkdownPlus pages read a local file (`StyleAssetResolver::for_target`). Terminal, plain, Markdown, and data pages never read it.
 
 **Local files:**
 
-- Relative paths resolve against the source Markdown document's directory (or the current working directory if no source path is available). Absolute paths are accepted.
+- The value is a `FileReference` (`./x.css`, `x.css`, `&x.css`, `~/x.css`, `{{VAR}}/x.css`, an absolute path), resolved with `resolve_detailed` against the context of the source that wrote it, never the process directory. For a prepared style that is the winning field's `StyleOrigin.context`: the document's context for a document value, the style file's own for a file value, and the launch context for a setter. A later layer that sets other fields does not move it. A caller of `apply_bespoke_style` supplies the context: `md` passes the opened document's context, or the launch context for standard input.
 - The file is read once during HTML artifact construction and inlined into the page head as `<style data-darkmatter-source="...">`. This keeps the default artifact self-contained without requiring an externalization flag.
 
 **Remote URLs:**
@@ -1076,6 +1082,19 @@ style:
 Overrides the page-level default code-block theme. The string value parses via `ThemePair::try_from`, using the same accepted names as `--code-theme` and `--list-themes`. Unknown theme names return `StyleApplyError::InvalidCodeTheme { value }`.
 
 CLI `--code-theme` wins over `style.page.code.theme`, consistent with the invocation-level CLI precedence established in sub-spec #2.
+
+### Presentation: themes, code-block mode, line numbers
+
+`style.page.theme`, `style.page.code.theme`, `style.page.code.mode`, and `style.code-block.line-numbers` are resolved together, after the layers merge, by `darkmatter::style::PresentationDefaults::resolve`, and set on the page by `Presentation::apply_to` (prose and code themes, `with_code_block_mode`, `with_line_numbers`; the style's own code theme also as `with_page_code_theme`). The page carries them to both the terminal and the browser fold.
+
+| Value | Source, highest first |
+|---|---|
+| prose theme | `page.theme` → captured `THEME` (`ThemePair::from_str_or_default`) → `one-half` |
+| code theme | `page.code.theme` → captured `CODE_THEME` (`from_str_or_default`) → `get_code_theme_for_prose(prose theme)` |
+| code-block mode | `page.code.mode` → `inverse` |
+| line numbers | `code-block.line-numbers` (an explicit `false` is kept) → off |
+
+`PresentationDefaults` holds the `THEME`/`CODE_THEME` values of a request snapshot (`from_snapshot`, `from_context`, `from_env`); it never reads the process environment. A fence's `theme=` and a directly constructed `CodeBlock` theme still outrank every row. Color mode is not part of it: it comes from the `Terminal` or output options the page was built from. `md` writes its `--theme`, `--code-theme`, and `--line-numbers` flags over the document's style before resolving, so a flag wins and an omitted flag leaves the document's value.
 
 The existing code-block contrast model is preserved: `ThemePair` resolves against the **inverted** color mode so the code panel contrasts against the page (light code on a dark page, and vice versa).
 
@@ -1171,16 +1190,20 @@ pub enum MetaTag {
 // darkmatter::style - extended
 
 /// Apply bespoke style knobs (stylesheet, meta, code-theme, local-style) onto
-/// a DarkmatterPage builder.
-///
-/// CLI overrides suppress frontmatter for overlapping bespoke fields. The
-/// returned page has active sub-spec #7 settings applied.
+/// a DarkmatterPage builder. A local stylesheet resolves in `context` and is
+/// read only when `assets` is a browser target's resolver.
 pub fn apply_bespoke_style(
     page: DarkmatterPage,
     style: &StyleFrontmatter,
     overrides: BespokeStyleOverrides,
-    source_path: Option<&Path>,
+    assets: StyleAssetResolver,
+    context: &FileResolutionContext,
 ) -> Result<DarkmatterPage, StyleApplyError>;
+
+/// Which assets a page build reads: `for_target(OutputTarget::Html |
+/// OutputTarget::MarkdownPlus)` reads local CSS; every other target, and
+/// `passive()`, only validates.
+pub struct StyleAssetResolver { /* .. */ }
 
 /// CLI fields that already claimed bespoke style values.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1191,6 +1214,10 @@ pub struct BespokeStyleOverrides {
 ```
 
 `BespokeStyleOverrides::code_theme` is set when `--code-theme` was supplied. There are no stylesheet or meta CLI overrides in v1.
+
+### Prepared styles
+
+`darkmatter::style::apply_prepared_style(page, &prepared, assets, &defaults)` is the page-construction entry for a `PreparedStyle` (from `prepare_style_layers`). Preparation is passive; this call executes assets. It applies the resolved presentation, then the page, component, list, rule, disclosure, color, and bespoke style with no CLI claims (layer order already decided precedence), and resolves `page.stylesheet` in its winning origin's context.
 
 ### Precedence and Integration Order
 
@@ -1204,7 +1231,7 @@ The full integration order in `darkmatter-cli` is:
 6. `darkmatter::style::apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
 7. `darkmatter::style::apply_color_style(page, &style)` — color and bg-color for all wired components
 8. `darkmatter::style::apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
 10. `render / render_to_browser`
 
 ### Errors
@@ -1213,7 +1240,9 @@ The full integration order in `darkmatter-cli` is:
 
 | Variant | Trigger |
 |---|---|
-| `StylesheetNotFound { path }` | Local stylesheet file does not exist. |
+| `StylesheetNotFound { path }` | No file matches the local stylesheet reference; `path` is the first candidate probed. |
+| `StylesheetReference { reference, error }` | The value is not a valid file reference, or resolving it failed (an unset `{{VAR}}`, a tree escape, an I/O probe failure). `StyleApplyError::file_reference_error()` returns the `FileReferenceError`. |
+| `StylesheetContextMissing { reference }` | `apply_prepared_style` found a stylesheet with no recorded origin, so no context to resolve it in. |
 | `StylesheetRead { path, source }` | Local stylesheet file exists but cannot be read (permissions, I/O). |
 | `EmptyStylesheet` | The stylesheet value is empty after trimming. |
 | `UnsupportedStylesheetScheme` | A `file://` URL was provided instead of a local path or HTTP(S) URL. |
@@ -1302,7 +1331,7 @@ Disclosure style resolves from most specific to least specific:
 6. `apply_disclosure_style(page, &style, disclosure_overrides)` — disclosure frontmatter
 7. `apply_color_style(page, &style)` — color and bg-color for all wired components
 8. `apply_hr_style(page, &style, hr_overrides)` — HR frontmatter
-9. `apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
+9. `apply_bespoke_style(page, &style, bespoke_overrides, StyleAssetResolver::for_target(target), &document_context)` — stylesheet, meta, code-theme, hyperlink/image local-style
 10. `render / render_to_browser`
 
 ### Errors
@@ -1325,6 +1354,7 @@ Each of the component buckets embeds a `CommonStyle` providing the shared layout
 | `alignment` | `alignment` | `left` \| `center` \| `right` | Overrides page-level broadcast for this component |
 | `margin` | `margin` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
 | `padding` | `padding` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
+| `padding-left`, `padding-right` | `padding-left`, `padding-right` | `Nch` or `N%` | One side each, applied after `padding`; a CLI fill claim on the bucket keeps its sides |
 | `color` | `color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
 | `bg-color` | `bg-color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
 | `border` | `border` | bool, string, or object | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
@@ -1372,6 +1402,7 @@ blocks for hyperlinks and images:
 |---|---|---|
 | `margin` | `Nch` or `N%` | `Layout.margin` (all four sides) |
 | `padding` | `Nch` or `N%` | `Layout.padding` (all four sides) |
+| `padding-left`, `padding-right` | `Nch` or `N%` | `Layout.padding.left` / `.right`, after `padding`; for `hyperlinks`/`images` `local-style`, `padding-*` CSS in `CommonStyle::to_css_overlay`. A `local-style` `padding` drops the base bucket's sides in `merge_common_style` |
 | `border` | `true`/`false`, `"thin"`/`"medium"`/`"thick"`/"none", or object | `Style.border` |
 | `emphasis` | object (`{ bold, dim, italic, strikethrough, blink, inverse, underline }`) | `Style.emphasis` |
 | `word-wrap` | `none`/`wrap`/`truncate`/`wrap-prose` | `Layout.word_wrap` |

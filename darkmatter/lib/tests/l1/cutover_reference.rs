@@ -111,7 +111,7 @@ fn apply_all_styles(page: DarkmatterPage, md: &Markdown) -> DarkmatterPage {
     let page = apply_hr_style(page, &style, HrStyleOverrides::default())
         .expect("apply_hr_style");
     let page = apply_color_style(page, &style).expect("apply_color_style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), darkmatter::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .expect("apply_bespoke_style")
 }
 
@@ -194,7 +194,7 @@ fn reference_page_background_pronounced() {
 #[test]
 fn reference_page_margin_and_padding() {
     let md = with_style(
-        "page:\n  left-margin: 2\n  right-margin: 2\n  top-padding: 1\n  bottom-padding: 1\n",
+        "page:\n  margin-left: 2\n  margin-right: 2\n  padding-top: 1\n  padding-bottom: 1\n",
         SIMPLE_DOC,
     );
     insta::assert_snapshot!(

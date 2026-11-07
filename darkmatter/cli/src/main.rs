@@ -7,6 +7,7 @@ use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
+use darkmatter_cli::args::classify_render_args;
 use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
     CleanOptions, run_clean, run_subcommand, validate_subcommand_usage,
@@ -226,9 +227,12 @@ fn run() -> Result<()> {
             output: cli.render.output,
             ..CleanOptions::default()
         };
-        run_clean(cli.render.input.as_ref(), &options, &cli, &request)?;
+        let input = classify_render_args(&cli.render.args, &cli.render.literal_args).map_err(|error| error.usage_error())?;
+        run_clean(input.input.as_ref(), &options, &cli, &request)?;
         return Ok(());
-    } else if cli.render.input.is_none() && io::stdin().is_terminal() {
+    } else if classify_render_args(&cli.render.args, &cli.render.literal_args).is_ok_and(|input| input.input.is_none())
+        && io::stdin().is_terminal()
+    {
         Cli::command().print_help()?;
         return Ok(());
     }

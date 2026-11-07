@@ -33,26 +33,13 @@ pub use crate::output::report::ReportedExit;
 use render::run_render;
 
 /// Validates that top-level CLI options are not combined with subcommands.
+///
+/// Every root render argument counts, setters included; shared controls
+/// (`--width`, `-v`, `--debug`, `--magic-root`) do not.
 pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
-    let mut conflicts = Vec::new();
-
-    if cli.render.input.is_some() {
-        conflicts.push("[INPUT]");
-    }
-    if cli.render.output.is_some() {
-        conflicts.push("--output");
-    }
-    if cli.render.indent.is_some() {
-        conflicts.push("--indent");
-    }
-    if cli.render.show {
-        conflicts.push("--show");
-    }
+    let mut conflicts = cli.render.has_explicit_arguments();
     if cli.save {
         conflicts.push("--save");
-    }
-    if !cli.render.deny.is_empty() {
-        conflicts.push("--deny");
     }
 
     if conflicts.is_empty() {
@@ -230,7 +217,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 schema::run_validate(&inputs, &options, cli, request)?;
             }
             SchemaTarget::Detect { files, output, merge } => schema::run_detect(&files, output, merge, cli, request)?,
-            SchemaTarget::About { output } => schema::run_about(output, cli.code_block.into(), cli)?,
+            SchemaTarget::About { output, code_block } => schema::run_about(output, code_block.into(), cli)?,
             SchemaTarget::Triggers { file, output } => schema::run_triggers(&file, output, cli, request)?,
         },
     }

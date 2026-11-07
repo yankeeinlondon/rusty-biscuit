@@ -18,13 +18,13 @@ fn shipped_base_schema_exposes_structural_spans_across_anchors_and_aliases() {
     assert_eq!(document.envelope, StandaloneSchemaEnvelope::Tagged);
 
     let page = SchemaSourcePath::root().property("style").property("page");
-    let anchored_union = page.property("left-margin");
+    let anchored_union = page.property("margin-left");
     let key = document
         .source_map
         .spans(&anchored_union, SchemaSpanKind::MappingKey)
         .first()
         .expect("anchored key span");
-    assert_eq!(&source[key.clone()], "left-margin");
+    assert_eq!(&source[key.clone()], "margin-left");
     let first_type = document
         .source_map
         .spans(&anchored_union.union_arm(0), SchemaSpanKind::TypeKeyword)
@@ -32,7 +32,7 @@ fn shipped_base_schema_exposes_structural_spans_across_anchors_and_aliases() {
         .expect("type within anchored union");
     assert_eq!(&source[first_type.clone()], "string");
 
-    let alias = page.property("right-margin");
+    let alias = page.property("margin-right");
     let alias_definition = document
         .source_map
         .spans(&alias, SchemaSpanKind::Definition)
@@ -47,7 +47,7 @@ fn shipped_base_schema_exposes_structural_spans_across_anchors_and_aliases() {
         "an alias span must not invent type tokens authored at its anchor"
     );
 
-    let anchored_scalar = page.property("top-margin");
+    let anchored_scalar = page.property("margin-top");
     let type_keyword = document
         .source_map
         .spans(&anchored_scalar, SchemaSpanKind::TypeKeyword)

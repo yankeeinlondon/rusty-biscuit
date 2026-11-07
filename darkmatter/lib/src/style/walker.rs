@@ -7,8 +7,14 @@
 //! snake-cased segment) rather than a single container warning plus an
 //! `UnknownKey` for the child. The same property holds for the nested
 //! `hyperlinks.local_style.*` and `images.local_style.*` paths.
+//!
+//! An unknown key carries a suggestion when its intended key is known: a
+//! removed page spacing name (`page.left-margin` → `page.margin-left`) or a
+//! snake-case spelling of a key that has no snake-case alias.
 
-use crate::style::descriptor::{is_canonical_container, join_path, kebabify, leaf_for_canonical};
+use crate::style::descriptor::{
+    is_canonical_container, join_path, kebabify, leaf_for_key, suggested_key,
+};
 use crate::style::warning::{StyleWarning, StyleWarningKind};
 
 /// Walk the raw style value and collect schema-validation warnings.
@@ -40,7 +46,7 @@ fn walk_inner(
         let canonical_child = join_path(canonical_path, &canonical_segment);
 
         // Leaf?
-        if let Some(leaf) = leaf_for_canonical(&canonical_child) {
+        if let Some(leaf) = leaf_for_key(&canonical_child, key) {
             if was_alias {
                 warnings.push(StyleWarning::new(
                     format!("style.{}", raw_child),
@@ -68,10 +74,11 @@ fn walk_inner(
         }
 
         // Truly unknown — reported at the raw path the user wrote.
-        warnings.push(StyleWarning::new(
-            format!("style.{}", raw_child),
-            StyleWarningKind::UnknownKey,
-        ));
+        let warning = StyleWarning::new(format!("style.{}", raw_child), StyleWarningKind::UnknownKey);
+        warnings.push(match suggested_key(&canonical_child) {
+            Some(key) => warning.with_suggestion(key),
+            None => warning,
+        });
     }
 }
 
@@ -116,11 +123,57 @@ mod tests {
 
     #[test]
     fn snake_case_leaf_is_deprecated() {
-        let w = warnings_for(json!({"page": {"left_margin": "2ch"}}));
+        let w = warnings_for(json!({"page": {"max_width": "80ch"}}));
+        assert_eq!(w, vec![deprecated("style.page.max_width", "page.max-width")]);
+    }
+
+    #[test]
+    fn removed_page_spacing_names_suggest_css_order() {
+        let w = warnings_for(json!({"page": {"left-margin": "2ch", "top_padding": 1}}));
         assert_eq!(
             w,
-            vec![deprecated("style.page.left_margin", "page.left-margin")]
+            vec![
+                unknown("style.page.left-margin").with_suggestion("page.margin-left"),
+                unknown("style.page.top_padding").with_suggestion("page.padding-top"),
+            ]
         );
+    }
+
+    #[test]
+    fn removed_page_spacing_name_at_top_level_suggests_top_level_key() {
+        let w = warnings_for(json!({"right-margin": "2ch"}));
+        assert_eq!(w, vec![unknown("style.right-margin").with_suggestion("margin-right")]);
+    }
+
+    #[test]
+    fn snake_spelling_of_key_without_alias_is_unknown_with_suggestion() {
+        let w = warnings_for(json!({"page": {"margin_left": "2ch"}, "code_block": {"line_numbers": true}}));
+        assert_eq!(
+            w,
+            vec![
+                unknown("style.page.margin_left").with_suggestion("page.margin-left"),
+                deprecated("style.code_block", "code-block"),
+                unknown("style.code_block.line_numbers").with_suggestion("code-block.line-numbers"),
+            ]
+        );
+    }
+
+    #[test]
+    fn page_keys_and_shorthands_are_known_at_top_level_and_under_page() {
+        let w = warnings_for(json!({
+            "margin": 1, "mx": "2ch", "pl": 3, "max-width": "80ch", "theme": "github",
+            "code": {"theme": "nord", "mode": "dark"},
+            "page": {"padding": 1, "py": 2, "mr": "1ch", "theme": "github", "code": {"mode": "same"}}
+        }));
+        assert!(w.is_empty(), "{w:?}");
+    }
+
+    #[test]
+    fn removed_hr_keys_are_unknown() {
+        let w = warnings_for(json!({"hr": {"margin": 1, "border": true, "emphasis": {}, "word-wrap": "wrap", "padding-left": 2}}));
+        let paths: Vec<&str> = w.iter().map(|w| w.path.as_str()).collect();
+        assert_eq!(paths, ["style.hr.margin", "style.hr.border", "style.hr.emphasis", "style.hr.word-wrap"]);
+        assert!(w.iter().all(|w| w.kind == StyleWarningKind::UnknownKey && w.suggestion.is_none()));
     }
 
     #[test]

@@ -199,7 +199,7 @@ fn level2_percent_page_frame_offset_and_width_in_real_terminal() {
 
     let sentinel = "Sentinel_pct_frame";
     let body = format!(
-        "---\nstyle:\n    page:\n        left-margin: 25%\n        max-width: 50%\n---\n\n\
+        "---\nstyle:\n    page:\n        margin-left: 25%\n        max-width: 50%\n---\n\n\
          {sentinel} lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod \
          tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam.\n"
     );

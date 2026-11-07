@@ -100,7 +100,7 @@ fn frontmatter_page(md: &Markdown) -> DarkmatterPage {
     let page = apply_disclosure_style(page, &style, DisclosureStyleOverrides::default())
         .expect("disclosure style");
     let page = apply_color_style(page, &style).expect("color style");
-    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None).expect("bespoke style")
+    apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), crate::style::StyleAssetResolver::for_target(biscuit_terminal::output::OutputTarget::Html), &biscuit_file::FileResolutionContext::new(std::env::temp_dir())).expect("bespoke style")
 }
 
 fn term_opts() -> TerminalOptions {

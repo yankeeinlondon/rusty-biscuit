@@ -17,9 +17,9 @@ Put a `style:` object in the document frontmatter:
 title: Release Notes
 style:
     page:
-        left-margin: 2ch
-        right-margin: 2ch
-        top-margin: 1
+        margin-left: 2ch
+        margin-right: 2ch
+        margin-top: 1
         max-width: 96
         background: subtle
         color: slate-100
@@ -101,12 +101,12 @@ The `page` bucket controls the outer frame:
 ```yaml
 style:
     page:
-        left-margin: 4ch
-        right-margin: 4ch
-        top-margin: 1
-        bottom-margin: 1
-        left-padding: 2ch
-        right-padding: 2ch
+        margin-left: 4ch
+        margin-right: 4ch
+        margin-top: 1
+        margin-bottom: 1
+        padding-left: 2ch
+        padding-right: 2ch
         max-width: 100
         alignment: center
         background: pronounced
@@ -120,8 +120,8 @@ Horizontal lengths accept:
 | `40ch` | 40 character cells |
 | `50%` | half of the available width |
 
-Vertical page fields are row counts, so `top-margin: 1` is valid but
-`top-margin: 1ch` is not.
+Vertical page fields are row counts, so `margin-top: 1` is valid but
+`margin-top: 1ch` is not.
 
 `background` accepts:
 
@@ -175,6 +175,27 @@ style:
 
 Set either `width` or `max-width` in a bucket, not both. Darkmatter rejects a
 bucket that sets both so terminal and HTML behavior stay consistent.
+
+### Padding
+
+`padding` sets all four sides of a component's padding; `padding-left` and
+`padding-right` then set one horizontal side each. Within one bucket the sides
+always apply after `padding`, whatever order you write them in:
+
+```yaml
+style:
+    table:
+        padding: 0          # top, right, bottom, and left are 0
+        padding-left: 4     # then the left side is 4 cells
+```
+
+A side on its own changes only that side, so a component keeps whatever top
+and bottom padding it already had. To indent a component with no vertical
+padding, reset with `padding: 0` first, as above. The same keys work in
+`table`, `block-quote`, `code-block`, `disclosure`, `ul`, `ol`, `li`, `hr`, and
+the `local-style` buckets of `hyperlinks` and `images`. In HTML they become
+`padding-*` CSS on the element; in a terminal they move the component inside
+the content width.
 
 ## Colors
 
@@ -265,6 +286,16 @@ style:
 `weight` accepts `thin`, `medium`, or `thick`. `alignment` accepts `full`,
 `left`, `center`, or `right`.
 
+Padding moves a rule inside the content width. In a 50-column terminal,
+`padding-left: 4` starts the rule 4 cells in (46 wide), and
+`{ padding: 0, padding-left: 4, padding-right: 4 }` draws it 42 wide:
+
+```yaml
+style:
+    hr:
+        padding-left: 4
+```
+
 ## HTML Page Fields
 
 The `page.stylesheet` field adds CSS to HTML output:
@@ -275,10 +306,17 @@ style:
         stylesheet: ./docs.css
 ```
 
-Relative local stylesheets resolve from the Markdown file's directory and are
-inlined into the generated HTML. `http` and `https` stylesheet URLs are emitted
-as external stylesheet links. `file://` stylesheet URLs are rejected; use a
-normal local path instead.
+The value is a file reference, so `./docs.css`, `docs.css`, `&styles/docs.css`,
+`~/styles/docs.css`, and an absolute path all work. It resolves from where the
+value was written: a value in the document resolves from the document's
+directory, and a value from the command line resolves from the directory `md`
+was started in. A local stylesheet is read only for HTML and Markdown Plus
+output, where it is inlined into the generated page; terminal, plain, Markdown,
+and data output never read it. A stylesheet that does not exist, or a
+reference that cannot be resolved, fails an HTML render with an error naming
+it. `http` and `https` stylesheet URLs are emitted as external stylesheet links
+and never fetched. `file://` stylesheet URLs are rejected; use a normal local
+path instead.
 
 The `page.meta` field emits HTML metadata:
 
@@ -297,21 +335,45 @@ String, number, and boolean values become `content` values. `keywords` may be a
 list, and Open Graph or Twitter-style keys become property metadata. These
 fields are ignored by terminal rendering.
 
-Set the document's code theme with `page.code.theme`:
+## Themes, Code Blocks, and Line Numbers
+
+Four keys choose how prose and code look:
 
 ```yaml
 style:
     page:
+        theme: nord           # prose theme
         code:
-            theme: github
+            theme: github     # code-block theme
+            mode: inverse     # inverse, dark, light, or same
+    code-block:
+        line-numbers: true    # false turns the gutter off
 ```
 
-The `--code-theme` CLI flag overrides this field.
+Theme names are the ones `--list-themes` prints, in any case (`Base16-Ocean`,
+`vs-dark`). `mode` chooses a code block's light or dark variant relative to the
+page: `inverse` (the default) gives a light panel on a dark page and the
+reverse, `same` follows the page, and `dark`/`light` pin one variant.
+
+When a key is not set, Darkmatter decides it like this:
+
+| Key | Unset |
+| --- | --- |
+| `page.theme` | the `THEME` environment variable, else `one-half` |
+| `page.code.theme` | the `CODE_THEME` environment variable, else the prose theme (including one set by `page.theme`) |
+| `page.code.mode` | `inverse` |
+| `code-block.line-numbers` | off |
+
+An environment value that names no theme falls back to `one-half`. A theme set
+on one fence (`theme=dracula`) still wins over all of these for that block.
+The `--theme`, `--code-theme`, and `--line-numbers` CLI flags override these
+fields; a flag you leave out leaves the document's value. `page.code.mode` has
+no render flag.
 
 ## CLI Overrides
 
 CLI layout flags win over matching frontmatter fields. The override is
-field-level, so this command keeps the document's `top-margin`, `bottom-margin`,
+field-level, so this command keeps the document's `margin-top`, `margin-bottom`,
 and `max-width`, but replaces the left and right margins:
 
 ```sh
@@ -322,8 +384,8 @@ Common CLI overrides include:
 
 | CLI Flag | Frontmatter It Overrides |
 | --- | --- |
-| `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, `--mr` | `style.page.*-margin` |
-| `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, `--pr` | `style.page.*-padding` |
+| `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, `--mr` | `style.page.margin-*` |
+| `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, `--pr` | `style.page.padding-*` |
 | `--max-width` | `style.page.max-width` |
 | `--page-bg` | `style.page.background` |
 | `--alignment` | component alignment defaults |
@@ -331,7 +393,9 @@ Common CLI overrides include:
 | `--align-lists`, `--align-ul`, `--align-ol`, `--align-li` | list alignment |
 | `--fill`, `--fill-tables`, `--fill-images`, `--fill-block-quotes` | matching component fill |
 | `--fill-lists`, `--fill-ul`, `--fill-ol`, `--fill-li` | list fill |
+| `--theme` | `style.page.theme` |
 | `--code-theme` | `style.page.code.theme` |
+| `--line-numbers` | `style.code-block.line-numbers` |
 
 Fill flags use this grammar:
 
@@ -366,9 +430,9 @@ Invalid values fail even without `--deny style`. Common examples:
 
 | Invalid Value | Why It Fails |
 | --- | --- |
-| `left-margin: -2` | Negative lengths are not allowed. |
+| `margin-left: -2` | Negative lengths are not allowed. |
 | `max-width: 120%` | Percent lengths must be between `0%` and `100%`. |
-| `top-margin: 2ch` | Vertical margins are row counts, not horizontal lengths. |
+| `margin-top: 2ch` | Vertical margins are row counts, not horizontal lengths. |
 | `width` and `max-width` in the same bucket | The bucket can have only one width strategy. |
 | `color: bluish` | Color must be Tailwind, hex, or a web color name. |
 

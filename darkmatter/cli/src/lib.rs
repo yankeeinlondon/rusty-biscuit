@@ -14,6 +14,7 @@ pub mod completion_shells;
 pub mod io;
 pub mod output;
 pub mod render;
+pub mod render_style;
 pub mod request;
 pub mod style_claims;
 

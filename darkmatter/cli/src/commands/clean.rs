@@ -224,7 +224,7 @@ fn clean_value(
         // What was printed is what a later `--save` would write, so a document
         // the guards declined prints unchanged.
         let document = Markdown::from(result.text.as_str());
-        return document_value(None, &document, result.text.clone(), resolved.as_ref(), output, cli).map(Completed::success);
+        return document_value(None, &document, result.text.clone(), resolved.as_ref(), output, cli, request).map(Completed::success);
     };
     if result.outcome == CleanOutcome::Declined {
         return Ok(Completed::success(acknowledgment(String::new())));

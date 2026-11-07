@@ -41,10 +41,14 @@ fn sample_for(kind: LeafType) -> Value {
         LeafType::HorizontalLength => json!("10ch"),
         LeafType::WidthOrMode => json!("fit-content"),
         LeafType::RowCount => json!(1),
+        LeafType::PositivePageWidth => json!("10ch"),
         LeafType::Alignment => json!("left"),
         LeafType::Color => json!("red-500"),
         LeafType::BackgroundEnum => json!("subtle"),
         LeafType::StringValue => json!("x"),
+        LeafType::ThemeName => json!("github"),
+        LeafType::CodeBlockMode => json!("dark"),
+        LeafType::Boolean => json!(true),
         LeafType::OpaqueValue => json!({"k": "v"}),
         LeafType::HrKind => json!("waves"),
         LeafType::HrWeight => json!("medium"),
@@ -249,16 +253,17 @@ fn every_canonical_leaf_round_trips_without_unknown_key() {
 #[test]
 fn descriptor_entry_count_matches_expected() {
     const EXPECTED: usize =
-        // page: 16
-        // table, block-quote, ol, li: 10 each = 40
-        // ul: 11
-        // hyperlinks: 5 outer + 10 local-style = 15
-        // images: 5 outer + 10 local-style = 15
-        // hr: 12
-        // disclosure: 10
-        // code-block: 10
+        // page: 18 keys + 14 shorthands = 32
+        // top level (every page key and shorthand): 32
+        // table, block-quote, ol, li: 12 each = 48
+        // ul: 13
+        // hyperlinks: 5 outer + 12 local-style = 17
+        // images: 5 outer + 12 local-style = 17
+        // hr: 10
+        // disclosure: 12
+        // code-block: 13
         // markdown (cleanup rules): 10
-        16 + 40 + 11 + 15 + 15 + 12 + 10 + 10 + 10;
+        32 + 32 + 48 + 13 + 17 + 17 + 10 + 12 + 13 + 10;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,
@@ -277,7 +282,10 @@ fn active_wiring_warnings_for_hr_keys() {
             "alignment": "center",
             "color": "red-500",
             "bg-color": "blue-500",
-            "weight": "thick"
+            "weight": "thick",
+            "padding": 1,
+            "padding-left": 4,
+            "padding-right": 2
         }
     });
     let (_parsed, warnings) = from_json_value(&v).unwrap();
@@ -295,6 +303,9 @@ fn active_wiring_warnings_for_hr_keys() {
         "style.hr.color",
         "style.hr.bg-color",
         "style.hr.weight",
+        "style.hr.padding",
+        "style.hr.padding-left",
+        "style.hr.padding-right",
     ] {
         assert!(
             !inactive.iter().any(|w| w.path == path),

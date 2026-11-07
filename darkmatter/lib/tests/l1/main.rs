@@ -270,6 +270,8 @@ mod style_features_baseline;
 mod style_features_phase5;
 mod style_frontmatter;
 mod style_frontmatter_parity;
+mod style_layers;
+mod style_effective_lowering;
 mod suggest_constraint_phase1;
 mod suggest_constraint_phase2;
 mod suggest_constraint_phase3;

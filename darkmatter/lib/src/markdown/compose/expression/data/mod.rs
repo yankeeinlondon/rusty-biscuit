@@ -27,6 +27,7 @@ pub use error::{
     CONTRACT_MISMATCH_CODE, DATA_DIAGNOSTIC_CODES, DataError, DataSourceLocation, MALFORMED_CODE,
     NOT_A_CONTAINER_CODE, ROW_SHAPE_CONFLICT_CODE, TabularSource, THIS_IMPORT_REJECTED_CODE, UNSUPPORTED_FORMAT_CODE,
 };
+pub use parse::{LocalDataDocument, parse_local_document};
 pub use runtime::{
     BindEntry, DataRuntime, DataRuntimeStats, DataSourceIdentity, LoadedData, LoadedSource, SourceContent, SourceEntry,
 };

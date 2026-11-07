@@ -2,7 +2,8 @@
 //! MarkdownPlus output, and the temporary files `--show` opens.
 
 use crate::args::{Cli, Feature};
-use crate::render::{ResolvedTheme, apply_cli_layout_flags, apply_features, apply_style_frontmatter};
+use crate::render::{PageInputs, apply_cli_layout_flags, apply_features, apply_style_frontmatter};
+use biscuit_terminal::output::OutputTarget;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::DarkmatterPage;
@@ -20,24 +21,20 @@ pub struct OutputArtifact {
 
 /// Build the page that renders HTML and MarkdownPlus output: CLI layout flags,
 /// `style:` frontmatter, then `features`.
+///
+/// Only this page reads a local `style.page.stylesheet`; it resolves in
+/// `inputs.document_context`.
 pub fn html_page(
     md: &Markdown,
     cli: &Cli,
-    input_path: Option<&PathBuf>,
+    inputs: &PageInputs,
     strict_style: bool,
     features: &[Feature],
 ) -> Result<DarkmatterPage> {
     let term = Terminal::new_optimistic(120);
-    let theme = ResolvedTheme::from_cli(cli, &term);
-    let page = apply_cli_layout_flags(
-        DarkmatterPage::new(&term)
-            .with_prose_theme(theme.prose.kebab_name())
-            .with_code_theme(theme.code.kebab_name())
-            .with_color_mode(theme.color_mode),
-        cli,
-    );
+    let page = apply_cli_layout_flags(DarkmatterPage::new(&term).with_color_mode(term.color_mode()), cli);
 
-    let page = apply_style_frontmatter(page, md, cli, input_path, strict_style)?;
+    let page = apply_style_frontmatter(page, md, cli, inputs, OutputTarget::Html, strict_style)?;
     Ok(apply_features(page, features))
 }
 

@@ -18,7 +18,9 @@ pub struct StyleSpan {
 /// `KnownButInactive` is informational and never fails strict mode.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StyleWarningKind {
-    /// The path does not appear anywhere in the schema. Likely a typo.
+    /// The path does not appear anywhere in the schema. Likely a typo, or a
+    /// removed spelling; [`StyleWarning::suggestion`] names the key to use
+    /// when one is known.
     UnknownKey,
     /// The path matched a documented snake-case alias for a renamed key.
     /// The kebab-case canonical spelling is `replacement`.
@@ -35,7 +37,12 @@ pub struct StyleWarning {
     /// Fully-qualified YAML path, e.g., `style.page.lft-margin`.
     pub path: String,
     pub kind: StyleWarningKind,
-    /// Source position. Always `None` in v1.
+    /// Canonical key path (without the `style.` prefix) the author should
+    /// write instead, e.g. `page.margin-left` for the removed
+    /// `page.left-margin`. Set only on `UnknownKey` warnings whose intended
+    /// key is known.
+    pub suggestion: Option<String>,
+    /// Source position, when the parse had the raw frontmatter text.
     pub source_span: Option<StyleSpan>,
 }
 
@@ -45,8 +52,16 @@ impl StyleWarning {
         Self {
             path: path.into(),
             kind,
+            suggestion: None,
             source_span: None,
         }
+    }
+
+    /// The same warning, suggesting `key` as the spelling to use.
+    #[must_use]
+    pub fn with_suggestion(mut self, key: impl Into<String>) -> Self {
+        self.suggestion = Some(key.into());
+        self
     }
 
     /// `true` if this warning is a schema-validation issue that strict mode
@@ -90,8 +105,18 @@ mod tests {
     }
 
     #[test]
-    fn span_defaults_to_none() {
+    fn span_and_suggestion_default_to_none() {
         let w = StyleWarning::new("style.x", StyleWarningKind::UnknownKey);
         assert_eq!(w.source_span, None);
+        assert_eq!(w.suggestion, None);
+    }
+
+    #[test]
+    fn with_suggestion_keeps_the_unknown_key_kind() {
+        let w = StyleWarning::new("style.page.left-margin", StyleWarningKind::UnknownKey)
+            .with_suggestion("page.margin-left");
+        assert_eq!(w.kind, StyleWarningKind::UnknownKey);
+        assert_eq!(w.suggestion.as_deref(), Some("page.margin-left"));
+        assert!(w.is_schema_issue());
     }
 }

@@ -3,12 +3,41 @@
 Detail behind the "CLI orientation" section of [SKILL.md](SKILL.md).
 
 `args::RenderOptions` defines the arguments shared by top-level default
-rendering (`Cli::render`, flattened) and `Command::Render`. After the help and
-`--save` shortcuts, `Cli::command_or_render` supplies the default command and
-combines top-level and explicit-render features once. Both forms enter the
-same `run_subcommand` branch and `run_render(&RenderOptions, &Cli, &MdRequest)`;
-render policy is resolved there. Keep render argument definitions and
+rendering (`Cli::render`, flattened) and `Command::Render`. Its fields have no
+clap defaults, so `RenderOptions::has_explicit_arguments` sees every supplied
+one; `commands::validate_subcommand_usage` rejects any root render argument
+(setters included) before a subcommand with exit 2, and
+`args::render::tests` enumerates the clap definition so a new field without a
+root representative fails. Shared controls (`--width`, `-v`, `--debug`,
+`--magic-root`) are not render arguments. After the help and `--save`
+shortcuts, `Cli::command_or_render` returns the explicit command or a clone of
+the root options; nothing is combined. Both forms enter the same
+`run_subcommand` branch and `run_render`, which builds
+`args::PreparedRenderOptions` (classified input/setters, `--style`
+references, resolved policy). Keep render argument definitions and
 preparation shared, including `--indent`.
+
+`cli/src/render_style.rs` turns those `--style` references and setters into
+`darkmatter::style::StyleLayer`s and prints nothing:
+`prepare_cli_style_inputs` selects the Markdown document's schema once
+(`commands/schema/validate.rs::select_document_schema`, the same passive
+selection completion's `effective_document_schema` uses), reads each file
+through the library's `parse_local_document` (the `load_data` readers), and
+`CliStyleInputs::prepare` wraps a `StylePreparationError` in a
+`ClassifiedFailure` whose records keep the `dm.schema.*`/`dm.style.*` codes.
+A file record's `source` is the style file; a setter's is null. Tests:
+`cli/tests/l1/render_style_files.rs`.
+
+Render positionals are two clap fields: `args` (before `--`) and
+`literal_args` (`last = true`, only after `--`), so the terminator survives
+parsing without scanning argv. `args::classify_render_args` is the one
+classifier: a Unicode word whose text before its first `=` is `style` or
+starts with `style.` is a `RawStyleSetter` (split once); every other word,
+and every `literal_args` word, is the input, kept as a native `OsString`.
+Root help uses its own `help_template` and hides the flattened render fields
+with root-only `mut_arg`; never hide them in `RenderOptions`, since
+`md render --help` lists them all. `--code-block` exists only on
+`schema about`.
 
 Every source-file argument opens through `cli/src/io::open_argument` (or
 `resolve_file_path` for a context of its own): parse with `FileReference`
@@ -62,7 +91,7 @@ frontmatter without mistaking defaults for user intent. Keep parsing in
 `cli/src/args`, command execution in `cli/src/commands`, and output in shared
 renderable components.
 
-`--feature` (`args::Feature`, top level and on `render`, lists combined) is
+`--feature` (`args::Feature`, a render option: root form or `render`, never both) is
 lowered in one place, `render::apply_features`, for both HTML and terminal
 output (`render::terminal_page` mirrors `html_page`, so tests drive the real
 lowering in-process). Names: `embed-mermaid-font`, the three shared Mermaid

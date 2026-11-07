@@ -46,6 +46,18 @@ assembly. It cannot inspect component kinds or rewrite their content.
 claims with frontmatter as presentation policy; do not let CLI defaults
 silently override authored styles.
 
+A merged `PreparedStyle` (from `prepare_style_layers`) reaches a page only
+through `style::apply_prepared_style(page, &prepared, StyleAssetResolver,
+&PresentationDefaults)`: preparation is passive, this call executes assets.
+`page.stylesheet` is a `FileReference` resolved in the winning field's
+`StyleOrigin.context` (never `current_dir`), read only by
+`StyleAssetResolver::for_target(Html | MarkdownPlus)`; HTTP(S) stays a
+`<link>`. Themes, code-block mode, and line numbers resolve after the merge
+through `PresentationDefaults` built from the request snapshot's `THEME` /
+`CODE_THEME`, never the process environment. Component `padding` lowers
+before `padding-left`/`padding-right`, so a side alone keeps inherited
+vertical padding.
+
 Kebab-case keys are canonical. Supported snake-case compatibility aliases emit
 deprecation warnings and become errors in strict-style mode. Width and
 max-width are mutually exclusive where the component contract says so.

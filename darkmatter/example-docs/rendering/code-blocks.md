@@ -1,9 +1,9 @@
 ---
 style:
     page:
-        top-margin: 1
-        left-margin: 2ch
-        right-margin: 2ch
+        margin-top: 1
+        margin-left: 2ch
+        margin-right: 2ch
     
 ---
 # Blocks Test
