@@ -448,9 +448,8 @@ assembly. Do not mutate the document’s authored frontmatter or serialized
 Markdown to inject CLI overrides. Preserve the one context-aware tree build
 and one target fold; no HTML repair or terminal decoration pass is added.
 
-> **Decided (2026-11-06). `--alignment` is removed, and alignment gets no special
-> treatment on the command line.** `style.alignment` and `style.page.alignment` are
-> ordinary keys, so the merge rule applies: a source changes only the keys it names.
+> **Decided (2026-11-06). `--alignment` is removed; `style.alignment` means every
+> component.** It is the same key as `style.page.alignment`, in every source.
 
 ```yaml
 # document
@@ -460,15 +459,20 @@ style:
 ```
 
 ```sh
-md render doc.md style.alignment=center          # everything else centers; the table stays left
-md render doc.md style.table.alignment=center    # the table centers
+md render doc.md style.alignment=center                              # everything centers, the table too
+md render doc.md style.alignment=center style.table.alignment=right  # the table is right; the rest center
 ```
 
-`page.alignment` keeps its existing meaning: it applies to each component with no
-alignment of its own. `--align-*` go with the other removed flags.
+Each source expands `alignment` into its components before sources merge, using the
+existing targets, and a specific key in the same source beats the broad one. So a
+document holding both `page.alignment: center` and `table.alignment: left` keeps its
+table left, as it does today, while a later source's `alignment` overrides it.
+
+
+`--align-*` go with the other removed flags.
 
 Remove the library's [`CliStyleClaims`](../../lib/src/style/cli_claims.rs) and its
-claim-derived overrides once component overrides, relative stylesheet origins, and the
+claim-derived overrides once alignment, component overrides, relative stylesheet origins, and the
 fill replacements have coverage on the new path. Preserve origins separately from typed
 presentation values where a field refers to a file.
 
@@ -935,7 +939,8 @@ performance gate is required by this feature.
   others 2. Also test document `ml: 6` overridden by CLI `margin: 2`,
   later broad shorthand over earlier specific shorthand, reordered setters,
   nested duplicate spellings, width-mode replacement, null absence,
-  explicit zero/false, and `style.alignment` leaving a document's `table.alignment` alone.
+  explicit zero/false, and `style.alignment` overriding a document's `table.alignment`, unless the same source
+  also sets `table.alignment`.
 - **Validation:** `style="{ magin: 4 }"`, `style="{ margin: "`, and
   `style.margin=abc` each exit 1 with the matching `dm.schema.*` code and the key path. Parse every
   valid JSON5 example in this spec; test duplicate keys, wrong root types,
