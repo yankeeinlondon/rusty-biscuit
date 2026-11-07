@@ -10,8 +10,8 @@ fn every_test_source_is_compiled_by_a_declared_target() {
     let manifest = std::fs::read_to_string(crate_root.join("Cargo.toml")).expect("read Cargo.toml");
     let files = collect_test_sources(&crate_root).expect("scan tests/");
 
-    // Non-vacuity: the walk read the real suite (both roots, their fifteen
-    // former targets, and this gate).
+    // Non-vacuity: the walk read the real suite (every root, the former
+    // targets in them, and this gate).
     assert!(files.len() >= 18, "scanned only {} test source file(s): {:?}", files.len(), files.keys());
     for expected in [
         "tests/l1/main.rs",
@@ -19,6 +19,8 @@ fn every_test_source_is_compiled_by_a_declared_target() {
         "tests/l1/yaml_mutation.rs",
         "tests/l1-fetch/main.rs",
         "tests/l1-fetch/fetch_integration.rs",
+        "tests/l1-delimited/main.rs",
+        "tests/l1-delimited/delimited_reader.rs",
     ] {
         assert!(files.contains_key(expected), "{expected} was not scanned");
     }

@@ -6,6 +6,13 @@
 //! - **TOML**: Parse, convert to JSON/YAML, validate against schema
 //! - **YAML**: Parse, convert to JSON/TOML, validate against schema
 //! - **JSON5**: Parse, convert to JSON/YAML/TOML
+//! - **JSON Lines**: Read one JSON value per line with each record's line and
+//!   byte offsets (`json_lines`)
+//! - **CSV/TSV**: Strictly read delimited text into a header and rows with
+//!   each field's raw byte offset (`delimited`, needs `delimited`)
+//! - **Source locations**: Byte offset of the value at a JSON Pointer in JSON,
+//!   JSON Lines, TOML, or JSON5 text (`data_locations`), and a byte offset's
+//!   1-based line and character column (`source_position`)
 //! - **PDF**: Extract text, convert to Markdown, extract table of contents
 //! - **FileReference**: Parse compact file descriptors (`@`, `&`, `^`, `vault:`, `%`,
 //!   `{{ENV}}`) and resolve them lazily against runtime context
@@ -29,6 +36,7 @@
 //! | `url` | Yes (via `file-reference-syntax`) | URL classification for remote references |
 //! | `fetch` | No | HTTP fetch primitive with host policy enforcement |
 //! | `schema` | No | JSON Schema validation for TOML/YAML |
+//! | `delimited` | No | Strict CSV/TSV reader (`csv`, `csv-core`) |
 //! | `full` | No | All features enabled |
 //!
 //! ## Re-exports
@@ -124,6 +132,15 @@ pub mod frontmatter;
 #[cfg(feature = "json5")]
 pub mod json5;
 
+pub mod json_lines;
+
+#[cfg(feature = "delimited")]
+pub mod delimited;
+
+pub mod data_locations;
+
+pub mod source_position;
+
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
 pub mod pdf;
 
@@ -134,7 +151,7 @@ pub mod file_reference;
 pub use error::BiscuitFileError;
 
 // Re-export file type detection
-pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes};
+pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes, detect_from_extension};
 
 // Re-export data format enum
 pub use format::DataFormat;
@@ -160,6 +177,23 @@ pub use self::yaml::{
 #[cfg(feature = "yaml")]
 #[doc(hidden)]
 pub use self::yaml::{analyze_parse_count, reset_analyze_parse_count};
+
+pub use self::json_lines::{JsonLineRecord, JsonLines, JsonLinesError, read_json_lines};
+
+pub use self::data_locations::{locate_json, locate_jsonl};
+
+#[cfg(feature = "toml")]
+pub use self::data_locations::locate_toml;
+
+#[cfg(feature = "json5")]
+pub use self::data_locations::{json5_parse_error_offset, locate_json5};
+
+pub use self::source_position::source_position;
+
+#[cfg(feature = "delimited")]
+pub use self::delimited::{
+    DelimitedData, DelimitedError, DelimitedField, DelimitedRecord, read_delimited,
+};
 
 #[cfg(feature = "json5")]
 pub use self::json5::{

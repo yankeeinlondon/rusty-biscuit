@@ -20,10 +20,13 @@ mod detailed_resolution;
 mod file_tree;
 #[cfg(feature = "file-reference")]
 mod finalized_reference_resolution;
+mod data_locations;
+mod format_detection;
 #[cfg(feature = "file-reference")]
 mod glob_reference;
 #[cfg(feature = "file-reference")]
 mod implicit_relative;
+mod json_lines;
 #[cfg(feature = "file-reference")]
 mod magic_local_roots;
 mod path_lookup_guard;
@@ -39,6 +42,7 @@ mod repository_scope_catalog;
 mod resolution_context;
 #[cfg(all(feature = "toml", feature = "json5"))]
 mod round_trip;
+mod source_position;
 mod span_compat;
 mod structural_validation;
 mod test_layout;

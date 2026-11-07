@@ -14,6 +14,7 @@ Core library for file format parsing, conversion, and detection as well as file 
 | `file-reference` | yes | File reference parsing and resolution via `gix` and `walkdir` |
 | `pdfium` | no | High-fidelity PDF extraction via `pdfium-render` |
 | `schema` | no | JSON Schema validation for TOML/YAML |
+| `delimited` | no | Strict CSV/TSV reader via `csv` and `csv-core` |
 | `full` | no | All features enabled |
 
 ## Key Types
@@ -67,7 +68,15 @@ assert_eq!(ft.extension(), Some("toml"));
 assert_eq!(ft.mime_type(), Some("application/toml"));
 ```
 
-Recognized extensions: `.toml`, `.yaml`, `.yml`, `.json`, `.json5`, `.md`, `.markdown`, `.mdx`, `.pdf`
+Recognized extensions: `.toml`, `.yaml`, `.yml`, `.json`, `.json5`, `.jsonl`, `.ndjson`, `.csv`, `.tsv`, `.md`, `.markdown`, `.mdx`, `.pdf`. `detect_from_extension` applies the same table to a path without reading the file.
+
+### `read_json_lines` / `read_delimited`
+
+Line-oriented readers that keep each record's line and byte offsets: `json_lines::read_json_lines(text)` (always available) and `delimited::read_delimited(text, delimiter)` (feature `delimited`). See [Data Formats and Readers](../docs/topics/data-readers.md).
+
+### `source_position` / `data_locations`
+
+`source_position(text, byte_offset)` turns a byte offset into a 1-based line and character column (LF and CRLF break lines; a lone CR does not). `locate_json`, `locate_jsonl`, `locate_toml` (feature `toml`), and `locate_json5` (feature `json5`) return the byte offset of the value at a JSON Pointer, or `None` to report the pointer alone. See [Source positions and data locators](../docs/topics/data-readers.md#source-positions-and-data-locators).
 
 ### `Toml`
 

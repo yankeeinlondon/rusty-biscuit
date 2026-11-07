@@ -1230,6 +1230,8 @@ dependencies = [
  "biscuit-test-harness",
  "bytes",
  "criterion",
+ "csv",
+ "csv-core",
  "dunce",
  "gix",
  "globset",

@@ -39,14 +39,18 @@ url = ["dep:url"]
 # Remote fetch (off-by-default; gates reqwest and HTTP dependencies)
 fetch = ["file-reference", "dep:reqwest", "dep:bytes", "dep:tokio"]
 
+# Delimited text (CSV/TSV) reader (off-by-default; gates csv and csv-core)
+delimited = ["dep:csv", "dep:csv-core"]
+
 # Optional features
 schema = ["dep:jsonschema"]
-full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema", "file-reference", "fetch"]
+full = ["toml", "yaml", "json5", "extract", "lopdf", "pdfium", "schema", "file-reference", "fetch", "delimited"]
 
 [dependencies]
 # Core serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# `raw_value`: `data_locations` locates a JSON value by its borrowed source slice.
+serde_json = { version = "1.0", features = ["raw_value"] }
 thiserror = "2.0"
 
 # Structured logging
@@ -63,6 +67,10 @@ serde_yaml_ng = { version = "0.10", optional = true }
 
 # JSON5 support (optional, default)
 json-five = { version = "0.3", optional = true }
+
+# Delimited text (CSV/TSV) reader (optional, off by default)
+csv = { version = "1.3", optional = true }
+csv-core = { version = "0.1.13", optional = true }
 
 # PDF backends
 pdf-extract = { version = "0.10", optional = true }
@@ -123,10 +131,16 @@ name = "l1-fetch"
 path = "tests/l1-fetch/main.rs"
 required-features = ["fetch"]
 
+[[test]]
+name = "l1-delimited"
+path = "tests/l1-delimited/main.rs"
+required-features = ["delimited"]
+
 # CI policy: the L1 suite runs with `fetch`, which gates the fetch helper unit
-# tests and the `l1-fetch` target (wiremock; no external network).
+# tests and the `l1-fetch` target (wiremock; no external network), and with
+# `delimited`, which gates the `l1-delimited` target.
 [package.metadata.ci.tests]
-features = ["fetch"]
+features = ["fetch", "delimited"]
 # The path lookup guard includes darkmatter-cli's shared engine by `#[path]`
 # and spells both files in its test.
 source-inputs = ["darkmatter/cli/tests/common/path_lookup_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
