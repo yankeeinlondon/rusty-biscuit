@@ -24,7 +24,7 @@ created: 2026-11-04
 status: draft-spec
 area: darkmatter
 reviewed: false
-clarified: false
+clarified: true
 implemented: false
 review_iterations: 0
 related:
@@ -42,8 +42,9 @@ Let the expression engine take part in defining a schema. At minimum,
 expression. The goal is **broad** support: anywhere a schema author writes a
 type expression should eventually accept a `{{ … }}` expression.
 
-This is a **draft**. Its main job is to frame the spikes that decide how
-dynamic types can run with good performance. Narrowing where expressions may
+This is a **draft** with no open rulings: it stays a draft until the spikes report. Its
+main job is to frame the spikes that decide how dynamic types can run with good
+performance. Narrowing where expressions may
 appear is the **last resort**. It is considered only if the spikes show that
 no caching or resolution strategy keeps validation and DMLS responsive.
 
@@ -196,7 +197,9 @@ Specify the resolver trait in `simplified-schema` and the template type it
 operates on. The extraction (2026-10-28-extract-simplified-schema) has landed
 in code, so the hook is added to that library's public surface and must keep
 it host-neutral: no Darkmatter types and no dependency from
-`simplified-schema` back to Darkmatter.
+`simplified-schema` back to Darkmatter. Slots must be resolved before layers reach
+`EffectiveSchema`'s merge of already-lowered schemas; report whether that merge can stay
+as it is, or whether it should move up to `SimplifiedSchema`.
 
 ### S8. Breadth
 
@@ -224,14 +227,28 @@ Whatever the spikes conclude, the finalized spec must deliver:
 - **M5.** No guarantee from "The tension to resolve" is lost without an
   explicit, documented replacement.
 
-## Open questions
+## Rulings
 
-- **Q1.** Is a slot the whole member list, or may literal and dynamic members
-  mix (`enum(none, {{ … }})`)?
-- **Q2.** Should JSON Schema output (`md schema detect --output json-schema`)
-  contain the resolved values, or the template plus an `x-darkmatter-*`
-  extension?
-- **Q3.** Does any case truly need document-relative evaluation (for example
-  `fm.*` inside a schema)? If so, how does it coexist with validator sharing?
-- **Q4.** Should `kind` catalogs and baseline schemas be allowed dynamic slots,
-  given that they load on every composition?
+- **Q1. Decided (2026-11-06): literal and dynamic members mix.** Each slot's array is
+  flattened into the list, so a literal `none` beside a slot that loads
+  `[macOS, Linux, Windows]` means `enum(none, macOS, Linux, Windows; required)`. `suggest(...)` works the same way. A
+  member duplicated between a literal and a slot is kept once rather than rejected, so
+  a changed data file cannot break a schema. Literals stay visible to the editor before
+  the slot resolves.
+- **Q2. Decided (2026-11-06): callers work with the struct, and JSON Schema is derived.**
+  `SimplifiedSchema` holds literal members and unresolved slots, and resolving is the
+  only effectful step. Conversion to JSON Schema is lossy and remains an explicit export,
+  derived and cached as today. On an unresolved schema, `to_json_schema` and validation
+  return a typed error, as a function-typed property already does; there is no
+  placeholder output, because a passive caller has the struct.
+- **Q3. Decided (2026-11-06): a slot evaluates in the schema's context only.** `fm.*` in
+  a slot is a schema error. One schema then resolves once for every document that uses
+  it, and no slot relies on values it is about to validate. A document's inline `$schema`
+  resolves relative paths against that document. This can be relaxed later without
+  breaking a document.
+- **Q4. Decided (2026-11-06): no slots in the baseline or in kind definitions.** A slot
+  in either is a schema error, and a kind claim holding one is reported as broken. These
+  load without a document asking for them, so they stay free of evaluation, and kind
+  selection stays passive. This does not affect an ordinary `kind: schema` document named
+  by `$schema`, such as `sandboxing.yaml`. It can be relaxed later without breaking a
+  document.
