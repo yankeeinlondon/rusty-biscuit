@@ -102,6 +102,15 @@ and lists convert, a union keeps the first arm that accepts the value as
 written before converting, and number text the numeric model cannot hold
 exactly (`"9007199254740993"`) fails with that reason in its message.
 
+When soft validation fails, its problems describe a copy in which every value
+that converts on its own is converted, every value that fails stays as
+written, and every unexpected key or tuple element is kept. So only real
+problems are reported: with `rows: "{ name: string, port: number }[]"`, the
+value `[{ name: a, port: "8080" }, { name: b, port: "1", extra: z }]` fails
+with one problem, the unknown key `extra` at `/rows/1`, and nothing about the
+`"8080"` and `"1"` cells. That copy is used only for the report; the failure
+carries no value, and write-back keeps `rows` as written.
+
 Both methods judge presence and nullness alike. An explicit `null` at a
 property that is `required` or [`non-null`](./language/types.md#non-null-properties)
 is reported at that property under either method, because soft validation

@@ -270,7 +270,11 @@ fn declaration_options_hold(atom: &PropertyAtom, value: &Value) -> bool {
     let has_options = atom.constraints.iter().any(|constraint| {
         matches!(
             constraint,
-            Constraint::Mapping | Constraint::Property { .. } | Constraint::Forms(_) | Constraint::DeclaredRequired
+            Constraint::Mapping
+                | Constraint::Property { .. }
+                | Constraint::Forms(_)
+                | Constraint::DeclaredRequired
+                | Constraint::Container
         )
     });
     match &atom.ty {

@@ -65,7 +65,7 @@ For a practical introduction with worked examples, see
 | `yaml`       | A string whose **content** parses as YAML, **or** a native mapping/sequence/scalar coerced to a YAML string. | JSON Schema `format: darkmatter-yaml`. Accepts JSON too (JSON is valid YAML). See [Content-Format Types](objects-and-named-types.md#content-format-types-yaml--json).                              |
 | `json`       | A string whose **content** parses as strict JSON, **or** a native value coerced to a JSON string.      | JSON Schema `format: darkmatter-json`. Rejects YAML-only syntax. See [Content-Format Types](objects-and-named-types.md#content-format-types-yaml--json).                                                  |
 | `expression` | A string that parses under the Darkmatter expression grammar. Parse-only — never evaluated.            | JSON Schema `format: darkmatter-expression`. The third content-format string type. Native booleans/numbers coerce to their string form. See [Expressions](#expressions).        |
-| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. Options: `forms(...)`, `declared-required`. See [Semantic Meta-Types](#semantic-meta-types).              |
+| `type-definition` | A string type expression, native mapping object definition, or non-empty property union.          | Describes one SimplifiedSchema property definition as data. Parse-only; the value is never resolved or normalized. Options: `forms(...)`, `declared-required`, `container`. See [Semantic Meta-Types](#semantic-meta-types).            |
 | `schema`     | An inline schema mapping, local schema reference string, or non-empty root union.                       | Describes one complete `$schema` declaration as data. Parse-only; validation checks syntax without reading referenced files. Options: `mapping`, `property(...)`. See [Semantic Meta-Types](#semantic-meta-types).  |
 | `unknown`    | Anything, including `null`, or omission. `any` is an equivalent alias.                                  | JSON Schema `{}`. `required` has no effect: `unknown(required)` still accepts `null` and omission. To require a value, use a concrete type, e.g. `unknown[](required)` for a required list. See [`unknown` and `null`](#unknown-and-null). |
 | `null`       | Only an explicit `null`, or omission.                                                                  | JSON Schema `{"type": "null"}`. `required` has no effect. Written unquoted (`review: null`, `review: ~`) or as `"null"`. See [`unknown` and `null`](#unknown-and-null). |
@@ -126,7 +126,8 @@ Either meta-type can also narrow which declarations it accepts:
 `schema(mapping)` accepts only a mapping, and
 `schema(property(kind, type-definition(forms(literal, enum); declared-required)))`
 demands that every exported object declare a required `kind` as a literal or
-enum. These options judge the authored declaration, never a document's data;
+enum, and `type-definition(container)` accepts only a definition of a list,
+tuple, object, or dictionary. These options judge the authored declaration, never a document's data;
 see [Narrowing a declaration](schema-types.md#narrowing-a-declaration).
 
 #### Source-Aware Presentation Boundary

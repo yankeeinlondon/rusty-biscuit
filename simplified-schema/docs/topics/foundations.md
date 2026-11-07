@@ -79,6 +79,59 @@ let result = scan("{{ a }}  {{ b }}", &[(0, 9)]);
 assert_eq!(result.expressions[0].expression, "b");
 ```
 
+### Where an expression ends
+
+An expression ends at the first `}}` that is outside every quoted string and
+closes every single `{` opened inside the expression. Strings follow the
+expression lexer: `"` and `'` delimit them, `\` escapes the next character,
+and a string may span lines. So a `}}` inside a string, or the end of a nested
+object, does not end the expression:
+
+| Text | Expression found |
+| --- | --- |
+| `{{ load_data(f, "{a: {b: string}}") }}` | `load_data(f, "{a: {b: string}}")` |
+| `{{ {a: {b: 1}} }}` | `{a: {b: 1}}` |
+| `{{ "}}" }}` | `"}}"` |
+
+This rule wins only when its span **parses** and the older rule's span (the
+first `}}` not matched by a nested `{{`) does not. Otherwise the older span
+is kept. No span that parsed under the older rule changes, and a changed span
+always parses. That protects prose, where an apostrophe is not a quote:
+
+| Text | Expressions found |
+| --- | --- |
+| `{{ don't }} it's fine {{ x }} and more }}` | `don't`, `x` |
+| `{{ "open }} then {{ y }} and " more }}` | `"open`, `y` |
+
+The trade-off: an expression with a real syntax error **and** a `}}` inside a
+string still ends at that `}}`, so its parse error describes the shorter text.
+`{{{ … }}}` literals still close at the first `}}}`, even inside quotes, and
+`{{{a: 1}}}` is a literal, not an object expression.
+
+### Editor regions
+
+An editor needs to know where the cursor is before the expression is finished,
+which no parse can confirm. `expression_region_at(text, offset, excluded)`
+answers with the same opener, quote, escape, and brace rules, without the
+parse gate. It returns `None` in prose, on a delimiter, or inside a literal or
+token. Otherwise it returns the opener's offset, the closer's end (`None`
+while the expression is still open), the quote opening the string that holds
+the cursor, and the count of unclosed single `{`.
+
+```rust
+use simplified_schema::expression::scan::expression_region_at;
+
+// No closing `}}` yet; the `}}` inside the string does not close it.
+let text = r#"{{ load_data(f, "{a: {b: string}}") "#;
+let region = expression_region_at(text, text.len(), &[]).unwrap();
+assert_eq!((region.start, region.end, region.string_start), (0, None, None));
+```
+
+A `{{` outside a string at depth 0 starts a new region, so in
+`{{ don't }} it's fine {{ x` the cursor at the end is in the second
+expression. A prose apostrophe after a broken expression can still read as an
+open string; unfinished text is ambiguous there.
+
 ## Literal tokens (`pending`)
 
 `{{!data:v1:<payload>}}` stores one string as data: the payload is the

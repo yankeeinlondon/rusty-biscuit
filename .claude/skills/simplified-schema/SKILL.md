@@ -1,6 +1,6 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` declaration options, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` / `container` declaration options, `denotes_container`, `located_failures`, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
 last_updated: 2026-11-06T00:00:00Z
 ---
 
@@ -48,6 +48,20 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
 - **Strict never converts; soft converts a copy.** The input `Value` is never
   mutated; `ValidationSuccess::value` is `Cow::Borrowed` when accepted as
   written.
+  A failed soft validation reports on a diagnostic copy
+  (`coerce.rs::partial_copy`): converted siblings, failing values as written,
+  and unexpected keys/tuple elements masked from the retry then put back.
+- **One failure flattening.** `ConversionError::located_failures()` /
+  `coercion::locate_failures` (null arms dropped, an arm unreachable only on
+  `NoConversion` at the union's path) serves annotation, `partial_copy`, and
+  hosts; never re-implement it in Darkmatter.
+- **One `{{ }}` closing rule.** `expression::scan` ends an expression at the
+  quote- and brace-balanced `}}` only when that span parses and the legacy
+  first-`}}` span does not (no parsing span ever changes). Editor cursor
+  state comes from `scan::expression_region_at` (same lexical rules, no parse
+  gate). Any other `{{`/`}}` end detector (`rfind("{{")`, a private depth
+  scan) is a second rule: route it through these. Tests:
+  `tests/l1/{expression_scanner,expression_regions,scanner_corpus}.rs`.
 - **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
   or not at all, with whole-property replacement.
 - **One implementation.** Darkmatter calls the library; it never redefines a

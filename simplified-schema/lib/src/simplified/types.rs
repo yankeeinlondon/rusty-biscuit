@@ -1074,6 +1074,12 @@ pub enum Constraint {
     /// `required` and admits no null alternative.
     DeclaredRequired,
 
+    /// `type-definition(container)`: the declaration denotes a container
+    /// ([`super::narrowing::denotes_container`]), judged on the literal text;
+    /// an unresolved named-type reference passes provisionally
+    /// ([`super::narrowing::container_admission`]).
+    Container,
+
     // ── documentation ──────────────────────────────────────────────────────
     /// One or more example artifact file references (`example(...)`, Feature
     /// A). Non-validating for the annotated property — each referenced file is
@@ -1136,6 +1142,7 @@ impl Constraint {
             Constraint::Property { .. } => "property",
             Constraint::Forms(_) => "forms",
             Constraint::DeclaredRequired => "declared-required",
+            Constraint::Container => "container",
             Constraint::Example(_) => "example",
             Constraint::Category(_) => "category",
             Constraint::Operands(_) => "operands",

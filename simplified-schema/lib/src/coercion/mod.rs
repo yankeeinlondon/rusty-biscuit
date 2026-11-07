@@ -41,7 +41,8 @@ pub use shape::compact;
 use serde_json::Value;
 
 pub use error::{
-    Constraint, ConversionError, FailureReason, OptionFailure, PathSegment, ValueFailure, ValueKind, render_path,
+    ActualKind, Constraint, ConversionError, ExpectedType, FailureReason, LocatedFailure, OptionFailure, PathSegment,
+    ValueFailure, ValueKind, json_pointer, locate_failures, render_path,
 };
 pub use shape::{
     DESCRIPTION_LIMIT,    Additional, ArrayShape, Assertion, ContentFormat, IntegerRule, KeyMatcher, NumberShape, NumericBounds,

@@ -624,6 +624,7 @@ pub fn is_match_safe_constraint(constraint: &Constraint) -> bool {
             | Constraint::Property { .. }
             | Constraint::Forms(_)
             | Constraint::DeclaredRequired
+            | Constraint::Container
     )
 }
 

@@ -147,8 +147,8 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "type-definition",
         aliases: &[],
         description: "One complete SimplifiedSchema property definition carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for schema-language completion, hover, and diagnostics.",
-        accepted_constraints: &["forms", "declared-required", "default", "required", "non-null", "generated", "deferred"],
-        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }, or an options object such as { \"forms\": [\"literal\"], \"declaredRequired\": true } in place of `true`",
+        accepted_constraints: &["forms", "declared-required", "container", "default", "required", "non-null", "generated", "deferred"],
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }, or an options object such as { \"forms\": [\"literal\"], \"declaredRequired\": true, \"container\": true } in place of `true`",
         type_options: &[],
     },
     SchemaTypeDescriptor {
@@ -448,7 +448,7 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         form: "property(name, ...)",
         target_types: "schema",
         argument_arity: "2",
-        description: "Every inline object the declaration exports must declare the property `name`, and that property's declaration must satisfy the `type-definition(...)` options (`forms`, `declared-required`). Repeat it for several names. A reference carrier or a root-union file arm is not followed.",
+        description: "Every inline object the declaration exports must declare the property `name`, and that property's declaration must satisfy the `type-definition(...)` options (`forms`, `declared-required`, `container`). Repeat it for several names. A reference carrier or a root-union file arm is not followed.",
         json_schema_effect: "appends `{ \"name\", \"declaration\" }` to the `property` list of the `x-darkmatter-schema` options object",
     },
     SchemaConstraintDescriptor {
@@ -468,6 +468,15 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "0",
         description: "The declaration must be marked `required` and admit no null alternative.",
         json_schema_effect: "sets `\"declaredRequired\": true` in the `x-darkmatter-type-definition` options object",
+    },
+    SchemaConstraintDescriptor {
+        name: "container",
+        keyword: "container",
+        form: "container",
+        target_types: "type-definition",
+        argument_arity: "0",
+        description: "The declaration must denote a container: every non-null alternative is a list, tuple, object, or dictionary, and at least one exists. Judged on the text alone; a named-type alternative passes until it is resolved.",
+        json_schema_effect: "sets `\"container\": true` in the `x-darkmatter-type-definition` options object",
     },
     // ── array ──────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -822,6 +831,7 @@ pub const MATCH_SAFE_CONSTRAINT_DESCRIPTORS: &[MatchSafeConstraintDescriptor] = 
     MatchSafeConstraintDescriptor { keyword: "property", description: "Requires a `schema` declaration to declare a property whose declaration satisfies its options." },
     MatchSafeConstraintDescriptor { keyword: "forms", description: "Requires a `type-definition` built from the listed type keywords." },
     MatchSafeConstraintDescriptor { keyword: "declared-required", description: "Requires a `type-definition` marked `required` with no null alternative." },
+    MatchSafeConstraintDescriptor { keyword: "container", description: "Requires a `type-definition` that denotes a container." },
 ];
 
 /// Returns the constraint subset accepted in trigger matches.
@@ -1389,6 +1399,7 @@ mod tests {
             Constraint::Property { name: String::new(), declaration: Box::new(type_definition()) },
             Constraint::Forms(Vec::new()),
             Constraint::DeclaredRequired,
+            Constraint::Container,
         ] {
             implemented.insert(c.keyword());
         }
@@ -1561,6 +1572,7 @@ mod tests {
             Constraint::Property { name: String::new(), declaration: Box::new(type_definition()) },
             Constraint::Forms(Vec::new()),
             Constraint::DeclaredRequired,
+            Constraint::Container,
             Constraint::Closed,
             Constraint::UncountedKeys(Vec::new()),
         ];

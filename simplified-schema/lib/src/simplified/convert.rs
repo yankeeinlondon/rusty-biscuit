@@ -2282,7 +2282,11 @@ fn semantic_type_fragment(
 fn is_declaration_option(constraint: &Constraint) -> bool {
     matches!(
         constraint,
-        Constraint::Mapping | Constraint::Property { .. } | Constraint::Forms(_) | Constraint::DeclaredRequired
+        Constraint::Mapping
+            | Constraint::Property { .. }
+            | Constraint::Forms(_)
+            | Constraint::DeclaredRequired
+            | Constraint::Container
     )
 }
 
@@ -2296,8 +2300,8 @@ fn is_declaration_option(constraint: &Constraint) -> bool {
 /// ## Errors
 ///
 /// [`SchemaError::Convert`] when a `property(name, …)` option's declaration
-/// is not one `type-definition(...)` carrying only `forms` and
-/// `declared-required`.
+/// is not one `type-definition(...)` carrying only `forms`,
+/// `declared-required`, and `container`.
 pub fn declaration_options_payload(property: &str, constraints: &[Constraint]) -> Result<Value, SchemaError> {
     let options: Vec<&Constraint> = constraints.iter().filter(|constraint| is_declaration_option(constraint)).collect();
     options_payload(property, &options)
@@ -2319,6 +2323,9 @@ fn options_payload(name: &str, options: &[&Constraint]) -> Result<Value, SchemaE
             Constraint::DeclaredRequired => {
                 payload.insert("declaredRequired".into(), Value::Bool(true));
             }
+            Constraint::Container => {
+                payload.insert("container".into(), Value::Bool(true));
+            }
             Constraint::Forms(forms) => {
                 let forms = forms.iter().map(|form| Value::from(form.as_keyword())).collect();
                 payload.insert("forms".into(), Value::Array(forms));
@@ -2333,13 +2340,15 @@ fn options_payload(name: &str, options: &[&Constraint]) -> Result<Value, SchemaE
                 let inner: Vec<&Constraint> = atom.property_constraints().collect();
                 if let Some(other) = inner
                     .iter()
-                    .find(|constraint| !matches!(constraint, Constraint::Forms(_) | Constraint::DeclaredRequired))
+                    .find(|constraint| {
+                        !matches!(constraint, Constraint::Forms(_) | Constraint::DeclaredRequired | Constraint::Container)
+                    })
                 {
                     return Err(SchemaError::Convert {
                         property: name.to_string(),
                         message: format!(
                             "constraint `{}` is not valid on the `type-definition` of `property({property}, …)`; \
-                             only `forms` and `declared-required` judge a declaration",
+                             only `forms`, `declared-required`, and `container` judge a declaration",
                             other.keyword()
                         ),
                     });

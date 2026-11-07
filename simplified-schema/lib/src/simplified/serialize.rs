@@ -431,6 +431,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         Constraint::Closed => out.push_str("closed"),
         Constraint::Mapping => out.push_str("mapping"),
         Constraint::DeclaredRequired => out.push_str("declared-required"),
+        Constraint::Container => out.push_str("container"),
         Constraint::Forms(forms) => {
             out.push_str("forms(");
             let keywords: Vec<&str> = forms.iter().map(|form| form.as_keyword()).collect();

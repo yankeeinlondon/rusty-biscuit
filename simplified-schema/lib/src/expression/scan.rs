@@ -1,9 +1,24 @@
 //! Locates `{{ … }}` expressions, `{{{ … }}}` literals, and `{{!data:…}}`
 //! literal tokens in text.
 //!
-//! The scan is purely lexical and knows nothing about Markdown: a host that
-//! must skip code blocks computes their byte ranges itself and passes them to
-//! [`scan`]. [`scan_plain`] excludes nothing.
+//! The scan knows nothing about Markdown: a host that must skip code blocks
+//! computes their byte ranges itself and passes them to [`scan`].
+//! [`scan_plain`] excludes nothing.
+//!
+//! An expression ends at the first `}}` that sits outside every quoted string
+//! (the expression lexer's string and escape rules, so strings may span
+//! lines) and closes every single `{` opened inside it. That span replaces
+//! the older "first unnested `}}`" span only when the two differ, the older
+//! span's text does not parse, and the new span's text does
+//! ([`parse`](crate::expression::parse)). So no span that parses under the
+//! older rule changes, and a changed span always parses; prose apostrophes
+//! and unbalanced quotes keep the older span. The trade-off: an expression
+//! with a real syntax error and a `}}` inside a string still ends at that
+//! `}}`.
+//!
+//! [`expression_region_at`] answers the editor question "is this offset inside
+//! a complete or still-open expression?" with the same lexical rules, without
+//! the parse gate.
 //!
 //! An opener preceded by an odd run of backslashes (`\{{`) is not a span; an
 //! even run (`\\{{`) leaves it active. Scanning never removes the backslashes.
@@ -24,6 +39,8 @@
 //! ```
 
 use tracing::debug;
+
+use crate::expression::parse;
 
 /// What follows `{{` in a literal token (`{{!data:…}}`).
 const LITERAL_TOKEN_BODY_PREFIX: &str = "!data:";
@@ -141,7 +158,7 @@ pub fn scan(content: &str, excluded: &[(usize, usize)]) -> ExpressionScanResult 
             if !found_close {
                 // Unclosed {{{ - fall back to legacy {{ scanning at the
                 // same byte position to preserve existing behavior.
-                let (expr, next_pos) = scan_legacy_expression(content, start);
+                let (expr, next_pos) = scan_expression(content, start);
                 if let Some(expr) = expr {
                     expressions.push(expr);
                 }
@@ -168,7 +185,7 @@ pub fn scan(content: &str, excluded: &[(usize, usize)]) -> ExpressionScanResult 
                 pos = end;
                 continue;
             }
-            let (expr, next_pos) = scan_legacy_expression(content, start);
+            let (expr, next_pos) = scan_expression(content, start);
             if let Some(expr) = expr {
                 expressions.push(expr);
             }
@@ -202,6 +219,252 @@ pub fn scan_plain(content: &str) -> ExpressionScanResult {
 #[must_use]
 pub fn find_all_plain(content: &str) -> Vec<ExpressionLocation> {
     scan_plain(content).expressions
+}
+
+/// Where an editor offset sits relative to the `{{ … }}` expressions of a text.
+///
+/// Uses the scanner's lexical rules only (openers, escapes, excluded ranges,
+/// literals, tokens, strings, and single-brace depth) and never applies the
+/// parse gate, so a complete region may differ from [`scan`]'s span for text
+/// that does not parse. One editor-only rule is added: a `{{` at depth 0
+/// outside a string starts a new expression, so the cursor in
+/// `{{ don't }} it's fine {{ x` belongs to the second opener. A prose
+/// apostrophe after a broken expression can still read as an open string;
+/// that ambiguity is inherent in unfinished text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpressionRegion {
+    /// Byte offset of the opening `{{`.
+    pub start: usize,
+
+    /// Byte offset after the closing `}}`, or `None` while the expression is
+    /// still open at the end of the text or at a following `{{`.
+    pub end: Option<usize>,
+
+    /// Byte offset of the quote opening the string that holds the offset.
+    pub string_start: Option<usize>,
+
+    /// Single `{` opened outside strings between the opener and the offset
+    /// and not yet closed.
+    pub brace_depth: usize,
+}
+
+/// Finds the expression region holding the byte `offset` of `text`, skipping
+/// openers whose first `{` falls inside one of `excluded` (as in [`scan`]).
+///
+/// Returns `None` when the offset is in prose, on or between the braces of a
+/// delimiter, or inside a `{{{ … }}}` literal or `{{!data:…}}` token. An
+/// offset past the end of `text` is `None`.
+///
+/// ## Examples
+///
+/// ```
+/// use simplified_schema::expression::scan::expression_region_at;
+///
+/// let text = r#"{{ load_data(f, "{a: {b: string}}") "#;
+/// let region = expression_region_at(text, text.len(), &[]).unwrap();
+/// assert_eq!((region.start, region.end), (0, None));
+/// assert_eq!(region.string_start, None);
+/// ```
+#[must_use]
+pub fn expression_region_at(text: &str, offset: usize, excluded: &[(usize, usize)]) -> Option<ExpressionRegion> {
+    let is_excluded = |pos: usize| excluded.iter().any(|(start, end)| pos >= *start && pos < *end);
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    if offset > len {
+        return None;
+    }
+    let mut pos = 0;
+
+    while pos < offset && pos + 1 < len {
+        if !(bytes[pos] == b'{' && bytes[pos + 1] == b'{') {
+            pos += 1;
+            continue;
+        }
+        if is_escaped_opener(bytes, pos) {
+            while pos < len && bytes[pos] == b'{' {
+                pos += 1;
+            }
+            continue;
+        }
+
+        let triple = pos + 2 < len && bytes[pos + 2] == b'{' && (pos + 3 >= len || bytes[pos + 3] != b'{');
+        if triple {
+            if is_excluded(pos) {
+                pos += 1;
+                continue;
+            }
+            if pos + 2 > offset {
+                return None;
+            }
+            // An unclosed `{{{` is scanned as a `{{` expression, as in `scan`.
+            if let Some(close) = text[pos + 3..].find("}}}") {
+                let end = pos + 3 + close + 3;
+                if offset < end {
+                    return None;
+                }
+                pos = end;
+                continue;
+            }
+        } else if is_excluded(pos) {
+            pos += 2;
+            continue;
+        }
+
+        if pos + 2 > offset {
+            return None;
+        }
+        if !triple && bytes[pos + 2..].starts_with(LITERAL_TOKEN_BODY_PREFIX.as_bytes()) {
+            let body = pos + 2 + LITERAL_TOKEN_BODY_PREFIX.len();
+            let end = text[body..].find("}}").map_or(len, |close| body + close + 2);
+            if offset < end {
+                return None;
+            }
+            pos = end;
+            continue;
+        }
+
+        match region_from(bytes, pos, offset) {
+            RegionWalk::Found(region) => return Some(region),
+            RegionWalk::Resume(next) => pos = next,
+            RegionWalk::Outside => return None,
+        }
+    }
+    None
+}
+
+/// Outcome of lexing one opener for [`expression_region_at`].
+enum RegionWalk {
+    /// The offset lies in this expression.
+    Found(ExpressionRegion),
+    /// The expression ended before the offset; keep walking here.
+    Resume(usize),
+    /// The offset sits between the two braces of the closing `}}`.
+    Outside,
+}
+
+fn region_from(bytes: &[u8], start: usize, offset: usize) -> RegionWalk {
+    let mut state = Delimiters::default();
+    let mut at_offset = None;
+    let mut i = start + 2;
+    let found = |at: Option<(Option<usize>, usize)>, end| {
+        let (string_start, brace_depth) = at.unwrap_or_default();
+        RegionWalk::Found(ExpressionRegion {
+            start,
+            end,
+            string_start,
+            brace_depth,
+        })
+    };
+
+    loop {
+        if at_offset.is_none() && i >= offset {
+            at_offset = Some((state.string_start, state.depth));
+        }
+        if i >= bytes.len() {
+            return found(at_offset, None);
+        }
+        if state.string_start.is_none() && state.depth == 0 && bytes[i] == b'{' && bytes.get(i + 1) == Some(&b'{') {
+            if at_offset.is_some() {
+                return found(at_offset, None);
+            }
+            return RegionWalk::Resume(i);
+        }
+        match state.advance(bytes, i) {
+            Step::Next(next) => i = next,
+            Step::Close => {
+                if at_offset.is_some() {
+                    return found(at_offset, Some(i + 2));
+                }
+                return if i + 2 <= offset {
+                    RegionWalk::Resume(i + 2)
+                } else {
+                    RegionWalk::Outside
+                };
+            }
+        }
+    }
+}
+
+/// Lexical state between an opener and its closer: the open string, if any,
+/// and the single `{` opened outside strings.
+#[derive(Default)]
+struct Delimiters {
+    string_start: Option<usize>,
+    depth: usize,
+}
+
+enum Step {
+    Next(usize),
+    /// The byte is a `}` at depth 0 outside a string, followed by `}`.
+    Close,
+}
+
+impl Delimiters {
+    /// Consumes the byte at `i`. Every delimiter is ASCII and a UTF-8
+    /// continuation byte never equals one, so skipping the byte after a `\`
+    /// lands at worst on a continuation byte, which is then ordinary text.
+    fn advance(&mut self, bytes: &[u8], i: usize) -> Step {
+        if let Some(open) = self.string_start {
+            match bytes[i] {
+                b'\\' => return Step::Next(i + 2),
+                quote if quote == bytes[open] => self.string_start = None,
+                _ => {}
+            }
+            return Step::Next(i + 1);
+        }
+        match bytes[i] {
+            b'"' | b'\'' => self.string_start = Some(i),
+            b'{' => self.depth += 1,
+            b'}' if self.depth > 0 => self.depth -= 1,
+            b'}' if bytes.get(i + 1) == Some(&b'}') => return Step::Close,
+            _ => {}
+        }
+        Step::Next(i + 1)
+    }
+}
+
+/// Byte offset of the `}}` closing the expression opened at `start`, under
+/// the quote- and brace-balanced rule; `None` at EOF or in an unterminated
+/// string.
+fn balanced_close(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut state = Delimiters::default();
+    let mut i = start + 2;
+    while i < bytes.len() {
+        match state.advance(bytes, i) {
+            Step::Next(next) => i = next,
+            Step::Close => return Some(i),
+        }
+    }
+    None
+}
+
+/// Scans the `{{ … }}` expression opened at `start`, applying the parse gate
+/// described in the module docs. Returns the expression (if any) and the
+/// position at which scanning continues.
+fn scan_expression(content: &str, start: usize) -> (Option<ExpressionLocation>, usize) {
+    let legacy = scan_legacy_expression(content, start);
+    let Some(close) = balanced_close(content.as_bytes(), start) else {
+        return legacy;
+    };
+    let end = close + 2;
+    if legacy.1 == end {
+        return legacy;
+    }
+    if legacy.0.as_ref().is_some_and(|old| parse(&old.expression).is_ok()) {
+        return legacy;
+    }
+    let expression = content[start + 2..close].trim();
+    if expression.is_empty() || parse(expression).is_err() {
+        return legacy;
+    }
+    (
+        Some(ExpressionLocation {
+            start,
+            end,
+            expression: expression.to_string(),
+        }),
+        end,
+    )
 }
 
 /// Scans a legacy `{{ ... }}` expression starting at `start`.
@@ -346,6 +609,28 @@ mod tests {
         assert!(result.literals.is_empty());
         // The range end is exclusive: an opener at `end` is scanned.
         assert_eq!(scan(content, &[(0, 0)]).expressions.len(), 2);
+    }
+
+    #[test]
+    fn the_balanced_close_skips_strings_and_single_braces() {
+        assert_eq!(balanced_close(br#"{{ "}}" }}"#, 0), Some(8));
+        assert_eq!(balanced_close(b"{{ {a: {b: 1}} }}", 0), Some(15));
+        assert_eq!(balanced_close(b"{{ a { }} b", 0), None);
+        assert_eq!(balanced_close(br#"{{ "open }}"#, 0), None);
+        // A backslash at the end of an open string runs past the text.
+        assert_eq!(balanced_close(br#"{{ "\"#, 0), None);
+    }
+
+    #[test]
+    fn the_gate_keeps_a_parsing_older_span() {
+        // Older span `a {{ b }} c` parses and the balanced span is the same.
+        assert_eq!(scan_expression("{{ a {{ b }} c }}", 0).1, 17);
+        // Older span `"` fails; the balanced span parses and replaces it.
+        let (found, next) = scan_expression(r#"{{ "}}" }} z"#, 0);
+        assert_eq!((found.unwrap().expression.as_str(), next), (r#""}}""#, 10));
+        // Neither parses: the older span stays, including its resume point.
+        let (found, next) = scan_expression("{{ don't }} it's }}", 0);
+        assert_eq!((found.unwrap().expression.as_str(), next), ("don't", 11));
     }
 
     #[test]

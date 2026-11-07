@@ -1107,6 +1107,7 @@ fn primitive(path: &str, ty: SimplifiedType, constraints: &[Constraint]) -> Resu
                             | Constraint::Property { .. }
                             | Constraint::Forms(_)
                             | Constraint::DeclaredRequired
+                            | Constraint::Container
                     )
                 })
                 .cloned()

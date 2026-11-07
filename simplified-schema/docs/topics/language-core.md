@@ -47,7 +47,7 @@ flowchart TD
 | `simplified` | `SchemaRoot` (one shape, or a root union of arms), `SchemaShape`, `PropertyDef`, `TypeExpr`; the type grammar; `to_json_schema`; source maps (`SchemaSourceMap`), editor cursors, suggestion queries, serializers, subtyping |
 | `resolve` | `resolve_schema` and its YAML and schema-root variants, named-type expansion (`expand_named_types`), cycle and use-site checks, `merge_baseline` (the layer merge: a higher layer replaces a whole property) |
 | `claims` | `claimed_values`, `ClaimProblem`, `ClaimCause`: the strings a resolved schema claims for one property; see [Claimed Values](#claimed-values) |
-| `coercion` | The conversion engine over shapes (`bind`, `bind_with`, `check_exact`) |
+| `coercion` | The conversion engine over shapes (`bind`, `bind_with`, `check_exact`), and `ConversionError::located_failures`, one record per failing location; see [Located failures](conversion.md#located-failures) |
 | `coerce` | Frontmatter conversion against a lowered JSON Schema (`coerce_frontmatter`) |
 | `validate`, `format`, `file_match` | Compiled validators and their cache, the `darkmatter-*` formats, the `x-darkmatter-*` keywords, and `file(match(...))` globs |
 | `schema` | `SimplifiedSchema` (build from content or a file, validate, layer, query, export), `SchemaSource`, `TypeDefinition`, `FunctionView`, `SimplifiedSchemaError`; see [The `SimplifiedSchema` Object](simplified-schema-struct.md) |

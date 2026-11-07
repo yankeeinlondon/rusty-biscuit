@@ -134,7 +134,12 @@ fn darkmatter_defines_no_second_schema_language_implementation() {
         (
             "coercion/error.rs",
             include_str!("../../../../simplified-schema/lib/src/coercion/error.rs"),
-            &["ConversionError"],
+            &["ConversionError", "LocatedFailure", "locate_failures", "json_pointer"],
+        ),
+        (
+            "simplified/narrowing.rs",
+            include_str!("../../../../simplified-schema/lib/src/simplified/narrowing.rs"),
+            &["ContainerAdmission", "container_admission", "denotes_container"],
         ),
         (
             "simplified/definitions.rs",

@@ -585,6 +585,7 @@ fn is_constraint_keyword(name: &str) -> bool {
             | "non-null"
             | "mapping"
             | "declared-required"
+            | "container"
             | "forms"
             | "property"
     )
@@ -1965,6 +1966,7 @@ impl<'a> Parser<'a> {
                 | Constraint::Property { .. }
                 | Constraint::Forms(_)
                 | Constraint::DeclaredRequired
+                | Constraint::Container
                     if !is_array_level => {}
                 Constraint::Default(value) => {
                     let Some(default) = value.as_str() else {
@@ -2617,6 +2619,16 @@ impl<'a> Parser<'a> {
                 )?;
                 Constraint::DeclaredRequired
             }
+            ("container", false) => {
+                self.check_declaration_option(
+                    &keyword,
+                    SimplifiedType::TypeDefinition,
+                    owner,
+                    is_array_level,
+                    &kw_span,
+                )?;
+                Constraint::Container
+            }
             ("forms", true) => {
                 self.check_declaration_option(
                     &keyword,
@@ -2652,7 +2664,7 @@ impl<'a> Parser<'a> {
                 self.check_declaration_option(&keyword, SimplifiedType::Schema, owner, is_array_level, &kw_span)?;
                 self.parse_property_option(kw_span)?
             }
-            ("non-null" | "mapping" | "declared-required", true) => {
+            ("non-null" | "mapping" | "declared-required" | "container", true) => {
                 return self.err(format!("`{keyword}` does not take arguments"), kw_span);
             }
             ("required", true) => {
@@ -2871,7 +2883,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Rejects a declaration option (`mapping`, `property`, `forms`,
-    /// `declared-required`) anywhere but the value list of the one
+    /// `declared-required`, `container`) anywhere but the value list of the one
     /// meta-type that takes it.
     fn check_declaration_option(
         &self,

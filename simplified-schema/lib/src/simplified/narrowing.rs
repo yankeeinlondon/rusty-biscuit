@@ -7,9 +7,14 @@
 //! [`FunctionType`] that never passed through the grammar. This module has no
 //! dependency on the runtime registry; lowering a valid declaration to a
 //! runtime fact stays with registration.
+//!
+//! It also holds the text-only predicates over a parsed definition that these
+//! rules and their hosts share: value [`families`] and the container contract
+//! ([`container_admission`]).
 
 use serde_json::Value;
 
+use super::query::flattened_alternatives;
 use super::serialize::serialize_property_def;
 use super::types::{
     Constraint, FunctionType, NarrowsClause, NarrowsKind, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
@@ -75,6 +80,62 @@ pub fn families(atom: &PropertyAtom) -> &'static [Family] {
             ALL_FAMILIES
         }
     }
+}
+
+/// How a definition stands against the container contract
+/// (`type-definition(container)`), judged on its text alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerAdmission {
+    /// Every non-null alternative is an array, tuple, object, or pattern
+    /// dictionary, and at least one exists.
+    Container,
+    /// Every non-null alternative is a container or an unresolved named-type
+    /// reference, and at least one is a reference: what the reference
+    /// denotes is known only once its definition is resolved.
+    Provisional,
+    /// Some non-null alternative is not a container (a scalar, `unknown`,
+    /// `any`, a function), or the definition has only `null` alternatives.
+    NotContainer,
+}
+
+/// Whether `def` denotes a container, treating an unresolved named-type
+/// reference as provisionally admitted ([`ContainerAdmission`]).
+///
+/// `null` alternatives are dropped, so `string[] | null` is a container and
+/// `null` alone is not. A bracket list such as `[string, number]` is a union
+/// of its items, not a tuple, so it is a container only when every item is.
+pub fn container_admission(def: &PropertyDef) -> ContainerAdmission {
+    let mut provisional = false;
+    let mut any_container = false;
+    for alternative in flattened_alternatives(def) {
+        if alternative.is_array {
+            any_container = true;
+            continue;
+        }
+        match &alternative.atom.ty {
+            TypeExpr::Primitive(SimplifiedType::Null) => {}
+            TypeExpr::InlineObject(_) | TypeExpr::Tuple(_) | TypeExpr::Primitive(SimplifiedType::Object) => {
+                any_container = true;
+            }
+            // A recursive reference's body lives in a definition table this
+            // text-only judgment does not consult.
+            TypeExpr::Imported { .. } | TypeExpr::Ref(_) => provisional = true,
+            _ => return ContainerAdmission::NotContainer,
+        }
+    }
+    match (provisional, any_container) {
+        (true, _) => ContainerAdmission::Provisional,
+        (false, true) => ContainerAdmission::Container,
+        (false, false) => ContainerAdmission::NotContainer,
+    }
+}
+
+/// Whether the fully known `def` denotes a container: every non-null
+/// alternative is an array, tuple, object, or pattern dictionary, and at
+/// least one exists. An unresolved named-type reference is not proof; use
+/// [`container_admission`] to admit one provisionally.
+pub fn denotes_container(def: &PropertyDef) -> bool {
+    container_admission(def) == ContainerAdmission::Container
 }
 
 pub fn is_null_type(atom: &PropertyAtom) -> bool {

@@ -1,4 +1,5 @@
-//! Type errors from binding: one [`ValueFailure`] per failing path.
+//! Type errors from binding: one [`ValueFailure`] per failing path, and
+//! their flattening into one [`LocatedFailure`] per failing location.
 //!
 //! The data is public so a caller can wrap it in its own context (function,
 //! signature, parameter, property, source location) without parsing text.
@@ -283,3 +284,170 @@ impl fmt::Display for ConversionError {
 }
 
 impl std::error::Error for ConversionError {}
+
+/// Encodes `path` as an RFC 6901 JSON Pointer: `""` for the value itself,
+/// `/rows/0/a~1b` for key `a/b` (`~` is `~0`, `/` is `~1`). An empty key
+/// is the segment `/`.
+pub fn json_pointer(path: &[PathSegment]) -> String {
+    path.iter()
+        .map(|segment| match segment {
+            PathSegment::Index(index) => format!("/{index}"),
+            PathSegment::Key(key) => format!("/{}", key.replace('~', "~0").replace('/', "~1")),
+        })
+        .collect()
+}
+
+/// The kind of value found at a located failure, in the schema vocabulary
+/// (`string`, `array`) rather than the engine's message words (`text`,
+/// `list`), plus [`ActualKind::Missing`] for a value that is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActualKind {
+    String,
+    Number,
+    Boolean,
+    Null,
+    Array,
+    Object,
+    /// A required tuple slot or object property that is not there.
+    Missing,
+}
+
+impl ActualKind {
+    fn of(received: Option<&Value>) -> Self {
+        match received.map(ValueKind::of) {
+            None => Self::Missing,
+            Some(ValueKind::Text) => Self::String,
+            Some(ValueKind::Number) => Self::Number,
+            Some(ValueKind::Boolean) => Self::Boolean,
+            Some(ValueKind::Null) => Self::Null,
+            Some(ValueKind::List) => Self::Array,
+            Some(ValueKind::Object) => Self::Object,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Number => "number",
+            Self::Boolean => "boolean",
+            Self::Null => "null",
+            Self::Array => "array",
+            Self::Object => "object",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+impl fmt::Display for ActualKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// What a located failure expected at its location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpectedType<'f> {
+    /// The engine's expected-type text for the value.
+    Type(&'f str),
+    /// A union no single arm explains: the expected-type text of each
+    /// non-`null` arm left, in declaration order. Renders joined by ` | `.
+    Union(Vec<&'f str>),
+    /// Nothing belongs here: an unexpected object key or tuple element. The
+    /// engine's own `expected` text names the enclosing container instead.
+    Absent,
+}
+
+impl fmt::Display for ExpectedType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Type(text) => f.write_str(text),
+            Self::Union(arms) => f.write_str(&arms.join(" | ")),
+            Self::Absent => f.write_str("absent"),
+        }
+    }
+}
+
+/// One failing location of a [`ConversionError`], after union failures are
+/// flattened ([`locate_failures`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocatedFailure<'f> {
+    /// The location as a JSON Pointer ([`json_pointer`]); `""` for the value
+    /// bound.
+    pub pointer: String,
+    pub expected: ExpectedType<'f>,
+    pub actual: ActualKind,
+    /// The engine's failure at this location: a leaf failure, or the union's
+    /// own [`FailureReason::NoOptionAccepts`] when no single arm explains it.
+    pub failure: &'f ValueFailure,
+}
+
+impl ConversionError {
+    /// Every failing location, flattened through unions; see
+    /// [`locate_failures`].
+    pub fn located_failures(&self) -> Vec<LocatedFailure<'_>> {
+        locate_failures(&self.failures)
+    }
+}
+
+/// Flattens `failures` into one record per failing location, in engine
+/// order (ascending indexes, the value's key order, union arms as declared).
+///
+/// A failure that is not [`FailureReason::NoOptionAccepts`] is one record.
+/// For a union failure, `null` arms are dropped, and an arm is reachable
+/// unless it failed with [`FailureReason::NoConversion`] at the union's own
+/// path (the value's kind cannot become that arm's top-level kind at all).
+/// Exactly one reachable arm is descended into; otherwise the union is one
+/// record at its path listing the remaining arms. The `null`-arm rule is the
+/// one [`crate::simplified::narrowing::container_admission`] applies.
+///
+/// When two arms are containers of the same kind (`{a: string}[] | {b:
+/// number}[]`), both are reachable, so data fitting neither is one record at
+/// the union's path rather than one per element: nothing in the data says
+/// which arm was meant.
+pub fn locate_failures(failures: &[ValueFailure]) -> Vec<LocatedFailure<'_>> {
+    let mut out = Vec::new();
+    push_located(failures, &mut out);
+    out
+}
+
+fn push_located<'f>(failures: &'f [ValueFailure], out: &mut Vec<LocatedFailure<'f>>) {
+    for failure in failures {
+        let FailureReason::NoOptionAccepts { options } = &failure.reason else {
+            out.push(leaf_record(failure));
+            continue;
+        };
+        let typed: Vec<&OptionFailure> = options.iter().filter(|option| option.expected != "null").collect();
+        let mut reachable = typed.iter().filter(|option| {
+            !option
+                .failures
+                .iter()
+                .any(|inner| inner.path == failure.path && inner.reason == FailureReason::NoConversion)
+        });
+        match (reachable.next(), reachable.next()) {
+            (Some(only), None) => push_located(&only.failures, out),
+            _ => out.push(LocatedFailure {
+                pointer: json_pointer(&failure.path),
+                expected: if typed.is_empty() {
+                    ExpectedType::Type(&failure.expected)
+                } else {
+                    ExpectedType::Union(typed.iter().map(|option| option.expected.as_str()).collect())
+                },
+                actual: ActualKind::of(failure.received.as_ref()),
+                failure,
+            }),
+        }
+    }
+}
+
+fn leaf_record(failure: &ValueFailure) -> LocatedFailure<'_> {
+    let expected = match failure.reason {
+        FailureReason::UnexpectedProperty | FailureReason::UnexpectedElement => ExpectedType::Absent,
+        _ => ExpectedType::Type(&failure.expected),
+    };
+    LocatedFailure {
+        pointer: json_pointer(&failure.path),
+        expected,
+        actual: ActualKind::of(failure.received.as_ref()),
+        failure,
+    }
+}

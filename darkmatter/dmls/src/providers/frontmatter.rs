@@ -4744,8 +4744,8 @@ mod tests {
     #[test]
     fn meta_type_constraint_lists_offer_their_declaration_options() {
         for (declaration, offered, withheld) in [
-            ("type-definition(", ["forms", "declared-required", "non-null"], ["mapping", "property"]),
-            ("schema(", ["mapping", "property", "non-null"], ["forms", "declared-required"]),
+            ("type-definition(", &["forms", "declared-required", "container", "non-null"][..], &["mapping", "property"][..]),
+            ("schema(", &["mapping", "property", "non-null"][..], &["forms", "declared-required", "container"][..]),
         ] {
             let text = format!("---\n$schema:\n  p: {declaration}\n---\n\nbody\n");
             let labels = top_level_labels_after(&text, declaration);

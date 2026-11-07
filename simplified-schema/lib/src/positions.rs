@@ -113,10 +113,11 @@ impl PositionMap {
     ///
     /// ## Returns
     ///
-    /// `None` when the locator cannot read the YAML, its root is not a
-    /// mapping, or what it read does not match `orders` mapping for mapping or
-    /// contains an alias: the parsed value then has a structure the source
-    /// cannot be trusted to show.
+    /// `None` when the locator cannot read the YAML, or what it read does not
+    /// match `orders` mapping for mapping or contains an alias: the parsed
+    /// value then has a structure the source cannot be trusted to show. Any
+    /// root kind (mapping, sequence, or scalar) is projected; frontmatter
+    /// rejects a non-mapping root before it is validated.
     pub fn project(
         text: &str,
         yaml: Range<usize>,
@@ -124,9 +125,6 @@ impl PositionMap {
         orders: &MappingOrders,
     ) -> Option<Self> {
         let root = locate_frontmatter_value(&text[yaml.clone()], yaml.start)?;
-        if !matches!(root.kind, SchemaValueKind::Mapping(_)) {
-            return None;
-        }
         let mut mappings = 0;
         let mut pointer = String::new();
         if !matches_orders(&root, text, orders, &mut pointer, &mut mappings)
@@ -482,6 +480,36 @@ mod tests {
             let map = build_position_map(yaml);
             assert!(!is_located(&map), "{yaml:?} must not be located");
             assert_eq!(at(&map, "/other/x", PositionTarget::Value), Some((other_line, 1)), "{yaml:?}");
+        }
+    }
+
+    #[test]
+    fn a_list_root_is_projected() {
+        let yaml = "- macOS\n- linux\n";
+        let map = build_position_map(yaml);
+        let PositionSource::Located { root, .. } = &map.source else {
+            panic!("a list root must be located");
+        };
+        let range = locate_range_in(root, &segments("/0"), PositionTarget::Value).unwrap();
+        assert_eq!(range.start, 2);
+        assert!(yaml[range].starts_with("macOS"));
+        assert_eq!(at(&map, "/1", PositionTarget::Value), Some((2, 3)));
+    }
+
+    #[test]
+    fn a_scalar_root_is_projected() {
+        let yaml = "# note\n42\n";
+        let map = build_position_map(yaml);
+        assert!(is_located(&map));
+        assert_eq!(at(&map, "", PositionTarget::Value), Some((2, 1)));
+    }
+
+    #[test]
+    fn an_alias_under_a_list_root_still_refuses_projection() {
+        for yaml in ["- &a x\n- *a\n", "- base: &b\n    x: 1\n- *b\n"] {
+            let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+            let orders = MappingOrders::collect(&value);
+            assert!(PositionMap::project(yaml, 0..yaml.len(), 1, &orders).is_none(), "{yaml:?}");
         }
     }
 
