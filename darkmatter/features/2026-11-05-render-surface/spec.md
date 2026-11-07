@@ -26,7 +26,7 @@ area: darkmatter
 owner: Ken Snyder <ken@ken.net>
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
-reviewed_on: 2026-11-05
+reviewed_on: 2026-11-06
 clarified: true
 review_iterations: 0
 implemented: false
@@ -70,6 +70,8 @@ in review.
 This inline review preserves the owner’s decisions. It corrects JSON5
 examples, separates layer precedence from shorthand precedence, and adds
 requirements for parser construction, file context, errors, and migration.
+The 2026-11-06 review also aligns duplicate-key handling with the shared data
+readers and defines which custom-schema values reach rendering.
 
 The behavior inventory below was refreshed on 2026-11-06, after
 `2026-11-04-composition-errors` completed. The current
@@ -333,6 +335,11 @@ and the alias usage line; other render details belong in `md render --help`.
 
 Respect `--` for positional inputs; `md -- render` renders a file named
 `render`. Do not rewrite arguments by scanning for command words.
+Preserve which positional tokens followed `--` for the shared classifier;
+a vector of token strings alone loses that distinction. Keep native OS argument
+values intact for file inputs rather than converting every token to lossy text.
+Only recognized setters require text parsing. Test the command-name and
+setter-looking file examples against the actual parser, not only the classifier.
 
 Resolve shared output options once at dispatch and pass the resolved output
 context and request to the render handler. Removing `&Cli` must not lose
@@ -364,21 +371,30 @@ margin-left: 4
 bad-mojo: true    # warned about and ignored
 ```
 
-**Reading the reference.** Text before the first `@` is an offset when it is not empty
-and holds no `/`; the rest is the file reference. `FileReference` gives a mid-name `@`
-no meaning, so this split happens first. The offset is a `PropertyPath` from
-`2026-11-06-dotted-paths`. A file whose name would read as an offset needs `./`, as a
-file named `a=b.md` already does.
+**Reading the reference.** First classify the whole argument passively with
+biscuit-file's [`FileReference`](../../../biscuit-file/lib/src/file_reference/mod.rs).
+An explicit relative, absolute, home, magic, repository, vault, or URL reference
+keeps every `@` as part of that reference; URLs are then refused by the local-only
+rule. This includes native Windows paths, whose separator may be `\`.
+For an implicit relative reference only, a nonleading first `@` separates an
+offset from the remaining file reference when the text before it contains no
+path separator (`/` or `\`). Thus `themes/user@host.yaml` remains a file path.
+Parse the offset with the shared
+`PropertyPath` parser from `2026-11-06-dotted-paths`, then parse the remaining
+reference through `FileReference`; an empty offset or file part fails, with no
+fallback to another interpretation. The offset uses the shared rules for escaped
+dots and existing array indexes. A file whose name would read as an offset needs
+`./`, as a file named `a=b.md` already does. Classification performs no lookup.
 
 **Rules.**
 
 | Case | Result |
 |---|---|
 | A key the effective schema does not allow | excluded with a warning, and the allowed keys still apply; `--deny style` makes it fatal |
-| No value in the file was applied, including `{}` and `{ table: { bad: 1 } }` | fails |
+| No non-null value remains after excluded keys are removed, including `{}` and `{ table: { bad: 1 } }` | fails |
 | An allowed key with an invalid value (`max-width: abc`) | fails: continuing would render the wrong thing |
 | The offset key is missing or not a mapping | fails, naming the key and the file |
-| `style="{ margin: 4 }"` | fails as a missing file, with a hint to use `style="..."` |
+| `--style="{ margin: 4 }"` | fails as a file input, with a hint to use the inline setter `style="{ margin: 4 }"` |
 
 A failure here is a run failure: see
 [Style input preparation and errors](#style-input-preparation-and-errors).
@@ -410,9 +426,18 @@ a document’s `ml: 6` defeat a CLI `margin: 2`.
 Top-level page keys and nested `page` keys normalize to the same fields.
 Reject duplicate spellings of the same specific field in one object, such
 as `ml` together with `page.margin-left`. A shorthand plus a more specific
-field is valid. Duplicate exact object keys must be rejected before a JSON
-map silently discards one. Preserve option occurrence and source information
-long enough to identify the offending layer and key.
+field is valid. Exact duplicate object keys follow the shared reader or value
+parser's format rules; JSON files keep the last value, as specified by
+`2026-11-04-loading-data`. Do not add a style-only parsing mode or change those
+readers globally. Preserve option occurrence and source information long enough
+to identify an offending layer and key.
+
+**Reader's note.** Earlier review wording required every duplicate object key
+to fail. That conflicted with the data-loading dependency's JSON file contract.
+Inline objects use the shared setter parser's duplicate-key rejection; style
+files use their data reader's rules. This review retains those shared behaviors
+and still rejects distinct spellings that normalize to the same field; those are style
+ambiguities the file reader cannot detect.
 
 The style setters form one final layer regardless of their position among
 `--style` occurrences. Within that layer, expand shorthands by specificity;
@@ -421,6 +446,20 @@ still yields left 6 and other sides 2. `style="{...}"` is the setter at the path
 `style`, so `style="{ margin: 2 }" style.ml=6` resolves the same way. Across separate
 `--style` files, later files win even if earlier layers used a more
 specific shorthand. No omitted value or parser default becomes an override.
+
+Keep the normalized layers sparse until merging is complete. In particular,
+the Darkmatter library's [`ComponentBorder`](../../lib/src/style/schema/common.rs)
+materializes border defaults when deserialized. Deserializing each layer first
+would make `table.border.left=false` erase an earlier border's color or weight.
+Merge explicitly present object members before producing the final typed border.
+This same rule applies to any nested type that supplies defaults while parsing.
+
+The repeated-path rule applies to a whole-object setter too:
+`style='{ margin: 2 }' style='{ max-width: 50 }'` retains only the second
+`style` value, plus any separately supplied, more specific setters. Distinct
+paths that normalize to the same specific field, such as `style.ml=2` and
+`style.page.margin-left=3`, fail as duplicate spellings rather than depending
+on argument order. Repeating `style.ml` itself still keeps its last value.
 
 Use nonnegative integer row counts for vertical page spacing, retaining the
 existing `u16` range; horizontal spacing keeps its existing length grammar.
@@ -439,6 +478,12 @@ In CLI layers, strip null-valued fields before merging: `null` is absence,
 not a reset instruction; zero and `false`
 are explicit values where their field permits them. A present CLI root must
 be an object; a scalar or `null` root is invalid. Reset syntax is out of scope.
+
+These are render-layer merge rules, not changes to the shared property editor.
+In particular, a nested border setter may select the border's object form after
+a scalar border value; that explicit style-union rule must not make ordinary
+`md set` or `md compose` traversal replace scalar parents implicitly. Reuse the
+shared path and value parsers, with style normalization owned by Darkmatter.
 
 In the `darkmatter` library,
 [`StyleFrontmatter`](../../lib/src/style/schema/mod.rs) is the typed sparse
@@ -477,9 +522,12 @@ fill replacements have coverage on the new path. Preserve origins separately fro
 presentation values where a field refers to a file.
 
 The shared schema also contains `style.markdown`, whose cleanup rules are
-accepted and validated but never read by rendering. It has no field in
-`StyleFrontmatter`; retain it through validation separately and preserve its
-existing lack of rendering effects. `--style` must not clean or save a file.
+accepted and validated but never lowered into rendering policy. It has no field in
+`StyleFrontmatter`; retain it through validation separately. A CLI cleanup-rule
+override does not change rendering's existing guarded cleanup or its `--indent`
+behavior, and never edits or saves the input. Do not inject the CLI style layer
+into authored frontmatter or cleanup options. This preserves current rendering;
+it does not remove the cleanup already performed before rendering.
 
 ### Style key names
 
@@ -536,9 +584,11 @@ md render -- style.draft=old.md                 # a file: nothing after `--` is 
 
 **Values.** The value is the text after the first `=`, read as the key's declared
 type through the same conversion engine that reads frontmatter
-(`simplified_schema::coercion`), so `4` is a number and `slate-900` a string. Every
-style key is declared, so this is the shared parser's declared-type path from
-`2026-11-06-dotted-paths`. A string containing expression syntax is never executed.
+(`simplified_schema::coercion`), so `4` is a number and `slate-900` a string.
+Built-in style keys use the shared parser's declared-type path from
+`2026-11-06-dotted-paths`; custom schema fields and pattern-admitted fields use
+that parser's applicable type or unknown-value rules. A string containing
+expression syntax is never executed.
 
 A value starting with `{` is read as JSON5, then as YAML flow syntax, so hyphenated
 keys need no quotes inside the shell's quotes: `style="{ max-width: 50 }"`. Bare
@@ -628,10 +678,40 @@ runtime style validator as well, including apply-time constraints, because the s
 alone does not enforce all width exclusions. Preserve informational `KnownButInactive`
 notices as the current parser does. Report the setter and canonical key path.
 
+Resolve the document's effective schema once, from its original frontmatter
+and request context, before applying render overrides. Use the existing passive
+schema assembly, including baseline, triggers, and document declarations; do
+not compose the document to obtain a schema. Render overrides do not rewrite
+`$schema`, rerun trigger selection, or affect expression evaluation. Completion
+uses that same selection rule, with the dependency's advisory fallbacks.
+
+Validate each CLI layer as a sparse override: check the fields it supplies,
+without treating omitted required fields as missing in that layer. Check
+required style fields against the combined style value, then validate runtime
+constraints on the normalized rendering fields. This lets one file supply
+`page.color` and a setter supply a required `page.theme` without making each
+source a complete style document. Invalid supplied values still fail even
+when another source replaces them.
+
+Within the combined setter layer, discard superseded occurrences of the same
+exact path before conversion, as the shared setter parser does. This differs
+from validating separate files even when later files override them: a repeated
+argument replaces one assignment, while each file remains a checked input.
+
 **A document that declares `style` replaces the built-in definition,** as it does for
 any property, so `$schema: { style: { foo: string } }` makes `style.margin=4` an error
 and leaves completion with `foo` alone. This feature does not change schema layering.
 Custom values belong in their own top-level property, which is already open.
+
+Schema admission and rendering support are separate checks. Values admitted
+only by a custom schema are retained during validation and merging but do not
+become new rendering features. Do not warn that such admitted keys are unknown,
+and do not feed them to the built-in style walker as unknown fields. A known
+rendering field must still satisfy its runtime contract even if the document
+schema widens its type: admitting `page.max-width: abc` cannot make it renderable.
+The runtime descriptor identifies supported fields; it is not a second source
+of setter completion. Completion may therefore offer an admitted custom field
+that has no rendering effect, and the style documentation must explain this.
 
 **What is already in the document stays a warning.** `md render` warns about an unknown
 `style:` key in frontmatter, and `--deny style` makes it fatal, as today. `md compose`
@@ -645,10 +725,29 @@ allow is excluded with a warning, while an allowed key with a wrong value is sti
 error. The warning goes to stderr, or to `diagnostics` for a data output, where stderr
 stays empty.
 
+For the empty-file check, a non-null schema-admitted leaf counts as supplied
+even if it is a cleanup rule, custom metadata, or inactive on the chosen target.
+For example `{ markdown: { unwrap: true } }` succeeds without changing cleanup,
+and an admitted `{ foo: 'bar' }` succeeds without changing rendering. Empty
+containers and nulls do not count; `{ page: {} }` and `{ page: { color: null } }`
+fail. Apply this check to each file before later layers are merged, so an
+overridden file is not mistaken for an empty one. Inline `style='{}'` remains
+a valid no-op; the empty-file safeguard belongs only to `--style` files.
+
+Prepare and validate explicitly supplied styles for every output target,
+including Markdown and the data family, so a bad setter never appears to
+succeed merely because no styled page was needed. Plain Markdown and a data
+result's `document` retain their existing source-output behavior: CLI styles
+neither enter the serialized frontmatter nor create a page or read CSS there.
+Keep the existing target-dependent handling of authored style warnings;
+explicit CLI warnings and failures are always reported. Run preparation only
+after the report sink is available for data output, and complete it before
+printing a document or opening an artifact for `--show`.
+
 Opening and reading a `--style` file is execution. Missing, unreadable,
 unsupported-format, or invalid-content files, and the failing cases in the `--style`
 rules above, fail with exit 1 and the existing run diagnostics. Its unknown-key warnings
-are ordinary diagnostics: on stderr, or in `diagnostics` for a data output. For `--output json|yaml|toml`, return the
+are ordinary diagnostics: on stderr, or in `diagnostics` for a data output. For `--output json|json5|yaml|toml`, return the
 one failed result and keep stderr empty, as required by the data-output
 contract. Retain the typed file-reference `failure:` information. Do not
 turn these failures into pre-parse exit-2 messages. Stylesheet reads occur
@@ -736,14 +835,33 @@ broadcasts; replacing `--align-lists` needs values for `ul`, `ol`, and `li`.
 | `max=40` | `style.table.max-width=40` |
 | `explicit=50` | `style.table.width=50` |
 | `full` | `style="{ table: { width: 'auto', padding: 0 } }"` |
-| `pad=4` | `style.table.padding-left=4 style.table.padding-right=4` |
-| `indent=4` | `style.ul.padding-left=4`, or `padding-right` for a right-aligned component |
+| `pad=4` | `style="{ table: { padding: 0, 'padding-left': 4, 'padding-right': 4 } }"` |
+| `indent=4` | `style="{ ul: { padding: 0, 'padding-left': 4 } }"`, or `padding-right` for a right-aligned component; use both sides for a centered component |
 
 - `full` needs no reset syntax: setting `width` removes an inherited `max-width`
   under the cross-field rule above.
 - `indent`'s automatic side is given up: the caller names the side.
+- `pad` and `indent` reset padding before setting the horizontal sides, matching
+  the old fill operation's replacement of the whole padding value. Setting only
+  the sides would incorrectly retain inherited vertical padding. Component
+  `padding` expands before `padding-left`/`padding-right` within each layer, just
+  as page spacing shorthands do.
 - The broadcast `--fill max=60` has no single replacement; list each component,
   or keep the list in a style file.
+- [`PageComponent::ALL`](../../lib/src/layout/types.rs) also includes horizontal rules,
+  hyperlinks, and disclosures, which only the global `--fill` reached. Measured
+  2026-11-06: hyperlinks showed no change from any mode, and disclosures use the shared
+  component style, so they take the keys above. For rules, `max` and `explicit` already
+  match `hr.max-width` and `hr.width`, and `full` showed no change from the default.
+
+> **Decided (2026-11-06). `hr` gains real padding, and its schema lists only what it
+> honors.** `pad` and `indent` move a rule in a terminal (`--fill pad=4` gives 4 cells in,
+> 42 wide), and no style key could say so. Add `padding`, `padding-left`, and
+> `padding-right` to [`HrStyle`](../../lib/src/style/schema/hr.rs), which takes the same
+> padding replacement as the table above; the lowering already exists through the
+> component policy. Remove `margin`, `border`, `emphasis`, and `word-wrap` from `hr` in the
+> [embedded schema](../../schemas/partials/style.yaml): `HrStyle` has no field for them, so
+> they validate and do nothing, and Tab would offer them.
 
 ### 2. The shape of a style value
 
@@ -869,6 +987,9 @@ has determined its role.
   still bounds the box according to the existing output-width contract.
 - `style.margin=4` gives the same output as `style="{ margin: 4 }"`.
 - A setter or `--style` file that sets one key keeps the document's other `style:` keys.
+- Sparse border overrides keep earlier color and weight values; parser defaults
+  never erase fields supplied by another layer. Repeated whole-object setters
+  and equivalent-path conflicts behave as specified under `--style`.
 - `--style=style@style.yaml` applies that key's value, and each row of the `--style`
   rules table has a test, in JSON, JSON5, YAML, and TOML where the format matters.
 - `page.margin-left` and its siblings are accepted, and `page.left-margin` warns as an
@@ -892,14 +1013,16 @@ has determined its role.
   after equivalent effective-style behavior is covered, or the author-approved
   losses and retained machinery are explicitly recorded.
 - No-input handling, stdin, command-name inputs, and argument terminators
-  behave the same for both render spellings, as the author selects above.
-- Styles do not alter authored frontmatter or make rendering run cleanup;
+  behave the same for both render spellings, as decided under “No input, and help”.
+- Styles do not alter authored frontmatter or change rendering's existing cleanup;
   plain and data output retain their existing capability and stream contracts.
 - Invalid style values, style-file failures, and stylesheet execution failures
   exit 1 with the existing structured failure result when data output is selected.
 - The migration retains valid command-local `--save`, `--theme`, and
   `--code-block` spellings. Completion never executes style preparation or
   reads a style file.
+- `style.hr.padding-left=4` moves a rule as `--fill indent=4` did, and `style.hr.margin=4`
+  fails as an unknown property. The migration table covers every old broadcast target.
 
 ## Tests
 
@@ -911,8 +1034,8 @@ the current testing and CI input-discovery conventions; no new CI matrix or
 performance gate is required by this feature.
 
 - **Parity, generated** (`cli/tests/l1/render_alias_parity.rs`): iterate
-  `md render`'s arguments from the clap command, plus setters from the style
-  catalog, use representative values from the shared type information
+  `md render`'s arguments from the clap command, plus setters from the effective
+  style schema, use representative values from the shared type information
   (plus explicit valid combinations for conflicts), and assert that `md …` and
   `md render …` parse to equal `RenderOptions`. A new render option is
   covered without editing the test’s option inventory. Assert effective
@@ -929,7 +1052,9 @@ performance gate is required by this feature.
 - **Completion:** in-process through `clap_complete::engine::complete`:
   `style.` yields `style.page.`; `style.ul.` yields `style.ul.padding-left=`;
   `style.ul.alignment=` yields its values; `--` yields no per-key flag. Each
-  shell's script is proven for completing after `=`, without taking focus.
+  supported shell uses the scripts and completion-after-`=` evidence provided
+  by `2026-11-06-dotted-paths`; add render-specific wiring coverage here without
+  duplicating that dependency's whole shell matrix. No test takes focus.
 - **Setters:** classification (`./`, `--`, more than one input, a setter before a
   subcommand, a value holding `=`, a suggestion for a misspelled prefix); semantic
   schema/parser/typed-value agreement; compound and union branches, booleans,
@@ -941,13 +1066,28 @@ performance gate is required by this feature.
   nested duplicate spellings, width-mode replacement, null absence,
   explicit zero/false, and `style.alignment` overriding a document's `table.alignment`, unless the same source
   also sets `table.alignment`.
+- **Sparse values:** partial border objects preserve earlier weight and color;
+  required style fields can be supplied by different layers; equivalent-path
+  conflicts fail, while repeated exact paths and whole-object setters retain
+  their specified last value. Distinguish scalar-to-object style-union selection
+  from ordinary property-editor traversal.
 - **Validation:** `style="{ magin: 4 }"`, `style="{ margin: "`, and
   `style.margin=abc` each exit 1 with the matching `dm.schema.*` code and the key path. Parse every
-  valid JSON5 example in this spec; test duplicate keys, wrong root types,
+  valid inline example in this spec through the shared JSON5/YAML-flow value
+  parser; test duplicate keys, wrong root types,
   invalid overridden layers, vertical-length limits, and forbidden width pairs.
+- **Custom schemas and output targets:** an admitted custom key has no unknown-key
+  warning and no rendering effect; widening a known field's schema cannot bypass
+  its runtime validation. Schema selection uses the original document and performs
+  no composition. Bad CLI styles fail for Markdown and every data format as well
+  as styled outputs; source outputs perform no stylesheet read and never serialize
+  the CLI layer. An admitted cleanup-only file, a null-only file, an empty nested
+  mapping, and an inline empty object follow their different documented rules.
 - **File form:** `--style ./dark.yaml`, `--style style@dark.yaml`, and
   `--style '@dark.json5'` apply in a controlled magic-root context. Cover
-  each format, offsets, relative CSS paths from document/inline/file origins,
+  each format and its duplicate-key policy, offsets (including escaped dots and
+  existing array indexes), `@` in explicit paths, native Windows path syntax,
+  relative CSS paths from document/inline/file origins,
   field-origin preservation across multiple files, stdin Markdown plus local
   style, malformed files, missing files, unsupported extensions, `--style -`,
   and remote style-file refusal without a network request. Check data-output
@@ -983,7 +1123,10 @@ performance gate is required by this feature.
   line; the alias rule in the opening paragraph.
 - **`darkmatter/docs/topics/layouts-and-style.md`:** rewrite "CLI Overrides"
   around `--style`; add the accepted shorthand and presentation keys to the
-  frontmatter sections.
+  frontmatter sections. Explain sparse merging, repeated whole-object setters,
+  the per-format duplicate-key rules, and the distinction between admitting a
+  custom style value and implementing a rendering feature. State that CLI
+  cleanup-rule values have no effect on render's existing cleanup.
 - **`darkmatter/docs/rendering/style.md`, `rendering/mermaid.md`,
   `rendering/code-highlighting.md`:** replace old flag spellings.
 - **`darkmatter/docs/cli/policy.md`:** `--deny style` makes a `--style` file's excluded
