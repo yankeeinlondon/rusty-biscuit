@@ -78,6 +78,7 @@ fn a_record_with_no_reference_details_omits_those_fields() {
         span: None,
         iteration_path: Default::default(),
         reference_details: None,
+        data_location: None,
     };
 
     assert_eq!(

@@ -69,6 +69,21 @@ pub(crate) fn file_reference_diagnostic(
     }
 }
 
+/// The failure of `function` for a remote read of `raw` that returned no
+/// text: a host the policy refuses is a typed file-reference failure, any
+/// other failure keeps the remote runtime's wording.
+pub(crate) fn remote_text_error(
+    function: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+    error: RemoteTextError,
+) -> ExpressionError {
+    match error {
+        RemoteTextError::Denied => file_reference_error(function, raw, ctx, FileRefFailure::RemoteDenied, None),
+        RemoteTextError::Failed(message) => expression_other(function, message),
+    }
+}
+
 pub(crate) fn resolve_arg(
     function: &'static str,
     raw: &str,
@@ -196,7 +211,7 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
                 "file_exists() cannot read remote URL {raw:?}: this resolution \
                  context is local-only (no remote runtime)"
             ))),
-            Err(message) => Err(expression_other("file_exists", message)),
+            Err(error) => Err(remote_text_error("file_exists", raw, ctx, error)),
         };
     }
     let found = resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
@@ -989,10 +1004,7 @@ pub(super) fn load_markdown(
     // mirroring how `::file`/`::code` directives resolve remote targets.
     if is_remote_url(raw) {
         record_url_read(ctx, raw);
-        return match ctx
-            .fetch_remote_text(raw)
-            .map_err(|message| expression_other(fname, message))?
-        {
+        return match ctx.fetch_remote_text(raw).map_err(|error| remote_text_error(fname, raw, ctx, error))? {
             Some(body) => Markdown::try_from_content(body).map_err(|e| {
                 expression_other(fname, format!("{fname}() failed to parse {raw:?}: {e}"))
             }),

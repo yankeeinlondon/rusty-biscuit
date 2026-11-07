@@ -4,15 +4,17 @@ use crate::args::Cli;
 use crate::commands::validate::report_failure_diagnostics;
 use crate::io::open_argument;
 use crate::output::command::{CommandRun, Completed, DataShape};
+use crate::output::report::ClassifiedFailure;
 use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::output::{OutputTarget, WidthRequest, render_output};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource};
 use darkmatter::markdown::output::command::{CommandValue, code_document};
-use darkmatter::markdown::reference::file_tree::FileTree;
+use darkmatter::markdown::reference::file_tree::{FileTree, FileTreeError};
 use darkmatter::markdown::reference::validate::ValidationReportView;
 use renderable::{CommandOutput as _, OutputOptions, TerminalProfile, Width};
 use serde_json::Value;
@@ -57,7 +59,13 @@ fn graph_value(
         tree = tree.validate();
     }
 
-    tree.ensure_built().map_err(|e| eyre!("{e}"))?;
+    // A document that fails to prepare keeps its own records (an expression's
+    // location, a data file's `data_location`); the message, and so stderr, is
+    // the tree error's text as before.
+    tree.ensure_built().map_err(|error| match &error {
+        FileTreeError::Markdown(markdown) => ClassifiedFailure::report(eyre!("{error}"), error_diagnostics(markdown)),
+        _ => eyre!("{error}"),
+    })?;
 
     let report = validate.then(|| tree.validation_report().cloned()).flatten();
     let mut data = match tree.graph() {

@@ -158,6 +158,7 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         span: None,
         iteration_path: Default::default(),
         reference_details: None,
+        data_location: None,
     }
 }
 

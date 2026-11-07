@@ -69,6 +69,7 @@ fn a_category_3_call_composes_with_a_located_warning() {
         span: None,
         iteration_path: Default::default(),
         reference_details: None,
+        data_location: None,
     };
     assert_eq!(found, [&expected(position_of(content, "label, 9", 0)), &expected(position_of(content, "label, 5", 0))]);
     let warning = report.warnings.iter().find(|warning| warning.diagnostic.is_some()).unwrap();

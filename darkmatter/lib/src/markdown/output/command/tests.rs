@@ -191,6 +191,7 @@ fn envelope() -> DocumentEnvelope {
         summary: None,
         perf: None,
         lifecycle_output: Vec::new(),
+        read_set: Vec::new(),
     }
 }
 
@@ -199,7 +200,7 @@ fn the_envelope_serializes_in_order_with_nulls_and_without_perf() {
     let json = serde_json::to_string(&envelope()).expect("json");
     assert_eq!(
         json,
-        r#"{"file":null,"outcome":"success","document":null,"diagnostics":[],"summary":null,"lifecycle_output":[]}"#
+        r#"{"file":null,"outcome":"success","document":null,"diagnostics":[],"summary":null,"lifecycle_output":[],"read_set":[]}"#
     );
 }
 
@@ -232,7 +233,7 @@ fn the_envelope_serializes_perf_and_lifecycle_when_present() {
     let keys: Vec<&str> = json.as_object().expect("object").keys().map(String::as_str).collect();
     assert_eq!(
         keys,
-        ["file", "outcome", "document", "diagnostics", "summary", "perf", "lifecycle_output"]
+        ["file", "outcome", "document", "diagnostics", "summary", "perf", "lifecycle_output", "read_set"]
     );
     assert_eq!(json["outcome"], "failure");
     assert_eq!(json["summary"]["broken"], 1);

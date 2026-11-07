@@ -54,6 +54,10 @@ pub enum FileRefFailure {
     FoundElsewhere,
     /// A remote URL reference was used where no remote runtime is enabled.
     RemoteNotEnabled,
+    /// The run's fetch policy does not allow the URL's host, so nothing was
+    /// requested. Unlike [`RemoteNotEnabled`](Self::RemoteNotEnabled), no
+    /// later pass of the same run can read it.
+    RemoteDenied,
 }
 
 impl FileRefFailure {
@@ -100,6 +104,7 @@ impl FileRefFailure {
             FileRefFailure::NotFound => "not_found",
             FileRefFailure::FoundElsewhere => "found_elsewhere",
             FileRefFailure::RemoteNotEnabled => "remote_not_enabled",
+            FileRefFailure::RemoteDenied => "remote_denied",
         }
     }
 }
@@ -445,6 +450,16 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
                 diagnostic.function, diagnostic.reference
             )
         }
+        // Worded as the remote runtime's policy refusal, which this failure
+        // replaced as untyped text.
+        (FileRefFailure::RemoteDenied, _) => format!(
+            "{}(): remote read denied for host '{}'",
+            diagnostic.function,
+            url::Url::parse(&diagnostic.reference)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_string))
+                .unwrap_or_default()
+        ),
         _ => crate::markdown::errors::with_hint_line(
             format!("invalid file path: {}", diagnostic.reference),
             diagnostic.glob_hint(),
@@ -453,6 +468,23 @@ fn display_file_reference(diagnostic: &FileReferenceDiagnostic) -> String {
 }
 
 impl FileReferenceDiagnostic {
+    /// The biscuit-file class of this failure: its typed cause's class when
+    /// it has one, otherwise the class its kind implies (a clean miss is
+    /// [`NoMatch`](biscuit_file::ResolutionFailure::NoMatch), a remote read
+    /// that cannot run is
+    /// [`UnsupportedRemote`](biscuit_file::ResolutionFailure::UnsupportedRemote)).
+    pub fn resolution_failure(&self) -> biscuit_file::ResolutionFailure {
+        use biscuit_file::ResolutionFailure;
+        if let Some(source) = &self.source {
+            return source.resolution_failure();
+        }
+        match self.kind {
+            FileRefFailure::Malformed => ResolutionFailure::InvalidReference,
+            FileRefFailure::NotFound | FileRefFailure::FoundElsewhere => ResolutionFailure::NoMatch,
+            FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied => ResolutionFailure::UnsupportedRemote,
+        }
+    }
+
     /// The literal-glob hint for a clean miss (a [`FileRefFailure::NotFound`]
     /// with no underlying error) of a reference whose text looks like a glob;
     /// see [`biscuit_file::ResolutionFailure::glob_hint`].
@@ -738,6 +770,7 @@ mod tests {
                 FileRefFailure::RemoteNotEnabled.as_str(),
                 "remote_not_enabled"
             );
+            assert_eq!(FileRefFailure::RemoteDenied.as_str(), "remote_denied");
             assert_ne!(FileRefFailure::NotFound.as_str(), "NotFound");
         }
     }

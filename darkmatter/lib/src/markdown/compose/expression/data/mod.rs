@@ -5,6 +5,8 @@
 //! - [`error`] holds [`DataError`], the typed failure kept until diagnostic
 //!   projection.
 //! - [`parse`] decodes and parses one data document in its format.
+//! - `locate` places a contract violation in its source text and in file
+//!   order, for diagnostic projection.
 //! - [`load`] is the `load_data` function: resolve, read through the memo,
 //!   parse, and bind to the contract.
 //! - [`runtime`] holds [`DataRuntime`], the command-wide memo and read set
@@ -13,6 +15,7 @@
 pub mod contract;
 pub mod error;
 pub mod load;
+pub(crate) mod locate;
 pub mod parse;
 pub mod runtime;
 

@@ -24,7 +24,7 @@ fn report_of(output: &std::process::Output) -> Value {
         .unwrap_or_else(|error| panic!("stdout is not JSON ({error}): {stdout}"));
     assert!(stream.next().is_none(), "one object only: {stdout}");
     let keys: Vec<&str> = report.as_object().expect("an object").keys().map(String::as_str).collect();
-    assert_eq!(keys, ["file", "outcome", "document", "diagnostics", "summary", "lifecycle_output"], "{report:#}");
+    assert_eq!(keys, ["file", "outcome", "document", "diagnostics", "summary", "lifecycle_output", "read_set"], "{report:#}");
     for diagnostic in report["diagnostics"].as_array().expect("an array") {
         let keys: Vec<&str> = diagnostic.as_object().expect("an object").keys().map(String::as_str).collect();
         let (shared, details) = keys.split_at(8);
@@ -34,7 +34,7 @@ fn report_of(output: &std::process::Output) -> Value {
             "{diagnostic:#}"
         );
         assert!(
-            details.iter().all(|key| ["reason", "construct", "reference", "failure", "included_via"].contains(key)),
+            details.iter().all(|key| ["reason", "construct", "reference", "failure", "included_via", "data_location"].contains(key)),
             "{diagnostic:#}"
         );
         if let Some(source) = diagnostic["source"].as_object() {
@@ -90,6 +90,7 @@ fn success_reports_the_document_the_markdown_output_prints() {
             "diagnostics": [],
             "summary": { "references": 0, "documents": 1, "ok": 0, "broken": 0 },
             "lifecycle_output": [],
+            "read_set": [],
         })
     );
     assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -153,6 +154,7 @@ fn a_rejected_call_reports_the_shared_record() {
             "diagnostics": expected,
             "summary": report["summary"],
             "lifecycle_output": [],
+            "read_set": [],
         })
     );
     assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
@@ -204,6 +206,7 @@ fn a_rejected_lifecycle_call_reports_the_shared_record() {
             "diagnostics": expected,
             "summary": null,
             "lifecycle_output": [],
+            "read_set": [],
         })
     );
     assert_eq!(report["diagnostics"][0]["code"], "dm.expression.incompatible_call");
@@ -475,6 +478,7 @@ fn a_lifecycle_run_writes_only_the_envelope_to_stdout() {
             "diagnostics": [],
             "summary": { "references": 0, "documents": 1, "ok": 0, "broken": 0 },
             "lifecycle_output": [{ "stage": "composed", "step": "stdout", "text": "from the lifecycle" }],
+            "read_set": [],
         })
     );
     assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));

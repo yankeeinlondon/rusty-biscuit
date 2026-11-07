@@ -25,6 +25,7 @@ mod compose_diagnostic_identity;
 mod compose_read_set;
 mod load_data_execution;
 mod load_data_passive;
+mod load_data_diagnostics;
 mod compose_setters;
 mod path_candidates;
 mod compose_expression_failure_contract;

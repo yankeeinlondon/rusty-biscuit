@@ -1511,7 +1511,7 @@ mod remote_transclusion_tests {
             .await
             .expect_err("a denied remote read must not read as a missing file");
         assert!(
-            format!("{error:?}").contains("remote read denied"),
+            error.to_string().contains("remote read denied"),
             "unexpected error: {error:?}"
         );
     }

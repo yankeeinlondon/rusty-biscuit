@@ -309,12 +309,14 @@ impl ResolutionContext {
     ///
     /// - `Ok(Some(body))` when the URL was fetched.
     /// - `Ok(None)` when no remote-fetch runtime is attached.
-    /// - `Err` when the URL is malformed, denied by policy, or the fetch failed.
-    pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, String> {
+    /// - [`RemoteTextError::Denied`] when the fetch policy does not allow the
+    ///   URL's host, and [`RemoteTextError::Failed`] when the URL is malformed
+    ///   or the fetch failed.
+    pub(crate) fn fetch_remote_text(&self, raw: &str) -> Result<Option<String>, RemoteTextError> {
         let Some(rf) = self.remote_fetch.as_ref() else {
             return Ok(None);
         };
-        let url = url::Url::parse(raw).map_err(|e| format!("invalid URL {raw:?}: {e}"))?;
+        let url = url::Url::parse(raw).map_err(|e| RemoteTextError::Failed(format!("invalid URL {raw:?}: {e}")))?;
         if let Ok(Some(body)) = rf.get_content(&url) {
             return Ok(Some(body));
         }
@@ -323,10 +325,22 @@ impl ResolutionContext {
         rf.register_nested(url.clone());
         match rf.get_content(&url) {
             Ok(Some(body)) => Ok(Some(body)),
-            Ok(None) => Err(format!("remote URL {raw:?} could not be fetched")),
-            Err(e) => Err(e),
+            Ok(None) => Err(RemoteTextError::Failed(format!("remote URL {raw:?} could not be fetched"))),
+            // The slot keeps only the runtime's text, and a host the policy
+            // refuses is never requested, so the policy itself classifies it.
+            Err(_) if url.host_str().is_some_and(|host| !rf.policy().is_allowed(host)) => Err(RemoteTextError::Denied),
+            Err(e) => Err(RemoteTextError::Failed(e)),
         }
     }
+}
+
+/// Why [`ResolutionContext::fetch_remote_text`] returned no text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RemoteTextError {
+    /// The run's fetch policy does not allow the URL's host.
+    Denied,
+    /// Any other failure, worded by the remote runtime.
+    Failed(String),
 }
 
 /// Returns `true` when the argument is an HTTP(S) URL (handled remotely rather
@@ -658,7 +672,7 @@ mod tests {
         })
         .await
         .unwrap();
-        assert!(result.is_err());
+        assert_eq!(result, Err(super::RemoteTextError::Denied));
     }
 
     #[test]

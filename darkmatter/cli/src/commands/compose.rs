@@ -333,7 +333,11 @@ pub fn run_compose(
     // the lifecycle, pre-flight, and composition below all clone these
     // options, so a file is read once across them and every pass's reads are
     // reported together.
-    options = options.with_shared_data_runtime();
+    let data_runtime = darkmatter::markdown::compose::DataRuntime::new();
+    if let Some(sink) = sink {
+        sink.reads_from(&data_runtime);
+    }
+    options = options.with_data_runtime(data_runtime);
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
         ComposeRequest::with_context(options, file_resolution_context.clone())
             .wrap_err("Failed to prepare the compose request")

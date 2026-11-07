@@ -303,8 +303,15 @@ impl NestedCompose {
         let mut report = match result {
             Ok(report) => report,
             Err(error) => {
+                let structural = is_structural(&error);
+                // Unless a structural failure replaces it, a data failure
+                // keeps its type, so the caller reports its `dm.data.*`
+                // records at the `as_markdown` call.
+                if !structural && let Some(data) = data_failure(&error) {
+                    return Err(ExpressionError::Data(data));
+                }
                 let message = format!("nested composition failed: {error}");
-                if is_structural(&error) && outcome.restored.is_none() {
+                if structural && outcome.restored.is_none() {
                     outcome.restored = Some(error);
                 }
                 return Err(violation(message));
@@ -356,6 +363,21 @@ fn is_structural(error: &MarkdownError) -> bool {
         // the request however a fallback handles the call that raised them.
         || matches!(error, MarkdownError::Collection(_))
         || matches!(error, MarkdownError::BlockedDiagnostics { .. })
+}
+
+/// The `load_data` failure anywhere in `error`'s source chain.
+fn data_failure(error: &MarkdownError) -> Option<Arc<super::expression::data::DataError>> {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = current {
+        let expression = cause
+            .downcast_ref::<ExpressionError>()
+            .or_else(|| cause.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+        if let Some(ExpressionError::Data(data)) = expression.map(ExpressionError::without_callbacks) {
+            return Some(data.clone());
+        }
+        current = cause.source();
+    }
+    None
 }
 
 fn violation(message: String) -> ExpressionError {

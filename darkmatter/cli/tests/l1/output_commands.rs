@@ -666,9 +666,10 @@ fn conforms_schema_about_carries_the_whole_catalog_at_any_verbosity() {
 #[test]
 fn every_schema_file_shares_one_diagnostic_type() {
     let compose = include_str!("../../schemas/output/compose.yaml");
+    // A diagnostic's `data_location` is a named type of its own, shared too.
     let block = |text: &'static str| -> serde_json::Value {
         let document: serde_json::Value = serde_yaml_ng::from_str(text).expect("YAML");
-        document["types"]["diagnostic"].clone()
+        serde_json::json!({ "diagnostic": document["types"]["diagnostic"], "data-location": document["types"]["data-location"] })
     };
     let expected = block(compose);
     for (name, text) in [
@@ -691,8 +692,8 @@ fn every_schema_file_shares_one_diagnostic_type() {
         let mut actual = block(text);
         let mut wanted = expected.clone();
         // Only the example in `code`'s description differs between files.
-        actual["code"] = Value::Null;
-        wanted["code"] = Value::Null;
+        actual["diagnostic"]["code"] = Value::Null;
+        wanted["diagnostic"]["code"] = Value::Null;
         assert_eq!(actual, wanted, "{name}");
     }
 }

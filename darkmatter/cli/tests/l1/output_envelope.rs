@@ -307,13 +307,22 @@ fn conforms_with_a_null_file_for_stdin_and_a_failure_location() {
 #[test]
 fn the_schema_refuses_a_payload_outside_the_contract() {
     let schema = SimplifiedSchema::try_from(include_str!("../../schemas/output/compose.yaml")).expect("the schema file parses");
-    let valid = json!({ "outcome": "success", "document": "x", "diagnostics": [], "lifecycle_output": [] });
+    let valid = json!({ "outcome": "success", "document": "x", "diagnostics": [], "lifecycle_output": [], "read_set": [] });
     assert!(schema.validate_strict(&valid).is_ok());
+    let located = |data_location: Value| {
+        json!({ "outcome": "failure", "diagnostics": [{ "code": "x", "severity": "error", "message": "m", "iteration_path": [], "data_location": data_location }], "lifecycle_output": [], "read_set": [] })
+    };
+    assert!(schema.validate_strict(&located(json!({ "file": "/d.json", "pointer": "/0", "line": 1, "column": 2 }))).is_ok());
+    assert!(schema.validate_strict(&located(json!({ "file": "/d.csv", "byte_offset": 7 }))).is_ok());
     for invalid in [
-        json!({ "outcome": "maybe", "diagnostics": [], "lifecycle_output": [] }),
-        json!({ "outcome": "success", "lifecycle_output": [] }),
-        json!({ "outcome": "success", "diagnostics": [], "lifecycle_output": [{ "stage": "composed" }] }),
-        json!({ "outcome": "success", "diagnostics": [{ "code": "x", "severity": "warn", "message": "m", "iteration_path": [] }], "lifecycle_output": [] }),
+        json!({ "outcome": "maybe", "diagnostics": [], "lifecycle_output": [], "read_set": [] }),
+        json!({ "outcome": "success", "lifecycle_output": [], "read_set": [] }),
+        json!({ "outcome": "success", "diagnostics": [], "lifecycle_output": [{ "stage": "composed" }], "read_set": [] }),
+        json!({ "outcome": "success", "diagnostics": [{ "code": "x", "severity": "warn", "message": "m", "iteration_path": [] }], "lifecycle_output": [], "read_set": [] }),
+        json!({ "outcome": "success", "diagnostics": [], "lifecycle_output": [] }),
+        json!({ "outcome": "success", "diagnostics": [], "lifecycle_output": [], "read_set": [1] }),
+        located(json!({ "pointer": "/0" })),
+        located(json!({ "file": "/d.json", "offset": 3 })),
     ] {
         assert!(schema.validate_strict(&invalid).is_err(), "{invalid:#}");
     }
@@ -988,4 +997,173 @@ fn stderr_has_its_own_width_on_a_terminal() {
         .expect("a valid width");
     assert_eq!(resolved.options.width, Width::Columns(90));
     assert_eq!(environment.stderr_options(&environment.stderr_terminal()).width, Width::Columns(33));
+}
+
+// ── Read set and data location ─────────────────────────────────────────────
+
+/// How the read set names a file that exists: its canonical path, with `/`.
+fn read_entry(path: &Path) -> String {
+    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).expect("the file exists"))
+}
+
+/// Runs `args` with `--output json` and returns the one value, after requiring
+/// an empty stderr and the exit status `status`.
+#[track_caller]
+fn json_run(fixture: &CliProcessFixture, args: &[&str], status: i32) -> Value {
+    let output = fixture.command().args(args).args(["--output", "json"]).output().expect("md runs");
+    assert!(output.stderr.is_empty(), "{}", stderr_of(&output));
+    let envelope = parse_data("json", &stdout_of(&output));
+    assert_eq!(output.status.code(), Some(status), "{envelope:#}");
+    envelope
+}
+
+#[test]
+fn compose_reports_every_expression_read_sorted() {
+    let fixture = CliProcessFixture::named("read_set_success");
+    let child = fixture.write_file("cwd/b.md", "---\ntitle: Child\n---\n");
+    fixture.write_file("cwd/doc.md", "{{ frontmatter(\"b.md\").title }} {{ file_exists(\"c.md\") }} {{ file_exists(\"b.md\") }}\n");
+
+    let envelope = json_run(&fixture, &["compose", "doc.md"], 0);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_eq!(envelope["document"].as_str().map(str::trim_end), Some("Child false true"), "{envelope:#}");
+    // `c.md` does not exist: the read set names the path `file_exists` probed.
+    let probed = format!("{}/c.md", read_entry(fixture.cwd()));
+    assert_eq!(envelope["read_set"], json!([read_entry(&child), probed]), "{envelope:#}");
+}
+
+#[test]
+fn compose_without_reads_reports_an_empty_read_set() {
+    let envelope = conform(include_str!("../../schemas/output/compose.yaml"), "read_set_empty", Some(GOOD), &["compose", "doc.md"], Expect::Success);
+    assert_eq!(envelope["read_set"], json!([]), "{envelope:#}");
+}
+
+/// A read-side function's missing file is an expression failure that also
+/// carries the reference fields a broken link has.
+#[test]
+fn a_failed_frontmatter_read_reports_its_reference_details() {
+    let envelope = conform(
+        include_str!("../../schemas/output/compose.yaml"),
+        "read_set_missing_frontmatter",
+        Some("Value: {{ frontmatter(\"missing.md\").title }}\n"),
+        &["compose", "doc.md"],
+        Expect::Failure,
+    );
+    assert!(envelope["read_set"].is_array(), "{envelope:#}");
+    let record = &envelope["diagnostics"][0];
+    assert_eq!(record["code"], "dm.expression.evaluation_failure", "{envelope:#}");
+    assert_eq!(record["construct"], "frontmatter()", "{record:#}");
+    assert_eq!(record["reference"], "missing.md", "{record:#}");
+    assert!(record["reason"].is_string(), "{record:#}");
+    assert!(record["failure"].is_string(), "{record:#}");
+}
+
+/// The reference check reads the data before composition starts, so its
+/// failure has no reference totals and still names the file it read.
+#[test]
+fn a_malformed_data_file_failing_the_reference_check_is_in_the_read_set() {
+    let fixture = CliProcessFixture::named("read_set_reference_check");
+    let data = fixture.write_file("cwd/bad.json", "{\"a\": 1,\n");
+    fixture.write_file("cwd/doc.md", "{{ load_data(\"bad.json\", \"string[]\") }}\n");
+
+    let envelope = json_run(&fixture, &["compose", "doc.md"], 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_eq!(envelope["outcome"], "failure", "{envelope:#}");
+    assert_eq!(envelope["summary"], Value::Null, "the check stopped: {envelope:#}");
+    assert_eq!(envelope["read_set"], json!([read_entry(&data)]), "{envelope:#}");
+}
+
+/// `[1, "x"]` against `number[]`: one record, at `/1`, line 1, column 5.
+fn contract_mismatch(name: &str) -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named(name);
+    let data = fixture.write_file("cwd/ports.json", "[1, \"x\"]\n");
+    fixture.write_file("cwd/doc.md", "Ports: {{ load_data(\"ports.json\", \"number[]\") }}\n");
+    (fixture, data)
+}
+
+#[track_caller]
+fn assert_mismatch_record(envelope: &Value, data: &Path) {
+    let record = envelope["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .find(|record| record["code"] == "dm.data.contract_mismatch")
+        .unwrap_or_else(|| panic!("no contract mismatch: {envelope:#}"));
+    assert_eq!(
+        record["data_location"],
+        json!({ "file": read_entry(data), "pointer": "/1", "line": 1, "column": 5 }),
+        "{record:#}"
+    );
+    assert_eq!((&record["expected_type"], &record["actual_type"]), (&json!("number"), &json!("string")), "{record:#}");
+}
+
+#[test]
+fn conforms_compose_contract_mismatch_with_its_data_location() {
+    let (fixture, data) = contract_mismatch("data_location_compose");
+    let envelope = json_run(&fixture, &["compose", "doc.md"], 1);
+    validate_strictly(include_str!("../../schemas/output/compose.yaml"), &envelope);
+    assert_mismatch_record(&envelope, &data);
+    assert_eq!(envelope["read_set"], json!([read_entry(&data)]), "{envelope:#}");
+}
+
+/// Graph preparation evaluates the document's expressions.
+#[test]
+fn conforms_graph_contract_mismatch_with_its_data_location() {
+    let (fixture, data) = contract_mismatch("data_location_graph");
+    let envelope = json_run(&fixture, &["graph", "doc.md"], 1);
+    validate_strictly(include_str!("../../schemas/output/graph.yaml"), &envelope);
+    assert_mismatch_record(&envelope, &data);
+}
+
+#[test]
+fn conforms_validate_refs_contract_mismatch_with_its_data_location() {
+    let (fixture, data) = contract_mismatch("data_location_validate_refs");
+    let envelope = json_run(&fixture, &["validate", "refs", "doc.md"], 1);
+    validate_strictly(include_str!("../../schemas/output/validate-refs.yaml"), &envelope);
+    assert_mismatch_record(&envelope, &data);
+}
+
+/// `md render` evaluates no expression, so a `load_data` call is text and the
+/// read set is empty.
+#[test]
+fn conforms_render_with_an_empty_read_set_and_no_evaluation() {
+    let (fixture, _) = contract_mismatch("read_set_render");
+    let envelope = json_run(&fixture, &["render", "doc.md"], 0);
+    validate_strictly(include_str!("../../schemas/output/render.yaml"), &envelope);
+    assert_eq!(envelope["read_set"], json!([]), "{envelope:#}");
+    assert!(envelope["document"].as_str().expect("a document").contains("load_data("), "{envelope:#}");
+}
+
+/// The stderr report of a missing `frontmatter()` file, exactly as it was
+/// before diagnostics carried reference details. Only the header icon, which
+/// the environment's icon support selects, is left out of the comparison.
+#[test]
+fn a_missing_frontmatter_file_reports_the_same_stderr_text() {
+    let fixture = with_document("read_set_stderr_unchanged", "---\ntitle: A\n---\nValue: {{ frontmatter(\"missing.md\").title }}\n");
+    let output = run(&fixture, &["compose", "doc.md"]);
+    assert_eq!(output.status.code(), Some(1), "{}", stderr_of(&output));
+    assert!(output.stdout.is_empty(), "{}", stdout_of(&output));
+    let document = biscuit_file::canonicalize_simplified(&fixture.cwd().join("doc.md")).expect("the document exists");
+    let expected = format!(
+        "MarkdownError: invalid file path\n\
+         ┃ \n\
+         ┃ A document expression references the file missing.md, which could not be resolved.\n\
+         ┃ \n\
+         ┃ Defined in:\n\
+         ┃ \n\
+         ┃ {}\n\
+         ┃ \n\
+         ┃ Expression at line: 4, column: 8\n\
+         ┃ \n\
+         ┃ ```markdown\n\
+         ┃   2 │ title: A\n\
+         ┃   3 │ ---\n\
+         ┃ > 4 │ Value: {{{{ frontmatter(\"missing.md\").title }}}}\n\
+         ┃ ```\n\
+         ┃ \n\
+         ┃ Confirm the path is correct, or guard an optional reference with `file_exists(...)` so a missing file is not treated as an error.\n",
+        document.display()
+    );
+    let stderr = stderr_of(&output);
+    let (_icon, report) = stderr.split_once(' ').unwrap_or_else(|| panic!("an icon, then the report: {stderr}"));
+    assert_eq!(report, expected);
 }

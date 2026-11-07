@@ -39,6 +39,7 @@ types:
         reference: string -> the reference as written
         failure: string -> file-reference failure class, e.g. no-match
         included_via: trail-step[] -> outermost first
+        data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
     source:
         file: string -> null for stdin
         line: number -> 1-based authored line; null when unknown
@@ -54,3 +55,9 @@ types:
     trail-step:
         file: string(required)
         line: number -> authored line of the directive; null when the parent was built in memory
+    data-location:
+        file: string(required) -> the resolved data file (portable path) or URL
+        pointer: string -> JSON Pointer of the offending value, e.g. /0; absent when the parser proves none
+        line: number -> 1-based line in the data
+        column: number -> 1-based column in the data, in characters
+        byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it

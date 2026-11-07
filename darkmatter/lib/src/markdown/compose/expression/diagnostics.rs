@@ -105,6 +105,7 @@ impl ExpressionDiagnostic {
             span: None,
             iteration_path: IterationPath::empty(),
             reference_details: None,
+            data_location: None,
         }
     }
 
@@ -136,6 +137,36 @@ pub struct Diagnostic {
     /// for every other family.
     #[serde(flatten)]
     pub reference_details: Option<ReferenceDetails>,
+    /// Where in a loaded data source the problem is, for a
+    /// `dm.data.malformed` or `dm.data.contract_mismatch` record; `None`
+    /// (and not serialized) for every other record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_location: Option<DataLocation>,
+}
+
+/// A position inside a data source read by `load_data`, as opposed to the
+/// call site in [`Diagnostic::source`].
+///
+/// Every field other than `file` is a fact a parser or locator proved; an
+/// unknown one is `None` and omitted from output, never a placeholder (a
+/// pointer is never `""` to mean "unknown"). `line` and `column` are
+/// 1-based and count characters of the BOM-stripped text, with LF or CRLF
+/// as the only line breaks. `byte_offset` is set only for local text that is
+/// not valid UTF-8; it is zero-based into the original bytes, and `line` and
+/// `column` are then absent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DataLocation {
+    /// The resolved data file as a portable path, or the normalized URL.
+    pub file: String,
+    /// RFC 6901 pointer to the offending value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pointer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub byte_offset: Option<usize>,
 }
 
 /// The start of a diagnostic's authored range.

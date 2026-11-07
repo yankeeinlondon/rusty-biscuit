@@ -1508,6 +1508,7 @@ fn file_reference_detail_serializes_kind_as_snake_case() {
         (FileRefFailure::Malformed, "malformed"),
         (FileRefFailure::FoundElsewhere, "found_elsewhere"),
         (FileRefFailure::RemoteNotEnabled, "remote_not_enabled"),
+        (FileRefFailure::RemoteDenied, "remote_denied"),
     ] {
         let err = file_ref_compose_error(FileReferenceDiagnostic {
             function: "frontmatter",

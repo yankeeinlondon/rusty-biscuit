@@ -873,6 +873,7 @@ impl ComposeWarning {
             span: None,
             iteration_path: Default::default(),
             reference_details: None,
+            data_location: None,
         };
         Self {
             stage: "schema_validation".to_string(),
@@ -933,6 +934,7 @@ impl ComposeWarning {
             span,
             iteration_path: Default::default(),
             reference_details: None,
+            data_location: None,
         };
         Self {
             stage: "link_titles".to_string(),

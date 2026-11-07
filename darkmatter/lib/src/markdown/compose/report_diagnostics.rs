@@ -18,6 +18,15 @@
 //! `iteration_path` its error holds, so every host reports the same
 //! provenance. Classification reads only the error and warning values: it
 //! evaluates nothing and reads no file.
+//!
+//! A failure caused by a read-side function's file reference keeps
+//! `dm.expression.evaluation_failure` and its message, and gains the
+//! reference fields (`reason`, `construct`, `reference`, `failure`). A
+//! `load_data` failure takes its `dm.data.*` code; a malformed document and
+//! each contract violation also carry a `data_location` inside the data, kept
+//! apart from `source`, which stays the call site. A contract mismatch
+//! reports one record per violating location in file order, at most
+//! [`CONTRACT_RECORD_CAP`] of them, then one record counting the rest.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -29,7 +38,12 @@ use super::TransclusionError;
 use super::conditions::ConditionError;
 use super::context::report::ComposeWarning;
 use super::expression::iteration::IterationPath;
-use super::expression::{Diagnostic, DiagnosticSource, ExpressionError, ReferenceDetails, Severity};
+use super::expression::data::locate::SourceLocator;
+use super::expression::data::{DataError, DataSourceLocation, TabularSource};
+use super::expression::{
+    DataLocation, Diagnostic, DiagnosticSource, ExpressionError, FileRefFailure, FileReferenceDiagnostic,
+    ReferenceDetails, Severity,
+};
 use super::page_blocks::PageBlockError;
 use super::shell_blocks::ShellBlockError;
 use super::shell_expansion::ShellCommandOrigin;
@@ -63,6 +77,13 @@ pub const LIFECYCLE_FAILURE_CODE: &str = "dm.lifecycle.failure";
 pub const COMPOSE_FAILURE_CODE: &str = "dm.compose.failure";
 /// A composition warning whose producer declares no code.
 pub const UNCODED_WARNING_CODE: &str = "dm.compose.warning";
+
+/// The most contract-violation records one `load_data` failure reports; one
+/// further record counts the violations past it.
+pub const CONTRACT_RECORD_CAP: usize = 20;
+
+/// The most lines of per-arm detail a union violation's message keeps.
+const UNION_DETAIL_LINES: usize = 6;
 
 /// `warning` as a shared record: its own record when it carries one,
 /// otherwise its code (or [`UNCODED_WARNING_CODE`]) and message, with its
@@ -142,6 +163,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
             failure: issue.resolution_failure().map(|failure| resolution_failure_name(failure).to_string()),
             included_via: Some(issue.included_via.clone()),
         }),
+        data_location: None,
     }
 }
 
@@ -154,7 +176,8 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 ///   call record; a lifecycle rejection first reports the lifecycle warnings
 ///   found before it. (A document rejection's earlier warnings travel beside
 ///   the error, in [`ComposeFailure::warnings`](super::ComposeFailure).)
-/// - A schema failure reports one record per problem.
+/// - A schema failure reports one record per problem, and a `load_data`
+///   contract mismatch one per violating location (see the module docs).
 /// - Any other Darkmatter error reports one record classified by its
 ///   innermost typed error; a foreign error reports [`INPUT_READ_CODE`] for an
 ///   I/O error and [`COMPOSE_FAILURE_CODE`] otherwise.
@@ -182,7 +205,8 @@ pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
             .downcast_ref::<ExpressionError>()
             .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref))
         {
-            return vec![unlocated(expression_code(expression), Severity::Error, expression.to_string())];
+            let record = unlocated(expression_code(expression), Severity::Error, expression.to_string());
+            return with_expression_cause(record, expression_cause(error));
         }
         current = error.source();
     }
@@ -285,11 +309,173 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                 span: None,
                 iteration_path: IterationPath::empty(),
                 reference_details: None,
+                data_location: None,
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
-        _ => vec![leaf_diagnostic(leaf)],
+        _ => with_expression_cause(leaf_diagnostic(leaf), expression_cause(leaf)),
     }
+}
+
+/// The deepest expression error in `error`'s source chain, callbacks
+/// unwrapped: the evaluation failure a stage's wrapper reports.
+fn expression_cause<'e>(error: &'e (dyn Error + 'static)) -> Option<&'e ExpressionError> {
+    let mut found = None;
+    let mut current = Some(error);
+    while let Some(cause) = current {
+        if let Some(expression) = cause
+            .downcast_ref::<ExpressionError>()
+            .or_else(|| cause.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref))
+        {
+            found = Some(expression.without_callbacks());
+        }
+        current = cause.source();
+    }
+    found
+}
+
+/// `record`, the failure's record, with what its expression `cause` adds:
+/// the reference fields of a file-reference failure, or a `load_data`
+/// failure's code and data positions (several records for a contract
+/// mismatch). Every record keeps `record`'s `source` and `span`.
+fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) -> Vec<Diagnostic> {
+    match cause {
+        Some(ExpressionError::FileReference(diagnostic)) => vec![with_file_reference(record, diagnostic)],
+        Some(ExpressionError::Data(data)) => data_records(record, data),
+        _ => vec![record],
+    }
+}
+
+fn with_file_reference(record: Diagnostic, diagnostic: &FileReferenceDiagnostic) -> Diagnostic {
+    let details = record.reference_details.clone().unwrap_or_else(|| file_reference_details(diagnostic));
+    Diagnostic { reference_details: Some(details), ..record }
+}
+
+/// A read-side function's failed file reference in the reference records'
+/// vocabulary. `reason` is left out for a class no reference phrase names
+/// (an I/O failure, a missing anchor, other invalid syntax).
+fn file_reference_details(diagnostic: &FileReferenceDiagnostic) -> ReferenceDetails {
+    use biscuit_file::{FileReferenceError, ResolutionFailure};
+    let failure = diagnostic.resolution_failure();
+    let reason = match (diagnostic.kind, failure, diagnostic.source.as_deref()) {
+        (FileRefFailure::RemoteNotEnabled | FileRefFailure::RemoteDenied, ..) => {
+            Some(ReferenceIssueCode::RemoteDisallowed)
+        }
+        (_, ResolutionFailure::NoMatch, _) => Some(ReferenceIssueCode::MissingLocalTarget),
+        (_, _, Some(FileReferenceError::UnsupportedScheme { .. })) => Some(ReferenceIssueCode::UnsupportedScheme),
+        (_, _, Some(FileReferenceError::InvalidUrl(_))) => Some(ReferenceIssueCode::InvalidUrl),
+        _ => None,
+    };
+    ReferenceDetails {
+        reason: reason.map(|code| code.reason_phrase().to_string()),
+        construct: Some(format!("{}()", diagnostic.function)),
+        reference: Some(diagnostic.reference.clone()),
+        failure: Some(resolution_failure_name(failure).to_string()),
+        included_via: None,
+    }
+}
+
+/// The records of a `load_data` failure reported at `record`'s site.
+fn data_records(record: Diagnostic, error: &DataError) -> Vec<Diagnostic> {
+    let Some(code) = error.code() else {
+        return match error {
+            DataError::FileReference(diagnostic) => vec![with_file_reference(record, diagnostic)],
+            _ => vec![record],
+        };
+    };
+    let record = Diagnostic { code: code.to_string(), ..record };
+    match error {
+        DataError::Malformed { identity, location, .. } => {
+            let DataSourceLocation { byte_offset, pointer, line, column } = location.clone();
+            let data_location = DataLocation { file: identity.read_set_entry(), pointer, line, column, byte_offset };
+            vec![Diagnostic { data_location: Some(data_location), ..record }]
+        }
+        DataError::ContractMismatch { identity, format, written, failure, text, table } => {
+            let mismatch = Mismatch { file: identity.read_set_entry(), written, text, table: table.as_ref() };
+            contract_records(record, &mismatch, *format, failure)
+        }
+        _ => vec![record],
+    }
+}
+
+/// What every record of one contract mismatch shares.
+struct Mismatch<'a> {
+    file: String,
+    written: &'a str,
+    text: &'a str,
+    table: Option<&'a TabularSource>,
+}
+
+impl Mismatch<'_> {
+    fn message(&self, detail: impl std::fmt::Display) -> String {
+        format!("load_data(): `{}` does not match `{}`: {detail}", self.file, self.written)
+    }
+}
+
+/// One record per violating location, in file order: by source position,
+/// then (for YAML the file cannot position, and for a missing member or
+/// slot) by parsed container order, the engine's declaration order breaking
+/// ties. Past [`CONTRACT_RECORD_CAP`], one record at the call site counts
+/// the rest.
+fn contract_records(
+    record: Diagnostic,
+    mismatch: &Mismatch<'_>,
+    format: biscuit_file::DataFormat,
+    failure: &simplified_schema::coercion::ConversionError,
+) -> Vec<Diagnostic> {
+    use simplified_schema::coercion::{ActualKind, FailureReason};
+    let mut locator = SourceLocator::new(format, mismatch.text, mismatch.table);
+    let mut placed: Vec<_> = failure
+        .located_failures()
+        .into_iter()
+        .map(|violation| {
+            let place = locator.place(&violation.failure.path, violation.actual == ActualKind::Missing);
+            let detail = violation.failure.to_string();
+            let detail = match violation.failure.reason {
+                FailureReason::NoOptionAccepts { .. } => cut_union_detail(&detail),
+                _ => detail,
+            };
+            let expected = if violation.pointer.is_empty() {
+                mismatch.written.to_string()
+            } else {
+                violation.expected.to_string()
+            };
+            let data_location = DataLocation {
+                file: mismatch.file.clone(),
+                pointer: Some(violation.pointer),
+                line: place.position.map(|(line, _)| line),
+                column: place.position.map(|(_, column)| column),
+                byte_offset: None,
+            };
+            let diagnostic = Diagnostic {
+                message: mismatch.message(detail),
+                expected_type: Some(expected),
+                actual_type: Some(violation.actual.as_str().to_string()),
+                data_location: Some(data_location),
+                ..record.clone()
+            };
+            (place.order, diagnostic)
+        })
+        .collect();
+    placed.sort_by(|left, right| left.0.cmp(&right.0));
+    let omitted = placed.len().saturating_sub(CONTRACT_RECORD_CAP);
+    let mut records: Vec<Diagnostic> = placed.into_iter().take(CONTRACT_RECORD_CAP).map(|(_, record)| record).collect();
+    if omitted > 0 {
+        let more = if omitted == 1 { "1 more violation is".to_string() } else { format!("{omitted} more violations are") };
+        records.push(Diagnostic { message: mismatch.message(format_args!("{more} not listed")), ..record });
+    }
+    records
+}
+
+/// `detail`, a union violation's text, with at most [`UNION_DETAIL_LINES`]
+/// lines after its first, and an ellipsis line when any were cut.
+fn cut_union_detail(detail: &str) -> String {
+    let mut lines = detail.lines();
+    let mut kept: Vec<&str> = lines.by_ref().take(1 + UNION_DETAIL_LINES).collect();
+    if lines.next().is_some() {
+        kept.push("    …");
+    }
+    kept.join("\n")
 }
 
 /// Where `source` is in its file and the bytes it covers: a file alone when
@@ -400,6 +586,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             MarkdownError::Reference(inner) => reference_error_details(inner),
             _ => None,
         },
+        data_location: None,
     }
 }
 
@@ -556,5 +743,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         span: None,
         iteration_path: IterationPath::empty(),
         reference_details: None,
+        data_location: None,
     }
 }

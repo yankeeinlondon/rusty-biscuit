@@ -315,7 +315,9 @@ pub(crate) fn interpolation_block(
             interpolation_block(key, expression, source, inner)
                 .hint(format!("Callback: {function}[{position}]"))
         }
-        ExpressionError::FileReference(diagnostic) => {
+        // A refused host was reported as a generic evaluation failure before
+        // it was typed, and still renders as one.
+        ExpressionError::FileReference(diagnostic) if diagnostic.kind != FileRefFailure::RemoteDenied => {
             let headline = match diagnostic.kind {
                 FileRefFailure::RemoteNotEnabled => "remote reference not enabled",
                 _ => "invalid file path",
@@ -793,6 +795,31 @@ mod tests {
             rendered: String::new(),
             origin_key: Some(key.to_string()),
         }
+    }
+
+    /// A refused host became a typed file-reference failure; its message and
+    /// block stay those of the untyped failure it replaced.
+    #[test]
+    fn a_denied_remote_host_renders_as_the_evaluation_failure_it_replaced() {
+        use crate::markdown::compose::expression::FileReferenceDiagnostic;
+
+        let denied = ExpressionError::FileReference(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "https://blocked.example/doc.md".to_string(),
+            kind: FileRefFailure::RemoteDenied,
+            cwd: PathBuf::from("/repo"),
+            fallback_dir: None,
+            source: None,
+            caller: None,
+        });
+        let untyped = ExpressionError::Other {
+            function: "frontmatter".to_string(),
+            message: "remote read denied for host 'blocked.example'".to_string(),
+        };
+        assert_eq!(denied.to_string(), untyped.to_string());
+        let source = effective_source("doc");
+        let block = |cause| render_block(&interpolation_block(None, "frontmatter(url)", &source, cause));
+        assert_eq!(block(&denied), block(&untyped));
     }
 
     #[test]

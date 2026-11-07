@@ -2,8 +2,8 @@
 //! failure, and nothing on stderr.
 //!
 //! [`ReportSink`] gathers each diagnostic when the run reports it (in discovery
-//! order), the document, the reference totals, the timings, and what lifecycle
-//! steps printed. [`ReportSink::finish`] adds the failure's diagnostics and
+//! order), the document, the reference totals, the timings, what lifecycle
+//! steps printed, and the read set. [`ReportSink::finish`] adds the failure's diagnostics and
 //! writes the envelope. Codes and messages come from the library's shared
 //! diagnostics (`darkmatter::markdown::compose::report_diagnostics`); this
 //! module only collects and serializes them. Nothing is evaluated or rendered
@@ -19,7 +19,7 @@ use darkmatter::markdown::compose::expression::{Diagnostic, Severity};
 use darkmatter::markdown::compose::report_diagnostics::{
     error_diagnostics, reference_issue_diagnostic, warning_diagnostic, with_document_fallback,
 };
-use darkmatter::markdown::compose::{ComposePerfReport, ComposeSource, ComposeWarning};
+use darkmatter::markdown::compose::{ComposePerfReport, ComposeSource, ComposeWarning, DataRuntime};
 use darkmatter::markdown::output::command::{
     DocumentEnvelope, LifecycleOutputEntry, Outcome, PerfData, PerfStage, ReferenceSummary,
 };
@@ -44,6 +44,7 @@ pub struct ReportSink {
     summary: Mutex<Option<ReferenceSummary>>,
     perf: Option<Mutex<Vec<PerfStage>>>,
     lifecycle: Mutex<Vec<LifecycleOutputEntry>>,
+    data_runtime: Mutex<Option<DataRuntime>>,
 }
 
 impl ReportSink {
@@ -64,7 +65,16 @@ impl ReportSink {
             summary: Mutex::new(None),
             perf: perf.then(|| Mutex::new(Vec::new())),
             lifecycle: Mutex::new(Vec::new()),
+            data_runtime: Mutex::new(None),
         }
+    }
+
+    /// Reports the read set of `runtime`, the command's one shared `load_data`
+    /// runtime. It is read when the envelope is written, so every way the run
+    /// ends, the reference check's failures included, reports every read made
+    /// before it. With no runtime the read set is `[]`.
+    pub fn reads_from(&self, runtime: &DataRuntime) {
+        *self.data_runtime.lock().expect("sink lock") = Some(runtime.clone());
     }
 
     /// Names the document this run opened, the file of each later record that
@@ -241,6 +251,7 @@ impl ReportSink {
             summary: self.summary.into_inner().expect("sink lock"),
             perf: self.perf.map(|perf| PerfData { stages: perf.into_inner().expect("sink lock") }),
             lifecycle_output: self.lifecycle.into_inner().expect("sink lock"),
+            read_set: self.data_runtime.into_inner().expect("sink lock").map(|runtime| runtime.read_set()).unwrap_or_default(),
         }
     }
 }

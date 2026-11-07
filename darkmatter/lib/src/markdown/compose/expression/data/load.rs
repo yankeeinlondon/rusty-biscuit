@@ -23,7 +23,7 @@ use super::parse::{decode_local, located_at, parse_text, strip_bom};
 use super::runtime::{DataSourceIdentity, LoadedData, LoadedSource, SourceContent};
 use crate::markdown::compose::expression::call_binding::{BoundCall, CallBindingError};
 use crate::markdown::compose::expression::functions::{
-    expression_other, file_reference_diagnostic, file_reference_error, resolve_arg,
+    file_reference_diagnostic, file_reference_error, remote_text_error, resolve_arg,
 };
 use crate::markdown::compose::expression::resolve_ctx::is_remote_url;
 use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, ResolutionContext};
@@ -38,8 +38,9 @@ const FUNCTION: &str = "load_data";
 ///
 /// ## Errors
 ///
-/// - The file-reference family for a missing, unreadable, or not-yet-fetchable
-///   source, and a plain evaluation failure for a denied or failed fetch.
+/// - The file-reference family for a missing, unreadable, not-yet-fetchable,
+///   or policy-denied source, and a plain evaluation failure for a failed
+///   fetch.
 /// - [`ExpressionError::Data`] for every `dm.data.*` failure and an invalid
 ///   contract.
 #[tracing::instrument(
@@ -89,7 +90,7 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         DataSourceIdentity::Remote(_) => match ctx.fetch_remote_text(raw) {
             Ok(Some(body)) => Origin::Fetched(body),
             Ok(None) => return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::RemoteNotEnabled, None)),
-            Err(message) => return Err(expression_other(FUNCTION, message)),
+            Err(error) => return Err(remote_text_error(FUNCTION, raw, ctx, error)),
         },
     };
 

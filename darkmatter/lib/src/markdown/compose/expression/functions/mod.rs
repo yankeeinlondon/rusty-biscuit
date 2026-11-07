@@ -21,7 +21,7 @@ use super::{
     scalar_string,
 };
 use super::resolve_ctx::{
-    ResolutionContext, is_remote_url, is_well_formed_reference, normalize_path_arg, resolve_document_file_ref,
+    RemoteTextError, ResolutionContext, is_remote_url, is_well_formed_reference, normalize_path_arg, resolve_document_file_ref,
     resolve_document_file_ref_shape, resolve_document_file_ref_target,
 };
 use crate::markdown::Markdown;

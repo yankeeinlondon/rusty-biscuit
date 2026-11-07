@@ -99,6 +99,10 @@ pub struct DocumentEnvelope {
     pub perf: Option<PerfData>,
     /// Output lifecycle steps wrote, in order.
     pub lifecycle_output: Vec<LifecycleOutputEntry>,
+    /// The files and URLs the command's expressions read, deduplicated and in
+    /// lexical order; always serialized, as `[]` when nothing was read or no
+    /// expression ran.
+    pub read_set: Vec<String>,
 }
 
 impl CommandOutput for DocumentEnvelope {
@@ -231,6 +235,7 @@ impl DocumentOutput {
             summary: None,
             perf: None,
             lifecycle_output: Vec::new(),
+            read_set: Vec::new(),
         };
         Ok(Self {
             prepared,

@@ -121,6 +121,7 @@ fn a_warning_keeps_its_record_or_its_code() {
                 span: None,
                 iteration_path: Default::default(),
                 reference_details: None,
+                data_location: None,
             }
         );
     }

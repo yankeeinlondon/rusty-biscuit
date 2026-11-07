@@ -35,7 +35,8 @@ md compose notes.md --output json
     }
   ],
   "summary": { "references": 2, "documents": 1, "ok": 1, "broken": 1 },
-  "lifecycle_output": []
+  "lifecycle_output": [],
+  "read_set": []
 }
 ```
 
@@ -89,6 +90,7 @@ flowchart LR
 | `summary` | the reference check's totals; `null` when no check ran |
 | `perf` | `md compose --perf` [timings](#timings); absent without that flag |
 | `lifecycle_output` | what [lifecycle and shell steps](#lifecycle-output) printed, in run order; `[]` when there was nothing |
+| `read_set` | the files and URLs the run's expressions [read](#read-set), sorted; `[]` when there were none |
 
 `document` is always Markdown, even though `md render` defaults to terminal text.
 It is the Markdown the same command's `--output markdown` would print, with
@@ -146,6 +148,47 @@ finalize:
 ]
 ```
 
+### Read set
+
+`read_set` lists every file and URL an expression read during the run, so a
+script can tell which inputs a composed document depends on (for example, to
+rebuild it when one of them changes). It is always present, success or failure.
+
+```markdown
+---
+title: Release
+---
+Owner: {{ frontmatter("team.md").owner }}
+{{ file_exists("CHANGELOG.md") }}
+{{ load_data("servers.yaml", "string[]") }}
+```
+
+```json
+"read_set": [
+  "/work/CHANGELOG.md",
+  "/work/servers.yaml",
+  "/work/team.md"
+]
+```
+
+- **What counts.** Each read-side function records the file it reads:
+  `load_data`, `frontmatter`, `try_frontmatter`, `file_exists`,
+  `markdown_title`, `markdown_body_empty`, and `validate_schema`. Schema files a
+  `load_data` contract or `validate_schema` imports count too. Links,
+  transclusions, and other files the run touches without an expression do not.
+- **Every pass counts.** A read during the reference check, the lifecycle,
+  pre-flight, or composition is reported, including a read in a transcluded
+  document. A run that fails reports the reads made before it stopped, the file
+  that failed to read or parse included, even when the failure came in the
+  reference check before composition started.
+- **Misses count.** `file_exists` on a missing file records the path it looked
+  for, so `CHANGELOG.md` above appears whether or not it exists. A reference
+  that names no concrete file, such as an empty string, records nothing.
+- **Form.** Local files are absolute paths with `/` separators; URLs are
+  written as the remote cache normalizes them, query included. A URL a host
+  policy refused is still listed. Each entry appears once, in lexical order.
+- **`md render`** runs no expressions, so its `read_set` is always `[]`.
+
 ## Diagnostics
 
 A diagnostic is one reported problem. The same problem has the same fields
@@ -188,7 +231,11 @@ to the document the command named, with a `null` line and column. See
 ### Reference details
 
 A reference problem also carries what the [reference report](./validate.md#the-reference-report)
-shows in its rows, as separate fields. Other diagnostics omit these fields.
+shows in its rows, as separate fields. So does an expression that failed because
+the file a read-side function names could not be read, such as
+`frontmatter("missing.md")`: its `construct` is the function, as in
+`"frontmatter()"`, and its `reference` is the argument as written. Other
+diagnostics omit these fields.
 
 | Field | Value |
 |---|---|
@@ -197,6 +244,34 @@ shows in its rows, as separate fields. Other diagnostics omit these fields.
 | `reference` | the reference as written |
 | `failure` | the [file-reference failure class](../errors/file-reference-failures.md), such as `"no-match"`, when the reference failed to resolve |
 | `included_via` | the transclusion trail, outermost first, as `{ "file", "line" }` steps; each `line` is the authored line of the `::file` or `::toc-linking` directive |
+
+### Data location
+
+A problem inside a file `load_data` read also says where in that file it is.
+`source` still points at the `load_data` call in the document; `data_location`
+points into the data. It is present only on `dm.data.malformed` and
+`dm.data.contract_mismatch` records, and absent (not `null`) on every other
+diagnostic.
+
+```json
+{ "code": "dm.data.contract_mismatch", "severity": "error",
+  "message": "…",
+  "source": { "file": "/work/notes.md", "line": 4, "column": 3, "inserted": false },
+  "expected_type": "number", "actual_type": "string",
+  "span": { "start": 31, "end": 70 }, "iteration_path": [],
+  "data_location": { "file": "/work/ports.json", "pointer": "/1", "line": 1, "column": 5 } }
+```
+
+| `data_location` field | Value |
+|---|---|
+| `file` | the data file's resolved path, or the URL it was fetched from |
+| `pointer` | the [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) of the offending value, such as `/1`; always present on a contract mismatch, and absent on a syntax error unless the parser can name the value |
+| `line`, `column` | one-based; the column counts characters. Absent when the position cannot be proven, as for a YAML file that uses an alias or a flow collection spread over several lines |
+| `byte_offset` | for a local file that is not valid UTF-8, the zero-based offset of the first invalid byte, with no `line` or `column` |
+
+A contract mismatch lists up to 20 violating values, one record each, in the
+order they appear in the file; one more record of the same code, with no
+`data_location`, says how many were left out.
 
 ## Which diagnostics, in which order
 
@@ -279,6 +354,7 @@ classified by what failed:
 | `dm.expression.parse_failure` | an expression does not parse |
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
+| `dm.data.*` | a `load_data` call fails on its data or its contract (`malformed`, `contract_mismatch`, `not_a_container`, `row_shape_conflict`, `unsupported_format`, `this_import_rejected`); a missing or unreadable data file is `dm.expression.evaluation_failure`, as for any read-side function |
 | `dm.directive.parse_failure` | a `::` directive does not parse |
 | `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener or the failing callback; a static defect is reported once, with `iteration_path: []` |
 | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
