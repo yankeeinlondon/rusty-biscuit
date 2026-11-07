@@ -53,3 +53,18 @@ fn an_empty_plan_changes_nothing() {
     let out = compose(&dir, "---\nt: 1\n---\n{{ t }}\n", |options| options.with_setters(SetterPlan::default()));
     assert_eq!(out, "1");
 }
+
+/// One grammar: `PropertyPath` owns splitting a path, so a consumer that splits on
+/// `.` would misread `a\.b` while ordinary keys kept working.
+#[test]
+fn only_property_path_splits_a_path_in_the_library() {
+    for (file, source) in [
+        ("compose/setters.rs", include_str!("../../src/markdown/compose/setters.rs")),
+        ("hash/path_edit.rs", include_str!("../../src/markdown/hash/path_edit.rs")),
+        ("schemas/completion.rs", include_str!("../../src/markdown/schemas/completion.rs")),
+    ] {
+        for needle in ["split('.')", "split(\".\")", "split_once('.')", "rsplit('.')", "rsplit_once('.')"] {
+            assert!(!source.contains(needle), "{file} parses a path with `{needle}`");
+        }
+    }
+}

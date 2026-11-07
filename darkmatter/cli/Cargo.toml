@@ -76,9 +76,10 @@ syntect = "5.2"
 # `[dependencies]` entry above cannot supply without the feature.
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # The process-global broken-pass hook, so an in-process `run_clean` can prove
-# a refused body is never saved; a dev-dependency feature, so no non-test
-# build of `md` compiles it.
-darkmatter = { path = "../lib", features = ["cleanup-test-hooks"] }
+# a refused body is never saved; and the work counters, so a test can count what
+# one Tab press prepares. Dev-dependency features, so no non-test build of `md`
+# compiles them.
+darkmatter = { path = "../lib", features = ["cleanup-test-hooks", "work-counters"] }
 
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a

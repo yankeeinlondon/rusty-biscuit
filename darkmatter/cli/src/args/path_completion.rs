@@ -208,26 +208,30 @@ struct DocumentSite {
 
 impl DocumentSite {
     fn for_compose(line: &CommandLine) -> Self {
+        Self::for_compose_in(line, completion_request(&line.magic_roots).as_ref())
+    }
+
+    fn for_compose_in(line: &CommandLine, request: Option<&MdRequest>) -> Self {
         let (input, setters) = line.compose_input_and_setters();
         let defaults = object_argument(line.defaults.as_deref());
         let overrides = object_argument(line.overrides.as_deref());
-        Self::load(line, input, |document| completion_overlay(document, defaults.as_ref(), overrides.as_ref(), setters))
+        Self::load(request, input, |document| completion_overlay(document, defaults.as_ref(), overrides.as_ref(), setters))
     }
 
     /// `get`, `set`, and `rm`: the first positional is the document, and the rest
     /// are the paths already given.
     fn for_path_command(line: &CommandLine) -> Self {
         let input = line.positionals.first().map(String::as_str);
-        let mut site = Self::load(line, input, |document| completion_overlay(document, None, None, []));
+        let request = completion_request(&line.magic_roots);
+        let mut site = Self::load(request.as_ref(), input, |document| completion_overlay(document, None, None, []));
         site.earlier_paths = line.positionals.iter().skip(1).filter_map(|path| PropertyPath::parse(path).ok()).collect();
         site
     }
 
-    fn load(line: &CommandLine, input: Option<&str>, overlay: impl FnOnce(&Markdown) -> CompletionOverlay) -> Self {
-        let request = completion_request(&line.magic_roots);
-        let opened = request.as_ref().zip(input).and_then(|(request, input)| open_document(input, request));
+    fn load(request: Option<&MdRequest>, input: Option<&str>, overlay: impl FnOnce(&Markdown) -> CompletionOverlay) -> Self {
+        let opened = request.zip(input).and_then(|(request, input)| open_document(input, request));
         let overlay = overlay(&opened.as_ref().map_or_else(|| Markdown::new(""), |(_, document)| document.clone()));
-        let effective = request.as_ref().zip(opened.as_ref()).and_then(|(request, (argument, _))| {
+        let effective = request.zip(opened.as_ref()).and_then(|(request, (argument, _))| {
             resolve_schema(argument, &overlay.markdown, request)
         });
         Self {
@@ -336,6 +340,55 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let request = MdRequest::new(darkmatter::markdown::compose::RequestSnapshot::new(temp_dir.path()));
         assert!(open_document("-", &request).is_none());
+    }
+
+    /// Counters and the observation frame are private to this process and thread,
+    /// so each measurement below is one Tab press. The first press compiles the
+    /// baseline, and that cost has nothing to do with the document, so the document's
+    /// own expressions are judged by comparing warmed presses.
+    #[test]
+    fn one_tab_prepares_once_and_reads_only_the_documents_schema_files() {
+        use darkmatter::work_counters::{Work, WorkSnapshot, snapshot};
+        use simplified_schema::resolve::observed::{Observed, collect};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = biscuit_file::canonicalize_simplified(temp_dir.path()).unwrap();
+        let write = |name: &str, text: &str| {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(".git/HEAD", "ref: refs/heads/main\n");
+        std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+        std::fs::create_dir_all(root.join(".git/refs")).unwrap();
+        write("quiet.md", "---\n$schema: ./s.yaml\n---\n");
+        write("active.md", "---\n$schema: ./s.yaml\ncmd: $(echo hi)\nshown: \"{{ 1 + 1 }}\"\n---\n::file ./other.md\n{{ 2 + 2 }}\n");
+        write("s.yaml", "$schema:\n  first: name@./types.yaml\n  second: name@./types.yaml\n");
+        write("types.yaml", "kind: schema\ntypes:\n  name: string\n");
+        write("schemas/lang.trigger.yaml", "kind: schema-trigger\nmatch:\n  lang: enum(rust; required)\n$schema:\n  edition: string\n");
+        write("unrelated.yaml", "$schema:\n  never: string\n");
+        write("other.md", "---\n$schema: ./unrelated.yaml\n---\n");
+        let request = MdRequest::new(darkmatter::markdown::compose::RequestSnapshot::new(&root));
+
+        let tab = |document: &str| -> (WorkSnapshot, Observed) {
+            let before = snapshot();
+            let (site, observed) = collect(|| DocumentSite::for_compose_in(&line(&["md", "compose", document]), Some(&request)));
+            assert!(site.effective.is_some(), "the schema must resolve, or nothing here was read");
+            (snapshot().since(&before), observed)
+        };
+
+        let (first, read) = tab("quiet.md");
+        assert_eq!(first.get(Work::TriggerDiscovery), 1, "{:?}", first.nonzero());
+        assert_eq!(first.get(Work::EffectivePreparation), 1, "{:?}", first.nonzero());
+        assert_eq!(first.get(Work::NamedTypeTableParse), 1, "two import sites, one table: {:?}", first.nonzero());
+        // Trigger files are read by discovery's own source, which the first count covers.
+        assert_eq!(read.read, [root.join("s.yaml"), root.join("types.yaml")].into_iter().collect());
+
+        let (warmed, _) = tab("quiet.md");
+        let (active, read) = tab("active.md");
+        assert_eq!(active.get(Work::ExpressionParse), warmed.get(Work::ExpressionParse), "the document's expressions stay unparsed");
+        assert_eq!(active.get(Work::LifecycleConfigParse), 0, "{:?}", active.nonzero());
+        assert!(!read.read.contains(&root.join("unrelated.yaml")), "a transcluded child is not followed: {:?}", read.read);
     }
 
     #[test]

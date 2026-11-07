@@ -8,7 +8,12 @@
 
 use crate::common;
 
-use common::CliProcessFixture;
+use common::{CliProcessFixture, MockHttpResponse, mock_http_server};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use test_toolkit::argv_recorder::{ARGV_RECORDER_FILE, read_argv_records};
+use test_toolkit::{Level, expect_level};
 
 const DOCUMENT: &str = "---\ntitle: Hello\nauthor:\n  name: Ann\nitems: [a, b]\n---\nBody\n";
 
@@ -26,11 +31,22 @@ fn write_in_cwd(fixture: &CliProcessFixture, relative: &str, content: &str) {
     fixture.write_file(fixture.cwd().join(relative), content);
 }
 
+/// Where the `argv-recorder` program writes if anything ever runs it; inside the
+/// workspace, so `files_under` sees it appear.
+fn recorder_file(fixture: &CliProcessFixture) -> PathBuf {
+    fixture.tmp_dir().join("argv.bin")
+}
+
 /// What a Tab press prints, one candidate per line, with help removed. Asserts
 /// that it succeeded and said nothing else.
 fn complete_in(fixture: &CliProcessFixture, shell: &str, index: Option<usize>, words: &[&str]) -> Vec<String> {
     let mut command = fixture.command();
-    command.env("COMPLETE", shell).arg("--").args(words).write_stdin("---\nfrom_stdin: 1\n---\n");
+    command
+        .env("COMPLETE", shell)
+        .env(ARGV_RECORDER_FILE, recorder_file(fixture))
+        .arg("--")
+        .args(words)
+        .write_stdin("---\nfrom_stdin: 1\n---\n");
     if let Some(index) = index {
         command.env("_CLAP_COMPLETE_INDEX", index.to_string());
     }
@@ -337,4 +353,253 @@ fn registration_scripts_print_for_every_shell() {
         let script = String::from_utf8_lossy(&output.stdout);
         assert!(script.contains(marker), "{shell}: {script}");
     }
+}
+
+/// Every file under `directory` with its bytes, so a test can show a Tab changed nothing.
+fn files_under(directory: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut files = BTreeMap::new();
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(next).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = std::fs::read(&path).unwrap();
+                files.insert(path, bytes);
+            }
+        }
+    }
+    files
+}
+
+const COMMANDS_BODY: &str = "mine: 1\nfrom_command: $(argv-recorder frontmatter)\nshown: \"{{ title }}\"\ntitle: T\n---\n::shell argv-recorder body\n";
+
+/// A document with a frontmatter command, an interpolated value, and a body command,
+/// all approved, so only completion's own restraint stops them. The command is the
+/// recorder, a native program, because it exists on every platform and its evidence
+/// is exactly what ran.
+fn commands_fixture(name: &str, schema_line: &str) -> CliProcessFixture {
+    let fixture = CliProcessFixture::named(name);
+    let program = fixture.bin_dir().join(format!("argv-recorder{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(biscuit_test_harness::bin_exe!("darkmatter-argv-recorder"), program).unwrap();
+    write_in_cwd(&fixture, "doc.md", &format!("---\n{schema_line}\n{COMMANDS_BODY}"));
+    write_in_cwd(&fixture, ".darkmatter-shell-whitelist", "prefix argv-recorder\n");
+    fixture
+}
+
+/// `md compose`'s, `get`'s, `set`'s, and `rm`'s root positions, with and without a
+/// host permission that would let an ordinary composition fetch.
+fn assert_tabs_leave_everything_alone(fixture: &CliProcessFixture) {
+    let before = files_under(fixture.workspace_path());
+    let plain = fish(fixture, &["md", "compose", "doc.md", ""]);
+    holds(&plain, &["mine=", "from_command=", "shown=", "style."]);
+    let allowed = fish(fixture, &["md", "compose", "--allow", "host=127.0.0.1", "doc.md", ""]);
+    assert_eq!(allowed, plain, "a host permission on the line changes nothing");
+    holds(&paths_only(fish(fixture, &["md", "get", "doc.md", ""])), &["mine", "from_command"]);
+    holds(&paths_only(fish(fixture, &["md", "set", "doc.md", ""])), &["mine", "from_command"]);
+    holds(&paths_only(fish(fixture, &["md", "rm", "doc.md", ""])), &["mine", "from_command"]);
+    bash(fixture, &["md", "compose", "doc.md", "mine", "=", ""]);
+    assert_eq!(files_under(fixture.workspace_path()), before, "a Tab ran a command, or wrote a cache entry or an edit");
+}
+
+#[test]
+fn a_tab_runs_no_command_and_writes_nothing_while_composing_the_same_document_does() {
+    let fixture = commands_fixture("completion-sentinel", "description: D");
+    assert_tabs_leave_everything_alone(&fixture);
+
+    // The control: the document really does run these when it is composed.
+    let output = fixture.command().env(ARGV_RECORDER_FILE, recorder_file(&fixture)).args(["compose", "doc.md"]).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(read_argv_records(&recorder_file(&fixture)).unwrap(), [["frontmatter"], ["body"]]);
+}
+
+#[test]
+fn a_remote_schema_is_never_requested_and_local_keys_remain() {
+    let server = mock_http_server(vec![MockHttpResponse { status: 200, body: "$schema:\n  remote_key: string\n", cache_control: None }]);
+    let url = server.url("/remote.yaml");
+    let fixture = commands_fixture("completion-remote-schema", &format!("$schema: {url}"));
+    assert_tabs_leave_everything_alone(&fixture);
+    lacks(&fish(&fixture, &["md", "compose", "doc.md", ""]), &["remote_key="]);
+    assert_eq!(server.requests(), Vec::<String>::new());
+
+    // The control: this host and server do answer an allowed composition.
+    let output = fixture
+        .command()
+        .args(["compose", "-", "--allow", "host=127.0.0.1"])
+        .write_stdin(format!("::file {url}\n"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(server.request_count(), 1);
+}
+
+#[test]
+fn a_remote_import_inside_a_local_schema_is_never_requested() {
+    let server = mock_http_server(vec![MockHttpResponse { status: 200, body: "kind: schema\ntypes:\n  name: string\n", cache_control: None }]);
+    let fixture = commands_fixture("completion-remote-import", "$schema: ./s.yaml");
+    write_in_cwd(&fixture, "s.yaml", &format!("$schema:\n  imported: name@{}\n", server.url("/types.yaml")));
+    assert_tabs_leave_everything_alone(&fixture);
+    lacks(&fish(&fixture, &["md", "compose", "doc.md", ""]), &["imported="]);
+    assert_eq!(server.requests(), Vec::<String>::new());
+}
+
+#[test]
+fn an_interpolated_tag_is_not_evaluated_to_narrow_a_union() {
+    let fixture = CliProcessFixture::named("completion-unevaluated-tag");
+    write_in_cwd(&fixture, "union.yaml", "$schema:\n  - { kind: 'literal(a)', only_a: string }\n  - { kind: 'literal(b)', only_b: string }\n");
+    write_in_cwd(&fixture, "written.md", "---\n$schema: ./union.yaml\nkind: a\n---\n");
+    write_in_cwd(&fixture, "interpolated.md", "---\n$schema: ./union.yaml\nkind: \"{{ 'a' }}\"\n---\n");
+
+    let written = fish(&fixture, &["md", "compose", "written.md", ""]);
+    holds(&written, &["only_a="]);
+    lacks(&written, &["only_b="]);
+    holds(&fish(&fixture, &["md", "compose", "interpolated.md", ""]), &["only_a=", "only_b="]);
+}
+
+/// Any diagnostic printed into the reply would be an extra candidate, so a broken
+/// document must answer exactly as one with nothing wrong answers.
+fn assert_failures_add_no_text(shell: &str) {
+    let fixture = CliProcessFixture::named("completion-no-diagnostics");
+    write_in_cwd(&fixture, "clean.md", "---\nmine: 1\n---\n");
+    write_in_cwd(&fixture, "bad.yaml", "$schema:\n  lang: enum(two words)\n");
+    write_in_cwd(&fixture, "missing-schema.md", "---\n$schema: ./nowhere.yaml\nmine: 1\n---\n");
+    write_in_cwd(&fixture, "bad-schema.md", "---\n$schema: ./bad.yaml\nmine: 1\n---\n");
+    write_in_cwd(&fixture, "remote-schema.md", "---\n$schema: https://127.0.0.1:9/never.yaml\nmine: 1\n---\n");
+    write_in_cwd(&fixture, "broken.md", "---\ntitle: [unclosed\n---\n");
+
+    let reply = |document: &str| complete_in(&fixture, shell, Some(3), &["md", "get", document, ""]);
+    let clean = reply("clean.md");
+    holds(&clean, &["mine", "style."]);
+    for document in ["missing-schema.md", "bad-schema.md", "remote-schema.md"] {
+        assert_eq!(reply(document), clean, "{shell}, {document}");
+    }
+    assert_eq!(reply("broken.md"), reply("absent.md"), "{shell}");
+}
+
+#[test]
+fn a_failure_adds_no_text_in_bash() {
+    assert_failures_add_no_text("bash");
+}
+
+#[test]
+fn a_failure_adds_no_text_in_zsh() {
+    assert_failures_add_no_text("zsh");
+}
+
+#[test]
+fn a_failure_adds_no_text_in_fish() {
+    assert_failures_add_no_text("fish");
+}
+
+#[test]
+fn a_failure_adds_no_text_in_elvish() {
+    assert_failures_add_no_text("elvish");
+}
+
+#[test]
+fn a_failure_adds_no_text_in_powershell() {
+    assert_failures_add_no_text("powershell");
+}
+
+/// Bash 3.2 has no `compopt`, so its registered function sets this and every
+/// finished word carries its own space.
+#[test]
+fn bash_3_finished_words_carry_their_space_and_continuing_ones_do_not() {
+    let fixture = fixture("completion-bash-3-space");
+    let reply = |word: &str| {
+        let output = fixture
+            .command()
+            .env("COMPLETE", "bash")
+            .env("_CLAP_COMPLETE_SPACE", "true")
+            .env("_CLAP_COMPLETE_INDEX", "3")
+            .args(["--", "md", "compose", "doc.md", word])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    assert_eq!(reply("style.page.alignment=ce"), "center ");
+    assert_eq!(reply("style.page.al"), "style.page.alignment=");
+    assert!(reply("style.pa").lines().all(|line| !line.ends_with(' ')), "{}", reply("style.pa"));
+}
+
+/// The script `md` prints for `shell`, for the shell itself to load.
+fn registration(fixture: &CliProcessFixture, shell: &str) -> String {
+    let output = fixture.command().env("COMPLETE", shell).output().unwrap();
+    assert!(output.status.success(), "{shell}: {output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// Whether `program` starts at all. Only a few shells are guaranteed per platform;
+/// the tests for the others report themselves unproven when it does not.
+fn shell_starts(program: &str) -> bool {
+    Command::new(program).arg("--version").output().is_ok_and(|output| output.status.success())
+}
+
+/// Runs `script` in `program` and returns what it printed after asserting that
+/// loading it succeeded and said nothing on stderr. `flags` must keep the shell from
+/// reading or writing a profile, since this is not an `md` process and has no fixture.
+fn run_shell(program: &str, flags: &[&str], script: &str) -> String {
+    let output = Command::new(program).args(flags).arg(script).output().unwrap();
+    assert!(output.status.success(), "{program}: {output:?}");
+    assert!(output.stderr.is_empty(), "{program}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[cfg(unix)]
+fn assert_bash_registers(program: &str) {
+    let fixture = CliProcessFixture::named("completion-script-bash");
+    let script = registration(&fixture, "bash");
+    let printed = run_shell(program, &["--noprofile", "--norc", "-c"], &format!("{script}\ncomplete -p md"));
+    assert!(printed.contains("_clap_complete_md"), "{printed}");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_bash_script_loads() {
+    expect_level!(Level::L1, shell_starts("bash"), "bash");
+    assert_bash_registers("bash");
+}
+
+/// The one bash 3.2 that exists on every Mac, whichever bash `PATH` finds first.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_bash_script_loads_in_the_systems_bash_3() {
+    expect_level!(Level::L1, shell_starts("/bin/bash"), "/bin/bash");
+    assert_bash_registers("/bin/bash");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_zsh_script_loads() {
+    expect_level!(Level::L1, shell_starts("zsh"), "zsh");
+    let fixture = CliProcessFixture::named("completion-script-zsh");
+    let script = registration(&fixture, "zsh");
+    let printed = run_shell("zsh", &["-f", "-c"], &format!("autoload -Uz compinit && compinit -u -D\n{script}\nprint -r -- $_comps[md]"));
+    assert!(printed.contains("_clap_dynamic_completer_md"), "{printed}");
+}
+
+/// Fish is optional on every platform: where it is absent this proves nothing and
+/// says so, and the implementation log records which hosts ran it.
+#[test]
+fn the_fish_script_loads_where_fish_is_installed() {
+    if !shell_starts("fish") {
+        eprintln!("unproven: fish is not installed on this host");
+        return;
+    }
+    let fixture = CliProcessFixture::named("completion-script-fish");
+    let script = registration(&fixture, "fish");
+    let printed = run_shell("fish", &["--no-config", "-c"], &format!("{script}\ncomplete -c md"));
+    assert!(printed.contains("complete"), "{printed}");
+}
+
+#[cfg(windows)]
+#[test]
+fn the_powershell_script_loads() {
+    // Windows PowerShell has no `--version` flag.
+    let starts = Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", "exit 0"]).output();
+    expect_level!(Level::L1, starts.is_ok_and(|output| output.status.success()), "powershell");
+    let fixture = CliProcessFixture::named("completion-script-powershell");
+    let script = registration(&fixture, "powershell");
+    run_shell("powershell", &["-NoProfile", "-NonInteractive", "-Command"], &script);
 }

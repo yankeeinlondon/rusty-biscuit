@@ -63,6 +63,7 @@ mod compose_shell;
 mod compose_shell_template;
 mod compose_setters;
 mod path_completion;
+mod property_paths;
 mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;
