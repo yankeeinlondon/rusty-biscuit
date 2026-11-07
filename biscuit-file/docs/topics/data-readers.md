@@ -181,8 +181,10 @@ editor shows.
 Normalize a parser error to a byte offset before calling `source_position`;
 parsers report columns differently (serde_json counts bytes, json-five counts
 characters). For JSON5, `json5_parse_error_offset(text)` (feature `json5`)
-returns the byte offset of the first syntax error, or `None` when the text is
-grammatical:
+returns the byte offset of the first syntax error, or of the first token that
+parses but cannot become a value (an integer too large for its type, a string
+or key with an invalid escape, located at its start or its sign), and `None`
+when the text reads:
 
 ```rust
 use biscuit_file::{json5_parse_error_offset, source_position};

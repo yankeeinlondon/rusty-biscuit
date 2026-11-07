@@ -115,12 +115,14 @@ pub fn locate_json5(text: &str, pointer: &str) -> Option<usize> {
     spans.get(at).map(|(start, _, _)| *start)
 }
 
-/// The byte offset in `text` at which JSON5 parsing fails, or `None` when the
-/// text is grammatical JSON5.
+/// The byte offset in `text` at which reading it as a JSON5 value fails, or
+/// `None` when it reads.
 ///
-/// [`Json5`](crate::Json5) reports a syntax failure as text only; this
-/// recovers its position. A grammatical text that still cannot become a
-/// value (an integer beyond `u64`, for one) returns `None`.
+/// [`Json5`](crate::Json5) reports a failure as text only; this recovers its
+/// position. A syntax error is located where the parser stops. A grammatical
+/// text can still fail to become a value: a number too large for its type or
+/// a string or key with an invalid escape is located at the start of that
+/// token (a signed number at its sign).
 ///
 /// ## Examples
 ///
@@ -134,7 +136,42 @@ pub fn locate_json5(text: &str, pointer: &str) -> Option<usize> {
 #[must_use]
 pub fn json5_parse_error_offset(text: &str) -> Option<usize> {
     // `ParsingError::index` is a byte offset (`char_index` is the char count).
-    json_five::parser::from_str(text).err().map(|error| error.index.min(text.len()))
+    if let Err(error) = json_five::parser::from_str(text) {
+        return Some(error.index.min(text.len()));
+    }
+    json5_value_error_offset(text)
+}
+
+/// The start of the first token of grammatical `text` that cannot become a
+/// value. Each token is read on its own, as the value reader would read it.
+#[cfg(feature = "json5")]
+fn json5_value_error_offset(text: &str) -> Option<usize> {
+    use json_five::tokenize::TokType;
+
+    let tokens = json_five::tokenize_str(text).ok()?;
+    let mut previous: Option<(usize, &TokType)> = None;
+    for (start, kind, end) in &tokens.tok_spans {
+        let lexeme = &text[*start..*end];
+        let reads = match kind {
+            TokType::SingleQuotedString | TokType::DoubleQuotedString => {
+                json_five::from_str::<serde_json::Value>(lexeme).is_ok()
+            }
+            // An unquoted key may hold `\u` escapes; it reads only as a key.
+            TokType::Name => json_five::from_str::<serde_json::Value>(&format!("{{{lexeme}: 0}}")).is_ok(),
+            TokType::Integer | TokType::Float | TokType::Exponent | TokType::Hexadecimal => {
+                json_five::from_str::<serde_json::Value>(lexeme).is_ok()
+            }
+            _ => true,
+        };
+        if !reads {
+            return Some(match previous {
+                Some((sign, TokType::Plus | TokType::Minus)) => sign,
+                _ => *start,
+            });
+        }
+        previous = Some((*start, kind));
+    }
+    None
 }
 
 /// The decoded segments of `pointer`; `None` when it is malformed.

@@ -286,4 +286,18 @@ mod json5 {
         assert!(json5_parse_error_offset("{a: 1").is_some());
         assert!(json5_parse_error_offset("'open").is_some());
     }
+
+    #[test]
+    fn parse_error_offset_locates_a_grammatical_token_that_cannot_become_a_value() {
+        for (text, token) in [
+            ("{a: 99999999999999999999999}", "99999999999999999999999"),
+            ("{a: [1, -99999999999999999999999]}", "-99999999999999999999999"),
+            ("{a: 0xFFFFFFFFFFFFFFFFFFFFFFFF}", "0xFFFFFFFFFFFFFFFFFFFFFFFF"),
+            ("{a: 'ok', b: '\\u{zz}'}", "'\\u{zz}'"),
+        ] {
+            let offset = json5_parse_error_offset(text).unwrap_or_else(|| panic!("{text}: located"));
+            assert!(text[offset..].starts_with(token), "{text}: {offset}");
+        }
+        assert_eq!(json5_parse_error_offset("{a: -1.5e3, b: 0x1F, c: 'x\\u0041', d: +Infinity}"), None);
+    }
 }
