@@ -490,7 +490,10 @@ impl DataRuntime {
 
     /// The contract `written` describes in the document context `document`,
     /// prepared once per context identity and text. Every call records the
-    /// contract's imports, so a memo hit keeps its dependencies.
+    /// contract's imports, so a memo hit keeps its dependencies; a contract
+    /// that failed records the schema files its error names (an import that
+    /// does not export the type, or is not a schema), since editing one of
+    /// them is what fixes the failure.
     ///
     /// ## Errors
     ///
@@ -505,11 +508,46 @@ impl DataRuntime {
         let contract = self
             .inner
             .memo
-            .contract(key, || super::contract::prepare_contract(written, document))?;
+            .contract(key, || super::contract::prepare_contract(written, document))
+            .inspect_err(|error| {
+                if let DataError::ContractSchema { source, .. } = error.as_ref() {
+                    let mut files = Vec::new();
+                    schema_error_files(source, &mut files);
+                    files.iter().for_each(|file| self.record_local(file));
+                }
+            })?;
         for import in &contract.imports {
             self.record_local(import);
         }
         Ok(contract)
+    }
+}
+
+/// The host schema files `error` names as the files it read and rejected.
+/// Embedded schemas and text handed in directly name no host file.
+fn schema_error_files(error: &simplified_schema::SchemaError, files: &mut Vec<PathBuf>) {
+    use simplified_schema::SchemaError;
+    use simplified_schema::simplified::SchemaSourceId;
+    match error {
+        SchemaError::Aggregate { errors } => errors.iter().for_each(|error| schema_error_files(error, files)),
+        SchemaError::ReferencedSchema { path, source } => {
+            files.push(path.clone());
+            schema_error_files(source, files);
+        }
+        SchemaError::SchemaDocument { path, source, .. } => {
+            // `path` is `content` for text a factory was handed directly.
+            if path.is_absolute() {
+                files.push(path.clone());
+            }
+            if let Some(source) = source {
+                schema_error_files(source, files);
+            }
+        }
+        SchemaError::NotASchemaDocument { path, .. }
+        | SchemaError::UnsupportedJsonDialect { path, .. }
+        | SchemaError::InvalidJsonSchema { path, .. } => files.push(path.clone()),
+        SchemaError::UnknownNamedType { namespace: SchemaSourceId::File(path), .. } => files.push(path.clone()),
+        _ => {}
     }
 }
 

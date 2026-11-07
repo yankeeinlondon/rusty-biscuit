@@ -439,6 +439,23 @@ fn a_load_data_contract_records_its_transitive_imports() {
     assert_eq!(report.read_set, expected);
 }
 
+/// An import the contract read, but which does not export the named type (or
+/// is not a schema at all), stays a dependency of the failed run: editing it
+/// is what fixes the failure.
+#[test]
+fn a_failed_contract_keeps_the_import_it_read_in_the_read_set() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "types.yaml", "kind: schema\ntypes:\n  Other: string\n");
+    write(dir.path(), "notes.yaml", "just: data\n");
+    write(dir.path(), "d.json", "[\"x\"]");
+    for (contract, import) in [("Title[]@./types.yaml", "types.yaml"), ("Title[]@./notes.yaml", "notes.yaml")] {
+        let doc = write(dir.path(), "doc.md", format!("{{{{ as_csv(load_data('d.json', '{contract}')) }}}}\n"));
+        let failure = compose_file(&doc, ComposeOptions::new()).expect_err("an unknown type fails");
+        assert!(failure.read_set.contains(&entry(dir.path(), import)), "{contract}: {:?}", failure.read_set);
+        assert!(!failure.read_set.contains(&entry(dir.path(), "d.json")), "the data file is never reached");
+    }
+}
+
 // ── R6/R7: remote reads ─────────────────────────────────────────────────────
 
 async fn serve(route: &str, body: ResponseTemplate) -> MockServer {
