@@ -1,7 +1,7 @@
 ---
 total_phases: 9
 created: 2026-11-05
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -14,6 +14,8 @@ packages:
 - biscuit-file-cli
 - darkmatter
 - darkmatter-lsp
+- claudine
+- darkmatter-cli
 source_files_during_phase_2:
 - simplified-schema/lib/src/coerce.rs
 - simplified-schema/lib/src/coercion/error.rs
@@ -99,6 +101,87 @@ skills_files_updated_during_phase_3:
 - .claude/skills/biscuit-file/SKILL.md
 - .claude/skills/biscuit-file/references/architecture.md
 - .claude/skills/simplified-schema/SKILL.md
+source_files_during_phase_4:
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/context/request.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+- darkmatter/lib/src/markdown/frontmatter.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/lib/src/lifecycle/md_host.rs
+- darkmatter/lib/src/lifecycle/executor.rs
+- darkmatter/lib/src/lifecycle/executor/shell.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/compose_read_set.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/graph.rs
+- darkmatter/cli/src/commands/validate.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- claudine/lib/src/composition/sequence/grammar.rs
+- claudine/lib/src/composition/sequence/tests.rs
+docs_updated_during_phase_4:
+- claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/requests.md
+source_files_during_phase_5:
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/schemas/partials/lifecycle.yaml
+- darkmatter/schemas/partials/md-lifecycle.yaml
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/data.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/data/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/data/contract.rs
+- darkmatter/lib/src/markdown/compose/expression/data/error.rs
+- darkmatter/lib/src/markdown/compose/expression/data/load.rs
+- darkmatter/lib/src/markdown/compose/expression/data/parse.rs
+- darkmatter/lib/src/markdown/compose/expression/data/runtime.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/schemas/yaml_documents/mod.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/load_data_execution.rs
+- darkmatter/lib/tests/l1/load_data_passive.rs
+- darkmatter/lib/tests/l1/function_binding_registry.rs
+- darkmatter/lib/tests/l1/function_catalog_parity.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- claudine/schemas/action.yaml
+- claudine/schemas/lifecycle.yaml
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/library-surfaces.md
 ---
 
 # Loading Data Implementation Plan
@@ -200,27 +283,27 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 4: Request Runtime and Scanner Consumers
 
-- [ ] **Request runtime**
+- [x] **Request runtime**
   - Own new `expression/data/{mod,contract,runtime,error}.rs`, options/context/request plumbing, report/failure read-set fields, and pipeline root boundaries. Define the prepared contract, memo/error types, row classifier, read-set sink, and counters for read/parse/bind/memo-hit assertions. This task supplies APIs, not file parsing or function dispatch.
   - Attach the runtime in both options builders and at the command entry points per rule 17; share it through every pass, children, and nested compose; give unattached library root runs a fresh one. Add `invalidate_memo` and its calls per rule 15. Update `ComposeReport::merge`, failure construction in `compose/mod.rs`, and public request snapshots. Capture reads after a failure in any pass as well as success.
   - Wire existing reading functions at `load_markdown` and `file_exists_fn`; attach lifecycle `md_host` request snapshots and context-taking condition adapters. Audit concrete sites in rules 18/19 rather than rewriting test-only constructors.
   - Checkpoint: existing readers expose a sorted unique read set on success/failure, one command's passes share results, a command empties the memo, and separate compositions cannot reuse semantic results.
 
-- [ ] **Scanner consumers**
+- [x] **Scanner consumers**
   - Own darkmatter's two masking/recovery functions, DMLS overlay/dsl/frontmatter region detection only, and claudine sequence grammar. Adopt the Phase 3 APIs at every rule 24 site, retaining each host's exclusions and whole-value requirement.
   - Add masking, YAML fallback, editor-cursor, and claudine sequence regression tests. Verify escaped quotes keep sequence separators inside the interpolation.
   - Checkpoint: all consumers agree on expression extent; DMLS region tests pass without evaluating expressions.
 
 ## Phase 5: Data Execution and Passive Typing
 
-- [ ] **Data execution**
+- [x] **Data execution**
   - Own `expression/data/{parse,load}.rs`, function registration/dispatch and catalog entry, plus `remote.rs::REMOTE_READ_FUNCTIONS`. Register `load_data(file: file | null, as: type-definition(container)) -> any | null` as fallible in Filesystem; use existing bound-call conventions and null handling.
   - Execute: validate contract → resolve identity and record read → choose supported extension → select row mode → lookup memo → obtain local bytes or remote text → strip BOM/decode local bytes → parse/admit numbers → bind bare shape. No partial result escapes. Use the shared contract runtime and typed DataError; null file returns null with no data/import reads.
   - Use the existing YAML loader, add explicit custom-tag rejection, rejecting TOML conversion, JSON5 admission, and JSONL per-line numeric admission. Object-mode headers reject duplicate/empty names; list mode skips them; all rows obey header width.
   - Add a per-call tracing span with identity, format, bytes, item/row count, and memo answer. A memo stores metadata with the result so hits can populate these fields without reading again.
   - Checkpoint: catalog parity and shipped-artifact validation pass; direct public compose cases load every format and preserve typed errors.
 
-- [ ] **Passive typing**
+- [x] **Passive typing**
   - Own `call_check.rs`, its call-binding diagnostic integration, and `ScopeShape` projection changes. Consume the Phase 4 pure contract classifier for literal checks, embedded imports, `@this`, and literal CSV/TSV paths. Emit the six-code family's relevant static errors at the `as` span, ahead of any evaluation; malformed contract syntax keeps the existing incompatible-call diagnostic.
   - Implement rule 22 and callback parameter propagation. Test computed contracts, reference subtrees, nullable returns, literal-null file, and map/filter callback type checks. Use a read-count hook to prove static rejection does not read data/import files or run earlier expressions.
   - Checkpoint: scalar container failures receive `dm.data.not_a_container`, not only a generic binding failure; file imports remain provisionally accepted.
