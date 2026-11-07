@@ -37,6 +37,7 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
+use super::type_definition_argument::{self, Site};
 use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
     doc_links, expressions, format_dotted,
@@ -66,6 +67,9 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
 /// candidates. Semantic items lead so the pure-`type-definition` ordering is
 /// unchanged, and `dedup_completions` keeps first-seen order.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+    if let Some(items) = type_definition_argument::completion(ctx, offset, Site::Frontmatter) {
+        return items;
+    }
     let mut items = meta_schema_completion(ctx, offset).unwrap_or_default();
     items.extend(schema_completion(ctx, offset));
     dedup_completions(items)
@@ -152,7 +156,7 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
         let start = state.token_span.start;
         match kind {
             MetaSchemaKind::TypeDefinition => {
-                items.extend(type_definition_completions(ctx, start, offset, &state));
+                items.extend(type_definition_completions(ctx, start, offset, &state, NamedTypes::Offered));
             }
             MetaSchemaKind::Schema => {
                 items.extend(schema_value_completions(ctx, start, offset, &state.token));
@@ -431,13 +435,26 @@ fn semantic_owner_kinds(
     Some(owner.kinds.clone())
 }
 
+/// Whether type-definition completion offers the document's named types.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NamedTypes {
+    /// `Name@this` and the imports of this document's `$schema`, for a value
+    /// authored inside that schema's document.
+    Offered,
+    /// Neither: an expression argument has no schema document, so
+    /// `Name@this` has no target there, and an import relative to the
+    /// `$schema` file need not resolve from the calling document.
+    Withheld,
+}
+
 /// Completion for a cursor inside a `type-definition` value, dispatched on the
 /// structural role the shared parser-state authority reports.
-fn type_definition_completions(
+pub(crate) fn type_definition_completions(
     ctx: &DocumentContext,
     start: usize,
     offset: usize,
     state: &SchemaCursor,
+    named_types: NamedTypes,
 ) -> Vec<CompletionItem> {
     let partial = state.token.as_str();
     match &state.role {
@@ -522,6 +539,9 @@ fn type_definition_completions(
         {
             items.push(completion);
         }
+    }
+    if named_types == NamedTypes::Withheld {
+        return items;
     }
     let local = passive_namespace_names(ctx).into_iter().map(|name| {
         (
@@ -1296,14 +1316,14 @@ fn scalar_inventory<'c>(ctx: &DocumentContext<'c>) -> impl Iterator<Item = (usiz
 }
 
 /// The scalar entry whose authored value span contains `offset`.
-fn cursor_scalar(ast: &FrontmatterAst, offset: usize) -> Option<usize> {
+pub(crate) fn cursor_scalar(ast: &FrontmatterAst, offset: usize) -> Option<usize> {
     ast.entries()
         .iter()
         .position(|entry| entry.kind == FmValueKind::Scalar && entry.value_span.contains(&offset))
 }
 
 /// The Expression-typed value at entry `index`, when `typing` decoded one.
-fn expression_value<'a>(ast: &'a FrontmatterAst, index: usize, typing: &'a ScalarTyping) -> Option<ExpressionValue<'a>> {
+pub(crate) fn expression_value<'a>(ast: &'a FrontmatterAst, index: usize, typing: &'a ScalarTyping) -> Option<ExpressionValue<'a>> {
     let ExpressionTyping::Decoded { text, projection } = &typing.expression else {
         return None;
     };
@@ -1659,6 +1679,9 @@ fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
 /// property's schema type/constraints/default/description, or a `ctx.*`
 /// generated-key annotation.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    if let Some(hover) = type_definition_argument::hover(ctx, offset, Site::Frontmatter) {
+        return Some(hover);
+    }
     // A `$schema` string or root-union string item is a file reference, not
     // a type definition, so it is answered before the schema-authoring hover.
     if let Some(hover) = schema_value_hover::schema_value_hover(ctx, offset) {
@@ -1812,7 +1835,7 @@ fn dedent_spanned_yaml(source: &str, indent: usize) -> String {
     normalized
 }
 
-fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
+pub(crate) fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
     let mut denoted = Vec::new();
     for atom in atoms_of(def) {
         let mut name = match &atom.ty {
@@ -3227,7 +3250,7 @@ fn relativize(base_dir: &Path, target: &Path) -> String {
 }
 
 /// A Markdown hover over `span`.
-fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Option<Hover> {
+pub(crate) fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Option<Hover> {
     let range = ctx.source_map.byte_range_to_lsp(span);
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {

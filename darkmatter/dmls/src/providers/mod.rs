@@ -27,6 +27,7 @@ pub mod references;
 pub mod rename;
 pub mod semantic_tokens;
 pub mod symbols;
+pub mod type_definition_argument;
 pub mod wiki;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};

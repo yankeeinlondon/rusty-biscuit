@@ -82,6 +82,28 @@ First character: `A-Z a-z 0-9`
 A local type named like a built-in, referenced as `shell@this`, hovers and
 goes to its local definition; the bare `shell` is the built-in.
 
+### Type definitions inside a function argument
+
+Hovering a string argument whose catalog parameter is a `type-definition`,
+such as the `as` of `load_data`, shows the same definition hover, titled by
+the parameter and ranged on the string literal. It works in the body and in
+frontmatter expressions, through string escapes and YAML quoting.
+`{{ load_data("os.yaml", "string[]") }}` shows:
+
+```markdown
+**`as`**
+
+Type: **type-definition**
+
+Declares: **string[]**
+
+**`string`**: ...
+```
+
+A named reference such as `"Hosts@./types.yaml"` hovers as written; the
+schema file is not opened. A string that is not a valid definition falls
+back to the expression hover.
+
 ### Union-typed properties and list items
 
 A property typed by a reference to a union-typed named type with a postfix

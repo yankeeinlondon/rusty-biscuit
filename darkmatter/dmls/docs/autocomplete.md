@@ -161,6 +161,35 @@ types:
 Options are not offered inside a reference to a named `alphanumeric` type:
 a use site may only repeat its definition's options.
 
+### Type definitions inside a function argument
+
+A string argument whose catalog parameter is a `type-definition`, such as
+the `as` of `load_data`, completes as a type definition rather than as an
+expression. It works in the body and in frontmatter, in a `{{ … }}` span of
+any string value and in an Expression-typed value:
+
+```markdown
+{{ load_data("hosts.yaml", "{ name: str|") }}    offers `string`, `string[]`, ...
+{{ load_data("hosts.yaml", "string(m|") }}       offers `min`, `max`, ...
+```
+
+```yaml
+hosts: '{{ load_data(''hosts.yaml'', ''{ name: str|'') }}'
+```
+
+- The candidates are the ones a `type-definition` value gets (built-in
+  types, their `[]` forms, aliases, constraints and options, and the
+  `{}`/`[]`/`Name@./types.yaml` scaffolds), except your named types: an
+  expression has no schema document, so `Name@this` has no target there.
+- The string may still be open (`{{ load_data("x.yaml", "str`): the server
+  closes it at the cursor to read the call, and diagnostics still wait for
+  an expression that parses.
+- The edit replaces exactly what you typed, read through the string's
+  escapes (`\"`, `\\`) and the YAML quoting around a frontmatter value, and
+  the inserted text is escaped the same way.
+- Which arguments qualify comes from the function catalog's parameter type,
+  so the file argument of `load_data` is completed as an expression.
+
 ## Shell suffix completion (`$( … )::`)
 
 After the closing `)` of a frontmatter `$( … )` value, completion offers the
@@ -322,3 +351,16 @@ Nested callbacks see their enclosing locals, with the nearest binding winning.
 The iterable argument is completed before the new parameter exists, and the
 binding is not offered after the callback ends. Incomplete callback bodies use
 the same cursor scope without executing the expression.
+
+After `person.`, completion offers the members of the local's object type,
+`person.name` and so on, with each member's type as `detail`. A local typed
+by a literal `load_data` contract gets its members from the contract:
+
+```markdown
+{{ map(load_data("hosts.yaml", "{ name: string, port: number }[]"), h => h.| }}
+                                                   offers `h.name`, `h.port`
+```
+
+A computed contract (`load_data("hosts.yaml", t)`) or a named reference
+(`"Hosts@./types.yaml"`) types the local as unknown, so nothing is offered
+after `h.`; the server never opens the data or schema file to find out.

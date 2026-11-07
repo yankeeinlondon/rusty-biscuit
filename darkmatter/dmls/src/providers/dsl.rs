@@ -40,6 +40,7 @@ use super::DocumentContext;
 use super::collections as collections_provider;
 use super::frontmatter;
 use super::location::line_range;
+use super::type_definition_argument::{self, Site};
 use crate::diagnostics::call_check;
 use crate::diagnostics::codes::{code, source};
 use crate::context::{ReferenceTarget, resolution_failure_data};
@@ -51,6 +52,14 @@ use crate::workspace::file_path_to_uri;
 
 /// Directive-name, directive-option, and interpolation completions.
 pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
+    // A type-definition string argument completes as a type definition; in
+    // frontmatter the frontmatter provider offers those items.
+    if let Some(items) = type_definition_argument::completion(ctx, offset, Site::Body) {
+        return items;
+    }
+    if type_definition_argument::claims(ctx, offset, Site::Frontmatter) {
+        return Vec::new();
+    }
     let line_start = ctx.text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let prefix = &ctx.text[line_start..offset];
 
@@ -427,6 +436,9 @@ pub(super) fn lower_candidates(candidates: impl IntoIterator<Item = expressions:
 /// Hover for a directive, interpolation, frontmatter `$()` value, or
 /// interpolation literal.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    if let Some(hover) = type_definition_argument::hover(ctx, offset, Site::Body) {
+        return Some(hover);
+    }
     // A collection opener's source and callbacks are typed by the library's
     // region scopes; its keyword falls through to the catalog hover.
     if let Some(hover) = collections_provider::hover(ctx, offset) {

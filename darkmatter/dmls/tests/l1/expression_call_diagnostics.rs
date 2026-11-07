@@ -709,6 +709,7 @@ mod shared_fields {
             span: None,
             iteration_path: Default::default(),
             reference_details: None,
+            data_location: None,
         }
     }
 

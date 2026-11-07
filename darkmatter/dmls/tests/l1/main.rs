@@ -69,6 +69,7 @@ mod strict_mode_recovery_spike;
 mod style_markdown_parity;
 mod suggest_constraint_phase1;
 mod test_layout;
+mod type_definition_arguments;
 mod type_scope_ownership_guard;
 mod undeclared_property;
 mod union_item_editor;

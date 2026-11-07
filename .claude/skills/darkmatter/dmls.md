@@ -529,6 +529,18 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   the top-level references of the hovered type.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
+- Type-definition string arguments (`providers/type_definition_argument.rs`):
+  a string argument whose catalog parameter type is `type-definition`
+  (`load_data`'s `as`; chosen by `function_type.parameters`, never by name)
+  gets `frontmatter::type_definition_completions` (`NamedTypes::Withheld`:
+  no `Name@this`) and `meta_schema_definition_hover_body`. It is found with
+  `expression_region_at`'s `string_start`, then the shared parser (a
+  recovered prefix when the text does not parse); positions map through the
+  lexer's escapes and `ScalarProjection`. `frontmatter.rs` and `dsl.rs`
+  dispatch to it first for their `Site`; the DSL completion declines a
+  frontmatter-claimed cursor so items are not duplicated. Callback members
+  after `h.` come from `scoped_completion_candidates`' local-member step,
+  typed only by `TypeScope`.
 - Hover/documentation from typed descriptor catalogs.
 - Hover shows the local narrowed type ("Type here") at body sites and
   inside expressions: `providers/dsl.rs::with_site_scope` builds
