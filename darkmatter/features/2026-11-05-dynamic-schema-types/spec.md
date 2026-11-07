@@ -78,7 +78,7 @@ With 2026-11-04-loading-data, the intended spelling becomes:
 
 ```yaml
 types:
-    os: enum({{ load_data("claudine/docs/os.yaml", string[]) }}; required)
+    os: enum({{ load_data("claudine/docs/os.yaml", "string[]") }}; required)
 ```
 
 ## The tension to resolve
