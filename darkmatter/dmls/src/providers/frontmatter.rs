@@ -25,7 +25,7 @@ use simplified_schema::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor, SchemaCursorRole, SchemaDeclaration,
     SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, DecodedScalar, decode_plain_scalar_node, decode_scalar,
     locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar, mapping_separator,
-    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_property_definition,
+    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, parse_type_definition_value,
     parse_schema_declaration, flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
 use serde_json::Value;
@@ -1805,7 +1805,7 @@ fn frontmatter_definition_hover(
     let source = ctx.text.get(entry.value_span.clone())?;
     let source = dedent_spanned_yaml(source, source_column(ctx.text, entry.value_span.start));
     let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
-    let definition = parse_property_definition(&entry.key, &yaml).ok()?;
+    let definition = parse_type_definition_value(&entry.key, &yaml).ok()?;
     markup_hover(
         ctx,
         entry.key_span.clone()?,

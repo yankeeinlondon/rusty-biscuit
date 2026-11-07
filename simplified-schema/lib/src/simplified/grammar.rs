@@ -1981,7 +1981,7 @@ impl<'a> Parser<'a> {
                     let value = serde_yaml_ng::Value::String(default.to_string());
                     let result = match ty {
                         SimplifiedType::TypeDefinition => {
-                            super::parse_property_definition(self.property, &value).map(|_| ())
+                            super::parse_type_definition_value(self.property, &value).map(|_| ())
                         }
                         SimplifiedType::Schema => {
                             super::parse_schema_declaration(&value).map(|_| ())

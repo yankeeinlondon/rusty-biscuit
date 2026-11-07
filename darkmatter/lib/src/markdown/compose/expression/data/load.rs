@@ -17,7 +17,7 @@ use biscuit_file::{DataFormat, DelimitedData, DelimitedRecord, FileType};
 use serde_json::Value;
 use tracing::field::Empty;
 
-use super::contract::{PreparedContract, RowMode, judge_written_contract};
+use super::contract::{PreparedContract, RowMode, judge_written_contract, written_contract};
 use super::error::{DataError, TabularSource};
 use super::parse::{decode_local, located_at, parse_text, strip_bom};
 use super::runtime::{DataSourceIdentity, LoadedData, LoadedSource, SourceContent};
@@ -53,11 +53,11 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Null);
     };
-    let written = call.args().text(1).ok_or_else(|| ExpressionError::ContractViolation {
+    let written = call.args().get(1).and_then(written_contract).ok_or_else(|| ExpressionError::ContractViolation {
         function: FUNCTION.to_string(),
-        message: "argument 1 did not bind to text".to_string(),
+        message: "argument 1 did not bind to a type definition".to_string(),
     })?;
-    let contract = ctx.data.prepare_contract(written, &ctx.file_context())?;
+    let contract = ctx.data.prepare_contract(&written, &ctx.file_context())?;
 
     let remote = is_remote_url(raw);
     let identity = match url::Url::parse(raw) {
@@ -271,22 +271,20 @@ fn check_header(header: &DelimitedRecord, source: &LoadedSource, identity: &Data
     }))
 }
 
-/// Refines a failed binding of `load_data`'s `as` argument: a string the text
-/// alone proves cannot be a contract (a scalar type, or a `Name@this`
-/// reference) fails with its `dm.data.*` error rather than a generic type
-/// error, the same error a literal contract gets passively. Any other
-/// binding failure, including contract text that does not parse, keeps the
-/// binder's error.
+/// Refines a failed binding of `load_data`'s `as` argument: a contract the
+/// text alone proves cannot be one (a scalar type, a union of scalars, or a
+/// `Name@this` reference), carried as a string or as a list or mapping,
+/// fails with its `dm.data.*` error rather than a generic type error, the
+/// same error a literal contract gets passively. Any other binding failure,
+/// including contract text that does not parse, keeps the binder's error.
 pub(crate) fn refine_binding_error(error: &CallBindingError, args: &[Value]) -> Option<ExpressionError> {
     let mut failures = error.argument_errors().peekable();
     failures.peek()?;
     if !failures.all(|failure| failure.index == 1) {
         return None;
     }
-    let Some(Value::String(written)) = args.get(1) else {
-        return None;
-    };
-    match judge_written_contract(written) {
+    let written = written_contract(args.get(1)?)?;
+    match judge_written_contract(&written) {
         Err(rejected @ (DataError::ThisImportRejected { .. } | DataError::NotAContainer { .. })) => {
             Some(fail(rejected))
         }
@@ -329,6 +327,15 @@ mod tests {
     fn a_scalar_contract_refines_to_not_a_container() {
         let args = [json!("os.yaml"), json!("string")];
         assert_eq!(refined_code(&failed_at(1, json!("string")), &args), Some("dm.data.not_a_container"));
+    }
+
+    /// A bracket list, quoted or as a list value, is the union of its items.
+    #[test]
+    fn a_scalar_union_list_refines_to_not_a_container_from_either_carrier() {
+        for carrier in [json!("[string, number]"), json!(["string", "number"])] {
+            let args = [json!("os.yaml"), carrier.clone()];
+            assert_eq!(refined_code(&failed_at(1, carrier), &args), Some("dm.data.not_a_container"));
+        }
     }
 
     #[test]

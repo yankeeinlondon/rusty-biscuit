@@ -8,6 +8,7 @@
 //! wrapper is added, so `string[]` rejects `null` and `string[] | null`
 //! admits it.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,12 +18,13 @@ use simplified_schema::coercion::Shape;
 use simplified_schema::simplified::narrowing::{ContainerAdmission, container_admission, is_null_type};
 use simplified_schema::simplified::{
     DefKey, DefinitionTable, PropertyAtom, PropertyDef, SchemaRoot, SchemaShape, SimplifiedType, TypeExpr,
-    flattened_alternatives, parse_property_definition, serialize_property_atom, to_json_schema_with_definitions,
+    flattened_alternatives, parse_type_definition_value, serialize_property_atom, serialize_property_def,
+    to_json_schema_with_definitions,
 };
 
 use super::error::DataError;
 use crate::markdown::compose::expression::call_binding::{NoNamedTypes, shape_from_property_def_with_definitions};
-use crate::markdown::compose::expression::{FileRefFailure, FileReferenceDiagnostic};
+use crate::markdown::compose::expression::FileReferenceDiagnostic;
 
 /// The property name of the synthetic schema a contract is resolved in. It
 /// appears in schema error messages as the parameter the author wrote.
@@ -193,7 +195,7 @@ pub fn prepare_contract(written: &str, document: &FileResolutionContext) -> Resu
 /// - [`DataError::NotAContainer`] for a scalar, `unknown`, or `null`-only
 ///   contract.
 pub fn judge_written_contract(written: &str) -> Result<PropertyDef, DataError> {
-    let parsed = parse_property_definition(CONTRACT_PROPERTY, &serde_yaml_ng::Value::String(written.to_string()))
+    let parsed = parse_type_definition_value(CONTRACT_PROPERTY, &serde_yaml_ng::Value::String(written.to_string()))
         .map_err(|source| DataError::ContractSchema { written: written.to_string(), source: Arc::new(source) })?;
     if let Some(name) = local_reference(&parsed) {
         return Err(DataError::ThisImportRejected { written: written.to_string(), name: name.to_string() });
@@ -204,12 +206,30 @@ pub fn judge_written_contract(written: &str) -> Result<PropertyDef, DataError> {
     Ok(parsed)
 }
 
+/// The contract text an `as` value carries: a string as written, or the
+/// canonical text of a list or mapping that parses as a type definition (a
+/// list is the union of its items), so every carrier reaches
+/// [`judge_written_contract`] and [`prepare_contract`] the same way. `None`
+/// for any other value or a list or mapping that is not a definition; the
+/// binder has already rejected those.
+pub fn written_contract(carrier: &serde_json::Value) -> Option<Cow<'_, str>> {
+    match carrier {
+        serde_json::Value::String(text) => Some(Cow::Borrowed(text)),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            let yaml = serde_yaml_ng::to_value(carrier).ok()?;
+            let parsed = parse_type_definition_value(CONTRACT_PROPERTY, &yaml).ok()?;
+            Some(Cow::Owned(serialize_property_def(&parsed)))
+        }
+        _ => None,
+    }
+}
+
 /// The exact serialized identity of a resolved contract. The lowered schema
 /// keeps union and property order, so it is serialized as built, without
 /// key sorting; NUL cannot occur in any part, so the parts cannot run
 /// together.
 fn contract_key(property: &PropertyDef, lowered: &serde_json::Value, imports: &[PathBuf]) -> String {
-    let mut key = simplified_schema::simplified::serialize_property_def(property);
+    let mut key = serialize_property_def(property);
     key.push('\0');
     key.push_str(&lowered.to_string());
     for import in imports {
@@ -222,28 +242,9 @@ fn contract_key(property: &PropertyDef, lowered: &serde_json::Value, imports: &[
 /// Keeps a missing or unreadable import in the file-reference family, naming
 /// the import reference; every other expansion failure is a schema failure.
 fn import_failure(written: &str, document: &FileResolutionContext, error: SchemaError) -> DataError {
-    let file_reference = |reference: String, kind: FileRefFailure, source: Option<biscuit_file::FileReferenceError>| {
-        DataError::FileReference(FileReferenceDiagnostic {
-            function: "load_data",
-            reference,
-            kind,
-            cwd: document.cwd().to_path_buf(),
-            fallback_dir: None,
-            source: source.map(Arc::new),
-            caller: None,
-        })
-    };
-    match error {
-        SchemaError::Unresolved { reference, source } => {
-            file_reference(reference, FileRefFailure::classify(&source), Some(source))
-        }
-        SchemaError::NoMatch { reference, .. } => file_reference(reference, FileRefFailure::NotFound, None),
-        SchemaError::Io { path, source } => file_reference(
-            path.to_string_lossy().into_owned(),
-            FileRefFailure::NotFound,
-            Some(biscuit_file::FileReferenceError::Io { path, source }),
-        ),
-        other => DataError::ContractSchema { written: written.to_string(), source: Arc::new(other) },
+    match FileReferenceDiagnostic::from_schema_read("load_data", document.cwd().to_path_buf(), error) {
+        Ok(diagnostic) => DataError::FileReference(diagnostic),
+        Err(other) => DataError::ContractSchema { written: written.to_string(), source: Arc::new(other) },
     }
 }
 
@@ -605,7 +606,7 @@ mod tests {
     use super::*;
 
     fn parsed(text: &str) -> PropertyDef {
-        parse_property_definition("as", &serde_yaml_ng::Value::String(text.to_string()))
+        parse_type_definition_value("as", &serde_yaml_ng::Value::String(text.to_string()))
             .unwrap_or_else(|error| panic!("{text}: {error}"))
     }
 

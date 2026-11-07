@@ -22,6 +22,7 @@ use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionE
 use super::super::body_origin::{BodyProvenance, EditOrigin};
 use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::value_origin::DataPaths;
+use super::super::inline::shell_expansion::{CommandSiteKind, StageWindow};
 
 impl Markdown {
     /// Runs one inline-pre `operation`. `body` records where each byte of the
@@ -72,9 +73,45 @@ impl Markdown {
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
-                inline::shell_expansion::run_stage(self, state, schemas, options, runtime, report, perf, body)
+                if body.pending.is_empty() {
+                    inline::shell_expansion::run_stage(
+                        self, state, schemas, options, runtime, report, perf, body, StageWindow::All,
+                    )?;
+                } else {
+                    self.run_directives_between_reads(state, options, runtime, report, perf, body, schemas)?;
+                }
+                if !options.is_enabled(ComposeOperation::ShellBlocks) {
+                    inline::interpolation::resolve_pending(self, state, options, runtime, report, body, schemas, |_| true)?;
+                }
+                Ok(())
             }
-            ComposeOperation::ShellBlocks => self.run_shell_blocks_operation(state, options, runtime, report, body, schemas),
+            ComposeOperation::ShellBlocks => {
+                if body.pending.is_empty() {
+                    return self.run_shell_blocks_operation(state, options, runtime, report, body, schemas, None);
+                }
+                // Every directive has run; a pending read waits only for the
+                // blocks before it.
+                loop {
+                    let next = inline::shell_expansion::command_sites(self, &self.content, &body.data, options)
+                        .into_iter()
+                        .find(|site| site.kind == CommandSiteKind::Block)
+                        .map(|site| site.span);
+                    let refreshed = next.as_ref().is_some_and(|block| body.pending.intersects(block));
+                    inline::interpolation::resolve_pending(self, state, options, runtime, report, body, schemas, |read| {
+                        next.as_ref().is_none_or(|block| read.start < block.end)
+                    })?;
+                    if next.is_none() {
+                        return Ok(());
+                    }
+                    let ran = report.shell_blocks_applied;
+                    self.run_shell_blocks_operation(state, options, runtime, report, body, schemas, Some(refreshed))?;
+                    if report.shell_blocks_applied == ran {
+                        return Err(MarkdownError::Transform(
+                            "internal error: a shell block the stage found did not run".to_string(),
+                        ));
+                    }
+                }
+            }
             ComposeOperation::LinkResolve => {
                 let before = self.content.clone();
                 let edits = link_resolve::link_resolve_with_edits(self, options, report)?;
@@ -84,13 +121,64 @@ impl Markdown {
         }
     }
 
+    /// Runs the body's `::shell` directives one at a time when body
+    /// interpolation left reads pending, evaluating each read once every
+    /// command before it has run.
+    ///
+    /// Before each directive, the pending reads that precede every remaining
+    /// command, and those on the directive's own line, are evaluated; a read
+    /// after a shell block waits for the shell-block stage. The first call
+    /// still reads every directive before any runs.
+    #[allow(clippy::too_many_arguments)]
+    fn run_directives_between_reads(
+        &mut self,
+        state: &EffectiveState,
+        options: &crate::markdown::compose::ComposeRequest,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut ComposeReport,
+        perf: &mut perf::PerfCollector,
+        body: &mut BodyProvenance,
+        schemas: &super::super::schema_validation::PreparedSchemas,
+    ) -> MarkdownResult<()> {
+        let mut read_rest = true;
+        loop {
+            let sites = inline::shell_expansion::command_sites(self, &self.content, &body.data, options);
+            let barrier = sites.first().map(|site| site.span.start);
+            let next = sites.into_iter().find(|site| site.kind == CommandSiteKind::Directive).map(|site| site.span);
+            let on_line = |read: &std::ops::Range<usize>| {
+                next.as_ref().is_some_and(|line| line.start <= read.start && read.end <= line.end)
+            };
+            let refreshed = next.as_ref().is_some_and(|line| body.pending.intersects(line));
+            inline::interpolation::resolve_pending(self, state, options, runtime, report, body, schemas, |read| {
+                barrier.is_none_or(|barrier| read.start < barrier) || on_line(read)
+            })?;
+            if next.is_none() {
+                return Ok(());
+            }
+            let ran = report.shell_expansions_applied;
+            inline::shell_expansion::run_stage(
+                self, state, schemas, options, runtime, report, perf, body, StageWindow::First { read_rest, refreshed },
+            )?;
+            if report.shell_expansions_applied == ran {
+                return Err(MarkdownError::Transform(
+                    "internal error: a shell directive the stage found did not run".to_string(),
+                ));
+            }
+            read_rest = false;
+        }
+    }
+
     /// The [`ComposeOperation::ShellBlocks`] arm of
     /// [`run_inline_pre_operation`](Self::run_inline_pre_operation).
     ///
     /// Out of line so its evaluator and templates stay out of the dispatch
     /// frame, which the interpolation stage's nested compositions recur
     /// through.
+    ///
+    /// `first` limits the run to the first block (see
+    /// [`shell_blocks::run_shell_blocks_stage_in`]).
     #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
     fn run_shell_blocks_operation(
         &mut self,
         state: &EffectiveState,
@@ -99,6 +187,7 @@ impl Markdown {
         report: &mut ComposeReport,
         body: &mut BodyProvenance,
         schemas: &super::super::schema_validation::PreparedSchemas,
+        first: Option<bool>,
     ) -> MarkdownResult<()> {
         let sb_ctx = self.full_source_context_for_errors();
         let line_offset = self.frontmatter_line_count();
@@ -136,6 +225,7 @@ impl Markdown {
             &mut runtime.shell,
             &sb_ctx,
             line_offset,
+            first,
         )
         .map_err(|error| match lookup.entered() {
             // The stage entered the failing command's line, or the block's

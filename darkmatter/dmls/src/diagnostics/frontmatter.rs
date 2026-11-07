@@ -18,7 +18,7 @@ use simplified_schema::{
     FileReferenceDiagnostic, PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason, ValidationProblem,
     ValidationProblemCode, SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
     SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value, LocatedDefinitionFailure, LocatedRelated,
-    locate_standalone_definition_failure, parse_property_definition, parse_property_definition_with_source,
+    locate_standalone_definition_failure, parse_property_definition_with_source, parse_type_definition_value,
     parse_schema_declaration, parse_schema_declaration_with_source, parse_yaml_schema,
 };
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
@@ -618,7 +618,7 @@ fn semantic_authored_diagnostics(
         for kind in &value.kinds {
             let result = match kind {
                 MetaSchemaKind::TypeDefinition => {
-                    parse_property_definition(&entry.key, &yaml).map(|_| ())
+                    parse_type_definition_value(&entry.key, &yaml).map(|_| ())
                 }
                 MetaSchemaKind::Schema => parse_schema_declaration(&yaml).map(|_| ()),
             };

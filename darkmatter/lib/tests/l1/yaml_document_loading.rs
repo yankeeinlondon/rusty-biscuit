@@ -1,6 +1,7 @@
 //! Document shapes of the one whole-file YAML loader, through
 //! `DarkmatterSchemas::validate_yaml_document`: every load failure is a
-//! located `SchemaDocument` error (even when no schema could be selected),
+//! located `SchemaDocument` error (even when no schema could be selected or
+//! the file has an alias),
 //! document markers, a byte-order mark, and CRLF lines are accepted, and a
 //! root that is not a mapping is valid but unvalidated.
 
@@ -45,9 +46,12 @@ fn a_duplicate_key_is_a_located_load_error() {
 }
 
 #[test]
-fn a_non_string_mapping_key_is_a_load_error() {
-    let (message, _) = load_error("kind: roster\nlimits:\n    42: high\n");
+fn a_non_string_mapping_key_is_a_load_error_at_the_key() {
+    let text = "base: &b roster\nkind: *b\nlimits:\n    42: high\n";
+    let (message, span) = load_error(text);
     assert!(message.contains("`/limits`") && message.contains("not a string"), "{message}");
+    let span = span.expect("located even after an alias");
+    assert_eq!(simplified_schema::line_col_of_offset(text, span.start), (4, 5), "{message}");
 }
 
 #[test]
@@ -68,9 +72,11 @@ fn malformed_yaml_is_a_load_error_never_an_unclaimed_success() {
 }
 
 #[test]
-fn a_second_document_is_a_load_error() {
-    let (message, _) = load_error("name: a\n---\nname: b\n");
+fn a_second_document_is_a_load_error_at_its_marker() {
+    let text = "name: a\n---\nname: b\n";
+    let (message, span) = load_error(text);
     assert!(message.contains("more than one document"), "{message}");
+    assert_eq!(span, Some(8..8), "{message}");
 }
 
 #[test]

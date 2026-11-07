@@ -1007,6 +1007,8 @@ impl<'a> StackExecutor<'a> {
             "http_post" => engine.http_post(&s(0)?, s(1)?.into_bytes()),
             other => return Err(dispatch_err(format!("unknown side effect `{other}`"))),
         };
+        // The engine ran: a failed effect may still have written a file.
+        self.inputs.host.side_effect_attempted();
         // The effect engine's error is the snapshot boundary's input: hand it
         // over typed so the projection reads it, rather than pre-flattening it
         // here and handing the snapshot prose.

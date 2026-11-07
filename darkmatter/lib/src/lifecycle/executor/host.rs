@@ -120,6 +120,14 @@ pub trait LifecycleHost {
         false
     }
 
+    /// Told after each side effect the executor handed to the effect engine,
+    /// whether it succeeded or failed, before any later expression of the
+    /// stack evaluates: the effect may have written a file that a reused read
+    /// depends on. A side effect refused before the engine ran (an argument
+    /// that did not bind or evaluate) is not reported. By default nothing is
+    /// reused across expressions, so there is nothing to forget.
+    fn side_effect_attempted(&self) {}
+
     /// Whether `name` is a sound effect the host can play.
     fn is_known_effect(&self, name: &str) -> bool;
 

@@ -106,14 +106,51 @@ mod container_rule {
         }
     }
 
-    /// `[string, number]` is not inline type syntax (only a YAML sequence
-    /// spells that union), so it fails as malformed syntax rather than as a
-    /// scalar union; either way it is rejected before anything runs.
+    /// Spec R2: `"[string, number]"` is the union `string | number`, so it
+    /// is not a container, with a literal or a computed file.
     #[test]
-    fn a_bracketed_scalar_union_is_rejected_as_malformed_syntax() {
-        let check = load_check(&call("\"d.yaml\"", "[string, number]"));
+    fn a_bracketed_scalar_union_is_not_a_container_at_the_as_span() {
+        for file in ["\"d.yaml\"", "f"] {
+            let message = assert_rejected(&call(file, "[string, number]"), NOT_A_CONTAINER_CODE);
+            assert!(message.contains("`[string, number]`"), "{message}");
+            assert_rejected(&call(file, "string | number"), NOT_A_CONTAINER_CODE);
+        }
+    }
+
+    /// A bracket list whose items are all containers (or null) is accepted
+    /// and types the result like the same `|` union.
+    #[test]
+    fn a_bracketed_union_of_containers_passes_and_types_the_result() {
+        for contract in ["['string[]', null]", "['{ a: string }[]', { b: number }]"] {
+            assert_accepted(&call("\"d.yaml\"", contract));
+        }
+        assert_eq!(type_text(&call("\"h.yaml\"", "['string[]', null]")), "string[] | null");
+    }
+
+    /// Bracket text that is not a list of definitions stays malformed syntax,
+    /// as in an unquoted YAML list (`string[]` must be quoted inside one).
+    #[test]
+    fn malformed_bracket_text_keeps_the_incompatible_call_code() {
+        for contract in ["[string,", "[]]", "[]", "[string[], null]", "[string | number]"] {
+            let check = load_check(&call("\"d.yaml\"", contract));
+            assert!(check.is_rejected(), "{contract}: {check:#?}");
+            assert_eq!(check.data_problem, None, "{contract}");
+            assert_eq!(check.rejection_diagnostic().unwrap().code, INCOMPATIBLE_CALL_CODE, "{contract}");
+        }
+    }
+
+    /// An expression list literal is the same carrier as a YAML list: a
+    /// union of scalars is not a container, a union of containers passes.
+    #[test]
+    fn a_list_literal_contract_is_judged_as_its_union() {
+        let source = "load_data(\"d.yaml\", [\"string\", \"number\"])";
+        let check = load_check(source);
         assert!(check.is_rejected(), "{check:#?}");
-        assert_eq!(check.rejection_diagnostic().unwrap().code, INCOMPATIBLE_CALL_CODE);
+        let diagnostic = check.rejection_diagnostic().unwrap();
+        assert_eq!(diagnostic.code, NOT_A_CONTAINER_CODE, "{diagnostic:#?}");
+        assert_eq!(diagnostic.span, check.argument_spans[1]);
+        assert!(diagnostic.message.contains("`string | number`"), "{}", diagnostic.message);
+        assert_accepted("load_data(\"d.yaml\", [\"string[]\", null])");
     }
 
     /// Spec R10: the signature's null passthrough does not excuse a wrong
@@ -354,6 +391,26 @@ mod composition {
         assert_eq!(error_diagnostics(&failure.error), vec![record]);
         assert!(failure.read_set.is_empty(), "{:?}", failure.read_set);
         assert!(runtime.read_set().is_empty());
+        let stats = runtime.stats();
+        assert_eq!((stats.reads, stats.parses, stats.contract_preparations), (0, 0, 0), "{stats:?}");
+    }
+
+    /// The bracket spelling of a scalar union is rejected before anything
+    /// runs, exactly like the `|` spelling.
+    #[test]
+    fn a_bracketed_scalar_union_is_rejected_before_anything_runs() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "d.yaml", "- x\n");
+        let doc = write(dir.path(), "doc.md", "{{ load_data('d.yaml', '[string, number]') }}\n");
+        let runtime = DataRuntime::new();
+        let options = ComposeOptions::new().with_source_file(&doc).with_data_runtime(runtime.clone());
+        let request = crate::request_support::request(options);
+        let failure = Markdown::try_from(doc.as_path()).unwrap().compose_with_warnings(&request).expect_err("rejected");
+        let record = failure.error.call_diagnostic().expect("a located record");
+        assert_eq!(record.code, NOT_A_CONTAINER_CODE, "{record:#?}");
+        let source = record.source.as_ref().expect("located");
+        assert_eq!((source.line, source.column), (Some(1), Some(24)), "{record:#?}");
+        assert!(failure.read_set.is_empty(), "{:?}", failure.read_set);
         let stats = runtime.stats();
         assert_eq!((stats.reads, stats.parses, stats.contract_preparations), (0, 0, 0), "{stats:?}");
     }

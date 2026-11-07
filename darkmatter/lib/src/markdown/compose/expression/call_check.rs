@@ -237,12 +237,11 @@ fn load_data_type(name: &str, args: &[SpannedExpr], scope: &TypeScope<'_>) -> Op
     let [file, contract] = args else {
         return None;
     };
-    let Some(Value::String(written)) = literal_value(contract) else {
-        return None;
-    };
     if !is_load_data(name) {
         return None;
     }
+    let carrier = literal_value(contract)?;
+    let written = super::data::written_contract(&carrier)?;
     let mut denoted = super::data::judge_written_contract(&written).ok()?;
     unresolved_as_unknown(&mut denoted);
     let denoted = ScopeShape::of_type(&denoted);
@@ -1079,7 +1078,8 @@ fn shared_failing_argument(verdicts: &[Vec<ArgumentCheck>]) -> Option<usize> {
 }
 
 /// The static contract failure of a two-argument `load_data` call whose `as`
-/// is a literal string, judged with no I/O.
+/// is a literal (a string, or a list or mapping literal read as
+/// [`super::data::written_contract`] reads it), judged with no I/O.
 ///
 /// - The text alone decides a document-local reference and a scalar.
 /// - Shipped `Name@darkmatter:<stem>` imports are expanded from the embedded
@@ -1087,18 +1087,39 @@ fn shared_failing_argument(verdicts: &[Vec<ArgumentCheck>]) -> Option<usize> {
 /// - A literal CSV or TSV file (by its local or URL path's extension) also
 ///   applies the tabular row rule.
 ///
+/// A computed `as` the checker types as known string literals (a callback
+/// item over a literal list) is judged per literal, and is proven wrong only
+/// when every literal is; the first literal's problem is reported.
+///
 /// Malformed contract syntax is `None`: the binder's own type error already
 /// rejects it. So is an unknown shipped type, which execution reports.
 fn load_data_problem(arguments: &[ArgumentType]) -> Option<DataProblem> {
-    use super::data::DataError;
-    let [file, ArgumentType::Literal(Value::String(written))] = arguments else {
+    let [file, contract] = arguments else {
         return None;
     };
-    let error = match super::data::judge_written_contract(written) {
+    match contract {
+        ArgumentType::Literal(carrier) => literal_contract_problem(file, carrier),
+        ArgumentType::Typed(ScopeShape::Arms { arms, nullable: false }) => {
+            let mut problems = arms.iter().map(|arm| {
+                let carrier = arm.literal_value().filter(|value| !arm.is_array && value.is_string())?;
+                literal_contract_problem(file, carrier)
+            });
+            let first = problems.next()??;
+            problems.all(|problem| problem.is_some()).then_some(first)
+        }
+        _ => None,
+    }
+}
+
+/// [`load_data_problem`] for one literal `as` value.
+fn literal_contract_problem(file: &ArgumentType, carrier: &Value) -> Option<DataProblem> {
+    use super::data::DataError;
+    let written = super::data::written_contract(carrier)?;
+    let error = match super::data::judge_written_contract(&written) {
         Err(DataError::ContractSchema { .. }) => return None,
         Err(error) => error,
         Ok(parsed) => {
-            let (property, definitions) = match super::data::contract::expand_embedded_contract(&parsed, written) {
+            let (property, definitions) = match super::data::contract::expand_embedded_contract(&parsed, &written) {
                 None => (parsed, std::sync::Arc::new(DefinitionTable::default())),
                 Some(Ok(expanded)) => (expanded.property, expanded.definitions),
                 Some(Err(error)) if matches!(*error, DataError::NotAContainer { .. }) => {
@@ -1114,7 +1135,7 @@ fn load_data_problem(arguments: &[ArgumentType]) -> Option<DataProblem> {
             }
             match super::data::classify_rows(&property, &definitions) {
                 Ok(_) => return None,
-                Err(conflict) => DataError::RowShapeConflict { written: written.clone(), conflict },
+                Err(conflict) => DataError::RowShapeConflict { written: written.to_string(), conflict },
             }
         }
     };

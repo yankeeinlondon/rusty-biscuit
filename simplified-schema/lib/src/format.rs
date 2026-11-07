@@ -66,7 +66,7 @@ use crate::coercion::{ContentFormat, content_error};
 use crate::file_context::resolve_document_file_ref;
 use crate::simplified::{
     Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
-    TypeExpr, declaration_options_payload, parse_property_definition, parse_schema_declaration,
+    TypeExpr, declaration_options_payload, parse_schema_declaration, parse_type_definition_value,
     serialize_property_atom, serialize_property_def,
 };
 use crate::simplified::narrowing::{ContainerAdmission, container_admission};
@@ -847,7 +847,7 @@ impl SchemaOptions {
 
 fn parse_type_definition_instance(instance: &Value) -> Result<PropertyDef, String> {
     let yaml = serde_yaml_ng::to_value(instance).map_err(|error| error.to_string())?;
-    parse_property_definition("<instance>", &yaml).map_err(|error| error.to_string())
+    parse_type_definition_value("<instance>", &yaml).map_err(|error| error.to_string())
 }
 
 fn parse_schema_instance(instance: &Value) -> Result<SchemaDeclaration, String> {

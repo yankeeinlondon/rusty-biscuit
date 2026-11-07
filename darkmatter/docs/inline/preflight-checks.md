@@ -45,6 +45,23 @@ validation before execution or result reuse. Re-preparing a document with
 changed state requires another audit; an exact decision cannot cover new bytes.
 A dead-branch command is **approved but never executed**.
 
+One case has bytes the walk could not see: a command whose argument reads a
+file (`load_data`, `frontmatter`, `file_exists`, …) after an earlier command
+ran. Pre-flight read the file before anything ran, so it approved the bytes
+the old content gave. When the command's bytes change, they run only if an
+`exact` rule in the whitelist names them, the rule the walk itself would have
+applied, or if the command's `template` shape was approved. Otherwise the
+command fails as not pre-approved, and nothing about it runs:
+
+```markdown
+::shell git config --file d.toml a.b 2
+
+::shell git config --file result.toml r.v {{ load_data('d.toml', '{ a: { b: number } }').a.b }}
+```
+
+Pre-flight sees `… r.v 1`; the second command runs as `… r.v 2`. Approve it
+with `exact git config --file result.toml r.v 2` or with its template shape.
+
 ### Missing values
 
 A shell command never runs with a missing value. A placeholder is missing

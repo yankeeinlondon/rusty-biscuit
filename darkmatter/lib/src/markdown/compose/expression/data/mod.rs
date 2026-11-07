@@ -21,6 +21,7 @@ pub mod runtime;
 
 pub use contract::{
     PreparedContract, RowClassification, RowMode, RowShapeConflict, classify_rows, judge_written_contract, prepare_contract,
+    written_contract,
 };
 pub use error::{
     CONTRACT_MISMATCH_CODE, DATA_DIAGNOSTIC_CODES, DataError, DataSourceLocation, MALFORMED_CODE,

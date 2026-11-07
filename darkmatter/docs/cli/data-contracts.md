@@ -174,7 +174,8 @@ Owner: {{ frontmatter("team.md").owner }}
 - **What counts.** Each read-side function records the file it reads:
   `load_data`, `frontmatter`, `try_frontmatter`, `file_exists`,
   `markdown_title`, `markdown_body_empty`, and `validate_schema`. Schema files a
-  `load_data` contract or `validate_schema` imports count too. Links,
+  `load_data` contract or `validate_schema` imports count too, at any depth,
+  including every one read before an import failed. Links,
   transclusions, and other files the run touches without an expression do not.
 - **Every pass counts.** A read during the reference check, the lifecycle,
   pre-flight, or composition is reported, including a read in a transcluded
@@ -237,8 +238,9 @@ the file a read-side function names could not be read, such as
 `frontmatter("missing.md")`: its `construct` is the function, as in
 `"frontmatter()"`, and its `reference` is the argument as written. A remote
 fetch that fails after its host was allowed (the request fails, or the response
-is not UTF-8 text) has none of these fields; its `message` says what went
-wrong. Other diagnostics omit these fields. The cases `load_data` meets are
+is not UTF-8 text) carries them too, with reason `"unreachable"` and failure
+`"io"`; its `message` keeps the remote runtime's wording. Other diagnostics
+omit these fields. The cases `load_data` meets are
 listed under [Data errors](#data-errors).
 
 | Field | Value |
@@ -491,7 +493,7 @@ is always found when the call runs.
 
 Two contract problems keep a general code:
 
-- `as` text that is not type syntax at all, such as `"[string, number]"` or
+- `as` text that is not type syntax at all, such as `"[string,"` or
   `"string[("`, is `dm.expression.incompatible_call` at the `as` argument when it
   is a literal, and `dm.expression.evaluation_failure` when it is computed.
 - A contract whose named type cannot be resolved (the import file exists but
@@ -583,6 +585,7 @@ script can tell what went wrong without parsing the message:
 | an import named in `as` does not exist | `file not found` | `load_data()` | the import, such as `./missing-types.yaml` | `no-match` |
 | the local file exists but cannot be read | omitted | `load_data()` | the `file` argument as written | [`io`](../errors/file-reference-failures.md) |
 | the URL's host is not allowed | `remote check disabled` | `load_data()` | the URL as written | `unsupported-remote` |
+| the host is allowed, but the request fails (no connection, an HTTP error status) or the response is not UTF-8 text | `unreachable` | `load_data()` | the URL as written | `io` |
 
 ```json
 { "code": "dm.expression.evaluation_failure",
@@ -592,12 +595,42 @@ script can tell what went wrong without parsing the message:
   "reference": "gone.json", "failure": "no-match" }
 ```
 
-A fetch that fails after its host was allowed, because the request fails or the
-response is not UTF-8 text, keeps the same code but carries no reference
-fields; its `message` says what went wrong. No file error has a
-`data_location`. The other read-side functions (`frontmatter`, `markdown_title`,
+A fetch from an allowed host that fails keeps the remote runtime's wording in
+`message`, such as `HTTP error status 500 from <url>` or `invalid UTF-8 in
+response body: …`. Its `failure` is `io`, never `unsupported-remote`, because
+the host was allowed and contacted:
+
+```json
+{ "code": "dm.expression.evaluation_failure",
+  "message": "interpolation of `load_data(\"https://data.example.com/hosts.json\", \"object\")` failed: load_data(): HTTP error status 500 from https://data.example.com/hosts.json",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 3, "inserted": false },
+  "reason": "unreachable", "construct": "load_data()",
+  "reference": "https://data.example.com/hosts.json", "failure": "io" }
+```
+
+No file error has a `data_location`. The other read-side functions (`frontmatter`, `markdown_title`,
 `markdown_body_empty`, `validate_schema`, `file_exists`) report their file
 failures the same way, each naming itself in `construct`.
+
+`validate_schema` reads more than its argument: the `$schema` file its
+subject document names, and every file that schema imports a named type
+from. When one of those is missing or unreadable, the record carries the
+same fields with `construct` `validate_schema()` and `reference` the schema
+reference as written (`./missing-types.yaml` for
+`name: Name@./missing-types.yaml`): `file not found`/`no-match` for a file
+that does not exist, `io` with no `reason` for one that cannot be read. A
+schema file that reads but is not a valid schema (a grammar error, an
+unknown named type) is not a file failure and has no reference fields. A
+remote `$schema` is never fetched, so it has none either. The `message` is
+the same in every case, for example:
+
+```json
+{ "code": "dm.expression.evaluation_failure",
+  "message": "interpolation of `validate_schema(\"subject.md\")` failed: validate_schema(): validate_schema() error for \"subject.md\": could not resolve $schema reference `./missing-types.yaml`",
+  "source": { "file": "/work/doc.md", "line": 1, "column": 3, "inserted": false },
+  "reason": "file not found", "construct": "validate_schema()",
+  "reference": "./missing-types.yaml", "failure": "no-match" }
+```
 
 A data failure stops the command; it can stop it in the reference check, before
 composition starts. See [Data failures](../errors/composition-problems.md#data-failures).
@@ -678,8 +711,17 @@ or the position map cannot prove one:
 - **A duplicate key** is located at the start of the mapping that holds it, not
   at the second key: `a: 1` then `a: 2` at the top of a file is line 1,
   column 1, with no pointer.
-- **A second YAML document** in the file, and **a non-string key**, have no
-  position at all: `data_location` holds `file` alone.
+
+These are located even in a file with an alias, because they are problems in
+the YAML itself, not contract mismatches:
+
+- **A second YAML document** is located at the `---` that starts it
+  (`a: ok`, `---`, `a: next` is line 2, column 1), or at its first value when
+  no `---` introduces it (after a `...` end marker).
+- **A non-string key** is located at the key: `42: text` at the top of a file
+  is line 1, column 1, with no pointer.
+- **A tag** (`b: !tag text`) is located at the tag (line 1, column 4), with
+  the pointer of the tagged value (`/b`).
 
 ## Other commands
 

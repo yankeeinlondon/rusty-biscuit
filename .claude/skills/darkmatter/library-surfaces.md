@@ -69,7 +69,17 @@ behavior.
   capped at `CONTRACT_RECORD_CAP` plus one overflow record. Every
   `ExpressionError::FileReference` fills `reason`/`construct`/`reference`/
   `failure` without changing `message`; a host the fetch policy refuses is
-  the typed `FileRefFailure::RemoteDenied`, not text.
+  the typed `FileRefFailure::RemoteDenied`, not text. Any other failed
+  fetch from an allowed host (`RemoteTextError::Failed`, through
+  `functions/fs.rs::remote_text_error`) is `ExpressionError::RemoteRead`
+  (displayed and graded like `Other`), projected with reason `unreachable`
+  and failure `io` (`report_diagnostics::with_failed_fetch`).
+  A `$schema` target or import `validate_schema` cannot read
+  (`SchemaError::{Unresolved, NoMatch, Io}`, also inside
+  `ReferencedSchema`/`Aggregate`) is `ExpressionError::SchemaFileRead`
+  (displayed and graded like `Other`, carrying a `FileReferenceDiagnostic`
+  from `FileReferenceDiagnostic::from_schema_read`, the constructor
+  `load_data`'s contract imports share); any other schema error stays `Other`.
 - Consumers read `expression_function_catalog()` (categories in list order,
   descriptors in documentation order: category, then canonical name, then
   authored overload) or `function_descriptors(name)`, which resolves aliases

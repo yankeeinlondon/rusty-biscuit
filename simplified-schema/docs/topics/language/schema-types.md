@@ -186,7 +186,8 @@ parse-only.
   | `string[] \| null`, `{a: string}[] \| {b: number}[]`, `string[] \| {a: string}` | accepted |
   | `Rows@./rows.yaml`, `Rows@./rows.yaml \| null` | accepted provisionally: the reference is not followed |
   | `string`, `enum(a, b)`, `unknown`, `any`, `null` | rejected |
-  | `[string, number]` (a YAML list) | rejected: a list is a union of its items (`string \| number`), not a tuple |
+  | `[string, number]` (a YAML list), or the string `"[string, number]"` | rejected: a list is a union of its items (`string \| number`), not a tuple |
+  | `['string[]', null]`, or the string `"['string[]', null]"` | accepted |
   | `string[] \| string` | rejected: the `string` alternative is not a container |
 
   A rejection names the definition: *the definition must denote a container

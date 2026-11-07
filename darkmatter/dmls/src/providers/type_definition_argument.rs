@@ -21,7 +21,7 @@ use darkmatter::markdown::span::SourceSpan;
 use lsp_types::{CompletionItem, CompletionTextEdit, Hover};
 use simplified_schema::expression::scan::expression_region_at;
 use simplified_schema::{
-    PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, locate_type_definition_cursor, parse_property_definition,
+    PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, locate_type_definition_cursor, parse_type_definition_value,
 };
 
 use super::DocumentContext;
@@ -81,7 +81,7 @@ pub(crate) fn hover(ctx: &DocumentContext, offset: usize, site: Site) -> Option<
     let argument = locate(ctx, offset, site)?;
     let literal = argument.literal.clone()?;
     let definition =
-        parse_property_definition(&argument.parameter, &serde_yaml_ng::Value::String(argument.decoded.clone())).ok()?;
+        parse_type_definition_value(&argument.parameter, &serde_yaml_ng::Value::String(argument.decoded.clone())).ok()?;
     let span = argument.analyzed.project(literal)?;
     frontmatter::markup_hover(
         ctx,

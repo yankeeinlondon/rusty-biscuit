@@ -15,6 +15,8 @@ Both stages also expose the [read-side functions](../topics/darkmatter-expressio
 
 Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
 
+One kind of expression waits: one that reads a file and comes after a `::shell` line or shell block. The shell stages evaluate it once the commands before it have run, so it sees what they wrote; see [Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command).
+
 ### Nullable directive targets
 
 A whole-value `{{ ... }}` target on `::file`, `::code`, or `::url` has special

@@ -39,7 +39,7 @@ use serde_json::Value;
 
 use simplified_schema::format::{judge_schema, judge_type_definition};
 use simplified_schema::simplified::{
-    Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_property_definition,
+    Constraint, PropertyAtom, SimplifiedType, TypeExpr, parse_type_definition_value,
     parse_schema_declaration,
 };
 
@@ -410,7 +410,7 @@ fn primitive_matches(ty: SimplifiedType, value: &Value) -> bool {
         SimplifiedType::Object => value.is_object(),
         SimplifiedType::TypeDefinition => serde_yaml_ng::to_value(value)
             .ok()
-            .is_some_and(|yaml| parse_property_definition("<trigger>", &yaml).is_ok()),
+            .is_some_and(|yaml| parse_type_definition_value("<trigger>", &yaml).is_ok()),
         SimplifiedType::Schema => serde_yaml_ng::to_value(value)
             .ok()
             .is_some_and(|yaml| parse_schema_declaration(&yaml).is_ok()),
@@ -750,6 +750,19 @@ mod tests {
         assert!(!forms.matches(&frontmatter(&[("kind", json!("enum(a, b)"))]), &detached));
         let plain = loaded("kind: type-definition(required)");
         assert!(plain.matches(&frontmatter(&[("kind", json!("enum(a, b)"))]), &detached), "control");
+    }
+
+    /// A quoted bracket list is the union of its items, with or without
+    /// declaration options, as the lowered keyword judges it.
+    #[test]
+    fn a_quoted_bracket_list_is_a_type_definition_union() {
+        let detached = PathSubject::detached();
+        let plain = loaded("kind: type-definition(required)");
+        assert!(plain.matches(&frontmatter(&[("kind", json!("[string, number]"))]), &detached));
+        assert!(!plain.matches(&frontmatter(&[("kind", json!("[string,"))]), &detached));
+        let container = loaded("kind: type-definition(container; required)");
+        assert!(!container.matches(&frontmatter(&[("kind", json!("[string, number]"))]), &detached));
+        assert!(container.matches(&frontmatter(&[("kind", json!("['string[]', null]"))]), &detached));
     }
 
     // ── value predicates ─────────────────────────────────────────────────

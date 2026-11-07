@@ -23,11 +23,12 @@ use simplified_schema::{SchemaError, ValidationProblem};
 use super::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 
 mod load;
+mod marks;
 pub mod registry;
 mod select;
 mod semantic;
 
-pub(crate) use load::{load_yaml_document, locating_problem, pointer_string};
+pub(crate) use load::{first_tag_start, load_yaml_document, locating_problem, pointer_string};
 pub use registry::{Claim, DefinitionSource, Incomplete, KindDefinition, KindRegistry, RegistryScope};
 
 /// The route a validated YAML document took.

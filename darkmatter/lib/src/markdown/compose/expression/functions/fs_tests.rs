@@ -1523,11 +1523,12 @@ mod fn_remote_tests {
     fn file_exists_remote_url_fails_loudly_in_local_only_context() {
         // Frontmatter's resolution context carries no remote runtime, so a
         // remote URL argument is unreadable and must error rather than
-        // silently reporting the URL as absent (Decision B).
+        // silently reporting the URL as absent (Decision B). It fails like
+        // the document-reading functions below.
         let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
         let err = file_exists_fn(&[json!("https://example.com/doc.md")], &ctx)
             .expect_err("local-only remote URL must fail loudly");
-        assert!(err.contains("local-only"), "unexpected message: {err}");
+        assert!(err.contains("remote reads are not enabled"), "unexpected message: {err}");
     }
 
     #[test]

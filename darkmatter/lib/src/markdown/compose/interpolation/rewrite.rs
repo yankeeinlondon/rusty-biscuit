@@ -256,8 +256,30 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     scan_mode: ScanMode,
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
+    before_eval: BeforeEval<'_>,
+    site: Option<&dyn SiteHook>,
+) -> Result<InterpolationRewrite, LocatedInterpolationError> {
+    interpolate_text_selected(input, data, evaluator, scan_mode, policy, warning_stage, before_eval, site, None)
+}
+
+/// Which spans a rewrite evaluates: given a span of its input and the
+/// expression's source (`None` for a `{{{ … }}}` literal), whether to rewrite
+/// it now. A span it declines stays as written.
+pub(crate) type SpanSelection<'s> = Option<&'s dyn Fn(std::ops::Range<usize>, Option<&str>) -> bool>;
+
+/// [`interpolate_text_guarded`], rewriting only the spans `select` accepts
+/// (every span when `None`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn interpolate_text_selected<L: EvaluationLookup>(
+    input: &str,
+    data: Option<&DataRanges>,
+    evaluator: &Evaluator<L>,
+    scan_mode: ScanMode,
+    policy: ExpressionFailurePolicy,
+    warning_stage: &'static str,
     mut before_eval: BeforeEval<'_>,
     site: Option<&dyn SiteHook>,
+    select: SpanSelection<'_>,
 ) -> Result<InterpolationRewrite, LocatedInterpolationError> {
     let strict = policy == ExpressionFailurePolicy::Strict;
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
@@ -312,6 +334,15 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     let mut edits = Vec::new();
 
     for (start, end, item) in found {
+        if let Some(select) = select {
+            let source = match &item {
+                Found::Expression(loc) => Some(loc.expression.as_str()),
+                Found::Literal(_) => None,
+            };
+            if !select(start..end, source) {
+                continue;
+            }
+        }
         if let Some(site) = site {
             site.enter(start);
         }

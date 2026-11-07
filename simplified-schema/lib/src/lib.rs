@@ -125,6 +125,7 @@ pub use simplified::{
     locate_schema_declaration_cursor_in_scalar, locate_schema_value, locate_standalone_definition_failure,
     locate_type_definition_cursor, locate_type_definition_cursor_in_scalar, mapping_separator,
     parse_property_definition, parse_property_definition_with_source, parse_schema_declaration,
+    parse_type_definition_value,
     parse_schema_declaration_with_source, parse_selected_standalone_schema_document, parse_standalone_schema_document,
     parse_yaml_schema,
     suggestions_for_def, suggestions_for_path, to_json_schema, to_json_schema_with_definitions,

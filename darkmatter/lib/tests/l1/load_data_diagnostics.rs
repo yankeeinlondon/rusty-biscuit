@@ -591,3 +591,276 @@ denied_host! {
     frontmatter_from_a_denied_host_reports_the_reference_fields: "frontmatter(\"{url}\")" => "frontmatter()";
     file_exists_on_a_denied_host_reports_the_reference_fields: "file_exists(\"{url}\")" => "file_exists()";
 }
+
+// ── Failed reads from an allowed host ───────────────────────────────────────
+
+/// A loopback server whose `/fail.*` routes answer HTTP 500 and whose
+/// `/bad.*` routes answer 200 with a body that is not UTF-8.
+async fn failing_server() -> wiremock::MockServer {
+    use wiremock::matchers::{method, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/fail\."))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/bad\."))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'a', 0xff, b'b']))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// Composes `x {{ <call> }}` with `127.0.0.1` allowed, where `{url}` in
+/// `call` is `route` on `server`. Returns the call as written and the
+/// failure's records.
+async fn allowed_host_records(server: &wiremock::MockServer, call: &str, route: &str) -> (String, Vec<Diagnostic>) {
+    let call = call.replace("{url}", &format!("{}{route}", server.uri()));
+    let dir = TempDir::new().unwrap();
+    let doc = write(dir.path(), "doc.md", format!("x {{{{ {call} }}}}\n"));
+    let options = ComposeOptions::new()
+        .with_remote_read_config(RemoteReadConfig { allowed_hosts: vec!["127.0.0.1".into()], ..Default::default() });
+    let failure = tokio::task::spawn_blocking(move || failure_with(&doc, options)).await.unwrap();
+    (call, error_diagnostics(&failure.error))
+}
+
+/// Asserts the one record of a failed allowed-host read: the evaluation
+/// code, the runtime's wording, the four reference fields, and no data
+/// location.
+fn assert_failed_fetch(call: &str, records: Vec<Diagnostic>, construct: &str, url: &str, detail: &str) {
+    let record = only(records);
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert_eq!(reference_fields(&record), (Some("unreachable"), Some(construct), Some(url), Some("io")));
+    assert!(record.reference_details.as_ref().unwrap().included_via.is_none());
+    let detail = detail.replace("{url}", url);
+    assert_eq!(record.message, format!("interpolation of `{call}` failed: {construct}: {detail}"));
+    assert_eq!(record.data_location, None);
+}
+
+/// The runtime's wording of each failure; `{url}` stands for the URL read.
+const HTTP_500: &str = "HTTP error status 500 from {url}";
+const NOT_UTF8: &str = "invalid UTF-8 in response body: invalid utf-8 sequence of 1 bytes from index 1";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn load_data_from_an_allowed_host_that_fails_reports_the_reference_fields() {
+    let server = failing_server().await;
+    for (route, detail) in [("/fail.json", HTTP_500), ("/bad.json", NOT_UTF8)] {
+        let (call, records) = allowed_host_records(&server, "load_data(\"{url}\", \"object\")", route).await;
+        let url = format!("{}{route}", server.uri());
+        assert_failed_fetch(&call, records, "load_data()", &url, detail);
+    }
+}
+
+macro_rules! failed_fetch {
+    ($($name:ident: $call:literal, $route:literal, $detail:expr => $construct:literal;)*) => {$(
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn $name() {
+            let server = failing_server().await;
+            let (call, records) = allowed_host_records(&server, $call, $route).await;
+            assert_failed_fetch(&call, records, $construct, &format!("{}{}", server.uri(), $route), $detail);
+        }
+    )*};
+}
+
+failed_fetch! {
+    frontmatter_from_an_allowed_host_that_fails_reports_the_reference_fields:
+        "frontmatter(\"{url}\")", "/fail.md", HTTP_500 => "frontmatter()";
+    file_exists_on_an_allowed_host_with_a_non_utf8_body_reports_the_reference_fields:
+        "file_exists(\"{url}\")", "/bad.md", NOT_UTF8 => "file_exists()";
+    markdown_title_from_an_allowed_host_that_fails_reports_the_reference_fields:
+        "markdown_title(\"{url}\")", "/fail.md", HTTP_500 => "markdown_title()";
+    markdown_body_empty_on_an_allowed_host_with_a_non_utf8_body_reports_the_reference_fields:
+        "markdown_body_empty(\"{url}\")", "/bad.md", NOT_UTF8 => "markdown_body_empty()";
+    validate_schema_from_an_allowed_host_that_fails_reports_the_reference_fields:
+        "validate_schema(\"{url}\")", "/fail.md", HTTP_500 => "validate_schema()";
+}
+
+/// `try_frontmatter` turns the same failures into its `{ ok: false }` value,
+/// so the document composes and nothing is reported.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn try_frontmatter_on_an_allowed_host_that_fails_still_recovers() {
+    let server = failing_server().await;
+    for (route, detail) in [("/fail.md", HTTP_500), ("/bad.md", NOT_UTF8)] {
+        let url = format!("{}{route}", server.uri());
+        let dir = TempDir::new().unwrap();
+        let doc = write(
+            dir.path(),
+            "doc.md",
+            format!("{{{{ try_frontmatter(\"{url}\").ok }}}}|{{{{ try_frontmatter(\"{url}\").error }}}}\n"),
+        );
+        let options = ComposeOptions::new()
+            .with_remote_read_config(RemoteReadConfig { allowed_hosts: vec!["127.0.0.1".into()], ..Default::default() });
+        let composed = tokio::task::spawn_blocking(move || {
+            let request = crate::request_support::request(options.with_source_file(&doc));
+            Markdown::try_from(doc.as_path()).expect("document loads").compose_with_warnings(&request)
+        })
+        .await
+        .unwrap()
+        .unwrap_or_else(|failure| panic!("{route}: {}", failure.error));
+        let detail = detail.replace("{url}", &url);
+        assert_eq!(composed.0.content().trim(), format!("false|try_frontmatter(): {detail}"));
+        assert!(composed.1.warnings.is_empty(), "{:#?}", composed.1.warnings);
+    }
+}
+
+/// The `(pointer, line, column)` of the one `dm.data.malformed` record that
+/// loading `data` as `data.yaml` reports.
+fn malformed_yaml_place(data: &str) -> (Option<String>, Option<usize>, Option<usize>) {
+    let dir = TempDir::new().unwrap();
+    let record = only(load(dir.path(), "data.yaml", data, "object"));
+    assert_eq!(record.code, "dm.data.malformed", "{data:?}: {record:?}");
+    let location = record.data_location.expect("a data location");
+    assert_eq!(location.file, entry(dir.path(), "data.yaml"));
+    (location.pointer, location.line, location.column)
+}
+
+#[test]
+fn a_second_yaml_document_is_located_at_its_marker() {
+    assert_eq!(malformed_yaml_place("a: ok\n---\na: next\n"), (None, Some(2), Some(1)));
+    assert_eq!(malformed_yaml_place("\u{feff}a: ok\r\n---\r\na: next\r\n"), (None, Some(2), Some(1)));
+}
+
+#[test]
+fn a_non_string_yaml_key_is_located_at_the_key_even_after_an_alias() {
+    for (data, line, column) in [
+        ("42: text\n", 1, 1),
+        ("a:\n  b: ok\n  7: x\n", 3, 3),
+        ("a:\n  true: x\n", 2, 3),
+        ("? [a, b]\n: x\n", 1, 3),
+        ("base: &b ok\na: *b\n42: text\n", 3, 1),
+    ] {
+        assert_eq!(malformed_yaml_place(data), (None, Some(line), Some(column)), "{data:?}");
+    }
+}
+
+#[test]
+fn a_yaml_tag_is_located_at_the_tag_even_after_an_alias() {
+    let place = |pointer: &str, line, column| (Some(pointer.to_string()), Some(line), Some(column));
+    assert_eq!(malformed_yaml_place("base: &b ok\na: *b\nb: !tag text\n"), place("/b", 3, 4));
+    // Controls without an alias keep their positions.
+    assert_eq!(malformed_yaml_place("a: [\n  !t x\n]\n"), place("/a/0", 2, 3));
+    assert_eq!(malformed_yaml_place("!t\na: 1\n"), place("", 1, 1));
+}
+
+/// With no remote runtime at all (a standalone condition), `file_exists`
+/// fails on a URL with the same typed `RemoteNotEnabled` file-reference cause
+/// as the other read-side functions, so it is never an untyped failure.
+#[test]
+fn file_exists_without_a_remote_runtime_fails_like_its_siblings() {
+    use darkmatter::markdown::compose::conditions::{ConditionError, evaluate_condition_against};
+    use darkmatter::markdown::compose::expression::{ExpressionError, FileRefFailure};
+
+    let dir = TempDir::new().unwrap();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let url = "https://127.0.0.1:9/never-fetched.md";
+    for function in ["file_exists", "frontmatter"] {
+        let error = evaluate_condition_against(&format!("{function}(\"{url}\")"), &serde_json::json!({}), &context)
+            .expect_err("no remote runtime");
+        let ConditionError::Eval { cause, .. } = error else { panic!("{function}: {error:?}") };
+        let ExpressionError::FileReference(diagnostic) = *cause else { panic!("{function}: {cause:?}") };
+        assert_eq!((diagnostic.function, diagnostic.kind), (function, FileRefFailure::RemoteNotEnabled));
+        assert_eq!(diagnostic.reference, url);
+    }
+}
+
+/// A local Markdown file that exists but is not UTF-8 text keeps its typed
+/// `io` cause through every Markdown-reading function: the reference fields
+/// name the function and the file, with no reason phrase (none names an I/O
+/// failure) and no data location.
+#[test]
+fn a_local_markdown_file_that_is_not_utf8_reports_the_io_reference_fields() {
+    for (call, construct) in [
+        ("frontmatter(\"bad.md\")", "frontmatter()"),
+        ("markdown_title(\"bad.md\")", "markdown_title()"),
+        ("markdown_body_empty(\"bad.md\")", "markdown_body_empty()"),
+        ("validate_schema(\"bad.md\")", "validate_schema()"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "bad.md", [b'a', 0xff, b'b']);
+        let record = only(records(dir.path(), &format!("x {{{{ {call} }}}}\n")));
+        assert_eq!(record.code, EVALUATION_FAILURE, "{call}");
+        assert_eq!(reference_fields(&record), (None, Some(construct), Some("bad.md"), Some("io")), "{call}");
+        assert_eq!(record.data_location, None, "{call}");
+    }
+}
+
+// ── Schema files `validate_schema` cannot read ──────────────────────────────
+
+/// The one record of composing `validate_schema("subject.md")` in `dir`,
+/// where `subject.md` declares `schema` (a YAML `$schema` value).
+fn validate_subject(dir: &Path, schema: &str) -> Diagnostic {
+    write(dir, "subject.md", format!("---\n$schema: {schema}\nname: x\n---\nbody\n"));
+    only(records(dir, "x {{ validate_schema(\"subject.md\") }}\n"))
+}
+
+/// The message `validate_schema` reported for a schema failure before the
+/// reference fields existed: the `Other` wording, byte for byte.
+fn validate_schema_message(cause: &str) -> String {
+    format!(
+        "interpolation of `validate_schema(\"subject.md\")` failed: validate_schema(): validate_schema() error for \"subject.md\": {cause}"
+    )
+}
+
+#[test]
+fn validate_schema_with_a_missing_schema_target_reports_the_reference_fields() {
+    let dir = TempDir::new().unwrap();
+    let record = validate_subject(dir.path(), "./missing-schema.yaml");
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert_eq!(
+        reference_fields(&record),
+        (Some("file not found"), Some("validate_schema()"), Some("./missing-schema.yaml"), Some("no-match"))
+    );
+    assert_eq!(record.message, validate_schema_message("could not resolve $schema reference `./missing-schema.yaml`"));
+    assert_eq!(record.data_location, None);
+}
+
+#[test]
+fn validate_schema_with_a_missing_import_reports_the_reference_fields() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "schema.yaml", "$schema:\n  name: \"Name@./missing-types.yaml\"\n");
+    let record = validate_subject(dir.path(), "./schema.yaml");
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert_eq!(
+        reference_fields(&record),
+        (Some("file not found"), Some("validate_schema()"), Some("./missing-types.yaml"), Some("no-match"))
+    );
+    assert_eq!(record.message, validate_schema_message("could not resolve $schema reference `./missing-types.yaml`"));
+}
+
+/// An invalid schema that reads fine is not a read failure: it keeps the
+/// `Other` record, with no reference fields.
+#[test]
+fn validate_schema_with_an_invalid_readable_schema_has_no_reference_fields() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "schema.yaml", "$schema:\n  name: \"not-a-type\"\n");
+    let record = validate_subject(dir.path(), "./schema.yaml");
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert!(record.reference_details.is_none(), "{record:#?}");
+    assert!(record.message.starts_with(&validate_schema_message("referenced schema `")), "{}", record.message);
+    assert!(record.message.contains("is invalid: name: unknown named type `not-a-type`"), "{}", record.message);
+}
+
+/// A remote `$schema` is never fetched, even from an allowed host: nothing is
+/// read, so the refusal keeps the `Other` record with no reference fields.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn validate_schema_with_a_remote_schema_target_reads_nothing_and_has_no_reference_fields() {
+    let server = failing_server().await;
+    let url = format!("{}/fail.yaml", server.uri());
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "subject.md", format!("---\n$schema: {url}\nname: x\n---\nbody\n"));
+    let doc = write(dir.path(), "doc.md", "x {{ validate_schema(\"subject.md\") }}\n");
+    let options = ComposeOptions::new()
+        .with_remote_read_config(RemoteReadConfig { allowed_hosts: vec!["127.0.0.1".into()], ..Default::default() });
+    let failure = tokio::task::spawn_blocking(move || failure_with(&doc, options)).await.unwrap();
+    let record = only(error_diagnostics(&failure.error));
+    assert_eq!(record.code, EVALUATION_FAILURE, "{record:#?}");
+    assert!(record.reference_details.is_none(), "{record:#?}");
+    assert_eq!(
+        record.message,
+        validate_schema_message(&format!("remote $schema references are not supported in this version: `{url}`"))
+    );
+    assert!(server.received_requests().await.unwrap_or_default().is_empty());
+}

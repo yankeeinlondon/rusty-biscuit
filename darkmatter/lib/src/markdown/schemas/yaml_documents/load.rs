@@ -6,7 +6,10 @@
 //! a document-start marker and a trailing `...` a document-end marker, never
 //! Markdown frontmatter fences. Duplicate keys, a second document, an
 //! inadmissible number, a non-string mapping key, and malformed YAML are
-//! located load errors. One leading byte-order mark is skipped (the YAML
+//! located load errors, whether or not the file has an alias: the parser
+//! locates its own errors, and the [marks](super::marks) pass locates the
+//! refusals made after parsing (a second document at its `---`, a key at
+//! itself). One leading byte-order mark is skipped (the YAML
 //! parser reads a mark followed by CRLF lines as a second document); every
 //! span this module hands out is a byte range of the caller's original text.
 
@@ -16,6 +19,8 @@ use std::path::Path;
 use serde_yaml_ng::Value as YamlValue;
 use serde_json::Value;
 use simplified_schema::{PositionMap, SchemaError, ValidationProblem};
+
+use super::marks::{self, Offender};
 
 const BYTE_ORDER_MARK: char = '\u{feff}';
 
@@ -50,8 +55,10 @@ pub(crate) fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, 
     let offset = if text.starts_with(BYTE_ORDER_MARK) { BYTE_ORDER_MARK.len_utf8() } else { 0 };
     let body = &text[offset..];
     let value = simplified_schema::numeric::load_admitted_yaml(body).map_err(|error| {
-        let span = error.location().map(|location| {
-            let start = (location.index() + offset).min(text.len());
+        // Only a second document has no parser location.
+        let start = error.location().map(|location| location.index()).or_else(|| marks::second_document_start(body));
+        let span = start.map(|start| {
+            let start = (start + offset).min(text.len());
             start..start
         });
         let message = if simplified_schema::numeric::is_yaml_admission_error(&error) {
@@ -63,8 +70,8 @@ pub(crate) fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, 
     })?;
     let positions = simplified_schema::positions::build_position_map(body);
     if let Some(pointer) = first_non_string_key(&value, &mut Vec::new()) {
-        let located = locating_problem(&pointer);
-        let span = positions.byte_range(&located).map(|range| range.start + offset..range.start + offset);
+        let span = marks::first_offender_start(body, &value, Offender::NonStringKey)
+            .map(|start| start + offset..start + offset);
         let at = if pointer.is_empty() { "the document root".to_string() } else { format!("`/{}`", pointer.join("/")) };
         return Err(load_error(path, format!("a mapping key at {at} is not a string; quote it to keep it as text"), span));
     }
@@ -73,18 +80,25 @@ pub(crate) fn load_yaml_document(text: &str, path: &Path) -> Result<LoadedYaml, 
     Ok(LoadedYaml { value, json, positions, offset })
 }
 
+/// The byte offset in `text` of the first tagged value of `loaded`, which
+/// was loaded from `text`.
+pub(crate) fn first_tag_start(text: &str, loaded: &LoadedYaml) -> Option<usize> {
+    marks::first_offender_start(&text[loaded.offset..], &loaded.value, Offender::Tag).map(|start| start + loaded.offset)
+}
+
 fn load_error(path: &Path, message: String, span: Option<Range<usize>>) -> SchemaError {
     SchemaError::SchemaDocument { path: path.to_path_buf(), message, source: None, span }
 }
 
-/// The path of the first mapping holding a key that is not a string.
+/// The path of the mapping holding the first key, in document order, that is
+/// not a string; the same key the marks pass locates.
 fn first_non_string_key(value: &YamlValue, at: &mut Vec<String>) -> Option<Vec<String>> {
     match value {
         YamlValue::Mapping(map) => {
-            if map.keys().any(|key| !key.is_string()) {
-                return Some(at.clone());
-            }
             for (key, child) in map {
+                if !key.is_string() {
+                    return Some(at.clone());
+                }
                 at.push(key.as_str().unwrap_or_default().to_string());
                 let found = first_non_string_key(child, at);
                 at.pop();

@@ -53,11 +53,7 @@ pub(crate) fn file_reference_diagnostic(
             candidate_provenance: provenance.candidate_provenance,
         })
     });
-    let (reference, cwd) = ctx
-        .active_caller_file_provenance
-        .as_ref()
-        .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
-        .unwrap_or_else(|| (raw.to_string(), ctx.cwd.clone()));
+    let (reference, cwd) = authored_reference(raw, ctx);
     FileReferenceDiagnostic {
         function,
         reference,
@@ -69,9 +65,20 @@ pub(crate) fn file_reference_diagnostic(
     }
 }
 
+/// The reference a failure names and the directory it was resolved from:
+/// the calling schema property's spelling when the argument was projected
+/// from one, otherwise `raw` in the document's directory.
+fn authored_reference(raw: &str, ctx: &ResolutionContext) -> (String, PathBuf) {
+    ctx.active_caller_file_provenance
+        .as_ref()
+        .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
+        .unwrap_or_else(|| (raw.to_string(), ctx.cwd.clone()))
+}
+
 /// The failure of `function` for a remote read of `raw` that returned no
-/// text: a host the policy refuses is a typed file-reference failure, any
-/// other failure keeps the remote runtime's wording.
+/// text: a host the policy refuses is a typed file-reference failure, and
+/// any other failure is a [`ExpressionError::RemoteRead`] in the remote
+/// runtime's wording.
 pub(crate) fn remote_text_error(
     function: &'static str,
     raw: &str,
@@ -80,7 +87,9 @@ pub(crate) fn remote_text_error(
 ) -> ExpressionError {
     match error {
         RemoteTextError::Denied => file_reference_error(function, raw, ctx, FileRefFailure::RemoteDenied, None),
-        RemoteTextError::Failed(message) => expression_other(function, message),
+        RemoteTextError::Failed(message) => {
+            ExpressionError::RemoteRead { function, reference: authored_reference(raw, ctx).0, message }
+        }
     }
 }
 
@@ -207,10 +216,7 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
         record_url_read(ctx, &normalized);
         return match ctx.fetch_remote_text(&normalized) {
             Ok(Some(_)) => Ok(Value::Bool(true)),
-            Ok(None) => Err(expression_other("file_exists", format!(
-                "file_exists() cannot read remote URL {raw:?}: this resolution \
-                 context is local-only (no remote runtime)"
-            ))),
+            Ok(None) => Err(file_reference_error("file_exists", raw, ctx, FileRefFailure::RemoteNotEnabled, None)),
             Err(error) => Err(remote_text_error("file_exists", raw, ctx, error)),
         };
     }
@@ -1190,9 +1196,11 @@ pub fn markdown_title_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resul
 ///
 /// ## Errors
 ///
-/// A file that cannot be loaded keeps its file-reference error, and a schema
-/// that cannot be resolved or compiled is an [`ExpressionError::Other`]; an
-/// invalid page is `false`, never an error.
+/// A file that cannot be loaded keeps its file-reference error. A `$schema`
+/// target or named-type import that is missing, malformed, or unreadable is
+/// an [`ExpressionError::SchemaFileRead`] naming that reference; a schema that
+/// reads but cannot be resolved or compiled is an [`ExpressionError::Other`].
+/// Both carry the same message. An invalid page is `false`, never an error.
 pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Null);
@@ -1220,17 +1228,31 @@ pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
         return Ok(Value::Bool(true));
     }
     let schemas = DarkmatterSchemas::new(ctx.file_context());
-    let (report, summary) = schemas
-        .validate_summarized(page)
-        .map_err(|e| expression_other(
-            "validate_schema",
-            format!("validate_schema() error for {raw:?}: {e}"),
-        ))?;
-    // The schema files read, imports included, are dependencies of the call
-    // like the page itself; an embedded schema lists no file.
-    for dependency in &summary.dependencies {
+    let (validated, observed) =
+        simplified_schema::resolve::observed::collect(|| schemas.validate(page));
+    // The schema files the preparation read, imports at any depth included,
+    // are dependencies of the call like the page itself, also when a later
+    // import fails; an embedded schema reads no file.
+    for dependency in &observed.read {
         ctx.data.record_local(dependency);
     }
+    let report = validated.map_err(|e| {
+        let message = format!("validate_schema() error for {raw:?}: {e}");
+        match unread_schema_file(ctx, e) {
+            Some(file) => ExpressionError::SchemaFileRead { message, file: Box::new(file) },
+            None => expression_other("validate_schema", message),
+        }
+    })?;
     Ok(Value::Bool(report.valid))
+}
+
+/// The first schema file `error` reports as unreadable, looking through the
+/// referenced-schema and aggregate wrappers a failing import arrives in.
+fn unread_schema_file(ctx: &ResolutionContext, error: simplified_schema::SchemaError) -> Option<FileReferenceDiagnostic> {
+    match error {
+        simplified_schema::SchemaError::ReferencedSchema { source, .. } => unread_schema_file(ctx, *source),
+        simplified_schema::SchemaError::Aggregate { errors } => errors.into_iter().find_map(|error| unread_schema_file(ctx, error)),
+        other => FileReferenceDiagnostic::from_schema_read("validate_schema", ctx.cwd.clone(), other).ok(),
+    }
 }
 

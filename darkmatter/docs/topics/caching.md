@@ -173,11 +173,18 @@ one command answers no question, so a file is still read once.
 The memo is emptied, together with its prepared contracts, after every
 executed command attempt (a frontmatter `$( … )`, a `::shell` line, a shell
 block, or a lifecycle shell step, whether it succeeded or failed) and after
-every lifecycle event whose stack is not empty. A shell command answered from
+every lifecycle side effect that ran (`append_line`, `append_jsonl`,
+`ensure_file`, `ensure_dir`, the frontmatter mutations, and `http_post`,
+whether it succeeded or failed), before the next expression evaluates. A
+lifecycle step that did not run, such as one its `when:` guard turned off,
+leaves the memo alone. A shell command answered from
 shell command memoization ran nothing and leaves the memo alone. Emptying the
 memo never removes an entry from the command's read set. A load already in
 flight when the memo is emptied finishes for its own caller but is not kept
-for later ones.
+for later ones. A body read that follows a command is evaluated only after
+that command ran, so it reads the file again rather than keeping a value from
+before the command (see
+[Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)).
 
 The memo persists nothing and does not replace the transport cache. A URL's
 body still comes from the [remote transport cache](#remote-transport-cache),

@@ -91,7 +91,10 @@ interpolation pass 2; literal replacement; conditional page blocks and
 `::map`/`::filter` regions (one structural traversal, callbacks finish before
 body stages); body interpolation; shell directives and blocks; link resolution; concurrent
 transclusion; inline cleanup and optional reflow; root-only link
-normalization. Keep this order stable. Whole-value `{{ ... }}` and `$(...)`
+normalization. Keep this order stable. One interleaving: a body read-side call
+(`remote::calls_read_side_function`) after the first command site is left in
+`BodyProvenance::pending` and evaluated by the shell stages once no unrun
+command precedes it (see compose.md "Reads after a command"). Whole-value `{{ ... }}` and `$(...)`
 values are executable state: they must resolve or fail, never leak as literal
 syntax. Demand-driven context capture must observe only referenced `ctx.*`
 groups.

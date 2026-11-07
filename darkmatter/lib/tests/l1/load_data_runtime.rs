@@ -184,8 +184,7 @@ fn the_reference_check_preflight_and_composition_read_once() {
     );
 }
 
-/// Body interpolation runs before any `::shell`, but a command template's
-/// placeholders are filled as each command runs, so the second item's call
+/// A command's placeholders are filled as it runs, so the second item's call
 /// comes after the first item's command.
 #[test]
 fn a_shell_step_inside_a_map_body_makes_the_next_item_read_again() {
@@ -231,6 +230,183 @@ fn a_failed_command_that_wrote_a_file_ends_reuse() {
     assert_eq!(runtime.stats().reads, 2, "{:?}", runtime.stats());
 }
 
+const B: &str = "load_data('d.toml', '{ a: { b: number } }').a.b";
+
+/// The `value:` lines of `text`, in order.
+fn values(text: &str) -> Vec<&str> {
+    text.lines().filter_map(|line| line.trim().strip_prefix("value: ")).collect()
+}
+
+/// `body` composed under `items: [10, 20]` in a fresh fixture whose `d.toml`
+/// holds `a.b = 1`, with every command allowed.
+fn compose_counted(body: &str) -> (TempDir, String, DataRuntime) {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.toml", "[a]\nb = 1\n");
+    let doc = write(dir.path(), "doc.md", format!("---\n$schema:\n  items: number[]\nitems: [10, 20]\n---\n{body}"));
+    let runtime = DataRuntime::new();
+    let text = composed_text(&doc, shell_options(dir.path(), &runtime));
+    (dir, text, runtime)
+}
+
+/// Plain text in a repeated body is evaluated after the commands before it,
+/// so the second item's read follows the first item's command.
+#[test]
+fn plain_text_after_a_shell_step_in_a_map_body_reads_again() {
+    let (_dir, text, runtime) = compose_counted(&format!(
+        "::map items \"i => i\"\nvalue: {{{{ {B} }}}}\n::shell git config --file d.toml a.b 2\n\n::end-map\n"
+    ));
+    assert_eq!(values(&text), ["1", "2"], "{text}");
+    assert_eq!(runtime.stats().reads, 2, "{:?}", runtime.stats());
+}
+
+#[test]
+fn plain_text_after_a_shell_step_in_a_filter_body_reads_again() {
+    let (_dir, text, _) = compose_counted(&format!(
+        "::filter items \"i => true\"\nvalue: {{{{ {B} }}}}\n::shell git config --file d.toml a.b 2\n\n::end-filter\n"
+    ));
+    assert_eq!(values(&text), ["1", "2"], "{text}");
+}
+
+/// Each item's command adds the item to the stored value, so every read sees
+/// exactly the commands of the items before it.
+#[test]
+fn every_item_reads_what_the_items_before_it_wrote() {
+    let (dir, text, runtime) = compose_counted(&format!(
+        "::map items \"i => i\"\nvalue: {{{{ {B} }}}}\n::shell git config --file d.toml a.b {{{{ {B} + i }}}}\n\n::end-map\n"
+    ));
+    // The first item reads 1 and writes 11; the second reads 11 and writes 31.
+    assert_eq!(values(&text), ["1", "11"], "{text}");
+    assert_eq!(read(&dir.path().join("d.toml")).replace("\r\n", "\n"), "[a]\n\tb = 31\n");
+    assert_eq!(runtime.stats().reads, 2, "{:?}", runtime.stats());
+}
+
+#[test]
+fn plain_text_after_a_shell_block_in_a_map_body_reads_again() {
+    let (_dir, text, _) = compose_counted(&format!(
+        "::map items \"i => i\"\nvalue: {{{{ {B} }}}}\n\n::shell-block\ngit config --file d.toml a.b 2\n::end-block\n\n::end-map\n"
+    ));
+    assert_eq!(values(&text), ["1", "2"], "{text}");
+}
+
+#[test]
+fn a_nested_map_body_reads_after_the_commands_before_it() {
+    let (_dir, text, _) = compose_counted(&format!(
+        "::map items \"i => i\"\n::map items \"j => j\"\nvalue: {{{{ {B} }}}}\n\
+         ::shell git config --file d.toml a.b {{{{ {B} + 1 }}}}\n\n::end-map\n::end-map\n"
+    ));
+    assert_eq!(values(&text), ["1", "2", "3", "4"], "{text}");
+}
+
+/// A read before a command keeps the old value; one after it sees the write,
+/// even when the command created the file the read names.
+#[test]
+fn a_top_level_read_after_a_command_sees_its_write() {
+    let (_dir, text, _) = compose_counted(&format!(
+        "value: {{{{ {B} }}}}\n\n::shell git config --file d.toml a.b 2\n\n::shell git config --file new.toml a.b 5\n\n\
+         value: {{{{ {B} }}}}\n\nvalue: {{{{ load_data('new.toml', '{{ a: {{ b: number }} }}').a.b }}}}\n"
+    ));
+    assert_eq!(values(&text), ["1", "2", "5"], "{text}");
+}
+
+/// The directive stage runs every `::shell` before any shell block, so a read
+/// written after a block waits for that block, and sees the later `::shell`
+/// too.
+#[test]
+fn a_read_after_a_shell_block_waits_for_the_block() {
+    let (_dir, text, _) = compose_counted(&format!(
+        "::shell-block\ngit config --file d.toml a.b 3\n::end-block\n\nvalue: {{{{ {B} }}}}\n\n\
+         ::shell git config --file d.toml a.b 2\n"
+    ));
+    assert_eq!(values(&text), ["3"], "{text}");
+}
+
+/// A transclusion target is evaluated as a target, after the command before
+/// it; the partial form is ordinary text in the directive's line.
+#[test]
+fn a_transclusion_target_after_a_command_sees_its_write() {
+    for directive in [
+        format!("::file {{{{ {B} == 2 ? 'two.md' : 'one.md' }}}}"),
+        format!("::file {{{{ {B} == 2 ? 'two' : 'one' }}}}.md"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "d.toml", "[a]\nb = 1\n");
+        write(dir.path(), "one.md", "ONE\n");
+        write(dir.path(), "two.md", "TWO\n");
+        let doc = write(dir.path(), "doc.md", format!("::shell git config --file d.toml a.b 2\n\n{directive}\n"));
+        let text = composed_text(&doc, shell_options(dir.path(), &DataRuntime::new()));
+        assert!(text.contains("TWO") && !text.contains("ONE"), "{directive}: {text}");
+    }
+}
+
+fn later_argument_fixture() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.toml", "[a]\nb = 1\n");
+    let doc = write(
+        dir.path(),
+        "doc.md",
+        format!(
+            "::shell git config --file d.toml a.b 2\n\n\
+             ::shell git config --file result.toml r.v {{{{ {B} }}}}\n"
+        ),
+    );
+    (dir, doc)
+}
+
+#[test]
+fn a_later_shell_argument_sees_an_earlier_commands_write() {
+    let (dir, doc) = later_argument_fixture();
+    let runtime = DataRuntime::new();
+    composed_text(&doc, shell_options(dir.path(), &runtime));
+    assert_eq!(read(&dir.path().join("result.toml")).replace("\r\n", "\n"), "[r]\n\tv = 2\n");
+    assert_eq!(runtime.stats().reads, 1, "only the later command reads: {:?}", runtime.stats());
+}
+
+/// Composes the later-argument fixture the way `md compose` does: pre-flight
+/// approves what the whitelist `rules` cover, and composition runs only that
+/// set, plus `shapes` when asked for the walk's template shapes.
+fn compose_pre_approved(rules: &str, shapes: bool) -> (TempDir, Composed) {
+    let (dir, doc) = later_argument_fixture();
+    write(dir.path(), ".darkmatter-shell-whitelist", rules);
+    let options = ComposeOptions::new()
+        .with_shell(ShellExpansionOptions { policy_root: Some(dir.path().to_path_buf()), ..Default::default() })
+        .with_shell_working_directory(dir.path())
+        .with_source_file(&doc);
+    let request = crate::request_support::request(options);
+    let markdown = Markdown::try_from(doc.as_path()).unwrap();
+    let mut approved = markdown.compose_preflight_approvals(&request, None).expect("pre-flight approves").pre_approved_commands;
+    if shapes {
+        let candidates = markdown.compose_preflight(&request).expect("pre-flight walks").candidates;
+        candidates.iter().filter_map(|candidate| candidate.shape()).for_each(|shape| {
+            approved.insert_template(shape);
+        });
+    }
+    let composed = markdown.compose_with_warnings(&request.map_options(|options| options.with_pre_approved_commands(approved)));
+    (dir, composed)
+}
+
+const WALKED_RULES: &str = "exact git config --file d.toml a.b 2\nexact git config --file result.toml r.v 1\n";
+
+/// Pre-flight approves the bytes it saw, `… r.v 1`; the command that runs is
+/// `… r.v 2`. It runs only when something approves those bytes or the site's
+/// shape.
+#[test]
+fn a_refreshed_shell_argument_must_still_be_approved() {
+    let (dir, composed) = compose_pre_approved(WALKED_RULES, false);
+    let failure = composed.expect_err("nothing approved the refreshed bytes");
+    let message = failure.error.to_string();
+    assert!(message.contains("r.v 2") && message.contains("after an earlier command ran"), "{message}");
+    assert!(!dir.path().join("result.toml").exists(), "the unapproved command did not run");
+
+    let (dir, composed) =
+        compose_pre_approved(&format!("{WALKED_RULES}exact git config --file result.toml r.v 2\n"), false);
+    composed.unwrap_or_else(|failure| panic!("an exact rule approves the refreshed bytes: {}", failure.error));
+    assert_eq!(read(&dir.path().join("result.toml")).replace("\r\n", "\n"), "[r]\n\tv = 2\n");
+
+    let (dir, composed) = compose_pre_approved(WALKED_RULES, true);
+    composed.unwrap_or_else(|failure| panic!("an approved shape covers every value: {}", failure.error));
+    assert_eq!(read(&dir.path().join("result.toml")).replace("\r\n", "\n"), "[r]\n\tv = 2\n");
+}
+
 // ── R7: lifecycle steps ─────────────────────────────────────────────────────
 
 struct Silent;
@@ -255,6 +431,18 @@ impl CommandOutput for Silent {
 /// Runs `signal`'s stack of `lifecycle` for `source` through the `md` host, in
 /// `request`, with shells locked, returning the frontmatter `set` produced.
 fn run_event(request: &ComposeRequest, source: &Path, signal: LifecycleSignal, lifecycle: Value) -> Value {
+    let (outcome, set) = evaluate_event(request, source, signal, lifecycle);
+    assert!(outcome.evaluation_error.is_none() && outcome.action_error.is_none(), "{outcome:?}");
+    set
+}
+
+/// [`run_event`] without judging the outcome.
+fn evaluate_event(
+    request: &ComposeRequest,
+    source: &Path,
+    signal: LifecycleSignal,
+    lifecycle: Value,
+) -> (darkmatter::lifecycle::executor::LifecycleEventOutcome, Value) {
     let config = md_host::parse_lifecycle(&lifecycle, source, None)
         .unwrap_or_else(|error| panic!("{lifecycle} parses: {error}"));
     let frontmatter = SharedFrontmatter::from(serde_json::Map::new());
@@ -282,12 +470,13 @@ fn run_event(request: &ComposeRequest, source: &Path, signal: LifecycleSignal, l
     };
     let name = match signal {
         LifecycleSignal::Initialize => "initialize",
+        LifecycleSignal::Finalize => "finalize",
+        LifecycleSignal::Blocked => "failed",
         _ => "composed",
     };
     let event = MdEvent { signal, name, error: None, shells: Err(ShellRefusal::Locked) };
     let outcome = md_host::evaluate(&context, &config, &event);
-    assert!(outcome.evaluation_error.is_none() && outcome.action_error.is_none(), "{outcome:?}");
-    Value::Object(state.snapshot().into_iter().collect())
+    (outcome, Value::Object(state.snapshot().into_iter().collect()))
 }
 
 /// `md compose`'s lifecycle order: the shell-free frontmatter bootstrap,
@@ -316,6 +505,131 @@ fn a_read_in_the_frontmatter_bootstrap_is_not_reused_after_initialize() {
     let (composed, _) = md.compose_with_warnings(&request).unwrap_or_else(|failure| panic!("{}", failure.error));
     assert_eq!(composed.content().trim(), "2", "composition read the file `initialize` changed");
     assert_eq!(runtime.stats().reads, 2, "{:?}", runtime.stats());
+}
+
+/// A count of `d.yaml`'s records, as a lifecycle `set` value.
+fn count_into(key: &str, file: &str) -> Value {
+    json!({ "set": { key: format!("{{{{ length(load_data('{file}', 'string[]')) }}}}") } })
+}
+
+/// Each event of the `md` profile, by its authored key and engine slot.
+const WRITING_EVENTS: [(&str, LifecycleSignal); 4] = [
+    ("initialize", LifecycleSignal::Initialize),
+    ("composed", LifecycleSignal::Start),
+    ("finalize", LifecycleSignal::Finalize),
+    ("failed", LifecycleSignal::Blocked),
+];
+
+/// Reads `file` (holding one record), runs `writing_step` (which adds a second), and
+/// reads it again within one stack of each event, in a fresh request.
+fn read_write_read(file: &str, first: &str, writing_step: Value) {
+    for (key, signal) in WRITING_EVENTS {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), file, first);
+        let runtime = DataRuntime::new();
+        let (request, doc) = lifecycle_request(dir.path(), &runtime);
+        let stack = json!({ key: [count_into("before", file), writing_step.clone(), count_into("after", file)] });
+        let set = run_event(&request, &doc, signal, stack);
+        assert_eq!(set, json!({ "before": 1, "after": 2 }), "`{key}` read the file its own step changed");
+        assert_eq!(runtime.stats().reads, 2, "`{key}`: {:?}", runtime.stats());
+    }
+}
+
+#[test]
+fn a_later_step_reads_the_line_an_earlier_append_line_wrote() {
+    read_write_read("d.yaml", "- a\n", json!({ "append_line": ["d.yaml", "- b"] }));
+}
+
+#[test]
+fn a_later_step_reads_the_record_an_earlier_append_jsonl_wrote() {
+    read_write_read("d.jsonl", "\"one\"\n", json!({ "append_jsonl": ["d.jsonl", "two"] }));
+}
+
+/// `ensure_dir` over an existing file fails after the engine ran; `no_error`
+/// keeps the stack going, so the next read shows whether reuse ended.
+#[test]
+fn a_failed_side_effect_attempt_ends_reuse() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.yaml", "- a\n");
+    let runtime = DataRuntime::new();
+    let (request, doc) = lifecycle_request(dir.path(), &runtime);
+    let stack = json!({ "initialize": [
+        count_into("before", "d.yaml"),
+        { "ensure_dir": ["d.yaml"], "no_error": true },
+        count_into("after", "d.yaml"),
+    ] });
+    let set = run_event(&request, &doc, LifecycleSignal::Initialize, stack);
+    assert_eq!(set, json!({ "before": 1, "after": 1 }));
+    assert!(dir.path().join("d.yaml").is_file(), "the failed attempt left the file");
+    let stats = runtime.stats();
+    assert_eq!((stats.reads, stats.invalidations), (2, 1), "{stats:?}");
+}
+
+/// A failed attempt that stops the stack still ends reuse for the next event.
+#[test]
+fn a_failed_side_effect_that_stops_the_stack_ends_reuse() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.yaml", "- a\n");
+    let runtime = DataRuntime::new();
+    let (request, doc) = lifecycle_request(dir.path(), &runtime);
+    let stack = json!({ "composed": [count_into("before", "d.yaml"), { "ensure_dir": ["d.yaml"] }] });
+    let (outcome, _) = evaluate_event(&request, &doc, LifecycleSignal::Start, stack);
+    assert!(outcome.action_error.is_some(), "{outcome:?}");
+    run_event(&request, &doc, LifecycleSignal::Finalize, json!({ "finalize": [count_into("after", "d.yaml")] }));
+    let stats = runtime.stats();
+    assert_eq!((stats.reads, stats.invalidations), (2, 1), "{stats:?}");
+}
+
+/// Every verb the engine runs ends reuse at the step that ran it, the failing
+/// `http_post` (no host is allowed) included.
+#[test]
+fn every_dispatched_side_effect_ends_reuse() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.yaml", "- a\n");
+    write(dir.path(), "page.md", "---\ntitle: Page\n---\nbody\n");
+    let runtime = DataRuntime::new();
+    let (request, doc) = lifecycle_request(dir.path(), &runtime);
+    let effects = [
+        json!({ "ensure_file": ["made.txt", "x"] }),
+        json!({ "ensure_dir": ["sub"] }),
+        json!({ "set_frontmatter": ["page.md", "title", "Changed"] }),
+        json!({ "append_frontmatter": ["page.md", "tags", "t"] }),
+        json!({ "delete_frontmatter": ["page.md", "tags"] }),
+        json!({ "http_post": ["https://example.invalid/hook", "{}"], "no_error": true }),
+    ];
+    let mut stack = vec![count_into("r0", "d.yaml")];
+    for (index, effect) in effects.iter().enumerate() {
+        stack.push(effect.clone());
+        stack.push(count_into(&format!("r{}", index + 1), "d.yaml"));
+    }
+    run_event(&request, &doc, LifecycleSignal::Start, json!({ "composed": stack }));
+    assert!(read(&dir.path().join("page.md")).contains("title: Changed"), "the mutations ran");
+    let stats = runtime.stats();
+    assert_eq!((stats.reads, stats.invalidations), (effects.len() + 1, effects.len()), "{stats:?}");
+}
+
+/// Neither a guarded-off side effect nor a message runs anything, so neither
+/// ends reuse, within the stack or after it.
+#[test]
+fn steps_that_did_not_run_keep_reuse() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "d.yaml", "- a\n");
+    let runtime = DataRuntime::new();
+    let (request, doc) = lifecycle_request(dir.path(), &runtime);
+    let first = json!({ "initialize": [
+        count_into("before", "d.yaml"),
+        { "append_line": ["d.yaml", "- b"], "when": "false" },
+        { "info": "nothing to do" },
+        count_into("after", "d.yaml"),
+    ] });
+    let set = run_event(&request, &doc, LifecycleSignal::Initialize, first);
+    assert_eq!(set, json!({ "before": 1, "after": 1 }));
+    let guarded_only = json!({ "composed": [{ "append_line": ["d.yaml", "- b"], "when": "false" }] });
+    run_event(&request, &doc, LifecycleSignal::Start, guarded_only);
+    run_event(&request, &doc, LifecycleSignal::Finalize, json!({ "finalize": [count_into("again", "d.yaml")] }));
+    assert_eq!(read(&dir.path().join("d.yaml")), "- a\n", "no guarded step wrote");
+    let stats = runtime.stats();
+    assert_eq!((stats.reads, stats.invalidations), (1, 0), "{stats:?}");
 }
 
 // ── R8: the read set of each evaluation surface ─────────────────────────────
@@ -454,6 +768,109 @@ fn a_failed_contract_keeps_the_import_it_read_in_the_read_set() {
         assert!(failure.read_set.contains(&entry(dir.path(), import)), "{contract}: {:?}", failure.read_set);
         assert!(!failure.read_set.contains(&entry(dir.path(), "d.json")), "the data file is never reached");
     }
+}
+
+/// `good.yaml` exports `Good`; `bad.yaml` is a schema that does not export
+/// `Missing`; `outer.yaml` exports `Outer`, whose definition imports `Good`
+/// and then `Missing`.
+fn partial_imports(dir: &Path) {
+    write(dir, "good.yaml", "kind: schema\ntypes:\n  Good: string\n");
+    write(dir, "bad.yaml", "kind: schema\ntypes:\n  Other: string\n");
+    write(dir, "outer.yaml", "kind: schema\ntypes:\n  Outer: '{ a: Good@./good.yaml, b: Missing@./bad.yaml }'\n");
+    write(dir, "data.json", "[]");
+}
+
+fn entries(dir: &Path, names: &[&str]) -> Vec<String> {
+    let mut entries: Vec<String> = names.iter().map(|name| entry(dir, name)).collect();
+    entries.sort();
+    entries
+}
+
+fn load_data_doc(dir: &Path, contract: &str) -> PathBuf {
+    write(dir, "doc.md", format!("{{{{ as_json(load_data('data.json', '{contract}')) }}}}\n"))
+}
+
+/// A subject whose inline `$schema` is `schema`, and a document validating it.
+fn validate_schema_doc(dir: &Path, schema: &str) -> PathBuf {
+    write(dir, "subject.md", format!("---\n$schema:\n{schema}title: Page\n---\nbody\n"));
+    write(dir, "doc.md", "{{ validate_schema('subject.md') }}\n")
+}
+
+#[test]
+fn a_successful_contract_import_records_the_data_and_the_import() {
+    let dir = TempDir::new().unwrap();
+    partial_imports(dir.path());
+    let doc = load_data_doc(dir.path(), "{ a: Good@./good.yaml }[]");
+    let (_, report) = composed(&doc, ComposeOptions::new());
+    assert_eq!(report.read_set, entries(dir.path(), &["data.json", "good.yaml"]));
+}
+
+/// Every import a failed contract read stays a dependency: the one that
+/// succeeded before the failure and the one that failed. A missing import was
+/// never read and is not recorded; neither is the data file, never reached.
+#[test]
+fn a_failed_contract_keeps_every_import_read_before_the_failure() {
+    let dir = TempDir::new().unwrap();
+    partial_imports(dir.path());
+    for (contract, expected) in [
+        ("{ a: Good@./good.yaml, b: Missing@./bad.yaml }[]", &["bad.yaml", "good.yaml"][..]),
+        ("{ a: Good@./good.yaml, b: Missing@./absent.yaml }[]", &["good.yaml"][..]),
+        ("{ o: Outer@./outer.yaml }[]", &["bad.yaml", "good.yaml", "outer.yaml"][..]),
+    ] {
+        let doc = load_data_doc(dir.path(), contract);
+        let failure = compose_file(&doc, ComposeOptions::new()).expect_err(contract);
+        assert_eq!(failure.read_set, entries(dir.path(), expected), "{contract}");
+    }
+}
+
+/// A repeated failed call keeps every import the first preparation read:
+/// answered by the memoized failure on the same runtime, and prepared again
+/// on a fresh one once the process has the import tables cached.
+#[test]
+fn a_repeated_contract_failure_keeps_its_imports() {
+    let dir = TempDir::new().unwrap();
+    partial_imports(dir.path());
+    let doc = load_data_doc(dir.path(), "{ o: Outer@./outer.yaml }[]");
+    let expected = entries(dir.path(), &["bad.yaml", "good.yaml", "outer.yaml"]);
+    let runtime = DataRuntime::new();
+    for _ in 0..2 {
+        let failure = compose_file(&doc, ComposeOptions::new().with_data_runtime(runtime.clone())).unwrap_err();
+        assert_eq!(failure.read_set, expected);
+    }
+    let stats = runtime.stats();
+    assert_eq!((stats.contract_preparations, stats.contract_hits), (1, 1), "{stats:?}");
+    let failure = compose_file(&doc, ComposeOptions::new()).unwrap_err();
+    assert_eq!(failure.read_set, expected, "a fresh runtime prepares again and reads the same files");
+}
+
+#[test]
+fn validate_schema_records_a_successful_import() {
+    let dir = TempDir::new().unwrap();
+    partial_imports(dir.path());
+    let doc = validate_schema_doc(dir.path(), "  title: Good@./good.yaml\n");
+    let (text, report) = composed(&doc, ComposeOptions::new());
+    assert_eq!(text, "true");
+    assert_eq!(report.read_set, entries(dir.path(), &["good.yaml", "subject.md"]));
+}
+
+/// A schema that fails to prepare keeps every schema file it read, at any
+/// depth, beside the subject; repeating the call records the same files.
+#[test]
+fn a_failed_validate_schema_keeps_every_schema_file_it_read() {
+    let dir = TempDir::new().unwrap();
+    partial_imports(dir.path());
+    for (schema, expected) in [
+        ("  title: Good@./good.yaml\n  other: Missing@./bad.yaml\n", &["bad.yaml", "good.yaml", "subject.md"][..]),
+        ("  title: Good@./good.yaml\n  other: Missing@./absent.yaml\n", &["good.yaml", "subject.md"][..]),
+        ("  o: Outer@./outer.yaml\n", &["bad.yaml", "good.yaml", "outer.yaml", "subject.md"][..]),
+    ] {
+        let doc = validate_schema_doc(dir.path(), schema);
+        let failure = compose_file(&doc, ComposeOptions::new()).expect_err(schema);
+        assert_eq!(failure.read_set, entries(dir.path(), expected), "{schema}");
+    }
+    let doc = dir.path().join("doc.md");
+    let failure = compose_file(&doc, ComposeOptions::new()).expect_err("the repeated call fails again");
+    assert_eq!(failure.read_set, entries(dir.path(), &["bad.yaml", "good.yaml", "outer.yaml", "subject.md"]));
 }
 
 // ── R6/R7: remote reads ─────────────────────────────────────────────────────

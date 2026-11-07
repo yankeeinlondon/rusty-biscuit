@@ -830,8 +830,9 @@ References; Choosing an Arm: Reporting versus Changing Data).
   objects and fixed tuples still reject them. That copy is never returned as
   success, and the production binder is not relaxed.
 - `PreparationSummary.dependencies` (`#[non_exhaustive]`) lists the schema
-  files a preparation read, imports included (embedded schemas add none);
-  `validate_schema(...)` records them in the read set.
+  files a successful preparation read, imports included (embedded schemas
+  add none). `validate_schema(...)` does not use it for the read set: it
+  records the resolver's observed reads, which survive a failed preparation.
 - Performance: `EffectiveSchema` keeps a `ConversionPlan` keyed by the digest
   `ValidatorCache::shared_schema_hash` already records, and checks
   `accepts_as_is` with its own compiled validators first. Never hash or

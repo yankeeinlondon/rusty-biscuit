@@ -20,7 +20,9 @@
 //! ## Scope of this layer
 //!
 //! - Filesystem builtins carry [`FileReferenceDiagnostic`] via
-//!   [`ExpressionError::FileReference`].
+//!   [`ExpressionError::FileReference`]; a failed fetch from an allowed host
+//!   is [`ExpressionError::RemoteRead`], and a schema file `validate_schema`
+//!   could not read is [`ExpressionError::SchemaFileRead`].
 //! - An unrecognized function name is [`ExpressionError::UnknownFunction`] — the
 //!   failure remains authoring-fatal through callback wrappers.
 //! - A call that does not bind to its declared signatures, or a handler result
@@ -430,6 +432,36 @@ pub enum ExpressionError {
     #[error("{0}")]
     Data(Arc<super::data::DataError>),
 
+    /// A read-side function's fetch from an allowed host failed: the request
+    /// failed (a network error, an HTTP error status) or the response was not
+    /// UTF-8 text. Worded and graded like [`Other`](Self::Other), so it is not
+    /// authoring-fatal and renders the same; it keeps the reference as
+    /// written so the report can fill its reference fields. A host the policy
+    /// refuses is a [`FileReference`](Self::FileReference) failure instead.
+    #[error("{function}(): {message}")]
+    RemoteRead {
+        /// The read-side function's name.
+        function: &'static str,
+        /// The URL as written (or as the calling schema property spelled it).
+        reference: String,
+        /// The remote runtime's description of the failure.
+        message: String,
+    },
+
+    /// A schema file a read-side function needed beyond its argument could
+    /// not be read: `validate_schema`'s `$schema` target or a named-type
+    /// import is missing, malformed, or unreadable. Worded and graded like
+    /// [`Other`](Self::Other), so it is not authoring-fatal and renders the
+    /// same; `file` keeps the typed cause so the report can fill its
+    /// reference fields. A schema that reads but is invalid stays `Other`.
+    #[error("{}(): {message}", file.function)]
+    SchemaFileRead {
+        /// The same message the function's `Other` failure carries.
+        message: String,
+        /// The schema file reference that could not be read.
+        file: Box<FileReferenceDiagnostic>,
+    },
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -495,6 +527,32 @@ impl FileReferenceDiagnostic {
             }
             _ => None,
         }
+    }
+
+    /// The file-reference failure of a schema file `function` could not
+    /// read — a `$schema` target or named-type import that is missing,
+    /// malformed, or unreadable — resolved from `cwd`; any other schema
+    /// failure is returned unchanged.
+    ///
+    /// The reference is the one the schema spells (the path, for an I/O
+    /// failure). Only this level of `error` is inspected.
+    pub(crate) fn from_schema_read(
+        function: &'static str,
+        cwd: PathBuf,
+        error: simplified_schema::SchemaError,
+    ) -> Result<Self, simplified_schema::SchemaError> {
+        use simplified_schema::SchemaError;
+        let (reference, kind, source) = match error {
+            SchemaError::Unresolved { reference, source } => (reference, FileRefFailure::classify(&source), Some(source)),
+            SchemaError::NoMatch { reference, .. } => (reference, FileRefFailure::NotFound, None),
+            SchemaError::Io { path, source } => (
+                path.to_string_lossy().into_owned(),
+                FileRefFailure::NotFound,
+                Some(biscuit_file::FileReferenceError::Io { path, source }),
+            ),
+            other => return Err(other),
+        };
+        Ok(Self { function, reference, kind, cwd, fallback_dir: None, source: source.map(Arc::new), caller: None })
     }
 }
 

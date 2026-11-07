@@ -493,8 +493,11 @@ semantics, and composition request. An iteration does not restart the full
 document pipeline or rerun frontmatter preparation. Finish structural callback
 evaluation and body preparation before ordinary body interpolation, then run
 the existing body shell stages, link resolution, transclusion, cleanup, and
-normalization. A later callback failure can prevent earlier bodies' shell
-commands from running. Child transclusions retain existing concurrency and
+normalization. A file read in a body copy that follows a command waits for
+that command, so the next item reads what the previous item's command wrote
+(see [Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command)).
+A later callback failure can prevent earlier bodies' shell commands from
+running. Child transclusions retain existing concurrency and
 output placement. Explicit effects invoked by an expression, including
 `as_markdown()`, still run when that expression evaluates.
 

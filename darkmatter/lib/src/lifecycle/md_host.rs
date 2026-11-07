@@ -466,6 +466,12 @@ impl LifecycleHost for MdStackHost<'_> {
         matches!(self.signal, LifecycleSignal::Initialize | LifecycleSignal::Start)
     }
 
+    /// Every pass of this command shares the memo this empties, so the
+    /// stack's next expression reads the file the effect may have written.
+    fn side_effect_attempted(&self) {
+        self.request.options().invalidate_data_memo();
+    }
+
     fn is_known_effect(&self, _name: &str) -> bool {
         false
     }
@@ -728,8 +734,9 @@ pub struct MdStackContext<'a> {
 
 /// Runs `event`'s stack of `config` in `context`.
 ///
-/// A non-empty stack empties the request's `load_data` memo when it returns,
-/// whatever its outcome, as an executed command does.
+/// Each step that ran a command or a side effect empties the request's
+/// `load_data` memo as it finishes, whatever its outcome, before the next
+/// expression; a stack whose steps were all guarded off keeps it.
 pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &MdEvent) -> LifecycleEventOutcome {
     let host = MdStackHost {
         signal: event.signal,
@@ -764,14 +771,7 @@ pub fn evaluate(context: &MdStackContext<'_>, config: &LifecycleConfig, event: &
         source_path: context.source_path,
         host: &host,
     };
-    let outcome = StackExecutor::with_services(inputs, context.effects, &MdDiagnostics).execute_event(config);
-    // A step may have written any file (an `initialize` side effect runs
-    // after the frontmatter bootstrap read), so no read from before it may be
-    // reused. An event with no stack ran nothing.
-    if !config.stack(event.signal).is_empty() {
-        options.invalidate_data_memo();
-    }
-    outcome
+    StackExecutor::with_services(inputs, context.effects, &MdDiagnostics).execute_event(config)
 }
 
 /// The user blacklist of `request`'s shell policy; an unreadable policy file

@@ -140,6 +140,23 @@ fn body_hover_over_a_type_keyword_shows_the_type_definition_hover() {
     session.shutdown();
 }
 
+/// A bracket list in the string is the union of its items, as a YAML list
+/// is, so it gets the same hover as the `|` spelling.
+#[test]
+fn body_hover_over_a_bracket_list_shows_its_union() {
+    let workspace = LspWorkspace::new();
+    let text = "# Doc\n\n{{ load_data(\"x.yaml\", \"['string[]', null]\") }}\n";
+    let mut session = Session::open(&workspace, text);
+
+    let (hover, range) = session.hover(inside(text, "string[]", 2));
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares:"), "{hover}");
+    let literal = text.find("\"['string").unwrap();
+    assert_eq!(range, session.range(literal..literal + "\"['string[]', null]\"".len()));
+
+    session.shutdown();
+}
+
 #[test]
 fn body_completion_inside_the_string_offers_type_names_over_the_partial() {
     let workspace = LspWorkspace::new();

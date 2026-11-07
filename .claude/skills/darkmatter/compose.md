@@ -520,6 +520,27 @@ optional-target idiom is condition-aware and warning-free:
 ::end-block
 ```
 
+### Reads after a command (`BodyProvenance::pending`)
+
+Body interpolation leaves pending every expression (plain or whole-value
+target) that calls a read-side function (`remote::calls_read_side_function`,
+the read-set list) and starts after the end of the first command site
+(`inline::shell_expansion::command_sites`: enabled `::shell` lines and shell
+blocks). `PendingReads` rides `BodyProvenance` and drops any read an edit
+touches. When pending is non-empty the shell stages interleave
+(`phases.rs::run_directives_between_reads`, the `ShellBlocks` arm): before each
+command, `inline::interpolation::resolve_pending` evaluates the reads with no
+unrun command before them plus those inside the command, then the stage runs
+only that command (`StageWindow::First`, `run_shell_blocks_stage_in(first)`);
+the first call still pre-reads every directive. Directives all run before
+blocks, so a read after a block waits for the block stage; the last enabled
+shell stage settles the rest. Structural decisions (page-block and `when=`
+conditions, collection gates, sources, callbacks) are not deferred. A command
+whose own line held pending reads is prepared with `prepare_refreshed_site`:
+under pre-approvals its new bytes run when an exact whitelist rule covers every
+segment (or its shape is a member), else `NotPreApproved`. Tests:
+`lib/tests/l1/load_data_runtime.rs`.
+
 ### Variable Resolution
 
 | Pattern | Description |
@@ -990,7 +1011,10 @@ Shell approval and shell execution are separate concerns:
 - **Execution is condition-aware.** The inline shell stages run only the
   commands whose branch is reached, gated by
   `ComposeOptions::with_pre_approved_commands(set)`. The invariant
-  `execution_set ⊆ approval_set` makes the gate a pure membership check.
+  `execution_set ⊆ approval_set` makes the gate a pure membership check,
+  except for a refreshed site (its arguments read a file after an earlier
+  command ran), which an exact whitelist rule may also admit
+  (`site::prepare_refreshed_site`).
 - A body/`::shell-block` command embedding a frontmatter value still pending
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).

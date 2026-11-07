@@ -843,6 +843,70 @@ pub(crate) struct BodyProvenance {
     pub(crate) data: DataRanges,
     pub(crate) authored: Option<AuthoredBody>,
     pub(crate) scopes: ScopeRanges,
+    /// Authored expressions body interpolation left for the shell stages,
+    /// because they read files and follow a command that has not run yet.
+    pub(crate) pending: PendingReads,
+}
+
+/// One authored `{{ … }}` expression whose evaluation waits for the commands
+/// before it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingRead {
+    pub range: Range<usize>,
+    /// The whole-value target of a `::file`, `::code`, or `::url` directive,
+    /// evaluated as a target rather than as text.
+    pub target: bool,
+}
+
+/// The authored expressions body interpolation left pending (see
+/// [`inline::interpolation::resolve_pending`](super::inline::interpolation::resolve_pending)).
+///
+/// Sorted and non-overlapping. An edit never touches a pending range except
+/// the one that resolves it; an edit that does drops the read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PendingReads(Vec<PendingRead>);
+
+impl PendingReads {
+    pub(crate) fn new(mut reads: Vec<PendingRead>) -> Self {
+        reads.sort_by_key(|read| read.range.start);
+        Self(reads)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether any pending read overlaps `range`.
+    pub(crate) fn intersects(&self, range: &Range<usize>) -> bool {
+        self.0.iter().any(|read| read.range.start < range.end && range.start < read.range.end)
+    }
+
+    /// Removes and returns the reads `ready` accepts.
+    pub(crate) fn take(&mut self, ready: impl Fn(&Range<usize>) -> bool) -> Vec<PendingRead> {
+        let (taken, kept) = std::mem::take(&mut self.0).into_iter().partition(|read| ready(&read.range));
+        self.0 = kept;
+        taken
+    }
+
+    /// The reads past `edits` (sorted and non-overlapping), dropping any an
+    /// edit touched.
+    pub(crate) fn after_edits(&self, edits: &[TextEdit]) -> Self {
+        let mut reads = Vec::with_capacity(self.0.len());
+        let mut shift: isize = 0;
+        let mut next = edits.iter().peekable();
+        for read in &self.0 {
+            let range = &read.range;
+            while let Some(edit) = next.next_if(|edit| edit.range.end <= range.start) {
+                shift += edit.replacement_len as isize - edit.range.len() as isize;
+            }
+            if next.peek().is_some_and(|edit| edit.range.start < range.end) {
+                continue;
+            }
+            let start = range.start.saturating_add_signed(shift);
+            reads.push(PendingRead { range: start..start + range.len(), target: read.target });
+        }
+        Self(reads)
+    }
 }
 
 impl BodyProvenance {
@@ -854,6 +918,7 @@ impl BodyProvenance {
             data: DataRanges::none_for(markdown.content()),
             authored: Some(AuthoredBody::capture(markdown.content())),
             scopes: ScopeRanges::default(),
+            pending: PendingReads::default(),
         }
     }
 
@@ -889,6 +954,7 @@ impl BodyProvenance {
     pub(crate) fn advance(&mut self, before: &str, edits: &[TextEdit], after: &str) -> MarkdownResult<()> {
         self.data.ensure_describes(before)?;
         self.scopes = self.scopes.after_edits(edits);
+        self.pending = self.pending.after_edits(edits);
         self.data = self.data.after_edits(edits, after);
         advance(&mut self.origin, before, edits, after);
         self.authored = self.authored.take().and_then(|authored| authored.advanced(before, edits, after));
@@ -985,6 +1051,16 @@ fn hash_text(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_reads_move_past_edits_and_drop_when_touched() {
+        let read = |range: Range<usize>| PendingRead { range, target: false };
+        let pending = PendingReads::new(vec![read(10..14), read(2..5), read(20..24)]);
+        // Grows the text before the first read by 3, rewrites the second, and
+        // inserts right after the third.
+        let edits = [TextEdit::data(0..1, 4), TextEdit::data(11..12, 0), TextEdit::data(24..24, 2)];
+        assert_eq!(pending.after_edits(&edits), PendingReads::new(vec![read(5..8), read(22..26)]));
+    }
 
     fn origin_of(loaded: &str) -> (Markdown, BodyOrigin) {
         let markdown = Markdown::from(loaded);

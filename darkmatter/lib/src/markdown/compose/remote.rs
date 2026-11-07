@@ -444,6 +444,21 @@ fn collect_expression_urls(
     }
 }
 
+/// Whether `expr` calls a read-side function (one that records into the
+/// read set) anywhere, callbacks included.
+///
+/// Names compare without underscores or case, so an alias such as
+/// `markdownbodyempty` counts as its function.
+pub(crate) fn calls_read_side_function(expr: &Expr) -> bool {
+    let fold = |name: &str| name.replace('_', "").to_ascii_lowercase();
+    if let Expr::FunctionCall { name, .. } = expr
+        && REMOTE_READ_FUNCTIONS.iter().any(|read| fold(read) == fold(name))
+    {
+        return true;
+    }
+    expr_children(expr).into_iter().any(calls_read_side_function)
+}
+
 /// Returns the immediate sub-expressions of `expr` for recursive traversal.
 fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {

@@ -22,7 +22,7 @@ use simplified_schema::numeric::{self, JsonNumberError};
 
 use super::error::{DataError, DataSourceLocation};
 use super::runtime::{DataSourceIdentity, SourceContent};
-use crate::markdown::schemas::yaml_documents::{load_yaml_document, locating_problem, pointer_string};
+use crate::markdown::schemas::yaml_documents::{first_tag_start, load_yaml_document, pointer_string};
 
 /// A parse failure before it is attributed to a source.
 struct Failure {
@@ -136,7 +136,7 @@ fn parse_yaml(text: &str, identity: &DataSourceIdentity) -> Result<Value, Failur
     // carries plain values only, so a tag is refused before its JSON form
     // (a one-key mapping named after the tag) can be used.
     if let Some((segments, tag)) = first_tag(&loaded.value, &mut Vec::new()) {
-        let start = loaded.byte_range(&locating_problem(&segments)).map(|range| range.start);
+        let start = first_tag_start(text, &loaded);
         let location = DataSourceLocation {
             pointer: Some(pointer_string(&segments)),
             ..start.map(|start| located_at(text, start)).unwrap_or_default()

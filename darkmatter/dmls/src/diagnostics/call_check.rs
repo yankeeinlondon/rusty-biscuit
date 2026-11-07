@@ -150,6 +150,21 @@ mod tests {
         assert_eq!((error.range.start.line, error.range.start.character), (0, column), "{error:#?}");
     }
 
+    /// The bracket spelling of a scalar union is the same union, so the
+    /// editor shows the same data code at `as`; a list of containers is clean.
+    #[test]
+    fn a_bracketed_scalar_union_contract_shows_its_data_code_at_the_as_argument() {
+        let text = "{{ load_data(\"d.yaml\", \"[string, number]\") }}\n";
+        let found = diagnostics(text);
+        let errors: Vec<_> = found.iter().filter(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR)).collect();
+        let [error] = errors.as_slice() else { panic!("one error: {found:#?}") };
+        assert_eq!(error.code, Some(NumberOrString::String("dm.data.not_a_container".into())), "{error:#?}");
+        let column = text.find("\"[string").unwrap() as u32;
+        assert_eq!((error.range.start.line, error.range.start.character), (0, column), "{error:#?}");
+        let clean = diagnostics("{{ load_data(\"d.yaml\", \"['string[]', null]\") }}\n");
+        assert!(clean.iter().all(|diagnostic| diagnostic.severity != Some(DiagnosticSeverity::ERROR)), "{clean:#?}");
+    }
+
     #[test]
     fn callback_analysis_never_runs_provider_handlers() {
         use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;

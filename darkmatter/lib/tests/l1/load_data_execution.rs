@@ -188,6 +188,84 @@ fn a_computed_this_import_is_rejected() {
     assert_eq!(data_error(&failure).code(), Some("dm.data.this_import_rejected"));
 }
 
+/// Spec R2: the bracket spelling of a scalar union fails every computed
+/// carrier the way `string | number` does, before the data file is read: a
+/// frontmatter string, a frontmatter YAML list, and a callback's value.
+#[test]
+fn a_computed_bracketed_scalar_union_is_not_a_container() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "os.yaml", OS_YAML);
+    for content in [
+        "---\nt: \"[string, number]\"\n---\n{{ load_data(\"os.yaml\", t) }}\n",
+        "---\nt: \"string | number\"\n---\n{{ load_data(\"os.yaml\", t) }}\n",
+        "---\nt: [string, number]\n---\n{{ load_data(\"os.yaml\", t) }}\n",
+    ] {
+        let runtime = DataRuntime::new();
+        let failure = match compose_with(dir.path(), content, &runtime) {
+            Ok((composed, _)) => panic!("{content:?} composed: {}", composed.content()),
+            Err(failure) => failure,
+        };
+        let error = data_error(&failure);
+        assert_eq!(error.code(), Some("dm.data.not_a_container"), "{content:?}: {error}");
+        assert!(failure.read_set.is_empty(), "{content:?}: {:?}", failure.read_set);
+        assert_eq!(runtime.stats().reads, 0, "{content:?}");
+    }
+}
+
+/// A callback item typed from a literal list is judged by the call check,
+/// before anything runs, with the same code for each spelling of a scalar.
+#[test]
+fn a_callback_contract_over_literal_scalars_is_not_a_container() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "os.yaml", OS_YAML);
+    for list in ["[\"[string, number]\"]", "[\"string\"]", "[\"string\", \"number | null\"]"] {
+        let content = format!("{{{{ map({list}, t => load_data(\"os.yaml\", t)) }}}}\n");
+        let runtime = DataRuntime::new();
+        let failure = match compose_with(dir.path(), &content, &runtime) {
+            Ok((composed, _)) => panic!("{content:?} composed: {}", composed.content()),
+            Err(failure) => failure,
+        };
+        let record = failure.error.call_diagnostic().unwrap_or_else(|| panic!("{content:?}: {}", failure.error));
+        assert_eq!(record.code, "dm.data.not_a_container", "{content:?}: {record:#?}");
+        assert!(failure.read_set.is_empty(), "{content:?}: {:?}", failure.read_set);
+        assert_eq!(runtime.stats().reads, 0, "{content:?}");
+    }
+    // One literal that is a container leaves the call to execution, where
+    // the scalar item fails under the same code.
+    let failure = failure_of(dir.path(), "{{ map([\"string[]\", \"string\"], t => load_data(\"os.yaml\", t)) }}\n");
+    assert_eq!(data_error(&failure).code(), Some("dm.data.not_a_container"));
+}
+
+/// A bracket list of containers loads from each carrier: a literal string,
+/// a frontmatter string, a frontmatter YAML list, and an expression list.
+#[test]
+fn a_bracketed_union_of_containers_loads_from_every_carrier() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "os.yaml", OS_YAML);
+    write(dir.path(), "empty.yaml", "");
+    assert_eq!(loaded(dir.path(), "os.yaml", "['string[]', null]"), json!(["macOS", "Linux", "Windows"]));
+    assert_eq!(loaded(dir.path(), "empty.yaml", "['string[]', null]"), Value::Null);
+    for content in [
+        "---\nt: \"['string[]', null]\"\n---\n{{ as_csv(load_data(\"os.yaml\", t)) }}\n",
+        "---\nt: ['string[]', null]\n---\n{{ as_csv(load_data(\"os.yaml\", t)) }}\n",
+        "{{ as_csv(load_data(\"os.yaml\", [\"string[]\", null])) }}\n",
+    ] {
+        assert_eq!(rendered(dir.path(), content), "macOS, Linux, Windows", "{content:?}");
+    }
+}
+
+/// A named type whose definition is a YAML list of scalars is resolved at
+/// execution and fails the container rule; a list of containers loads.
+#[test]
+fn a_named_bracketed_union_is_judged_once_resolved() {
+    let dir = TempDir::new().unwrap();
+    write(dir.path(), "os.yaml", OS_YAML);
+    write(dir.path(), "schemas/u.yaml", "kind: schema\ntypes:\n  pair: [string, number]\n  rows: ['string[]', null]\n");
+    let error = load_failure(dir.path(), "os.yaml", "pair@./schemas/u.yaml");
+    assert_eq!(error.code(), Some("dm.data.not_a_container"), "{error}");
+    assert_eq!(loaded(dir.path(), "os.yaml", "rows@./schemas/u.yaml"), json!(["macOS", "Linux", "Windows"]));
+}
+
 // ── R3: one fixture per extension ───────────────────────────────────────────
 
 macro_rules! loads {
@@ -307,15 +385,15 @@ rejects! {
     yaml_duplicate_key_is_malformed: "d.yaml", "a: 1\na: 2\n", "{ <string>: number }" => Some((1, 1));
     yaml_nested_duplicate_key_is_located_at_its_mapping: "d.yaml", "x: 0\nm:\n  a: 1\n  a: 2\n", "{ <string>: unknown }"
         => Some((3, 3));
-    // The YAML parser reports a second document without a position, and no
-    // other source proves one.
-    yaml_multiple_documents_are_malformed: "d.yaml", "- a\n---\n- b\n", "string[]" => None;
+    // The YAML parser reports a second document without a position; the
+    // event marks put it at the `---` that starts it.
+    yaml_multiple_documents_are_malformed: "d.yaml", "- a\n---\n- b\n", "string[]" => Some((2, 1));
     yaml_custom_tag_is_malformed: "d.yaml", "- !foo a\n", "string[]" => Some((1, 3));
     yaml_invalid_syntax_is_malformed: "d.yaml", "a: [1\n", "{ a: number[] }" => Some((2, 1));
     yaml_inexact_integer_is_malformed: "d.yaml", "- 9007199254740993\n", "number[]" => Some((1, 3));
     // The parser accepts a non-string key; the shared loader refuses it
-    // afterwards, and its position map cannot index such a mapping.
-    yaml_non_string_key_is_malformed: "d.yaml", "a:\n  1: x\n", "{ <string>: unknown }" => None;
+    // afterwards, at the key's own event mark.
+    yaml_non_string_key_is_malformed: "d.yaml", "a:\n  1: x\n", "{ <string>: unknown }" => Some((2, 3));
     // Aliases only make contract violations pointer-only; a parser error in
     // a file that holds one keeps the parser's coordinates.
     yaml_invalid_syntax_after_an_alias_keeps_its_parser_position: "d.yaml", "a: &x 1\nb: *x\nc: d: e\n",
@@ -334,6 +412,14 @@ rejects! {
     json5_inexact_integer_is_malformed: "d.json5", "[9007199254740993]", "number[]" => Some((1, 2));
     empty_json5_is_malformed: "d.json5", "", "string[]" => Some((1, 1));
     json5_nan_is_malformed: "d.json5", "[1, NaN]", "number[]" => Some((1, 5));
+    // Grammatical tokens the value reader still refuses are located at the
+    // token, not left without a position.
+    json5_oversized_integer_is_malformed: "d.json5", "[1, 99999999999999999999999]", "number[]" => Some((1, 5));
+    json5_oversized_negative_integer_is_malformed: "d.json5", "[-99999999999999999999999]", "number[]" => Some((1, 2));
+    json5_oversized_hex_is_malformed: "d.json5", "{\n  a: 0xFFFFFFFFFFFFFFFFFFFFFFFF}", "{ a: number }" => Some((2, 6));
+    json5_invalid_escape_is_malformed: "d.json5", "['ok', 'é\\u{zz}']", "string[]" => Some((1, 8));
+    toml_oversized_integer_is_malformed: "d.toml", "a = 99999999999999999999\n", "{ a: number }" => Some((1, 5));
+    toml_overflowing_float_is_malformed: "d.toml", "a = 1\nb = 1e999\n", "{ <string>: number }" => Some((2, 5));
 
     jsonl_malformed_line_reports_its_number: "d.jsonl", "1\n\n{x\n", "number[]" => Some((3, 2));
     jsonl_two_values_on_one_line_are_malformed: "d.jsonl", "1 2\n", "number[]" => Some((1, 3));

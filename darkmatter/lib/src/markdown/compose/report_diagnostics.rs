@@ -341,6 +341,10 @@ fn expression_cause<'e>(error: &'e (dyn Error + 'static)) -> Option<&'e Expressi
 fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) -> Vec<Diagnostic> {
     match cause {
         Some(ExpressionError::FileReference(diagnostic)) => vec![with_file_reference(record, diagnostic)],
+        Some(ExpressionError::RemoteRead { function, reference, .. }) => {
+            vec![with_failed_fetch(record, function, reference)]
+        }
+        Some(ExpressionError::SchemaFileRead { file, .. }) => vec![with_file_reference(record, file)],
         Some(ExpressionError::Data(data)) => data_records(record, data),
         _ => vec![record],
     }
@@ -348,6 +352,21 @@ fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) ->
 
 fn with_file_reference(record: Diagnostic, diagnostic: &FileReferenceDiagnostic) -> Diagnostic {
     let details = record.reference_details.clone().unwrap_or_else(|| file_reference_details(diagnostic));
+    Diagnostic { reference_details: Some(details), ..record }
+}
+
+/// A read-side function's failed fetch from an allowed host, in the words a
+/// reference check uses for a remote that answered with an error or not at
+/// all: `unreachable`, and the `io` class of a file that exists but could not
+/// be read. The host was allowed, so it is never `remote check disabled`.
+fn with_failed_fetch(record: Diagnostic, function: &str, reference: &str) -> Diagnostic {
+    let details = record.reference_details.clone().unwrap_or_else(|| ReferenceDetails {
+        reason: Some(ReferenceIssueCode::RemoteUnreachable.reason_phrase().to_string()),
+        construct: Some(format!("{function}()")),
+        reference: Some(reference.to_string()),
+        failure: Some(resolution_failure_name(biscuit_file::ResolutionFailure::Io).to_string()),
+        included_via: None,
+    });
     Diagnostic { reference_details: Some(details), ..record }
 }
 

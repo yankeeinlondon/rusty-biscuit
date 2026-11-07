@@ -296,9 +296,10 @@ A type-definition value has two types, and it helps to keep them apart:
 
 `"string[] | null"` has a string carrier and denotes "a list of strings, or
 null". `[string, { nested: number }]` has a list carrier and denotes
-`string | { nested: number }`. Every rule below, including the
-[container rule](#container-types), judges the denoted type, never the carrier: a
-YAML list is not a list type.
+`string | { nested: number }`. A string holding a bracket list,
+`"[string, number]"`, denotes the same union as the unquoted list. Every rule
+below, including the [container rule](#container-types), judges the denoted
+type, never the carrier: a YAML list is not a list type.
 
 ### Unions and Tuples
 
@@ -307,14 +308,20 @@ data looks like:
 
 | You want | Write | Matches |
 | --- | --- | --- |
-| one value of either type | `"string \| number"`, or the YAML list `[string, number]` | `"a"`, `4` |
+| one value of either type | `"string \| number"`, the YAML list `[string, number]`, or that list quoted, `"[string, number]"` | `"a"`, `4` |
 | a fixed sequence of positions | `"tuple([string, number])"` | `["a", 4]` |
 | a list of any length, each item either type | `"(string \| number)[]"` | `["a", 4, "b"]` |
 
-Inside a string, a bracket list is not valid syntax at all: `"[string, number]"`
-is rejected as malformed, and in a `load_data` call it fails the call check with
-`dm.expression.incompatible_call`. Tuple positions, optional positions, and
-spreads are described under
+A type-definition value written as one string may hold the bracket list:
+`"[string, number]"` means `string | number` there too, so `load_data`
+rejects it as `dm.data.not_a_container`, and `"['string[]', null]"` is an
+accepted container contract. The list is read as YAML, so an item that ends
+in `[]` is quoted, as it would be in the unquoted list: `"[string[], null]"`
+is malformed, and so is `"[string,"`. A schema's own declaration is not a
+value and keeps the plain grammar: `id: "[string, number]"` under `$schema`
+is an error; write `id: [string, number]`.
+
+Tuple positions, optional positions, and spreads are described under
 [Tuples](../../../../simplified-schema/docs/topics/language/types.md#tuples).
 
 ### Constraints That Apply
@@ -846,7 +853,8 @@ The file is read as exactly one YAML document:
   not a string, and a number the [numeric model](../numbers.md) rejects
   (such as `9007199254740993`, which no `f64` holds exactly) are load
   errors (`SchemaError::SchemaDocument` naming the file, with the byte span
-  of the failure when the parser reports one). Quote a key such as `1:` or
+  of the failure: where the parser stops, the `---` that starts a second
+  document, or the non-string key itself, even in a file with an alias). Quote a key such as `1:` or
   `true:` to keep it as text.
 
 ```yaml

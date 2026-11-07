@@ -92,9 +92,11 @@ Every common container form works:
 | nullable | `"string[] \| null"` | `["macOS"]`, or an empty YAML file |
 
 Write a tuple as `tuple([string, number])`. A bracket list such as
-`[string, number]` is not a tuple in SimplifiedSchema: in a schema it means
-the union `string | number`, and inside an `as` string it is rejected as
-invalid syntax before anything runs.
+`[string, number]` is not a tuple in SimplifiedSchema: in a schema and
+inside an `as` string alike it means the union `string | number`, which is
+not a container, so `load_data("os.yaml", "[string, number]")` is rejected
+before anything runs. A list whose items are containers is a container:
+`"['string[]', null]"` (quote an item holding brackets, as in any YAML list).
 
 The data is converted the way frontmatter is: `"8080"` against `number`
 becomes `8080`, and a value that cannot convert without changing its meaning
@@ -374,7 +376,9 @@ md compose doc.md --allow host=data.example.com
   permission. A URL there is left for composition to read, not recorded as a
   failure.
 - Fetched text that is not valid UTF-8 is a transport failure, not
-  `dm.data.malformed`.
+  `dm.data.malformed`. Like a request that fails, it is
+  `dm.expression.evaluation_failure` with reason `unreachable` and failure
+  `io` (see [File errors](../cli/data-contracts.md#file-errors)).
 
 ## Reading a file once per command
 
@@ -389,9 +393,24 @@ govern the composed-result cache, not this memo. Nothing is persisted.
 Anything that might have changed a file ends the reuse. The memo is emptied
 after every command that actually runs, whether it succeeds or fails: a
 frontmatter `$( … )`, a `::shell` line, a shell block, or a lifecycle shell
-step. It is also emptied after every lifecycle event whose stack is not
-empty, so a file an `initialize` step rewrote is read again. A shell command
-answered from the shell cache ran nothing and keeps the memo.
+step. A lifecycle side effect that may write a file (`append_line`,
+`append_jsonl`, `ensure_file`, `ensure_dir`, a frontmatter mutation such as
+`set_frontmatter`, or `http_post`) empties it too, as soon as it has run and
+whether or not it succeeded, so the next step of the same event reads the
+file again:
+
+```yaml
+initialize:
+  - info: "before {{ length(load_data('d.yaml', 'string[]')) }}"   # before 1
+  - append_line: [d.yaml, "- b"]
+  - info: "after {{ length(load_data('d.yaml', 'string[]')) }}"    # after 2
+```
+
+A step that did not run keeps the memo: a step its `when:` guard turned off,
+an `info` or other message, and a side effect whose arguments failed to
+evaluate. A shell command answered from the shell cache ran nothing and keeps
+the memo too. A URL is not fetched again after the memo is emptied: the
+command keeps the response it already received.
 
 ```md
 ---
@@ -403,12 +422,23 @@ made: "$(./regenerate-hosts)"
 Here the reference check reads the old `hosts.yaml`, the command runs and
 empties the memo, and composition reads the new file.
 
-> **Limitation.** The shell stage fills in some body expressions before it
-> runs the commands around them: an expression on a later top-level `::shell`
-> line, and plain text inside a `::map` body. Such an expression is evaluated
-> before an earlier command runs, so it does not see that command's rewrite.
-> An expression inside the command itself is filled in as the command runs
-> and does see it.
+A body read after a command waits for it, so it sees the rewrite: plain
+text, a later `::shell` line's argument, and a `::file` target, in every
+item of a `::map` or `::filter` body. Here the first item shows `value: 1`
+and the second `value: 2`:
+
+```md
+::map items "i => i"
+value: {{ load_data('d.toml', '{ a: { b: number } }').a.b }}
+::shell git config --file d.toml a.b 2
+
+::end-map
+```
+
+A read written before a command keeps the old value. So does a read in a
+`::block when=` condition or a `::map` source or callback: those are decided
+before any body command runs. See
+[Reads after a command](../darkmatter-compose-pipeline.md#reads-after-a-command).
 
 There is no file-size limit. The `::map` iteration limits bound how many
 items a region visits and how much it writes, not how many bytes a file may
@@ -427,8 +457,16 @@ set, and so is a URL whose host was denied. A reference that resolves to no
 file at all (a missing `load_data` file) has no path to record;
 `file_exists` is the exception, and records every candidate path it probed.
 The schema files a contract imports, and those `validate_schema` reads, are
-recorded too, including an import that made the contract fail because it is
-not a schema or does not export the type `as` names.
+recorded too, at any depth of import. A preparation that fails keeps every
+schema file it read before stopping: an import that made the contract fail
+because it is not a schema or does not export the type `as` names, and every
+import read before it. An import file that does not exist was never read and
+is not recorded.
+
+For example, with `good.yaml` exporting `Good` and `bad.yaml` exporting only
+`Other`, the contract `{ a: Good@./good.yaml, b: Missing@./bad.yaml }[]`
+fails, and the failed run's read set lists both `good.yaml` and `bad.yaml`
+(but not the data file, which was never reached).
 
 `md compose --output json` prints it as `read_set`, on success and failure;
 see [Read set](../cli/data-contracts.md#read-set). A library caller reads it
@@ -494,9 +532,10 @@ spans more than one line (`servers: [` … `]`), a contract mismatch reports
 never reported in their place. A syntax error in such a file still has the
 parser's line and column.
 
-Some malformed YAML is located less precisely: a duplicate key is reported
-at the start of the mapping that holds it, and a second document or a
-non-string key reports no line or column.
+Malformed YAML always keeps a line and column, alias or not. A second
+document is reported at the `---` that starts it, a non-string key and a tag
+at the key or tag itself. A duplicate key is located less precisely: at the
+start of the mapping that holds it.
 
 ## See also
 

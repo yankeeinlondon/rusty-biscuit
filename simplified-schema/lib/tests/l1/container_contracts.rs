@@ -11,7 +11,9 @@
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
 use simplified_schema::simplified::narrowing::{ContainerAdmission, container_admission, denotes_container};
-use simplified_schema::simplified::{Constraint, PropertyDef, parse_property_definition, serialize_property_def};
+use simplified_schema::simplified::{
+    Constraint, PropertyDef, parse_property_definition, parse_type_definition_value, serialize_property_def,
+};
 use simplified_schema::{SchemaError, SimplifiedSchema, ValidationFailure};
 
 /// Definitions that denote a container.
@@ -107,7 +109,7 @@ mod predicate {
     }
 
     /// A bracket list is the YAML list spelling of a union of its items, not
-    /// a tuple; as one string it is not a definition at all.
+    /// a tuple. A schema declaration's own string keeps the plain grammar.
     #[test]
     fn a_bracket_list_of_scalars_is_a_union_not_a_tuple() {
         let def = parse_property_definition("as", &serde_yaml_ng::from_str("[string, number]").unwrap()).unwrap();
@@ -116,6 +118,40 @@ mod predicate {
         assert!(parse_property_definition("as", &YamlValue::String("[string, number]".into())).is_err());
         let containers = parse_property_definition("as", &serde_yaml_ng::from_str("['string[]', null]").unwrap()).unwrap();
         assert!(denotes_container(&containers));
+    }
+
+    /// A `type-definition` value holding the list as one string is the same
+    /// union as the unquoted list, so the container rule judges it alike.
+    #[test]
+    fn a_quoted_bracket_list_value_is_the_same_union_as_the_list() {
+        for (text, container) in [
+            ("[string, number]", false),
+            (" [string, null] ", false),
+            ("['string[]', null]", true),
+            ("['{ a: string }[]', { b: number }]", true),
+        ] {
+            let quoted = parse_type_definition_value("as", &YamlValue::String(text.into())).unwrap();
+            let listed = parse_property_definition("as", &serde_yaml_ng::from_str(text).unwrap()).unwrap();
+            assert_eq!(quoted, listed, "`{text}`");
+            assert_eq!(denotes_container(&quoted), container, "`{text}`");
+        }
+    }
+
+    /// Text that is neither grammar nor a list of definitions keeps the
+    /// grammar's own error; a non-string value parses as it always did. As in
+    /// an unquoted YAML list, an item holding brackets must be quoted:
+    /// `[string[], null]` is not a list of two definitions.
+    #[test]
+    fn malformed_bracket_text_keeps_the_grammar_error() {
+        for text in ["[string,", "[]]", "[string[], null]", "[string, number][", "[]", "[1, 2]", "[[string]]", "[string | number]"] {
+            let value = YamlValue::String(text.into());
+            let expected = parse_property_definition("as", &value).unwrap_err().to_string();
+            let error = parse_type_definition_value("as", &value).unwrap_err().to_string();
+            assert_eq!(error, expected, "`{text}`");
+        }
+        let list = serde_yaml_ng::from_str("[string, number]").unwrap();
+        assert_eq!(parse_type_definition_value("as", &list).unwrap(), parse_property_definition("as", &list).unwrap());
+        assert_eq!(definition("string[]"), parse_type_definition_value("as", &YamlValue::String("string[]".into())).unwrap());
     }
 
     #[test]
@@ -140,6 +176,7 @@ mod declaration_option {
             assert_accepted(&schema, json!(expression));
         }
         assert_accepted(&schema, json!(["string[]", null]));
+        assert_accepted(&schema, json!("['string[]', null]"));
     }
 
     #[test]
@@ -153,8 +190,12 @@ mod declaration_option {
         assert!(message.ends_with("`string` does not"), "{message}");
         let message = rejection(&schema, json!(["string", "number"]));
         assert!(message.contains("must denote a container"), "{message}");
-        // The bracket text in one string is not a definition, so it fails too.
-        rejection(&schema, json!("[string, number]"));
+        // The same list quoted as one string is the same union.
+        let message = rejection(&schema, json!("[string, number]"));
+        assert!(message.ends_with("`string | number` does not"), "{message}");
+        // Malformed bracket text fails as a definition, not as a container.
+        let message = rejection(&schema, json!("[string,"));
+        assert!(!message.contains("must denote a container"), "{message}");
     }
 
     /// Judged on the text alone: the referenced file does not exist and is
@@ -210,6 +251,15 @@ mod grammar {
         }
         let PropertyDef::Single(atom) = definition("type-definition(container)") else { panic!("one atom") };
         assert_eq!(atom.constraints, [Constraint::Container]);
+    }
+
+    /// A `type-definition` default is a definition value, so a quoted
+    /// bracket list is accepted there as the union it denotes.
+    #[test]
+    fn a_bracket_list_default_is_a_definition_value() {
+        definition("type-definition(default('[string, number]'))");
+        let message = grammar_error("type-definition(default('[string,'))");
+        assert!(message.contains("`default` value is not valid on `type-definition`"), "{message}");
     }
 
     #[test]

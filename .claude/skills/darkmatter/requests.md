@@ -108,25 +108,31 @@ crate-internal `data_runtime()` returns it or a fresh unshared one, like
 
 - Reads are recorded at the operation boundary, never in `resolve_arg`:
   `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`
-  (probed candidates on a miss), contract imports via
-  `DataRuntime::prepare_contract` (a failed contract records the host files its
-  `SchemaError` names, `runtime.rs::schema_error_files`), and `validate_schema_fn`'s schema files
-  (`PreparationSummary::dependencies`, imports included; embedded schemas add
-  none). Record after resolution, before reading, so a failed read stays in the
-  set.
+  (probed candidates on a miss), and the schema files a contract
+  (`DataRuntime::prepare_contract`, inside the memo's prepare closure) or
+  `validate_schema_fn` read. Those two wrap the preparation in
+  `simplified_schema::resolve::observed::collect` and record `Observed::read`
+  on success and failure alike, so a later import's failure keeps every
+  earlier import (transitive ones too); never reconstruct reads from a
+  returned value or an error. A missing import was never read and is not
+  recorded; embedded schemas read nothing. Record after resolution, before
+  reading, so a failed read stays in the set.
 - `invalidate_memo()` runs after every executed command attempt
   (`shell_expansion::execute_prepared_outcome`'s run closure,
-  `MdShellRunner::execute`), never for a cached or skipped one, and after every
-  lifecycle event whose stack is non-empty (`lifecycle::md_host::evaluate`, so
-  an `initialize` side effect is never served a bootstrap read; the stack's
-  steps are not inspected, so an all-`info` or guarded-off stack empties it
-  too). It swaps in empty source, bind, and contract maps (a regenerated
+  `MdShellRunner::execute`), never for a cached or skipped one, and after
+  every side effect the shared executor handed to the effect engine, failed or
+  not (`StackExecutor::dispatch_side_effect` calls
+  `LifecycleHost::side_effect_attempted`; `MdStackHost` invalidates, Claudine's
+  host keeps the no-op default because its lifecycle expressions get a fresh
+  runtime each). There is no end-of-event clear: a guarded-off or all-`info`
+  stack keeps the memo. It swaps in empty source, bind, and contract maps (a regenerated
   imported schema must not be served stale); a generation counter keeps a
   load already in flight from filling the new maps. It never clears the read
   set.
-- A body expression the shell stage fills in advance (a later top-level
-  `::shell` line, plain `::map` body text) is evaluated before the earlier
-  command runs, so it does not see that command's invalidation; an expression
-  inside the command itself does. Tests: `lib/tests/l1/load_data_runtime.rs`.
+- A body read-side call after a command is left pending by body
+  interpolation and evaluated by the shell stages after the commands before it
+  ran (compose.md "Reads after a command"), so it sees their invalidation; a
+  structural read (page-block condition, collection source or callback) is
+  decided before any body command. Tests: `lib/tests/l1/load_data_runtime.rs`.
 - `read_set` is on `ComposeReport` (unioned by `merge`) and `ComposeFailure`;
   `ComposeRequest::read_set()` snapshots it.

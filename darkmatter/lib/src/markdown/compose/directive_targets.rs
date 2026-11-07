@@ -282,7 +282,9 @@ pub(crate) struct DirectiveTargetRewrite {
 /// in authored text is evaluated; its value is data.
 ///
 /// `before_eval` is checked before each target is evaluated and after the
-/// last (see [`BeforeEval`]).
+/// last (see [`BeforeEval`]). `select`, given a target's span and expression,
+/// declines the targets this call leaves as written.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     source: &str,
     data: Option<&DataRanges>,
@@ -290,6 +292,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     line_offset: usize,
     mut before_eval: BeforeEval<'_>,
     site: Option<&dyn SiteHook>,
+    select: crate::markdown::compose::interpolation::rewrite::SpanSelection<'_>,
 ) -> Result<DirectiveTargetRewrite, LocatedInterpolationError> {
     let mut output = source.to_string();
     let mut replacements = 0usize;
@@ -313,6 +316,9 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
             continue;
         };
 
+        if select.is_some_and(|select| !select(target.span.clone(), Some(&location.expression))) {
+            continue;
+        }
         show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
         if let Some(site) = site {
             site.enter(target.span.start);

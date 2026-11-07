@@ -196,7 +196,7 @@ mod file_exists {
         let dir = TempDir::new().unwrap();
         let lookup = Lookup { value: json!("https://example.com/spec.md"), context: Some(anchored(dir.path())) };
         let error = evaluate(&parse("file_exists(p)").unwrap(), &lookup).unwrap_err();
-        assert!(error.to_string().contains("local-only"), "{error}");
+        assert!(error.to_string().contains("remote reads are not enabled"), "{error}");
     }
 }
 

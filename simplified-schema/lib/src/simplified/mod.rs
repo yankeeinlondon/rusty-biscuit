@@ -244,6 +244,39 @@ pub fn parse_property_definition(
     parse_property_definition_located(property, value).map_err(SchemaError::from)
 }
 
+/// Parses a `type-definition` value: [`parse_property_definition`], except
+/// that a string holding a bracket list, such as `"[string, number]"`, means
+/// what the same list means unquoted, the union of its items. A list is never
+/// a tuple; that is `tuple([string, number])`.
+///
+/// Every reader of a definition supplied as a value (the `type-definition`
+/// meta-type, a host's function argument, editor hover) parses through here,
+/// so a quoted and an unquoted list cannot disagree. A schema declaration's
+/// own string is not a value and keeps the plain grammar.
+///
+/// ## Errors
+///
+/// As [`parse_property_definition`]. Text that is neither grammar nor a list
+/// of definitions keeps the grammar's error, so `"[string,"` fails as it
+/// always did.
+pub fn parse_type_definition_value(property: &str, value: &YamlValue) -> Result<PropertyDef, SchemaError> {
+    let written = parse_property_definition(property, value);
+    let YamlValue::String(text) = value else {
+        return written;
+    };
+    if written.is_ok() {
+        return written;
+    }
+    let trimmed = text.trim();
+    if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
+        return written;
+    }
+    match serde_yaml_ng::from_str::<YamlValue>(trimmed) {
+        Ok(list @ YamlValue::Sequence(_)) => parse_property_definition(property, &list).or(written),
+        _ => written,
+    }
+}
+
 /// [`parse_property_definition`], keeping the rejected node's path.
 pub(crate) fn parse_property_definition_located(
     property: &str,

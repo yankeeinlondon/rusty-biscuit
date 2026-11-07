@@ -421,8 +421,14 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   on the text (named imports `Provisional`), then `denotes_container` on the
   resolved definition. A computed scalar `as` reaches `dm.data.not_a_container`
   through `FunctionBinding::refining_binding_errors`
-  (`load.rs::refine_binding_error`), not the binder's type error. A string
-  `"[string, number]"` is malformed type syntax, not `not_a_container`.
+  (`load.rs::refine_binding_error`), not the binder's type error. Every `as`
+  carrier goes through `contract.rs::written_contract` (a string as written;
+  a list or mapping, from frontmatter or an expression literal, as its
+  canonical text) and `parse_type_definition_value`, so `"[string, number]"`,
+  `t: [string, number]`, and `["string", "number"]` are all the union
+  `string | number` and fail with `not_a_container`. A computed `as` the
+  checker types as string literals (a callback over a literal list) is judged
+  passively per literal (`call_check.rs::load_data_problem`).
 - **CSV/TSV rows** (`contract.rs::classify_rows`, `RowMode::{Object, List}`):
   every non-null arm and array/tuple element must agree; object/dictionary
   elements read rows by header, list/tuple elements by position (header row
@@ -442,7 +448,8 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   authoring-fatal, never in the warning-only `COMPOSE_DIAGNOSTIC_CODES`):
   `dm.data.not_a_container`, `row_shape_conflict`, `this_import_rejected`,
   `unsupported_format`, `malformed`, `contract_mismatch`. File failures stay
-  `dm.expression.evaluation_failure` with the file-reference fields. A literal
+  `dm.expression.evaluation_failure` with the file-reference fields (a failed
+  allowed-host fetch is `ExpressionError::RemoteRead`: `unreachable`/`io`). A literal
   file plus literal contract is checked passively (`CallCheck::data_problem`).
 - **Mismatch records** come only from
   `ConversionError::located_failures()` (null arms dropped, one reachable arm
@@ -458,7 +465,10 @@ command-scoped memo and read set are in [requests.md](requests.md#data-runtime-a
   `PositionMap::byte_range`, never its top-level fallback. A YAML file with an
   alias, or with a flow collection spanning lines (`has_multi_line_flow_collection`,
   although `PositionMap` can locate those), reports pointers only. A missing
-  value keeps its own pointer but is positioned at its parent.
+  value keeps its own pointer but is positioned at its parent. Pointer-only
+  is for contract mismatches alone: a YAML refusal made after parsing (second
+  document, non-string key, tag) is located by
+  `schemas/yaml_documents/marks.rs`, an event-mark pass that follows aliases.
 - **Typed literal returns** (`call_check.rs::expression_type`): a literal
   `as` types the call as its bare shape (named references `unknown`, explicit
   null arms kept, `| null` added when `file` may be null, `null` for a literal
