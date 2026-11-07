@@ -310,14 +310,14 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 6: Diagnostics and Editor Authoring
 
-- [ ] **Diagnostic projection**
+- [x] **Diagnostic projection**
   - Own `Diagnostic`/`DataLocation`, `report_diagnostics.rs`, formatted diagnostic rendering, `DocumentEnvelope`, `ReportSink`, compose command/lifecycle collection, output schemas, and their existing conformance tests. Consume the Phase 5 typed DataError without interpreting coercion semantics in darkmatter.
   - Emit R5 leaf vocabulary, source-order records and capped overflow; retain written `as` at the root. Limit union-detail message text to six lines, appending an ellipsis when truncated. Attach call-source and iteration provenance separately from data-source positions; use original call arguments for file-reference errors.
   - Implement rule 4's file-reference projection for every read-side function, pinning that human stderr and `message` do not change.
   - Add `read_set` snapshots on normal success, expression failure, a failed reference check, early output failures, and lifecycle completion. Shared render/clean/set envelope constructors initialize `[]`; render does not begin evaluating expressions. Add optional `data_location` to each output schema's own `diagnostic` type per rule 1, recording the audit of the 17 files in the implementation log.
   - Checkpoint: success and failure compose envelopes conform; JSON emits one value, status 0/1 as appropriate, and empty stderr. Markdown-mode failures use the existing terminal components and stderr path.
 
-- [ ] **Editor authoring**
+- [x] **Editor authoring**
   - Own the new DMLS type-definition-argument provider and extraction of reusable semantic helpers from frontmatter.rs; scanner consumers have finished touching that file. Dispatch hover/completion from the catalog's parameter type and project string escapes/YAML source spans correctly.
   - Add body/frontmatter hover and completion cases, named-reference unknown typing, computed-contract unknown typing, nested type strings containing `}}`, unfinished strings, and callback completion after `h.` with `name`/`port`.
   - Checkpoint: editor providers perform no load_data I/O and use the same call-check typing as composition; no read-set invalidation behavior is introduced.
