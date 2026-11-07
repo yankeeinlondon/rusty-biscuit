@@ -684,7 +684,7 @@ fn every_leaf_has_a_schema_file_and_a_conformance_test() {
         include_str!("output_commands.rs"),
         include_str!("output_envelope.rs"),
     );
-    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/output");
+    let directory = biscuit_test_harness::manifest_dir!().join("schemas/output");
     let mut files: Vec<String> = std::fs::read_dir(&directory)
         .expect("the schema directory")
         .map(|entry| entry.expect("an entry").file_name().to_string_lossy().into_owned())
