@@ -988,6 +988,7 @@ _run_all recipe specs *args="":
 _test_all specs *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         just _run_all _test '{{ specs }}' {{ args }}
     else
@@ -1001,6 +1002,7 @@ _test_all specs *args="":
 _test_local_all specs *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
 
     read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
     test_threads="${NEXTEST_TEST_THREADS:-$(just _test_threads)}"
@@ -1173,6 +1175,7 @@ _sanity_all specs *args="":
 _test_l2_all specs *args="":
     #!/usr/bin/env bash
     set -uo pipefail
+    eval "$(just _test_run_scope)"
 
     required="${BISCUIT_TEST_REQUIRED_BACKENDS:-}"
     proof_owner=0
@@ -1381,6 +1384,7 @@ _build_messenger_desktop_stubs:
 _test pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     # One slow-test scope per recipe invocation (`_record_slow_tests`).
     export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
 
@@ -1804,10 +1808,11 @@ _expected_manifest tier specs *args="":
 _test_workspace *selectors="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
 
     metadata_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-workspace-tests.XXXXXX")"
     selected_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-workspace-selected.XXXXXX")"
-    trap 'rm -f "${metadata_file}" "${selected_file}"' EXIT
+    trap 'rm -f "${metadata_file}" "${selected_file}"; _test_run_finish' EXIT
 
     if ! cargo metadata --no-deps --format-version 1 > "${metadata_file}"; then
         echo "Unable to discover workspace packages with cargo metadata." >&2
@@ -2225,6 +2230,7 @@ _sanity pkg *args="": _storage_preflight
 _test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     # One slow-test scope per recipe invocation (`_record_slow_tests`).
     export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     echo
@@ -2384,7 +2390,7 @@ _test_l2 pkg *args="": _storage_preflight
     # Registry of (backend id) pairs the trap uses to tear down panes
     # the broker spawned. The trap consumes the registry on EXIT.
     SHARED_REGISTRY="$(mktemp "${TMPDIR:-/tmp}/biscuit-shared.XXXXXX")"
-    trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"' EXIT
+    trap 'while read -r b i; do "${broker}" kill "${b}" "${i}" >/dev/null 2>&1 || true; done < "${SHARED_REGISTRY}"; rm -f "${SHARED_REGISTRY}"; _test_run_finish' EXIT
 
     # The broker exits as soon as it has spawned, so a pane tagged with its
     # pid looks leaked to every reaper on the host — including a concurrent
@@ -2436,6 +2442,7 @@ _test_l2 pkg *args="": _storage_preflight
 _test_l3 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     # One slow-test scope per recipe invocation (`_record_slow_tests`).
     export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     if [ "${BISCUIT_L3_TAKE_FOCUS:-}" != "1" ]; then
@@ -2484,6 +2491,7 @@ _test_l3 pkg *args="": _storage_preflight
 _test_browser pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     # One slow-test scope per recipe invocation (`_record_slow_tests`).
     export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     echo
@@ -2538,6 +2546,7 @@ _test_browser pkg *args="": _storage_preflight
 _test_real pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     # One slow-test scope per recipe invocation (`_record_slow_tests`).
     export BISCUIT_SLOW_TESTS_GROUP="${BISCUIT_SLOW_TESTS_GROUP:-$(date +%s)-$$}"
     echo

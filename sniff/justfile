@@ -94,6 +94,7 @@ check-windows:
 test *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         just _test_all "sniff --features remote; sniff-detection-cli --features test-fixtures" {{ args }}
     else
@@ -119,8 +120,9 @@ test-browser:
 
 # Real-resource tests (network probes, host filesystem). Skip-clean when absent.
 test-real *args="":
-    @just _test_real sniff --features network {{ args }}
-    @just _test_real sniff-detection-cli {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real sniff --features network {{ args }}; \
+        just _test_real sniff-detection-cli {{ args }}
 
 # lint with clippy
 #

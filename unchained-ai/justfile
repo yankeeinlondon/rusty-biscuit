@@ -79,10 +79,11 @@ test-browser:
 
 # Live provider-API tests. Skip-clean without credentials.
 test-real *args="":
-    @just _test_real unchained-ai {{ args }}
-    @just _test_real unchained-ai-contract --features real-tests {{ args }}
-    @just _test_real unchained-ai-cli {{ args }}
-    @just _test_real unchained-ai-gen {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real unchained-ai {{ args }}; \
+        just _test_real unchained-ai-contract --features real-tests {{ args }}; \
+        just _test_real unchained-ai-cli {{ args }}; \
+        just _test_real unchained-ai-gen {{ args }}
 
 # not applicable: no criterion benches (work is provider-bound I/O)
 bench:

@@ -72,6 +72,7 @@ sanity:
 test *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    eval "$(just _test_run_scope)"
     exit_code=0
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         # Darkmatter's CI L1 contract retains the explicitly marked slow tests
@@ -105,8 +106,9 @@ test-l2 *args="":
 
 # darkmatter Level-3 tests
 test-l3 *args="":
-    @just _test_l3 {{ LIBRARY }} --features terminal-tests,browser-tests {{ args }}
-    @just _test_l3 {{ CLI }} {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_l3 {{ LIBRARY }} --features terminal-tests,browser-tests {{ args }}; \
+        just _test_l3 {{ CLI }} {{ args }}
 
 # Headless-browser tests (chromiumoxide). Selects every `browser_*` test in
 # the library crate. Skips cleanly when Chrome is absent unless

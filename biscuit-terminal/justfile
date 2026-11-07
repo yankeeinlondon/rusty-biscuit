@@ -83,8 +83,9 @@ test-l2 *args="":
 
 # not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests
 test-l3 *args="":
-    @just _test_l3 {{ LIBRARY }} {{ args }}
-    @just _test_l3 {{ CLI }} {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_l3 {{ LIBRARY }} {{ args }}; \
+        just _test_l3 {{ CLI }} {{ args }}
 
 # Headless-browser tests (computed-style parity for BrowserRenderable output).
 test-browser:

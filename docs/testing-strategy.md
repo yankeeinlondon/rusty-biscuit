@@ -481,6 +481,37 @@ runs inherit the flag by design; see the `rust-testing` skill for why.
 Ctrl+C stops it immediately with exit code 130, and
 `just check-test-interrupts` verifies that contract for every area.
 
+### How long a run took
+
+Every test recipe that runs tests ends by telling you how long the whole run
+took, after all of its other reporting, whether the run passed, failed, or was
+interrupted:
+
+```text
+🐢 L1 run recorded: 11818 test(s), none at or above 5.0s
+🕖 this test run took 4 minutes, 12 seconds
+```
+
+The time is wall-clock and includes compiling. A recipe that chains several
+others, such as `test-real` running one package after another, prints one line
+for all of them. A `not applicable` stub prints none, and neither do runs on
+GitHub Actions. `just test-githooks` prints one line for each of its two suites,
+because it runs them as separate dependencies.
+
+The shared `_test*` recipes already do this, so an area recipe that only calls
+one of them needs nothing extra. A recipe that does more, by calling several or
+by running `cargo` itself, makes its first step:
+
+```just
+test-real *args="":
+    @eval "$(just _test_run_scope)"; \
+        just _test_real my-lib {{ args }}; \
+        just _test_real my-cli {{ args }}
+```
+
+A recipe that sets its own `EXIT` trap replaces the one that prints this line,
+so it must call `_test_run_finish` from its own trap.
+
 ### How an area's justfile is built
 
 Areas do not reimplement test mechanics. The shared file `just/devops.just`

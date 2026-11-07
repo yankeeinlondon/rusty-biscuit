@@ -79,7 +79,7 @@ test *args="":
 #
 # compile freshly generated client crates offline, outside the checkout
 test-fresh-output *args="":
-    @cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
+    @eval "$(just _test_run_scope)"; cargo nextest run -p schematic-gen --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
 
 # These are schematic-runtime's `slow_` L1 tests: trybuild runs Cargo to
 # compare each case with its expected compiler diagnostic, which an archive
@@ -88,7 +88,7 @@ test-fresh-output *args="":
 #
 # check that misusing the runtime API fails to compile with the intended diagnostic
 test-compile-fail *args="":
-    @cargo nextest run -p schematic-runtime --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
+    @eval "$(just _test_run_scope)"; cargo nextest run -p schematic-runtime --test l1 --no-tests=fail -E 'test(/(^|::)slow_/)' {{ args }}
 
 # Show this area's slow-test history; `import <run-id>` adds a CI run (see `_slow_tests`)
 slow-tests *args="":
@@ -100,7 +100,7 @@ test-schema *args="":
     @echo "Testing schematic-schema (generated)"
     @echo "------------------------------------"
     @echo ""
-    @cargo nextest run --manifest-path schema/Cargo.toml {{ args }}
+    @eval "$(just _test_run_scope)"; cargo nextest run --manifest-path schema/Cargo.toml {{ args }}
 
 # clippy the generated schematic-schema crate (excluded from the workspace)
 lint-schema:
@@ -124,11 +124,12 @@ test-browser:
 
 # E2E generation tests live behind `--ignored`; expose via test-real.
 test-real *args="":
-    @just _test_real schematic-define {{ args }}
-    @just _test_real schematic-definitions {{ args }}
-    @just _test_real schematic-gen {{ args }}
-    @just _test_real schematic-oauth {{ args }}
-    @just _test_real schematic-runtime {{ args }}
+    @eval "$(just _test_run_scope)"; \
+        just _test_real schematic-define {{ args }}; \
+        just _test_real schematic-definitions {{ args }}; \
+        just _test_real schematic-gen {{ args }}; \
+        just _test_real schematic-oauth {{ args }}; \
+        just _test_real schematic-runtime {{ args }}
 
 # Criterion benches: schematic crates are code-generation focused with no algorithmic hot paths.
 bench:
@@ -328,7 +329,7 @@ test-e2e:
     @echo "Running E2E Tests"
     @echo "-----------------"
     @echo ""
-    @cargo test -p schematic-gen --test l1 -- --ignored e2e_generation::
+    @eval "$(just _test_run_scope)"; cargo test -p schematic-gen --test l1 -- --ignored e2e_generation::
 
 # build and show the docs for the library code
 docs:
