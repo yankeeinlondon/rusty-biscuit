@@ -24,6 +24,9 @@
 //! - [`schema`]: the [`SimplifiedSchema`] object, which builds from content
 //!   or a file, validates strictly or softly without a compile step, layers,
 //!   answers type queries, and exports;
+//! - [`property_path`]: the dotted path grammar, its typed walk over a value,
+//!   and the pure edits at a path;
+//! - [`setter_value`]: the shared reader for a value written on a command line;
 //! - [`SchemaError`], in [`errors`].
 //!
 //! A host (Darkmatter) keeps its own policy — baseline selection, schema
@@ -54,10 +57,12 @@ pub mod pending;
 pub mod phase;
 pub mod positions;
 pub mod prepared;
+pub mod property_path;
 pub mod reference;
 pub mod resolve;
 pub mod schema;
 pub mod scope;
+pub mod setter_value;
 pub mod simplified;
 pub mod span;
 pub mod timings;
@@ -92,7 +97,11 @@ pub use origin::{SchemaOrigin, SchemaOriginKind, SchemaOriginMap};
 pub use outcome::{ValidationFailure, ValidationSuccess};
 pub use phase::SchemaPhase;
 pub use prepared::Prepared;
+pub use property_path::{
+    PathEditError, PropertyPath, PropertyPathError, RemovalPlan, ResolveStop, Resolved, remove_at, set_at,
+};
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
+pub use setter_value::{SetterValue, SetterValueError};
 pub use schema::{
     FunctionView, PathSyntaxError, SchemaProvenance, SimplifiedSchema, SimplifiedSchemaError, TypeDefinition,
 };
