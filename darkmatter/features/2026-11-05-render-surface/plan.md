@@ -1,9 +1,14 @@
 ---
 total_phases: 7
 created: 2026-11-06
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Render Surface Implementation Plan
@@ -70,7 +75,7 @@ Phases run in order. Wave numbers are unique across this plan. Tasks within a wa
 
 ### Wave 1 — Prerequisites (serial)
 
-- [ ] **Complete dependencies**
+- [x] **Complete dependencies**
   - Finish the remaining dotted-path plan phases, followed by the loading-data plan phases, in this session's worktree. Preserve their public path/value/completion and reader contracts and their own validation evidence.
   - Record their completed APIs and evidence in this feature's implementation log. Do not reproduce their shell/format matrices in this feature.
   - Checkpoint: shared `PropertyPath`, `SetterValue`, schema path candidates, shell-word recovery, public format detection, and reader location helpers compile and their prerequisite suites pass. Phase 2 starts directly afterward.
