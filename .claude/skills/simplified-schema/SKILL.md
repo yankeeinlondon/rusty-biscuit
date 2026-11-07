@@ -1,7 +1,7 @@
 ---
 name: simplified-schema
-description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` declaration options, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
-last_updated: 2026-10-31T00:00:00Z
+description: Expert knowledge for the simplified-schema Rust library, the home of the SimplifiedSchema language (compact YAML type strings such as `name: string(required)`, `age: number(min(0))`) extracted from Darkmatter. Use when working in the `simplified-schema/` package area; using `SimplifiedSchema`, `SchemaSource`, `SchemaRoot`, `SchemaShape`, `PropertyDef`, `Prepared`, `validate_strict`, `validate_soft`, `ValidationSuccess`, `ValidationFailure`, or `SchemaError`; writing, parsing, or lowering SimplifiedSchema type strings to JSON Schema; schema layering (`layer_under`, `layer_over`, `merge_baseline`); conversion and coercion (`coercion`, `coerce`); named-type imports (`Name@file`, `Name@this`, recursive and shared types); `PropertyPath`, `set_at`, `remove_at`, `RemovalPlan`, or `SetterValue`; `non-null`, closed roots, `schema(mapping)` / `property(...)` / `forms(...)` / `declared-required` declaration options, or `claimed_values`; standalone schema documents; deciding whether schema code belongs in the library or in Darkmatter; fixing a failing schema ownership, dependency-direction, or context-construction guard; or adding the simplified-schema dependency.
+last_updated: 2026-11-06T00:00:00Z
 ---
 
 # simplified-schema
@@ -22,6 +22,7 @@ feature) depend on it directly.
 | Conversion engine (`coercion/`, `coerce.rs`), numeric model (`numeric.rs`) | Pending classification (`coerce.rs::nested_templates`) and eager-file rewrite (`rewrite.rs`) |
 | Validators, formats, `x-darkmatter-*` keywords (`validate.rs`, `format.rs`, `file_match.rs`) | `ProblemPositions` (`positions.rs`), completion over an `EffectiveSchema` |
 | `SchemaError`, `ValidationProblem`, `SchemaPhase`, `SchemaOrigin`, `ValidationTimings` | `md schema` CLI, compose integration, DMLS projection |
+| Dotted paths and their pure edits (`property_path.rs`), the command-line value reader (`setter_value.rs`) | Which document and schema a path or value applies to; the nested text editor (`markdown/hash/path_edit.rs`); setter plans (`compose/setters.rs`) |
 | Passive expression syntax (`expression/`), literal-token codec (`pending.rs`) | Expression evaluation and the function registry |
 | The `SimplifiedSchema` facade object (`schema/`) | `schemas::resolve` wrappers that pass `SHIPPED_SOURCES` so `Name@darkmatter:<stem>` resolves |
 
@@ -150,6 +151,23 @@ cannot state; see the `darkmatter` skill's
 An envelope that fails admission is a located `SchemaDocument` error; the
 library never falls back to treating it as an untagged payload.
 
+## Property paths and setter values
+
+`PropertyPath` is the only parser of the dotted grammar. It keeps decoded text
+segments, because `0` is an index or a key depending on the value it meets, so
+`PathStep` and `JsonPointer` come only from `resolve`'s `Resolved`, never from text.
+`set_at` and `RemovalPlan` decide before changing anything and work on a frontmatter
+`IndexMap`, not on source text.
+
+`SetterValue::parse` sees only text; `bind` takes the `Shape` the host looked up.
+Syntax rejection is text, but a parsed container that fails admission is an error,
+never text: `biscuit_file::json5_scan` finds duplicates and number spellings that
+`serde_json::Value` has already lost, `numeric::admit_json5_text_numbers` judges
+them, and `json5_is_well_formed` keeps an integer beyond `u64` from reaching the YAML
+step as a key. A YAML list under `$schema` is a union of object arms, not an array,
+which is a trap when writing fixtures; an array of objects is a named type with
+`item[]`.
+
 ## Features
 
 | Feature | Default | Adds |
@@ -209,6 +227,7 @@ Run from `simplified-schema/`:
 - [Strict and soft validation](../../../simplified-schema/docs/topics/validation.md) — `Prepared`, success and failure shapes
 - [Conversion](../../../simplified-schema/docs/topics/conversion.md) — coercion rules, unions, function binding, type errors
 - [Diagnostics](../../../simplified-schema/docs/topics/diagnostics.md) — located failures and the error model
+- [Property paths](../../../simplified-schema/docs/topics/property-paths.md) · [Setter values](../../../simplified-schema/docs/topics/setter-values.md) — the dotted grammar, its edits, and the command-line value reader
 - [Language core](../../../simplified-schema/docs/topics/language-core.md) — modules, supplied sources, what a host keeps
 - [Features](../../../simplified-schema/docs/topics/features.md) · [Foundations](../../../simplified-schema/docs/topics/foundations.md) · [Expression syntax](../../../simplified-schema/docs/topics/expression-syntax.md)
 

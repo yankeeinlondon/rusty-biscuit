@@ -44,9 +44,9 @@ Three things work the same way on every command:
 - [`compose <file-reference>`](./compose.md) - runs the referenced Markdown file through the [composition pipeline](../darkmatter-compose-pipeline.md) and returns the composed Markdown to STDOUT, or the document and every problem as data; pipe it to `md render` for any other output
 - [`toc <file-ref>`](./toc.md) - shows the table of contents for the file referenced
 - [`delta <file-ref> <file-ref>`](./delta.md) - describes the changes found between the two Markdown files. Uses a structured analysis to describe semantically what's changed. Adds visual diffing if you use the `--verbose` flag.
-- [`get <file-ref> <prop>`](./get.md) - extracts a property from the Markdown file referenced
-- [`set <file-ref> <prop> <value>`](./set.md) - sets a frontmatter property on the referenced Markdown file
-- [`rm <file-ref> <prop>`](./rm.md) - removes a Frontmatter property on the referenced Markdown file
+- [`get <file-ref> <path>`](./get.md) - extracts a frontmatter value, named by [property path](#property-paths), from the Markdown file referenced
+- [`set <file-ref> <path> <value>`](./set.md) - sets a frontmatter value, named by [property path](#property-paths), on the referenced Markdown file
+- [`rm <file-ref> <path>`](./rm.md) - removes a frontmatter value, named by [property path](#property-paths), from the referenced Markdown file
 - [`edit <file-ref>`](./edit.md) - opens the referenced Markdown file and blocks until the user closes that file in their editor.
 - [`validate refs <file-ref>`](./validate.md) - validates references (links, images, transclusions) in the document and prints the reference report.
 - [`hash <file-ref>`](./hash.md) - computes Markdown-aware hashes, stores them, and reports drift from a stored hash.
@@ -123,9 +123,115 @@ The canonical reference for the full grammar — including the error vocabulary 
 md compose foobar.md | md
 ```
 
+## Property Paths
+
+`md get`, `md set`, `md rm`, and the `key=value` setters of `md compose` all name a value inside frontmatter the same way: with a **property path**, a list of keys joined by `.`.
+
+```yaml
+---
+title: Notes
+author:
+  name: Alice
+style:
+  page:
+    max-width: 96
+items:
+  - name: a
+  - name: b
+ports:
+  "0": http
+"a.b": a key with a dot in its name
+---
+```
+
+```sh
+md get doc.md style.page.max-width   # 96
+md get doc.md items.1.name           # "b"
+md get doc.md ports.0                # "http": on a mapping, 0 is a key
+md get doc.md 'a\.b'                 # the key whose name is a.b
+md set doc.md author.name Ann --save # changes one value, keeps the rest of author
+md rm doc.md items.0                 # removes it; the next element becomes items.0
+md compose doc.md author.name=Ann    # overrides it for this run only
+```
+
+### Spelling a path
+
+A path has one reading, whatever the document holds: `a.b` is always `b` inside `a`, even when the document has a top-level key literally named `a.b`.
+
+| You write | It means |
+|---|---|
+| `.` | the next key begins |
+| `\.` | a dot inside this key: `'a\.b'` is the one key `a.b` |
+| `\\` | a backslash inside this key: `'C:\\.name'` is `name` under the key `C:\` |
+| `\` before anything else | that backslash, unchanged: `C:\dir` is the one key `C:\dir` |
+
+- Escape pairs match from left to right.
+- Quote a path that has a backslash, so that your shell passes it on untouched. The path rules apply after the shell has removed its quoting.
+- Nothing is trimmed or normalized, so spaces and Unicode are part of a key. `'$schema'` and `'my key'` are ordinary one-segment paths.
+- The whole argument `''` names an empty top-level key. An empty segment in a longer path (`a.`, `.a`, `a..b`) is a mistake: it fails as a usage error with exit status 2, before the document is read.
+
+These escapes belong to property paths only. File references keep their own [grammar](#file-references).
+
+### Numbers: index or key
+
+The value a path walks through decides what a number means. On an array `1` is an index, and on a mapping it is the key `"1"`, so `0` and `00` are two different keys. An array index is written in one way only, with plain digits and no leading zero: `items.01`, `items.-1`, and `items.+1` never find an element. A number too large to be an index is simply out of range. Paths address elements that exist, so no path appends to an array; replace the whole array to add to it (`md set doc.md items '[1, 2, 3]'`).
+
+### When a path cannot be followed
+
+`md get` reads, so a path that leads nowhere is simply missing. The commands that change something refuse, and write nothing.
+
+| The path | `md get` | `md set`, `md compose` setter | `md rm` |
+|---|---|---|---|
+| ends at a key that is absent | `""` | creates the key | exit 1 |
+| goes through parents that are absent (`author.name`, no `author`) | `""` | creates the parents | exit 1 |
+| has a number under an absent parent (`items.0.name`, no `items`) | `""` | exit 1: it could be an index or a key | exit 1 |
+| names an array index that does not exist | `""` | exit 1, naming the array's length | exit 1, naming the array's length |
+| goes through text, a number, or `null` (`nick.first`, where `nick: Ken`) | `""` | exit 1, naming the parent's type | exit 1, naming the parent's type |
+
+A path command never destroys what you did not name. To replace `nick: Ken` with a mapping, name `nick` itself: `md set doc.md nick '{first: "Ken"}'`.
+
+### Where these paths do not apply
+
+- `--state` and `--set` on `md compose` take objects, whose keys are literal: `--set '{"a.b": 1}'` sets the one key `a.b`, and `--set '{"a": {"b": 1}}'` supplies a nested object.
+- Expressions such as `{{ author.name }}` have [their own grammar](../topics/darkmatter-expressions.md).
+- `md schema validate`'s `key=value` assignments have [their own value rules](../topics/schemas/definition.md).
+
+## Command-Line Values
+
+`md set` and `md compose` setters read a value in the same way, in two steps. The text decides the value's form, then the type the document's schema declares for that place decides how plain text is read.
+
+**Step 1, the form.** The whole text is read as JSON5:
+
+| You write | Form |
+|---|---|
+| `{a: 1}`, `["x", "y"]` | an object or array |
+| `{ max-width: 50 }` | an object: a value starting with `{` that JSON5 rejects is tried as one YAML flow mapping, so a hyphenated key needs no quotes |
+| `"Alice"` | a string, with its quotes removed once |
+| `null` | null |
+| (empty) | the empty string |
+| anything else: `5`, `1.10`, `true`, `Alice`, `[x, y]`, `{{ title }}` | plain text, spelled as written |
+
+JSON5 goes first because YAML would read `{a:1}` as a key named `a:1`. Only a value starting with `{` is tried as YAML, and only as one flow mapping with no tags, anchors, or aliases; anything else stays plain text. So `[x, y]` is the text `[x, y]`; write `'["x", "y"]'` for an array.
+
+An object or array that parsed must also be valid, and never falls back to text: a repeated key (`{a:1,a:2}`), a non-finite number (`{a:NaN}`), and a whole number no double can hold exactly (`{a:9007199254740993}`) all fail, and nothing is written or composed.
+
+**Step 2, the type.** Plain text then goes through the same [conversion](../../../simplified-schema/docs/topics/conversion.md) authored frontmatter gets:
+
+| You write | Declared `string` | Declared `number` | Declared `numberlike` | Declared `boolish` | Not declared, or `unknown` |
+|---|---|---|---|---|---|
+| `5` | `"5"` | `5` | `"5"` | refused | `5` |
+| `1.10` | `"1.10"` | `1.1` | `"1.10"` | refused | `1.1` |
+| `02134` | `"02134"` | `2134` | `"02134"` | refused | `"02134"` |
+| `true` | `"true"` | refused | refused | `true` | `true` |
+| `On` | `"On"` | refused | refused | `"On"` | `"On"` |
+
+A refused value stays as you wrote it at this step, so schema validation is what reports it. A bare `NaN` or `9007199254740993` with no declared type stays text.
+
+An object or array has already lost its numbers' spelling when its fields are converted, so `author={version:1.10}` gives `"1.1"` under a `version: string`. Write `author.version=1.10`, or quote it: `'author={version:"1.10"}'`.
+
 ## Shell Completions
 
-`md` completes subcommands, flags, Markdown files (`.md`, `.dm`), and directories. Add the line for your shell to its startup file:
+`md` completes subcommands, flags, Markdown files (`.md`, `.dm`), and directories, and it completes property paths and their values from the document on the command line. Add the line for your shell to its startup file:
 
 ```bash
 # Bash (~/.bashrc)
@@ -142,6 +248,98 @@ $env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item E
 ```
 
 `md --completions <SHELL>` prints the setup command for your shell, for `bash`, `elvish`, `fish`, `powershell`, or `zsh`.
+
+### Completing a path
+
+Tab walks the schema one level at a time, so you can find out what a document accepts without opening it:
+
+```text
+md compose doc.md style.<Tab>                 style.page. style.page= style.table. style.table= ...
+md compose doc.md style.page.<Tab>            ... style.page.max-width= style.page.alignment= ...
+md compose doc.md style.page.alignment=<Tab>  left center right   (some shells show style.page.alignment=left, ...)
+md get doc.md au<Tab>                         author. author
+md set doc.md style.page.alignment <Tab>      left center right
+```
+
+Tab fills in only what every candidate shares. `style.pa<Tab>` stops at `style.page` because `style.page.` (go deeper) and `style.page=` (replace the whole object) are both valid, so you type the `.` or `=` yourself. The finished word is `style.page.alignment=center`, with no space before the value.
+
+A key's form tells you what accepting it does:
+
+| Candidate | Means | After it |
+|---|---|---|
+| `style.page.` | go into an object or array | no space |
+| `style.page=`, `title=` | assign, in `md compose`; the value comes next | no space |
+| `title`, `items` | the whole value, in `md get`, `md set`, or `md rm` | a space |
+| `items.0.`, `items.0=`, `items.0` | an existing array element; arrays offer only the indexes they hold | as above |
+
+The keys on offer depend on the command, because each one can do something different with an absent key:
+
+| Command | Offers, in this order | Why |
+|---|---|---|
+| `md compose`, `md set` | schema keys (required first, then as declared), then keys only the document has | you may set a key the document omits |
+| `md get` | keys the document has, then absent schema keys | reading an absent key only prints empty |
+| `md rm` | keys the document has | removing an absent key is an error |
+
+A setter already on the line is not offered again, and it counts: `md compose doc.md lang=rust <Tab>` offers what the schema selected by `lang: rust` declares. Only the words before the cursor count. A key declared with a pattern (`"<string>": unknown`) offers the keys already present, never the pattern itself, and no key names are invented for an open object. A path that could only fail when run, such as one into a text value, is not offered.
+
+Where the shell can show it, a schema description (`-> ...` in a type) appears as the candidate's help.
+
+### Completing a value
+
+| The key's type | Tab offers |
+|---|---|
+| `enum(...)`, `literal(...)` | the members |
+| `suggest(...)` | the suggestions, which stay advisory |
+| `boolean` | `true`, `false` |
+| `file` and its forms | file paths, including files that are not Markdown |
+| a union | the candidates of each arm, without repeats; a literal tag in the document or an earlier setter (`kind: rust`) narrows the arms |
+| `string`, `number`, `unknown`, an object | nothing |
+
+A value that the [value rules](#command-line-values) would read as something else is offered in JSON quotes, so an enum member `null` appears as `"null"`. Your shell's own quoting is added after that, so a member with a space or `$` still arrives as one value.
+
+### What completion reads
+
+Tab can never change or run anything, however the document is written.
+
+```mermaid
+flowchart LR
+    W["words before<br/>the cursor"] --> I["find the<br/>input document"]
+    I --> P["parse its<br/>frontmatter"]
+    P --> E["effective schema:<br/>baseline, triggers, $schema"]
+    E --> C["candidates"]
+    P --> C
+    R["remote schema"] -. never fetched .-> E
+```
+
+- **It reads** the input document, the local files its schema needs, the configured schema roots to discover triggers, and a directory's listing when completing a file.
+- **It never** evaluates an expression, runs a command, makes a network request (even with `--allow host=HOST` on the line), reads stdin, opens a candidate file, or writes anything.
+- **It also honors** `--state`, `--set`, and `--magic-root` when they come before the cursor. It does not honor `--baseline-schema` or `--disable`, so after those flags Tab still reads the normal baseline and triggers.
+- **It prints no errors.** Whatever it cannot work out, it leaves out, and validation stays the judge of what is allowed:
+
+| Situation | Tab still offers |
+|---|---|
+| no input document, or input from stdin | the baseline's keys such as `style.*`, plus files and flags |
+| the document does not parse | the baseline's keys |
+| the document's schema is missing, invalid, or remote | the document's own keys and the baseline's |
+| an earlier setter is incomplete or invalid | everything else; that setter is ignored |
+
+### Per-shell limits
+
+The "Real Tab" column is an automated run of a finished path, ending by running the command, in a real terminal. Other cells describe what has been checked and what has not.
+
+| Shell | Words `md` receives | Registration script loads | Real Tab |
+|---|---|---|---|
+| bash 5 | tested | tested | tested |
+| bash 3.2 (ships with macOS) | tested | tested | tested |
+| zsh | tested | tested | tested |
+| fish | tested | tested | tested |
+| PowerShell | tested | tested on native Windows | not tested |
+| elvish | tested | not tested | not tested |
+
+- **elvish:** its completion script has no way to suppress the space after a candidate, so accepting `style.` is likely to end the word. If it does, delete the space. Keys still complete.
+- **PowerShell:** expect candidates to work as listed above, but its behavior after a real Tab press has not been observed.
+- **fish:** offers nothing for a value after an opening quote (`mode="pl<Tab>`). Complete first, or type the value.
+- **bash:** a setter deliberately left empty just before the cursor (`x= y<Tab>`) reads as `x=y` while completing. That changes only what Tab offers, not what the command does when run.
 
 ## Working on the CLI
 

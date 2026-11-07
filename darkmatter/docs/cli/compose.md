@@ -52,9 +52,13 @@ md compose doc.md --state '{name: "Alice", env: "prod"}'
 # Override values using --set
 md compose doc.md --set '{"name":"Bob"}'
 
-# Override values using shorthand setters
+# Override values using setters
 md compose doc.md name=Bob iteration=1
 md compose - name=Alice draft=false
+
+# Override one nested value, keeping its siblings
+md compose doc.md author.name=Bob
+md compose doc.md items.1.name=z
 
 # Include frontmatter in output
 md compose doc.md --frontmatter
@@ -74,28 +78,81 @@ md compose doc.md --show
 md compose doc.md --shell
 ```
 
-### Shorthand Setter Syntax
+### Setters
 
-Positional arguments matching `key=value` are treated as override setters, equivalent to adding the key-value pair to `--set`. This provides a more ergonomic syntax for common overrides:
+A positional argument of the form `path=value` overrides one frontmatter value for this run. The file is not changed.
 
 ```bash
 md compose doc.md iteration=1 draft=false name=Alice
-md compose iteration=1 doc.md   # setters can come before the path too
+md compose iteration=1 doc.md            # setters can come before the path too
+md compose doc.md author.name=Alice      # one nested value; author's other keys stay
+md compose doc.md 'a\.b=1'               # a key with a dot in its name
 ```
 
-**Value parsing**: Values are parsed as JSON5 with a string fallback. This means:
-- Numbers (`iteration=1`) and booleans (`draft=false`) are parsed as their native types
-- Objects and arrays can use JSON5 syntax: `meta={author:"Alice"}`
-- Unquoted strings are treated as literal strings: `name=Alice`
-- Empty values (`empty=`) resolve to an empty string
+The left side is a [property path](./index.md#property-paths), and the right side follows the shared [value rules](./index.md#command-line-values). The argument splits at its first `=`, so the rest belongs to the value (`note=a=b`).
 
-**Key grammar**: Keys must match `[A-Za-z_][A-Za-z0-9_-]*`. Tokens with `/`, `:`, or other path-like characters in the key portion are treated as input paths rather than setters. This means `./foo=bar.md` is correctly classified as a file path.
+**Telling a setter from a file.** `md compose` has to decide whether an argument is a setter or the input path, before it reads anything:
 
-**Limitation**: Shorthand setters only set top-level keys. For nested paths, use `--set` with dot-notation or JSON objects.
+```mermaid
+flowchart TD
+    A["argument"] --> B{"has an = ?"}
+    B -->|no| P["input path"]
+    B -->|yes| C{"text before the first = is empty?"}
+    C -->|yes| E["error: setter key must not be empty"]
+    C -->|no| D{"every segment fits the<br/>setter key grammar?"}
+    D -->|yes| S["setter"]
+    D -->|no| P
+```
+
+The first segment must match `[A-Za-z_][A-Za-z0-9_-]*`. Each later segment matches that too or is all digits, and `\.` stands for a literal dot within a segment.
+
+| Argument | Reads as |
+|---|---|
+| `name=Bob`, `author.name=Bob`, `items.0=x`, `'a\.b=1'` | setter |
+| `a.b=c.md` | setter: it sets `b` inside `a` to `c.md` |
+| `./a.b=c.md`, `./foo=bar.md`, `/tmp/a=b.md`, `@x=1.md` | input path |
+| `9key=value`, `a..b=1`, `a.=1` | input path, because the key does not fit |
+
+Name a file that looks like a setter with `./` in front. On native Windows, where `\` also separates folders, `dir\.config=1.md` reads as a setter, so write `.\dir\.config=1.md`. A key that does not fit the grammar, such as one with a space, can still be set by name through `--set`.
+
+**What a setter does to a document.** Each document reads a setter through its own schema, and a setter reaches transcluded children just as `--set` does. So `md compose parent.md v=7` changes `v` in the parent and in each child, and a nested setter whose path cannot be followed in a child fails the run, naming that child.
+
+- Changing one descendant keeps its siblings. Naming a whole object replaces it, as in `'author={name:"Ann"}'`.
+- A missing parent is created. A number under a missing parent, an index out of range, and a path through text or `null` fail: see [When a path cannot be followed](./index.md#when-a-path-cannot-be-followed).
+- A setter can change which schema applies. Setters are first applied to a temporary copy to select the schema, and then each value is read once through that schema, so `lang=rust edition=1.10` reads `edition` through a trigger that matches `lang: rust`, whichever comes first on the line. There is no second attempt: a trigger that would match only after a later conversion fails with a schema problem that names the setter.
+- A setter's `{{ ... }}` stays authored text, evaluated by composition as `--set` values are.
+
+The schema decides whether a setter is allowed. The frontmatter root is open by default, so an undeclared top-level key is fine. A declared nested object is closed by default, so `author.mistake=1` fails with `dm.schema.unknown_key`, unless the schema opens it with a pattern key such as `"<string>": unknown`.
+
+**Overlapping setters** resolve by how specific they are, not by their order on the line. The same path given twice takes the last value.
+
+```bash
+md compose doc.md 'author={name:"Ann",email:"a@x"}' author.name=Bob
+md compose doc.md author.name=Bob 'author={name:"Ann",email:"a@x"}'
+# both give { name: "Bob", email: "a@x" }
+
+md compose doc.md author=7 author.name=Bob
+# fails in either order: a scalar or null cannot also hold a child
+```
+
+**A failing setter** reports `dm.setter.invalid` when it cannot be applied, and a `dm.schema.*` code when its value breaks the schema. Either way the message names your argument and has no line or column, because the value is on the command line, not in the file. See [Composition Problems](../errors/composition-problems.md#how-a-problem-is-located).
+
+#### Migrating older calls
+
+| Call | Before | Now |
+|---|---|---|
+| `md compose doc.md a.b=c.md` | composed the file `a.b=c.md` | a setter; write `./a.b=c.md` for the file |
+| `md compose doc.md nested.deep=7` | failed: read as a second input | sets `deep` inside `nested` |
+| `md compose doc.md version=1.10` under `version: string` | the number `1.1` | the text `"1.10"` |
+| `md compose doc.md 'meta={a:1,a:2}'` | kept the last value | fails: a parsed object must be valid |
+| `md compose doc.md 'meta={a:NaN}'` | the text `{a:NaN}` | fails, for the same reason |
+| `md compose doc.md 'style={ max-width: 50 }'` | the text | the object `{max-width: 50}` |
+| `md compose doc.md 'note={foo}'` | the text `{foo}` | the object `{foo: null}`; quote it to keep the text: `'note="{foo}"'` |
+| `md compose doc.md n=9007199254740993` | a number no double can hold | the text `"9007199254740993"` when no type is declared |
 
 ### Arguments
 
-- `[ARGS]`: Positional arguments — an optional input file path followed by zero or more `key=value` setters. Use `-` for stdin. If no path is provided, reads stdin when piped; otherwise errors.
+- `[ARGS]`: Positional arguments — an optional input file path and zero or more [`path=value` setters](#setters), in any order. Use `-` for stdin. If no path is provided, reads stdin when piped; otherwise errors.
 
 ### Options
 
@@ -197,12 +254,12 @@ Override values are applied in this order (highest priority last):
 1. **Document frontmatter** — base values from the document itself
 2. **`--state`** — fills null/missing keys without overriding existing values
 3. **`--set`** — unconditional overwrite of matching keys
-4. **Shorthand `key=value`** — unconditional overwrite, highest CLI priority
+4. **[`path=value` setters](#setters)** — unconditional overwrite of the one value each names, highest CLI priority
 
-Shorthand setters are merged into the same `--set` override map. On key collision, the shorthand value wins.
+`--state` deep-merges into the frontmatter, and `--set` replaces each top-level key it names whole. Setters run after both, one path at a time, and outrank them whatever their spelling: `author={...}` beats a more specific `author.name` inside a `--set` object. `--state` and `--set` keep taking objects with literal keys, so `--set '{"a.b":1}'` sets the one key `a.b`.
 
 ```bash
-# --state provides defaults, --set overrides, shorthand overrides both
+# --state provides defaults, --set overrides, a setter overrides both
 md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 # Result: name is "Charlie"
 ```

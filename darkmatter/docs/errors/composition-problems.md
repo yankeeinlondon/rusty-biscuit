@@ -18,6 +18,7 @@ is the whole list, while an expression error may have another behind it.
 
 | Family | Stopping rule | What you see |
 | --- | --- | --- |
+| Setters | The run stops at the first setter that cannot be applied | One `dm.setter.invalid` error, before that document's stages run |
 | References | Every problem is collected, then reported together | One grouped report, before anything is composed |
 | Schema | Every problem in one document is collected, then the run stops | Every problem in that document, none from later documents |
 | Transclusion | A fatal failure, such as a cycle, stops the run; a tolerated failure is reported and composition continues | A fatal error, or a notice in the document and a warning |
@@ -118,6 +119,21 @@ What each family reports:
 | Any other failure that holds no file, such as a caller's `--set` value that could not bind | the document named on the command line |
 | A schema problem on a value a `key.path=value` setter supplied | the file, with a `null` line and column; the message names the setter, because the value was never at the on-disk scalar |
 | A `dm.setter.invalid` setter that cannot be applied | `null`, whatever the document; the message names the argument, its path, and the document a path could not reach |
+
+A value on the command line was never in a file, so neither form points into one.
+Both name your argument, so you can tell which setter to fix:
+
+```text
+$ md compose doc.md items.9.name=z
+Setter: items.9.name=z
+Path: items.9.name
+`items.9` is out of range: the array has 2 element(s) in `doc.md`
+
+$ md compose doc.md count=abc --output json
+"code": "dm.schema.type_mismatch",
+"message": "\"abc\" is not of type \"number\" (from the setter `count=abc` at `count`)",
+"source": { "file": "doc.md", "line": null, "column": null, "inserted": false }
+```
 
 Apart from `dm.setter.invalid`, `source` is `null` only when no file is known: input read from stdin or built in
 memory, or a lifecycle `error:` step, whose message is the author's own text.

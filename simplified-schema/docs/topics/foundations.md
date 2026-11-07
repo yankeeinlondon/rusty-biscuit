@@ -37,7 +37,8 @@ assert_eq!(admit_integer((1 << 53) + 1), Err(NumericAdmissionError::Inexact));
 
 The loaders apply the same rules to whole documents and say where a number
 failed: `load_admitted_yaml` reports the property path, line, and column;
-`admit_json_text_numbers` reports a JSON Pointer, line, and column;
+`admit_json_text_numbers` and its JSON5 counterpart `admit_json5_text_numbers` report a
+JSON Pointer, line, and column;
 `reject_non_finite_json5` rejects `Infinity`, `NaN`, and overflowing literals
 that JSON5 would otherwise store as `null`.
 

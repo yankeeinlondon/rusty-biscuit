@@ -426,6 +426,17 @@ no longer watches files, so its user docs no longer describe fseventsd.
   competing work and rerun with bounded workers (`--test-threads 4`) before
   you change timeouts or suspect a code defect.
 
+## `CDPATH` redirects a relative `cd`
+
+The dev Mac's shell sets `CDPATH` to the workspace and `~/coding/*` folders, with no
+`.` entry, and the Bash tool inherits it. So `mkdir repo; cd repo` in a scratch folder
+lands in `~/coding/personal/repo` when that exists, and whatever follows runs there:
+on 2026-11-06 a probe's `git init` re-initialized that unrelated repository (harmless,
+but it rewrote `.git/config` and added a sample hook). The tell is `cd` printing a
+path. In a scratch script, use absolute paths, `git -C /abs/path`, or `cd ./repo`,
+which `CDPATH` never rewrites. The shell's aliases differ too: `c`, for one, is an
+alias, so a script that defines helper functions runs under `/bin/bash`.
+
 ## Diagnosing a slow host
 
 - **Compare load average with idle CPU:** `sysctl -n vm.loadavg` and

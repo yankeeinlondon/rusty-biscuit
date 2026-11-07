@@ -695,3 +695,11 @@ touches. Three shapes recur:
   for a helper that already carries Windows branches, use
   `#[cfg_attr(windows, allow(dead_code, reason = "…"))]` instead of deleting
   them.
+
+## Spawning a program from a test
+
+- Windows PowerShell (`powershell`) rejects `--version`, so a generic "does it start" probe
+  reports it missing. Probe with `-NoProfile -NonInteractive -Command "exit 0"`.
+- A test that needs a command with a side effect cannot use `touch`: Darkmatter runs a command
+  without a shell, and the rig has no such program. Copy the `darkmatter-argv-recorder` fixture
+  into the fixture `bin` directory, which also records what ran.

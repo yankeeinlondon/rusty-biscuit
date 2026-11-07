@@ -214,3 +214,22 @@ when changing the oracle.
   Claudine's `collection_host_compat` tests prepare dependency gates against
   fixture-owned specs and execute the initialize event with its host binding
   view, without providers or shells.
+
+## Proving a passive path has no effects
+
+Completion, and anything else that must not evaluate, needs a positive assertion and a
+control as well as the absence: a document that fails to parse also runs nothing, so "no
+sentinel" alone passes for the wrong reason. `cli/tests/l1/path_completion.rs` is the example.
+
+- Use the `darkmatter-argv-recorder` program as the sentinel, approved in the fixture's
+  whitelist. It exists on every platform, and `read_argv_records` shows exactly what ran.
+- Compare the whole fixture workspace before and after, which also catches a cache write.
+- Run the control afterward: composing the same document runs the recorder, and the mock
+  server answers an allowed composition.
+- To count work, `work_counters` is on `darkmatter-cli`'s dev-dependency, so a CLI unit test
+  can read it, and `simplified_schema::resolve::observed::collect` lists the schema files
+  read. The baseline schema costs hundreds of expression parses on a first use, so compare
+  warmed runs instead of asserting zero.
+- Real Tabs live in `cli/tests/level2/level2_path_completion.rs`: `spawn_program` through
+  `env -i` with a fixed `PATH`, so no developer configuration reaches the shell. Assert the
+  whole finished line, since `capture-pane` trims a trailing space, then run it.

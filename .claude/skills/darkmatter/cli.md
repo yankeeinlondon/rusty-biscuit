@@ -73,6 +73,26 @@ by `Feature::mermaid_fallback()` and folded into
 and `embed-mermaid-font`). `--mermaid` itself selects `MermaidMode::Automatic`.
 Convention: the `cli` skill; user docs: `darkmatter/docs/cli/render.md#features`.
 
+## Property paths and setters
+
+`md get`, `md set`, `md rm`, and `md compose` setters name a value with
+`simplified_schema::PropertyPath`, which is the only parser of that grammar
+(`only_property_path_splits_a_path_in_the_commands` and its library twin scan for
+another). User docs: `docs/cli/index.md#property-paths` and `#command-line-values`.
+`md schema validate`'s `key=value` assignments are a separate, older grammar
+(`commands/schema/assignment.rs`), not `PropertyPath`.
+
+- A malformed path is a `clap` usage error (exit 2) before the document is read;
+  everything else goes through `CommandRun::finish` (exit 1).
+- `compose::setters::classify_token` decides setter or input path, for execution
+  and completion alike. A token whose key misses the setter grammar is a path, so
+  `a..b=1` fails as a second input rather than as a bad setter.
+- Values: `SetterValue::parse`, then `bind` through
+  `schemas::completion::declared_shape`. `md set` and setters share both.
+- Setters stay a raw ordered plan (`ComposeOptions::with_setters`, `SetterPlan`),
+  bound per document by `apply_setter_plan` right after schemas are prepared, so
+  they reach transcluded children and a child's own schema reads them.
+
 ## Shell completion of property paths
 
 `COMPLETE=<shell> md -- <words>` is the entry point; `CompleteEnv` answers and

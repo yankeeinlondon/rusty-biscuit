@@ -408,9 +408,9 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | [`md clean`](./clean.md#version-1-json-envelope) | [`clean.yaml`](../../cli/schemas/output/clean.yaml) | the version-1 object: `version`, `source`, `frontmatter`, `diagnostics`, `applied`, `changed`, `warnings`; see below for its run-level records |
 | [`md toc`](./toc.md) | [`toc.yaml`](../../cli/schemas/output/toc.yaml) | `title`, the hashes, `preamble`, `structure` (the heading tree), `code_blocks`, `internal_links`, `slug_index` |
 | [`md delta`](./delta.md) | [`delta.yaml`](../../cli/schemas/output/delta.yaml) | `classification`, `statistics`, the frontmatter and preamble flags, `added`, `removed`, `modified`, `moved`, `code_block_changes`, `broken_links` |
-| [`md get`](./get.md) | [`get.yaml`](../../cli/schemas/output/get.yaml) | one property's value, or an object of the requested keys; a missing key is `""` |
-| [`md set`](./set.md) | [`set.yaml`](../../cli/schemas/output/set.yaml) | `file`, `property`, `value`, `document`, `saved`, plus outcome |
-| [`md rm`](./rm.md) | [`rm.yaml`](../../cli/schemas/output/rm.yaml) | `removed`, `remaining`, `filename` |
+| [`md get`](./get.md) | [`get.yaml`](../../cli/schemas/output/get.yaml) | one path's value, or a flat object keyed by the [paths](./index.md#property-paths) as written; a missing path is `""` |
+| [`md set`](./set.md) | [`set.yaml`](../../cli/schemas/output/set.yaml) | `file`, `property` (the path as written), `value`, `document`, `saved`, plus outcome |
+| [`md rm`](./rm.md) | [`rm.yaml`](../../cli/schemas/output/rm.yaml) | `removed` (the paths as written), `remaining` (surviving top-level keys), `filename` |
 | [`md edit`](./edit.md) | [`edit.yaml`](../../cli/schemas/output/edit.yaml) | `file`, `editor`, `created`, plus outcome |
 | [`md hash`](./hash.md) | [`hash.yaml`](../../cli/schemas/output/hash.yaml) | `mode`, `file`, `kind`, `computed`, `stored`, `comparison`, `saved`, plus outcome |
 | [`md graph`](./graph.md) | [`graph.yaml`](../../cli/schemas/output/graph.yaml) | `file`, `source`, `references`, `transclusions`, and with `--validate`, `validation` |
@@ -420,6 +420,8 @@ outcome, depending on whether its shape was published before `outcome` existed:
 | [`md schema detect`](./schema.md#md-schema-detect) | [`schema-detect.yaml`](../../cli/schemas/output/schema-detect.yaml) | the inferred schema; for several files without `--merge`, `{ "files": [{ "file", "schema" }] }` |
 | [`md schema triggers`](./schema.md#md-schema-triggers) | [`schema-triggers.yaml`](../../cli/schemas/output/schema-triggers.yaml) | `file`, `roots`, `shadowed`, `skipped`, `triggers`, plus outcome |
 | [`md schema about`](./schema.md#md-schema-about) | [`schema-about.yaml`](../../cli/schemas/output/schema-about.yaml) | `sections`, the whole catalog at any verbosity, plus outcome |
+
+A malformed [property path](./index.md#property-paths) given to `md get`, `md set`, or `md rm` is a usage error: exit status 2, nothing read, and no value printed. A path that is well formed but cannot be edited, or a value the schema refuses, is a failure with exit status 1 and a diagnostic.
 
 Three of these have details a script should know:
 

@@ -1,6 +1,6 @@
 ## Overview
 
-The `get` command extracts frontmatter properties from a markdown document.
+The `get` command extracts frontmatter values from a markdown document, naming each with a [property path](./index.md#property-paths).
 
 It is intended for metadata-oriented workflows in scripts and pipelines.
 
@@ -14,6 +14,14 @@ md get doc.md title
 
 # Multiple properties
 md get doc.md title author tags
+
+# A nested value, an array element, a key with a dot in its name
+md get doc.md style.page.max-width
+md get doc.md items.1.name
+md get doc.md 'a\.b'
+
+# Several paths give a flat object, keyed as you wrote them
+md get doc.md author.name title
 
 # Read from stdin
 cat doc.md | md get - title
@@ -33,7 +41,7 @@ md get doc.md tags --compact
 ### Arguments
 
 - `<INPUT>`: Markdown file path (supports `@` file references) or `-` for stdin.
-- `<PROP>...`: One or more frontmatter property names (required).
+- `<PROP>...`: One or more [property paths](./index.md#property-paths) (required). A malformed path such as `a..b` is a usage error with exit status 2, before the document is read.
 
 ### Options
 
@@ -46,12 +54,21 @@ md get doc.md tags --compact
 **Single property request**
 
 - Returns the raw property value.
-- Missing property returns an empty string.
+- A missing path returns an empty string. That includes a path that cannot be followed: an index out of range, or a path through text or `null`.
+- An explicit `null` stays `null` in data outputs.
 
 **Multiple property request**
 
-- Returns an object/map containing requested keys.
-- Missing keys are included with empty-string values.
+- Returns a flat object with one entry per argument, keyed as you wrote it. It is not rebuilt into a nested object.
+- Missing paths are included with empty-string values.
+
+```text
+$ md get doc.md author.name title
+{
+  "author.name": "Alice",
+  "title": "Notes"
+}
+```
 
 **Default output**
 
@@ -103,8 +120,8 @@ formatted output writes the error to stderr. See
 
 ### Property Lookup Scope
 
-- `get` looks up top-level frontmatter keys by exact key name.
-- It does not evaluate dotted paths or expressions.
+- `get` reads the frontmatter as written, with no schema. It evaluates no expression, so `{{ title }}` comes back as that text.
+- `.` always separates keys. `md get doc.md a.b` reads `b` inside `a`, even when the document has a top-level key named `a.b`; write `md get doc.md 'a\.b'` for that key. See [Property Paths](./index.md#property-paths).
 
 ## Lessons Learned
 
@@ -115,6 +132,16 @@ formatted output writes the error to stderr. See
 ## Issues
 
 - Missing and intentionally-empty string values are indistinguishable in CLI output.
+
+## Migrating older calls
+
+| If you relied on | Now |
+|---|---|
+| `md get doc.md a.b` reading a top-level key whose name holds a dot | `md get doc.md 'a\.b'`; `a.b` reads `b` inside `a` |
+| a key name holding `\\` or `\.` | write each backslash as `\\`: the key `x\.y` is `'x\\\.y'` |
+| `md get doc.md a..b` printing `""` | it is now a usage error, because a key cannot be empty in a longer path |
+
+An ordinary call such as `md get doc.md title` is unchanged.
 
 ## Removed spellings
 
