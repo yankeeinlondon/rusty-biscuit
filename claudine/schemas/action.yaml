@@ -386,6 +386,9 @@ types:
         link:
             - link-short@darkmatter:lifecycle
             - link-long@darkmatter:lifecycle
+        load_data:
+            - load_data-short@darkmatter:lifecycle
+            - load_data-long@darkmatter:lifecycle
         lower:
             - lower-short@darkmatter:lifecycle
             - lower-long@darkmatter:lifecycle
@@ -611,6 +614,7 @@ types:
         last: last-short@darkmatter:lifecycle
         length: length-short@darkmatter:lifecycle
         link: link-short@darkmatter:lifecycle
+        load_data: load_data-short@darkmatter:lifecycle
         lower: lower-short@darkmatter:lifecycle
         markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
         markdown_title: markdown_title-short@darkmatter:lifecycle
@@ -763,6 +767,7 @@ types:
         last: last-short@darkmatter:lifecycle
         length: length-short@darkmatter:lifecycle
         link: link-short@darkmatter:lifecycle
+        load_data: load_data-short@darkmatter:lifecycle
         lower: lower-short@darkmatter:lifecycle
         markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
         markdown_title: markdown_title-short@darkmatter:lifecycle
@@ -919,6 +924,7 @@ types:
         last: last-short@darkmatter:lifecycle
         length: length-short@darkmatter:lifecycle
         link: link-short@darkmatter:lifecycle
+        load_data: load_data-short@darkmatter:lifecycle
         lower: lower-short@darkmatter:lifecycle
         markdown_body_empty: markdown_body_empty-short@darkmatter:lifecycle
         markdown_title: markdown_title-short@darkmatter:lifecycle

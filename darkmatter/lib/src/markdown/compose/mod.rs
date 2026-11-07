@@ -164,6 +164,7 @@ pub use remote::{
     resolve_remote_concurrency,
 };
 pub use remote_fetch::RemoteFetchStats;
+pub use expression::data::{DataRuntime, DataRuntimeStats};
 pub use frontmatter_shell_expansion::{
     FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellAction, FrontmatterShellBody,
     FrontmatterShellPipeline, FrontmatterShellSuffix, FrontmatterShellTernary,
@@ -274,11 +275,21 @@ impl Markdown {
     /// returns, with the failed documents' warnings, the outer document's
     /// first. A child that had already succeeded reported into its parent, so
     /// its warnings appear there.
+    ///
+    /// The report or failure carries the read set of the request's data
+    /// runtime: the command's whole read set when the caller attached one
+    /// ([`ComposeOptions::with_shared_data_runtime`]), otherwise this
+    /// composition's own.
     pub fn compose_with_warnings(&self, request: &ComposeRequest) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
         let mut result = self.clone();
-        match result.run_root_pipeline_collecting(request.clone(), None) {
+        let mut request = request.clone();
+        let data_runtime = request.data_runtime();
+        request.data_runtime = Some(data_runtime.clone());
+        match result.run_root_pipeline_collecting(request, None) {
             (Ok(report), _) => Ok((result, report)),
-            (Err(error), warnings) => Err(Box::new(ComposeFailure { error, warnings })),
+            (Err(error), warnings) => {
+                Err(Box::new(ComposeFailure { error, warnings, read_set: data_runtime.read_set() }))
+            }
         }
     }
 

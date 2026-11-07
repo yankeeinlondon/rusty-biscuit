@@ -1091,3 +1091,17 @@ fn mixed_expression_condition_with_command_branches_parses() {
     assert!(matches!(then_b, Branch::Pipeline { .. }));
     assert!(matches!(else_b, Branch::Pipeline { .. }));
 }
+
+#[test]
+fn mask_interpolations_ends_each_expression_where_the_scanner_does() {
+    assert_eq!(mask_interpolations(r#"$(cmd {{ f("}}") }})"#), "$(cmd __DM_INTERP_0__)");
+    // Prose apostrophes keep the first-`}}` spans.
+    assert_eq!(
+        mask_interpolations("{{ don't }} it's fine {{ x }} and more }}"),
+        "__DM_INTERP_0__ it's fine __DM_INTERP_1__ and more }}"
+    );
+    // Literals and escaped openers end at the first `}}`, as before.
+    assert_eq!(mask_interpolations("a {{{ x }}} b"), "a __DM_INTERP_0__} b");
+    assert_eq!(mask_interpolations(r#"\{{ "}}" }}"#), r#"\__DM_INTERP_0__" }}"#);
+    assert_eq!(mask_interpolations("echo {{ open"), "echo {{ open");
+}

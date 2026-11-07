@@ -1186,7 +1186,13 @@ fn prepare_content(
     let mut result = md.clone();
     let report = match result.run_root_pipeline_collecting(inline_pre_options, None) {
         (Ok(report), _) => report,
-        (Err(error), warnings) => return Err(Box::new(crate::markdown::compose::ComposeFailure { error, warnings })),
+        (Err(error), warnings) => {
+            return Err(Box::new(crate::markdown::compose::ComposeFailure {
+                error,
+                warnings,
+                read_set: options.compose.read_set(),
+            }));
+        }
     };
     Ok(PreparedReferenceContent {
         content: result.content().to_string(),

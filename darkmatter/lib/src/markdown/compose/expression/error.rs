@@ -418,6 +418,13 @@ pub enum ExpressionError {
     #[error("malformed literal token: {0}")]
     MalformedLiteralToken(crate::markdown::literal_token::TokenError),
 
+    /// A `load_data` failure other than a file-reference one: the contract,
+    /// the format, the document's syntax, or the data's fit to the contract.
+    /// Authoring-fatal on every surface; shared through an `Arc` because the
+    /// request memo hands one failure to every call site that reaches it.
+    #[error("{0}")]
+    Data(Arc<super::data::DataError>),
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -516,6 +523,9 @@ impl ExpressionError {
     /// - [`CallCheck`] — a call the design-time check proves wrong rejects the
     ///   document before evaluation, so no lenient surface may keep it.
     ///
+    /// - [`Data`] — a `load_data` contract, format, syntax, or contract-fit
+    ///   failure. No partial value may stand in for data that did not load.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -535,6 +545,7 @@ impl ExpressionError {
     /// [`Binding`]: ExpressionError::Binding
     /// [`Call`]: ExpressionError::Call
     /// [`CallCheck`]: ExpressionError::CallCheck
+    /// [`Data`]: ExpressionError::Data
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -552,6 +563,7 @@ impl ExpressionError {
             ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::Binding(_) => true,
             ExpressionError::CallCheck(_) => true,
+            ExpressionError::Data(_) => true,
             // A broken return contract is a Darkmatter defect; a call that
             // does not bind keeps the old arity/arg-type severity.
             ExpressionError::Call(error) => {

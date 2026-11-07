@@ -165,7 +165,7 @@ impl EvaluationLookup for Lookup {
 const FIXTURE: &str = "---\ntitle: Fixture Title\n---\n# Fixture Title\n\nBody.\n";
 const NUMBERED: &str = "---\ntitle: Numbered\n---\n# Numbered\n\nBody.\n";
 
-/// A private fixture tree: `fixture.md`, a file named `2026` (so a number
+/// A private fixture tree: `fixture.md`, `fixture.yaml`, a file named `2026` (so a number
 /// converted to text names a real file), an index family, `sub/note.md`, an
 /// empty home, and an empty Git repository with no remote, so nothing
 /// discovers a repository above it.
@@ -183,6 +183,7 @@ fn fixture() -> (TempDir, Lookup) {
     write("review-1.md", "# Review\n");
     write("review-2.md", "# Review\n");
     write("sub/note.md", "# Note\n");
+    write("fixture.yaml", "- macOS\n- Linux\n- Windows\n");
     std::fs::create_dir_all(root.join("home")).expect("home");
     let lookup = lookup_at(&root);
     (dir, lookup)
@@ -523,6 +524,10 @@ registry_rows! {
         ok(r#"try_frontmatter("fixture.md")"#, json!({"ok": true, "value": {"title": "Fixture Title"}, "error": null})),
         rejects_type("try_frontmatter([])"),
         converts(ok("try_frontmatter(2026)", json!({"ok": true, "value": {"title": "Numbered"}, "error": null}))));
+    // `2026` converts to text naming the extensionless file `2026`; the
+    // handler resolves it and fails on its format, proving the conversion.
+    load_data => row(ok(r#"load_data("fixture.yaml", "string[]")"#, json!(["macOS", "Linux", "Windows"])),
+        rejects_type(r#"load_data([], "string[]")"#), converts(domain(r#"load_data(2026, "string[]")"#)));
     markdown_body_empty => row(ok(r#"markdown_body_empty("fixture.md")"#, json!(false)),
         rejects_type("markdown_body_empty([])"), converts(ok("markdown_body_empty(2026)", json!(false))));
     markdown_title => row(ok(r#"markdown_title("fixture.md")"#, json!("Fixture Title")),
@@ -618,6 +623,7 @@ fn no_handler_local_coercion_helpers_remain() {
         ("cicd.rs", include_str!("../../src/markdown/compose/expression/functions/cicd.rs")),
         ("collections.rs", include_str!("../../src/markdown/compose/expression/functions/collections.rs")),
         ("composition.rs", include_str!("../../src/markdown/compose/expression/functions/composition.rs")),
+        ("data.rs", include_str!("../../src/markdown/compose/expression/functions/data.rs")),
         ("dates.rs", include_str!("../../src/markdown/compose/expression/functions/dates.rs")),
         ("escape.rs", include_str!("../../src/markdown/compose/expression/functions/escape.rs")),
         ("fs.rs", include_str!("../../src/markdown/compose/expression/functions/fs.rs")),

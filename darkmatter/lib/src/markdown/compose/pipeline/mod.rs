@@ -70,6 +70,10 @@ impl Markdown {
         // store a compose run uses (R18).
         let remote_fetch = options.remote_fetch_runtime();
         options.remote_fetch = Some(remote_fetch.clone());
+        // The same reuse rule for the data memo and read set: a caller's
+        // runtime spans its whole command; otherwise this root run owns one.
+        let data_runtime = options.data_runtime();
+        options.data_runtime = Some(data_runtime.clone());
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
@@ -146,6 +150,7 @@ impl Markdown {
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
         report.add_warnings(glob_warnings.take_warnings());
+        report.read_set = data_runtime.read_set();
         (Ok(report), Vec::new())
     }
 

@@ -174,7 +174,7 @@ fn the_generated_verbs_are_value_accepting_catalog_functions_and_side_effects_bu
         projection.verbs.iter().map(|(origin, verb)| (*origin, verb.name.as_str())).collect();
 
     assert_eq!(actual, expected);
-    assert_eq!(actual.len(), 129);
+    assert_eq!(actual.len(), 130);
     let recorded: Vec<(&str, VerbOrigin)> =
         projection.collisions.iter().map(|collision| (collision.verb, collision.catalog)).collect();
     assert_eq!(recorded, [("set", VerbOrigin::SideEffect), ("max", VerbOrigin::ExpressionFunction)]);

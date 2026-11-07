@@ -3697,6 +3697,24 @@
         }
       },
       {
+        "label": "load_data(file, as)",
+        "kind": 3,
+        "detail": "load_data(file: file | null, as: type-definition(container)) -> unknown | null | error",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "load_data"
+        }
+      },
+      {
         "label": "markdown_body_empty(file)",
         "kind": 3,
         "detail": "markdown_body_empty(file: file | null) -> boolean | error",

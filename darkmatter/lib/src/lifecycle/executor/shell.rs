@@ -169,6 +169,17 @@ pub fn execute_set_shell_values(
     request: &ShellValueRequest<'_>,
     child_environment: Option<&ShellChildEnvironment>,
 ) -> Result<Vec<(String, Value)>, ShellRunError> {
+    execute_set_shell_values_sharing(request, child_environment, None)
+}
+
+/// [`execute_set_shell_values`], reading and invalidating through `data`, the
+/// running command's `load_data` runtime, so the values' expressions report
+/// into its read set and a command they run empties its memo.
+pub(crate) fn execute_set_shell_values_sharing(
+    request: &ShellValueRequest<'_>,
+    child_environment: Option<&ShellChildEnvironment>,
+    data: Option<&crate::markdown::compose::DataRuntime>,
+) -> Result<Vec<(String, Value)>, ShellRunError> {
     let mut approved = ShellPreApprovals::new();
     for value in request.values {
         match value.template() {
@@ -187,6 +198,9 @@ pub fn execute_set_shell_values(
     }
     if let Some(environment) = child_environment {
         options = options.with_shell_child_environment(environment.clone());
+    }
+    if let Some(data) = data {
+        options = options.with_data_runtime(data.clone());
     }
     let compose_request = compose_request(options, request.file_resolution_context.clone())
         .map_err(|source| ShellRunError::Context { source })?;

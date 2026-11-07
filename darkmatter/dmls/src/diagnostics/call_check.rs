@@ -140,6 +140,17 @@ mod tests {
     }
 
     #[test]
+    fn a_scalar_load_data_contract_shows_its_data_code_at_the_as_argument() {
+        let text = "{{ load_data(\"d.yaml\", \"string\") }}\n";
+        let found = diagnostics(text);
+        let errors: Vec<_> = found.iter().filter(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR)).collect();
+        let [error] = errors.as_slice() else { panic!("one error: {found:#?}") };
+        assert_eq!(error.code, Some(NumberOrString::String("dm.data.not_a_container".into())), "{error:#?}");
+        let column = text.find("\"string\"").unwrap() as u32;
+        assert_eq!((error.range.start.line, error.range.start.character), (0, column), "{error:#?}");
+    }
+
+    #[test]
     fn callback_analysis_never_runs_provider_handlers() {
         use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;
         use darkmatter::markdown::compose::expression::function_test_hooks as hooks;

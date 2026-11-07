@@ -789,6 +789,14 @@ types:
                 fallible;
                 example(link("fixture.md", "Fixture") => "[Fixture](/path/to/fixture.md)"; display-only: result includes an absolute destination path, which is not portable);
             ) -> Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through.
+    load_data: |-
+        function(
+            parameters(file: file | null, as: type-definition(container));
+            returns(any | null);
+            category(Filesystem);
+            fallible;
+            example(load_data("fixture.yaml", "string[]") => ["macOS", "Linux", "Windows"]);
+        ) -> Reads a YAML, JSON, JSON Lines, CSV, TSV, TOML, or JSON5 file (chosen by its extension) and returns its data converted to the container type `as` describes, or fails naming where the data breaks that type. CSV and TSV rows become objects keyed by the header, or lists of cells, as `as`'s element type says. Null passes through without reading anything.
     markdown_body_empty: |-
         function(
             parameters(file: file | null);

@@ -661,6 +661,13 @@ pub struct ComposeOptions {
     /// request per URL. `None` means each stage builds its own.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
 
+    // ── Shared `load_data` runtime and read set ───────────────────
+    /// The command-wide data memo and read set, shared by every pass that
+    /// clones these options (reference check, pre-flight, lifecycle,
+    /// composition, nested documents). `None` means each root composition
+    /// builds its own, so separate compositions never share results.
+    pub(crate) data_runtime: Option<crate::markdown::compose::DataRuntime>,
+
     // ── File-reference launch-area anchor (diagnostic only) ────────
     /// The captured launch-area directory a top-level caller (Claudine) was
     /// invoked from.
@@ -1043,6 +1050,7 @@ impl ComposeOptions {
             schema_phase: None,
             preflight_graph: None,
             remote_fetch: None,
+            data_runtime: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
@@ -1833,6 +1841,7 @@ impl ComposeOptions {
         );
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.remote_fetch = self.remote_reads_enabled().then(|| remote_fetch.clone());
+        context.data = self.data_runtime();
         context.ctx_values = self.context_values_for_resolution();
         context.observations = self.context.observations().clone();
         if !self.suppress_shell_probes {
@@ -1881,6 +1890,7 @@ impl ComposeOptions {
             self.source_file_resolution_context_in(request_context),
         );
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
+        context.data = self.data_runtime();
         context.ctx_values = self.context_values_for_resolution();
         context.observations = self.context.observations().clone();
         if !self.suppress_shell_probes {
@@ -2381,6 +2391,57 @@ impl ComposeOptions {
     pub fn with_shared_remote_fetch(mut self) -> Self {
         self.remote_fetch = Some(self.build_remote_fetch_runtime());
         self
+    }
+
+    /// Attaches a fresh `load_data` runtime that every pass cloned from these
+    /// options shares: one memo and one read set for the whole command.
+    ///
+    /// A command that runs several passes (a reference check, pre-flight,
+    /// lifecycle events, then composition) calls this once before building
+    /// its first request, so a file is read once across them and the read set
+    /// lists every pass's reads. A root composition with none attached builds
+    /// its own.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::ComposeOptions;
+    ///
+    /// let options = ComposeOptions::new().with_shared_data_runtime();
+    /// let check = options.clone();
+    /// assert!(check.data_runtime_handle().unwrap().same_instance(options.data_runtime_handle().unwrap()));
+    /// ```
+    #[must_use]
+    pub fn with_shared_data_runtime(mut self) -> Self {
+        self.data_runtime = Some(crate::markdown::compose::DataRuntime::new());
+        self
+    }
+
+    /// Attaches `runtime` as the shared `load_data` runtime, so the caller
+    /// keeps a handle to its read set and counters.
+    #[must_use]
+    pub fn with_data_runtime(mut self, runtime: crate::markdown::compose::DataRuntime) -> Self {
+        self.data_runtime = Some(runtime);
+        self
+    }
+
+    /// The attached `load_data` runtime, if any.
+    pub fn data_runtime_handle(&self) -> Option<&crate::markdown::compose::DataRuntime> {
+        self.data_runtime.as_ref()
+    }
+
+    /// Returns the attached `load_data` runtime, otherwise a fresh one that
+    /// shares nothing.
+    pub(crate) fn data_runtime(&self) -> crate::markdown::compose::DataRuntime {
+        self.data_runtime.clone().unwrap_or_default()
+    }
+
+    /// Empties the attached runtime's memo after a command ran. With none
+    /// attached there is no memo anyone else could read.
+    pub(crate) fn invalidate_data_memo(&self) {
+        if let Some(runtime) = &self.data_runtime {
+            runtime.invalidate_memo();
+        }
     }
 
     /// Returns the shared remote-fetch runtime when one is attached, otherwise
@@ -3087,6 +3148,9 @@ impl ComposeOptions {
             absolute_fallback_warning,
             preflight_graph,
             remote_fetch,
+            // A memo and read-set sink: it changes how often a file is read
+            // and what the report lists, never a composed result.
+            data_runtime: _,
             file_ref_fallback_dir,
         } = self;
 

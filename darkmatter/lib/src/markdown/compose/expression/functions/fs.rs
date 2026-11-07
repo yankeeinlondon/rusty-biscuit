@@ -4,7 +4,7 @@
 use super::*;
 
 /// Constructs an [`ExpressionError::Other`] for `function` with `message`.
-pub(super) fn expression_other(function: &'static str, message: String) -> ExpressionError {
+pub(crate) fn expression_other(function: &'static str, message: String) -> ExpressionError {
     ExpressionError::Other {
         function: function.to_string(),
         message,
@@ -26,13 +26,25 @@ pub(super) fn required_text<'a>(
     })
 }
 
-pub(super) fn file_reference_error(
+pub(crate) fn file_reference_error(
     function: &'static str,
     raw: &str,
     ctx: &ResolutionContext,
     kind: FileRefFailure,
     source: Option<biscuit_file::FileReferenceError>,
 ) -> ExpressionError {
+    ExpressionError::FileReference(file_reference_diagnostic(function, raw, ctx, kind, source))
+}
+
+/// The [`FileReferenceDiagnostic`] [`file_reference_error`] wraps, for a
+/// caller that keeps it inside another typed error.
+pub(crate) fn file_reference_diagnostic(
+    function: &'static str,
+    raw: &str,
+    ctx: &ResolutionContext,
+    kind: FileRefFailure,
+    source: Option<biscuit_file::FileReferenceError>,
+) -> FileReferenceDiagnostic {
     let caller = ctx.active_caller_file_provenance.as_ref().map(|provenance| {
         Arc::new(super::super::CallerFileDiagnosticProvenance {
             property: provenance.property.clone(),
@@ -46,7 +58,7 @@ pub(super) fn file_reference_error(
         .as_ref()
         .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
         .unwrap_or_else(|| (raw.to_string(), ctx.cwd.clone()));
-    ExpressionError::FileReference(FileReferenceDiagnostic {
+    FileReferenceDiagnostic {
         function,
         reference,
         kind,
@@ -54,10 +66,10 @@ pub(super) fn file_reference_error(
         fallback_dir: ctx.file_ref_fallback_dir.clone(),
         source: source.map(Arc::new),
         caller,
-    })
+    }
 }
 
-pub(super) fn resolve_arg(
+pub(crate) fn resolve_arg(
     function: &'static str,
     raw: &str,
     ctx: &ResolutionContext,
@@ -177,6 +189,7 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
         return Ok(Value::Bool(false));
     };
     if file_ref.class().kind == biscuit_file::FileReferenceKind::Url {
+        record_url_read(ctx, &normalized);
         return match ctx.fetch_remote_text(&normalized) {
             Ok(Some(_)) => Ok(Value::Bool(true)),
             Ok(None) => Err(expression_other("file_exists", format!(
@@ -186,9 +199,39 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
             Err(message) => Err(expression_other("file_exists", message)),
         };
     }
-    resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
-        .map(|found| Value::Bool(found.is_some()))
-        .map_err(|e| file_reference_error("file_exists", raw, ctx, FileRefFailure::classify(&e), Some(e)))
+    let found = resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
+        .map_err(|e| file_reference_error("file_exists", raw, ctx, FileRefFailure::classify(&e), Some(e)))?;
+    match &found {
+        Some(path) => ctx.data.record_local(path),
+        None => record_probed_candidates(&file_ref, ctx),
+    }
+    Ok(Value::Bool(found.is_some()))
+}
+
+/// Records the candidates a clean miss probed: an absent file is an
+/// observation too, and creating any of them would change the answer. A
+/// recursive (`%`) reference's candidates are search folders, not files, so
+/// it records nothing.
+fn record_probed_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) {
+    if file_ref.class().recursive {
+        return;
+    }
+    let Ok(candidates) =
+        file_ref.candidate_plan_with_order(&ctx.file_context(), biscuit_file::CandidatePlanOrder::Resolution)
+    else {
+        return;
+    };
+    for candidate in candidates {
+        ctx.data.record_local(candidate.path());
+    }
+}
+
+/// Records a read of the URL `raw` names, before any policy check or fetch;
+/// text that is not a URL records nothing.
+fn record_url_read(ctx: &ResolutionContext, raw: &str) {
+    if let Ok(url) = url::Url::parse(raw) {
+        ctx.data.record_url(&url);
+    }
 }
 
 /// `has_command(cmd: string | null) -> bool` — pure existence/executability
@@ -945,6 +988,7 @@ pub(super) fn load_markdown(
     // HTTP(S) arguments read from the run's remote-fetch cache instead of disk,
     // mirroring how `::file`/`::code` directives resolve remote targets.
     if is_remote_url(raw) {
+        record_url_read(ctx, raw);
         return match ctx
             .fetch_remote_text(raw)
             .map_err(|message| expression_other(fname, message))?
@@ -964,6 +1008,9 @@ pub(super) fn load_markdown(
     let path = resolve_arg(fname, raw, ctx)?.ok_or_else(|| {
         file_reference_error(fname, raw, ctx, FileRefFailure::NotFound, None)
     })?;
+    // Recorded before reading, so a file that resolves but fails to read or
+    // parse is still a dependency.
+    ctx.data.record_local(&path);
     // A reference that resolved but cannot be read (permissions, a race delete)
     // is still a file-reference failure: surface it through the shared
     // diagnostic carrying the typed `Io` cause, not an opaque `Other` string, so

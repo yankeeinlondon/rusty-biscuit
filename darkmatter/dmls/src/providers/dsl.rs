@@ -222,8 +222,7 @@ fn interpolation_completions(
     let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
     // Callback locals extend the enclosing directive scope only at this cursor.
     let candidates = with_site_scope(ctx, Some(token_start), |site| {
-        let prefix = &ctx.text[..offset];
-        let start = prefix.rfind("{{").map_or(token_start, |start| start + 2);
+        let start = expressions::expression_body_start(ctx.text, offset).unwrap_or(token_start);
         let scope = expressions::cursor_scope(&ctx.text[start..offset], offset - start, site);
         expressions::scoped_completion_candidates(partial, &frontmatter_keys, host, &scope)
     });

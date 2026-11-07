@@ -1,0 +1,288 @@
+//! Typed `load_data` failures.
+//!
+//! A [`DataError`] is the cause a data read stores in the request memo, so it
+//! carries only source-independent facts: the resolved identity, the format,
+//! the written contract, the parser's location, and the coercion engine's
+//! structured failure. A call site's own span, document, and iteration path
+//! are attached when the error is projected to a diagnostic, never here, so
+//! one memoized failure can be reported at every call site that reaches it.
+
+use std::sync::Arc;
+
+use biscuit_file::{DataFormat, DelimitedData};
+use simplified_schema::SchemaError;
+use simplified_schema::coercion::ConversionError;
+
+use super::contract::{RowMode, RowShapeConflict};
+use super::runtime::DataSourceIdentity;
+use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, FileReferenceDiagnostic};
+
+/// `as` does not denote a container (R2).
+pub const NOT_A_CONTAINER_CODE: &str = "dm.data.not_a_container";
+/// `as` cannot pick one CSV/TSV row shape (R4).
+pub const ROW_SHAPE_CONFLICT_CODE: &str = "dm.data.row_shape_conflict";
+/// `as` names a type of the writing document (`Name@this`) (R1).
+pub const THIS_IMPORT_REJECTED_CODE: &str = "dm.data.this_import_rejected";
+/// The data file's extension names no supported format (R3).
+pub const UNSUPPORTED_FORMAT_CODE: &str = "dm.data.unsupported_format";
+/// The data does not parse under its format's rules (R3, R4).
+pub const MALFORMED_CODE: &str = "dm.data.malformed";
+/// The parsed data does not satisfy `as` (R5).
+pub const CONTRACT_MISMATCH_CODE: &str = "dm.data.contract_mismatch";
+
+/// Every `dm.data.*` code, each always an error. None is a warning, so none
+/// belongs in the `--deny` registry of governed warnings.
+pub const DATA_DIAGNOSTIC_CODES: &[&str] = &[
+    NOT_A_CONTAINER_CODE,
+    ROW_SHAPE_CONFLICT_CODE,
+    THIS_IMPORT_REJECTED_CODE,
+    UNSUPPORTED_FORMAT_CODE,
+    MALFORMED_CODE,
+    CONTRACT_MISMATCH_CODE,
+];
+
+/// Where a parser located a malformed data document.
+///
+/// Every field is a fact the parser proved; an unknown field is `None`, never
+/// a placeholder. `line` and `column` are 1-based and count characters of the
+/// BOM-stripped text. `byte_offset` is set only for local text that is not
+/// valid UTF-8, where a line is meaningless: it is zero-based into the
+/// file's original bytes (a byte-order mark included), and `line` and
+/// `column` are then absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DataSourceLocation {
+    /// Zero-based offset of the first invalid UTF-8 byte in the local file's
+    /// original bytes.
+    pub byte_offset: Option<usize>,
+    /// RFC 6901 pointer to the value the failure belongs to.
+    pub pointer: Option<String>,
+    /// 1-based line, when the parser reported one.
+    pub line: Option<usize>,
+    /// 1-based character column, when the parser reported one.
+    pub column: Option<usize>,
+}
+
+/// A `load_data` failure, kept typed until diagnostic projection.
+#[derive(Debug, thiserror::Error)]
+pub enum DataError {
+    /// The data file (or a contract import) could not be resolved, read, or
+    /// fetched. Kept in the shared file-reference family so it projects like
+    /// every other read-side function's failure.
+    #[error("{}", ExpressionError::FileReference(.0.clone()))]
+    FileReference(FileReferenceDiagnostic),
+
+    /// The contract does not describe an array, tuple, object, or dictionary.
+    #[error("load_data(): the contract `{written}` does not describe a container (an array, tuple, object, or dictionary)")]
+    NotAContainer {
+        /// The contract as written.
+        written: String,
+    },
+
+    /// A CSV or TSV contract whose arms do not agree on one row shape.
+    #[error("load_data(): the contract `{written}` cannot describe tabular rows: {conflict}")]
+    RowShapeConflict {
+        /// The contract as written.
+        written: String,
+        /// Which arms disagree, or which element is not a row.
+        conflict: RowShapeConflict,
+    },
+
+    /// The contract names a type of the writing document (`Name` or
+    /// `Name@this`), which an inline contract has none of.
+    #[error("load_data(): the contract `{written}` names `{name}` from this document; an inline contract must import named types from a file (`{name}@./types.yaml`)")]
+    ThisImportRejected {
+        /// The contract as written.
+        written: String,
+        /// The local type name it referenced.
+        name: String,
+    },
+
+    /// The data file's extension names no supported format.
+    #[error("load_data(): `{identity}` has no supported data format{}", extension.as_deref().map(|ext| format!(" (`.{ext}`)")).unwrap_or_default())]
+    UnsupportedFormat {
+        /// The resolved data source.
+        identity: DataSourceIdentity,
+        /// The extension found, if any.
+        extension: Option<String>,
+    },
+
+    /// The data document does not parse in its format.
+    #[error("load_data(): `{identity}` is not valid {}: {message}", format_name(*format))]
+    Malformed {
+        /// The resolved data source.
+        identity: DataSourceIdentity,
+        /// The format the document was read as.
+        format: DataFormat,
+        /// The parser's message.
+        message: String,
+        /// Where the parser located the failure.
+        location: DataSourceLocation,
+    },
+
+    /// The data parsed but does not satisfy the contract.
+    #[error("load_data(): `{identity}` does not match `{written}`: {failure}")]
+    ContractMismatch {
+        /// The resolved data source.
+        identity: DataSourceIdentity,
+        /// The format the document was read as.
+        format: DataFormat,
+        /// The contract as written.
+        written: String,
+        /// The coercion engine's structured failure; flatten it with
+        /// `ConversionError::located_failures`, never from display text.
+        failure: ConversionError,
+        /// The BOM-stripped text the value was parsed from, local or fetched,
+        /// for locating pointers.
+        text: Arc<str>,
+        /// For CSV and TSV, the table the rows were built from and how: a
+        /// pointer `/i/<column>` (object rows) or `/i/<n>` (list rows) names
+        /// row `rows[i]`, whose fields carry their raw source offsets. `None`
+        /// for every other format.
+        table: Option<TabularSource>,
+    },
+
+    /// The contract is not a valid SimplifiedSchema type, or names a type its
+    /// import does not export.
+    #[error("load_data(): the contract `{written}` is invalid: {source}")]
+    ContractSchema {
+        /// The contract as written.
+        written: String,
+        /// The schema language's cause.
+        #[source]
+        source: Arc<SchemaError>,
+    },
+}
+
+/// The delimited table a CSV or TSV value was built from, and its row mode.
+#[derive(Debug, Clone)]
+pub struct TabularSource {
+    /// How each row became a value; in list mode the header row is skipped.
+    pub mode: RowMode,
+    /// The header and data rows with their raw field offsets.
+    pub data: Arc<DelimitedData>,
+}
+
+fn format_name(format: DataFormat) -> &'static str {
+    match format {
+        DataFormat::Toml => "TOML",
+        DataFormat::Yaml => "YAML",
+        DataFormat::Json => "JSON",
+        DataFormat::Json5 => "JSON5",
+        DataFormat::Jsonl => "JSON Lines",
+        DataFormat::Csv => "CSV",
+        DataFormat::Tsv => "TSV",
+        DataFormat::Markdown => "Markdown",
+        DataFormat::Pdf => "PDF",
+        DataFormat::Text => "text",
+    }
+}
+
+impl DataError {
+    /// Whether this failure only means "not possible yet": a remote read in a
+    /// context with no remote permission. The request memo never stores one,
+    /// so a later pass that may read the URL still tries.
+    pub fn is_deferral(&self) -> bool {
+        matches!(self, Self::FileReference(diagnostic) if diagnostic.kind == FileRefFailure::RemoteNotEnabled)
+    }
+
+    /// The `dm.data.*` code of this failure; `None` for the file-reference
+    /// family and an invalid contract schema, which stay
+    /// `dm.expression.evaluation_failure`.
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            Self::NotAContainer { .. } => Some(NOT_A_CONTAINER_CODE),
+            Self::RowShapeConflict { .. } => Some(ROW_SHAPE_CONFLICT_CODE),
+            Self::ThisImportRejected { .. } => Some(THIS_IMPORT_REJECTED_CODE),
+            Self::UnsupportedFormat { .. } => Some(UNSUPPORTED_FORMAT_CODE),
+            Self::Malformed { .. } => Some(MALFORMED_CODE),
+            Self::ContractMismatch { .. } => Some(CONTRACT_MISMATCH_CODE),
+            Self::FileReference(_) | Self::ContractSchema { .. } => None,
+        }
+    }
+
+    /// The written contract this failure names, when it is about the contract.
+    pub fn written_contract(&self) -> Option<&str> {
+        match self {
+            Self::NotAContainer { written }
+            | Self::RowShapeConflict { written, .. }
+            | Self::ThisImportRejected { written, .. }
+            | Self::ContractMismatch { written, .. }
+            | Self::ContractSchema { written, .. } => Some(written),
+            Self::FileReference(_) | Self::UnsupportedFormat { .. } | Self::Malformed { .. } => None,
+        }
+    }
+}
+
+impl From<Arc<DataError>> for ExpressionError {
+    /// A file-family failure stays [`ExpressionError::FileReference`], so its
+    /// fatality and projection match `frontmatter()`'s; every other failure
+    /// is [`ExpressionError::Data`].
+    fn from(error: Arc<DataError>) -> Self {
+        match &*error {
+            DataError::FileReference(diagnostic) => ExpressionError::FileReference(diagnostic.clone()),
+            _ => ExpressionError::Data(error),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn remote_not_enabled() -> DataError {
+        DataError::FileReference(FileReferenceDiagnostic {
+            function: "load_data",
+            reference: "https://example.com/a.json".to_string(),
+            kind: FileRefFailure::RemoteNotEnabled,
+            cwd: PathBuf::from("/tmp"),
+            fallback_dir: None,
+            source: None,
+            caller: None,
+        })
+    }
+
+    #[test]
+    fn only_a_remote_not_enabled_read_is_a_deferral() {
+        assert!(remote_not_enabled().is_deferral());
+        assert!(!DataError::NotAContainer { written: "string".into() }.is_deferral());
+        let missing = DataError::FileReference(FileReferenceDiagnostic {
+            kind: FileRefFailure::NotFound,
+            ..match remote_not_enabled() {
+                DataError::FileReference(diagnostic) => diagnostic,
+                _ => unreachable!(),
+            }
+        });
+        assert!(!missing.is_deferral());
+    }
+
+    #[test]
+    fn a_data_error_is_authoring_fatal_and_survives_callback_wrappers() {
+        let error = ExpressionError::from(Arc::new(DataError::NotAContainer { written: "string".into() }));
+        assert!(matches!(error, ExpressionError::Data(_)));
+        assert!(error.is_authoring_fatal());
+        let wrapped = ExpressionError::Callback {
+            function: "map".into(),
+            position: crate::markdown::compose::expression::iteration::IterationPosition::Index(0),
+            source: Box::new(error),
+        };
+        assert!(wrapped.is_authoring_fatal());
+        assert!(matches!(wrapped.without_callbacks(), ExpressionError::Data(_)));
+    }
+
+    #[test]
+    fn a_file_family_failure_converts_to_the_shared_file_reference_variant() {
+        let error = ExpressionError::from(Arc::new(remote_not_enabled()));
+        assert!(matches!(error, ExpressionError::FileReference(ref d) if d.kind == FileRefFailure::RemoteNotEnabled));
+    }
+
+    #[test]
+    fn contract_failures_name_the_written_contract() {
+        let error = DataError::ContractSchema {
+            written: "strng[]".into(),
+            source: Arc::new(SchemaError::Convert { property: "as".into(), message: "unknown type".into() }),
+        };
+        assert_eq!(error.written_contract(), Some("strng[]"));
+        assert!(error.to_string().contains("strng[]"), "{error}");
+    }
+}

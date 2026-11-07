@@ -598,8 +598,11 @@ impl MdShellRunner<'_> {
             options.source(),
             self.request.resolution_context(),
             None,
-        )
-        .map_err(|source| ShellRunError::Value { source })?;
+        );
+        // The command may have written any file, failed or not; every pass of
+        // this command shares the memo it empties.
+        options.invalidate_data_memo();
+        let outcome = outcome.map_err(|source| ShellRunError::Value { source })?;
         self.output.command(raw, &outcome.stdout, &outcome.stderr);
         match outcome.status {
             ShellStatus::Exited(code) => Ok(code),
@@ -687,7 +690,11 @@ impl ShellRunner for MdShellRunner<'_> {
         request: &super::executor::ShellValueRequest<'_>,
     ) -> Result<Vec<(String, Value)>, ShellRunError> {
         self.ensure_permitted()?;
-        super::executor::execute_set_shell_values(request, None)
+        super::executor::execute_set_shell_values_sharing(
+            request,
+            None,
+            self.request.options().data_runtime_handle(),
+        )
     }
 }
 

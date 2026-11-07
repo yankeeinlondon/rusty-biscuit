@@ -34,7 +34,8 @@ use crate::markdown::span::SourceSpan;
 
 /// A call the design-time check proves wrong: argument category 5, a wrong
 /// argument count, or an ambiguous overload. Always an error; composition
-/// rejects the document.
+/// rejects the document. A `load_data` contract the check proves wrong uses
+/// its `dm.data.*` code instead ([`CallCheck::data_problem`]).
 pub const INCOMPATIBLE_CALL_CODE: &str = "dm.expression.incompatible_call";
 
 /// A call argument that might not bind: category 3, and under
@@ -202,7 +203,8 @@ pub fn one_based_position(text: &str, offset: usize) -> Option<(usize, usize)> {
 
 impl CallCheck {
     /// The shown findings of this call as diagnostics: each category the
-    /// [`call_severity`] ladder shows under `strict`, then the always-false
+    /// [`call_severity`] ladder shows under `strict` (a data problem's finding
+    /// under its own `dm.data.*` code), then the always-false
     /// warning ([`ALWAYS_FALSE_CALL_CODE`]) under either setting.
     pub fn diagnostics(&self, strict: bool) -> Vec<ExpressionDiagnostic> {
         let mut found: Vec<_> = self
@@ -210,8 +212,11 @@ impl CallCheck {
             .into_iter()
             .filter_map(|finding| {
                 let severity = call_severity(finding.category, strict)?;
+                let data = self.data_problem.as_ref().filter(|problem| finding.argument == Some(problem.argument));
                 let code = if matches!(self.problem, Some(super::call_check::CallProblem::InvalidCallback { .. })) {
                     simplified_schema::expression::parser::INVALID_CALLBACK_CODE
+                } else if let Some(problem) = data {
+                    problem.code
                 } else if finding.category == ArgumentCategory::Incompatible {
                     INCOMPATIBLE_CALL_CODE
                 } else {

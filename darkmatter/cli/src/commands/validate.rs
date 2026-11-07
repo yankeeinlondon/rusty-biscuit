@@ -38,7 +38,9 @@ pub(crate) fn run_validate(target: ValidateTarget, cli: &Cli, request: &MdReques
         let opened = open_argument(&input, request)?;
         let md = Markdown::try_from(opened.path()).wrap_err_with(|| format!("Failed to load {}", input.display()))?;
         let context = opened.document_context(request)?;
-        let validation_request = ComposeRequest::with_context(ComposeOptions::for_document(request.launch_dir(), &md), context)
+        // Every document the graph prepares shares one data memo and read set.
+        let options = ComposeOptions::for_document(request.launch_dir(), &md).with_shared_data_runtime();
+        let validation_request = ComposeRequest::with_context(options, context)
             .wrap_err("Failed to prepare the validation request")?;
         Ok::<_, color_eyre::Report>((opened, md, validation_request))
     })();

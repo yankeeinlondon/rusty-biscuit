@@ -21,6 +21,7 @@ use darkmatter::markdown::compose::expression::{
     parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
 use darkmatter::markdown::schemas::catalog::GlobalCatalog;
+use simplified_schema::expression::scan::expression_region_at;
 use simplified_schema::simplified::serialize_property_atom;
 use simplified_schema::{PropertyDef, TypeExpr};
 use simplified_schema::{DecodedScalar, decode_scalar};
@@ -567,14 +568,17 @@ pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> 
 /// document offset where it begins. `None` when the cursor is not inside an
 /// interpolation.
 pub fn completion_partial(text: &str, offset: usize) -> Option<(usize, &str)> {
-    let before = &text[..offset];
-    let open = before.rfind("{{")?;
-    // A `}}` between the last `{{` and the cursor closes the region.
-    if before[open..].contains("}}") {
-        return None;
-    }
-    let token_start = identifier_prefix_start(before).max(open + 2);
+    let body_start = expression_body_start(text, offset)?;
+    let token_start = identifier_prefix_start(&text[..offset]).max(body_start);
     Some((token_start, &text[token_start..offset]))
+}
+
+/// The offset just past the `{{` of the complete or still-open expression
+/// holding `offset`, under the shared scanner's string, brace, literal, and
+/// escape rules, so a `}}` or `{{` inside a quoted string neither closes nor
+/// opens a region. `None` outside every expression.
+pub fn expression_body_start(text: &str, offset: usize) -> Option<usize> {
+    expression_region_at(text, offset, &[]).map(|region| region.start + 2)
 }
 
 /// All context-variable descriptors, in catalog display order.
@@ -1945,6 +1949,55 @@ mod tests {
         assert_eq!(&text[start..], "ctx.to");
         // Closed region offers nothing.
         assert!(completion_partial("value {{ x }} after", 19).is_none());
+    }
+
+    #[test]
+    fn completion_partial_follows_a_nested_type_string_in_an_open_interpolation() {
+        let text = r#"value {{ load_data(f, "{a: {b: string}}") "#;
+        let (start, partial) = completion_partial(text, text.len()).unwrap();
+        assert_eq!((start, partial), (text.len(), ""));
+
+        let typed = format!("{text}|| fm.ti");
+        let (start, partial) = completion_partial(&typed, typed.len()).unwrap();
+        assert_eq!(partial, "fm.ti");
+        assert_eq!(&typed[start..], "fm.ti");
+    }
+
+    #[test]
+    fn completion_partial_ignores_a_closer_inside_a_string() {
+        let text = r#"{{ f("}}") + x"#;
+        let (_, partial) = completion_partial(text, text.len()).unwrap();
+        assert_eq!(partial, "x");
+        // The real closer after the string still closes the region.
+        let closed = r#"{{ f("}}") }} after"#;
+        assert!(completion_partial(closed, closed.len()).is_none());
+    }
+
+    #[test]
+    fn completion_partial_keeps_prose_apostrophes_out_of_later_regions() {
+        let text = "{{ don't }} it's fine {{ x }} and more }} {{ ctx.to";
+        let (start, partial) = completion_partial(text, text.len()).unwrap();
+        assert_eq!(partial, "ctx.to");
+        assert_eq!(start, text.rfind("ctx").unwrap());
+        // Between the second expression and the next opener is prose.
+        let prose = text.find("and more").unwrap();
+        assert!(completion_partial(text, prose).is_none());
+    }
+
+    #[test]
+    fn completion_partial_declines_literals_and_escaped_openers() {
+        let literal = "{{{ ctx.to }}}";
+        assert!(completion_partial(literal, literal.find("to").unwrap()).is_none());
+        let escaped = r"\{{ ctx.to";
+        assert!(completion_partial(escaped, escaped.len()).is_none());
+        let unescaped = r"\\{{ ctx.to";
+        assert_eq!(completion_partial(unescaped, unescaped.len()).unwrap().1, "ctx.to");
+    }
+
+    #[test]
+    fn expression_body_start_skips_a_quoted_opener() {
+        let text = r#"{{ f("{{") + x"#;
+        assert_eq!(expression_body_start(text, text.len()), Some(2));
     }
 
     #[test]

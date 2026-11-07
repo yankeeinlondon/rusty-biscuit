@@ -1065,7 +1065,7 @@ fn expression_candidates(
     crate::providers::dsl::with_site_scope(ctx, None, |site| {
         let prefix = &ctx.text[..offset];
         let line_start = prefix.rfind('\n').map_or(0, |at| at + 1);
-        let start = prefix.rfind("{{").filter(|at| *at >= line_start).map(|at| at + 2)
+        let start = expressions::expression_body_start(ctx.text, offset).filter(|at| *at >= line_start + 2)
             .or_else(|| prefix[line_start..].find(':').map(|at| line_start + at + 1))
             .unwrap_or(token_start);
         let expression = ctx.text[start..offset].trim_start();

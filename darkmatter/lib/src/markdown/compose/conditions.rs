@@ -357,7 +357,28 @@ pub fn evaluate_condition_against(
     data: &Value,
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<bool, ConditionError> {
-    let work_dir = context.cwd();
+    // A standalone context owns its own data runtime, so a read here joins
+    // no composition's read set.
+    evaluate_condition_in(expr, data, &ResolutionContext::new(context.clone()))
+}
+
+/// [`evaluate_condition_against`] in an expression context the caller
+/// already owns.
+///
+/// A caller inside a composition passes the context its request built, so a
+/// read-side call in the condition (`file_exists`, `frontmatter`, …) reports
+/// into the command's read set and shares its data memo. The context's
+/// remote runtime, if any, also serves URL arguments.
+///
+/// ## Errors
+///
+/// As [`evaluate_condition_against`].
+pub fn evaluate_condition_in(
+    expr: &str,
+    data: &Value,
+    resolution: &ResolutionContext,
+) -> Result<bool, ConditionError> {
+    let work_dir = resolution.cwd.as_path();
     trace!(expr = %expr, "conditions: evaluating against plain data");
 
     // Shortcut API uses a synthetic source context since it's typically
@@ -377,7 +398,7 @@ pub fn evaluate_condition_against(
         authored: None,
     })?;
 
-    let lookup = ShortcutLookup::new(data, context);
+    let lookup = ShortcutLookup::in_context(data, resolution);
     let value = evaluate(&parsed, &lookup).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
@@ -406,6 +427,9 @@ pub(crate) struct ShortcutLookup<'a> {
 }
 
 impl<'a> ShortcutLookup<'a> {
+    /// A lookup with its own standalone context, as
+    /// [`evaluate_condition_against`] builds.
+    #[cfg(test)]
     pub(crate) fn new(data: &'a Value, context: &'a biscuit_file::FileResolutionContext) -> Self {
         Self {
             data,
@@ -433,6 +457,17 @@ impl<'a> ShortcutLookup<'a> {
         }
 
         Some(current)
+    }
+
+    /// A lookup reading `data` whose read-side functions resolve through
+    /// `resolution`, sharing its data runtime and remote runtime.
+    pub(crate) fn in_context(data: &'a Value, resolution: &'a ResolutionContext) -> Self {
+        let context = &resolution.file_resolution_context;
+        Self {
+            data,
+            ctx: CtxLookup::new(context.cwd(), context.env()),
+            resolution_context: resolution.clone(),
+        }
     }
 
     #[cfg(test)]

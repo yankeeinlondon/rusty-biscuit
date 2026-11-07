@@ -682,6 +682,10 @@ types:
         - "{file: file(deferred) | null,no_error: boolean(required)}(min-keys(2);operands(link-long))"
         - "{target: file(deferred) | null,desc: string(deferred) | null}(min-keys(2);operands(link-long))"
         - "{target: file(deferred) | null,desc: string(deferred) | null,no_error: boolean(required)}(min-keys(3);operands(link-long))"
+    load_data-short: "tuple([file(deferred) | null, type-definition(container;deferred)]; operands(load_data-short))"
+    load_data-long:
+        - "{file: file(deferred) | null,as: type-definition(container;deferred;required)}(min-keys(2);operands(load_data-long))"
+        - "{file: file(deferred) | null,as: type-definition(container;deferred;required),no_error: boolean(required)}(min-keys(3);operands(load_data-long))"
     lower-short:
         - "string(deferred;operands(lower-short))"
         - "tuple([string(deferred) | null]; operands(lower-short))"
@@ -1232,6 +1236,9 @@ types:
         link:
             - link-short
             - link-long
+        load_data:
+            - load_data-short
+            - load_data-long
         lower:
             - lower-short
             - lower-long
@@ -1459,6 +1466,7 @@ types:
         last: last-short
         length: length-short
         link: link-short
+        load_data: load_data-short
         lower: lower-short
         markdown_body_empty: markdown_body_empty-short
         markdown_title: markdown_title-short
@@ -1613,6 +1621,7 @@ types:
         last: last-short
         length: length-short
         link: link-short
+        load_data: load_data-short
         lower: lower-short
         markdown_body_empty: markdown_body_empty-short
         markdown_title: markdown_title-short

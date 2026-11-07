@@ -405,6 +405,7 @@ fn every_executable_example_evaluates_to_its_declared_result() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("fixture.md"), "---\ntitle: Fixture Title\n---\n# Fixture\n\nBody\n").unwrap();
     std::fs::write(dir.path().join("note.md"), "plain\n").unwrap();
+    std::fs::write(dir.path().join("fixture.yaml"), "- macOS\n- Linux\n- Windows\n").unwrap();
     std::fs::write(dir.path().join("review-1.md"), "").unwrap();
     std::fs::write(dir.path().join("review-2.md"), "").unwrap();
     std::fs::create_dir(dir.path().join("sub")).unwrap();

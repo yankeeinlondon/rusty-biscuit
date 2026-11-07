@@ -27,7 +27,7 @@ pub mod registry;
 mod select;
 mod semantic;
 
-pub(crate) use load::locating_problem;
+pub(crate) use load::{load_yaml_document, locating_problem, pointer_string};
 pub use registry::{Claim, DefinitionSource, Incomplete, KindDefinition, KindRegistry, RegistryScope};
 
 /// The route a validated YAML document took.

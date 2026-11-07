@@ -86,6 +86,7 @@ use super::{LifecycleConfig, LifecycleSignal};
 mod host;
 mod outcome;
 mod shell;
+pub(crate) use shell::execute_set_shell_values_sharing;
 
 pub use host::{LifecycleHost, LifecycleRunFailure, PrepError, PrepRequest};
 pub use outcome::{ActionLocation, LifecycleEventOutcome, StackControl};

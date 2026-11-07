@@ -43,6 +43,22 @@ behavior.
   example must be added to its `EXAMPLE_FILES` table. The function registry
   panics at load when a cataloged function has no runtime binding, so every
   catalog entry needs a `FunctionBinding` in the same change.
+- A new catalog function also reaches these hand-kept or generated copies,
+  and each fails a test until updated: `just regen-expr-doc` (the function
+  table in `docs/topics/darkmatter-expressions.md`), `just
+  regen-lifecycle-schema` (verb types in `schemas/partials/lifecycle.yaml`,
+  plus the verb count in `lifecycle_schema_generation.rs`), the two verb
+  pattern lists in `schemas/partials/md-lifecycle.yaml`, Claudine's mirrored
+  `expression` category in `claudine/schemas/{action,lifecycle}.yaml`, a row
+  in `tests/l1/function_binding_registry.rs`, an alias row in
+  `function_catalog_parity.rs`, the recursive-schema goldens
+  (`DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`), and DMLS's
+  `a3_completions.json` (`DMLS_UPDATE_GOLDEN=1`).
+- A binding whose failed argument binding means a domain error registers
+  `FunctionBinding::refining_binding_errors` (`load_data`: a scalar `as`
+  is `dm.data.not_a_container`, not a type error); a passive per-function
+  verdict a literal call can prove belongs on `CallCheck::data_problem`, so
+  composition and DMLS publish its code from `CallCheck::diagnostics`.
 - Consumers read `expression_function_catalog()` (categories in list order,
   descriptors in documentation order: category, then canonical name, then
   authored overload) or `function_descriptors(name)`, which resolves aliases

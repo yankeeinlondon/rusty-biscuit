@@ -56,6 +56,9 @@ pub struct ResolutionContext {
     /// Run-local remote-fetch runtime for URL-typed arguments. `None` disables
     /// remote reads in expression functions.
     pub(crate) remote_fetch: Option<RemoteFetchRuntime>,
+    /// The command's `load_data` memo and read-set sink. A standalone context
+    /// owns an isolated one; the compose builders share the request's.
+    pub(crate) data: super::data::DataRuntime,
     /// Run-local memoization and single-flight slots for normalized provider calls.
     pub(crate) provider_queries: Arc<Mutex<HashMap<String, ProviderQuerySlot>>>,
     /// Captured context values (e.g. `ctx.agent`) available to read-side
@@ -125,6 +128,7 @@ impl ResolutionContext {
             package_area: context.package_area().map(Path::to_path_buf),
             file_ref_fallback_dir: None,
             remote_fetch: None,
+            data: Default::default(),
             provider_queries: Arc::new(Mutex::new(HashMap::new())),
             ctx_values: Map::new(),
             observations: Default::default(),

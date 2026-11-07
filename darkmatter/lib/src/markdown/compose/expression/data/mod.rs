@@ -1,0 +1,28 @@
+//! `load_data` support: contracts, typed failures, and the request runtime.
+//!
+//! - [`contract`] resolves an `as` contract in a document's context and
+//!   chooses a CSV/TSV row mode from it.
+//! - [`error`] holds [`DataError`], the typed failure kept until diagnostic
+//!   projection.
+//! - [`parse`] decodes and parses one data document in its format.
+//! - [`load`] is the `load_data` function: resolve, read through the memo,
+//!   parse, and bind to the contract.
+//! - [`runtime`] holds [`DataRuntime`], the command-wide memo and read set
+//!   every expression context of one command shares.
+
+pub mod contract;
+pub mod error;
+pub mod load;
+pub mod parse;
+pub mod runtime;
+
+pub use contract::{
+    PreparedContract, RowClassification, RowMode, RowShapeConflict, classify_rows, judge_written_contract, prepare_contract,
+};
+pub use error::{
+    CONTRACT_MISMATCH_CODE, DATA_DIAGNOSTIC_CODES, DataError, DataSourceLocation, MALFORMED_CODE,
+    NOT_A_CONTAINER_CODE, ROW_SHAPE_CONFLICT_CODE, TabularSource, THIS_IMPORT_REJECTED_CODE, UNSUPPORTED_FORMAT_CODE,
+};
+pub use runtime::{
+    BindEntry, DataRuntime, DataRuntimeStats, DataSourceIdentity, LoadedData, LoadedSource, SourceContent, SourceEntry,
+};

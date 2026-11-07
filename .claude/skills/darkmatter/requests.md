@@ -78,3 +78,27 @@ again, `without_supplied_values`). Never judge `match()` from the process direct
 from "any containing root". `find_files()` and `::file-links <glob>` call
 `list_files` in the document's context and report skipped out-of-tree file
 symlinks as `dm.glob.skipped_symlink` (`compose/glob_listing.rs`).
+
+## Data runtime and read set
+
+`compose::DataRuntime` (in `compose/expression/data/`) is the command-scoped memo and
+read-set sink, shared the same way as the remote-fetch runtime: an
+`Option<DataRuntime>` on `ComposeOptions` (`with_shared_data_runtime()`,
+`with_data_runtime(rt)`), cloned into every `ResolutionContext` by both
+`expression_resolution_context_in` builders; a root pipeline with none attached
+makes its own, so separate library compositions never share. A standalone
+`ResolutionContext::new` is isolated. `md compose`, `md graph`, and
+`md validate refs` attach one before their first `prepare_request`, so the
+reference check, pre-flight, lifecycle, and composition share it.
+
+- Reads are recorded at the operation boundary, never in `resolve_arg`:
+  `functions/fs.rs::load_markdown` (the five Markdown readers), `file_exists_fn`
+  (probed candidates on a miss), and contract imports via
+  `DataRuntime::prepare_contract`. Record after resolution, before reading, so a
+  failed read stays in the set.
+- `invalidate_memo()` runs after every executed command attempt
+  (`shell_expansion::execute_prepared_outcome`'s run closure,
+  `MdShellRunner::execute`), never for a cached or skipped one, and never
+  clears the read set.
+- `read_set` is on `ComposeReport` (unioned by `merge`) and `ComposeFailure`;
+  `ComposeRequest::read_set()` snapshots it.

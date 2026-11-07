@@ -1062,29 +1062,38 @@ fn parse_static_pipeline_shape(
 /// the shell tokenizer without risk of the placeholder body confusing
 /// quote tracking or chain-operator detection.
 ///
-/// Unterminated `{{` with no matching `}}` is left untouched; the
-/// downstream tokenizer will surface a diagnostic against the original
+/// An expression ends where the shared scanner ends it, so a `}}` inside one
+/// of its quoted strings (`{{ f("}}") }}`) stays masked. Openers the scanner
+/// does not report as expressions (literals, tokens, escaped openers) end at
+/// the first `}}`. Unterminated `{{` with no matching `}}` is left untouched;
+/// the downstream tokenizer will surface a diagnostic against the original
 /// shape if that matters.
 fn mask_interpolations(input: &str) -> String {
+    let expressions = super::expression::ExpressionFinder::scan_plain(input).expressions;
     let mut out = String::with_capacity(input.len());
-    let mut rest = input;
+    let mut pos = 0;
     let mut counter: usize = 0;
-    while let Some(open) = rest.find("{{") {
-        out.push_str(&rest[..open]);
-        let after_open = &rest[open + 2..];
-        match after_open.find("}}") {
-            Some(close) => {
+    while let Some(found) = input[pos..].find("{{") {
+        let open = pos + found;
+        out.push_str(&input[pos..open]);
+        let end = expressions
+            .iter()
+            .find(|expression| expression.start == open)
+            .map(|expression| expression.end)
+            .or_else(|| input[open + 2..].find("}}").map(|close| open + 2 + close + 2));
+        match end {
+            Some(end) => {
                 out.push_str(&format!("__DM_INTERP_{counter}__"));
                 counter += 1;
-                rest = &after_open[close + 2..];
+                pos = end;
             }
             None => {
-                out.push_str(&rest[open..]);
+                out.push_str(&input[open..]);
                 return out;
             }
         }
     }
-    out.push_str(rest);
+    out.push_str(&input[pos..]);
     out
 }
 

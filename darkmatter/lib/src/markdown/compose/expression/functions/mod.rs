@@ -34,6 +34,7 @@ pub(in crate::markdown::compose) mod agentic_cli_generated;
 mod cicd;
 mod collections;
 mod composition;
+mod data;
 mod dates;
 pub(in crate::markdown::compose) mod escape;
 mod git;
@@ -59,6 +60,12 @@ use super::catalog::{FunctionCatalog, expression_function_catalog};
 pub(crate) type PureFn = fn(&BoundCall<'_>) -> Result<Value, String>;
 /// A handler that also reads the document resolution context.
 pub(crate) type ContextFn = fn(&BoundCall<'_>, &ResolutionContext) -> Result<Value, ExpressionError>;
+/// A function's own reading of a binding failure: the domain error the
+/// failed call means (`load_data`'s scalar contract is
+/// `dm.data.not_a_container`, not a generic type error), or `None` to keep
+/// the binder's error. Consulted only after binding failed; the handler is
+/// still never entered.
+pub(crate) type BindingRefiner = fn(&CallBindingError, &[Value]) -> Option<ExpressionError>;
 
 #[derive(Clone, Copy)]
 enum FunctionHandler {
@@ -89,6 +96,8 @@ struct FunctionBinding {
     /// Registered malformed-reference rule: the parameter whose malformed
     /// reference text makes the call `false`.
     malformed_reference: Option<&'static str>,
+    /// Registered binding-failure refinement ([`BindingRefiner`]).
+    refine_binding: Option<BindingRefiner>,
 }
 
 impl FunctionBinding {
@@ -106,6 +115,7 @@ impl FunctionBinding {
             rejects: &[],
             recovery: None,
             malformed_reference: None,
+            refine_binding: None,
         }
     }
 
@@ -132,6 +142,13 @@ impl FunctionBinding {
     const fn recovering(self, subject: &'static str, fallback: &'static str) -> Self {
         Self {
             recovery: Some((subject, fallback)),
+            ..self
+        }
+    }
+
+    const fn refining_binding_errors(self, refine: BindingRefiner) -> Self {
+        Self {
+            refine_binding: Some(refine),
             ..self
         }
     }
@@ -179,6 +196,7 @@ const BINDING_GROUPS: &[&[FunctionBinding]] = &[
     agentic_cli::BINDINGS,
     skills::BINDINGS,
     markdown_docs::BINDINGS,
+    data::BINDINGS,
     composition::BINDINGS,
     LAZY_BINDINGS,
 ];
@@ -883,7 +901,9 @@ fn call_entry(
         FunctionHandler::Pure(_) => None,
     };
     let registration = &entry.registration;
-    let call = registration.bind_call(args).map_err(call_error)?;
+    let call = registration.bind_call(args).map_err(|error| {
+        entry.binding.refine_binding.and_then(|refine| refine(&error, args)).unwrap_or_else(|| call_error(error))
+    })?;
     #[cfg(any(test, feature = "effects-instrumentation"))]
     test_hooks::record_entry(canonical);
     let domain = |message: String| ExpressionError::Other {

@@ -329,6 +329,11 @@ pub fn run_compose(
     if !setters.is_empty() {
         options = options.with_setters(setters);
     }
+    // One data memo and read set for the whole command: the reference check,
+    // the lifecycle, pre-flight, and composition below all clone these
+    // options, so a file is read once across them and every pass's reads are
+    // reported together.
+    options = options.with_shared_data_runtime();
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
         ComposeRequest::with_context(options, file_resolution_context.clone())
             .wrap_err("Failed to prepare the compose request")

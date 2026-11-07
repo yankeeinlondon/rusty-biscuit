@@ -32,6 +32,7 @@ const REMOTE_READ_FUNCTIONS: &[&str] = &[
     "markdown_title",
     "markdown_body_empty",
     "validate_schema",
+    "load_data",
 ];
 
 /// What kind of directive or expression is consuming a remote URL.

@@ -90,6 +90,12 @@ pub struct ComposeReport {
     /// Remote-fetch statistics from this compose run.
     pub remote_fetch_stats: Option<super::super::remote_fetch::RemoteFetchStats>,
 
+    /// The files and URLs the command's expressions read, deduplicated and in
+    /// lexical order: canonical local paths as portable text, and normalized
+    /// URLs. It covers every pass that shared the command's data runtime (a
+    /// reference check included), and a read that failed after resolving.
+    pub read_set: Vec<String>,
+
     /// Top-level frontmatter keys intentionally deferred from compose-time
     /// resolution (via `ComposeOptions::with_exclude_keys`). Their values
     /// survive raw in `effective_frontmatter` for caller-owned event-time
@@ -551,6 +557,8 @@ impl ComposeReport {
             _ => {}
         }
 
+        merge_read_sets(&mut self.read_set, other.read_set);
+
         // Deferred keys accumulate across recursive child pipelines.
         self.deferred_frontmatter_keys
             .extend(other.deferred_frontmatter_keys);
@@ -655,6 +663,19 @@ pub(crate) struct WarningLocation {
 pub struct ComposeFailure {
     pub error: crate::markdown::types::MarkdownError,
     pub warnings: Vec<ComposeWarning>,
+    /// What the command's expressions had read when it stopped; see
+    /// [`ComposeReport::read_set`].
+    pub read_set: Vec<String>,
+}
+
+/// Unions `other` into the sorted, deduplicated `read_set`.
+pub(crate) fn merge_read_sets(read_set: &mut Vec<String>, other: Vec<String>) {
+    if other.is_empty() {
+        return;
+    }
+    read_set.extend(other);
+    read_set.sort();
+    read_set.dedup();
 }
 
 /// The issue a coded warning reports, so each issue is reported once.

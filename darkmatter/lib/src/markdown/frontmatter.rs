@@ -583,18 +583,29 @@ fn protect_shell_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
 ///
 /// Returns the modified string and a map of placeholder → original expression.
 ///
+/// An expression ends where the shared scanner ends it, so a `}}` inside one
+/// of its quoted strings stays protected. Other openers (literals, tokens,
+/// escaped or unclosed openers) keep the nested first-`}}` rule, an unclosed
+/// one running to the end of the text.
+///
 /// Non-matched content advances by full UTF-8 scalar boundaries (via
 /// `yaml[pos..].chars().next()` + `char.len_utf8()`) so `pos` never lands
 /// inside a multi-byte scalar.
 fn protect_interpolation_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
+    let expressions = simplified_schema::expression::scan::scan_plain(yaml).expressions;
     let mut result = String::with_capacity(yaml.len());
     let mut replacements = Vec::new();
     let bytes = yaml.as_bytes();
     let mut pos = 0;
 
     while pos < bytes.len() {
-        if pos + 1 < bytes.len() && bytes[pos] == b'{' && bytes[pos + 1] == b'{' {
-            // Find matching }}
+        if let Some(expression) = expressions.iter().find(|expression| expression.start == pos) {
+            let original = &yaml[pos..expression.end];
+            let placeholder = format!("__DM_EXPR_{}__", replacements.len());
+            replacements.push((placeholder.clone(), original.to_string()));
+            result.push_str(&placeholder);
+            pos = expression.end;
+        } else if pos + 1 < bytes.len() && bytes[pos] == b'{' && bytes[pos + 1] == b'{' {
             let start = pos;
             pos += 2;
             let mut depth = 1;
@@ -1160,6 +1171,28 @@ This is content."#;
             Some("prefix/{{topic}}/{{plan || \"plan.md\"}}".to_string())
         );
         assert!(remaining.starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_fallback_keeps_a_quoted_closer_inside_its_expression() {
+        let content = "---\nlabel: \"{{ f(\"}}\") }}\"\n---\n# Body\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let label: Option<String> = fm.get("label").unwrap();
+
+        assert_eq!(label.as_deref(), Some("{{ f(\"}}\") }}"));
+        assert!(remaining.starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_protect_interpolation_expressions_keeps_prose_and_literal_spans() {
+        let (_, replacements) = protect_interpolation_expressions("k: {{ don't }} it's fine {{ x }} and more }}");
+        let originals: Vec<&str> = replacements.iter().map(|(_, original)| original.as_str()).collect();
+        assert_eq!(originals, ["{{ don't }}", "{{ x }}"]);
+
+        let (protected, replacements) = protect_interpolation_expressions("k: {{{ a }}} b");
+        assert_eq!(protected, "k: __DM_EXPR_0__} b");
+        assert_eq!(replacements[0].1, "{{{ a }}");
     }
 
     #[test]
