@@ -1,9 +1,14 @@
 ---
 total_phases: 9
 created: 2026-11-05
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Loading Data Implementation Plan
@@ -74,7 +79,7 @@ Finish a phase before starting the next. Tasks within a phase may use separate a
 
 ## Phase 1: Contract Baseline
 
-- [ ] **Contract baseline**
+- [x] **Contract baseline**
   - Establish the feature's baseline on the delivered envelope, diagnostic projection, conformance tests, and `docs/cli/data-contracts.md`; fix integration drift within the interfaces this plan extends.
   - Create `implementation-log.md` beside this plan, recording these rules, existing workspace edits, prerequisite evidence, the historical SP1 result, and the YAML pointer-only limitation. Do not overwrite unrelated changes.
   - Checkpoint: every later task has the types, ownership, and outcomes specified above; there are no pending product rulings or runtime spikes.
