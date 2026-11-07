@@ -29,7 +29,7 @@ reviewed_on: 2026-11-06
 clarified: true
 clarified_by: claude/opus
 needs_rulings: false
-implemented: false
+implemented: true
 review_iterations: 0
 related:
     - 2026-10-28-extract-simplified-schema
@@ -42,6 +42,7 @@ references:
     spikes/sp1-scanner-corpus-diff.md: Compares today's double-brace expression scanner with several quote-aware variants over 6,909 repository files and recommends the balanced, parse-gated rule adopted in R11. Also lists every other double-brace detector and whether it must move to the shared scanner.
     spikes/sp2-line-column-per-format.md: Tests a JSON Pointer to line/column locator for each supported format and fixes the per-format locators, their owning crates, the line-break rule, and the one pointer-only case (YAML with aliases or multi-line flow collections) used in R3 and R5.
     spikes/sp3-union-failure-flattening.md: Shows that contract-mismatch records must come from the coercion engine's `ConversionError` rather than `validate_soft`, and defines the union-flattening rule, leaf vocabulary, and ordering used in R5.
+implemented_by: "claude/opus"
 ---
 
 # Loading Data
