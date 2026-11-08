@@ -1,16 +1,77 @@
 ---
 total_phases: 9
 created: 2026-11-08
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 packages:
-    - simplified-schema
-    - sniff
-    - darkmatter
-    - darkmatter-cli
-    - darkmatter-lsp
-    - claudine
+- darkmatter-lsp
+- darkmatter
+- simplified-schema
+source_files_during_phase_1:
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/frontmatter/enum_item_tests.rs
+- darkmatter/lib/tests/dynamic_slots_fixtures/mod.rs
+- darkmatter/lib/tests/l1/dynamic_slots_fixture_repos.rs
+- darkmatter/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/fixtures/dynamic_slots/value-positions.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/revision.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/minimum.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/maximum.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/default-retries.yaml
+- simplified-schema/lib/tests/fixtures/dynamic_slots/values/slug-pattern.yaml
+docs_updated_during_phase_1:
+- darkmatter/docs/topics/schemas/dmls-schema-support.md
+- darkmatter/dmls/docs/autocomplete.md
+- simplified-schema/lib/tests/fixtures/dynamic_slots/README.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+- .claude/skills/darkmatter/dmls.md
+source_files_during_phase_2:
+- simplified-schema/lib/src/completion.rs
+- simplified-schema/lib/src/errors.rs
+- simplified-schema/lib/src/expression/scan.rs
+- simplified-schema/lib/src/format.rs
+- simplified-schema/lib/src/lib.rs
+- simplified-schema/lib/src/resolve.rs
+- simplified-schema/lib/src/resolve/recursive.rs
+- simplified-schema/lib/src/schema/error.rs
+- simplified-schema/lib/src/schema/export.rs
+- simplified-schema/lib/src/schema/layer.rs
+- simplified-schema/lib/src/schema/layering.rs
+- simplified-schema/lib/src/schema/mod.rs
+- simplified-schema/lib/src/schema/tests.rs
+- simplified-schema/lib/src/schema/view.rs
+- simplified-schema/lib/src/simplified/convert.rs
+- simplified-schema/lib/src/simplified/grammar.rs
+- simplified-schema/lib/src/simplified/grammar/slot_tests.rs
+- simplified-schema/lib/src/simplified/lint.rs
+- simplified-schema/lib/src/simplified/mod.rs
+- simplified-schema/lib/src/simplified/narrowing.rs
+- simplified-schema/lib/src/simplified/query.rs
+- simplified-schema/lib/src/simplified/serialize.rs
+- simplified-schema/lib/src/simplified/source.rs
+- simplified-schema/lib/src/simplified/subtype.rs
+- simplified-schema/lib/src/simplified/types.rs
+- simplified-schema/lib/src/slots.rs
+- simplified-schema/lib/tests/l1/declaration_grammar.rs
+- simplified-schema/lib/tests/l1/expression_scanner.rs
+- simplified-schema/lib/tests/l1/main.rs
+- simplified-schema/lib/tests/l1/schema_object.rs
+- simplified-schema/lib/tests/l1/slot_spans.rs
+- simplified-schema/lib/tests/l1/slot_templates.rs
+- darkmatter/lib/src/markdown/schemas/triggers/finding.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+docs_updated_during_phase_2:
+- simplified-schema/docs/topics/diagnostics.md
+- simplified-schema/docs/topics/language-core.md
+- simplified-schema/docs/topics/language/index.md
+- simplified-schema/docs/topics/simplified-schema-struct.md
+docs_created_during_phase_2:
+- simplified-schema/docs/topics/language/slots.md
+skills_files_updated_during_phase_2:
+- .claude/skills/simplified-schema/SKILL.md
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Plan: Dynamic Schema Types
@@ -759,7 +820,7 @@ Loader code-smell grep before closing the phase's loaders: `rg
 
 ### Wave 1 (parallel, disjoint files)
 
-- [ ] **Baseline run**
+- [x] **Baseline run**
   - In `simplified-schema/`, `sniff/`, `darkmatter/` run `just test` then
     `just lint`; save pass/fail counts and any pre-existing failures in
     `implementation-log.md` under "Baseline" so later red tests are attributable.
@@ -784,7 +845,7 @@ Loader code-smell grep before closing the phase's loaders: `rg
   - Independent of slots and of every later phase (disjoint files under
     `darkmatter/dmls/`): failing L1 test on the static sandbox-shaped enum, then
     the fix.
-- [ ] **Validation checkpoint**
+- [x] **Validation checkpoint**
   - Baseline recorded; fixtures compile into the test crates (`just test` in both areas
     unchanged-green).
 
@@ -795,21 +856,21 @@ and query without evaluating anything; lowering fails with a typed error.
 
 ### Wave 2 (serial base)
 
-- [ ] **AST types**
+- [x] **AST types**
   - Add `Slot`, `DynamicKind`, `DynamicElement`, `DynamicList`,
     `Constraint::Dynamic`, `ValueSlotKind`, `Constraint::DynamicValue` per N3 in `simplified/types.rs`; update `keyword()`;
     re-export from `simplified/mod.rs` and `lib.rs`.
   - Fix every exhaustive `match` the compiler reports (known: `types.rs`
     `keyword()`, `narrowing.rs` ~l.173/194, `darkmatter` `triggers/grammar.rs`
     ~l.599).
-- [ ] **Scanner API**
+- [x] **Scanner API**
   - Add `scan_expression_at` (N5) with doctest and tests in
     `simplified-schema/lib/tests/l1/expression_scanner.rs` (quoted `{{`, nested
     braces, unclosed, escaped opener).
 
 ### Wave 3 (parallel after Wave 2; one task per file group)
 
-- [ ] **Grammar**
+- [x] **Grammar**
   - In `simplified/grammar.rs`: `parse_enum_members` and the `suggest` arm of
     `parse_one_constraint` recognise slots (N4). Build `Constraint::Dynamic`
     only when a slot is present; literals before/after keep their normal tokens;
@@ -824,11 +885,11 @@ and query without evaluating anything; lowering fails with a typed error.
   - Tests: unit tests in the file plus `declaration_grammar.rs`: mixed order,
     multiple slots, quoted `'{{ x }}'` stays literal, `abc{{x}}` keeps today's
     behavior, incomplete element error, unterminated slot, parse-error offset.
-- [ ] **Serialize / export**
+- [x] **Serialize / export**
   - `simplified/serialize.rs` (`Constraint::Dynamic` arm near l.491/509): export
     literals with their quoting and slots as authored `{{ expr }}`; round-trip
     export → reparse equals the template. Test with the three fixtures.
-- [ ] **Source spans**
+- [x] **Source spans**
   - `simplified/source.rs`: make `split_top_level`, `scan_constraint_groups`,
     `constraint_call_arguments`, `inline_object_end` and the span projection
     (`project_suggestion_spans`, `project_atom_suggestions`,
@@ -838,7 +899,7 @@ and query without evaluating anything; lowering fails with a typed error.
     frontmatter offsets, without normalizing line endings.
   - Tests: spans point at the authored `{{` in plain, `'…'`, `"…"`, `|`, `>`
     carriers, and at a slot in an imported file.
-- [ ] **Lowering error and query**
+- [x] **Lowering error and query**
   - `simplified/convert.rs`: `Constraint::Dynamic` makes lowering return
     `SchemaError::UnresolvedSlots` (N10) for `Dynamic` and `DynamicValue` at the `Constraint` match sites
     (~l.1934, 2013, 2117, 2452); add the variant to `errors.rs` with a
@@ -849,7 +910,7 @@ and query without evaluating anything; lowering fails with a typed error.
 
 ### Wave 4 (parallel)
 
-- [ ] **Consumer sweep**
+- [x] **Consumer sweep**
   - `resolve.rs` (~l.2353, 3204–3320) and `resolve/recursive.rs` (l.87, 691, 719,
     987): treat `Dynamic` suggest like `Suggest` for the one-list-per-property and
     marker checks; `completion.rs`, `coercion/engine.rs`, `format.rs`,
@@ -858,7 +919,7 @@ and query without evaluating anything; lowering fails with a typed error.
     coercion of an unresolved enum is `UnresolvedSlots`, never "no members").
     Grep list to clear: `rg 'Constraint::(Members|Suggest|Literal|Default|Min|Max|Pattern)' simplified-schema/lib/src`.
   - Completion on a template shows the literals plus a pending marker.
-- [ ] **`SimplifiedSchema` passive behavior**
+- [x] **`SimplifiedSchema` passive behavior**
   - `schema/layer.rs`, `export.rs`, `view.rs`, `mod.rs`: N13 passive half —
     factories accept valid templates, `lowered = Err(UnresolvedSlots)`,
     `is_resolved`, `pending_slots`, typed errors from `to_json_schema`,
@@ -867,12 +928,12 @@ and query without evaluating anything; lowering fails with a typed error.
 
 ### Validation checkpoint (end of Phase 2)
 
-- [ ] `just test` and `just lint` in `simplified-schema/` pass, including the
+- [x] `just test` and `just lint` in `simplified-schema/` pass, including the
   minimal-feature (no `file`) build and `work-counters`.
-- [ ] Static-schema parity: the existing shipped corpus and `schema_object` suites
+- [x] Static-schema parity: the existing shipped corpus and `schema_object` suites
   pass unchanged; a test proves a static `enum`/`suggest` still lowers to
   `Constraint::Members` / `Suggest` (never `Dynamic`).
-- [ ] A counter/read-nothing test proves parse, query, export evaluate nothing and
+- [x] A counter/read-nothing test proves parse, query, export evaluate nothing and
   read nothing.
 
 ## Phase 3 — Resolution hook and concrete snapshot (simplified-schema)
