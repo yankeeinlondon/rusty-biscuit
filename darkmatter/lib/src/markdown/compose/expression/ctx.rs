@@ -103,6 +103,28 @@ impl<'a> CtxLookup<'a> {
         self.captured.borrow_mut().insert(group);
     }
 
+    /// Each group captured so far, by its `Debug` name in sorted order, with
+    /// the BLAKE3 digest of its values' canonical JSON. A digest stands in
+    /// for the values, so no value text is ever kept as a key.
+    pub(crate) fn group_digests(&self) -> Vec<(String, [u8; 32])> {
+        let cache = self.cache.borrow();
+        let mut digests: Vec<_> = self
+            .captured
+            .borrow()
+            .iter()
+            .map(|group| {
+                let values: serde_json::Map<String, Value> = group
+                    .projected_keys()
+                    .filter_map(|key| cache.get(key).map(|value| (key.to_string(), value.clone())))
+                    .collect();
+                let canonical = biscuit_hash::canonical_json(&Value::Object(values));
+                (format!("{group:?}"), biscuit_hash::blake3_hash_bytes(canonical.as_bytes()))
+            })
+            .collect();
+        digests.sort();
+        digests
+    }
+
     /// Returns the set of context groups that have been captured so far.
     #[cfg(test)]
     pub(crate) fn captured_groups(&self) -> Vec<super::super::context::capture::ContextGroup> {

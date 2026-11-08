@@ -231,7 +231,76 @@ impl InlineOwner<'_> {
 /// [`resolve_yaml_schema_with_roots`] for an inline value authored by
 /// `owner`. A string reference resolves exactly as it does for a document;
 /// only the namespaces of inline named types differ.
+///
+/// A template (a schema holding `{{ … }}` slots, here or in anything it
+/// imports or references) fails with [`SchemaError::UnresolvedSlots`] whose
+/// `pending` resolves it ([`crate::slots::PendingSchema::resolve`]); every
+/// function delegating here does the same.
 pub fn resolve_yaml_schema_owned_by(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    resolving_entry(
+        || resolve_owned_value(value, owner, base_dir, schema_roots, request_context, shipped),
+        || {
+            let value = value.clone();
+            let trigger = match owner {
+                InlineOwner::Document => None,
+                InlineOwner::Trigger(path) => Some(path.to_path_buf()),
+            };
+            let base_dir = base_dir.to_path_buf();
+            let schema_roots = schema_roots.to_vec();
+            let context = request_context.clone();
+            Arc::new(move || {
+                let owner = trigger.as_deref().map_or(InlineOwner::Document, InlineOwner::Trigger);
+                resolve_owned_value(&value, owner, &base_dir, &schema_roots, &context, shipped)
+            })
+        },
+    )
+}
+
+thread_local! {
+    /// How many [`resolving_entry`] calls are running on this thread.
+    static ENTRY_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Runs the public resolution `resolve`. When it meets a template, the
+/// error gains the [`crate::slots::PendingSchema`] that resolves it: the
+/// texts `resolve` read and the `replay` (built only then) of the same call.
+/// A call nested in another entry point, or running inside a slot-value
+/// scope (a replay), is left to the outer one.
+fn resolving_entry(
+    resolve: impl FnOnce() -> Result<ResolvedSchema, SchemaError>,
+    replay: impl FnOnce() -> crate::slots::Replay,
+) -> Result<ResolvedSchema, SchemaError> {
+    if ENTRY_DEPTH.get() > 0 || crate::slots::active_values().is_some() {
+        return resolve();
+    }
+    struct Leave;
+    impl Drop for Leave {
+        fn drop(&mut self) {
+            ENTRY_DEPTH.set(ENTRY_DEPTH.get() - 1);
+        }
+    }
+    ENTRY_DEPTH.set(ENTRY_DEPTH.get() + 1);
+    let _leave = Leave;
+    let open = buffers::current();
+    let (result, sources) = buffers::recording(resolve);
+    match result {
+        Err(SchemaError::UnresolvedSlots(mut unresolved)) => {
+            unresolved.pending = Some(crate::slots::PendingSchema::new(&unresolved, open, sources, replay()));
+            Err(SchemaError::UnresolvedSlots(unresolved))
+        }
+        other => other,
+    }
+}
+
+/// [`resolve_yaml_schema_owned_by`] without the template handle.
+fn resolve_owned_value(
     value: &YamlValue,
     owner: InlineOwner<'_>,
     base_dir: &Path,
@@ -303,7 +372,7 @@ fn resolve_inline_mapping(
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    let (schema, imports) = expand_imports(
+    let (mut schema, imports) = expand_imports(
         schema,
         None,
         base_dir,
@@ -315,6 +384,7 @@ fn resolve_inline_mapping(
         &mut definitions,
         shipped,
     )?;
+    crate::slots::apply_active(&mut schema, &mut definitions)?;
     let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
     // Inline `$schema` mappings have no on-disk path, so `this` example
     // references have no target here (the acceptance driver references
@@ -578,7 +648,7 @@ pub(crate) fn resolve_root_union(
             YamlValue::Mapping(_) => {
                 let arm_schema = parse_yaml_schema(item)?;
                 // Named-type imports are inlined per arm before conversion.
-                let (arm_schema, arm_imports) =
+                let (mut arm_schema, arm_imports) =
                     expand_document_imports(
                         arm_schema,
                         None,
@@ -592,6 +662,7 @@ pub(crate) fn resolve_root_union(
                         shipped,
                     )?;
                 imports.extend(arm_imports);
+                crate::slots::apply_active(&mut arm_schema, &mut definitions)?;
                 let mut arm_json = to_json_schema_with_definitions(&arm_schema, &definitions)?;
                 examples.extend(resolve_document_examples(
                     &mut arm_json,
@@ -1229,7 +1300,7 @@ fn resolve_standalone_schema(
         SchemaRoot::Single(_) => {
             let mut searched = BTreeSet::new();
             let mut definitions = DefinitionTable::default();
-            let (schema, imports) = expand_document_imports(
+            let (mut schema, imports) = expand_document_imports(
                 schema,
                 local_types,
                 file_dir,
@@ -1241,6 +1312,7 @@ fn resolve_standalone_schema(
                 &mut definitions,
                 shipped,
             )?;
+            crate::slots::apply_active(&mut schema, &mut definitions)?;
             let mut json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
             let examples = resolve_document_examples(
                 &mut json_schema,
@@ -1423,15 +1495,36 @@ pub fn prepare_yaml_schema_text(
 /// [`SchemaError::NotASchemaDocument`] when `document` is not a
 /// `yaml-schema` ([`NotSchemaReason::NoSchemaProperty`]); every resolver
 /// error of its export and imports.
+///
+/// A template fails with [`SchemaError::UnresolvedSlots`] whose `pending`
+/// resolves it, as for [`resolve_yaml_schema_owned_by`].
 pub fn prepare_standalone_yaml_schema(
     document: StandaloneSchemaDocument,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolving_entry(
+        || prepare_standalone_document(&document, schema_roots, request_context, shipped),
+        || {
+            let document = document.clone();
+            let schema_roots = schema_roots.to_vec();
+            let context = request_context.clone();
+            Arc::new(move || prepare_standalone_document(&document, &schema_roots, &context, shipped))
+        },
+    )
+}
+
+/// [`prepare_standalone_yaml_schema`] without the template handle.
+fn prepare_standalone_document(
+    document: &StandaloneSchemaDocument,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
     let StandaloneSchemaDocument { path, envelope, declaration, local_types, .. } = document;
     let path = path.as_path();
-    if envelope != StandaloneSchemaEnvelope::YamlSchema {
+    if *envelope != StandaloneSchemaEnvelope::YamlSchema {
         return Err(SchemaError::NotASchemaDocument { path: path.to_path_buf(), reason: NotSchemaReason::NoSchemaProperty });
     }
     let canonical = canonical_path(path);
@@ -1439,7 +1532,7 @@ pub fn prepare_standalone_yaml_schema(
     stack.enter(&canonical)?;
     let resolved = match declaration {
         SchemaDeclaration::Schema(schema) => resolve_standalone_schema(
-            schema,
+            schema.clone(),
             local_types.as_ref(),
             path,
             schema_roots,
@@ -1552,6 +1645,16 @@ fn lower_embedded_schema(
         &mut definitions,
         shipped,
     )?;
+    // An embedded schema is a build input: nothing could resolve a slot in
+    // it, as nothing could read an `example(...)` file.
+    if crate::slots::has_dynamic(&schema, &definitions) {
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(path),
+            message: "an embedded schema cannot contain `{{ … }}` slots".into(),
+            source: None,
+            span: None,
+        });
+    }
     let json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
     if contains_example_annotation(&json_schema) {
         return Err(SchemaError::SchemaDocument {
@@ -1615,7 +1718,7 @@ pub(crate) fn resolve_standalone_root_union(
         match arm {
             SchemaArm::Inline(shape) => {
                 let schema = SchemaRoot::Single(shape);
-                let (schema, arm_imports) = expand_document_imports(
+                let (mut schema, arm_imports) = expand_document_imports(
                     schema,
                     local_types,
                     base_dir,
@@ -1628,6 +1731,7 @@ pub(crate) fn resolve_standalone_root_union(
                     shipped,
                 )?;
                 imports.extend(arm_imports);
+                crate::slots::apply_active(&mut schema, &mut definitions)?;
                 let SchemaRoot::Single(shape) = schema else {
                     unreachable!("single root-union arm remains single")
                 };
@@ -2184,6 +2288,12 @@ fn expand_imports(
     definitions: &mut DefinitionTable,
     shipped: ShippedSources,
 ) -> Result<(SchemaRoot, Vec<PathBuf>), SchemaError> {
+    let mut schema = schema;
+    // A slot evaluates in the file it was written in: stamp the root's own
+    // slots here and each lifted definition's in `rehome_definition`.
+    if let Some(file) = key.file() {
+        crate::slots::stamp_root_origin(&mut schema, file);
+    }
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
     }
@@ -2580,19 +2690,28 @@ impl ImportEngine<'_> {
         };
         self.stack.pop();
 
-        let base = self.rehome_definition_examples(base, &target.key)?;
+        let base = self.rehome_definition(base, &target.key)?;
         let cache = if force_inline { &mut self.forced_cache } else { &mut self.expanded_cache };
         cache.insert(frame.clone(), base.clone());
         Ok(base)
     }
 
-    /// Pins the examples of a definition expanded from a schema file (see
-    /// [`Self::rehome_examples`]); other namespaces have none to pin.
-    fn rehome_definition_examples(
+    /// Rehomes a definition expanded from `namespace` for use elsewhere:
+    /// stamps its slots with the file it was written in (a slot evaluates in
+    /// its defining file's context), and pins its examples when that file is
+    /// a schema file (see [`Self::rehome_examples`]); other namespaces have
+    /// none to pin.
+    fn rehome_definition(
         &mut self,
-        base: ExpandedDef,
+        mut base: ExpandedDef,
         namespace: &DefNamespace,
     ) -> Result<ExpandedDef, SchemaError> {
+        if let Some(file) = namespace.file() {
+            match &mut base {
+                ExpandedDef::Single(atom, _) => crate::slots::stamp_atom_origin(atom, file),
+                ExpandedDef::Union(arms) => arms.iter_mut().for_each(|atom| crate::slots::stamp_atom_origin(atom, file)),
+            }
+        }
         match namespace {
             DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) => {
                 self.rehome_examples(base, &file.clone())

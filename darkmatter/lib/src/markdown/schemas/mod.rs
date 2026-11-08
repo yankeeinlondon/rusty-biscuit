@@ -51,6 +51,7 @@ mod frontmatter_shape;
 pub mod resolve;
 pub mod rewrite;
 pub mod roots;
+pub mod slots;
 pub mod triggers;
 pub mod yaml_documents;
 mod positions;

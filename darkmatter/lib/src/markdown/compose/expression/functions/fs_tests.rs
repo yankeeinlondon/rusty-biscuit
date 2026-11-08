@@ -330,6 +330,34 @@ mod fn_filesystem {
         }
     }
 
+    /// The search path is the request's captured `PATH`, never the
+    /// process's: an empty captured `PATH` finds nothing the process could,
+    /// and a captured one holding the binary's folder finds it.
+    #[test]
+    fn has_command_searches_the_captured_path_not_the_process_path() {
+        let Ok(found) = which::which(PROBE_BINARY) else {
+            return;
+        };
+        let empty = tempfile::TempDir::new().unwrap();
+        let with_path = |path: &std::path::Path| {
+            let env = std::collections::HashMap::from([("PATH".to_string(), path.to_string_lossy().into_owned())]);
+            ResolutionContext::new(biscuit_file::FileResolutionContext::new(empty.path()).with_env(env))
+        };
+        let probe = |ctx: &ResolutionContext, name: &str| {
+            super::super::call_function(name, &[json!(PROBE_BINARY)], Some(ctx)).unwrap().unwrap()
+        };
+        let nowhere = with_path(empty.path());
+        assert_eq!(probe(&nowhere, "has_command"), json!(false));
+        assert_eq!(probe(&nowhere, "has_binary"), json!(false));
+        let captured = with_path(found.parent().unwrap());
+        assert_eq!(probe(&captured, "has_command"), json!(true));
+        assert_eq!(probe(&captured, "has_binary"), json!(true));
+        let no_path = ResolutionContext::new(
+            biscuit_file::FileResolutionContext::new(empty.path()).with_env(std::collections::HashMap::new()),
+        );
+        assert_eq!(probe(&no_path, "has_command"), json!(false));
+    }
+
     #[test]
     fn has_command_missing_returns_false() {
         let ctx = ResolutionContext::at(std::env::temp_dir());

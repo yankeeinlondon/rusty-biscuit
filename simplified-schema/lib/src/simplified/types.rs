@@ -1189,9 +1189,11 @@ pub struct Slot {
     pub span: SourceSpan,
     /// The trimmed expression text alone.
     pub expression_span: SourceSpan,
-    /// The schema file whose context the slot evaluates in, stamped when an
-    /// imported definition is lifted into another file; `None` is the
-    /// schema's own file or document.
+    /// The schema file the slot was written in, whose context it evaluates
+    /// in: stamped by resolution for every slot of a schema file, an
+    /// imported definition, or a trigger payload. `None` only for a slot of
+    /// an inline document `$schema` or of in-memory content, which evaluates
+    /// in the request's own context.
     pub origin: Option<std::path::PathBuf>,
 }
 

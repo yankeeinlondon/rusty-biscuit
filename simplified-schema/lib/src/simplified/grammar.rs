@@ -3415,7 +3415,7 @@ fn interpret_suggestion(arg: &Arg, ty: SimplifiedType) -> SuggestionCandidate {
     interpret_suggestion_parts(&arg.lex, arg.span.clone(), ty)
 }
 
-fn interpret_suggestion_parts(
+pub(crate) fn interpret_suggestion_parts(
     decoded: &str,
     span: Range<usize>,
     ty: SimplifiedType,

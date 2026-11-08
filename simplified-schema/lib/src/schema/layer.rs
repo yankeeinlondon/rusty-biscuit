@@ -12,6 +12,7 @@ use serde_yaml_ng::Value as YamlValue;
 
 use super::SimplifiedSchemaError;
 use crate::embedded::ShippedSources;
+use crate::resolve::buffers::{self, SourceBuffers};
 use crate::resolve::{self, InlineOwner, ReferenceStack, ResolvedSchema};
 use crate::simplified::standalone::visit_def;
 use crate::simplified::{
@@ -37,6 +38,59 @@ pub(super) struct Layer {
     /// The file context of a file-backed schema; `None` for content.
     pub(super) binding: Option<Binding>,
     pub(super) provenance: SchemaProvenance,
+    /// How to build this layer again under slot values; set only on a
+    /// template layer.
+    pub(super) rebuild: Option<Rebuild>,
+}
+
+/// A template layer's own construction, run again by
+/// [`super::SimplifiedSchema::resolve_slots`] inside a slot-value scope,
+/// with `buffers` (the open buffers of the first build and every schema text
+/// it read) in force, so the rebuild reads exactly what the first build did.
+#[derive(Clone)]
+pub(super) struct Rebuild {
+    pub(super) build: Arc<dyn Fn() -> Result<Layer, SimplifiedSchemaError> + Send + Sync>,
+    pub(super) buffers: SourceBuffers,
+}
+
+impl std::fmt::Debug for Rebuild {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rebuild").finish_non_exhaustive()
+    }
+}
+
+/// A layer constructor: the text, the file it came from, and its binding.
+type Build = fn(&str, Option<PathBuf>, Option<Binding>) -> Result<Layer, SimplifiedSchemaError>;
+
+/// Runs `build` and, when the layer is a template, keeps how to run it
+/// again: the text (copied only then), the layer's own path and binding, and
+/// the schema texts the build read. A build inside a slot-value scope is a
+/// rebuild and keeps nothing.
+fn rebuildable(
+    text: &str,
+    path: Option<PathBuf>,
+    binding: Option<Binding>,
+    build: Build,
+) -> Result<Layer, SimplifiedSchemaError> {
+    if crate::slots::active_values().is_some() {
+        return build(text, path, binding);
+    }
+    let mut buffers = buffers::current();
+    let (layer, sources) = buffers::recording(|| build(text, path, binding));
+    let mut layer = layer?;
+    if !layer.pending_slots().is_empty() {
+        for (path, text) in sources {
+            buffers.insert(&path, text);
+        }
+        let text: Arc<str> = Arc::from(text);
+        let path = layer.provenance.path.clone();
+        let binding = layer.binding.clone();
+        layer.rebuild = Some(Rebuild {
+            build: Arc::new(move || build(&text, path.clone(), binding.clone())),
+            buffers,
+        });
+    }
+    Ok(layer)
 }
 
 /// The form the schema was written in.
@@ -140,10 +194,10 @@ impl Layer {
     /// Content: Markdown when it opens with a frontmatter block, otherwise a
     /// YAML (or JSON) document.
     pub(super) fn from_content(text: &str) -> Result<Self, SimplifiedSchemaError> {
-        match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
+        rebuildable(text, None, None, |text, _, _| match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
             Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, frontmatter.yaml_span.start, None, None),
-            None => Self::from_yaml_document(text, None, None),
-        }
+            None => Self::build_yaml_document(text, None, None),
+        })
     }
 
     /// A Markdown document: its frontmatter `$schema`; the body is ignored.
@@ -153,6 +207,11 @@ impl Layer {
         path: Option<PathBuf>,
         binding: Option<Binding>,
     ) -> Result<Self, SimplifiedSchemaError> {
+        rebuildable(text, path, binding, Self::build_markdown)
+    }
+
+    #[cfg(feature = "file")]
+    fn build_markdown(text: &str, path: Option<PathBuf>, binding: Option<Binding>) -> Result<Self, SimplifiedSchemaError> {
         match biscuit_file::frontmatter::extract_frontmatter_block(text)? {
             Some(frontmatter) => Self::from_frontmatter(frontmatter.yaml, frontmatter.yaml_span.start, path, binding),
             None => Err(missing_schema(path.as_deref(), "the document has no frontmatter block")),
@@ -196,7 +255,16 @@ impl Layer {
 
     /// A standalone schema document, or a raw JSON Schema written in YAML or
     /// JSON (a mapping whose `$schema` is a JSON Schema dialect URI).
+    #[cfg(feature = "file")]
     pub(super) fn from_yaml_document(
+        text: &str,
+        path: Option<PathBuf>,
+        binding: Option<Binding>,
+    ) -> Result<Self, SimplifiedSchemaError> {
+        rebuildable(text, path, binding, Self::build_yaml_document)
+    }
+
+    fn build_yaml_document(
         text: &str,
         path: Option<PathBuf>,
         binding: Option<Binding>,
@@ -259,6 +327,7 @@ impl Layer {
             lowered: Ok(Arc::new(json)),
             binding,
             provenance: SchemaProvenance { path, ..SchemaProvenance::default() },
+            rebuild: None,
         }
     }
 }
@@ -317,11 +386,12 @@ fn resolve_authored(
                 lowered: Err(Arc::new(unavailable)),
                 binding: None,
                 provenance,
+                rebuild: None,
             });
         }
         let root = authored.schema().expect("a declaration with no external reference is inline");
         let context = content_context();
-        let expansion = resolve::expand_named_types_searched(
+        let mut expansion = resolve::expand_named_types_searched(
             root,
             authored.local_types.as_ref(),
             Path::new(""),
@@ -331,15 +401,14 @@ fn resolve_authored(
             shipped,
             &mut BTreeSet::new(),
         )?;
-        let lowered = to_json_schema_with_definitions(&expansion.schema, &expansion.definitions)
-            .map(Arc::new)
-            .map_err(Arc::new);
+        let lowered = lower_expanded(&mut expansion.schema, &mut expansion.definitions);
         return Ok(Layer {
             authored: Authored::Simplified(Box::new(authored)),
             typed: Some(Typed { root: expansion.schema, definitions: expansion.definitions }),
             lowered,
             binding: None,
             provenance,
+            rebuild: None,
         });
     };
 
@@ -396,6 +465,7 @@ fn resolve_authored(
                 lowered: Err(Arc::new(unresolved)),
                 binding: Some(binding),
                 provenance,
+                rebuild: None,
             });
         }
         whole => whole.transpose()?,
@@ -423,12 +493,13 @@ fn resolve_authored(
             lowered: Ok(Arc::new(json_schema)),
             binding: Some(binding),
             provenance,
+            rebuild: None,
         });
     }
 
     let root = authored.schema().expect("an inline declaration");
     let mut searched = BTreeSet::new();
-    let expansion = resolve::expand_named_types_searched(
+    let mut expansion = resolve::expand_named_types_searched(
         root,
         authored.local_types.as_ref(),
         base_dir,
@@ -438,13 +509,14 @@ fn resolve_authored(
         shipped,
         &mut searched,
     )?;
-    let lowered = match to_json_schema_with_definitions(&expansion.schema, &expansion.definitions) {
-        Ok(mut json) => {
+    let lowered = match lower_expanded(&mut expansion.schema, &mut expansion.definitions) {
+        Ok(json) => {
+            let mut json = Arc::unwrap_or_clone(json);
             provenance.examples =
                 resolve::resolve_document_examples(&mut json, base_dir, defining_file, &[], context, &mut searched)?;
             Ok(Arc::new(json))
         }
-        Err(error) => Err(Arc::new(error)),
+        Err(error) => Err(error),
     };
     provenance.imports = expansion.imports;
     provenance.searched = searched.into_iter().collect();
@@ -454,7 +526,19 @@ fn resolve_authored(
         lowered,
         binding: Some(binding),
         provenance,
+        rebuild: None,
     })
+}
+
+/// Lowers an expanded declaration, substituting slot values first when a
+/// slot-value scope is running (a rebuild). A lowering failure is kept, not
+/// raised: a template's is [`SchemaError::UnresolvedSlots`], a refused slot
+/// value's [`SchemaError::SlotResult`].
+fn lower_expanded(root: &mut SchemaRoot, definitions: &mut Arc<DefinitionTable>) -> Result<Arc<Value>, Arc<SchemaError>> {
+    if crate::slots::has_dynamic(root, definitions) {
+        crate::slots::apply_active(root, Arc::make_mut(definitions)).map_err(Arc::new)?;
+    }
+    to_json_schema_with_definitions(root, definitions).map(Arc::new).map_err(Arc::new)
 }
 
 impl AuthoredSchema {
@@ -580,7 +664,7 @@ impl Layer {
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
         };
-        let (root, definitions) = match expanded_def.and_then(object) {
+        let (mut root, mut definitions) = match expanded_def.and_then(object) {
             Some(shape) => (SchemaRoot::Single(shape), Arc::clone(&typed.definitions)),
             // Expand the selection against the table it came from.
             None => {
@@ -602,15 +686,29 @@ impl Layer {
         };
         let lowered = match &self.lowered {
             // An unpreparable source stays unpreparable for the same reason.
-            Err(error) if self.binding.is_none() => Err(Arc::clone(error)),
-            _ => to_json_schema_with_definitions(&root, &definitions).map(Arc::new).map_err(Arc::new),
+            Err(error) if self.binding.is_none() && !matches!(error.as_ref(), SchemaError::UnresolvedSlots(_)) => {
+                Err(Arc::clone(error))
+            }
+            _ => lower_expanded(&mut root, &mut definitions),
         };
-        Ok(Self {
+        let mut layer = Self {
             authored: Authored::Simplified(Box::new(selected)),
             typed: Some(Typed { root, definitions }),
             lowered,
             binding: self.binding.clone(),
             provenance: self.provenance.clone(),
-        })
+            rebuild: None,
+        };
+        // A selection from a template rebuilds its source, then selects.
+        if let Some(parent) = &self.rebuild
+            && !layer.pending_slots().is_empty()
+        {
+            let (build, name) = (Arc::clone(&parent.build), name.to_string());
+            layer.rebuild = Some(Rebuild {
+                build: Arc::new(move || build()?.select(&name)),
+                buffers: parent.buffers.clone(),
+            });
+        }
+        Ok(layer)
     }
 }

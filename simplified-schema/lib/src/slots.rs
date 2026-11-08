@@ -1,12 +1,35 @@
-//! `{{ … }}` slots in a parsed schema: finding them without evaluating them.
+//! `{{ … }}` slots in a parsed schema: finding them, and resolving them
+//! through a host.
 //!
 //! A schema whose `enum(...)`/`suggest(...)` lists or value positions hold a
-//! slot is a **template**. Everything here is passive: it reads the typed
+//! slot is a **template**. Finding slots is passive: it reads the typed
 //! declaration and never evaluates an expression or reads a file. Lowering a
 //! template fails with [`SchemaError::UnresolvedSlots`], which lists the
-//! slots [`collect_slots`] finds.
+//! slots [`collect_slots`] finds and, from a resolution entry point, carries
+//! a [`PendingSchema`].
+//!
+//! Resolution is explicit: [`PendingSchema::resolve`] (or
+//! [`crate::SimplifiedSchema::resolve_slots`]) asks a [`SlotHost`] for each
+//! slot's value, then runs the same resolution again inside
+//! [`with_values`], where every lowering site [`substitute`]s the values
+//! right after import expansion. The result is an ordinary concrete schema;
+//! the template is never changed.
 //!
 //! See `simplified-schema/docs/topics/language/slots.md`.
+
+mod host;
+mod pending;
+mod substitute;
+
+pub use host::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError, SlotRunRequest};
+pub use pending::{PendingSchema, Template};
+pub(crate) use pending::{Attempt, Replay, resolve_with};
+pub use substitute::{
+    MAX_SLOT_PATTERN_BYTES, SlotKey, SlotValues, active_values, check_slot_pattern, substitute, with_values,
+};
+pub(crate) use substitute::apply_active;
+
+use std::path::Path;
 
 use crate::errors::{SchemaError, UnresolvedSlots};
 use crate::simplified::{
@@ -172,6 +195,96 @@ fn constraint_slots(constraints: &[Constraint], slots: &mut Vec<Slot>) {
         }
         for slot in constraint.slots() {
             push_unique(slots, slot);
+        }
+    }
+}
+
+/// Sets `origin` on every slot of `atom` that has none: the slots of a
+/// definition lifted out of the file `origin` evaluate in that file's
+/// context wherever the definition is used.
+pub(crate) fn stamp_atom_origin(atom: &mut PropertyAtom, origin: &Path) {
+    visit_atom_slots_mut(atom, &mut |slot| {
+        if slot.origin.is_none() {
+            slot.origin = Some(origin.to_path_buf());
+        }
+    });
+}
+
+/// [`stamp_atom_origin`] for a whole declaration.
+pub(crate) fn stamp_root_origin(root: &mut SchemaRoot, origin: &Path) {
+    let mut stamp = |slot: &mut Slot| {
+        if slot.origin.is_none() {
+            slot.origin = Some(origin.to_path_buf());
+        }
+    };
+    match root {
+        SchemaRoot::Single(shape) => visit_shape_slots_mut(shape, &mut stamp),
+        SchemaRoot::Union(arms) => {
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    visit_shape_slots_mut(shape, &mut stamp);
+                }
+            }
+        }
+    }
+}
+
+fn visit_shape_slots_mut(shape: &mut SchemaShape, visit: &mut dyn FnMut(&mut Slot)) {
+    for def in shape.properties.values_mut() {
+        visit_def_slots_mut(def, visit);
+    }
+    for pattern in &mut shape.pattern_keys {
+        visit_def_slots_mut(&mut pattern.def, visit);
+    }
+    visit_constraint_slots_mut(&mut shape.constraints, visit);
+}
+
+fn visit_def_slots_mut(def: &mut PropertyDef, visit: &mut dyn FnMut(&mut Slot)) {
+    match def {
+        PropertyDef::Single(atom) => visit_atom_slots_mut(atom, visit),
+        PropertyDef::Union(atoms) => atoms.iter_mut().for_each(|atom| visit_atom_slots_mut(atom, visit)),
+    }
+}
+
+fn visit_atom_slots_mut(atom: &mut PropertyAtom, visit: &mut dyn FnMut(&mut Slot)) {
+    visit_constraint_slots_mut(&mut atom.constraints, visit);
+    match &mut atom.ty {
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Ref(_) => {}
+        TypeExpr::InlineObject(shape) => visit_shape_slots_mut(shape, visit),
+        TypeExpr::Union(atoms) => atoms.iter_mut().for_each(|atom| visit_atom_slots_mut(atom, visit)),
+        TypeExpr::Tuple(tuple) => {
+            for element in &mut tuple.elements {
+                visit_def_slots_mut(&mut element.def, visit);
+            }
+            if let Some(spread) = &mut tuple.spread {
+                visit_atom_slots_mut(spread, visit);
+            }
+        }
+        TypeExpr::Function(function) => {
+            if let FunctionParameters::List(parameters) = &mut function.parameters {
+                for parameter in parameters {
+                    visit_def_slots_mut(&mut parameter.def, visit);
+                }
+            }
+            visit_def_slots_mut(&mut function.returns, visit);
+        }
+    }
+    visit_constraint_slots_mut(&mut atom.array_constraints, visit);
+}
+
+fn visit_constraint_slots_mut(constraints: &mut [Constraint], visit: &mut dyn FnMut(&mut Slot)) {
+    for constraint in constraints {
+        match constraint {
+            Constraint::Property { declaration, .. } => visit_def_slots_mut(declaration, visit),
+            Constraint::Dynamic(list) => {
+                for element in &mut list.elements {
+                    if let crate::simplified::DynamicElement::Slot(slot) = element {
+                        visit(slot);
+                    }
+                }
+            }
+            Constraint::DynamicValue { slot, .. } => visit(slot),
+            _ => {}
         }
     }
 }

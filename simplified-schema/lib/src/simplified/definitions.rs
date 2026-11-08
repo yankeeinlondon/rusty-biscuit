@@ -81,6 +81,19 @@ pub enum DefNamespace {
 }
 
 impl DefNamespace {
+    /// The file this namespace was authored in: a schema file or a trigger
+    /// file, by canonical path; `None` for a document's inline `$schema` and
+    /// for embedded and shipped documents.
+    pub fn file(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::File(path)
+            | Self::FileRootUnionArm(path, _)
+            | Self::TriggerPayload(path)
+            | Self::TriggerPayloadUnionArm(path, _) => Some(path),
+            Self::InlineRoot | Self::RootUnionArm(_) | Self::Embedded(_) | Self::Shipped(_) => None,
+        }
+    }
+
     /// The public identity of the source this namespace was authored in.
     pub fn source_id(&self) -> SchemaSourceId {
         match self {
@@ -162,6 +175,11 @@ impl DefinitionTable {
     /// Every definition, in allocation order.
     pub fn iter(&self) -> impl Iterator<Item = (&DefKey, &Definition)> {
         self.entries.iter()
+    }
+
+    /// Every definition's body, in allocation order, for slot substitution.
+    pub(crate) fn bodies_mut(&mut self) -> impl Iterator<Item = &mut PropertyDef> {
+        self.entries.values_mut().map(|definition| &mut definition.body)
     }
 
     /// What `key`'s value is at its top level, looking through a body that

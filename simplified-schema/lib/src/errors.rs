@@ -29,6 +29,8 @@
 //!   file.
 //! - [`SchemaError::UnresolvedSlots`] — the schema is a template holding
 //!   `{{ … }}` slots and cannot be lowered until they are resolved.
+//! - [`SchemaError::SlotResult`] — a resolved slot's value cannot fill its
+//!   position.
 //! - [`SchemaError::FrontmatterShape`] — `$schema` is present in frontmatter
 //!   but is not a YAML mapping/sequence/string.
 
@@ -189,17 +191,69 @@ impl fmt::Display for NotSchemaReason {
 /// Each slot carries its authored span (in the type-expression string, or
 /// the whole YAML or Markdown document once source-aware parsing projected
 /// it) and its defining file when it was reached through an import.
+///
+/// `pending` is the handle that resolves the template: set by the public
+/// resolution entry points (`resolve::resolve_yaml_schema_owned_by` and the
+/// functions delegating to it, `resolve::prepare_standalone_yaml_schema`),
+/// `None` where the schema cannot be resolved from the call that met it.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct UnresolvedSlots {
     /// Every slot of the schema, in declaration order, each once.
     pub slots: Vec<Slot>,
+    /// How to resolve the template, when the call that met it can.
+    pub pending: Option<crate::slots::PendingSchema>,
+    /// The expanded template the slots were found in, kept for
+    /// [`crate::slots::PendingSchema::template`].
+    pub(crate) template: Option<crate::slots::Template>,
 }
 
 impl UnresolvedSlots {
-    /// The unresolved slots `slots`.
+    /// The unresolved slots `slots`, with no resolution handle.
     pub fn new(slots: Vec<Slot>) -> Self {
-        Self { slots }
+        Self { slots, pending: None, template: None }
+    }
+
+    /// `slots`, found in the expanded `template`.
+    pub(crate) fn with_template(slots: Vec<Slot>, template: crate::slots::Template) -> Self {
+        Self { slots, pending: None, template: Some(template) }
+    }
+}
+
+/// What is wrong with a value a `{{ … }}` slot produced
+/// ([`SchemaError::SlotResult`]).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum SlotResultKind {
+    /// The list's slots produced no element and the list has no literal one.
+    Empty,
+    /// The value is not the JSON shape the position takes.
+    WrongShape {
+        /// The shape the position takes.
+        expected: &'static str,
+        /// The JSON kind the slot produced (`null`, `boolean`, `number`,
+        /// `string`, `array`, `mapping`), naming the element for a list.
+        found: String,
+    },
+    /// The value has the right shape but the position cannot take it: a
+    /// number outside the numeric model, a negative or fractional count, a
+    /// bound that crosses its counterpart, a default the type rejects or that
+    /// disagrees with another.
+    Inadmissible(String),
+    /// A slot-supplied pattern the linear regex engine must not take: a
+    /// lookaround, a backreference, more than
+    /// [`MAX_SLOT_PATTERN_BYTES`](crate::slots::MAX_SLOT_PATTERN_BYTES), or a
+    /// pattern that does not compile within the default size limit.
+    PatternRejected(String),
+}
+
+impl fmt::Display for SlotResultKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("the list is empty: its slots produced no element and it has no literal one"),
+            Self::WrongShape { expected, found } => write!(f, "expected {expected}, found {found}"),
+            Self::Inadmissible(reason) | Self::PatternRejected(reason) => f.write_str(reason),
+        }
     }
 }
 
@@ -280,6 +334,17 @@ pub enum SchemaError {
     /// schema.
     #[error("{0}")]
     UnresolvedSlots(Box<UnresolvedSlots>),
+
+    /// A `{{ … }}` slot's value cannot fill its position. `slot.span` (in
+    /// `slot.origin`'s file when set) is where it is reported; resolution
+    /// stops at the first such value and publishes nothing.
+    #[error("the value of `{{{{ {} }}}}` cannot be used here: {kind}", slot.expression)]
+    SlotResult {
+        /// The slot that produced the value.
+        slot: Box<Slot>,
+        /// What is wrong with it.
+        kind: SlotResultKind,
+    },
 
     /// A `$schema` file reference could not be resolved: the syntax is
     /// invalid, or biscuit-file rejected it. A reference that resolves but
@@ -852,6 +917,19 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         .collect::<Vec<_>>(),
                 )
                 .hint("Resolve the schema's slots explicitly before validating documents against it."),
+
+            SchemaError::SlotResult { slot, kind } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "slot value cannot be used"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Slot:</dim> <cyan>{}</cyan> <dim>(bytes {}..{})</dim>",
+                        Prose::escape_text(&format!("{{{{ {} }}}}", slot.expression)),
+                        slot.span.start,
+                        slot.span.end
+                    )),
+                    Prose::new(format!("<dim>Problem:</dim> {}", Prose::escape_text(&kind.to_string()))),
+                ])
+                .hint("Change the slot's expression or the data it reads so it yields a value the position takes."),
 
             SchemaError::Convert { property, message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

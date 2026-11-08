@@ -5,15 +5,15 @@
 
 use serde_json::Value;
 
-use super::{BoundCall, FunctionBinding, ResolutionContext, command_exists};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext, command_exists};
 use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::compose::shell_expansion::probe::ShellClasses;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::context("has_alias", &[], has_alias_fn),
-    FunctionBinding::context("has_builtin_function", &[], has_builtin_function_fn),
-    FunctionBinding::context("has_user_function", &[], has_user_function_fn),
-    FunctionBinding::context("can_execute", &[], can_execute_fn),
+    FunctionBinding::context("has_alias", &[], has_alias_fn).slot(SlotClass::Rejected),
+    FunctionBinding::context("has_builtin_function", &[], has_builtin_function_fn).slot(SlotClass::Rejected),
+    FunctionBinding::context("has_user_function", &[], has_user_function_fn).slot(SlotClass::Rejected),
+    FunctionBinding::context("can_execute", &[], can_execute_fn).slot(SlotClass::Rejected),
 ];
 
 /// Like `has_command`, a `null` or empty name is simply not a command, so it
@@ -41,7 +41,7 @@ fn has_user_function_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Re
 /// `has_binary` first: a name found without the shell never launches a
 /// profile, and one launch answers the other three disjuncts together.
 fn can_execute_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    if call.args().text(0).is_some_and(command_exists) {
+    if call.args().text(0).is_some_and(|raw| command_exists(raw, context)) {
         return Ok(Value::Bool(true));
     }
     Ok(Value::Bool(classify(call, context).any()))

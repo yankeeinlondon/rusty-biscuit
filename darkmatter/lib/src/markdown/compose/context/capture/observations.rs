@@ -16,7 +16,7 @@ use sniff::network::ScopedIpAddr;
 use sniff::programs::{ExecutableIndex, InstalledAiClients};
 
 use super::super::repository_scope::{PackageLookup, RepositoryObservation};
-use super::{ContextGroup, ContextRequirements};
+use super::{CapturedClock, ClockReading, ContextGroup, ContextRequirements};
 
 /// Observations retained for expression functions.
 ///
@@ -33,9 +33,23 @@ pub(crate) struct CapturedObservations {
     /// never pays for it; every clone shares the one scan, so all calls in a
     /// request observe the same answer.
     agentic_clis: Option<Arc<OnceLock<InstalledAiClients>>>,
+    /// The request's clock reading, read by the date functions. A capture
+    /// seeds it with the reading `ctx.now` came from; an uncaptured set reads
+    /// the clock once, on first use.
+    clock: CapturedClock,
 }
 
 impl CapturedObservations {
+    pub(super) fn with_clock(mut self, reading: ClockReading) -> Self {
+        self.clock = CapturedClock::seeded(reading);
+        self
+    }
+
+    /// The request's clock (see [`CapturedClock`]).
+    pub(crate) fn clock(&self) -> &CapturedClock {
+        &self.clock
+    }
+
     pub(super) fn with_packages(mut self, root: Option<&Path>, repo: Option<&RepoInfo>) -> Self {
         self.packages = Some(Arc::new(PackageLookup::new(root, repo)));
         self.repository = Some(Arc::new(RepositoryObservation {
@@ -62,6 +76,11 @@ impl CapturedObservations {
         let observed = OnceLock::new();
         let _ = observed.set(installed);
         Self { agentic_clis: Some(Arc::new(observed)), ..Self::default() }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_clock(reading: ClockReading) -> Self {
+        Self::default().with_clock(reading)
     }
 
     #[cfg(test)]
@@ -111,6 +130,11 @@ impl CapturedObservations {
         }
         if self.agentic_clis.is_none() && groups.contains(ContextGroup::Agent) {
             self.agentic_clis.clone_from(&other.agentic_clis);
+        }
+        // Adopted date/time values come from `other`'s reading, so the date
+        // functions must read it too.
+        if groups.contains(ContextGroup::DateTime) {
+            self.clock.clone_from(&other.clock);
         }
     }
 }

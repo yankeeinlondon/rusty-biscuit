@@ -14,27 +14,6 @@ use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::expression::{Expr, ExpressionFinder, parse};
 use crate::markdown::compose::transclusion::BlockDirective;
 
-/// Expression-function identifiers whose first argument is a file/URL path the
-/// evaluator will actually **fetch over the network** when it is an HTTP(S) URL.
-///
-/// This is deliberately narrower than the context-requiring read-side set
-/// (the context-aware expression registrations): `absolute` and
-/// `relative` also require a resolution context but only ever rewrite a path
-/// string — they never touch the network — so registering them as remote
-/// egress would make the pre-fetch discovery scanner contact a host for a URL
-/// that is never actually read. Membership is an **exact** match — a longer
-/// identifier such as `not_frontmatter` is deliberately excluded so it never
-/// registers network egress.
-const REMOTE_READ_FUNCTIONS: &[&str] = &[
-    "frontmatter",
-    "try_frontmatter",
-    "file_exists",
-    "markdown_title",
-    "markdown_body_empty",
-    "validate_schema",
-    "load_data",
-];
-
 /// What kind of directive or expression is consuming a remote URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteUrlConsumer {
@@ -298,12 +277,13 @@ pub fn discover_remote_urls_from_directives(
 ///
 /// Discovery is driven by the same parser the evaluator uses: only genuine
 /// `{{ … }}` expressions are considered (fenced/indented code blocks are
-/// skipped), each is parsed to an AST, and a URL is registered only for an
-/// exact-identifier [`REMOTE_READ_FUNCTIONS`] call whose first argument is a
-/// string literal that validates as an `http(s)` URL. Prose, inline code, and
-/// longer identifiers that merely *contain* a function name therefore never
-/// trigger network egress — an allowlisted host is contacted only for inputs
-/// the evaluator would actually read.
+/// skipped), each is parsed to an AST, and a URL is registered only for a
+/// call the evaluator dispatches to a URL-fetching function (see
+/// [`fetches_url`]) whose first argument is a string literal that validates
+/// as an `http(s)` URL. Prose, inline code, and longer identifiers that
+/// merely *contain* a function name therefore never trigger network egress —
+/// an allowlisted host is contacted only for inputs the evaluator would
+/// actually read.
 pub fn discover_remote_urls_from_expressions(
     content: &str,
     source: &ComposeSource,
@@ -415,8 +395,8 @@ pub fn check_remote_read_allowed(
 }
 
 /// Recursively walks a parsed expression, registering a remote URL for every
-/// exact-identifier [`REMOTE_READ_FUNCTIONS`] call whose first argument is a
-/// string-literal `http(s)` URL. Recurses into all sub-expressions so calls
+/// [`fetches_url`] call whose first argument is a string-literal `http(s)`
+/// URL. Recurses into all sub-expressions so calls
 /// nested inside ternaries, comparisons, fallbacks, or other function
 /// arguments are still discovered.
 fn collect_expression_urls(
@@ -426,7 +406,7 @@ fn collect_expression_urls(
     results: &mut Vec<DiscoveredRemoteUrl>,
 ) {
     if let Expr::FunctionCall { name, args } = expr
-        && REMOTE_READ_FUNCTIONS.contains(&name.as_str())
+        && fetches_url(name)
         && let Some(Expr::StringLiteral(raw)) = args.first()
         && let Ok(url) = validate_url_for_remote_read(raw)
     {
@@ -444,15 +424,24 @@ fn collect_expression_urls(
     }
 }
 
-/// Whether `expr` calls a read-side function (one that records into the
-/// read set) anywhere, callbacks included.
+/// Whether a call to `name` dispatches to a built-in that fetches an HTTP(S)
+/// URL given as its first argument (`load_data`, `frontmatter`,
+/// `file_exists`, …): the registration's read fact, never a hand-kept list.
 ///
-/// Names compare without underscores or case, so an alias such as
-/// `markdownbodyempty` counts as its function.
+/// `name` is resolved exactly as the evaluator resolves it (case folded,
+/// then canonical name or alias), so `LOAD_DATA` and `loaddata` count, while
+/// a longer identifier such as `not_frontmatter` never does. Functions that
+/// only shape a path (`absolute`, `relative`) never fetch, so they never
+/// register egress.
+pub(crate) fn fetches_url(name: &str) -> bool {
+    crate::markdown::compose::expression::functions::read_fact(name).is_some_and(|fact| fact.remote)
+}
+
+/// Whether `expr` calls a URL-reading function ([`fetches_url`]) anywhere,
+/// callbacks included.
 pub(crate) fn calls_read_side_function(expr: &Expr) -> bool {
-    let fold = |name: &str| name.replace('_', "").to_ascii_lowercase();
     if let Expr::FunctionCall { name, .. } = expr
-        && REMOTE_READ_FUNCTIONS.iter().any(|read| fold(read) == fold(name))
+        && fetches_url(name)
     {
         return true;
     }
@@ -658,6 +647,32 @@ mod tests {
 {{ markdown_title(\"https://c.com/f.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 3);
+    }
+
+    /// Discovery resolves a name the way the evaluator dispatches it, so an
+    /// alias or another case is found up front, while a longer identifier, a
+    /// path-shaping function, and a function that only probes locally are not.
+    #[test]
+    fn discovery_folds_case_and_aliases_as_evaluation_does() {
+        let content = "\
+{{ loaddata(\"https://a.com/hosts.yaml\", \"string[]\") }}
+{{ LOAD_DATA(\"https://b.com/hosts.yaml\", \"string[]\") }}
+{{ MarkdownTitle(\"https://c.com/page.md\") }}
+{{ not_frontmatter(\"https://d.com/f.md\") }}
+{{ absolute(\"https://e.com/f.md\") }}
+{{ find_files(\"https://f.com/*.md\") }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        let hosts: Vec<_> = results.iter().map(|result| result.url.host_str().unwrap().to_string()).collect();
+        assert_eq!(hosts, ["a.com", "b.com", "c.com"]);
+    }
+
+    #[test]
+    fn a_read_side_call_is_recognized_by_its_dispatched_name() {
+        let read = |text: &str| calls_read_side_function(&parse(text).unwrap());
+        assert!(read("loaddata('a.yaml', 'string[]')"));
+        assert!(read("x || Frontmatter('a.md')"));
+        assert!(!read("absolute('a.md')"));
+        assert!(!read("not_frontmatter('a.md')"));
     }
 
     #[test]

@@ -42,7 +42,9 @@ use serde_json::Value;
 
 use crate::outcome::{ValidationFailure, ValidationSuccess};
 use crate::prepared::Prepared;
+use crate::resolve::buffers;
 use crate::simplified::Slot;
+use crate::slots::{self, Attempt, SlotHost, SlotResolutionError};
 use crate::{SchemaAdvisory, SchemaError};
 
 pub use error::SimplifiedSchemaError;
@@ -178,6 +180,82 @@ impl SimplifiedSchema {
     /// reads nothing.
     pub fn pending_slots(&self) -> &[Slot] {
         &self.definition.pending
+    }
+
+    /// Resolves the template's slots through `host` and returns a new,
+    /// concrete schema: the same construction run again with the slots'
+    /// values substituted right after import expansion, reading the schema
+    /// texts the first build read. The template is never changed, so each
+    /// call starts from it; a concrete schema returns a clone of itself.
+    ///
+    /// Slots are admitted, then evaluated, in the context of the schema's
+    /// binding (none for content), each in its defining file
+    /// ([`Slot::origin`]).
+    ///
+    /// ```
+    /// use serde_json::{Value, json};
+    /// use simplified_schema::{SimplifiedSchema, Slot};
+    /// use simplified_schema::slots::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest};
+    ///
+    /// struct Fixed;
+    /// impl SlotHost for Fixed {
+    ///     fn admit(&self, _: &Slot) -> Result<(), SlotAdmissionError> { Ok(()) }
+    ///     fn resolve(&self, _: &SlotRequest<'_>) -> Result<Value, SlotFailure> { Ok(json!(["macOS", "Linux"])) }
+    /// }
+    ///
+    /// let template = SimplifiedSchema::try_from("$schema:\n  os: enum(none, {{ os_list }})\n")?;
+    /// let concrete = template.resolve_slots(&Fixed)?;
+    /// assert!(concrete.validate_strict(&json!({ "os": "Linux" })).is_ok());
+    /// assert!(!template.is_resolved(), "the template is unchanged");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// [`SlotResolutionError`]: refused slots, failed evaluations, a value
+    /// that cannot fill its position ([`SchemaError::SlotResult`]), or
+    /// cancellation. Nothing is published.
+    pub fn resolve_slots(&self, host: &dyn SlotHost) -> Result<Self, SlotResolutionError> {
+        if self.is_resolved() {
+            return Ok(self.clone());
+        }
+        let layer = self.top();
+        // Layering refuses a template, so a template has one layer.
+        let rebuild = match (&layer.rebuild, self.definition.layers.len()) {
+            (Some(rebuild), 1) => rebuild.clone(),
+            _ => {
+                return Err(SlotResolutionError::Schema(Box::new(SchemaError::UnresolvedSlots(Box::new(
+                    crate::UnresolvedSlots::new(self.pending_slots().to_vec()),
+                )))));
+            }
+        };
+        let context = layer.binding.as_ref().map_or_else(layer::content_context, |binding| binding.context.clone());
+        let source_name = layer.provenance.path.clone().unwrap_or_else(|| std::path::PathBuf::from(layer::CONTENT));
+        let resolved = slots::resolve_with(host, &context, self.pending_slots().to_vec(), |values| {
+            let rebuilt = buffers::with(&rebuild.buffers, || slots::with_values(values, || (rebuild.build)()));
+            let layer = match rebuilt {
+                Ok(layer) => layer,
+                Err(SimplifiedSchemaError::Schema(error)) => return Attempt::Failed(error),
+                // The text built once already; only its schema can fail.
+                Err(other) => {
+                    return Attempt::Failed(SchemaError::SchemaDocument {
+                        path: source_name.clone(),
+                        message: other.to_string(),
+                        source: None,
+                        span: None,
+                    });
+                }
+            };
+            let outcome = match layer.lowered.as_ref().err().map(Arc::as_ref) {
+                Some(SchemaError::UnresolvedSlots(unresolved)) => Some(Attempt::Unresolved(unresolved.slots.clone())),
+                Some(SchemaError::SlotResult { slot, kind }) => {
+                    Some(Attempt::Failed(SchemaError::SlotResult { slot: slot.clone(), kind: kind.clone() }))
+                }
+                _ => None,
+            };
+            outcome.unwrap_or(Attempt::Done(layer))
+        })?;
+        Ok(Self::from_layer(resolved))
     }
 
     /// The definition revision: `0` when built, bumped by each layering call

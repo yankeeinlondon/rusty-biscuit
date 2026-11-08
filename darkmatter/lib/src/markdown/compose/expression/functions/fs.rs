@@ -113,7 +113,7 @@ pub(crate) fn resolve_arg(
     })
 }
 
-pub(super) fn parse_file_ref(
+pub(crate) fn parse_file_ref(
     function: &'static str,
     raw: &str,
     ctx: &ResolutionContext,
@@ -162,6 +162,7 @@ pub fn absolute_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Valu
     };
     reject_remote_url("absolute", raw)?;
     let file_ref = parse_file_ref("absolute", raw, ctx)?;
+    observe_reference_probes(&file_ref, ctx);
     let typed = |e: biscuit_file::FileReferenceError| {
         file_reference_error("absolute", raw, ctx, FileRefFailure::classify(&e), Some(e))
     };
@@ -213,8 +214,11 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
         return Ok(Value::Bool(false));
     };
     if file_ref.class().kind == biscuit_file::FileReferenceKind::Url {
+        ctx.authorize_slot_read("file_exists", ReadKind::Probe, || remote_location(&normalized))?;
         record_url_read(ctx, &normalized);
-        return match ctx.fetch_remote_text(&normalized) {
+        let fetched = ctx.fetch_remote_text(&normalized);
+        observe_url_body(ctx, &normalized, fetched.as_ref().ok().and_then(Option::as_deref));
+        return match fetched {
             Ok(Some(_)) => Ok(Value::Bool(true)),
             Ok(None) => Err(file_reference_error("file_exists", raw, ctx, FileRefFailure::RemoteNotEnabled, None)),
             Err(error) => Err(remote_text_error("file_exists", raw, ctx, error)),
@@ -223,17 +227,17 @@ pub fn file_exists_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<V
     let found = resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
         .map_err(|e| file_reference_error("file_exists", raw, ctx, FileRefFailure::classify(&e), Some(e)))?;
     match &found {
-        Some(path) => ctx.data.record_local(path),
+        Some(path) => ctx.data.observe_existence(path, true),
         None => record_probed_candidates(&file_ref, ctx),
     }
     Ok(Value::Bool(found.is_some()))
 }
 
-/// Records the candidates a clean miss probed: an absent file is an
-/// observation too, and creating any of them would change the answer. A
-/// recursive (`%`) reference's candidates are search folders, not files, so
-/// it records nothing.
-fn record_probed_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) {
+/// Records the candidates a clean miss probed as missing probes: an absent
+/// file is an observation too, and creating any of them would change the
+/// answer. A recursive (`%`) reference's candidates are search folders, not
+/// files, so it records nothing.
+pub(crate) fn record_probed_candidates(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) {
     if file_ref.class().recursive {
         return;
     }
@@ -243,7 +247,7 @@ fn record_probed_candidates(file_ref: &biscuit_file::FileReference, ctx: &Resolu
         return;
     };
     for candidate in candidates {
-        ctx.data.record_local(candidate.path());
+        ctx.data.observe_existence(candidate.path(), false);
     }
 }
 
@@ -255,37 +259,80 @@ fn record_url_read(ctx: &ResolutionContext, raw: &str) {
     }
 }
 
+/// The gate location of the URL `raw` names; `None` for text that is not a
+/// URL, which is never fetched.
+fn remote_location(raw: &str) -> Option<crate::markdown::compose::expression::read_gate::ReadLocation> {
+    url::Url::parse(raw).ok().map(crate::markdown::compose::expression::read_gate::ReadLocation::Remote)
+}
+
+/// Observes the fetch of the URL `raw` names: the hash of `body`, or no hash
+/// when nothing was fetched.
+fn observe_url_body(ctx: &ResolutionContext, raw: &str, body: Option<&str>) {
+    if let Ok(url) = url::Url::parse(raw) {
+        let identity = crate::markdown::compose::expression::data::DataSourceIdentity::Remote(Box::new(url));
+        ctx.data.observe_read(&identity, body.map(|body| biscuit_hash::blake3_hash_bytes(body.as_bytes())));
+    }
+}
+
+/// Observes what resolving `file_ref` probed: each candidate in resolution
+/// order up to the first that exists, so creating an earlier candidate, or
+/// removing the one found, is a change. A recursive (`%`) reference searches
+/// folders rather than probing files, so it observes nothing.
+pub(super) fn observe_reference_probes(file_ref: &biscuit_file::FileReference, ctx: &ResolutionContext) {
+    if file_ref.class().recursive || file_ref.class().kind == biscuit_file::FileReferenceKind::Url {
+        return;
+    }
+    let Ok(candidates) =
+        file_ref.candidate_plan_with_order(&ctx.file_context(), biscuit_file::CandidatePlanOrder::Resolution)
+    else {
+        return;
+    };
+    for candidate in candidates {
+        let exists = candidate.path().exists();
+        ctx.data.observe_existence(candidate.path(), exists);
+        if exists {
+            break;
+        }
+    }
+}
+
 /// `has_command(cmd: string | null) -> bool` — pure existence/executability
-/// probe for a host command. Reports whether `cmd` is on `PATH` or is an
-/// existing executable path; it **never executes** the command. `null` and
-/// empty text read as `false`; a number or boolean arrives converted to text,
-/// so `has_command(true)` looks for a command named `true`.
+/// probe for a host command. Reports whether `cmd` is on the request's
+/// captured `PATH` or is an existing executable path; it **never executes**
+/// the command. `null` and empty text read as `false`; a number or boolean
+/// arrives converted to text, so `has_command(true)` looks for a command
+/// named `true`.
 ///
 /// Only two input shapes can probe: a bare name (`PATH` search) and an
 /// absolute path (exists + executable, delegated to `which`). Any other
 /// path-shaped input — `./mytool`, `bin/mytool`, `~/bin/mytool`, or a Windows
 /// drive-relative `C:mytool` — reads as `false`: it is neither tilde-expanded
 /// nor resolved against the resolution context or the process CWD.
-pub fn has_command_fn(call: &BoundCall<'_>, _ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    Ok(Value::Bool(call.args().text(0).is_some_and(command_exists)))
+///
+/// The search path is the `PATH` of the request's captured environment, never
+/// the process's: a request without one finds no bare name.
+pub fn has_command_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    Ok(Value::Bool(call.args().text(0).is_some_and(|raw| command_exists(raw, ctx))))
 }
 
 /// Whether `raw` names a command [`has_command_fn`] finds; `false` for empty
 /// text. Shared with `can_execute`, which checks it before any shell probe.
-pub(super) fn command_exists(raw: &str) -> bool {
+pub(super) fn command_exists(raw: &str, ctx: &ResolutionContext) -> bool {
     if raw.is_empty() {
         return false;
     }
-    // `which::which` resolves relative paths against the process CWD, which
-    // would make document truth depend on where the composer was launched —
-    // reject them before probing. The multi-component test mirrors `which`'s
-    // own separator detection and also catches Windows drive-relative inputs
-    // (`C:mytool` parses as Prefix + Normal but is not absolute).
+    // `which` resolves relative paths against the directory it is given,
+    // which would make document truth depend on where the composer was
+    // launched — reject them before probing. The multi-component test mirrors
+    // `which`'s own separator detection and also catches Windows
+    // drive-relative inputs (`C:mytool` parses as Prefix + Normal but is not
+    // absolute).
     let path = std::path::Path::new(raw);
     if !path.is_absolute() && path.components().count() > 1 {
         return false;
     }
-    which::which(raw).is_ok()
+    let search_path = ctx.file_resolution_context.env().get("PATH");
+    which::which_in(raw, search_path, &ctx.cwd).is_ok()
 }
 
 /// `relative(file) -> file | Error::InvalidFilePath`
@@ -296,6 +343,9 @@ pub fn relative_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Valu
     let Some(raw) = call.args().text(0) else {
         return Ok(Value::Null);
     };
+    if let Ok(file_ref) = parse_file_ref("relative", raw, ctx) {
+        observe_reference_probes(&file_ref, ctx);
+    }
     let abs = match resolve_arg("relative", raw, ctx)? {
         Some(p) => p,
         None => {
@@ -350,6 +400,7 @@ pub(super) fn resolve_anchored_path_shape(
 ) -> Result<PathShape, ExpressionError> {
     reject_remote_url(name, raw)?;
     let file_ref = parse_file_ref(name, raw, ctx)?;
+    observe_reference_probes(&file_ref, ctx);
     // The shared shaper builds the same candidate plan execution probes
     // (document-first for implicit references), so a missing target's shape
     // is the first shared candidate rather than a source-first join.
@@ -550,9 +601,11 @@ pub(super) fn find_index_endpoint(
         .map(|(base, _, _)| base)
         .unwrap_or(input_stem);
 
+    let listed = crate::markdown::compose::expression::data::DataSourceIdentity::local(parent).read_set_entry();
     let entries = match std::fs::read_dir(parent) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            ctx.data.observe_existence(parent, false);
             return Ok(Value::String(render_built_path(&input, absolute_input, ctx)));
         }
         Err(error) => {
@@ -563,11 +616,13 @@ pub(super) fn find_index_endpoint(
         }
     };
     let mut candidates = Vec::<(Option<u64>, String)>::new();
+    let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
             expression_other(name, format!("failed to read {}: {error}", parent.display()))
         })?;
         let actual_name = entry.file_name().to_string_lossy().into_owned();
+        names.push(actual_name.clone());
         if file_extension(&actual_name) != input_extension {
             continue;
         }
@@ -584,6 +639,7 @@ pub(super) fn find_index_endpoint(
         };
         candidates.push((ordinal, actual_name));
     }
+    ctx.data.observe_listing(crate::markdown::compose::expression::data::ObservationKind::Listing, listed, names);
     candidates.sort();
     let selected = match endpoint {
         IndexEndpoint::First => candidates.first(),
@@ -938,9 +994,15 @@ pub(super) fn validate_skill_name(name: &str) -> bool {
         && components.next().is_none()
 }
 
-/// Checks whether a direct child directory named `name` exists under any root.
-pub(super) fn skill_exists_in_roots(roots: &[PathBuf], name: &str) -> bool {
-    roots.iter().any(|root| root.join(name).is_dir())
+/// Checks whether a direct child directory named `name` exists under any
+/// root, observing each candidate probed up to the first found.
+pub(super) fn skill_exists_in_roots(roots: &[PathBuf], name: &str, ctx: &ResolutionContext) -> bool {
+    roots.iter().any(|root| {
+        let candidate = root.join(name);
+        let exists = candidate.is_dir();
+        ctx.data.observe_existence(&candidate, exists);
+        exists
+    })
 }
 
 /// `has_skill(name)` — `true` when a direct child directory named `name` exists
@@ -968,7 +1030,7 @@ pub fn has_skill_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Val
         .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.cwd.clone());
     let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
-    Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
+    Ok(Value::Bool(skill_exists_in_roots(&roots, name, ctx)))
 }
 
 /// `has_local_skill(name)` — `true` when a direct child directory named `name`
@@ -996,7 +1058,7 @@ pub fn has_local_skill_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
         .map(Path::to_path_buf)
         .unwrap_or_else(|| ctx.cwd.clone());
     let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
-    Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
+    Ok(Value::Bool(skill_exists_in_roots(&roots, name, ctx)))
 }
 
 /// Loads a Markdown file via the resolution context. `Err` if the path is
@@ -1009,8 +1071,11 @@ pub(super) fn load_markdown(
     // HTTP(S) arguments read from the run's remote-fetch cache instead of disk,
     // mirroring how `::file`/`::code` directives resolve remote targets.
     if is_remote_url(raw) {
+        ctx.authorize_slot_read(fname, ReadKind::Content, || remote_location(raw))?;
         record_url_read(ctx, raw);
-        return match ctx.fetch_remote_text(raw).map_err(|error| remote_text_error(fname, raw, ctx, error))? {
+        let fetched = ctx.fetch_remote_text(raw);
+        observe_url_body(ctx, raw, fetched.as_ref().ok().and_then(Option::as_deref));
+        return match fetched.map_err(|error| remote_text_error(fname, raw, ctx, error))? {
             Some(body) => Markdown::try_from_content(body).map_err(|e| {
                 expression_other(fname, format!("{fname}() failed to parse {raw:?}: {e}"))
             }),
@@ -1023,18 +1088,35 @@ pub(super) fn load_markdown(
             )),
         };
     }
-    let path = resolve_arg(fname, raw, ctx)?.ok_or_else(|| {
-        file_reference_error(fname, raw, ctx, FileRefFailure::NotFound, None)
+    let Some(path) = resolve_arg(fname, raw, ctx)? else {
+        // Creating any probed candidate would change the answer.
+        if let Ok(file_ref) = parse_file_ref(fname, raw, ctx) {
+            record_probed_candidates(&file_ref, ctx);
+        }
+        return Err(file_reference_error(fname, raw, ctx, FileRefFailure::NotFound, None));
+    };
+    ctx.authorize_slot_read(fname, ReadKind::Content, || {
+        Some(crate::markdown::compose::expression::read_gate::ReadLocation::Local(path.clone()))
     })?;
     // Recorded before reading, so a file that resolves but fails to read or
     // parse is still a dependency.
     ctx.data.record_local(&path);
+    let identity = crate::markdown::compose::expression::data::DataSourceIdentity::local(&path);
     // A reference that resolved but cannot be read (permissions, a race delete)
     // is still a file-reference failure: surface it through the shared
     // diagnostic carrying the typed `Io` cause, not an opaque `Other` string, so
     // it renders identically to a missing reference and `frontmatter()` /
     // `markdown_title()` / siblings all inherit the same report.
-    let content = std::fs::read_to_string(&path).map_err(|e| {
+    // Read as a schema source is read, so an editor's open buffer is what a
+    // resolution inside a buffer scope sees; outside one this is the file.
+    let read = simplified_schema::resolve::buffers::read(&path).and_then(|bytes| {
+        let hash = biscuit_hash::blake3_hash_bytes(&bytes);
+        String::from_utf8(bytes)
+            .map(|text| (text, hash))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+    });
+    ctx.data.observe_read(&identity, read.as_ref().ok().map(|(_, hash)| *hash));
+    let content = read.map(|(text, _)| text).map_err(|e| {
         file_reference_error(
             fname,
             raw,
@@ -1090,6 +1172,8 @@ pub fn try_frontmatter_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
                 .collect();
             (true, Value::Object(object), Value::Null)
         }
+        // A slot's refused read is never turned into a value.
+        Err(error @ ExpressionError::SlotReadRefused { .. }) => return Err(error),
         Err(error) => (false, Value::Null, Value::String(error.to_string())),
     };
     let mut outcome = serde_json::Map::new();
@@ -1130,6 +1214,13 @@ pub fn find_files_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Va
     let globs = biscuit_file::GlobReference::new([pattern]).map_err(glob_error)?;
     let listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
     ctx.glob_warnings.record("interpolation", &listing);
+    // The pattern names no single folder, so the listing is observed by the
+    // pattern as written and the matched paths, never added to the read set.
+    ctx.data.observe_listing(
+        crate::markdown::compose::expression::data::ObservationKind::Glob,
+        raw.to_string(),
+        listing.matches.iter().map(|path| biscuit_file::to_portable_string(path)).collect(),
+    );
     Ok(Value::Array(
         listing
             .matches
@@ -1228,13 +1319,21 @@ pub fn validate_schema_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Resu
         return Ok(Value::Bool(true));
     }
     let schemas = DarkmatterSchemas::new(ctx.file_context());
-    let (validated, observed) =
-        simplified_schema::resolve::observed::collect(|| schemas.validate(page));
+    let ((validated, texts), observed) = simplified_schema::resolve::observed::collect(|| {
+        simplified_schema::resolve::buffers::recording(|| schemas.validate(page))
+    });
     // The schema files the preparation read, imports at any depth included,
     // are dependencies of the call like the page itself, also when a later
-    // import fails; an embedded schema reads no file.
+    // import fails; an embedded schema reads no file. Each is observed with
+    // the hash of the text the resolver read.
     for dependency in &observed.read {
+        let identity = crate::markdown::compose::expression::data::DataSourceIdentity::local(dependency);
+        let hash = texts
+            .iter()
+            .find(|(path, _)| crate::markdown::compose::expression::data::DataSourceIdentity::local(path) == identity)
+            .map(|(_, text)| biscuit_hash::blake3_hash_bytes(text.as_bytes()));
         ctx.data.record_local(dependency);
+        ctx.data.observe_read(&identity, hash);
     }
     let report = validated.map_err(|e| {
         let message = format!("validate_schema() error for {raw:?}: {e}");

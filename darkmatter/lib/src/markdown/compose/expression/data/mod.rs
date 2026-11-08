@@ -19,6 +19,9 @@ pub(crate) mod locate;
 pub mod parse;
 pub mod runtime;
 
+#[cfg(test)]
+mod observation_tests;
+
 pub use contract::{
     PreparedContract, RowClassification, RowMode, RowShapeConflict, classify_rows, judge_written_contract, prepare_contract,
     written_contract,
@@ -29,5 +32,6 @@ pub use error::{
 };
 pub use parse::{LocalDataDocument, parse_local_document};
 pub use runtime::{
-    BindEntry, DataRuntime, DataRuntimeStats, DataSourceIdentity, LoadedData, LoadedSource, SourceContent, SourceEntry,
+    BindEntry, DataRuntime, DataRuntimeStats, DataSourceIdentity, LoadedData, LoadedSource, Observation, ObservationKind,
+    ReadMark, SourceContent, SourceEntry,
 };

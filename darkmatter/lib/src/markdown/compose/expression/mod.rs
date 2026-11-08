@@ -87,6 +87,9 @@ pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
 pub mod prepared;
+pub mod read_gate;
+#[cfg(test)]
+mod read_gate_tests;
 pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;

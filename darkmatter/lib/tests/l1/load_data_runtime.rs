@@ -806,15 +806,16 @@ fn a_successful_contract_import_records_the_data_and_the_import() {
 }
 
 /// Every import a failed contract read stays a dependency: the one that
-/// succeeded before the failure and the one that failed. A missing import was
-/// never read and is not recorded; neither is the data file, never reached.
+/// succeeded before the failure and the one that failed. A missing import is
+/// a dependency too, so creating it changes the answer; the data file, never
+/// reached, is not recorded.
 #[test]
 fn a_failed_contract_keeps_every_import_read_before_the_failure() {
     let dir = TempDir::new().unwrap();
     partial_imports(dir.path());
     for (contract, expected) in [
         ("{ a: Good@./good.yaml, b: Missing@./bad.yaml }[]", &["bad.yaml", "good.yaml"][..]),
-        ("{ a: Good@./good.yaml, b: Missing@./absent.yaml }[]", &["good.yaml"][..]),
+        ("{ a: Good@./good.yaml, b: Missing@./absent.yaml }[]", &["absent.yaml", "good.yaml"][..]),
         ("{ o: Outer@./outer.yaml }[]", &["bad.yaml", "good.yaml", "outer.yaml"][..]),
     ] {
         let doc = load_data_doc(dir.path(), contract);

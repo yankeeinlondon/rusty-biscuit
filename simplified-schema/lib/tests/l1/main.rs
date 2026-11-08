@@ -11,6 +11,7 @@ mod context_construction_guard;
 mod declaration_grammar;
 mod declaration_narrowing;
 mod dependency_direction_guard;
+mod dynamic_slots;
 mod envelope_admission;
 mod expression_regions;
 mod expression_scanner;

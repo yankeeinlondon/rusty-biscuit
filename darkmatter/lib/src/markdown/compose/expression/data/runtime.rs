@@ -17,6 +17,15 @@
 //! a new generation with empty maps and leaves the read set alone. A load
 //! already in flight finishes into its old entry for its own caller, and the
 //! generation it started in keeps it from populating the new maps.
+//! [`DataRuntime::memo_generation`] tells a holder of earlier results that
+//! this happened.
+//!
+//! Beside the read set, the runtime keeps an ordered [`Observation`] log:
+//! every input an expression function observed (content with the BLAKE3 hash
+//! of the bytes read, an existence answer, a missing probe, a listing). A
+//! memo hit records its observation again, so a caller that marks the log
+//! ([`DataRuntime::read_mark`]) and reads its slice afterward
+//! ([`DataRuntime::observations_since`]) sees every input it depended on.
 
 use std::collections::{BTreeSet, HashMap};
 use std::hash::Hash;
@@ -80,6 +89,46 @@ fn canonical_or_normalized(path: &Path) -> PathBuf {
     }
 }
 
+/// What kind of input an [`Observation`] records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ObservationKind {
+    /// A local file's bytes were read; the hash is of those bytes.
+    File,
+    /// A URL's body was fetched; the hash is of the body text.
+    Url,
+    /// A target was found to exist; nothing was read.
+    Exists,
+    /// A candidate was probed and absent.
+    MissingProbe,
+    /// A directory was listed; the hash is of the sorted entry names.
+    Listing,
+    /// A glob pattern was listed; the entry is the pattern as written and
+    /// the hash is of the sorted matched paths.
+    Glob,
+}
+
+/// One input an expression function observed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Observation {
+    /// The input: a read-set entry (portable absolute path or URL), or for a
+    /// glob listing the pattern as written.
+    pub entry: String,
+    /// What was observed.
+    pub kind: ObservationKind,
+    /// BLAKE3 of what was read; `None` when nothing was read (an existence
+    /// answer or a probe) or the read failed, so a failure is still a
+    /// dependency.
+    pub hash: Option<[u8; 32]>,
+}
+
+impl Observation {
+    /// Whether [`Self::entry`] names a file, folder, or URL and so also
+    /// belongs in the read set; a glob pattern does not.
+    fn is_read_set_entry(&self) -> bool {
+        self.kind != ObservationKind::Glob
+    }
+}
+
 /// A data document read, decoded, and parsed, before any contract applies.
 #[derive(Debug, Clone)]
 pub struct LoadedSource {
@@ -92,6 +141,10 @@ pub struct LoadedSource {
     /// The size of the document as read (local bytes or fetched text), in
     /// bytes.
     pub bytes: usize,
+    /// BLAKE3 of the bytes as read (local bytes before decoding, or the
+    /// fetched text), kept with the memo entry so a memo hit records the same
+    /// observation.
+    pub hash: [u8; 32],
 }
 
 /// What a source parsed into.
@@ -259,6 +312,10 @@ impl<S, B> DataMemo<S, B> {
         bump(&self.counters.parses);
     }
 
+    fn generation(&self) -> u64 {
+        self.lock().number
+    }
+
     /// Starts a new generation with empty maps.
     pub(crate) fn invalidate(&self) {
         let mut state = self.lock();
@@ -407,7 +464,15 @@ pub struct DataRuntime {
 struct DataRuntimeInner {
     memo: DataMemo<LoadedSource, LoadedData>,
     read_set: Mutex<BTreeSet<String>>,
+    observations: Mutex<Vec<Observation>>,
+    /// What each prepared contract observed, by memo key.
+    contract_observations: Mutex<HashMap<String, Arc<Vec<Observation>>>>,
 }
+
+/// A position in a [`DataRuntime`]'s observation log ([`DataRuntime::read_mark`]).
+/// The default mark is the start of the log.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReadMark(usize);
 
 impl std::fmt::Debug for DataRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -457,9 +522,71 @@ impl DataRuntime {
         self.record(&DataSourceIdentity::Remote(Box::new(url.clone())));
     }
 
+    /// Adds `entry` to the read set as it is: a cached result replays the
+    /// reads its first run recorded, so the command reports what a cold run
+    /// would.
+    pub fn record_entry(&self, entry: &str) {
+        self.read_set_guard().insert(entry.to_string());
+    }
+
+    /// Appends `observation` to the log (and to every [`capture_observations`]
+    /// scope running on this thread), and its entry to the read set when it
+    /// names a file, folder, or URL.
+    pub(crate) fn observe(&self, observation: Observation) {
+        if observation.is_read_set_entry() {
+            self.record_entry(&observation.entry);
+        }
+        CAPTURES.with_borrow_mut(|frames| frames.iter_mut().for_each(|frame| frame.push(observation.clone())));
+        self.observations_guard().push(observation);
+    }
+
+    /// Observes `identity` read with `hash` (`None`: the read failed).
+    pub(crate) fn observe_read(&self, identity: &DataSourceIdentity, hash: Option<[u8; 32]>) {
+        let kind = match identity {
+            DataSourceIdentity::Local(_) => ObservationKind::File,
+            DataSourceIdentity::Remote(_) => ObservationKind::Url,
+        };
+        self.observe(Observation { entry: identity.read_set_entry(), kind, hash });
+    }
+
+    /// Observes whether the local `path` exists, without reading it.
+    pub(crate) fn observe_existence(&self, path: &Path, exists: bool) {
+        let kind = if exists { ObservationKind::Exists } else { ObservationKind::MissingProbe };
+        self.observe(Observation { entry: DataSourceIdentity::local(path).read_set_entry(), kind, hash: None });
+    }
+
+    /// Observes a listing (of the folder `entry`, or of the glob pattern
+    /// `entry` for [`ObservationKind::Glob`]) whose names were `names`.
+    pub(crate) fn observe_listing(&self, kind: ObservationKind, entry: String, mut names: Vec<String>) {
+        names.sort();
+        let hash = biscuit_hash::blake3_hash_bytes(names.join("\0").as_bytes());
+        self.observe(Observation { entry, kind, hash: Some(hash) });
+    }
+
+    fn observations_guard(&self) -> MutexGuard<'_, Vec<Observation>> {
+        self.inner.observations.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The current end of the observation log.
+    pub fn read_mark(&self) -> ReadMark {
+        ReadMark(self.observations_guard().len())
+    }
+
+    /// Every observation recorded after `mark`, in order, duplicates kept.
+    pub fn observations_since(&self, mark: ReadMark) -> Vec<Observation> {
+        self.observations_guard().get(mark.0..).map(<[Observation]>::to_vec).unwrap_or_default()
+    }
+
     /// Empties the memo after a command ran; see the module documentation.
     pub(crate) fn invalidate_memo(&self) {
         self.inner.memo.invalidate();
+    }
+
+    /// The memo's generation: it starts at 0 and grows by one each time
+    /// [`Self::invalidate_memo`] ends reuse after a command ran. A holder of a
+    /// result computed in an earlier generation re-checks what it observed.
+    pub fn memo_generation(&self) -> u64 {
+        self.inner.memo.generation()
     }
 
     /// Counts one parse; called by a source loader.
@@ -490,11 +617,10 @@ impl DataRuntime {
 
     /// The contract `written` describes in the document context `document`,
     /// prepared once per context identity and text. The schema files the
-    /// preparation actually read (imports at any depth, including the one
-    /// that made it fail) are recorded when it runs, whether it succeeds or
-    /// fails; a memo hit reads nothing new, and the read set, which outlives
-    /// the memo, already holds them. A missing import was never read, so it
-    /// is not recorded.
+    /// preparation read (imports at any depth, including the one that made
+    /// it fail) are observed with the hash of the text read, and every other
+    /// location an import probed (a missing import) as a missing probe,
+    /// whether it succeeds or fails. A memo hit observes the same again.
     ///
     /// ## Errors
     ///
@@ -506,14 +632,75 @@ impl DataRuntime {
     ) -> Result<Arc<PreparedContract>, Arc<DataError>> {
         let identity = crate::markdown::compose::file_resolution_context_identity(document);
         let key = format!("{identity:016x}\0{written}");
-        self.inner.memo.contract(key, || {
-            let (prepared, observed) = simplified_schema::resolve::observed::collect(|| {
-                super::contract::prepare_contract(written, document)
+        let prepared = self.inner.memo.contract(key.clone(), || {
+            let ((prepared, texts), observed) = simplified_schema::resolve::observed::collect(|| {
+                simplified_schema::resolve::buffers::recording(|| super::contract::prepare_contract(written, document))
             });
-            observed.read.iter().for_each(|file| self.record_local(file));
+            // Kept per key, before the memo slot is filled, so every caller
+            // the slot answers (one waiting on this preparation included)
+            // observes the same inputs.
+            self.contract_observations_guard().insert(key.clone(), Arc::new(contract_observations(&observed, &texts)));
             prepared
-        })
+        });
+        let observations = self.contract_observations_guard().get(&key).cloned();
+        observations.iter().flat_map(|observations| observations.iter()).cloned().for_each(|observation| self.observe(observation));
+        prepared
     }
+
+    fn contract_observations_guard(&self) -> MutexGuard<'_, HashMap<String, Arc<Vec<Observation>>>> {
+        self.inner.contract_observations.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+thread_local! {
+    static CAPTURES: std::cell::RefCell<Vec<Vec<Observation>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `run`, returning its result with every observation any runtime made
+/// on this thread meanwhile, in order. Unlike a [`ReadMark`] slice of one
+/// runtime's log, it never includes what another thread observed.
+pub(crate) fn capture_observations<T>(run: impl FnOnce() -> T) -> (T, Vec<Observation>) {
+    struct Pop;
+    impl Drop for Pop {
+        fn drop(&mut self) {
+            CAPTURES.with_borrow_mut(Vec::pop);
+        }
+    }
+    CAPTURES.with_borrow_mut(|frames| frames.push(Vec::new()));
+    let pop = Pop;
+    let result = run();
+    let observed = CAPTURES.with_borrow_mut(|frames| frames.last_mut().map(std::mem::take)).unwrap_or_default();
+    drop(pop);
+    (result, observed)
+}
+
+/// What a contract preparation observed: each schema file read, with the
+/// hash of the text the resolver read, and each other location an import
+/// probed (a missing import), so creating it is a change.
+fn contract_observations(
+    observed: &simplified_schema::resolve::observed::Observed,
+    texts: &simplified_schema::resolve::buffers::ReadSources,
+) -> Vec<Observation> {
+    let text_hash = |file: &Path| {
+        let key = DataSourceIdentity::local(file);
+        texts
+            .iter()
+            .find(|(path, _)| DataSourceIdentity::local(path) == key)
+            .map(|(_, text)| biscuit_hash::blake3_hash_bytes(text.as_bytes()))
+    };
+    let mut observations: Vec<Observation> = observed
+        .read
+        .iter()
+        .map(|file| Observation {
+            entry: DataSourceIdentity::local(file).read_set_entry(),
+            kind: ObservationKind::File,
+            hash: text_hash(file),
+        })
+        .collect();
+    observations.extend(observed.searched.iter().filter(|probe| !observed.read.contains(*probe)).map(|probe| {
+        Observation { entry: DataSourceIdentity::local(probe).read_set_entry(), kind: ObservationKind::MissingProbe, hash: None }
+    }));
+    observations
 }
 
 #[cfg(test)]

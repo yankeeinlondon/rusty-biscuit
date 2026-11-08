@@ -4,10 +4,10 @@
 
 use serde_json::Value;
 
-use super::{BoundCall, FunctionBinding, ResolutionContext};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext};
 use crate::markdown::compose::expression::ExpressionError;
 
-pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding::context("as_markdown", &[], as_markdown_fn)];
+pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding::context("as_markdown", &[], as_markdown_fn).slot(SlotClass::Rejected)];
 
 /// `null` passes through without composing anything.
 fn as_markdown_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {

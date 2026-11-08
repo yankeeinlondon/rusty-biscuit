@@ -474,6 +474,12 @@ impl<'a> ShortcutLookup<'a> {
     fn captured_groups(&self) -> Vec<super::context::capture::ContextGroup> {
         self.ctx.captured_groups()
     }
+
+    /// The digests of the `ctx` groups this lookup captured
+    /// ([`CtxLookup::group_digests`]).
+    pub(crate) fn ctx_group_digests(&self) -> Vec<(String, [u8; 32])> {
+        self.ctx.group_digests()
+    }
 }
 
 impl EvaluationLookup for ShortcutLookup<'_> {

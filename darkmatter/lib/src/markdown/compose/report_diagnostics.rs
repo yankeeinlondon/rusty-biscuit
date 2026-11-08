@@ -667,6 +667,74 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
     }
 }
 
+/// The diagnostics of a schema-slot resolution that produced no schema, one
+/// per refused or failed slot.
+///
+/// Each record's primary position is the slot as authored in its defining
+/// file (an imported schema's own file included); `text_of` returns that
+/// file's text (`None` path: the document an inline `$schema` is written
+/// in), and a position with no text stays `null`. A failed slot keeps its
+/// typed cause: a `load_data` failure keeps its `dm.data.*` code and its
+/// `data_location`, a missing or unreadable file its reference fields.
+// The surfaces that report a slot resolution call it; until they land only
+// tests do.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn slot_resolution_diagnostics(
+    error: &simplified_schema::slots::SlotResolutionError,
+    text_of: &dyn Fn(Option<&Path>) -> Option<std::sync::Arc<str>>,
+) -> Vec<Diagnostic> {
+    use crate::markdown::schemas::slots::codes;
+    use simplified_schema::slots::SlotResolutionError;
+    let at = |slot: &simplified_schema::simplified::Slot, span: &simplified_schema::span::SourceSpan, code: &str, message: String| {
+        let text = text_of(slot.origin.as_deref());
+        let position = text
+            .as_deref()
+            .filter(|text| span.end <= text.len())
+            .map(|text| crate::markdown::span::line_col_of_offset(text, span.start));
+        Diagnostic {
+            source: Some(DiagnosticSource {
+                file: slot.origin.clone(),
+                line: position.map(|(line, _)| line),
+                column: position.map(|(_, column)| column),
+                section: None,
+                inserted: false,
+            }),
+            span: position.map(|_| span.clone()),
+            ..unlocated(code, Severity::Error, message)
+        }
+    };
+    match error {
+        SlotResolutionError::Refused(refused) => refused
+            .iter()
+            .map(|(slot, refusal)| {
+                let span = refusal.span.clone().unwrap_or_else(|| slot.expression_span.clone());
+                at(slot, &span, refusal.code.unwrap_or(codes::SLOT_FAILED_CODE), refusal.message.clone())
+            })
+            .collect(),
+        SlotResolutionError::Failed(failed) => failed
+            .iter()
+            .flat_map(|(slot, failure)| {
+                let record = at(slot, &slot.span, failure.code.unwrap_or(codes::SLOT_FAILED_CODE), failure.to_string());
+                with_expression_cause(record, failure.downcast_ref::<ExpressionError>().map(ExpressionError::without_callbacks))
+            })
+            .collect(),
+        SlotResolutionError::Schema(schema) => match schema.as_ref() {
+            simplified_schema::SchemaError::SlotResult { slot, kind } => {
+                use simplified_schema::SlotResultKind;
+                let code = match kind {
+                    SlotResultKind::Empty => codes::SLOT_EMPTY_CODE,
+                    SlotResultKind::PatternRejected(_) => codes::SLOT_PATTERN_REJECTED_CODE,
+                    _ => codes::SLOT_WRONG_SHAPE_CODE,
+                };
+                vec![at(slot, &slot.span, code, kind.to_string())]
+            }
+            other => vec![unlocated(codes::SLOT_FAILED_CODE, Severity::Error, other.to_string())],
+        },
+        SlotResolutionError::Canceled => vec![unlocated(codes::SLOT_CANCELED_CODE, Severity::Error, error.to_string())],
+        _ => vec![unlocated(codes::SLOT_FAILED_CODE, Severity::Error, error.to_string())],
+    }
+}
+
 fn shell_record(code: &str, error: &ShellExpansionError) -> Diagnostic {
     Diagnostic { source: shell_source(error), ..unlocated(code, Severity::Error, error.to_string()) }
 }

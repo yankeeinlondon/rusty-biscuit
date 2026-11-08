@@ -108,6 +108,9 @@ pub struct ResolutionContext {
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
     pub(crate) active_caller_file_provenance: Option<CallerFileProvenance>,
+    /// The read gate of a schema slot's evaluation; `None` everywhere else,
+    /// which leaves every read as it is (see [`super::read_gate`]).
+    pub(crate) slot_gate: Option<Arc<dyn super::read_gate::ReadGate>>,
 }
 
 /// Unit tests that never resolve a file use an empty `cwd`.
@@ -143,6 +146,7 @@ impl ResolutionContext {
             iteration: super::iteration::IterationBudget::new(Default::default()),
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
+            slot_gate: None,
         }
     }
 
@@ -232,6 +236,64 @@ impl ResolutionContext {
     pub fn with_home_dir(mut self, home_dir: PathBuf) -> Self {
         self.file_resolution_context = self.file_resolution_context.with_home_dir(home_dir);
         self
+    }
+
+    /// Asks the slot gate, when one is set, whether `function` may make the
+    /// read `kind` of `location` names; without a gate every read is allowed
+    /// and `location` is never built.
+    ///
+    /// ## Errors
+    ///
+    /// [`ExpressionError::SlotReadRefused`] when the gate refuses.
+    pub(crate) fn authorize_slot_read(
+        &self,
+        function: &str,
+        kind: super::functions::ReadKind,
+        location: impl FnOnce() -> Option<super::read_gate::ReadLocation>,
+    ) -> Result<(), ExpressionError> {
+        let Some(gate) = &self.slot_gate else {
+            return Ok(());
+        };
+        let Some(location) = location() else {
+            return Ok(());
+        };
+        let target = super::read_gate::ReadTarget { function: function.to_string(), kind, location };
+        gate.check(&target).map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })
+    }
+
+    /// Asks the slot gate about each input in `observed` that `function`
+    /// observed, before its result reaches the slot.
+    ///
+    /// ## Errors
+    ///
+    /// [`ExpressionError::SlotReadRefused`] for the first input refused.
+    pub(crate) fn authorize_slot_observations(
+        &self,
+        function: &str,
+        observed: &[super::data::Observation],
+    ) -> Result<(), ExpressionError> {
+        let Some(gate) = &self.slot_gate else {
+            return Ok(());
+        };
+        for observation in observed {
+            // An input the gate cannot name is refused, never skipped.
+            let (target, verdict) = match super::read_gate::ReadTarget::from_observation(function, observation) {
+                Some(target) => {
+                    let verdict = gate.check(&target);
+                    (target, verdict)
+                }
+                None => (
+                    super::read_gate::ReadTarget {
+                        function: function.to_string(),
+                        kind: super::functions::ReadKind::Content,
+                        location: super::read_gate::ReadLocation::Glob(observation.entry.clone()),
+                    },
+                    Err(super::read_gate::GateRefusal::ApprovalRequired),
+                ),
+            };
+            verdict.map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })?;
+        }
+        Ok(())
     }
 
     /// Returns the captured value for a context key, if present.

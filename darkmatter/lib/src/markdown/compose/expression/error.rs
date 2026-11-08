@@ -325,6 +325,18 @@ pub enum ExpressionError {
         group: ContextGroup,
     },
 
+    /// A schema slot's evaluation tried a read its approvals do not cover
+    /// (see [`read_gate`](super::read_gate)). Only slot evaluation sets a
+    /// gate, so document evaluation never raises it. Never recovered into a
+    /// value: `try_frontmatter` and `||` pass it through.
+    #[error("{target}: {refusal}")]
+    SlotReadRefused {
+        /// The read that was refused.
+        target: Box<super::read_gate::ReadTarget>,
+        /// Why.
+        refusal: super::read_gate::GateRefusal,
+    },
+
     /// A call that breaks a function's specified contract where the
     /// specification requires a compose error and the declared signature
     /// cannot express the rule (an argument out of a domain the type does

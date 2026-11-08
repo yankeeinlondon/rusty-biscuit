@@ -5,12 +5,12 @@ use sniff::remote::{
 };
 
 use super::escape::{collapse_and_escape, markdown_destination};
-use super::{BoundCall, FunctionBinding, ResolutionContext};
+use super::{BoundCall, FunctionBinding, SlotClass, ResolutionContext};
 use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::context("pr", &[], pr_fn),
-    FunctionBinding::context("pr_list", &["prlist"], pr_list_fn),
+    FunctionBinding::context("pr", &[], pr_fn).slot(SlotClass::Rejected),
+    FunctionBinding::context("pr_list", &["prlist"], pr_list_fn).slot(SlotClass::Rejected),
 ];
 
 fn pr_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {

@@ -82,8 +82,14 @@ impl SourceBuffers {
     }
 }
 
+/// The schema texts one [`recording`] scope has read: path and text, in
+/// read order.
+pub type ReadSources = Vec<(PathBuf, Arc<str>)>;
+
 thread_local! {
     static ACTIVE: RefCell<SourceBuffers> = RefCell::new(SourceBuffers::default());
+    /// The texts each running [`recording`] scope has read, in read order.
+    static RECORDING: RefCell<Vec<ReadSources>> = const { RefCell::new(Vec::new()) };
     /// How many [`with_reads_retained`] scopes are running on this thread.
     static RETAINING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -159,20 +165,70 @@ pub(super) fn first_open(probed: &[PathBuf]) -> Option<PathBuf> {
     })
 }
 
-/// `path`'s bytes: the open buffer's text in force, else the file's.
-pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
+/// `path`'s bytes, read as the resolver reads a schema source: the open
+/// buffer's text in force on this thread, else the file's. Outside a
+/// [`with`] scope this is [`std::fs::read`]. A host reading a file that a
+/// resolution depends on (a data file a slot loads) reads it here, so an
+/// editor's unsaved text is what it sees.
+///
+/// ## Errors
+///
+/// The file read's I/O error.
+pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {
     if let Some(text) = text(path) {
+        record(path, &text);
         return Ok(text.as_bytes().to_vec());
     }
     let bytes = std::fs::read(path)?;
     super::observed::opened(path);
     // Non-UTF-8 bytes fail the read's caller, so there is nothing to keep.
-    if RETAINING.get() > 0
-        && let Ok(text) = std::str::from_utf8(&bytes)
+    if let Ok(text) = std::str::from_utf8(&bytes)
+        && (RETAINING.get() > 0 || RECORDING.with_borrow(|frames| !frames.is_empty()))
     {
-        ACTIVE.with_borrow_mut(|active| active.insert(path, Arc::from(text)));
+        let text: Arc<str> = Arc::from(text);
+        record(path, &text);
+        if RETAINING.get() > 0 {
+            ACTIVE.with_borrow_mut(|active| active.insert(path, text));
+        }
     }
     Ok(bytes)
+}
+
+/// Adds the text read at `path` to every running [`recording`] scope that
+/// has not read it yet.
+fn record(path: &Path, text: &Arc<str>) {
+    RECORDING.with_borrow_mut(|frames| {
+        for frame in frames.iter_mut() {
+            if !frame.iter().any(|(seen, _)| seen == path) {
+                frame.push((path.to_path_buf(), Arc::clone(text)));
+            }
+        }
+    });
+}
+
+/// Runs `resolve`, returning its result with every schema source text it
+/// read (from a buffer or the disk), each path once, in read order: the
+/// exact bytes a template's resolution depended on. A host that hashes what
+/// a resolution read (a data contract's imports) takes the texts from here
+/// rather than reading the files again.
+pub fn recording<T>(resolve: impl FnOnce() -> T) -> (T, ReadSources) {
+    struct Pop;
+    impl Drop for Pop {
+        fn drop(&mut self) {
+            RECORDING.with_borrow_mut(Vec::pop);
+        }
+    }
+    RECORDING.with_borrow_mut(|frames| frames.push(Vec::new()));
+    let pop = Pop;
+    let result = resolve();
+    let read = RECORDING.with_borrow_mut(|frames| frames.last_mut().map(std::mem::take)).unwrap_or_default();
+    drop(pop);
+    (result, read)
+}
+
+/// The snapshot in force on this thread.
+pub(crate) fn current() -> SourceBuffers {
+    ACTIVE.with_borrow(Clone::clone)
 }
 
 #[cfg(test)]
@@ -214,6 +270,31 @@ mod tests {
         assert_eq!((outer.as_slice(), inner.as_str()), (b"first".as_slice(), "first"));
         assert_eq!(read(&file).unwrap(), b"second", "nothing is kept past the scope");
         assert!(text(&file).is_none());
+    }
+
+    /// A recording scope lists each source once, in read order, from a
+    /// buffer or the disk, with the exact text read; nothing is recorded
+    /// outside one.
+    #[test]
+    fn a_recording_scope_lists_every_text_read_once_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let (disk, open) = (dir.path().join("disk.yaml"), dir.path().join("open.yaml"));
+        std::fs::write(&disk, "on disk").unwrap();
+        let mut buffers = SourceBuffers::default();
+        buffers.insert(&open, Arc::from("in the editor"));
+
+        read(&disk).unwrap();
+        let ((), recorded) = recording(|| {
+            with(&buffers, || {
+                read(&open).unwrap();
+                read(&disk).unwrap();
+                read(&open).unwrap();
+            })
+        });
+        let recorded: Vec<(PathBuf, String)> = recorded.into_iter().map(|(path, text)| (path, text.to_string())).collect();
+        assert_eq!(recorded, vec![(open, "in the editor".to_string()), (disk.clone(), "on disk".to_string())]);
+        let ((), outside) = recording(|| ());
+        assert!(outside.is_empty());
     }
 
     /// The resolver's reads, through the public entry point: an unsaved

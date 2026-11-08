@@ -7,6 +7,13 @@
 //! any memo lookup); read, decode, and parse the source through the source
 //! memo; bind the value to the contract through the bind memo. Only a fully
 //! converted value is returned.
+//!
+//! Every outcome is observed in the data runtime's log: a missing file's
+//! probed candidates, and a read with the hash of the bytes read (`None` when
+//! the read failed). The hash is kept in the memo entry, so a memo hit
+//! observes the same read again. Local bytes come through
+//! [`simplified_schema::resolve::buffers::read`], so an editor's open buffer
+//! is what a resolution inside a buffer scope sees.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -23,8 +30,11 @@ use super::parse::{decode_local, located_at, parse_text, strip_bom};
 use super::runtime::{DataSourceIdentity, LoadedData, LoadedSource, SourceContent};
 use crate::markdown::compose::expression::call_binding::{BoundCall, CallBindingError};
 use crate::markdown::compose::expression::functions::{
-    file_reference_diagnostic, file_reference_error, remote_text_error, resolve_arg,
+    file_reference_diagnostic, file_reference_error, parse_file_ref, record_probed_candidates, remote_text_error,
+    resolve_arg,
 };
+use crate::markdown::compose::expression::functions::ReadKind;
+use crate::markdown::compose::expression::read_gate::ReadLocation;
 use crate::markdown::compose::expression::resolve_ctx::is_remote_url;
 use crate::markdown::compose::expression::{ExpressionError, FileRefFailure, ResolutionContext};
 
@@ -63,23 +73,43 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
     let identity = match url::Url::parse(raw) {
         Ok(url) if remote => DataSourceIdentity::Remote(Box::new(url)),
         _ => {
-            let path = resolve_arg(FUNCTION, raw, ctx)?
-                .ok_or_else(|| file_reference_error(FUNCTION, raw, ctx, FileRefFailure::NotFound, None))?;
+            let file_ref = parse_file_ref(FUNCTION, raw, ctx)?;
+            let Some(path) = resolve_arg(FUNCTION, raw, ctx)? else {
+                // Creating any probed candidate would change the answer.
+                record_probed_candidates(&file_ref, ctx);
+                return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::NotFound, None));
+            };
             DataSourceIdentity::local(&path)
         }
     };
+    // A slot's gate decides before the target is read, recorded, or looked
+    // up in the memo a document's own reads share.
+    ctx.authorize_slot_read(FUNCTION, ReadKind::Content, || {
+        Some(match &identity {
+            DataSourceIdentity::Local(path) => ReadLocation::Local(path.clone()),
+            DataSourceIdentity::Remote(url) => ReadLocation::Remote(url.as_ref().clone()),
+        })
+    })?;
     // Recorded before anything that can fail, so a failed read, a malformed
     // file, and a denied URL are all dependencies.
     ctx.data.record(&identity);
+    // A failure before the read is observed as a read that produced nothing.
+    let unread = |error: ExpressionError| {
+        ctx.data.observe_read(&identity, None);
+        error
+    };
     let span = tracing::Span::current();
     span.record("identity", tracing::field::display(&identity));
 
-    let format = format_of(&identity).map_err(fail)?;
+    let format = format_of(&identity).map_err(fail).map_err(unread)?;
     span.record("format", tracing::field::debug(format));
     let row_mode = match format {
-        DataFormat::Csv | DataFormat::Tsv => Some(contract.row_mode().map_err(|conflict| {
-            fail(DataError::RowShapeConflict { written: contract.written.clone(), conflict })
-        })?),
+        DataFormat::Csv | DataFormat::Tsv => Some(
+            contract
+                .row_mode()
+                .map_err(|conflict| fail(DataError::RowShapeConflict { written: contract.written.clone(), conflict }))
+                .map_err(unread)?,
+        ),
         _ => None,
     };
 
@@ -89,18 +119,22 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
         DataSourceIdentity::Local(path) => Origin::Local(path),
         DataSourceIdentity::Remote(_) => match ctx.fetch_remote_text(raw) {
             Ok(Some(body)) => Origin::Fetched(body),
-            Ok(None) => return Err(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::RemoteNotEnabled, None)),
-            Err(error) => return Err(remote_text_error(FUNCTION, raw, ctx, error)),
+            Ok(None) => {
+                return Err(unread(file_reference_error(FUNCTION, raw, ctx, FileRefFailure::RemoteNotEnabled, None)));
+            }
+            Err(error) => return Err(unread(remote_text_error(FUNCTION, raw, ctx, error))),
         },
     };
 
     let source = ctx
         .data
         .load_source(&identity, || {
-            let (text, bytes) = match origin {
-                Origin::Fetched(body) => (Arc::from(strip_bom(&body)), body.len()),
+            let (text, bytes, hash) = match origin {
+                Origin::Fetched(body) => {
+                    (Arc::from(strip_bom(&body)), body.len(), biscuit_hash::blake3_hash_bytes(body.as_bytes()))
+                }
                 Origin::Local(path) => {
-                    let bytes = std::fs::read(path).map_err(|error| {
+                    let bytes = simplified_schema::resolve::buffers::read(path).map_err(|error| {
                         Arc::new(DataError::FileReference(file_reference_diagnostic(
                             FUNCTION,
                             raw,
@@ -110,14 +144,17 @@ pub(crate) fn load_data_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Res
                         )))
                     })?;
                     let count = bytes.len();
-                    (decode_local(bytes, &identity, format)?, count)
+                    let hash = biscuit_hash::blake3_hash_bytes(&bytes);
+                    (decode_local(bytes, &identity, format)?, count, hash)
                 }
             };
             let content = parse_text(&text, format, &identity)?;
             ctx.data.note_parse();
-            Ok(LoadedSource { content, format, text, bytes })
-        })
-        .map_err(ExpressionError::from)?;
+            Ok(LoadedSource { content, format, text, bytes, hash })
+        });
+    // A failed read or parse is still a dependency; it observes no hash.
+    ctx.data.observe_read(&identity, source.as_ref().ok().map(|entry| entry.value().hash));
+    let source = source.map_err(ExpressionError::from)?;
     span.record("bytes", source.value().bytes);
     span.record("source_memo", source.from_memo());
 
