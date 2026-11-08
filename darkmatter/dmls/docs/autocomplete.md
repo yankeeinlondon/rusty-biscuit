@@ -66,6 +66,30 @@ the enum / boolish / file families for the same position. The candidates come
 from the schema itself (via the library's `suggestions_for_path`), so DMLS
 holds no parallel suggestion table.
 
+### Items of an array of one scalar type
+
+When an array's items are one scalar type (`enum(fit, fill)[]`, or `os[]`
+where `os: enum(macOS, Linux, Windows)` is a named type), each item is
+completed as a scalar value of that type: an `enum`'s members, a
+`literal(...)` value, `boolish` spellings, or `file(...)` paths. This holds
+on a `- ` line and inside a flow list. A `suggest(...)` on the array wins,
+as it does for a scalar.
+
+```yaml
+$schema: ./sandboxing.yaml   # os_support: os[](required)
+os_support:
+  - macOS
+  - Li        # offers `Linux`, replacing `Li`
+```
+
+```yaml
+os_support: [macOS, ]        # the cursor after `, ` offers every member
+```
+
+An unclosed `[` (`os_support: [`) leaves the frontmatter unparseable, so
+completion offers nothing until the bracket is closed; editors that close
+brackets as you type never reach that state.
+
 ### Items of an array of a union
 
 When an array's items are a union (`policy[](min(1))@./content-policy.yaml`,

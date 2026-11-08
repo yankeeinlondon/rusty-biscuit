@@ -123,10 +123,12 @@ fn partial_block_item_filters_members_and_replaces_the_partial() {
 
 #[test]
 fn flow_array_elements_offer_members() {
+    // Brackets are closed as an editor auto-closes them; an unclosed `[`
+    // leaves the frontmatter unparseable, which offers no completion at all.
     for (os_line, cursor_after) in [
-        ("os_support: [", "["),
-        ("os_support: [macOS, ", "[macOS, "),
-        ("os_support: [macOS, W", "[macOS, W"),
+        ("os_support: []", "["),
+        ("os_support: [macOS, ]", "[macOS, "),
+        ("os_support: [macOS, W]", "[macOS, W"),
     ] {
         let (text, offset) = provider_document(os_line, cursor_after);
         with_provider(&text, |ctx| {
@@ -169,3 +171,4 @@ fn scalar_enum_value_keeps_offering_members() {
         assert_eq!(member_labels(ctx, offset), ["macOS", "Linux", "Windows"]);
     });
 }
+

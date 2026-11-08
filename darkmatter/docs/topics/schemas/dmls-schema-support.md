@@ -470,7 +470,7 @@ With the cursor after `ma`, DMLS offers the same constraints it offers once the 
 Completion is a merged provider chain (substrate → wiki → frontmatter → DSL), so a schema-driven candidate and a Markdown candidate can coexist in one response. Within frontmatter, the effective schema drives:
 
 - **schema keys** — not-yet-present property keys at any nesting depth an inline object declares, with required keys marked
-- **enum values** — the declared choices for an `enum(...)` property
+- **enum values** — the declared choices for an `enum(...)` property, and for each item of an array of one (`enum(fit, fill)[]`, or `os[]` where `os` is a named `enum(...)` type): on a `- ` line, and inside a flow list such as `[macOS, ]`. A `suggest(...)` on the array takes precedence. An unclosed `[` leaves the frontmatter unparseable, so nothing is offered until the bracket closes (editors close it as you type)
 - **boolish scaffolds** — the accepted spellings for `boolish` properties
 - **file paths** — workspace-relative path completion inside `file(...)` values
 - **`style.*` keys** — the style descriptor catalog when the cursor is inside the opaque `style` object
