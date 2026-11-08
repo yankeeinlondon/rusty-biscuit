@@ -409,13 +409,13 @@ Markdown document.
 
 | Code | Severity | When |
 |---|---|---|
-| `dm.schema.unknown_key` | error | a setter names a key the document's schema does not declare (`style.magin=4`, `style.table.border.glow=1`, or a whole-object setter holding one); the message suggests a renamed key's new name, or else the nearest sibling key within two edits, as in ``did you mean `style.margin`?``; an unrelated word gets no suggestion |
-| `dm.schema.type_mismatch`, `dm.schema.constraint` | error | a setter or style file gives a declared key a value its schema refuses (`style.margin=abc`, `max-width: abc` in a file) |
+| `dm.schema.unknown_key` | error | a setter names a key the document's schema does not declare (`style.magin=4`, `style.table.border.glow=1`, or a whole-object setter holding one); the message suggests a renamed key's new name, or else the nearest sibling key within two edits, as in ``did you mean `style.margin`?``; an unrelated word gets no suggestion, and a suggestion only ever names a key the same schema accepts, so under `$schema: { style: { accent: string } }` `style.acent=blue` suggests `style.accent` and `style.magin=4` suggests nothing |
+| `dm.schema.type_mismatch`, `dm.schema.constraint` | error | a setter or style file gives a declared key a value its schema refuses (`style.margin=abc`, `max-width: abc` in a file), or a whole-style setter is not a mapping (`style='{ margin: '`, `style=4`, `style=null`, `style=[]`), with a message naming `style` |
 | `dm.style.unknown_key` | warning | a style file holds a key the schema does not declare; the key is left out and the rest applies. The document's own `style:` reports its unknown keys the same way |
 | `dm.style.deprecated` | warning | the document's `style:` uses a deprecated key or inline rule style |
 | `dm.style.invalid_value` | error | a value the schema admits but rendering cannot use, such as a color (`style.page.bg-color=currentColor`) or a length with an unsupported unit |
 | `dm.style.conflict` | error | one layer sets one field twice under different spellings (`style.ml=2 style.page.margin-left=3`), or sets both `width` and `max-width` on one component |
-| `dm.style.invalid_root` | error | a setter's `style=` value or a style file is not a mapping (`style='{ margin: '`, a file holding an array), or a `KEY@FILE` offset is missing or not a mapping |
+| `dm.style.invalid_root` | error | a style file is not a mapping (a file holding an array or a number), or a `KEY@FILE` offset is missing or not a mapping |
 | `dm.style.empty_file` | error | a style file sets no value once unknown keys and nulls are removed (`{}`, or only unknown keys); an inline `style='{}'` is a valid no-op |
 | `dm.style.invalid_setter` | error | a setter's key is not a property path (`style..x=1`) |
 | `dm.data.malformed` | error | a style file is not valid in its format, located at the parser's line and column |

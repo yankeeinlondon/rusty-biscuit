@@ -175,6 +175,9 @@ md render -- style.draft=old.md                  # a file: nothing after `--` is
   and `style.table.border.left=false` sets one field of it.
 - **Repeating a path** keeps its last value, whole-object setters included:
   `style='{ margin: 2 }' style='{ max-width: 50 }'` keeps only the second.
+  The replaced value is never read, so
+  `style='{ margin: 1, margin: 2 }' style='{ margin: 3 }'` succeeds; only the
+  surviving value must be valid.
 - **Two spellings of one field** fail rather than depend on order:
   `style.ml=2 style.page.margin-left=3` is a `dm.style.conflict` error. A
   short form beside a more specific key is fine; the specific key wins, so
@@ -263,10 +266,32 @@ every code).
 
 | Problem | In a setter | In a `--style` file | In the document's `style:` |
 |---|---|---|---|
-| an unknown key (`magin`, `table.border.glow`) | error, `dm.schema.unknown_key`, suggesting the nearest key (``did you mean `style.margin`?``) | left out with a `dm.style.unknown_key` warning | `dm.style.unknown_key` warning |
+| an unknown key (`magin`, `table.border.glow`) | error, `dm.schema.unknown_key`, suggesting the nearest valid key (``did you mean `style.margin`?``) | left out with a `dm.style.unknown_key` warning | `dm.style.unknown_key` warning |
 | a wrong value (`max-width: abc`) | error, `dm.schema.*` | error, `dm.schema.*` | error in an output that builds a page; `markdown` and data outputs do not read it |
+| a `style=` value that is not a mapping (`style='{ margin: '`, `style=4`, `style=null`) | error, `dm.schema.type_mismatch`, naming `style` | — | — |
 | nothing left once unknown keys and nulls are removed | — | error, `dm.style.empty_file` | — |
 | a file that is missing, unreadable, malformed, or not a mapping | — | error, naming the file | — |
+
+A rejected style still reports every warning found before it: the schema
+triggers skipped as invalid, the document's own `style:` warnings at their
+authored lines, and the warnings of each `--style` file read before the one
+that failed. A formatted output writes them to stderr above the error and
+prints no page; a data output lists them in `diagnostics` beside the error.
+When `--deny <code>` blocks one warning, that warning becomes the error and
+the others stay warnings.
+
+```text
+$ md render notes.md --style missing.yaml --output yaml   # line 3 of notes.md is `  magin: 4`, under `style:`
+outcome: failure
+diagnostics:
+- code: dm.style.unknown_key
+  severity: warning
+  message: unknown style key `style.magin`
+  source: { file: notes.md, line: 3, column: 3 }   # abridged
+- code: dm.input.read_failure
+  severity: error
+  message: 'Failed to load file: "missing.yaml"'
+```
 
 `--deny style` turns the warnings in that table into errors: see
 [Policy Flags](./policy.md#diagnostics---deny). A setter is judged by the

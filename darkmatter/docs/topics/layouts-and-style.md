@@ -523,6 +523,14 @@ md notes.md style="{ ml: 6 }" style="{ max-width: 50 }"   # only max-width: 50 a
 md notes.md style="{ ml: 6 }" style.max-width=50          # both apply
 ```
 
+The value a later setter replaces is never read, so it may be malformed or
+repeat a key; only the last value at a path is checked. Given alone,
+`style="{ ml: 1, ml: 2 }"` fails because `ml` is repeated:
+
+```sh
+md notes.md style="{ ml: 1, ml: 2 }" style="{ ml: 3 }"   # left margin 3
+```
+
 Two different spellings of one field among the setters, such as
 `style.ml=2` and `style.page.margin-left=3`, fail rather than depending on
 their order.
@@ -571,6 +579,21 @@ setter is something you just typed, so a typo stops the run. A member a
 compound value does not declare is an unknown key too: `glow` in
 `table.border: { weight: thick, glow: 1 }` is warned about and dropped from a
 document or file, while the setter `style.table.border.glow=1` fails.
+
+A setter's error suggests the nearest key the schema accepts at that place
+(`style.magin=4`: ``did you mean `style.margin`?``); a warning names only a
+renamed key's replacement. Both come from the schema that judged the key, so a
+document declaring its own `style` gets suggestions from its keys alone:
+
+```yaml
+$schema:
+    style:
+        accent: string
+```
+
+Here `style.acent=blue` suggests `style.accent`, while `style.magin=4` and a
+file's old `left-margin` get no suggestion, because `margin` and
+`margin-left` are rejected too.
 
 Other `--style` file rules:
 
