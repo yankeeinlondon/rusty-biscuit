@@ -430,7 +430,23 @@ reads, no grant-dependent failures; cleared by
 (one per slot evaluated). `pending_templates_for` returns `PendingTemplate`s
 (document + matched trigger payloads, Q14-filtered). Kind definitions, the
 baseline/catalog, DMLS extensions, and trigger `match` refuse slots
-(`codes::slot_prohibition_code`). User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
+(`codes::slot_prohibition_code`).
+CLI surfaces (one session per invocation): `md compose` builds it after
+pre-flight with `commands/compose.rs::with_command_slot_session`
+(`SlotSession::for_request` + `with_run_grants(slot_grants)` + the handler only
+on an interactive formatted run); with no shell operation enabled it asks via
+`Markdown::compose_slot_approvals`. `md graph`/`md validate refs` attach
+`with_reference_check_slot_session` (`SessionMode::ReferenceCheck`: an
+approval/deny failure becomes `UnresolvedSlots`, which `defers_template` defers
+for a ReferenceCheck session too). `md schema validate` and `md clean` build
+`SlotSession::for_context` and batch-ask with
+`DarkmatterSchemas::approve_slot_reads` (clean: `CleanSchemaConfig::with_slot_session`,
+asked once in `CleanSchemaContext::effective_schema`); a template failure is the
+`FileOutcome::Slots` record (`error: slots`, `diagnostics`, `grants_needed`), and a
+schema file argument reports `slots` (count) passively. `Diagnostic::grants_needed`
+(`GrantNeeded`, filled from `GateRefusal::ApprovalRequired` in
+`report_diagnostics::with_expression_cause`) is in all 18 `cli/schemas/output/` files.
+User-facing: `darkmatter/docs/topics/schemas/schema-slots.md`;
 language rules: `simplified-schema/docs/topics/language/slots.md`.
 
 ## Runtime baseline

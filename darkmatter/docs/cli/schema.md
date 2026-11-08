@@ -81,8 +81,38 @@ A baseline that cannot be loaded leaves nothing to validate:
 ```
 
 A clean success has only `files`. A record that could not be validated names why in
-`error`: `file_reference`, `frontmatter_parse`, `yaml_parse`, or `schema`. See
+`error`: `file_reference`, `frontmatter_parse`, `yaml_parse`, `schema`, or `slots`. See
 [JSON Output](../topics/schemas/definition.md#json-output) for every record field.
+
+### Schema templates
+
+A schema whose definitions hold `{{ … }}` [slots](../topics/schemas/schema-slots.md)
+(Claudine's sandboxing schema loads its `os` list from `os.yaml`) is treated two ways:
+
+- **A schema file argument** is checked as written. Its record is `valid: true` with
+  `slots: 1` (how many slots it holds); nothing the slot names is read.
+- **A document** under the template is checked against the resolved schema. A data
+  file committed in the schema's repository is read without asking. Any other read
+  is asked about on a terminal, once per run, before the document is checked; a data
+  output never asks. A read nobody approved makes the file's check unavailable, so the
+  run exits 1:
+
+```json
+{
+  "file": "provider.md",
+  "valid": false,
+  "schema": null,
+  "error": "slots",
+  "message": "the schema's slots could not be resolved: …",
+  "problems": [],
+  "diagnostics": [{ "code": "dm.schema.slot_approval_required", "...": "..." }],
+  "grants_needed": [{ "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" }, "..."]
+}
+```
+
+Adding `allow file /repo/claudine/docs/os.yaml` to `~/.config/darkmatter/schema-read-policy`
+grants the read in every later run; see
+[What a slot may read](../topics/schemas/schema-slots.md#what-a-slot-may-read).
 
 ## `md schema detect`
 

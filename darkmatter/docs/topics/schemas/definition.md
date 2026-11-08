@@ -894,7 +894,7 @@ the same report:
 
 | Kind | What is checked |
 |---|---|
-| `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves |
+| `schema` | the schema document parses as a schema: category entries, categories that `category(...)` uses but `categories` does not declare, duplicate or disagreeing overloads; and every named-type import resolves. A [template](./schema-slots.md) is checked as written: its slots are counted (the record's `slots`) and never resolved |
 | `schema-trigger` | the trigger grammar: each `$path` glob, an empty `match` list, a vacuous match, `min-match` count bounds, and match-safe conditions (see [Repository Trigger Schemas](#repository-trigger-schemas)) |
 | `yaml-schema` | its exported `$schema` prepares and claims a finite set of kinds |
 
@@ -1254,7 +1254,7 @@ The `layers` object says which schema layers judged the document, so a consumer 
 
 The terminal output names the same layers; see [Behavior Without `$schema`](#behavior-without-schema).
 
-A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, or `"schema"`), a `message`, and an empty `problems` array; a `yaml_parse` record also has the failure's `line` and `column`, and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
+A file that could not be judged has a record with an `error` key (`"file_reference"`, `"frontmatter_parse"`, `"yaml_parse"`, `"schema"`, or `"slots"`), a `message`, and an empty `problems` array; a `slots` record (a [schema template](./schema-slots.md) whose slots did not resolve for the run) also has the slots' own records in `diagnostics` and, for a read nobody approved, the `grants_needed` that would allow it; a `yaml_parse` record also has the failure's `line` and `column`, and a `file_reference` record has the [`failure` class](../../errors/file-reference-failures.md). A baseline that could not be loaded leaves `files` empty and reports a `dm.schema.baseline` entry in `diagnostics`. A YAML file's problem from one of its kind's own checks has `kind` `"kind_check"` (see [YAML Documents on the Command Line](#yaml-documents-on-the-command-line)).
 
 ### Problem Locations
 

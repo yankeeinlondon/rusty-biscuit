@@ -952,6 +952,21 @@ pub struct SchemaBundle {
     /// schema exists, so [`EffectiveSchema::definition`] cannot see these
     /// tables; the bundle's [`DefinitionLookup`] searches them after it.
     pub extension_definitions: Vec<Arc<DefinitionTable>>,
+    /// Whether a layer of the effective schema is a template whose slots
+    /// were resolved (served from the slot worker's pinned snapshot).
+    pub templated: bool,
+}
+
+/// How [`assemble`] treats a template layer.
+#[derive(Clone, Copy)]
+pub(crate) enum SlotUse<'a> {
+    /// No session: a template stays [`SchemaError::UnresolvedSlots`].
+    None,
+    /// Serve only what `session` already pinned (the request path: nothing
+    /// is evaluated, nothing a slot names is read).
+    Pins(&'a Arc<darkmatter::markdown::schemas::slots::SlotSession>),
+    /// Resolve through `session` (the slot worker).
+    Resolve(&'a Arc<darkmatter::markdown::schemas::slots::SlotSession>),
 }
 
 /// Every [`TypeExpr::Ref`] an editor walk meets in the bundle's shapes is
@@ -989,13 +1004,14 @@ impl DefinitionLookup for NoDefinitions {
 /// Propagates [`SchemaError`] from extension loading, baseline merging, `$schema`
 /// resolution, or validator construction so the caller can range a
 /// `dm.schema.prepare` / `dm.schema.invalid_schema_shape` diagnostic.
-pub fn assemble(
+pub(crate) fn assemble(
     doc_path: &Path,
     document_text: &str,
     config: &DmlsConfig,
     workspace_roots: &[PathBuf],
     trigger_registry: Option<TriggerRegistry>,
     file_context: &FileResolutionContext,
+    slots: SlotUse<'_>,
 ) -> Result<Option<SchemaBundle>, SchemaError> {
     let combined =
         ValidationStage::Resolve.time(|| combined_baseline(doc_path, config, workspace_roots, file_context))?;
@@ -1023,6 +1039,11 @@ pub fn assemble(
     if let Some(registry) = trigger_registry {
         schemas = schemas.with_trigger_registry(registry);
     }
+    schemas = match slots {
+        SlotUse::None => schemas,
+        SlotUse::Pins(session) => schemas.with_slot_session(Arc::clone(session)).with_slot_pins_only(true),
+        SlotUse::Resolve(session) => schemas.with_slot_session(Arc::clone(session)),
+    };
 
     match schemas.effective_for(&md)? {
         Some(effective) => Ok(Some(SchemaBundle {
@@ -1032,6 +1053,8 @@ pub fn assemble(
             extension_shapes,
             extension_dependencies: dependencies,
             extension_definitions,
+            // Only a served snapshot can make a template assemble.
+            templated: !matches!(slots, SlotUse::None) && !schemas.pending_templates_for(&md).is_empty(),
         })),
         None => Ok(None),
     }
@@ -1211,6 +1234,7 @@ mod tests {
             &[PathBuf::from("/w")],
             None,
             &crate::context::test_support::workspace_context(),
+            SlotUse::None,
         )
         .expect("assembles")
         .expect("has frontmatter");
@@ -1229,6 +1253,7 @@ mod tests {
             &[PathBuf::from("/w")],
             None,
             &crate::context::test_support::workspace_context(),
+            SlotUse::None,
         )
         .expect("assembles");
         assert!(bundle.is_none());
@@ -1246,6 +1271,7 @@ mod tests {
             &[PathBuf::from("/w")],
             None,
             &crate::context::test_support::workspace_context(),
+            SlotUse::None,
         );
         // Outside `.claude/**`: extension never loaded, assembly succeeds.
         assert!(outside.is_ok());

@@ -111,6 +111,15 @@ pub fn server_capabilities(profile: &ClientProfile) -> ServerCapabilities {
         semantic_tokens_provider: profile
             .supports_semantic_tokens
             .then(semantic_tokens_capabilities),
+        // The schema-slot grant quick fixes run these; neither edits the
+        // workspace.
+        execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
+            commands: vec![
+                crate::diagnostics::slots::GRANT_SLOT_READ_COMMAND.to_string(),
+                crate::diagnostics::slots::REFRESH_SCHEMA_SLOTS_COMMAND.to_string(),
+            ],
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        }),
         ..Default::default()
     }
 }

@@ -75,6 +75,7 @@ mod context_construction_guard;
 mod delta;
 mod docs_style_examples;
 mod diagnostic_positions;
+mod dynamic_schema_slots;
 mod get_set_rm;
 mod graph;
 mod hash;

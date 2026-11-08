@@ -50,6 +50,7 @@ fn graph_value(
         context,
     )
     .wrap_err("Failed to prepare the reference graph request")?;
+    let graph_request = crate::commands::compose::with_reference_check_slot_session(graph_request);
     let mut tree = FileTree::from_markdown(md, &graph_request);
 
     if follow {

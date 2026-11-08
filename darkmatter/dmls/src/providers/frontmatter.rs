@@ -1720,6 +1720,33 @@ fn style_key_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
 /// property's schema type/constraints/default/description, or a `ctx.*`
 /// generated-key annotation.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    let hover = frontmatter_hover(ctx, offset)?;
+    Some(with_slot_marker(ctx, hover))
+}
+
+/// `hover` with a note when the document's schema is a template whose
+/// slots are not served current: still being resolved (only its literal
+/// parts are known), or being refreshed (the facts shown are the last
+/// resolution's).
+fn with_slot_marker(ctx: &DocumentContext, mut hover: Hover) -> Hover {
+    let Some(status) = ctx.overlay.and_then(|overlay| overlay.slots.as_ref()) else {
+        return hover;
+    };
+    let note = if status.unresolved {
+        "_Schema slots pending: only the schema's literal parts are known._"
+    } else if status.refreshing {
+        "_Schema slots stale: refreshing; shown from their last resolution._"
+    } else {
+        return hover;
+    };
+    if let lsp_types::HoverContents::Markup(markup) = &mut hover.contents {
+        markup.value.push_str("\n\n");
+        markup.value.push_str(note);
+    }
+    hover
+}
+
+fn frontmatter_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     if let Some(hover) = type_definition_argument::hover(ctx, offset, Site::Frontmatter) {
         return Some(hover);
     }
@@ -2990,9 +3017,21 @@ fn eager_hover_line(def: &PropertyDef) -> Option<String> {
 }
 
 /// The enum members declared on an atom, if any.
-fn enum_members(atom: &PropertyAtom) -> Option<&[String]> {
+///
+/// An unresolved template's `enum(...)` holding slots offers its literal
+/// members alone (a resolved schema has no slot left).
+fn enum_members(atom: &PropertyAtom) -> Option<Vec<&String>> {
     atom.constraints.iter().find_map(|constraint| match constraint {
-        Constraint::Members(members) => Some(members.as_slice()),
+        Constraint::Members(members) => Some(members.iter().collect()),
+        Constraint::Dynamic(list) if list.kind == simplified_schema::simplified::DynamicKind::Members => Some(
+            list.elements
+                .iter()
+                .filter_map(|element| match element {
+                    simplified_schema::simplified::DynamicElement::Member(member) => Some(member),
+                    _ => None,
+                })
+                .collect(),
+        ),
         _ => None,
     })
 }

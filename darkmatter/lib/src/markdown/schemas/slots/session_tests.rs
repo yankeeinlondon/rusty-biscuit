@@ -389,3 +389,26 @@ fn a_cross_command_check_trusts_an_unchanged_stat_and_rehashes_a_changed_one() {
         .unwrap();
     assert!(!check.holds(true));
 }
+
+/// An editor buffer open for a data file replaces the file, and its edits
+/// leave the file's `stat` unchanged: the check rehashes the buffer instead
+/// of trusting the `stat`, so a cached resolution of the old text misses.
+#[test]
+fn an_open_buffer_with_other_text_fails_the_check_though_the_stat_is_unchanged() {
+    use simplified_schema::resolve::buffers::{self, SourceBuffers};
+    let temp = tempfile::tempdir().unwrap();
+    let path = biscuit_file::canonicalize_simplified(temp.path()).unwrap().join("os.yaml");
+    std::fs::write(&path, "- Linux\n").unwrap();
+    let check = InputCheck::capture(Observation {
+        entry: biscuit_file::to_portable_string(&path),
+        kind: ObservationKind::File,
+        hash: Some(biscuit_hash::blake3_hash_bytes(b"- Linux\n")),
+    });
+    assert!(check.holds(true), "control: nothing changed");
+    let mut edited = SourceBuffers::default();
+    edited.insert(&path, std::sync::Arc::from("- Linux\n- Haiku\n"));
+    assert!(!buffers::with(&edited, || check.holds(true)), "the unsaved edit is a change");
+    let mut same = SourceBuffers::default();
+    same.insert(&path, std::sync::Arc::from("- Linux\n"));
+    assert!(buffers::with(&same, || check.holds(true)), "a buffer equal to the read bytes holds");
+}

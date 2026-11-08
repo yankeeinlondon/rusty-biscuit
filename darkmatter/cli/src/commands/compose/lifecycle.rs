@@ -474,7 +474,7 @@ impl<'a> ComposeHost<'a> {
             || options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
         // Lifecycle shells are audited whether or not a body shell operation
         // is enabled; disabling one never authorizes the other.
-        if body_shells || !extra.entries.is_empty() || !extra.candidates.is_empty() {
+        let slot_grants = if body_shells || !extra.entries.is_empty() || !extra.candidates.is_empty() {
             let approvals = self
                 .md
                 .compose_preflight_approvals_with(&self.request, self.approval_handler.clone(), extra)
@@ -507,7 +507,13 @@ impl<'a> ComposeHost<'a> {
                     .with_pre_approved_commands(approvals.pre_approved_commands)
                     .with_preflight_graph(approvals.preflight_graph)
             });
-        }
+            approvals.slot_grants
+        } else {
+            self.md
+                .compose_slot_approvals(&self.request, self.approval_handler.clone())
+                .map_err(|error| ("shell", preflight_approval_error(error)))?
+        };
+        self.request = super::with_command_slot_session(self.request.clone(), slot_grants, self.approval_handler.clone());
 
         let (composed, mut report) =
             self.md.compose_with_warnings(&self.request).map_err(|mut failure| {

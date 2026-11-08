@@ -43,10 +43,28 @@ flowchart LR
 
 Composing a document resolves its templates: the document's `$schema` and
 each schema trigger whose payload holds slots and matches the document.
-[Resolving in a command](#resolving-in-a-command) covers how. Which other
-surfaces (`md schema validate`, `md clean`, the editor) resolve is
-**planned**; until then they report a typed "unresolved" error
-(`dm.schema.slot_pending`) for a schema with slots.
+[Resolving in a command](#resolving-in-a-command) covers how. Each `md`
+command decides how far it goes:
+
+| Command | What happens to a template |
+| --- | --- |
+| `md compose` | resolves with the automatic, persisted, and run-only grants; on a terminal, asks about the rest before anything runs; a data output fails with `dm.schema.slot_approval_required` |
+| `md schema validate <document>` | the same gate as `md compose`; an unapproved read makes the file's check unavailable (`error: slots`, exit 1), never a success |
+| `md schema validate <schema file>` | checks the template's syntax and shape only, reports how many slots it holds (`slots`), and resolves nothing |
+| `md clean` | the same gate; an unapproved read fails the run with the slot's diagnostic, and the document is never reported clean |
+| `md graph`, `md validate refs` | resolve with the automatic and persisted grants only and never ask; a template whose read nobody granted is left for composition to judge, like any other value the check defers |
+| the editor (DMLS) | resolves in the background with the automatic, persisted, and editor-session grants, never on a keystroke and never by asking; an unapproved read is a warning at the slot with quick fixes that grant it; see [In the editor](#in-the-editor) |
+
+For example, with Claudine's sandboxing schema committed beside its
+`os.yaml`:
+
+```sh
+md schema validate claudine/docs/research/sandboxing/providers/sandboxing.yaml
+# ✔ … valid …  (a schema template with 1 slot; checked as written, not resolved)
+md schema validate provider.md            # resolves os.yaml: the document is checked
+echo "- BeOS" >> claudine/docs/os.yaml    # now dirty: no automatic grant
+md schema validate provider.md --output json   # error: slots, grants_needed: […], exit 1
+```
 
 ## Where slots may appear
 
@@ -244,9 +262,15 @@ A slot's URL reads go through a remote runtime of their own, which may
 fetch only the hosts its grants name; a slot grant never widens what the
 document's own reads may fetch.
 
-Handing pre-flight's run-only answers to the composition that follows it in
-`md compose` is **planned**; today a library caller passes them with
-`SlotSession::with_run_grants`.
+`md compose` hands pre-flight's run-only answers to the composition that
+follows it, through the command's one session. A run with no shell operation
+enabled still asks about slot reads first
+(`Markdown::compose_slot_approvals`, the slot half of the pre-flight). A
+library caller does the same with `SlotSession::with_run_grants`.
+
+`md schema validate` and `md clean` do not run the compose pre-flight; they
+ask about each document's known reads in one batch just before its schema
+resolves (`DarkmatterSchemas::approve_slot_reads`), with the same prompt.
 
 ## Resolving in a command
 
@@ -287,9 +311,24 @@ Within the session:
   resolves again under the grants already decided. If that fails, the
   failure (with its `dm.data.*` code) is reported; nothing is validated
   against a stale schema.
-- **A pass that must read nothing** (a reference check, a pre-flight walk)
-  uses only a schema already pinned, and otherwise leaves the template for
-  composition to judge.
+- **A pass that must read nothing** (the reference check inside `md
+  compose`, a pre-flight walk) uses only a schema already pinned, and
+  otherwise leaves the template for composition to judge.
+- **A reference-check session** (`SessionMode::ReferenceCheck`, used by `md
+  graph` and `md validate refs`) resolves with the automatic and persisted
+  grants but never asks; a template a read nobody granted (or a denied read)
+  stops is left unresolved, and the check defers it.
+
+A command that validates without composing builds its session from its
+context instead of a request:
+
+```rust,ignore
+let session = SlotSession::for_context(DataRuntime::new(), &document_context)
+    .with_handler(handler); // only when the run may ask
+let schemas = DarkmatterSchemas::new(document_context).with_slot_session(Arc::new(session));
+schemas.approve_slot_reads(&markdown)?; // one batched ask, before resolving
+let effective = schemas.effective_for(&markdown)?;
+```
 
 ```mermaid
 flowchart TD
@@ -325,6 +364,78 @@ being resolved, the outer slot fails with `dm.schema.slot_cycle`. Outside a
 slot (in a document's own `load_data`), a contract naming a type with slots
 fails as unresolved.
 
+## In the editor
+
+DMLS, Darkmatter's language server, treats a template like `md compose`
+does, with two differences: it never asks you anything, and it never
+resolves a slot while answering a request. Completion, hover, and
+diagnostics read the last resolution kept in memory; a background worker
+of its own does the resolving.
+
+```mermaid
+flowchart LR
+    O[open or edit a document] --> Q{a resolution serves its template?}
+    Q -- yes --> S[serve it]
+    Q -- no, or an input changed --> J[queue a job on the slot worker]
+    J --> W[worker resolves with a fresh session]
+    W --> I[install, newest job wins]
+    I --> S
+    S --> R[completion, hover, diagnostics]
+```
+
+What you see while you work:
+
+| State | Diagnostics | Completion and hover |
+| --- | --- | --- |
+| not resolved yet (just opened) | `dm.schema.slot_pending` (information) at the slot; the frontmatter is not judged | the template's literal parts: `enum(Haiku, {{ … }})` offers `Haiku`; hover says the slots are pending |
+| resolved | ordinary schema diagnostics against the loaded values | the loaded values |
+| an input changed, a refresh is running | the last resolution's verdict, plus one `dm.schema.slot_pending` (information) saying it is being refreshed | the last resolution's values; hover says they are stale |
+| a read needs approval | `dm.schema.slot_approval_required` (warning) at the slot, with quick fixes | the template's literal parts |
+| a slot failed | the slot's own code (see [Failures](#failures)) at the slot | the template's literal parts |
+
+A template that did not resolve is never validated against: the
+frontmatter gets the slot's diagnostics instead of a verdict, so a schema
+missing its loaded values never makes a document look valid. A slot
+written in another schema file is reported on the document's `$schema`
+value, with a related location pointing at the slot.
+
+**Granting a read.** Each grant an approval-required diagnostic offers is a
+quick fix (the choices a prompt would list: this file or its folder, for
+this session or always; then always deny, and deny for this session). A
+quick fix runs the `dmls.grantSlotRead` command, which edits nothing in the
+workspace:
+
+- an "always" choice appends `allow file /repo/claudine/docs/os.yaml` (or
+  `deny …`) to the [grant store](#grants), the same file `md` reads;
+- a "this session" choice is kept in the server's memory until it exits and
+  is never written anywhere.
+
+Either way every open document's slots are resolved again. Running the
+`dmls.refreshSchemaSlots` command does the same without granting anything,
+and so does a configuration change (`workspace/didChangeConfiguration`),
+because a slot may read the environment, which no file event reports.
+
+**What refreshes a resolution.** The worker records every path a resolution
+read: data files, files probed and found missing, folders listed, and, when
+any of those lies in a Git repository, that repository's `.git/index` and
+`HEAD` (an automatic grant depends on what they record). DMLS watches each
+path itself, whatever its extension, so saving a data file, creating a
+missing one, or staging a change refreshes the documents that read it. An
+unsaved edit to an open YAML or JSON data file refreshes them too, and the
+resolution reads the unsaved text. A client that cannot watch files gets a
+fallback: each save re-checks every recorded path by `stat` (size,
+modification time, and whether it exists), not by content, so a rewrite
+that keeps a file's size and timestamp is not noticed until something else
+refreshes it.
+
+**Limits.** Each slot in the editor gets a quarter of a command's work
+allowance (25,000 visits, 4 MiB of expansion), so a runaway slot stops with
+the ordinary `dm.iteration.*` code at the slot in roughly 25 ms of work. A
+realistic list (500 members) uses a small fraction of it. A failure caused by
+the smaller allowance is never reused by a command. A newer edit of the
+template cancels a resolution still running, and only the newest result is
+installed.
+
 ## Failures
 
 A failed slot is reported at the slot, in the file it is written in (an
@@ -335,7 +446,7 @@ file's text is known. The cause the expression failed with is kept:
 | --- | --- | --- |
 | the slot text is not an expression | `dm.schema.slot_syntax` | |
 | a refused binding or function | `dm.schema.slot_forbidden_binding`, `dm.schema.slot_forbidden_function` | the refused read's position |
-| a read no approval covers, or a denied one | `dm.schema.slot_approval_required`, `dm.schema.slot_denied` | |
+| a read no approval covers, or a denied one | `dm.schema.slot_approval_required`, `dm.schema.slot_denied` | `grants_needed` (approval only): the grants any one of which would allow the read |
 | a malformed data file, a contract mismatch | the `load_data` code (`dm.data.malformed`, …) | `data_location`, the position inside the data file |
 | a missing or unreadable file | `dm.schema.slot_failed` | the reference fields (`construct`, `reference`, `failure`) |
 | an exhausted work budget | `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | |
@@ -347,3 +458,23 @@ file's text is known. The cause the expression failed with is kept:
 
 The full family of slot codes is `SLOT_DIAGNOSTIC_CODES` in
 `darkmatter::markdown::schemas::slots`.
+
+In a data output, an unapproved read's record names the grants that would
+allow it, in the order the prompt offers them, so a script can write one to
+the grant store and run again:
+
+```json
+{
+  "code": "dm.schema.slot_approval_required",
+  "source": { "file": "/repo/claudine/docs/research/sandboxing/providers/sandboxing.yaml", "line": 8, "column": 14, "inserted": false },
+  "grants_needed": [
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "once" },
+    { "kind": "file", "target": "/repo/claudine/docs/os.yaml", "scope": "persisted" },
+    { "kind": "dir", "target": "/repo/claudine/docs", "scope": "once" },
+    { "kind": "dir", "target": "/repo/claudine/docs", "scope": "persisted" }
+  ]
+}
+```
+
+A `persisted` grant is the line `allow <kind> <target>` in the grant store;
+a `once` grant can only be given at a prompt.

@@ -42,6 +42,7 @@ pub(crate) fn run_validate(target: ValidateTarget, cli: &Cli, request: &MdReques
         let options = ComposeOptions::for_document(request.launch_dir(), &md).with_shared_data_runtime();
         let validation_request = ComposeRequest::with_context(options, context)
             .wrap_err("Failed to prepare the validation request")?;
+        let validation_request = crate::commands::compose::with_reference_check_slot_session(validation_request);
         Ok::<_, color_eyre::Report>((opened, md, validation_request))
     })();
     if let Ok((opened, ..)) = &prepared {

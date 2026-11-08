@@ -710,6 +710,7 @@ mod shared_fields {
             iteration_path: Default::default(),
             reference_details: None,
             data_location: None,
+            grants_needed: None,
         }
     }
 

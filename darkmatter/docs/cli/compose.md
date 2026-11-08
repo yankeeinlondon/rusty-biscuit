@@ -305,6 +305,7 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
 - **`--deny` selections** make diagnostics blocking. One found by passive analysis (the call check, reference validation, the lifecycle call check) stops compose before anything runs; one found by shell preparation, which walks every transcluded document whatever its `when=` (such as an invalid schema trigger only a skipped child holds), stops compose before any shell command is approved or runs; one found while composing stops compose before the document is written, without undoing effects that already ran. See [Policy Flags](./policy.md).
 
+- **Schema templates.** A document whose `$schema` (or matching trigger payload) holds `{{ … }}` [slots](../topics/schemas/schema-slots.md) is validated against the resolved schema. A data file committed in the schema's repository is read without asking; on a terminal, any other read is asked about before anything runs, in the same batch as shell commands (and on its own when no shell operation is enabled). A data output never asks: an unapproved read fails the run (exit 1) with `dm.schema.slot_approval_required`, whose `grants_needed` names the grants that would allow it. The data files a slot read are in the envelope's `read_set`.
 - Invalid JSON/JSON5 in `--state` returns an error.
 - Non-object JSON (array/string/number/etc.) in `--state` returns an error.
 - Transform failures return non-zero exit with error details.

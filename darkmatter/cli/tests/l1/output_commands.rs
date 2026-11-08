@@ -566,6 +566,42 @@ fn conforms_schema_validate_keeps_a_failing_and_an_unopened_file_apart() {
     assert_eq!(files[2]["valid"], true);
 }
 
+/// A schema template beside a document, outside any repository: its slot's
+/// read gets no automatic grant, so a data output reports it unapproved.
+fn with_template_document(name: &str) -> CliProcessFixture {
+    let fixture = with_document(name, "---\n$schema: ./schema.yaml\nos: macOS\n---\n# H\n");
+    fixture.write_file("cwd/schema.yaml", "kind: schema\n$schema:\n    os: enum({{ load_data(\"./os.yaml\", \"string[]\") }})\n");
+    fixture.write_file("cwd/os.yaml", "- macOS\n- Linux\n");
+    fixture
+}
+
+#[test]
+fn conforms_schema_validate_slots_failure_names_the_grants_needed() {
+    let fixture = with_template_document("output-validate-slots");
+    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "doc.md", "--output", "json"], 1);
+    let record = &value["files"][0];
+    assert_eq!(record["error"], "slots", "{value:#}");
+    assert_eq!(record["diagnostics"][0]["code"], "dm.schema.slot_approval_required", "{value:#}");
+    assert_eq!(record["grants_needed"][0]["kind"], "file", "{value:#}");
+}
+
+#[test]
+fn conforms_schema_validate_template_schema_file_counts_its_slots() {
+    let fixture = with_template_document("output-validate-template");
+    let value = conforms(include_str!("../../schemas/output/schema-validate.yaml"), &fixture, &["schema", "validate", "schema.yaml", "--output", "json"], 0);
+    assert_eq!(value["files"][0]["valid"], true, "{value:#}");
+    assert_eq!(value["files"][0]["slots"], 1, "{value:#}");
+}
+
+#[test]
+fn conforms_clean_unapproved_slot_fails_with_the_grants_needed() {
+    let fixture = with_template_document("output-clean-slots");
+    let value = conforms(include_str!("../../schemas/output/clean.yaml"), &fixture, &["clean", "doc.md", "--output", "json"], 1);
+    assert_eq!(value["outcome"], "failure", "{value:#}");
+    assert_eq!(value["run_diagnostics"][0]["code"], "dm.schema.slot_approval_required", "{value:#}");
+    assert_eq!(value["run_diagnostics"][0]["grants_needed"][0]["kind"], "file", "{value:#}");
+}
+
 #[test]
 fn conforms_schema_validate_unloadable_baseline() {
     let fixture = with_document("output-validate-baseline", GOOD);

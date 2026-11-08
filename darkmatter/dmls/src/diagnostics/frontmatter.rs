@@ -87,10 +87,16 @@ fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec
 
     match &overlay.schema {
         _ if overlay.yaml_document.is_some() => {}
+        SchemaOutcome::Failed(error) if crate::slot_jobs::is_slot_failure(error) => {
+            crate::diagnostics::slots::failure_diagnostics(ctx, overlay.ast.as_deref(), error, overlay.slots.as_ref(), &mut out);
+        }
         SchemaOutcome::Failed(error) => {
             schema_prepare_diagnostic(ctx, overlay.ast.as_deref(), error, &mut out);
         }
         SchemaOutcome::Ready(Some(bundle)) => {
+            if let Some(status) = &overlay.slots {
+                crate::diagnostics::slots::served_diagnostics(ctx, overlay.ast.as_deref(), status, &mut out);
+            }
             if let Some(ast) = overlay.ast.as_deref() {
                 schema_advisory_diagnostics(ctx, ast, bundle, &mut out);
                 // One effective-schema validation drives both the generic schema
@@ -2663,7 +2669,7 @@ mod tests {
     /// from the resolver's `/private/var`.
     fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let root = dir.path().canonicalize().expect("canonical temp dir");
+        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
         (dir, root)
     }
 

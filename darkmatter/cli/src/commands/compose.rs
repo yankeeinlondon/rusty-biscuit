@@ -538,7 +538,16 @@ pub fn run_compose(
     // stages never need to gate against an approval set.
     use darkmatter::markdown::compose::ComposeOperation;
     let options = compose_request.options();
-    if options.is_enabled(ComposeOperation::ShellExpansion)
+    let preflight_failed = |e: darkmatter::markdown::compose::ShellExpansionError, compose_request: &ComposeRequest, pending_triggers: &mut PendingTriggerWarnings| {
+        let mut warnings = compose_request.options().take_preflight_failure_warnings();
+        pending_triggers.merge_into(&mut warnings);
+        match sink {
+            Some(sink) => sink.warnings(&warnings),
+            None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
+        }
+        preflight_approval_error(e)
+    };
+    let slot_grants = if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
         || options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
     {
@@ -563,18 +572,19 @@ pub fn run_compose(
                         .with_pre_approved_commands(approvals.pre_approved_commands)
                         .with_preflight_graph(approvals.preflight_graph)
                 });
+                approvals.slot_grants
             }
-            Err(e) => {
-                let mut warnings = compose_request.options().take_preflight_failure_warnings();
-                pending_triggers.merge_into(&mut warnings);
-                match sink {
-                    Some(sink) => sink.warnings(&warnings),
-                    None => report_failure_trigger_warnings(&warnings, preflight_blocked(&e), &term_cell),
-                }
-                return Err(preflight_approval_error(e));
-            }
+            Err(e) => return Err(preflight_failed(e, &compose_request, &mut pending_triggers)),
         }
-    }
+    } else {
+        // No shell operation to approve, but a schema template's slot reads
+        // are still asked about before anything resolves.
+        match md.compose_slot_approvals(&compose_request, preflight_handler.clone()) {
+            Ok(grants) => grants,
+            Err(e) => return Err(preflight_failed(e, &compose_request, &mut pending_triggers)),
+        }
+    };
+    compose_request = with_command_slot_session(compose_request, slot_grants, preflight_handler.clone());
 
     let (composed, mut report) = md.compose_with_warnings(&compose_request).map_err(|mut failure| {
         pending_triggers.merge_into(&mut failure.warnings);
@@ -666,6 +676,37 @@ pub fn run_compose(
     drop(options_ctx_ref);
 
     Ok(())
+}
+
+/// `request` with the command's one schema-slot session attached: built from
+/// the request (its data runtime, so slot reads join the command's read set;
+/// its repository, home, and `--allow host=HOST` values), holding the
+/// run-only `grants` pre-flight gave, and asking `handler` (present only on
+/// an interactive, formatted run) about a computed target no grant decides.
+pub(crate) fn with_command_slot_session(
+    request: ComposeRequest,
+    grants: Vec<darkmatter::markdown::schemas::slots::grants::Grant>,
+    handler: Option<std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>>,
+) -> ComposeRequest {
+    use darkmatter::markdown::schemas::slots::SlotSession;
+    let mut session = SlotSession::for_request(&request).with_run_grants(grants);
+    if let Some(handler) = handler {
+        session = session.with_handler(handler);
+    }
+    let session = std::sync::Arc::new(session);
+    request.map_options(|options| options.with_slot_session(session))
+}
+
+/// `request` with a reference-check schema-slot session attached, for a
+/// command that checks references without composing (`md graph`, `md
+/// validate refs`): a template resolves with the automatic and persisted
+/// grants only, nothing is ever asked, and a template a read nobody granted
+/// stops is deferred, as the check defers any value only composition can
+/// judge.
+pub(crate) fn with_reference_check_slot_session(request: ComposeRequest) -> ComposeRequest {
+    use darkmatter::markdown::schemas::slots::{SessionMode, SlotSession};
+    let session = std::sync::Arc::new(SlotSession::for_request(&request).with_mode(SessionMode::ReferenceCheck));
+    request.map_options(|options| options.with_slot_session(session))
 }
 
 /// How `md compose` writes the composed document.

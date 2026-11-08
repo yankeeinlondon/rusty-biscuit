@@ -271,6 +271,7 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
         iteration_path: Default::default(),
         reference_details: None,
         data_location: None,
+        grants_needed: None,
     };
     RecoveredSource { kind: plan.kind, reference, span, diagnostic }
 }

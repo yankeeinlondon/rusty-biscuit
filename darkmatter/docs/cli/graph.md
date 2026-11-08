@@ -28,6 +28,12 @@ so it goes to stdout.
 | `markdown`, `markdown-plus`, `html` | the tree as a code block, then with `--validate` the report in that form |
 | `json`, `json5`, `yaml`, `toml` | [the graph as data](#data-output) |
 
+A document whose schema is a [template](../topics/schemas/schema-slots.md) is
+prepared with the reads its slots are already granted (a data file committed in the
+schema's repository, or a grant in the user's grant store). The command never asks:
+a template a read nobody granted stops is left unchecked here, as the check leaves
+any value only composition can judge, and `md compose` reports it.
+
 ## Mental Model
 
 - **Without `--follow`**: Reports all references found directly in the Markdown

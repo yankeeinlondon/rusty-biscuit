@@ -129,6 +129,16 @@ describes it.
 [Claudine's Schemas](../../../../claudine/docs/topics/schemas.md) describes
 what the files check and how the CLI resolves them.
 
+### Templates (schemas with slots)
+
+A `$schema` or matched trigger payload holding `{{ … }}` slots is resolved
+off the request path, by a background worker of its own, and requests serve
+its last resolution from memory: nothing a slot names is read or evaluated
+while you type. Until the first resolution arrives, completion offers the
+template's literal parts and diagnostics report `dm.schema.slot_pending`; an
+unapproved read is a `dm.schema.slot_approval_required` warning whose quick
+fixes grant it. See [Schema Slots: In the editor](./schema-slots.md#in-the-editor).
+
 ## YAML Documents
 
 A whole YAML file (any `.yaml` or `.yml` extension, in any letter case) is

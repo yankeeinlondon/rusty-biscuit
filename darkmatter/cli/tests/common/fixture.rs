@@ -358,6 +358,24 @@ impl CliProcessFixture {
         true
     }
 
+    /// Stages and commits everything in the repository at `dir` (initialized
+    /// by [`Self::initialize_repository_at`]), with no host configuration,
+    /// so every file there is tracked and identical to `HEAD`.
+    ///
+    /// ## Returns
+    ///
+    /// Whether both `git add` and `git commit` succeeded.
+    pub fn commit_all(&self, dir: &Path) -> bool {
+        [&["add", "-A"][..], &["commit", "-q", "-m", "fixture"][..]].iter().all(|args| {
+            git(&self.git_global_config)
+                .args(*args)
+                .current_dir(dir)
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
+    }
+
     /// `git init` a disposable repository at the fixture `cwd`; see
     /// [`CliProcessFixture::initialize_repository_at`].
     pub fn initialize_repository(&self) -> bool {

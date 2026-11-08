@@ -171,6 +171,11 @@ pub struct StartupHooks {
     /// changes proceed. A probe that is still fresh prepares nothing and
     /// does not wait.
     pub startup_probe_gate: Option<Receiver<()>>,
+    /// When set, the slot worker waits, after reporting
+    /// [`StartupEvent::SlotPreparing`] and before resolving each job, until
+    /// this receives a message or disconnects, so a test can hold a
+    /// schema-slot resolution while requests and edits proceed.
+    pub slot_gate: Option<Receiver<()>>,
     /// Receives a [`StartupEvent`] as each background step completes.
     pub observer: Option<Sender<StartupEvent>>,
 }
@@ -217,6 +222,16 @@ pub enum StartupEvent {
     /// and then waits for zero has seen every effect of the jobs that
     /// request's handling queued.
     RegistryJobsOutstanding(usize),
+    /// The dispatch thread queued a schema-slot job on the slot worker.
+    SlotJobQueued,
+    /// The slot worker took a job (sent from the worker, before the
+    /// [`StartupHooks::slot_gate`] wait).
+    SlotPreparing,
+    /// The dispatch thread handled a finished slot job: `installed` when its
+    /// snapshot replaced the document's (and its diagnostics were
+    /// republished), `false` when a newer job or a cancellation superseded
+    /// it.
+    SlotPrepared { installed: bool },
 }
 
 /// A result background work hands to the dispatch thread, which owns every
@@ -242,6 +257,8 @@ enum Internal {
         build: u64,
         facts: PassReport,
     },
+    /// The slot worker finished a job.
+    SlotPrepared(Box<crate::slot_jobs::SlotResult>),
     /// The startup file-list walk finished. The dispatch thread ends the
     /// progress once the list is installed, so a client that sees the end
     /// sees diagnostics computed against the list.
@@ -324,6 +341,22 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         workspace: workspace.clone(),
         dispatch: dispatch.clone(),
     });
+    let slot_jobs = {
+        let internal = internal_tx.clone();
+        let observer = options.startup.observer.clone();
+        crate::slot_jobs::spawn_slot_worker(
+            move |result| {
+                let _ = internal.send(Internal::SlotPrepared(Box::new(result)));
+            },
+            move || {
+                if let Some(observer) = &observer {
+                    let _ = observer.send(StartupEvent::SlotPreparing);
+                }
+            },
+            crate::slot_jobs::SlotWorkerHooks { gate: options.startup.slot_gate },
+            dispatch.clone(),
+        )
+    };
     let mut registries = PendingRegistries::new(registry_jobs, options.startup.observer.clone());
     registries.begin_startup();
     spawn_startup(StartupWork {
@@ -359,6 +392,7 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         facts: Arc::new(Mutex::new(None)),
         facts_events: std::cell::RefCell::new(facts::FactsEvents::default()),
         store_inputs,
+        slot_jobs,
     };
     let mut router = Router::new(connection, state).with_internal(
         (internal_tx, internal_rx),
@@ -421,6 +455,12 @@ struct WatchLedger {
     schema_folders: std::collections::BTreeSet<crate::workspace::watch::WatchedFolder>,
     /// Whether a schema-location registration was ever sent.
     schema_registered: bool,
+    /// Outstanding schema-slot registration request ids.
+    slot: HashSet<RequestId>,
+    /// The paths the last schema-slot registration watches.
+    slot_paths: std::collections::BTreeSet<PathBuf>,
+    /// Whether a schema-slot registration was ever sent.
+    slot_registered: bool,
     next: u64,
 }
 
@@ -731,6 +771,8 @@ pub struct ServerState {
     facts_events: std::cell::RefCell<facts::FactsEvents>,
     /// Where the stores live, from the request snapshot.
     store_inputs: facts::StoreInputs,
+    /// The slot worker's job queue.
+    slot_jobs: Sender<crate::slot_jobs::SlotJob>,
 }
 
 impl ServerState {
@@ -753,6 +795,8 @@ impl ServerState {
     fn note_schema_buffer(&self, uri: &Uri, text: Option<&str>) {
         if let Some(path) = uri_to_file_path(uri) {
             self.overlay.set_schema_buffer(&path, text);
+            // A slot reads an open buffer in place of its file.
+            self.overlay.slots().invalidate_paths(&[path]);
         }
     }
 
@@ -1020,6 +1064,38 @@ impl ServerState {
         let mut index = self.index.lock().expect("index lock poisoned");
         index.relink();
         self.snapshot.store(index.snapshot());
+    }
+
+    /// Applies one schema-slot grant: a `persisted` one is appended to the
+    /// user's grant store (`<home>/.config/darkmatter/schema-read-policy`),
+    /// a `once` one is kept in memory for this server process. Every slot
+    /// snapshot then goes stale.
+    ///
+    /// ## Errors
+    ///
+    /// A message naming why the choice is not a grant, or why the store
+    /// could not be written.
+    fn grant_slot_read(&self, choice: &crate::diagnostics::slots::SlotGrantChoice) -> Result<(), String> {
+        use darkmatter::markdown::schemas::slots::grants::{Grant, GrantDecision, GrantScope, GrantStore, GrantTarget};
+        let decision = match choice.decision.as_str() {
+            "allow" => GrantDecision::Allow,
+            "deny" => GrantDecision::Deny,
+            other => return Err(format!("unknown decision `{other}`; expected `allow` or `deny`")),
+        };
+        let target = GrantTarget::parse(&choice.kind, &choice.target)?;
+        match choice.scope.as_str() {
+            "once" => self.overlay.slots().add_once(Grant { decision, target, scope: GrantScope::Once }),
+            "persisted" => {
+                let path = GrantStore::path_for_home(self.contexts.home())
+                    .ok_or_else(|| "there is no home folder to keep the grant store in".to_string())?;
+                let mut store = GrantStore::load(Some(&path)).map_err(|error| error.to_string())?;
+                store.append(decision, target).map_err(|error| error.to_string())?;
+                tracing::info!(store = %path.display(), "schema-slot grant persisted");
+                self.overlay.slots().invalidate_all();
+            }
+            other => return Err(format!("unknown scope `{other}`; expected `once` or `persisted`")),
+        }
+        Ok(())
     }
 
     /// Recomputes and publishes diagnostics for one open document (empty when
@@ -1660,7 +1736,7 @@ impl Router {
                     }
                 }
             }
-            self.sync_schema_watches();
+            self.after_message();
         }
     }
 
@@ -1720,6 +1796,51 @@ impl Router {
         send_watch_registration(&self.connection.sender, registration, &id, replace);
     }
 
+    /// The work every handled message ends with: keeping the watches equal
+    /// to what the overlay and slot snapshots read, and handing the slot
+    /// jobs the message demanded to the slot worker.
+    fn after_message(&mut self) {
+        self.sync_schema_watches();
+        self.dispatch_slot_jobs();
+        self.sync_slot_watches();
+    }
+
+    /// Sends every schema-slot job demanded since the last message to the
+    /// slot worker. Never waits for one.
+    fn dispatch_slot_jobs(&mut self) {
+        for job in self.state.overlay.slots().take_demands() {
+            if self.state.slot_jobs.send(job).is_ok() {
+                self.notify_observer(StartupEvent::SlotJobQueued);
+            }
+        }
+    }
+
+    /// Keeps the schema-slot watches equal to the paths the installed slot
+    /// resolutions read: one watcher per path, whatever its extension. A
+    /// client that cannot root a watcher at a folder (or rejected one) is
+    /// served by the save-driven `stat` re-check instead.
+    fn sync_slot_watches(&mut self) {
+        if self.state.watch_mode != WatchMode::ClientWatched || self.state.schema_watch_fallback {
+            return;
+        }
+        if !self.state.profile.supports_relative_watch_patterns {
+            return;
+        }
+        let paths = self.state.overlay.slots().watched_paths();
+        if paths == self.watches.slot_paths {
+            return;
+        }
+        let Some(registration) = crate::workspace::watch::slot_watch_registration(&paths) else {
+            return;
+        };
+        let replace = self.watches.slot_registered;
+        let id = self.watches.issue("register-slot-watchers");
+        self.watches.slot.insert(RequestId::from(id.clone()));
+        self.watches.slot_registered = true;
+        self.watches.slot_paths = paths;
+        send_watch_registration(&self.connection.sender, registration, &id, replace);
+    }
+
     /// Retires a watcher-registration response. A rejected workspace
     /// registration switches the server to [`WatchMode::ServerRescan`]; a
     /// rejected schema-location registration switches schema inputs to the
@@ -1735,6 +1856,13 @@ impl Router {
                 tracing::warn!(%message, "client rejected file watchers; rescanning on save instead");
                 self.state.watch_mode = WatchMode::ServerRescan;
                 self.state.manifests = scan_manifests(&self.state.roots);
+            }
+            return true;
+        }
+        if self.watches.slot.remove(&response.id) {
+            if let Some(message) = rejected {
+                tracing::warn!(%message, "client rejected schema-slot watchers; re-checking slot inputs on save instead");
+                self.state.schema_watch_fallback = true;
             }
             return true;
         }
@@ -1756,7 +1884,7 @@ impl Router {
         if catch_unwind(AssertUnwindSafe(|| self.install_internal(event))).is_err() {
             tracing::error!("background result handler panicked");
         }
-        self.sync_schema_watches();
+        self.after_message();
     }
 
     fn install_internal(&mut self, event: Internal) {
@@ -1802,6 +1930,14 @@ impl Router {
                 }
             }
             Internal::IndexRound { build, facts } => self.finish_index_round(build, facts),
+            Internal::SlotPrepared(result) => {
+                let uri = result.uri.clone();
+                let installed = self.state.overlay.slots().install(*result);
+                if installed && self.state.documents.is_open(&uri) {
+                    self.state.refresh_diagnostics(&uri);
+                }
+                self.notify_observer(StartupEvent::SlotPrepared { installed });
+            }
         }
     }
 
@@ -2241,6 +2377,7 @@ impl Router {
             PrepareRenameRequest::METHOD => self.prepare_rename(id, request.params),
             Rename::METHOD => self.rename(id, request.params),
             WillRenameFiles::METHOD => self.will_rename_files(id, request.params),
+            lsp_types::request::ExecuteCommand::METHOD => self.execute_command(id, request.params),
             #[cfg(test)]
             logging_tests::PANIC_METHOD => panic!("test handler panic"),
             other => {
@@ -2421,6 +2558,37 @@ impl Router {
         Response::new_ok(id, CompletionResponse::Array(items))
     }
 
+    /// Runs a `workspace/executeCommand`: a schema-slot grant (written to
+    /// the user's grant store, or kept for this server process) or a slot
+    /// refresh. Either marks every slot snapshot stale; the refreshes it
+    /// demands run on the slot worker, so the answer never waits for one.
+    fn execute_command(&mut self, id: RequestId, params: serde_json::Value) -> Response {
+        use crate::diagnostics::slots::{GRANT_SLOT_READ_COMMAND, REFRESH_SCHEMA_SLOTS_COMMAND, SlotGrantChoice};
+        let Ok(params) = serde_json::from_value::<lsp_types::ExecuteCommandParams>(params) else {
+            return invalid_params(id);
+        };
+        match params.command.as_str() {
+            GRANT_SLOT_READ_COMMAND => {
+                let Some(choice) = params
+                    .arguments
+                    .first()
+                    .and_then(|argument| serde_json::from_value::<SlotGrantChoice>(argument.clone()).ok())
+                else {
+                    return invalid_params(id);
+                };
+                if let Err(message) = self.state.grant_slot_read(&choice) {
+                    return Response::new_err(id, ErrorCode::InvalidParams as i32, message);
+                }
+            }
+            REFRESH_SCHEMA_SLOTS_COMMAND => self.state.overlay.slots().invalidate_all(),
+            other => {
+                return Response::new_err(id, ErrorCode::InvalidParams as i32, format!("dmls has no command `{other}`"));
+            }
+        }
+        self.state.refresh_all_diagnostics();
+        Response::new_ok(id, serde_json::Value::Null)
+    }
+
     fn code_action(&self, id: RequestId, params: serde_json::Value) -> Response {
         let Ok(params) = serde_json::from_value::<CodeActionParams>(params) else {
             return invalid_params(id);
@@ -2598,6 +2766,14 @@ impl Router {
                 // here — a `ClientWatched` client gets that from
                 // `didChangeWatchedFiles`, so it skips the scan.
                 tracing::debug!(uri = params.text_document.uri.as_str(), "didSave");
+                if let Some(path) = uri_to_file_path(&params.text_document.uri) {
+                    self.state.overlay.slots().invalidate_paths(&[path]);
+                }
+                // Without watches, a save is when a slot's other inputs are
+                // re-checked: by `stat`, not by content.
+                if self.state.watch_mode == WatchMode::ServerRescan || self.state.schema_watch_fallback {
+                    self.state.overlay.slots().recheck_stats();
+                }
                 // Trigger registries read schema files from disk, so saving one
                 // (open or not) is an input change; unsaved edits are not.
                 if let Some(path) = uri_to_file_path(&params.text_document.uri)
@@ -2640,6 +2816,10 @@ impl Router {
                 let workspace = self.state.config.effective().workspace.clone();
                 let refresh = self.state.reload_config(params.settings);
                 self.after_config_change(&workspace, refresh);
+                // A slot can read the environment or context, which no file
+                // event reports: every snapshot is refreshed.
+                self.state.overlay.slots().invalidate_all();
+                self.state.refresh_all_diagnostics();
             }
             DidChangeWatchedFiles::METHOD => {
                 let Some(params) =
@@ -2737,6 +2917,8 @@ impl Router {
         for change in &changes {
             self.state.note_repository_change(&change.path);
         }
+        let changed: Vec<PathBuf> = changes.iter().map(|change| change.path.clone()).collect();
+        self.state.overlay.slots().invalidate_paths(&changed);
         self.state.prepare_workspace_registries();
         // A discovery input rebuilds the list (and, for the config file,
         // everything the configuration shapes).

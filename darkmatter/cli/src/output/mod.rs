@@ -163,6 +163,7 @@ pub fn output_diagnostic(code: &str, severity: Severity, message: &str) -> Diagn
         iteration_path: Default::default(),
         reference_details: None,
         data_location: None,
+        grants_needed: None,
     }
 }
 

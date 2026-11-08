@@ -9,6 +9,7 @@ workspace, completion, hover, and diagnostic work.
 - [Passive-analysis contract](#passive-analysis-contract)
 - [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
+- [Schema slots](#schema-slots)
 - [Whole YAML documents](#whole-yaml-documents)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
 - [Call diagnostics](#call-diagnostics)
@@ -677,6 +678,47 @@ Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
 `parse_frontmatter_shell_suffixes`, the grammar `md compose` parses with.
 `frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
 because the YAML span includes them.
+
+## Schema slots
+
+User-facing contract: `darkmatter/docs/topics/schemas/schema-slots.md#in-the-editor`.
+Code: `dmls/src/slot_jobs.rs`, `overlay/mod.rs::schema_for`,
+`diagnostics/slots.rs`, `router.rs` (`after_message`, `execute_command`).
+
+- A template is resolved **only** on the `dmls-slots` worker thread
+  (`spawn_slot_worker`), never on the registry lane and never on a request.
+  Each job builds a fresh `SlotSession::for_context` (Full mode, **no**
+  handler, in-memory once grants, `with_cancel`, `with_slot_limits(DMLS_SLOT_LIMITS)`)
+  and runs `overlay::resolve_slot_templates` inside `buffers::with`.
+- Requests serve the installed session through `schema::SlotUse::Pins`
+  (`DarkmatterSchemas::with_slot_pins_only`): no evaluation, no read a slot
+  names. `tests/l1/no_side_effects.rs` pins this with the
+  `Work::SlotResolution` counter.
+- `SlotSnapshots` (on `OverlayState::slots()`) holds per document the
+  installed session, its failure, its reads (with `stat`), `stale`, and the
+  in-flight `seq`. `schema_for` records demands (pins missed and not already
+  resolved for this base key, or stale); the router drains them after every
+  message (`dispatch_slot_jobs`); `install` drops an older `seq` or a canceled
+  job. A pins miss with an installed failure keeps showing that failure.
+  The view's `generation` is part of the schema cache key.
+- Invalidation: `note_schema_buffer` (open/change/close of any path),
+  watched changes, saves (`recheck_stats` in `ServerRescan` or the schema
+  watch fallback), grants, `dmls.refreshSchemaSlots`, and
+  `didChangeConfiguration` (`invalidate_all`). Watches: one `RelativePattern`
+  per recorded path (`slot_watch_registration`, id
+  `dmls-schema-slot-watchers`), plus `.git/index` and `HEAD` when a read lies
+  in the repository.
+- Diagnostics: `slots::failure_diagnostics` positions an inline slot by
+  finding its `{{ … }}` text inside the `$schema` value (the library reports
+  inline slot spans relative to the type string); `slot_approval_required`
+  carries `data.choices` that `code_actions::grant_slot_read_actions` turns
+  into `Command` quick fixes (`dmls.grantSlotRead`). Completion reads
+  `SlotStatus::template_shape` (literal members of `Constraint::Dynamic`)
+  until a snapshot serves.
+- Test seams: `StartupHooks::slot_gate`, `LspFixture::start_with_slot_gate`,
+  `release_slot_job`, `wait_for_slot_prepared`, and the
+  `StartupEvent::{SlotJobQueued, SlotPreparing, SlotPrepared}` events. Tests:
+  `tests/l1/schema_slots_editor.rs`, `slot_jobs::tests`.
 
 ## Whole YAML documents
 

@@ -75,6 +75,9 @@ pub struct CleanSchemaFlags {
 struct DocumentRequest<'a> {
     request: &'a MdRequest,
     opening: Option<&'a biscuit_file::FileReference>,
+    /// The run may ask about a schema slot's read: a formatted output on a
+    /// terminal. A data output never prompts.
+    prompts: bool,
 }
 
 /// Everything `md clean` needs beyond its input path.
@@ -180,7 +183,11 @@ fn clean_value(
     let overrides = rule_overrides(options, output.explicit_width.then_some(output.options.width))?;
     let is_data = output.target.is_data();
 
-    let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
+    let document_request = DocumentRequest {
+        request,
+        opening: opened.as_ref().map(|opened| opened.reference()),
+        prompts: !is_data && crate::approval::can_prompt_interactively(),
+    };
     let result = match clean(&raw, &overrides, resolved.as_deref(), &options.schema, &document_request) {
         Ok(result) => result,
         Err(CleanFailure { error, trigger_findings: None }) => return Err(error),
@@ -355,7 +362,18 @@ fn schema_config(
         Some(path) => request.request.document_context(request.opening, path)?,
         None => request.request.launch_context()?.clone(),
     };
-    let mut config = CleanSchemaConfig::new(context);
+    // A schema template resolves through one session: its automatic grants
+    // judged against the document's repository, the user's grant store, and
+    // a prompt only when the run may ask. An unapproved read leaves the
+    // document unchecked, which fails the run rather than reporting it clean.
+    let mut session = darkmatter::markdown::schemas::slots::SlotSession::for_context(
+        darkmatter::markdown::compose::DataRuntime::new(),
+        &context,
+    );
+    if request.prompts {
+        session = session.with_handler(std::sync::Arc::new(crate::approval::CliShellApprovalHandler));
+    }
+    let mut config = CleanSchemaConfig::new(context).with_slot_session(std::sync::Arc::new(session));
 
     if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
         config = config.without_baseline_schema();

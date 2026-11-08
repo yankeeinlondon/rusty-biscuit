@@ -145,13 +145,18 @@ impl InputCheck {
     }
 
     /// Whether the input is still what was observed. `trust_stat` lets an
-    /// unchanged `stat` stand for unchanged bytes. An input that cannot be
+    /// unchanged `stat` stand for unchanged bytes, unless an editor buffer
+    /// is open for the file. An input that cannot be
     /// re-checked ([`Self::rechecks`]) never holds.
     pub(crate) fn holds(&self, trust_stat: bool) -> bool {
         let path = local_path(&self.observation);
         match self.observation.kind {
             ObservationKind::File => {
-                if trust_stat && let Some(stat) = self.stat
+                // An open editor buffer replaces the file, and its edits
+                // leave the file's `stat` unchanged.
+                if trust_stat
+                    && let Some(stat) = self.stat
+                    && simplified_schema::resolve::buffers::text(&path).is_none()
                     && stat_of(&path) == Some(stat)
                 {
                     return true;

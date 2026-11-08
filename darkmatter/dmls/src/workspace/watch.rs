@@ -175,6 +175,49 @@ pub fn schema_watch_registration<'a>(
     })
 }
 
+/// The registration id of the schema-slot watches.
+pub const SLOT_WATCH_REGISTRATION_ID: &str = "dmls-schema-slot-watchers";
+
+/// One watcher per path a schema-slot resolution depended on (a data file,
+/// a missing probe, a listed folder, a repository's index and `HEAD`), by
+/// path and whatever its extension. A path whose folder does not exist yet
+/// is watched from its nearest existing ancestor, so its creation is seen.
+/// Requires the client's `relativePatternSupport`.
+///
+/// ## Returns
+///
+/// `None` when there is no path to watch.
+pub fn slot_watch_registration<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) -> Option<Registration> {
+    let watchers: Vec<FileSystemWatcher> = paths
+        .into_iter()
+        .filter_map(|path| {
+            let mut base = path.parent()?;
+            while !base.is_dir() {
+                base = base.parent()?;
+            }
+            let relative = path.strip_prefix(base).ok()?;
+            let segments: Option<Vec<String>> =
+                relative.components().map(|component| component.as_os_str().to_str().map(escape_glob)).collect();
+            Some(FileSystemWatcher {
+                glob_pattern: GlobPattern::Relative(RelativePattern {
+                    base_uri: OneOf::Right(crate::workspace::file_path_to_uri(base)?),
+                    pattern: segments?.join("/"),
+                }),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            })
+        })
+        .collect();
+    if watchers.is_empty() {
+        return None;
+    }
+    let options = DidChangeWatchedFilesRegistrationOptions { watchers };
+    Some(Registration {
+        id: SLOT_WATCH_REGISTRATION_ID.to_string(),
+        method: "workspace/didChangeWatchedFiles".to_string(),
+        register_options: Some(serde_json::to_value(options).ok()?),
+    })
+}
+
 /// The base URI and patterns watching one folder (see
 /// [`schema_watch_registration`]).
 fn folder_patterns(watched: &WatchedFolder) -> Option<(lsp_types::Uri, Vec<String>)> {

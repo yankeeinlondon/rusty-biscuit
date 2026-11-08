@@ -425,11 +425,28 @@ impl DarkmatterSchemas {
         self
     }
 
+    /// The collect-and-approve step for `source`: the session's batched
+    /// prompt ([`slots::SlotSession::approve_reads`]) about the reads the
+    /// slots of `source`'s templates ([`Self::pending_templates_for`]) name.
+    /// Returns how many reads were asked about; `0` without a session.
+    /// Passive: nothing is resolved, and nothing a slot names is read.
+    ///
+    /// ## Errors
+    ///
+    /// The approval handler's own failure.
+    pub fn approve_slot_reads(&self, source: &Markdown) -> Result<usize, crate::markdown::compose::ShellExpansionError> {
+        let Some(session) = &self.slot_session else {
+            return Ok(0);
+        };
+        session.approve_reads(&self.pending_templates_for(source), &self.file_resolution_context)
+    }
+
     /// Uses only the snapshots the session already pinned: a template no
     /// earlier pass resolved stays [`SchemaError::UnresolvedSlots`], so this
-    /// pass reads nothing a slot names.
+    /// pass reads nothing a slot names. An editor resolves on a worker and
+    /// serves its requests this way from the worker's session.
     #[must_use]
-    pub(crate) fn with_slot_pins_only(mut self, pins_only: bool) -> Self {
+    pub fn with_slot_pins_only(mut self, pins_only: bool) -> Self {
         self.slot_pins_only = pins_only;
         self
     }

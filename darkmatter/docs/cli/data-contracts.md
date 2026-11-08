@@ -213,6 +213,7 @@ record this output prints.
 | `span` | `{ "start", "end" }`, the byte range of the failing construct in `source.file`; otherwise `null` |
 | `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
 | `data_location` | for `dm.data.malformed` and `dm.data.contract_mismatch`, where in the loaded data file the problem is; see [Data location](#data-location). Absent, not `null`, on every other diagnostic |
+| `grants_needed` | for `dm.schema.slot_approval_required`, the grants any one of which would allow the schema slot's read, in prompt order, as `{ "kind", "target", "scope" }` (`kind` is `file`, `dir`, `url`, `url-any-query`, or `site`; `scope` is `once` or `persisted`); see [Schema Slots](../topics/schemas/schema-slots.md#failures). Absent, not `null`, on every other diagnostic |
 
 Severity describes the problem, and `outcome` describes the run. A problem an
 `--allow` recovered keeps its severity while the run succeeds, so `severity: "error"`

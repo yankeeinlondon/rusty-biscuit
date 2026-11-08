@@ -58,6 +58,7 @@ mod repository_contexts;
 mod schema_reference_parity;
 mod schema_reference_sessions;
 mod schema_roots_parity;
+mod schema_slots_editor;
 mod schema_yaml_spellings;
 mod searched_candidates;
 mod shell_suffixes;

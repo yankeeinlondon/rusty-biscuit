@@ -164,6 +164,7 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
             included_via: Some(issue.included_via.clone()),
         }),
         data_location: None,
+        grants_needed: None,
     }
 }
 
@@ -207,6 +208,12 @@ pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
         {
             let record = unlocated(expression_code(expression), Severity::Error, expression.to_string());
             return with_expression_cause(record, expression_cause(error));
+        }
+        if let Some(records) = error
+            .downcast_ref::<simplified_schema::SchemaError>()
+            .and_then(|schema| template_diagnostics(schema, Path::new("unknown")))
+        {
+            return records;
         }
         current = error.source();
     }
@@ -310,6 +317,7 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
                 iteration_path: IterationPath::empty(),
                 reference_details: None,
                 data_location: None,
+                grants_needed: None,
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
@@ -323,10 +331,14 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
 }
 
 /// The records of a schema that is a template: each slot's own failure,
-/// at the slot, when its resolution failed, and `dm.schema.slot_pending` at
-/// the document when it was not resolved for this run. `None` for any other
-/// schema error.
-fn template_diagnostics(error: &simplified_schema::SchemaError, document: &Path) -> Option<Vec<Diagnostic>> {
+/// at the slot, when its resolution failed (an unapproved read's record
+/// names the `grants_needed`), and `dm.schema.slot_pending` at `document`
+/// when it was not resolved for this run. `None` for any other schema
+/// error.
+///
+/// A host that validates without composing (`md schema validate`) reports a
+/// template's failure through this.
+pub fn template_diagnostics(error: &simplified_schema::SchemaError, document: &Path) -> Option<Vec<Diagnostic>> {
     use crate::markdown::schemas::slots::codes::SLOT_PENDING_CODE;
     match error {
         simplified_schema::SchemaError::SlotResolution(failure) => {
@@ -373,6 +385,13 @@ fn with_expression_cause(record: Diagnostic, cause: Option<&ExpressionError>) ->
         }
         Some(ExpressionError::SchemaFileRead { file, .. }) => vec![with_file_reference(record, file)],
         Some(ExpressionError::Data(data)) => data_records(record, data),
+        Some(ExpressionError::SlotReadRefused {
+            refusal: crate::markdown::compose::expression::read_gate::GateRefusal::ApprovalRequired { needed },
+            ..
+        }) => vec![Diagnostic {
+            grants_needed: Some(needed.iter().map(crate::markdown::compose::expression::diagnostics::GrantNeeded::of).collect()),
+            ..record
+        }],
         _ => vec![record],
     }
 }
@@ -633,6 +652,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             _ => None,
         },
         data_location: None,
+        grants_needed: None,
     }
 }
 
@@ -712,6 +732,45 @@ pub(crate) fn slot_resolution_diagnostics(
     error: &simplified_schema::slots::SlotResolutionError,
     text_of: &dyn Fn(Option<&Path>) -> Option<std::sync::Arc<str>>,
 ) -> Vec<Diagnostic> {
+    slot_resolution_records(error, text_of).into_iter().map(|(_, record)| record).collect()
+}
+
+/// The records of a template's schema error, each with the slot it belongs
+/// to (`None`: a record of the whole resolution, such as a cancellation):
+/// one per refused or failed slot of a failed resolution, and one
+/// `dm.schema.slot_pending` per slot of a template not resolved for this
+/// run. `None` for any other schema error.
+///
+/// An editor positions each record at its slot itself; the record's own
+/// `source` and `span` are [`template_diagnostics`]' (the slot in its
+/// defining file, when that file's text is known).
+pub fn template_slot_records(
+    error: &simplified_schema::SchemaError,
+) -> Option<Vec<(Option<simplified_schema::simplified::Slot>, Diagnostic)>> {
+    use crate::markdown::schemas::slots::codes::SLOT_PENDING_CODE;
+    match error {
+        simplified_schema::SchemaError::SlotResolution(failure) => {
+            let text_of = |origin: Option<&Path>| {
+                let origin = origin?;
+                failure.sources.iter().find(|(path, _)| path == origin).map(|(_, text)| std::sync::Arc::clone(text))
+            };
+            Some(slot_resolution_records(&failure.error, &text_of))
+        }
+        simplified_schema::SchemaError::UnresolvedSlots(unresolved) => Some(
+            unresolved
+                .slots
+                .iter()
+                .map(|slot| (Some(slot.clone()), unlocated(SLOT_PENDING_CODE, Severity::Error, error.to_string())))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn slot_resolution_records(
+    error: &simplified_schema::slots::SlotResolutionError,
+    text_of: &dyn Fn(Option<&Path>) -> Option<std::sync::Arc<str>>,
+) -> Vec<(Option<simplified_schema::simplified::Slot>, Diagnostic)> {
     use crate::markdown::schemas::slots::codes;
     use simplified_schema::slots::SlotResolutionError;
     let at = |slot: &simplified_schema::simplified::Slot, span: &simplified_schema::span::SourceSpan, code: &str, message: String| {
@@ -737,7 +796,7 @@ pub(crate) fn slot_resolution_diagnostics(
             .iter()
             .map(|(slot, refusal)| {
                 let span = refusal.span.clone().unwrap_or_else(|| slot.expression_span.clone());
-                at(slot, &span, refusal.code.unwrap_or(codes::SLOT_FAILED_CODE), refusal.message.clone())
+                (Some(slot.clone()), at(slot, &span, refusal.code.unwrap_or(codes::SLOT_FAILED_CODE), refusal.message.clone()))
             })
             .collect(),
         SlotResolutionError::Failed(failed) => failed
@@ -745,6 +804,8 @@ pub(crate) fn slot_resolution_diagnostics(
             .flat_map(|(slot, failure)| {
                 let record = at(slot, &slot.span, failure.code.unwrap_or(codes::SLOT_FAILED_CODE), failure.to_string());
                 with_expression_cause(record, failure.downcast_ref::<ExpressionError>().map(ExpressionError::without_callbacks))
+                    .into_iter()
+                    .map(|record| (Some(slot.clone()), record))
             })
             .collect(),
         SlotResolutionError::Schema(schema) => match schema.as_ref() {
@@ -755,12 +816,12 @@ pub(crate) fn slot_resolution_diagnostics(
                     SlotResultKind::PatternRejected(_) => codes::SLOT_PATTERN_REJECTED_CODE,
                     _ => codes::SLOT_WRONG_SHAPE_CODE,
                 };
-                vec![at(slot, &slot.span, code, kind.to_string())]
+                vec![(Some(slot.as_ref().clone()), at(slot, &slot.span, code, kind.to_string()))]
             }
-            other => vec![unlocated(codes::SLOT_FAILED_CODE, Severity::Error, other.to_string())],
+            other => vec![(None, unlocated(codes::SLOT_FAILED_CODE, Severity::Error, other.to_string()))],
         },
-        SlotResolutionError::Canceled => vec![unlocated(codes::SLOT_CANCELED_CODE, Severity::Error, error.to_string())],
-        _ => vec![unlocated(codes::SLOT_FAILED_CODE, Severity::Error, error.to_string())],
+        SlotResolutionError::Canceled => vec![(None, unlocated(codes::SLOT_CANCELED_CODE, Severity::Error, error.to_string()))],
+        _ => vec![(None, unlocated(codes::SLOT_FAILED_CODE, Severity::Error, error.to_string()))],
     }
 }
 
@@ -860,5 +921,6 @@ fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
         iteration_path: IterationPath::empty(),
         reference_details: None,
         data_location: None,
+        grants_needed: None,
     }
 }

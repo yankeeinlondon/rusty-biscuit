@@ -27,8 +27,7 @@ use std::sync::Arc;
 
 use crate::markdown::Markdown;
 use crate::markdown::schemas::slots::grants::gate::SlotGrants;
-use crate::markdown::schemas::slots::grants::targets::{CollectedRead, collect_slot_targets};
-use crate::markdown::schemas::slots::grants::{Grant, GrantBook, GrantScope, GrantStore, SlotGrantRequest};
+use crate::markdown::schemas::slots::grants::{Grant, GrantBook, GrantScope, GrantStore};
 use crate::markdown::compose::shell_expansion::policy::{
     check_builtin_blacklist, check_template_blacklist, check_user_blacklist, check_whitelist,
 };
@@ -247,6 +246,28 @@ impl Markdown {
         })
     }
 
+    /// The schema-slot half of [`Self::compose_preflight_approvals`], for a
+    /// run with no shell operation to approve: collects the reads the slots
+    /// of this document's schema templates name, and asks `approval_handler`
+    /// once about every one no grant decides yet. Returns the grants given
+    /// for this run only, for
+    /// [`SlotSession::with_run_grants`](crate::markdown::schemas::slots::SlotSession::with_run_grants);
+    /// persisted ones are already in the grant store.
+    ///
+    /// Passive: nothing is resolved, and nothing a slot names is read.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellExpansionError::SlotGrantStore`] when the user's grant store is
+    /// invalid; the handler's own failure.
+    pub fn compose_slot_approvals(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+    ) -> Result<Vec<Grant>, ShellExpansionError> {
+        self.approve_slot_reads(request, approval_handler.as_deref()).map(|(grants, _)| grants)
+    }
+
     /// Collects the reads the slots of this document's schema templates will
     /// make, and asks `handler` once about every one no grant decides yet.
     /// Returns the grants given for this run and how many reads were asked
@@ -281,37 +302,12 @@ impl Markdown {
         let hosts = options.remote_read_config.http_hosts().cloned().collect();
         let grants = SlotGrants::new(GrantBook::new(store, hosts), options.slot_repository_root().as_deref(), None);
 
-        let mut requests: Vec<SlotGrantRequest> = Vec::new();
-        for template in &pending {
-            for slot in collect_slot_targets(&template.slots, context) {
-                for read in &slot.reads {
-                    let CollectedRead::Known(target) = read else {
-                        continue;
-                    };
-                    if grants.decide_without_asking(&slot.defining, target).is_some() {
-                        continue;
-                    }
-                    let schema = slot.slot.origin.as_deref();
-                    let asked = SlotGrantRequest::for_target(
-                        &crate::markdown::schemas::slots::grants::gate::canonical(target),
-                        schema,
-                        grants.can_persist(),
-                    );
-                    if !requests.iter().any(|known| known.kind == asked.kind && known.location == asked.location) {
-                        requests.push(asked);
-                    }
-                }
-            }
-        }
+        let requests = grants.undecided_requests(&pending, context);
         let Some(handler) = handler.filter(|_| !requests.is_empty()) else {
             return Ok((Vec::new(), requests.len()));
         };
         let decisions = handler.approve_slot_reads(&requests)?;
-        for (asked, decision) in requests.iter().zip(&decisions) {
-            if let Err(error) = grants.apply(asked, decision) {
-                tracing::warn!(%error, "the schema read grant applies for this run only");
-            }
-        }
+        grants.apply_all(&requests, &decisions);
         let once = grants.book().once().iter().filter(|grant| grant.scope == GrantScope::Once).cloned().collect();
         Ok((once, requests.len()))
     }

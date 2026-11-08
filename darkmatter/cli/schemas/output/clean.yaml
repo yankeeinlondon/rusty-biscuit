@@ -59,6 +59,7 @@ types:
         failure: string -> file-reference failure class, e.g. no-match
         included_via: trail-step[] -> outermost first
         data_location: data-location -> where in a loaded data file the problem is; dm.data.malformed and dm.data.contract_mismatch only
+        grants_needed: grant-needed[] -> any one of these grants would allow the read; dm.schema.slot_approval_required only
     source:
         file: string -> null for stdin
         line: number -> 1-based authored line; null when unknown
@@ -80,3 +81,7 @@ types:
         line: number -> 1-based line in the data
         column: number -> 1-based column in the data, in characters
         byte_offset: number -> zero-based byte offset of invalid UTF-8; no line or column accompanies it
+    grant-needed:
+        kind: enum(file,dir,url,url-any-query,site;required) -> the grant store's kind word
+        target: string(required) -> the path, URL, or scheme://host[:port] the grant covers
+        scope: enum(once,persisted;required) -> once for this run; persisted writes the user's grant store

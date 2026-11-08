@@ -788,9 +788,17 @@ pub(crate) fn validate_typed_shell_values(
 
 /// Whether `err` is a schema template a discovery pass leaves to the
 /// terminal pass: its slots resolve only after the approvals the discovery
-/// pass exists to collect, so nothing can be judged against it yet.
+/// pass exists to collect, so nothing can be judged against it yet. A
+/// reference-check session (`md graph`, `md validate refs`) defers the same
+/// way: it never asks, so a slot no grant allows leaves its template
+/// unresolved.
 fn defers_template(err: &simplified_schema::SchemaError, options: &crate::markdown::compose::ComposeRequest) -> bool {
-    options.defer_shell_pending_schema_problems && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_))
+    let reference_check = options
+        .slot_session
+        .as_ref()
+        .is_some_and(|session| session.mode() == crate::markdown::schemas::slots::SessionMode::ReferenceCheck);
+    (options.defer_shell_pending_schema_problems || reference_check)
+        && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_))
 }
 
 /// Rechecks only caller-file classification against the current effective

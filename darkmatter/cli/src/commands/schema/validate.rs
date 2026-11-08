@@ -46,6 +46,10 @@ enum FileOutcome {
         advisories: Vec<SchemaAdvisory>,
         schema_label: Option<String>,
         layers: AppliedLayers,
+        /// For a schema file that is a template, how many `{{ … }}` slots
+        /// it holds: its syntax and shape were checked, its slots were not
+        /// resolved. `0` otherwise.
+        slots: usize,
     },
     /// The file argument did not open (it is not valid reference syntax,
     /// failed to resolve, or matched no file); no document was read.
@@ -56,6 +60,23 @@ enum FileOutcome {
     YamlLoadError { message: String, location: Option<(usize, usize)> },
     /// Schema could not be resolved/built for this file.
     SchemaError(Box<SchemaError>),
+    /// The schema is a template whose slots did not resolve for this run
+    /// (a read nobody granted, a slot that failed): the check is
+    /// unavailable, never a success. `diagnostics` are the slots' own
+    /// records, each at its slot.
+    Slots { error: Box<SchemaError>, diagnostics: Vec<darkmatter::markdown::compose::expression::Diagnostic> },
+}
+
+impl FileOutcome {
+    /// `SchemaError(error)`, or [`Self::Slots`] when `error` is a template
+    /// that did not resolve; `document` names the file a record with no
+    /// slot position of its own is about.
+    fn schema_error(error: SchemaError, document: &Path) -> Self {
+        match darkmatter::markdown::compose::report_diagnostics::template_diagnostics(&error, document) {
+            Some(diagnostics) => Self::Slots { error: Box::new(error), diagnostics },
+            None => Self::SchemaError(Box::new(error)),
+        }
+    }
 }
 
 /// The schema layers that judged a validated document, kept apart so the
@@ -273,9 +294,11 @@ fn validate_all(
             .map_err(|error| SchemaError::Baseline { message: format!("{error:#}"), source: None })
     };
     let (api, baseline) = match loaded {
-        Ok(loaded) => loaded,
+        Ok((api, baseline)) => (api.with_slot_session(slot_session(request, is_data)), baseline),
         Err(err) if is_data => {
-            let diagnostic = output_diagnostic("dm.schema.baseline", Severity::Error, &err.to_string());
+            // A baseline holding a slot keeps its own code.
+            let code = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(&err).unwrap_or("dm.schema.baseline");
+            let diagnostic = output_diagnostic(code, Severity::Error, &err.to_string());
             let value = validate_value(Vec::new(), options.quiet, verbose);
             return Ok(Completed::failure(value).with_diagnostics(vec![diagnostic]));
         }
@@ -332,6 +355,25 @@ fn pretty_report(results: &[FileResult], quiet: bool, verbose: u8, options: &Out
     }
     // An error block paints regardless of its terminal.
     if options.terminal_profile.degrades_to_plain() { strip_escape_codes(report) } else { report }
+}
+
+/// The command's one schema-slot session: every document's template resolves
+/// through it, so a grant decided for one file holds for the rest of the run.
+/// Its automatic grants are judged against the launch context's repository,
+/// and its grant store is the one below the request's home. A formatted run
+/// on a terminal asks; a data output never prompts, so an unapproved read is
+/// `dm.schema.slot_approval_required`.
+fn slot_session(request: &MdRequest, is_data: bool) -> std::sync::Arc<darkmatter::markdown::schemas::slots::SlotSession> {
+    use darkmatter::markdown::schemas::slots::SlotSession;
+    let data = darkmatter::markdown::compose::DataRuntime::new();
+    let mut session = match request.launch_context() {
+        Ok(context) => SlotSession::for_context(data, context),
+        Err(_) => SlotSession::new(data),
+    };
+    if !is_data && crate::approval::can_prompt_interactively() {
+        session = session.with_handler(std::sync::Arc::new(crate::approval::CliShellApprovalHandler));
+    }
+    std::sync::Arc::new(session)
 }
 
 /// Builds the [`DarkmatterSchemas`] entry point at the launch context with
@@ -526,13 +568,19 @@ fn validate_one(
     let (api, mut timings) = if in_repository && !no_schema_triggers {
         match ValidationTimings::record(|| api.with_trigger_discovery()) {
             (Ok(api), discovery) => (api, discovery),
-            (Err(err), discovery) => return early(FileOutcome::SchemaError(Box::new(err)), Some(discovery)),
+            (Err(err), discovery) => return early(FileOutcome::schema_error(err, &discovery_path), Some(discovery)),
         }
     } else {
         (api, ValidationTimings::default())
     };
     let findings = api.discovery_findings().to_vec();
     let checked = |outcome, timings| CheckedFile { outcome, timings: Some(timings), findings: findings.clone() };
+    // The reads the document's templates name are asked about once, before
+    // anything resolves. A handler that cannot answer leaves them
+    // undecided, which the resolution reports as approval-required.
+    if let Err(error) = api.approve_slot_reads(&md) {
+        tracing::warn!(%error, "the schema slot reads could not be approved");
+    }
 
     if !assignments.is_empty() {
         // Build the pre-assignment effective schema solely to coerce assignment
@@ -544,7 +592,7 @@ fn validate_one(
         timings.absorb(preparation);
         let effective = match effective {
             Ok(effective) => effective,
-            Err(err) => return checked(FileOutcome::SchemaError(Box::new(err)), timings),
+            Err(err) => return checked(FileOutcome::schema_error(err, &discovery_path), timings),
         };
         assignment::apply_all(
             md.frontmatter_mut().as_map_mut(),
@@ -566,8 +614,9 @@ fn validate_one(
             advisories: report.advisories,
             schema_label,
             layers: AppliedLayers::for_markdown(summary.layers, &md, baseline),
+            slots: 0,
         },
-        Err(err) => FileOutcome::SchemaError(Box::new(err)),
+        Err(err) => FileOutcome::schema_error(err, &discovery_path),
     };
     checked(outcome, timings)
 }
@@ -621,6 +670,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
         Ok(context) => context,
         Err(err) => return FileOutcome::YamlLoadError { message: format!("{err:#}"), location: None },
     };
+    let slots = template_slot_count(&text, &path, &context);
     match api.clone().with_file_resolution_context(context).validate_loaded_yaml_document(&document) {
         Ok(YamlOutcome::NoSchema) => FileOutcome::Validated {
             report_valid: true,
@@ -628,6 +678,7 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
             advisories: Vec::new(),
             schema_label: None,
             layers: AppliedLayers::default(),
+            slots,
         },
         Ok(YamlOutcome::Validated(validation)) => FileOutcome::Validated {
             report_valid: validation.report.valid,
@@ -638,9 +689,18 @@ fn validate_yaml(api: &DarkmatterSchemas, opened: &OpenedArgument, request: &MdR
                 ..AppliedLayers::default()
             },
             schema_label: Some(validation.definition),
+            slots,
         },
-        Err(err) => FileOutcome::SchemaError(Box::new(err)),
+        Err(err) => FileOutcome::schema_error(err, &path),
     }
+}
+
+/// How many `{{ … }}` slots the schema file `text` (at `path`) holds; `0`
+/// for a concrete schema or a YAML document that is not a schema. Passive:
+/// the slots are listed, never evaluated, and nothing they name is read.
+fn template_slot_count(text: &str, path: &Path, context: &FileResolutionContext) -> usize {
+    let source = simplified_schema::SchemaSource::from(path).bound(context.clone()).with_text(text);
+    simplified_schema::SimplifiedSchema::try_from_yaml(source).map_or(0, |schema| schema.pending_slots().len())
 }
 
 /// Writes one document's validation stage timings to stderr.
@@ -718,6 +778,7 @@ fn render_pretty(
             report_valid: true,
             advisories,
             layers,
+            slots,
             ..
         } => {
             if quiet {
@@ -727,6 +788,11 @@ fn render_pretty(
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
             push_row(out, &Prose::new(line).with_verbosity(verbose).render(terminal));
+            if *slots > 0 {
+                let noun = if *slots == 1 { "slot" } else { "slots" };
+                let note = format!("    - <dim>a schema template with {slots} {noun}; checked as written, not resolved</dim>");
+                push_row(out, &Prose::new(note).render(terminal));
+            }
             for advisory in advisories {
                 push_advisory_bullet(out, advisory, terminal);
             }
@@ -781,6 +847,15 @@ fn render_pretty(
             let bullet = format!("    - {}{suffix}", escape_prose(message));
             push_row(out, &Prose::new(bullet).render(terminal));
         }
+        FileOutcome::Slots { diagnostics, .. } => {
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>could not be checked: its schema's slots did not resolve:</dim>_"
+            );
+            push_row(out, &Prose::new(header).with_verbosity(verbose).render(terminal));
+            for diagnostic in diagnostics {
+                push_slot_bullet(out, diagnostic, terminal);
+            }
+        }
         FileOutcome::SchemaError(err) => {
             let header = format!(
                 "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has a schema definition error:</dim>_"
@@ -789,6 +864,38 @@ fn render_pretty(
             let block = err.status_block(terminal);
             push_row(out, &block.render(terminal));
         }
+    }
+}
+
+/// One slot's record: its message, code, and position, then the grants any
+/// one of which would allow its read.
+fn push_slot_bullet(out: &mut String, diagnostic: &darkmatter::markdown::compose::expression::Diagnostic, terminal: &Terminal) {
+    let location = diagnostic
+        .source
+        .as_ref()
+        .map(|source| {
+            let file = source.file.as_ref().map(|file| file.display().to_string()).unwrap_or_default();
+            match (source.line, source.column) {
+                (Some(line), Some(column)) => format!(" <dim>(at {} line {line}, column {column})</dim>", escape_prose(&file)),
+                _ if !file.is_empty() => format!(" <dim>(in {})</dim>", escape_prose(&file)),
+                _ => String::new(),
+            }
+        })
+        .unwrap_or_default();
+    let bullet = format!(
+        "    - <red>error</red> <dim>[{}]</dim> {}{location}",
+        escape_prose(&diagnostic.code),
+        escape_prose(&diagnostic.message).replace('\n', "\n      "),
+    );
+    push_row(out, &Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal));
+    for grant in diagnostic.grants_needed.iter().flatten() {
+        let line = format!(
+            "        <dim>allowed by:</dim> {} {} <dim>({})</dim>",
+            grant.kind,
+            escape_prose(&grant.target),
+            grant.scope
+        );
+        push_row(out, &Prose::new(line).render(terminal));
     }
 }
 
@@ -909,6 +1016,7 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             advisories,
             schema_label,
             layers,
+            slots,
         } => {
             let problems_json: Vec<serde_json::Value> = problems
                 .iter()
@@ -933,13 +1041,17 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
                     "message": advisory.message(),
                 })
             }));
-            json!({
+            let mut record = json!({
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
                 "layers": layers.to_json(),
                 "problems": problems_json,
-            })
+            });
+            if *slots > 0 {
+                record["slots"] = json!(slots);
+            }
+            record
         }
         FileOutcome::Unopened(err) => json!({
             "file": file_str,
@@ -969,14 +1081,42 @@ fn file_record(file: &Path, outcome: &FileOutcome, findings: &[InvalidTriggerFin
             "column": location.map(|(_, column)| column),
             "problems": [],
         }),
-        FileOutcome::SchemaError(err) => json!({
-            "file": file_str,
-            "valid": false,
-            "schema": serde_json::Value::Null,
-            "error": "schema",
-            "message": err.to_string(),
-            "problems": [],
-        }),
+        FileOutcome::Slots { error, diagnostics } => {
+            let mut grants_needed: Vec<&darkmatter::markdown::compose::expression::GrantNeeded> = Vec::new();
+            for grant in diagnostics.iter().filter_map(|diagnostic| diagnostic.grants_needed.as_ref()).flatten() {
+                if !grants_needed.contains(&grant) {
+                    grants_needed.push(grant);
+                }
+            }
+            let mut record = json!({
+                "file": file_str,
+                "valid": false,
+                "schema": serde_json::Value::Null,
+                "error": "slots",
+                "message": error.to_string(),
+                "problems": [],
+                "diagnostics": diagnostics,
+            });
+            if !grants_needed.is_empty() {
+                record["grants_needed"] = json!(grants_needed);
+            }
+            record
+        }
+        FileOutcome::SchemaError(err) => {
+            let mut record = json!({
+                "file": file_str,
+                "valid": false,
+                "schema": serde_json::Value::Null,
+                "error": "schema",
+                "message": err.to_string(),
+                "problems": [],
+            });
+            // A slot where none may appear (a kind definition) names its code.
+            if let Some(code) = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(err) {
+                record["code"] = json!(code);
+            }
+            record
+        }
     };
     if !warnings_json.is_empty() {
         value

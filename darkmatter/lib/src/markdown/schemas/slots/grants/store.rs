@@ -194,10 +194,16 @@ fn parse_line(line: &str) -> Result<Grant, String> {
     if kind.is_empty() {
         return Err(format!("`{verb}` needs a kind: file, dir, url, url-any-query, or site"));
     }
-    let target = match kind {
-        "file" | "dir" | "url" | "url-any-query" | "site" if argument.is_empty() => {
-            return Err(format!("`{verb} {kind}` needs a target"));
-        }
+    if argument.is_empty() && matches!(kind, "file" | "dir" | "url" | "url-any-query" | "site") {
+        return Err(format!("`{verb} {kind}` needs a target"));
+    }
+    let target = target_from_words(kind, argument)?;
+    Ok(Grant { decision, target, scope: GrantScope::Persisted })
+}
+
+/// The target a store line's kind word and argument name.
+pub(super) fn target_from_words(kind: &str, argument: &str) -> Result<GrantTarget, String> {
+    Ok(match kind {
         "file" => GrantTarget::File(stored_path(argument)?),
         "dir" => GrantTarget::Dir(stored_path(argument)?),
         "url" => GrantTarget::Url(http_url(argument)?),
@@ -212,8 +218,7 @@ fn parse_line(line: &str) -> Result<Grant, String> {
         other => {
             return Err(format!("unknown kind `{other}`; expected file, dir, url, url-any-query, or site"));
         }
-    };
-    Ok(Grant { decision, target, scope: GrantScope::Persisted })
+    })
 }
 
 /// The first whitespace-separated word and the trimmed rest.

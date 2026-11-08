@@ -6,7 +6,8 @@
 //! `DataError`, its `dm.data.*` code, and its data location), and its code is
 //! [`failure_code`]'s.
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use simplified_schema::expression::parse_spanned;
@@ -26,12 +27,19 @@ use crate::markdown::compose::expression::read_gate::GateRefusal;
 pub struct DarkmatterSlotHost {
     evaluator: SlotEvaluator,
     evaluations: Mutex<Vec<(Slot, SlotEvaluation)>>,
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl DarkmatterSlotHost {
     /// A host evaluating with `evaluator`.
     pub(crate) fn new(evaluator: SlotEvaluator) -> Self {
-        Self { evaluator, evaluations: Mutex::new(Vec::new()) }
+        Self { evaluator, evaluations: Mutex::new(Vec::new()), cancel: None }
+    }
+
+    /// Reports the resolution canceled once `cancel` is set.
+    pub(crate) fn with_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
+        self.cancel = cancel;
+        self
     }
 
     /// Every successful evaluation so far, in order, with what it depended
@@ -50,6 +58,10 @@ fn in_slot(slot: &Slot, span: &SourceSpan) -> SourceSpan {
 }
 
 impl SlotHost for DarkmatterSlotHost {
+    fn is_canceled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|cancel| cancel.load(Ordering::Acquire))
+    }
+
     fn admit(&self, slot: &Slot) -> Result<(), SlotAdmissionError> {
         let parsed = parse_spanned(&slot.expression).map_err(|error| {
             let at = slot.expression_span.start + error.position.min(slot.expression.len());

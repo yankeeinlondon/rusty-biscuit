@@ -73,6 +73,18 @@ pub enum GrantTarget {
 }
 
 impl GrantTarget {
+    /// The target a grant-store line spells as `kind` and `argument` (the
+    /// [`Self::kind_word`] and [`Display`](fmt::Display) forms), judged as
+    /// the store judges a line: an absolute path, an `http`/`https` URL, a
+    /// `url-any-query` URL without a query, a site without a path.
+    ///
+    /// ## Errors
+    ///
+    /// The reason the words name no target, worded as a store-line error.
+    pub fn parse(kind: &str, argument: &str) -> Result<Self, String> {
+        store::target_from_words(kind, argument.trim())
+    }
+
     /// The store's kind word for this target.
     pub fn kind_word(&self) -> &'static str {
         match self {

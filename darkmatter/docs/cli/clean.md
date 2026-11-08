@@ -97,6 +97,15 @@ md clean README.md --save -v
     - `baseline-schema`: Disable the default Darkmatter baseline. Conflicts with `--baseline-schema`.
     - `schema-triggers`: Disable repository trigger discovery and bare-name schema-root lookup.
 
+A [schema template](../topics/schemas/schema-slots.md) (a schema whose
+definitions hold `{{ … }}` slots) is resolved before the schema checks run, under
+the same rules as `md compose`: a data file committed in the schema's repository is
+read without asking, any other read is asked about on a terminal, and a data output
+never asks. A read nobody approved leaves the schema's constraints unavailable, so
+the document is never reported clean: the run fails (exit 1) with the slot's
+`dm.schema.slot_approval_required` diagnostic, which names the `grants_needed`, and
+`--save` writes nothing.
+
 Each formatting flag overrides only its own rule, for this run. A rule with no
 flag comes from the document's `style.markdown`, then the built-in default.
 The full rule list, precedence, and examples are in [Markdown Formatting

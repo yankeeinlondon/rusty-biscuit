@@ -28,7 +28,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use biscuit_file::FileResolutionContext;
@@ -51,6 +51,7 @@ use super::host::DarkmatterSlotHost;
 use crate::markdown::compose::DataRuntime;
 use crate::markdown::compose::context::capture::CapturedObservations;
 use crate::markdown::compose::expression::functions::SlotClass;
+use crate::markdown::compose::expression::iteration::IterationLimits;
 use crate::markdown::compose::expression::read_gate::{GateRefusal, ReadGate, ReadTarget};
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 use crate::markdown::compose::shell_expansion::ShellApprovalHandler;
@@ -63,7 +64,9 @@ pub enum SessionMode {
     #[default]
     Full,
     /// Resolve with the automatic, persisted, and run-only grants only;
-    /// never ask. A read nothing grants stays approval-required.
+    /// never ask. A template a read nothing grants (or a deny) stops is
+    /// left unresolved ([`SchemaError::UnresolvedSlots`]), which a
+    /// reference check defers like any value only composition can judge.
     ReferenceCheck,
     /// Never resolve: a template stays unresolved
     /// ([`SchemaError::UnresolvedSlots`]).
@@ -90,6 +93,8 @@ pub struct SlotSession {
     run_grants: Vec<Grant>,
     mode: SessionMode,
     home: Option<PathBuf>,
+    cancel: Option<Arc<AtomicBool>>,
+    limits: Option<IterationLimits>,
     grants: OnceLock<Result<Arc<SlotGrants>, Arc<GrantStoreError>>>,
     pinned: Mutex<HashMap<ResolutionKey, Pin>>,
 }
@@ -197,6 +202,8 @@ impl SlotSession {
             run_grants: Vec::new(),
             mode: SessionMode::Full,
             home: None,
+            cancel: None,
+            limits: None,
             grants: OnceLock::new(),
             pinned: Mutex::new(HashMap::new()),
         }
@@ -205,8 +212,14 @@ impl SlotSession {
     /// The session a composition request builds when its caller attached
     /// none: the request's data runtime, captured observations, remote
     /// runtime, `--allow host=HOST` values, repository, home (for the grant
-    /// store), and approval handler.
-    pub(crate) fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
+    /// store), and approval handler. A command that composes more than once
+    /// builds it once from its first request and attaches it to every pass
+    /// with [`ComposeOptions::with_slot_session`](crate::markdown::compose::ComposeOptions::with_slot_session).
+    /// Attach the command's data runtime to the request first
+    /// (`ComposeOptions::with_data_runtime`): a request without one gives the
+    /// session a runtime of its own, whose reads never reach the command's
+    /// read set.
+    pub fn for_request(request: &crate::markdown::compose::ComposeRequest) -> Self {
         let options = request.options();
         let mut session = Self::new(options.data_runtime())
             .with_home(request.resolution_context().home_dir().map(Path::to_path_buf))
@@ -218,6 +231,17 @@ impl SlotSession {
             session = session.with_handler(Arc::clone(handler));
         }
         session
+    }
+
+    /// A session for a command that validates without composing (`md schema
+    /// validate`, `md clean`): reading through `data`, judging automatic
+    /// grants against `context`'s repository, and reading the grant store
+    /// below `context`'s home. It has no captured observations, so a slot
+    /// probing `PATH` (`has_command`) sees an empty one.
+    pub fn for_context(data: DataRuntime, context: &FileResolutionContext) -> Self {
+        Self::new(data)
+            .with_home(context.home_dir().map(Path::to_path_buf))
+            .with_repository_root(context.repository_root().map(Path::to_path_buf))
     }
 
     /// Resolves no further than `mode`.
@@ -266,6 +290,27 @@ impl SlotSession {
         self
     }
 
+    /// Stops a resolution in progress once `cancel` is set: the slot being
+    /// evaluated finishes, no further slot starts, and the resolution fails
+    /// with `dm.schema.slot_canceled`, which is never cached or pinned. An
+    /// editor sets it when a newer edit supersedes the resolution.
+    #[must_use]
+    pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(cancel);
+        self
+    }
+
+    /// Gives each slot `limits` instead of the default work allowances, so
+    /// a slot that does more work fails with the ordinary `dm.iteration.*`
+    /// code at the slot. An editor passes smaller limits than a command. A
+    /// failure these limits caused is never cached for another session; a
+    /// resolution that succeeded is shared as usual.
+    #[must_use]
+    pub fn with_slot_limits(mut self, limits: IterationLimits) -> Self {
+        self.limits = Some(limits);
+        self
+    }
+
     /// How far this session resolves.
     pub fn mode(&self) -> SessionMode {
         self.mode
@@ -276,6 +321,47 @@ impl SlotSession {
     /// is invalid.
     pub fn grants(&self) -> Option<GrantBook> {
         self.grants.get().and_then(|grants| grants.as_ref().ok()).map(|grants| grants.book())
+    }
+
+    /// Asks the session's approval handler once, in one batch, about every
+    /// read the slots of `templates` name before evaluation (a literal or
+    /// pure target) that no grant or automatic grant decides yet, and keeps
+    /// its answers for the run (a persisted answer is also written to the
+    /// grant store). Returns how many reads were asked about.
+    ///
+    /// This is the collect-and-approve step of a command that validates
+    /// without the compose pre-flight; call it before the first validation.
+    /// Nothing is asked in a [`SessionMode::ReferenceCheck`] or
+    /// [`SessionMode::Passive`] session, or without a handler; an undecided
+    /// read then stays `dm.schema.slot_approval_required` when its slot
+    /// resolves. A computed target is judged when its slot evaluates. An
+    /// invalid grant store asks nothing here and fails the resolution with
+    /// `dm.schema.slot_grant_store_invalid`.
+    ///
+    /// ## Errors
+    ///
+    /// The handler's own failure.
+    pub fn approve_reads(
+        &self,
+        templates: &[crate::markdown::schemas::PendingTemplate],
+        context: &FileResolutionContext,
+    ) -> Result<usize, crate::markdown::compose::ShellExpansionError> {
+        if self.mode != SessionMode::Full || templates.is_empty() {
+            return Ok(0);
+        }
+        let Some(handler) = self.handler.as_ref() else {
+            return Ok(0);
+        };
+        let Ok(grants) = self.run_grants() else {
+            return Ok(0);
+        };
+        let requests = grants.undecided_requests(templates, context);
+        if requests.is_empty() {
+            return Ok(0);
+        }
+        let decisions = handler.approve_slot_reads(&requests)?;
+        grants.apply_all(&requests, &decisions);
+        Ok(requests.len())
     }
 
     /// The run's grants, built on first use.
@@ -314,10 +400,31 @@ impl SlotSession {
         context: &FileResolutionContext,
         pins_only: bool,
     ) -> Result<Arc<ResolvedSchema>, SchemaError> {
-        let unresolved = || SchemaError::UnresolvedSlots(Box::new(UnresolvedSlots::new(pending.slots().to_vec())));
+        let unresolved = || unresolved_template(pending);
         if self.mode == SessionMode::Passive {
             return Err(unresolved());
         }
+        let resolved = self.resolve_in_mode(pending, template, context, pins_only);
+        match resolved {
+            // A reference check never asks: a slot whose read nobody
+            // granted leaves the template unresolved for it to defer.
+            Err(SchemaError::SlotResolution(failure))
+                if self.mode == SessionMode::ReferenceCheck && needs_grant(&failure.error) =>
+            {
+                Err(unresolved())
+            }
+            other => other,
+        }
+    }
+
+    fn resolve_in_mode(
+        self: &Arc<Self>,
+        pending: &PendingSchema,
+        template: &str,
+        context: &FileResolutionContext,
+        pins_only: bool,
+    ) -> Result<Arc<ResolvedSchema>, SchemaError> {
+        let unresolved = || unresolved_template(pending);
         let key = cache::resolution_key(pending, template, context, self.repository_root.as_deref());
         if let Some(outcome) = self.pinned(&key) {
             return failure_of(outcome, pending);
@@ -357,7 +464,8 @@ impl SlotSession {
             Err(error) => return Err(Arc::new(store_failure(pending.slots(), &error))),
         };
         let recorder = Arc::new(RecordingGates { inner: RunGates(Arc::clone(&grants)), reads: Arc::default() });
-        let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::clone(&recorder) as Arc<dyn SlotGates>));
+        let host = DarkmatterSlotHost::new(self.evaluator(&grants, Arc::clone(&recorder) as Arc<dyn SlotGates>))
+            .with_cancel(self.cancel.clone());
         let (result, observed) = {
             let _resolving = Resolving::enter(self, template_key.to_string(), context);
             crate::markdown::compose::expression::data::runtime::capture_observations(|| {
@@ -367,7 +475,9 @@ impl SlotSession {
         let outcome: Outcome = result.map(Arc::new).map_err(Arc::new);
         let cacheable = match &outcome {
             Ok(_) => true,
-            Err(error) => cache::caches_failure(error),
+            // A session with its own (smaller) work limits must not hand
+            // the failure they caused to a command allowed more work.
+            Err(error) => cache::caches_failure(error) && !(self.limits.is_some() && exhausted_work(error)),
         };
         if !cacheable {
             return outcome;
@@ -393,10 +503,14 @@ impl SlotSession {
     }
 
     fn evaluator(&self, grants: &Arc<SlotGrants>, gates: Arc<dyn SlotGates>) -> SlotEvaluator {
-        SlotEvaluator::new(self.data.clone())
+        let evaluator = SlotEvaluator::new(self.data.clone())
             .with_gates(gates)
             .with_remote(grants.remote_runtime(self.remote.as_ref()))
-            .with_observations(self.observations.clone())
+            .with_observations(self.observations.clone());
+        match self.limits {
+            Some(limits) => evaluator.with_limits(limits),
+            None => evaluator,
+        }
     }
 
     /// Whether the cached `entry` may be served to this session in
@@ -447,12 +561,44 @@ impl SlotSession {
     }
 }
 
+/// `pending` left unresolved, keeping its resolution handle so a caller can
+/// still read the template's literal parts.
+fn unresolved_template(pending: &PendingSchema) -> SchemaError {
+    let mut unresolved = UnresolvedSlots::new(pending.slots().to_vec());
+    unresolved.pending = Some(pending.clone());
+    SchemaError::UnresolvedSlots(Box::new(unresolved))
+}
+
 /// `outcome` as [`DarkmatterSchemas`](crate::markdown::schemas::DarkmatterSchemas)
 /// reports it.
 fn failure_of(outcome: Outcome, pending: &PendingSchema) -> Result<Arc<ResolvedSchema>, SchemaError> {
     outcome.map_err(|error| {
         SchemaError::SlotResolution(Box::new(SlotResolutionFailure::new(error, pending.read_sources().to_vec().into())))
     })
+}
+
+/// Whether a slot of `error` stopped on a work limit (`dm.iteration.*`).
+fn exhausted_work(error: &SlotResolutionError) -> bool {
+    match error {
+        SlotResolutionError::Failed(failed) => {
+            failed.iter().any(|(_, failure)| failure.code.is_some_and(|code| code.starts_with("dm.iteration.")))
+        }
+        _ => false,
+    }
+}
+
+/// Whether `error` failed only because a read was not granted (or denied),
+/// so a session that never asks leaves its template unresolved.
+fn needs_grant(error: &SlotResolutionError) -> bool {
+    match error {
+        SlotResolutionError::Failed(failed) => {
+            !failed.is_empty()
+                && failed.iter().all(|(_, failure)| {
+                    matches!(failure.code, Some(super::codes::SLOT_APPROVAL_REQUIRED_CODE | super::codes::SLOT_DENIED_CODE))
+                })
+        }
+        _ => false,
+    }
 }
 
 /// The key a template is known by on the resolution stack: the schema file

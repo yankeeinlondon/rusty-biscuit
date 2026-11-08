@@ -136,6 +136,45 @@ impl SlotGrants {
         written.map(|()| true)
     }
 
+    /// One request per read the slots of `templates` name before evaluation
+    /// (literal or pure targets) that no grant or automatic grant decides
+    /// yet, in slot order, each target once. Reads nothing a slot names.
+    pub(crate) fn undecided_requests(
+        &self,
+        templates: &[crate::markdown::schemas::PendingTemplate],
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Vec<SlotGrantRequest> {
+        use super::targets::{CollectedRead, collect_slot_targets};
+        let mut requests: Vec<SlotGrantRequest> = Vec::new();
+        for template in templates {
+            for slot in collect_slot_targets(&template.slots, context) {
+                for read in &slot.reads {
+                    let CollectedRead::Known(target) = read else {
+                        continue;
+                    };
+                    if self.decide_without_asking(&slot.defining, target).is_some() {
+                        continue;
+                    }
+                    let asked = SlotGrantRequest::for_target(&canonical(target), slot.slot.origin.as_deref(), self.can_persist());
+                    if !requests.iter().any(|known| known.kind == asked.kind && known.location == asked.location) {
+                        requests.push(asked);
+                    }
+                }
+            }
+        }
+        requests
+    }
+
+    /// Applies a handler's answers to `requests`, in order; a store write
+    /// that fails leaves the grant for this run only.
+    pub(crate) fn apply_all(&self, requests: &[SlotGrantRequest], decisions: &[SlotGrantDecision]) {
+        for (asked, decision) in requests.iter().zip(decisions) {
+            if let Err(error) = self.apply(asked, decision) {
+                tracing::warn!(%error, "the schema read grant applies for this run only");
+            }
+        }
+    }
+
     /// The fetch policy the slots' remote runtime uses: exactly the hosts
     /// the allow grants of URLs and sites name, and the command's
     /// `--allow host=HOST` values.
