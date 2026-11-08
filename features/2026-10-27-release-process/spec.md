@@ -17,9 +17,9 @@ implemented: false
 
 We are using the [Release-Plz](https://release-plz.dev/) solution today and we can continue to if it makes sense but in this spec we are going to define what is required and then agree on the right solution for it.
 
-## Decision needed first
+## Decision (2026-11-07): evidence opens a release pull request
 
-Two descriptions of this process now exist, and they differ:
+Two descriptions of this process existed, and they differed:
 
 | | Authored process (below) | Discussed on 2026-11-06 |
 |---|---|---|
@@ -28,7 +28,9 @@ Two descriptions of this process now exist, and they differ:
 | Reaches `main` by | A push, as the sole exception to PR-only | A normal merge |
 | Testing | None; existing evidence is posted | None; existing evidence is shown |
 
-**Recommended combination:**
+**Decided:** the evidence-triggered pull request, combined with the authored
+steps as follows. The authored text below stays as the record of intent;
+where it says to push straight to `main`, this decision replaces it.
 
 ```mermaid
 flowchart LR
@@ -120,5 +122,8 @@ the part flagged as a security concern.
 ## Guidelines
 
 - no code can be written in Python!
+    - decided 2026-11-07: repairing *existing* Python is allowed until the
+      Rust replacement lands (`2026-11-06-rust-ci-planner`,
+      `2026-11-06-python-retirement`); new Python modules are not
 - if there is a need to write faster turn-around code then it must be in Typescript (but Rust is always considered acceptable too)
 - any just recipes should provide "glue" but not business logic
