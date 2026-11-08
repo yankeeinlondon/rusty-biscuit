@@ -73,7 +73,7 @@ use simplified_schema::{PropertyPath, SetterValue, ValidationProblemCode};
 use crate::markdown::compose::policy::{STYLE_DEPRECATED_CODE, STYLE_UNKNOWN_KEY_CODE};
 use crate::markdown::schemas::EffectiveSchema;
 use crate::markdown::schemas::completion::declared_shape;
-use crate::style::descriptor::{LeafType, is_canonical_container, kebabify, leaf_for_canonical, suggested_key};
+use crate::style::descriptor::{LeafType, is_canonical_container, kebabify, leaf_for_canonical, nearest_key, suggested_key};
 use crate::style::normalize::{self, NormalizedLayer, Segments, flatten, insert_at, unflatten};
 use crate::style::parse;
 use crate::style::schema::StyleFrontmatter;
@@ -766,7 +766,9 @@ fn report_unknown(path: &[String], origins: &Origins<'_>, policy: StylePreparati
             let (key, parent) = path.split_last().map_or(("", &[][..]), |(key, parent)| (key.as_str(), parent));
             let parent = std::iter::once("style").chain(parent.iter().map(String::as_str)).collect::<Vec<_>>().join(".");
             let mut message = format!("`{key}` is not a valid property under `{parent}`");
-            if let Some(key) = suggestion {
+            // A setter is typed by hand, so a typo also gets the nearest
+            // sibling; files and documents keep the rename-only suggestion.
+            if let Some(key) = suggestion.or_else(|| nearest_key(&kebab.join("."))) {
                 message.push_str(&format!("; did you mean `style.{key}`?"));
             }
             let origin = origins.of(path, &canonical);

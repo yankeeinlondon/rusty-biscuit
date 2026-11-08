@@ -408,6 +408,35 @@ pub fn suggested_key(canonical_path: &str) -> Option<String> {
         .map(|(_, new)| join_path(parent, new))
 }
 
+/// The valid key nearest to a misspelled `canonical_path`, among the keys
+/// directly under its parent: a leaf or container one segment below it.
+///
+/// A candidate counts only within an edit distance of 2 and less than half
+/// the misspelled segment's length, so an unrelated word gets no
+/// suggestion. Ties go to the first candidate in descriptor order.
+pub fn nearest_key(canonical_path: &str) -> Option<String> {
+    let (parent, segment) = match canonical_path.rsplit_once('.') {
+        Some((parent, segment)) => (parent, segment),
+        None => ("", canonical_path),
+    };
+    let prefix = if parent.is_empty() { String::new() } else { format!("{parent}.") };
+    let mut best: Option<(usize, &str)> = None;
+    for leaf in SCHEMA {
+        let Some(rest) = leaf.canonical.strip_prefix(prefix.as_str()) else {
+            continue;
+        };
+        let child = rest.split('.').next().unwrap_or(rest);
+        if child == segment {
+            continue;
+        }
+        let distance = crate::markdown::delta::levenshtein_distance(segment, child);
+        if distance <= 2 && distance * 2 < segment.chars().count() && best.is_none_or(|(least, _)| distance < least) {
+            best = Some((distance, child));
+        }
+    }
+    best.map(|(_, child)| join_path(parent, child))
+}
+
 /// `true` if `path` is a canonical container — a node that has children but
 /// is not itself a leaf. Containers include the top-level buckets plus the
 /// nested `local-style` and `page.code` paths, and the top-level `code`
@@ -492,6 +521,17 @@ mod tests {
         assert_eq!(suggested_key("top-margin").as_deref(), Some("margin-top"));
         assert_eq!(suggested_key("table.left-margin"), None);
         assert_eq!(suggested_key("page.lft-margin"), None);
+    }
+
+    #[test]
+    fn nearest_key_finds_a_sibling_within_two_edits() {
+        assert_eq!(nearest_key("magin").as_deref(), Some("margin"));
+        assert_eq!(nearest_key("page.magin-left").as_deref(), Some("page.margin-left"));
+        assert_eq!(nearest_key("tabel").as_deref(), Some("table"));
+        assert_eq!(nearest_key("hyperlinks.local-styl").as_deref(), Some("hyperlinks.local-style"));
+        assert_eq!(nearest_key("page.zzzzzz"), None, "an unrelated word");
+        assert_eq!(nearest_key("mz"), None, "two letters are too short to guess");
+        assert_eq!(nearest_key("nosuch.margin"), None, "an unknown parent has no children");
     }
 
     #[test]

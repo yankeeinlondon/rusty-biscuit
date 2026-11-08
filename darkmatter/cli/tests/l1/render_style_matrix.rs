@@ -258,3 +258,46 @@ fn a_setter_problem_names_its_argument_and_canonical_path_and_no_position() {
     assert!(record.source.is_none(), "a setter is in no file: {record:?}");
     assert!(record.message.contains("`style.page.mb`") && record.message.contains("style.mb=-4"), "{}", record.message);
 }
+
+// A misspelled setter key suggests the nearest valid sibling.
+
+#[test]
+fn a_misspelled_setter_key_suggests_the_nearest_root_key() {
+    let local = Local::new();
+    let record = first_error(local.prepare(PLAIN, &[], &["style.magin=4"]));
+    assert_eq!(record.code, "dm.schema.unknown_key", "{record:?}");
+    assert!(record.message.contains("`magin` is not a valid property under `style`"), "{}", record.message);
+    assert!(record.message.contains("did you mean `style.margin`?"), "{}", record.message);
+}
+
+#[test]
+fn a_misspelled_nested_setter_key_suggests_its_sibling() {
+    let local = Local::new();
+    let record = first_error(local.prepare(PLAIN, &[], &["style.page.magin-left=4"]));
+    assert_eq!(record.code, "dm.schema.unknown_key", "{record:?}");
+    assert!(record.message.contains("did you mean `style.page.margin-left`?"), "{}", record.message);
+}
+
+#[test]
+fn a_renamed_setter_key_still_suggests_its_new_name() {
+    let local = Local::new();
+    let record = first_error(local.prepare(PLAIN, &[], &["style.page.left-margin=4"]));
+    assert!(record.message.contains("did you mean `style.page.margin-left`?"), "{}", record.message);
+}
+
+#[test]
+fn an_unrelated_setter_key_gets_no_suggestion() {
+    let local = Local::new();
+    let record = first_error(local.prepare(PLAIN, &[], &["style.page.zzzzzz=4"]));
+    assert_eq!(record.code, "dm.schema.unknown_key", "{record:?}");
+    assert!(!record.message.contains("did you mean"), "{}", record.message);
+}
+
+#[test]
+fn a_misspelled_key_in_a_style_file_is_dropped_and_its_siblings_apply() {
+    let local = Local::new();
+    local.write("style.yaml", "magin: 4\nmargin-left: 2\n");
+    let prepared = local.prepare(PLAIN, &["style.yaml"], &[]).expect("a file's unknown key warns");
+    assert_eq!(page(&prepared)["margin-left"], json!(2), "{:#}", prepared.value());
+    assert!(page(&prepared).get("margin-top").is_none(), "the misspelled key is dropped: {:#}", prepared.value());
+}

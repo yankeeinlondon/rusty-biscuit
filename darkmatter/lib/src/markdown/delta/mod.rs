@@ -779,7 +779,7 @@ fn find_similar_slug(
 }
 
 /// Simple Levenshtein distance calculation.
-fn levenshtein_distance(a: &str, b: &str) -> usize {
+pub(crate) fn levenshtein_distance(a: &str, b: &str) -> usize {
     let a_chars: Vec<char> = a.chars().collect();
     let b_chars: Vec<char> = b.chars().collect();
     let m = a_chars.len();
