@@ -1142,4 +1142,4 @@ types:
             category(Composition);
             fallible;
             example(as_markdown("::file ./intro.md") => "# Introduction"; display-only: result depends on the transcluded file);
-        ) -> Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through.
+        ) -> Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; the content inherits the calling document's values as a `::file` child does; null passes through.

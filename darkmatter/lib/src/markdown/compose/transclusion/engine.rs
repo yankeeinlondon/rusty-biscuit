@@ -1855,18 +1855,32 @@ pub(crate) fn apply_directive_set_overlay(
 /// The options a local Markdown child composes with, given its parent's
 /// options and the parent's effective state (`parent_data`).
 ///
-/// This is the single derivation of a child's inputs. Pre-flight discovery
-/// walks the transclusion graph with it, and composition executes with it, so
-/// a command a child interpolates from inherited state has the same bytes in
-/// the approval set as when it runs. The parent's values reach the child as
-/// data defaults ([`child_inherited_origin`]): the parent already scanned
-/// every authored value once.
+/// [`inherited_child_options`] with the child's own source file.
 pub(crate) fn markdown_child_options(
     parent: &crate::markdown::compose::ComposeRequest,
     parent_data: &crate::markdown::compose::SharedFrontmatter,
     directive_options: &transclusion::BlockOptions,
     path: &Path,
     opening: Option<SourceOpening>,
+) -> crate::markdown::compose::ComposeRequest {
+    inherited_child_options(parent, parent_data, directive_options).with_accepted_source_file(path.to_path_buf(), opening)
+}
+
+/// The inputs every nested child (a `::file` child or `as_markdown` content)
+/// inherits from the document that nests it, before the child's source is
+/// chosen.
+///
+/// This is the single derivation of a child's inputs. Pre-flight discovery
+/// walks the graph with it, and composition executes with it, so a command a
+/// child interpolates from inherited state has the same bytes in the approval
+/// set as when it runs. The request's `--set` overrides and setters stay on
+/// the child, and the parent's effective state reaches it as data defaults
+/// ([`child_inherited_origin`]): the parent already scanned every authored
+/// value once.
+pub(crate) fn inherited_child_options(
+    parent: &crate::markdown::compose::ComposeRequest,
+    parent_data: &crate::markdown::compose::SharedFrontmatter,
+    directive_options: &transclusion::BlockOptions,
 ) -> crate::markdown::compose::ComposeRequest {
     // Prologue/epilogue are scoped to the defining document — never propagate.
     // ctx is captured fresh per-document by EffectiveStateBuilder, so the
@@ -1892,7 +1906,7 @@ pub(crate) fn markdown_child_options(
     });
     child_options.external_state = Some(Value::Object(inherited));
     child_options.inherited_origin = child_inherited_origin(directive_options);
-    child_options.with_accepted_source_file(path.to_path_buf(), opening)
+    child_options
 }
 
 /// Origin of what a transcluded child receives from the directive that

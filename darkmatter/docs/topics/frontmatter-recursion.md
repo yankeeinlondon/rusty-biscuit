@@ -118,6 +118,34 @@ The child composes to `Child: fixed {{ area }}`, exactly as the parent's own bod
 
 Values a transclusion directive sets (`::file child.md set.x="…"`) are authored when the parent wrote them literally in the directive, and data when any part of the directive's options came from interpolation (the parent evaluates `set.x="{{ v }}"` before the child sees it). The child's own frontmatter is authored and scanned as usual. See [Inserted Text Is Data](../inline/interpolation.md#inserted-text-is-data).
 
+## Nested Content (`as_markdown`)
+
+Content composed with the [`as_markdown(text)`](./darkmatter-expressions.md#functions)
+expression function inherits from the document that calls it exactly as a
+`::file` child of that document does: the caller's composed values arrive by
+the rules above, the content's own frontmatter wins over them, and the
+request's `--set` values and `path=value` setters still apply on top. A
+transclusion inside the content passes the same values on.
+
+```md
+<!-- root.md, composed with: md compose root.md --state '{given: "state"}' given=setter -->
+---
+name: root
+---
+{{ as_markdown("name=[{{ name }}] given=[{{ given }}]") }}
+{{ as_markdown("---\nname: own\n---\nname=[{{ name }}]") }}
+```
+
+The first call composes to `name=[root] given=[setter]` and the second to
+`name=[own]`, the same values a `::file` child with that frontmatter would
+see. Inherited values never appear in the frontmatter `as_markdown` returns;
+only the keys the content itself wrote do.
+
+A call inside the caller's frontmatter runs before the caller's own values
+are composed, so it inherits only what the caller inherited: the request's
+state, overrides, and setters, or for a transcluded caller, its parent's
+values.
+
 ## Exceptions
 
 - `ctx` is a property which is provided to each document by Darkmatter; it is recommended that document authors **not** use this property themselves but it is supported. When a document _does_ have a `ctx` property then we will use the normal recursion process described above.

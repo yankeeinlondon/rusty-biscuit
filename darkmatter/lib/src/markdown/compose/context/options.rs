@@ -1345,16 +1345,6 @@ impl ComposeOptions {
         self
     }
 
-    /// Clears the caller overrides that target the root document, for a
-    /// compose of other content (`as_markdown`) under these options.
-    pub(crate) fn clear_root_overrides(&mut self) {
-        self.set_overrides = None;
-        self.data_overrides = None;
-        self.setters = crate::markdown::compose::setters::SetterPlan::default();
-        self.setter_bindings = crate::markdown::compose::setters::SetterBindings::default();
-        self.inherited_origin = InheritedOrigin::default();
-    }
-
     /// Installs immutable raw caller values with their per-property origins.
     #[must_use]
     pub fn with_caller_input_records(mut self, records: CallerInputRecords) -> Self {

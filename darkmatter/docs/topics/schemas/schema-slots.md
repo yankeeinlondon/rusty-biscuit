@@ -88,6 +88,50 @@ A trigger whose payload holds slots is **pending**, not invalid: matching it
 reads nothing, and `md schema triggers` lists it as `pending: true`. Its
 slots evaluate only for a document it matches.
 
+### A replaced property's slots never run
+
+Layers merge whole top-level properties: a property the document's
+`$schema` declares replaces a trigger's declaration of it, and a later
+trigger replaces an earlier one's (triggers layer in schema-root order,
+then filename order within a root; see
+[Keeping document layers separate](./schema-triggers.md#keeping-document-layers-separate)). A slot under a replaced declaration is never read and never asked
+about, by any command or the editor, because the effective schema does not
+contain it. The other properties of the same payload resolve as usual.
+
+```yaml
+# schemas/a.trigger.yaml
+kind: schema-trigger
+match:
+  topic: literal(sandbox; required)
+$schema:
+  os: enum({{ load_data("../data/os.yaml", "string[]") }}; required)
+```
+
+```markdown
+---
+$schema:
+  os: string
+topic: sandbox
+os: Windows
+---
+```
+
+The document's `os: string` replaces the trigger's `os`, so `md compose`
+succeeds without reading `data/os.yaml` or asking about it; remove the
+document's `$schema` and the slot needs a grant again. The same holds when a
+`b.trigger.yaml` that also matches declares `os: string`.
+
+- A root-union `$schema` replaces a property only when **every** arm
+  declares it; an arm that leaves it out keeps the trigger's declaration, so
+  its slot still resolves. This holds before the document's own slots
+  resolve too: a root-union `$schema` that is itself a template is read arm
+  by arm as written, so the questions asked before a run match what the run
+  reads.
+- A named type (`Name@file`) holding a slot is resolved when a surviving
+  property uses it, and skipped when only replaced properties do.
+- A payload left with no slot after the replacement is an ordinary schema:
+  the editor does not treat it as pending.
+
 ### Not yet supported
 
 A slot that supplies a whole property definition

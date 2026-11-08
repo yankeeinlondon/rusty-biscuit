@@ -1180,16 +1180,20 @@ fn collect_document(
     // ── Nested `as_markdown` content (condition-blind) ─────────────
     // What discovery evaluated, plus every string-literal argument in the
     // authored source, so a branch discovery did not take still contributes.
-    // Runtime composes the content against the root source; so does this walk.
+    // Runtime composes the content against the root source, inheriting this
+    // document's state as a `::file` child does; so does this walk.
     let mut nested_contents = discovery.nested_compose.take_discovered();
     nested_contents.extend(authored_as_markdown_literals(markdown));
     for content in nested_contents {
         let key = format!("as_markdown:{}", biscuit_hash::xx_hash(&content));
-        let mut nested_options = options.clone();
+        let mut nested_options = transclusion::inherited_child_options(
+            options,
+            &child_state_data,
+            &transclusion::BlockOptions::default(),
+        );
         nested_options.source = root.0.clone();
         nested_options.source_derivation = root.1;
         nested_options.source_opening = root.2.clone();
-        nested_options.clear_root_overrides();
         let child = Markdown::from(content);
         let mut node = collect_recursive(
             &child,
@@ -1204,7 +1208,7 @@ fn collect_document(
             remote_fetch,
             root,
             Some(key),
-            &InheritedDiscovery::default(),
+            &for_children,
         )?;
         node.source = None;
         children.push(std::sync::Arc::new(node));

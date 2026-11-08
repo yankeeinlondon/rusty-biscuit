@@ -719,6 +719,11 @@ impl Markdown {
         if let Some(start) = esb_start {
             perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());
         }
+        // The body's `as_markdown` content inherits this state, as this
+        // document's `::file` children do.
+        if let Some(nested) = nested {
+            nested.align_state(effective_state.data());
+        }
 
         // Convert ctx diagnostics to compose warnings
         let source_display = match &options.source {

@@ -4,7 +4,7 @@
 //!
 //! - the template: its identity (the `$schema` value or trigger payload and
 //!   where it was written), the exact text of every schema file it read, and
-//!   its slots;
+//!   its slots with their authored ranges;
 //! - the request context it resolved in, and the repository the automatic
 //!   grant was judged against;
 //! - [`SLOT_RESOLVER_VERSION`] and the embedded function catalog, so a build
@@ -74,7 +74,10 @@ pub(crate) fn resolution_key(
         .map(|slot| {
             serde_json::json!([
                 slot.origin.as_deref().map(biscuit_file::to_portable_string),
+                // The whole authored range: a failure served from here is
+                // positioned at these spans.
                 slot.span.start,
+                slot.span.end,
                 slot.expression
             ])
         })

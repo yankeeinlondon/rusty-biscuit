@@ -358,8 +358,12 @@ mod failures {
     use super::*;
 
     /// The text of each file a projection positions in.
-    fn texts(root: &Path) -> impl Fn(Option<&Path>) -> Option<Arc<str>> + '_ {
-        move |path| path.and_then(|path| std::fs::read_to_string(root.join(path)).ok()).map(Arc::from)
+    fn texts(root: &Path) -> impl Fn(&simplified_schema::simplified::Slot) -> Option<(Option<PathBuf>, Arc<str>)> + '_ {
+        move |slot| {
+            let path = root.join(slot.origin.as_deref()?);
+            let text = std::fs::read_to_string(&path).ok()?;
+            Some((Some(path), Arc::from(text)))
+        }
     }
 
     fn slot_position(text: &str) -> (usize, usize) {

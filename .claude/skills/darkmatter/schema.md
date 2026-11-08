@@ -429,7 +429,16 @@ slots evaluate under `buffers::unguarded`, judged by their own gates only).
 reads, no grant-dependent failures; cleared by
 `reset_process_caches_for_bench`). Work counters: `Work::SlotResolution`
 (one per slot evaluated), `Work::SlotInputRehash` (a cached input reread). `pending_templates_for` returns `PendingTemplate`s
-(document + matched trigger payloads, Q14-filtered). Kind definitions, the
+(document + matched trigger payloads). Q14 (only the effective schema's slots
+resolve) has one selection, `mod.rs::discarded_by_higher_layers`, shared by
+`pending_templates_for` and `resolve_trigger_layers`: each matched payload is
+taken as `PendingSchema::without_properties(<names the document or a later
+trigger declares in every arm>)` before any slot is collected, prompted for,
+cached, or evaluated; a payload left with no slot resolves through
+`resolve_without_slots` (no session, never pending, not listed as a template)
+and the omitted names join its slot-cache identity. A doc template met in a
+root union declares what every arm declares, before and after it resolves
+(`declared_by_template` reads `PendingSchema::declared_properties`). Kind definitions, the
 baseline/catalog, DMLS extensions, and trigger `match` refuse slots
 (`codes::slot_prohibition_code`).
 CLI surfaces (one session per invocation): `md compose` builds it after

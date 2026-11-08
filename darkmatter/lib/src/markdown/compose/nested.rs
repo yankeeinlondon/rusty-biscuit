@@ -5,7 +5,10 @@
 //! the request's context epoch, the shell runtime, and the transclusion
 //! ancestry. Its node counts against the same `max_transclusion_depth` budget
 //! as `::file`, so mixed `as_markdown`/transclusion recursion stops with the
-//! existing typed error (decisions D8). See
+//! existing typed error (decisions D8). The content inherits the calling
+//! document's state, `--set` overrides, and setters through the same
+//! derivation as a `::file` child of that document
+//! (`transclusion::inherited_child_options`). See
 //! `features/2026-09-09-more-context/spec.md` (R11, R20) and plan Phase 8.
 //!
 //! Expression handlers are synchronous, and so is the compose pipeline
@@ -110,6 +113,12 @@ struct Scope {
     options: Mutex<crate::markdown::compose::ComposeRequest>,
     /// The calling pipeline's runtime, forked while its node is on the stack.
     runtime: Mutex<PipelineRuntime>,
+    /// The calling document's effective state once its pipeline has built it
+    /// ([`NestedCompose::align_state`]). Content composed after that inherits
+    /// it as a `::file` child of the document would; a call made while the
+    /// frontmatter is still resolving finds `None` and inherits only what the
+    /// document itself inherited.
+    caller_state: Mutex<Option<super::SharedFrontmatter>>,
     /// The root document as it entered the pipeline, when this document owns
     /// the pre-approved gate. Frontmatter interpolation runs before that gate,
     /// so a nested call there validates the whole request first.
@@ -151,6 +160,7 @@ impl NestedCompose {
             scope: Arc::new(Scope {
                 options: Mutex::new(snapshot),
                 runtime: Mutex::new(runtime.clone_for_child()),
+                caller_state: Mutex::default(),
                 root_gate,
                 outcome: Mutex::default(),
             }),
@@ -163,6 +173,12 @@ impl NestedCompose {
     /// sees from now on, as the calling document's body does.
     pub(crate) fn align_environment(&self, env: &std::collections::HashMap<String, String>) {
         *lock(&self.scope.options).context_mut().env_mut() = env.clone();
+    }
+
+    /// Makes `state`, the calling document's effective state, the state
+    /// content composed through this handle inherits from now on.
+    pub(crate) fn align_state(&self, state: &super::SharedFrontmatter) {
+        *lock(&self.scope.caller_state) = Some(state.clone());
     }
 
     /// Folds every nested child's report, depth, and context groups into the
@@ -237,7 +253,16 @@ impl NestedCompose {
         let child = Markdown::with_frontmatter(frontmatter, body);
 
         let mut runtime = lock(&self.scope.runtime).clone_for_child();
-        let mut options = lock(&self.scope.options).clone();
+        // The content inherits the caller's state and the request's overrides
+        // exactly as a `::file` child of the caller does.
+        let mut options = match lock(&self.scope.caller_state).as_ref() {
+            Some(state) => transclusion::inherited_child_options(
+                &lock(&self.scope.options),
+                state,
+                &transclusion::BlockOptions::default(),
+            ),
+            None => lock(&self.scope.options).clone(),
+        };
         if let Some(root) = &self.scope.root_gate
             && !runtime.preflight_validated().load(Ordering::Acquire)
         {
@@ -263,9 +288,7 @@ impl NestedCompose {
             options.source_derivation = derivation;
             options.source_opening = opening;
         }
-        // `--set` overrides target the root document's frontmatter, and the
-        // preflight graph's edges belong to the caller, not this content.
-        options.clear_root_overrides();
+        // The preflight graph's edges belong to the caller, not this content.
         options.preflight_graph = None;
         let context = runtime.context_epoch.context_for_source(
             options.context(),

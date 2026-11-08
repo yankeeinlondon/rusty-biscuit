@@ -270,6 +270,10 @@ Unlike an exported standalone schema, a `schema-trigger` document applies its sc
 Schema triggers let you choose a schema based on the document and its surroundings. Conditions can check:
 
 - Frontmatter properties on the actively edited document
+- The document's path (`$path`)
+
+These conditions are **planned** and not yet part of the trigger grammar; a trigger that uses one is skipped as invalid:
+
 - File existence or absence
 - File contains text
 - Binary found or absent from the hosts execution path
@@ -278,25 +282,33 @@ Schema triggers let you choose a schema based on the document and its surroundin
 - Host timezone
 - Host OS
 - Repository membership or absence
+- An `expression` over document values
 
-Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. An `expression` uses normal Darkmatter expression syntax to check document values:
+Conditions belong under `match`. Top-level conditions combine with **AND**; conditions inside a `group` combine with **OR**. A trigger file holds only `kind`, `match`, and `$schema`:
 
 ```yaml
 kind: schema-trigger
-description: defines 'foo', 'bar', and 'baz' when one of them is present in the document
 match:
-    - expression: foo || bar || baz
-$schema: 
+    - group:
+          - foo: string(required)
+          - bar: string(required)
+          - baz: string(required)
+$schema:
     foo: string -> my favorite fake thing
     bar: string -> not bad, but no foo
     baz: string -> I wish we could leave him at home
 ```
+
+This trigger applies when the document has at least one of `foo`, `bar`, or `baz`.
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
 A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](../../../../simplified-schema/docs/topics/language/objects-and-named-types.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
 
 #### Passive Activation Expressions
+
+> **Planned.** The `expression`, file, and host conditions this section and
+> the next describe are not yet part of the trigger grammar.
 
 Choosing a schema should only answer a question: does this schema apply to this document? It should never run a command or start a runtime action. We call this _passive activation_.
 

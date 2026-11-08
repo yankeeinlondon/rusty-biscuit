@@ -588,3 +588,55 @@ fn without_watchers_a_save_re_checks_the_slot_inputs_by_stat() {
     let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
     assert_eq!(invalid_os(&diagnostics), None, "{diagnostics:#?}");
 }
+
+/// A workspace (a repository with no commit, so `data/os.yaml` gets no
+/// automatic grant) whose `a.trigger.yaml` selects `topic: sandbox` and
+/// declares `os` as an enum read from that file; returns the canonical root.
+fn trigger_slot_workspace(workspace: &LspWorkspace) -> PathBuf {
+    let root = biscuit_file::canonicalize_simplified(workspace.path()).unwrap();
+    std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+    std::fs::create_dir_all(root.join(".git/refs/heads")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(root.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
+    std::fs::create_dir_all(root.join("schemas")).unwrap();
+    std::fs::write(
+        root.join("schemas/a.trigger.yaml"),
+        "kind: schema-trigger\nmatch:\n  topic: literal(sandbox; required)\n$schema:\n    os: enum({{ load_data(\"../data/os.yaml\", \"string[]\") }}; required)\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("data")).unwrap();
+    write_members(&root.join("data/os.yaml"), &["macOS", "Linux"]);
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    root
+}
+
+/// A trigger slot under a property the document redeclares is discarded:
+/// the editor never schedules a slot job for it or reports it.
+#[test]
+fn a_trigger_slot_the_document_redeclares_is_never_pending_or_reported() {
+    let workspace = LspWorkspace::new();
+    let root = trigger_slot_workspace(&workspace);
+    let doc = root.join("docs/doc.md");
+    let text = "---\n$schema:\n    os: string\ntopic: sandbox\nos: Windows\n---\n\n# Doc\n";
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    fixture.initialize(params(&root));
+
+    open(&fixture, &doc, text, 1);
+    fixture.flush_server();
+    let diagnostics = fixture.wait_for_diagnostics(&uri(&doc));
+    assert!(codes(&diagnostics).iter().all(|code| !code.starts_with("dm.schema.")), "{diagnostics:#?}");
+}
+
+/// The control: with nothing replacing `os`, the trigger's unapproved read
+/// is reported at its slot.
+#[test]
+fn a_selected_trigger_slot_with_no_override_reports_its_unapproved_read() {
+    let workspace = LspWorkspace::new();
+    let root = trigger_slot_workspace(&workspace);
+    let doc = root.join("docs/doc.md");
+    let mut fixture = LspFixture::start_with_snapshot(&workspace, snapshot(&root));
+    fixture.initialize(params(&root));
+
+    let diagnostics = open_and_resolve(&mut fixture, &doc, "---\ntopic: sandbox\nos: Windows\n---\n\n# Doc\n");
+    assert_eq!(with_code(&diagnostics, "dm.schema.slot_approval_required").len(), 1, "{diagnostics:#?}");
+}

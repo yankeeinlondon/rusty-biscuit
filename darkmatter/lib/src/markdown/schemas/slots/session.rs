@@ -434,7 +434,7 @@ impl SlotSession {
         }
         let template_key = template_key(pending, template);
         if in_progress(self.id, &template_key) {
-            return Err(cycle_error(pending.slots(), &template_key));
+            return Err(cycle_error(pending.slots(), &template_key, Some(pending)));
         }
         if let Some(entry) = cache::lookup(&key)
             && self.serves(&entry, context)
@@ -572,9 +572,7 @@ fn unresolved_template(pending: &PendingSchema) -> SchemaError {
 /// `outcome` as [`DarkmatterSchemas`](crate::markdown::schemas::DarkmatterSchemas)
 /// reports it.
 fn failure_of(outcome: Outcome, pending: &PendingSchema) -> Result<Arc<ResolvedSchema>, SchemaError> {
-    outcome.map_err(|error| {
-        SchemaError::SlotResolution(Box::new(SlotResolutionFailure::new(error, pending.read_sources().to_vec().into())))
-    })
+    outcome.map_err(|error| SchemaError::SlotResolution(Box::new(SlotResolutionFailure::of_pending(error, pending))))
 }
 
 /// Whether a slot of `error` stopped on a work limit (`dm.iteration.*`).
@@ -611,8 +609,9 @@ fn template_key(pending: &PendingSchema, template: &str) -> String {
 }
 
 /// The cycle error for `slots`, whose template `template` is already being
-/// resolved, positioned at the first slot.
-fn cycle_error(slots: &[Slot], template: &str) -> SchemaError {
+/// resolved, positioned at the first slot: in the texts `pending` kept,
+/// when the template is a pending one.
+fn cycle_error(slots: &[Slot], template: &str, pending: Option<&PendingSchema>) -> SchemaError {
     let failed = slots
         .first()
         .map(|slot| {
@@ -620,10 +619,11 @@ fn cycle_error(slots: &[Slot], template: &str) -> SchemaError {
         })
         .into_iter()
         .collect();
-    SchemaError::SlotResolution(Box::new(SlotResolutionFailure::new(
-        Arc::new(SlotResolutionError::Failed(failed)),
-        Vec::new().into(),
-    )))
+    let error = Arc::new(SlotResolutionError::Failed(failed));
+    SchemaError::SlotResolution(Box::new(match pending {
+        Some(pending) => SlotResolutionFailure::of_pending(error, pending),
+        None => SlotResolutionFailure::new(error, Vec::new().into()),
+    }))
 }
 
 /// The failure of every slot of a template whose reads cannot be decided
@@ -732,7 +732,7 @@ pub(crate) fn resolve_contract_slots(
         .find_map(|slot| slot.origin.as_deref().map(biscuit_file::to_portable_string))
         .unwrap_or_else(|| "load_data contract".to_string());
     if in_progress(session.id, &template) {
-        return Some(Err(cycle_error(&slots, &template)));
+        return Some(Err(cycle_error(&slots, &template, None)));
     }
     let grants = match session.run_grants() {
         Ok(grants) => grants,

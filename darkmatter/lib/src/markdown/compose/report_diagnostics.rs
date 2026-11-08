@@ -342,11 +342,7 @@ pub fn template_diagnostics(error: &simplified_schema::SchemaError, document: &P
     use crate::markdown::schemas::slots::codes::SLOT_PENDING_CODE;
     match error {
         simplified_schema::SchemaError::SlotResolution(failure) => {
-            let text_of = |origin: Option<&Path>| {
-                let origin = origin?;
-                failure.sources.iter().find(|(path, _)| path == origin).map(|(_, text)| std::sync::Arc::clone(text))
-            };
-            Some(slot_resolution_diagnostics(&failure.error, &text_of))
+            Some(slot_resolution_diagnostics(&failure.error, &|slot| failure_text(failure, slot)))
         }
         simplified_schema::SchemaError::UnresolvedSlots(_) => Some(vec![Diagnostic {
             source: file_only(named(document)),
@@ -719,18 +715,33 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
     }
 }
 
+/// The file a slot was written in and its text, as `failure` kept them
+/// ([`simplified_schema::SlotResolutionFailure::slot_text`]).
+fn failure_text(
+    failure: &simplified_schema::SlotResolutionFailure,
+    slot: &simplified_schema::simplified::Slot,
+) -> Option<SlotText> {
+    failure.slot_text(slot).map(|(file, text)| (file.map(Path::to_path_buf), std::sync::Arc::clone(text)))
+}
+
+/// The file a slot's spans point into (`None`: in-memory text) and that
+/// file's text.
+type SlotText = (Option<PathBuf>, std::sync::Arc<str>);
+
 /// The diagnostics of a schema-slot resolution that produced no schema, one
 /// per refused or failed slot.
 ///
 /// Each record's primary position is the slot as authored in its defining
-/// file (an imported schema's own file included); `text_of` returns that
-/// file's text (`None` path: the document an inline `$schema` is written
-/// in), and a position with no text stays `null`. A failed slot keeps its
-/// typed cause: a `load_data` failure keeps its `dm.data.*` code and its
-/// `data_location`, a missing or unreadable file its reference fields.
+/// file: an imported or referenced schema's own file, a trigger file for
+/// its inline payload, or the document an inline `$schema` is written in.
+/// `text_of` returns that file and its text as the resolution kept them;
+/// a slot with no text keeps its origin as the file, and its position
+/// stays `null`. A failed slot keeps its typed cause: a `load_data` failure
+/// keeps its `dm.data.*` code and its `data_location`, a missing or
+/// unreadable file its reference fields.
 pub(crate) fn slot_resolution_diagnostics(
     error: &simplified_schema::slots::SlotResolutionError,
-    text_of: &dyn Fn(Option<&Path>) -> Option<std::sync::Arc<str>>,
+    text_of: &dyn Fn(&simplified_schema::simplified::Slot) -> Option<SlotText>,
 ) -> Vec<Diagnostic> {
     slot_resolution_records(error, text_of).into_iter().map(|(_, record)| record).collect()
 }
@@ -741,20 +752,17 @@ pub(crate) fn slot_resolution_diagnostics(
 /// `dm.schema.slot_pending` per slot of a template not resolved for this
 /// run. `None` for any other schema error.
 ///
-/// An editor positions each record at its slot itself; the record's own
-/// `source` and `span` are [`template_diagnostics`]' (the slot in its
-/// defining file, when that file's text is known).
+/// Each record's `source` and `span` are [`template_diagnostics`]': the
+/// slot in its defining file, when the resolution kept that file's text.
+/// An editor publishes a record of a slot written in its own document at
+/// that span.
 pub fn template_slot_records(
     error: &simplified_schema::SchemaError,
 ) -> Option<Vec<(Option<simplified_schema::simplified::Slot>, Diagnostic)>> {
     use crate::markdown::schemas::slots::codes::SLOT_PENDING_CODE;
     match error {
         simplified_schema::SchemaError::SlotResolution(failure) => {
-            let text_of = |origin: Option<&Path>| {
-                let origin = origin?;
-                failure.sources.iter().find(|(path, _)| path == origin).map(|(_, text)| std::sync::Arc::clone(text))
-            };
-            Some(slot_resolution_records(&failure.error, &text_of))
+            Some(slot_resolution_records(&failure.error, &|slot| failure_text(failure, slot)))
         }
         simplified_schema::SchemaError::UnresolvedSlots(unresolved) => Some(
             unresolved
@@ -769,25 +777,26 @@ pub fn template_slot_records(
 
 fn slot_resolution_records(
     error: &simplified_schema::slots::SlotResolutionError,
-    text_of: &dyn Fn(Option<&Path>) -> Option<std::sync::Arc<str>>,
+    text_of: &dyn Fn(&simplified_schema::simplified::Slot) -> Option<SlotText>,
 ) -> Vec<(Option<simplified_schema::simplified::Slot>, Diagnostic)> {
     use crate::markdown::schemas::slots::codes;
     use simplified_schema::slots::SlotResolutionError;
     let at = |slot: &simplified_schema::simplified::Slot, span: &simplified_schema::span::SourceSpan, code: &str, message: String| {
-        let text = text_of(slot.origin.as_deref());
-        let position = text
-            .as_deref()
-            .filter(|text| span.end <= text.len())
-            .map(|text| crate::markdown::span::line_col_of_offset(text, span.start));
+        let (file, text) = match text_of(slot) {
+            Some((file, text)) => (file, Some(text)),
+            None => (slot.origin.clone(), None),
+        };
+        let span = text.as_deref().and_then(|text| proven_slot_span(text, slot, span));
+        let position = span.as_ref().zip(text.as_deref()).map(|(span, text)| crate::markdown::span::line_col_of_offset(text, span.start));
         Diagnostic {
             source: Some(DiagnosticSource {
-                file: slot.origin.clone(),
+                file,
                 line: position.map(|(line, _)| line),
                 column: position.map(|(_, column)| column),
                 section: None,
                 inserted: false,
             }),
-            span: position.map(|_| span.clone()),
+            span,
             ..unlocated(code, Severity::Error, message)
         }
     };
@@ -823,6 +832,27 @@ fn slot_resolution_records(
         SlotResolutionError::Canceled => vec![(None, unlocated(codes::SLOT_CANCELED_CODE, Severity::Error, error.to_string()))],
         _ => vec![(None, unlocated(codes::SLOT_FAILED_CODE, Severity::Error, error.to_string()))],
     }
+}
+
+/// `span`, a range of `slot`'s in `text`, when `text` proves it: the slot's
+/// own bytes must be a `{{ … }}` there. A range inside the expression (a
+/// refused read) is offset from the expression's start, which holds only
+/// while the authored expression is the expression's text; through a YAML
+/// escape or fold it is not, and the whole expression is the proven range.
+fn proven_slot_span(
+    text: &str,
+    slot: &simplified_schema::simplified::Slot,
+    span: &simplified_schema::span::SourceSpan,
+) -> Option<simplified_schema::span::SourceSpan> {
+    let delimited = text.get(slot.span.clone()).is_some_and(|whole| whole.starts_with("{{") && whole.ends_with("}}"));
+    if !delimited {
+        return None;
+    }
+    let inside = *span != slot.span && *span != slot.expression_span;
+    if inside && text.get(slot.expression_span.clone()) != Some(slot.expression.as_str()) {
+        return Some(slot.expression_span.clone());
+    }
+    text.get(span.clone()).map(|_| span.clone())
 }
 
 fn shell_record(code: &str, error: &ShellExpansionError) -> Diagnostic {

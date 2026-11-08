@@ -403,3 +403,102 @@ fn schema_validate_names_the_code_of_a_slot_in_the_baseline() {
     assert_eq!(report["files"], json!([]), "{report:#}");
     assert_eq!(diagnostic_codes(&report["diagnostics"]), ["dm.schema.slot_not_allowed_in_baseline"], "{report:#}");
 }
+
+/// A repository whose `a.trigger.yaml` selects `topic: sandbox` and declares
+/// `os` as an enum read from `data/os.yaml`, which is left untracked (no
+/// automatic grant), beside `docs/doc.md` with `frontmatter` and any `extra`
+/// files; `None` when `git` is unavailable.
+fn overridden_trigger(name: &str, frontmatter: &str, extra: &[(&str, &str)]) -> Option<CliProcessFixture> {
+    let fixture = CliProcessFixture::named(name);
+    if !fixture.initialize_repository() {
+        return None;
+    }
+    fixture.write_file(
+        "cwd/schemas/a.trigger.yaml",
+        "kind: schema-trigger\nmatch:\n  topic: literal(sandbox; required)\n$schema:\n    os: enum({{ load_data(\"../data/os.yaml\", \"string[]\") }}; required)\n",
+    );
+    for (relative, text) in extra {
+        fixture.write_file(Path::new("cwd").join(relative), text);
+    }
+    fixture.write_file("cwd/docs/doc.md", &format!("---\n{frontmatter}---\n\nBody.\n"));
+    assert!(fixture.commit_all(fixture.cwd()), "the fixture commits");
+    fixture.write_file("cwd/data/os.yaml", "- macOS\n- Linux\n");
+    Some(fixture)
+}
+
+/// The document's inline `os: string` replaces the trigger's dynamic `os`.
+fn document_override(name: &str) -> Option<CliProcessFixture> {
+    overridden_trigger(name, "$schema:\n    os: string\ntopic: sandbox\nos: Windows\n", &[])
+}
+
+/// `b.trigger.yaml`, layered above `a.trigger.yaml`, replaces its `os`.
+fn trigger_override(name: &str) -> Option<CliProcessFixture> {
+    overridden_trigger(
+        name,
+        "topic: sandbox\nos: Windows\n",
+        &[("schemas/b.trigger.yaml", "kind: schema-trigger\nmatch:\n  topic: literal(sandbox; required)\n$schema:\n    os: string\n")],
+    )
+}
+
+#[test]
+fn compose_succeeds_without_reading_a_trigger_slot_the_document_redeclares() {
+    let Some(fixture) = document_override("slots-compose-document-override") else {
+        return;
+    };
+    let output = run(&fixture, &["compose", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 0, include_str!("../../schemas/output/compose.yaml"));
+    assert_eq!(report["read_set"], json!([]), "the discarded slot read nothing: {report:#}");
+}
+
+#[test]
+fn compose_succeeds_without_reading_a_trigger_slot_a_later_trigger_redeclares() {
+    let Some(fixture) = trigger_override("slots-compose-trigger-override") else {
+        return;
+    };
+    let output = run(&fixture, &["compose", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 0, include_str!("../../schemas/output/compose.yaml"));
+    assert_eq!(report["read_set"], json!([]), "the discarded slot read nothing: {report:#}");
+}
+
+#[test]
+fn schema_validate_is_valid_when_the_document_redeclares_the_trigger_slot_property() {
+    let Some(fixture) = document_override("slots-validate-document-override") else {
+        return;
+    };
+    let output = run(&fixture, &["schema", "validate", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 0, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(report["files"][0]["valid"], true, "{report:#}");
+}
+
+#[test]
+fn schema_validate_is_valid_when_a_later_trigger_redeclares_the_slot_property() {
+    let Some(fixture) = trigger_override("slots-validate-trigger-override") else {
+        return;
+    };
+    let output = run(&fixture, &["schema", "validate", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 0, include_str!("../../schemas/output/schema-validate.yaml"));
+    assert_eq!(report["files"][0]["valid"], true, "{report:#}");
+}
+
+#[test]
+fn clean_reports_no_findings_when_the_document_redeclares_the_trigger_slot_property() {
+    let Some(fixture) = document_override("slots-clean-document-override") else {
+        return;
+    };
+    let output = run(&fixture, &["clean", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 0, include_str!("../../schemas/output/clean.yaml"));
+    assert_eq!(report["diagnostics"], json!([]), "{report:#}");
+}
+
+/// The control: with nothing replacing `os`, the trigger's unapproved slot
+/// still fails the composition.
+#[test]
+fn compose_still_needs_approval_for_a_selected_trigger_slot_with_no_override() {
+    let Some(fixture) = overridden_trigger("slots-compose-no-override", "topic: sandbox\nos: Windows\n", &[]) else {
+        return;
+    };
+    let output = run(&fixture, &["compose", "docs/doc.md", "--output", "json"]);
+    let report = data_output(&output, 1, include_str!("../../schemas/output/compose.yaml"));
+    assert_eq!(diagnostic_codes(&report["diagnostics"]), [APPROVAL_REQUIRED], "{report:#}");
+    assert_eq!(report["read_set"], json!([]), "{report:#}");
+}
