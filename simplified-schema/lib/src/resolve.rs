@@ -244,10 +244,101 @@ pub fn resolve_yaml_schema_owned_by(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolve_authored_yaml_schema(value, owner, None, base_dir, schema_roots, request_context, shipped)
+}
+
+/// Where an inline `$schema` value was written: the whole text of the file
+/// holding it, as read, and the byte range of the YAML mapping whose
+/// `$schema` key holds the value (a Markdown document's frontmatter block, a
+/// schema-trigger or YAML document's whole text).
+///
+/// Given to [`resolve_authored_yaml_schema`], it lets every `{{ … }}` slot
+/// written in the value carry its byte range in that file, whatever YAML
+/// carrier (plain, single- or double-quoted, literal or folded block) holds
+/// the type string, and a pending template keep this text
+/// ([`crate::slots::PendingSchema::authored_source`]) so a failure of one
+/// of those slots can be positioned without reading the file again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredSchemaValue {
+    /// The file the value is written in; `None` for in-memory text. For a
+    /// trigger payload's template this is the canonical path its slots'
+    /// [`Slot::origin`](crate::simplified::Slot::origin) names.
+    pub file: Option<PathBuf>,
+    /// The file's whole text.
+    pub text: Arc<str>,
+    /// The YAML mapping holding the `$schema` key, as a byte range of `text`.
+    pub mapping: std::ops::Range<usize>,
+}
+
+impl AuthoredSchemaValue {
+    /// `value` located in this text and checked against it, when every
+    /// inline schema it holds projects: the proof that the slot spans of a
+    /// parse of `value` can be moved into the file. `None` for a value with
+    /// no `{{` (nothing to position) or one the text does not prove.
+    fn locate(&self, value: &YamlValue) -> Option<crate::simplified::LocatedSchemaValue> {
+        if !mentions_slot(value) {
+            return None;
+        }
+        let mapping = self.text.get(self.mapping.clone())?;
+        let located = crate::simplified::LocatedSchemaValue::locate(mapping, "$schema", self.mapping.start, value)?;
+        let projects = |item: &YamlValue, located: Option<crate::simplified::LocatedSchemaValue>| match parse_yaml_schema(item) {
+            // A definition that does not parse fails resolution on its own.
+            Err(_) => true,
+            Ok(mut schema) => located.is_some_and(|located| located.project(&mut schema).is_ok()),
+        };
+        let proven = match value {
+            YamlValue::Mapping(_) => projects(value, Some(located.clone())),
+            YamlValue::Sequence(items) => items
+                .iter()
+                .enumerate()
+                .all(|(index, item)| !item.is_mapping() || projects(item, located.arm(index))),
+            _ => false,
+        };
+        proven.then_some(located)
+    }
+}
+
+/// Whether any string in `value` contains `{{`.
+fn mentions_slot(value: &YamlValue) -> bool {
+    match value {
+        YamlValue::String(text) => text.contains("{{"),
+        YamlValue::Mapping(map) => map.values().any(mentions_slot),
+        YamlValue::Sequence(items) => items.iter().any(mentions_slot),
+        YamlValue::Tagged(tagged) => mentions_slot(&tagged.value),
+        _ => false,
+    }
+}
+
+/// [`resolve_yaml_schema_owned_by`] for a value written in `authored`: each
+/// slot of the inline value (and of its inline root-union arms) carries
+/// its byte range in that file, and a template met here keeps `authored`
+/// for positioning a failure. Without `authored`, or when the text does
+/// not prove where the value is, a slot's spans stay relative to its type
+/// string and the template keeps no text, so no position is claimed.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_authored_yaml_schema(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let located = authored.and_then(|authored| authored.locate(value));
+    let kept = located.as_ref().and(authored).map(|authored| crate::slots::pending::AuthoredText {
+        value: Arc::new(match owner {
+            InlineOwner::Document => authored.clone(),
+            InlineOwner::Trigger(path) => AuthoredSchemaValue { file: Some(canonical_path(path)), ..authored.clone() },
+        }),
+        document: matches!(owner, InlineOwner::Document),
+    });
     resolving_entry(
-        || resolve_owned_value(value, owner, base_dir, schema_roots, request_context, shipped),
+        || resolve_owned_value(value, owner, located.as_ref(), base_dir, schema_roots, request_context, shipped),
+        kept,
         || {
             let value = value.clone();
+            let located = located.clone();
             let trigger = match owner {
                 InlineOwner::Document => None,
                 InlineOwner::Trigger(path) => Some(path.to_path_buf()),
@@ -257,10 +348,24 @@ pub fn resolve_yaml_schema_owned_by(
             let context = request_context.clone();
             Arc::new(move || {
                 let owner = trigger.as_deref().map_or(InlineOwner::Document, InlineOwner::Trigger);
-                resolve_owned_value(&value, owner, &base_dir, &schema_roots, &context, shipped)
+                resolve_owned_value(&value, owner, located.as_ref(), &base_dir, &schema_roots, &context, shipped)
             })
         },
     )
+}
+
+/// [`resolve_schema_with_roots`] for a document `$schema` value written in
+/// `authored` ([`resolve_authored_yaml_schema`]).
+pub fn resolve_authored_schema_with_roots(
+    value: &Value,
+    authored: Option<&AuthoredSchemaValue>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    shipped: ShippedSources,
+) -> Result<ResolvedSchema, SchemaError> {
+    let yaml = json_to_yaml(value);
+    resolve_authored_yaml_schema(&yaml, InlineOwner::Document, authored, base_dir, schema_roots, request_context, shipped)
 }
 
 thread_local! {
@@ -275,6 +380,7 @@ thread_local! {
 /// scope (a replay), is left to the outer one.
 fn resolving_entry(
     resolve: impl FnOnce() -> Result<ResolvedSchema, SchemaError>,
+    authored: Option<crate::slots::pending::AuthoredText>,
     replay: impl FnOnce() -> crate::slots::Replay,
 ) -> Result<ResolvedSchema, SchemaError> {
     if ENTRY_DEPTH.get() > 0 || crate::slots::active_values().is_some() {
@@ -292,7 +398,7 @@ fn resolving_entry(
     let (result, sources) = buffers::recording(resolve);
     match result {
         Err(SchemaError::UnresolvedSlots(mut unresolved)) => {
-            unresolved.pending = Some(crate::slots::PendingSchema::new(&unresolved, open, sources, replay()));
+            unresolved.pending = Some(crate::slots::PendingSchema::new(&unresolved, open, sources, authored, replay()));
             Err(SchemaError::UnresolvedSlots(unresolved))
         }
         other => other,
@@ -303,6 +409,7 @@ fn resolving_entry(
 fn resolve_owned_value(
     value: &YamlValue,
     owner: InlineOwner<'_>,
+    located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -323,13 +430,14 @@ fn resolve_owned_value(
         YamlValue::Mapping(_) => resolve_inline_mapping(
             value,
             owner,
+            located,
             base_dir,
             schema_roots,
             request_context,
             shipped,
         ),
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack, shipped)
+            resolve_root_union(items, owner, located, base_dir, schema_roots, request_context, &mut stack, shipped)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -349,19 +457,25 @@ pub fn resolve_catalog_declaration(
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context, shipped)
+    resolve_inline_mapping(value, InlineOwner::Document, None, base_dir, &[], request_context, shipped)
 }
 
 /// Resolves the inline `$schema` mapping `value` authored by `owner`.
 fn resolve_inline_mapping(
     value: &YamlValue,
     owner: InlineOwner<'_>,
+    located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     shipped: ShippedSources,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let schema = parse_yaml_schema(value)?;
+    let mut schema = parse_yaml_schema(value)?;
+    if let Some(located) = located {
+        // Proven by `AuthoredSchemaValue::locate` before resolution began.
+        let projected = located.project(&mut schema);
+        debug_assert!(projected.is_ok(), "{projected:?}");
+    }
     // Inline the definitions of any `Name@file` named-type imports
     // (Feature B) before conversion — `to_json_schema` rejects a
     // surviving import. `@this` resolves against this mapping, whose
@@ -616,9 +730,11 @@ pub fn check_standalone_named_types(
     Ok(imports.into_iter().collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_root_union(
     items: &[YamlValue],
     owner: InlineOwner<'_>,
+    located: Option<&crate::simplified::LocatedSchemaValue>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -646,7 +762,11 @@ pub(crate) fn resolve_root_union(
     for (index, item) in items.iter().enumerate() {
         match item {
             YamlValue::Mapping(_) => {
-                let arm_schema = parse_yaml_schema(item)?;
+                let mut arm_schema = parse_yaml_schema(item)?;
+                if let Some(arm) = located.and_then(|located| located.arm(index)) {
+                    let projected = arm.project(&mut arm_schema);
+                    debug_assert!(projected.is_ok(), "{projected:?}");
+                }
                 // Named-type imports are inlined per arm before conversion.
                 let (mut arm_schema, arm_imports) =
                     expand_document_imports(
@@ -662,7 +782,10 @@ pub(crate) fn resolve_root_union(
                         shipped,
                     )?;
                 imports.extend(arm_imports);
-                crate::slots::apply_active(&mut arm_schema, &mut definitions)?;
+                if let Err(error) = crate::slots::apply_active_to_arm(&mut arm_schema, &mut definitions) {
+                    let later = document_union_arm_names(&items[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                    return Err(pending_union_arm(error, &any_of, later));
+                }
                 let mut arm_json = to_json_schema_with_definitions(&arm_schema, &definitions)?;
                 examples.extend(resolve_document_examples(
                     &mut arm_json,
@@ -691,14 +814,21 @@ pub(crate) fn resolve_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             YamlValue::String(reference) => {
-                let resolved = resolve_reference_in_context(
+                let resolved = match resolve_reference_in_context(
                     reference,
                     base_dir,
                     schema_roots,
                     request_context,
                     stack,
                     shipped,
-                )?;
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error @ SchemaError::UnresolvedSlots(_)) => {
+                        let later = document_union_arm_names(&items[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
+                    Err(error) => return Err(error),
+                };
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -1506,6 +1636,7 @@ pub fn prepare_standalone_yaml_schema(
 ) -> Result<ResolvedSchema, SchemaError> {
     resolving_entry(
         || prepare_standalone_document(&document, schema_roots, request_context, shipped),
+        None,
         || {
             let document = document.clone();
             let schema_roots = schema_roots.to_vec();
@@ -1690,6 +1821,103 @@ fn contains_example_annotation(value: &Value) -> bool {
     }
 }
 
+/// The template error one arm of a root union met, marked as that arm's,
+/// with the top-level properties every arm of the union declares: the
+/// arms already lowered (`lowered`), the pending arm itself, and the arms
+/// after it (`later`). Exactly what the resolved union's arms declare, so a
+/// host layering the pending union discards what the resolved one would.
+fn pending_union_arm(error: SchemaError, lowered: &[Value], later: Vec<Vec<String>>) -> SchemaError {
+    let SchemaError::UnresolvedSlots(mut unresolved) = error else {
+        return error;
+    };
+    if let Some(template) = unresolved.template.as_mut() {
+        let arms = lowered
+            .iter()
+            .map(json_property_names)
+            .chain(std::iter::once(template.single_object_names()))
+            .chain(later);
+        template.mark_union_arm(every_arm_declares(arms));
+    }
+    SchemaError::UnresolvedSlots(unresolved)
+}
+
+/// The names every one of `arms` declares, in the first arm's order.
+fn every_arm_declares(arms: impl IntoIterator<Item = Vec<String>>) -> Vec<String> {
+    let mut arms = arms.into_iter();
+    let first = arms.next().unwrap_or_default();
+    arms.fold(first, |kept, arm| kept.into_iter().filter(|name| arm.contains(name)).collect())
+}
+
+/// The top-level `properties` a lowered arm declares (none for an arm that
+/// is itself a union).
+fn json_property_names(arm: &Value) -> Vec<String> {
+    arm.get("properties").and_then(Value::as_object).map(|properties| properties.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// The top-level properties a referenced root-union arm declares as it
+/// resolves; a template's are read from it unevaluated. An arm that fails to
+/// resolve declares nothing.
+fn reference_arm_names(
+    reference: &str,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    stack: &mut ReferenceStack,
+    shipped: ShippedSources,
+) -> Vec<String> {
+    match resolve_reference_in_context(reference, base_dir, schema_roots, request_context, stack, shipped) {
+        Ok(resolved) => json_property_names(&resolved.json_schema),
+        Err(SchemaError::UnresolvedSlots(unresolved)) => {
+            unresolved.template.as_ref().map(crate::slots::Template::single_object_names).unwrap_or_default()
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The top-level properties each of a document root union's `arms`
+/// declares, an inline arm's as written (import expansion never adds a
+/// top-level property).
+fn document_union_arm_names(
+    arms: &[YamlValue],
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    stack: &mut ReferenceStack,
+    shipped: ShippedSources,
+) -> Vec<Vec<String>> {
+    arms.iter()
+        .map(|arm| match arm {
+            YamlValue::Mapping(_) => match parse_yaml_schema(arm) {
+                Ok(SchemaRoot::Single(shape)) => shape.properties.keys().cloned().collect(),
+                _ => Vec::new(),
+            },
+            YamlValue::String(reference) => {
+                reference_arm_names(reference, base_dir, schema_roots, request_context, stack, shipped)
+            }
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// [`document_union_arm_names`] for a standalone schema's root-union arms.
+fn standalone_union_arm_names(
+    arms: &[SchemaArm],
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    stack: &mut ReferenceStack,
+    shipped: ShippedSources,
+) -> Vec<Vec<String>> {
+    arms.iter()
+        .map(|arm| match arm {
+            SchemaArm::Inline(shape) => shape.properties.keys().cloned().collect(),
+            SchemaArm::FileRef(reference) => {
+                reference_arm_names(reference, base_dir, schema_roots, request_context, stack, shipped)
+            }
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_standalone_root_union(
     arms: Vec<SchemaArm>,
@@ -1714,10 +1942,10 @@ pub(crate) fn resolve_standalone_root_union(
     // Arms whose definitions join the root after every typed key is known.
     let mut deferred_arms: Vec<usize> = Vec::new();
 
-    for (index, arm) in arms.into_iter().enumerate() {
+    for (index, arm) in arms.iter().enumerate() {
         match arm {
             SchemaArm::Inline(shape) => {
-                let schema = SchemaRoot::Single(shape);
+                let schema = SchemaRoot::Single(shape.clone());
                 let (mut schema, arm_imports) = expand_document_imports(
                     schema,
                     local_types,
@@ -1731,7 +1959,10 @@ pub(crate) fn resolve_standalone_root_union(
                     shipped,
                 )?;
                 imports.extend(arm_imports);
-                crate::slots::apply_active(&mut schema, &mut definitions)?;
+                if let Err(error) = crate::slots::apply_active_to_arm(&mut schema, &mut definitions) {
+                    let later = standalone_union_arm_names(&arms[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                    return Err(pending_union_arm(error, &any_of, later));
+                }
                 let SchemaRoot::Single(shape) = schema else {
                     unreachable!("single root-union arm remains single")
                 };
@@ -1756,14 +1987,21 @@ pub(crate) fn resolve_standalone_root_union(
                 any_of.push(strip_schema_uri(arm_json));
             }
             SchemaArm::FileRef(reference) => {
-                let resolved = resolve_reference_in_context(
-                    &reference,
+                let resolved = match resolve_reference_in_context(
+                    reference,
                     base_dir,
                     schema_roots,
                     request_context,
                     stack,
                     shipped,
-                )?;
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error @ SchemaError::UnresolvedSlots(_)) => {
+                        let later = standalone_union_arm_names(&arms[index + 1..], base_dir, schema_roots, request_context, stack, shipped);
+                        return Err(pending_union_arm(error, &any_of, later));
+                    }
+                    Err(error) => return Err(error),
+                };
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
@@ -1774,7 +2012,7 @@ pub(crate) fn resolve_standalone_root_union(
                     &resolved.definitions,
                     matches!(resolved.simplified, Some(SchemaRoot::Single(_))),
                     &mut arm_json,
-                    &reference,
+                    reference,
                     &mut definitions,
                     &mut root_defs,
                 )? {

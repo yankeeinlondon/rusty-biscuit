@@ -213,6 +213,44 @@ cache on `read_sources()` knowing it describes exactly what was resolved.
 texts (`resolve::buffers::with`) in force when the template was built are
 kept the same way.
 
+### Resolving only the properties that survive
+
+A host that layers schemas with whole-property replacement can drop the
+top-level properties a higher layer redeclares before resolving, so their
+slots never run. `pending.without_properties(&names)` returns the template
+without those properties and without any stored named type only they reach:
+its `slots()` lists what survives, and `resolve` evaluates only those and
+returns a schema without the dropped properties. A template left with no slot
+resolves with `resolve_without_slots()`, which asks no host.
+
+```rust
+// `os` and `arch` both hold slots; a higher layer redeclares `os`.
+let surviving = pending.without_properties(&["os".to_string()]);
+assert_eq!(surviving.slots().len(), 1);              // only `arch`'s slot
+assert_eq!(surviving.omitted_properties(), ["os"]);  // key a cache on this too
+let resolved = surviving.resolve(&host, &request)?;  // `os` is not in it
+```
+
+- A host that caches resolutions keys on `omitted_properties()` as well as
+  `read_sources()` and the slots: dropping a property with no slot leaves the
+  slots unchanged but changes the result.
+- A root union, or a template that is one arm of one (`is_union_arm()`), is
+  returned unchanged: a union keeps a lower layer's property in every arm
+  that does not declare it, so no single arm decides.
+- `declared_properties()` names the top-level properties a template's whole
+  schema declares in every alternative, without evaluating anything: a
+  single object's properties, or, for a root-union arm, the names every arm
+  of that union declares (inline arms as written, a referenced arm as it
+  resolves). It equals what the resolved schema declares in each arm, so a
+  host decides what a higher layer replaces the same way before and after
+  resolution.
+
+```rust
+// `$schema: [{ os: "enum({{ first }})" }, { os: string, title: string }]`
+assert!(pending.is_union_arm());
+assert_eq!(pending.declared_properties(), ["os"]); // `title` is in one arm only
+```
+
 A host that reads a data file for a slot can read it with
 `resolve::buffers::read(path)`: inside a `buffers::with` scope it returns an
 open editor buffer's text, outside one it is `std::fs::read`.

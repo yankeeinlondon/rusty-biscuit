@@ -263,8 +263,9 @@ impl fmt::Display for SlotResultKind {
 }
 
 /// A failed resolution of a template ([`SchemaError::SlotResolution`]),
-/// with the schema texts the resolution read so each slot's span can be
-/// located in its defining file.
+/// with the schema texts the resolution read, and the text its inline
+/// value was written in, so each slot's span can be located in its defining
+/// file ([`Self::slot_text`]) without reading it again.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SlotResolutionFailure {
@@ -274,15 +275,34 @@ pub struct SlotResolutionFailure {
     /// Every schema file the template's first pass read, with the text
     /// read ([`crate::slots::PendingSchema::read_sources`]).
     pub sources: std::sync::Arc<[(PathBuf, std::sync::Arc<str>)]>,
+    /// The template's authored inline value
+    /// ([`crate::slots::PendingSchema::authored_source`]).
+    authored: Option<crate::slots::pending::AuthoredText>,
 }
 
 impl SlotResolutionFailure {
-    /// The failure `error` of a template that read `sources`.
+    /// The failure `error` of a template that read `sources`, with no
+    /// authored inline value.
     pub fn new(
         error: std::sync::Arc<crate::slots::SlotResolutionError>,
         sources: std::sync::Arc<[(PathBuf, std::sync::Arc<str>)]>,
     ) -> Self {
-        Self { error, sources }
+        Self { error, sources, authored: None }
+    }
+
+    /// The failure `error` of resolving `pending`: its read texts and its
+    /// authored inline value.
+    pub fn of_pending(error: std::sync::Arc<crate::slots::SlotResolutionError>, pending: &crate::slots::PendingSchema) -> Self {
+        Self { error, sources: pending.read_sources().to_vec().into(), authored: pending.authored_text().cloned() }
+    }
+
+    /// The text `slot`'s spans are byte ranges of, with the file it is
+    /// (`None`: in-memory text): a schema file the resolution read, which
+    /// the slot's origin names, or the inline value the template was
+    /// written in ([`crate::slots::PendingSchema::slot_text`]). `None` when
+    /// no text proves where the slot is.
+    pub fn slot_text(&self, slot: &crate::simplified::Slot) -> Option<(Option<&Path>, &std::sync::Arc<str>)> {
+        crate::slots::pending::slot_text(&self.sources, self.authored.as_ref(), slot)
     }
 }
 

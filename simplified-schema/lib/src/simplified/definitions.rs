@@ -182,6 +182,13 @@ impl DefinitionTable {
         self.entries.values_mut().map(|definition| &mut definition.body)
     }
 
+    /// Drops every definition `keep` rejects, keeping the others' identities,
+    /// `$defs` keys, and allocation order.
+    pub(crate) fn retain(&mut self, keep: impl Fn(&DefKey) -> bool) {
+        self.entries.retain(|key, _| keep(key));
+        self.by_json_key.retain(|_, key| keep(key));
+    }
+
     /// What `key`'s value is at its top level, looking through a body that
     /// is itself a reference to another definition.
     ///

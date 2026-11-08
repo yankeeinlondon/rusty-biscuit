@@ -55,7 +55,7 @@ pub use source::{
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
 pub use source::locate_frontmatter_value;
-pub(crate) use source::{parse_keyed_declaration, project_keyed_declaration_spans};
+pub(crate) use source::{LocatedSchemaValue, parse_keyed_declaration, project_keyed_declaration_spans};
 pub use standalone::{
     SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
     parse_standalone_schema_document,

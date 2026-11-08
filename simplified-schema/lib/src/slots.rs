@@ -18,7 +18,7 @@
 //! See `simplified-schema/docs/topics/language/slots.md`.
 
 mod host;
-mod pending;
+pub(crate) mod pending;
 mod substitute;
 
 pub use host::{SlotAdmissionError, SlotFailure, SlotHost, SlotRequest, SlotResolutionError, SlotRunRequest};
@@ -27,7 +27,7 @@ pub(crate) use pending::{Attempt, Replay, resolve_with};
 pub use substitute::{
     MAX_SLOT_PATTERN_BYTES, SlotKey, SlotValues, active_values, check_slot_pattern, substitute, with_values,
 };
-pub(crate) use substitute::apply_active;
+pub(crate) use substitute::{apply_active, apply_active_to_arm, omitting};
 
 use std::path::Path;
 
@@ -83,6 +83,35 @@ pub fn reachable_slots(def: &PropertyDef, definitions: &DefinitionTable) -> Vec<
     slots
 }
 
+/// Removes the top-level properties `omitted` names from a single-object
+/// `root`, then every stored definition the rest of it no longer reaches.
+/// A root union is left as it is. Returns whether anything was removed.
+pub(crate) fn omit_properties(root: &mut SchemaRoot, definitions: &mut DefinitionTable, omitted: &[String]) -> bool {
+    let SchemaRoot::Single(shape) = root else {
+        return false;
+    };
+    let before = shape.properties.len();
+    shape.properties.retain(|name, _| !omitted.contains(name));
+    if shape.properties.len() == before {
+        return false;
+    }
+    let mut pending = Vec::new();
+    for def in shape.properties.values().chain(shape.pattern_keys.iter().map(|pattern| &pattern.def)) {
+        def_refs(def, &mut pending);
+    }
+    constraint_refs(&shape.constraints, &mut pending);
+    let mut reached = std::collections::HashSet::new();
+    while let Some(key) = pending.pop() {
+        if let Some(definition) = definitions.get(&key)
+            && reached.insert(key)
+        {
+            def_refs(&definition.body, &mut pending);
+        }
+    }
+    definitions.retain(|key| reached.contains(key));
+    true
+}
+
 /// Collects the definition keys `def` names directly.
 fn def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
     let atoms: &[PropertyAtom] = match def {
@@ -95,10 +124,13 @@ fn def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
 }
 
 fn atom_refs(atom: &PropertyAtom, out: &mut Vec<DefKey>) {
+    constraint_refs(&atom.constraints, out);
+    constraint_refs(&atom.array_constraints, out);
     match &atom.ty {
         TypeExpr::Ref(key) => out.push(key.clone()),
         TypeExpr::InlineObject(shape) => {
             shape.properties.values().chain(shape.pattern_keys.iter().map(|pattern| &pattern.def)).for_each(|def| def_refs(def, out));
+            constraint_refs(&shape.constraints, out);
         }
         TypeExpr::Union(atoms) => atoms.iter().for_each(|atom| atom_refs(atom, out)),
         TypeExpr::Tuple(tuple) => {
@@ -112,6 +144,15 @@ fn atom_refs(atom: &PropertyAtom, out: &mut Vec<DefKey>) {
             def_refs(&function.returns, out);
         }
         TypeExpr::Primitive(_) | TypeExpr::Imported { .. } => {}
+    }
+}
+
+/// The definition keys the declarations among `constraints` name.
+fn constraint_refs(constraints: &[Constraint], out: &mut Vec<DefKey>) {
+    for constraint in constraints {
+        if let Constraint::Property { declaration, .. } = constraint {
+            def_refs(declaration, out);
+        }
     }
 }
 

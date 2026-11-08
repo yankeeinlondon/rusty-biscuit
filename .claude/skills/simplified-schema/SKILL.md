@@ -85,7 +85,10 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   `read_sources()` texts); `SimplifiedSchema::resolve_slots` reruns the
   layer's own `Rebuild`. Expansion stamps `Slot::origin` with the file a
   slot was written in (`DefNamespace::file`); a new lowering site must call
-  `apply_active` too. Tests: `tests/l1/dynamic_slots.rs`. Whole-type slots (a
+  `apply_active` too (`apply_active_to_arm` for a root-union arm, never
+  pruned by `omitting`; the union then marks the arm's template
+  `is_union_arm` with the names every arm declares, `resolve.rs::pending_union_arm`,
+  read by `declared_properties()`). Tests: `tests/l1/dynamic_slots.rs`. Whole-type slots (a
   slot supplying a property's whole definition) are **planned**, not built: do
   not widen the grammar to admit one ad hoc. The library never evaluates a
   slot and never reads its targets; approval, caching, and evaluation are the
@@ -126,6 +129,8 @@ let json_schema = schema.to_json_schema()?;                 // Arc<serde_json::V
 | Several resolutions in one host operation reading each file once | `resolve::buffers::with_reads_retained(\|\| …)`; read a file you will resolve with `resolve::buffers::read_to_string` (test builds count opens in `observed::Observed::opened`) |
 | One named type as its own schema | `schema.select("Person")` |
 | Resolve a template's `{{ … }}` slots | `schema.resolve_slots(&host)`, or `UnresolvedSlots::pending` → `PendingSchema::resolve(&host, &SlotRunRequest { context })` |
+| Resolve only the top-level properties a higher layer leaves | `pending.without_properties(&names)` (drops them and the definitions only they reach; `omitted_properties()` belongs in a cache key), then `resolve` or, with no slot left, `resolve_without_slots()` |
+| The top-level names a template declares in every alternative (a root-union arm's: every arm's), unevaluated | `pending.declared_properties()` |
 | Read a slot's data file honoring editor buffers | `resolve::buffers::read(path)` |
 | Judge each schema source before it is read (a host's slot approvals) | `resolve::buffers::guarded(guard, \|\| …)`; a refusal fails the read as `PermissionDenied`; `unguarded` suspends the guards |
 | Which file a `$schema`/`Name@file`/`example(file)` reference names, its probes, and a missing name's creation path | `resolve::select_schema_file(reference, base_dir, roots, &ctx)` → `SchemaFileSelection` (`into_result()` gives the resolver's error) |

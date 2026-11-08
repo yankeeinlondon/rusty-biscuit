@@ -814,6 +814,56 @@ pub(crate) fn project_keyed_declaration_spans(
     project_located_schema_suggestions(schema, value, source_offset)
 }
 
+/// An inline `$schema` value located in the text it was read from, and
+/// checked against the parsed value, so a parse of that value (or of one of
+/// its root-union arms) can project its candidate and slot spans into the
+/// file ([`Self::project`]).
+#[derive(Debug, Clone)]
+pub(crate) struct LocatedSchemaValue {
+    node: LocatedValue,
+    source_offset: usize,
+}
+
+impl LocatedSchemaValue {
+    /// The entry `key` of the YAML mapping authored as `mapping_source`,
+    /// which starts `source_offset` bytes into its file. `None` unless the
+    /// located entry agrees with `value` node for node, scalar for scalar:
+    /// a value that is not what the text says has no proven position.
+    ///
+    /// The mapping is read with the frontmatter grammar (comments, tags,
+    /// multi-line quoted scalars, and other keys' presentations around the
+    /// entry are tolerated); only the entry itself must be locatable.
+    pub(crate) fn locate(mapping_source: &str, key: &str, source_offset: usize, value: &YamlValue) -> Option<Self> {
+        let located = locate_yaml_value_with(mapping_source, LocatorGrammar::Tolerant).ok()?;
+        let LocatedKind::Mapping(pairs) = located.kind else {
+            return None;
+        };
+        let node = pairs.into_iter().find(|pair| pair.key == key)?.value;
+        verify_located(&node, value).ok()?;
+        Some(Self { node, source_offset })
+    }
+
+    /// Arm `index` of a located root union; `None` when the value is not a
+    /// sequence with that item.
+    pub(crate) fn arm(&self, index: usize) -> Option<Self> {
+        match &self.node.kind {
+            LocatedKind::Sequence(items) => {
+                items.get(index).map(|node| Self { node: node.clone(), source_offset: self.source_offset })
+            }
+            _ => None,
+        }
+    }
+
+    /// Projects `schema`, parsed from this value, so its candidate and slot
+    /// spans are byte ranges in the file. On error `schema` is unchanged.
+    pub(crate) fn project(&self, schema: &mut SchemaRoot) -> Result<(), SchemaError> {
+        let mut projected = schema.clone();
+        project_located_schema_suggestions(&mut projected, &self.node, self.source_offset)?;
+        *schema = projected;
+        Ok(())
+    }
+}
+
 /// Projects every `suggest(...)` candidate span through the located scalar
 /// authoring its own definition, the same decoded coordinates the structural
 /// source map uses, so identical definitions cannot trade spans.

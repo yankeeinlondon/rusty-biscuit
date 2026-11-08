@@ -69,6 +69,23 @@ impl SlotValues {
 
 thread_local! {
     static ACTIVE: RefCell<Option<SlotValues>> = const { RefCell::new(None) };
+    static OMITTED: RefCell<Option<Arc<[String]>>> = const { RefCell::new(None) };
+}
+
+/// Runs `resolve` with the top-level properties `omitted` left out of the
+/// next schema lowered on this thread (the replayed entry's), restoring what
+/// was in force before.
+pub(crate) fn omitting<T>(omitted: &Arc<[String]>, resolve: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<[String]>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            OMITTED.with_borrow_mut(|active| *active = previous);
+        }
+    }
+    let previous = OMITTED.with_borrow_mut(|active| active.replace(Arc::clone(omitted)));
+    let _restore = Restore(previous);
+    resolve()
 }
 
 /// Runs `resolve` with `values` in force on this thread, restoring what was
@@ -95,7 +112,25 @@ pub fn active_values() -> Option<SlotValues> {
 /// What a lowering site runs after import expansion: inside a
 /// [`with_values`] scope, [`substitute`]; outside one, a template is
 /// [`SchemaError::UnresolvedSlots`] carrying its expanded form.
+///
+/// Inside an [`omitting`] scope, the first lowering takes the omitted
+/// properties out first: a resolution lowers its entry schema once, after
+/// every import is expanded, so that lowering is the replayed template's.
 pub(crate) fn apply_active(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Result<(), SchemaError> {
+    if let Some(omitted) = OMITTED.with_borrow_mut(Option::take) {
+        super::omit_properties(root, definitions, &omitted);
+    }
+    apply_values(root, definitions)
+}
+
+/// [`apply_active`] for one arm of a root union, which an [`omitting`]
+/// scope never reaches. The union marks a template the arm reports as its
+/// arm ([`Template::mark_union_arm`]), once it knows what every arm declares.
+pub(crate) fn apply_active_to_arm(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Result<(), SchemaError> {
+    apply_values(root, definitions)
+}
+
+fn apply_values(root: &mut SchemaRoot, definitions: &mut DefinitionTable) -> Result<(), SchemaError> {
     let slots = collect_slots(root, definitions);
     if slots.is_empty() {
         return Ok(());
@@ -104,7 +139,7 @@ pub(crate) fn apply_active(root: &mut SchemaRoot, definitions: &mut DefinitionTa
         Some(values) => substitute(root, definitions, &values),
         None => Err(SchemaError::UnresolvedSlots(Box::new(UnresolvedSlots::with_template(
             slots,
-            Template { root: root.clone(), definitions: Arc::new(definitions.clone()) },
+            Template::new(root.clone(), Arc::new(definitions.clone())),
         )))),
     }
 }

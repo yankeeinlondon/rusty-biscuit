@@ -182,10 +182,11 @@ pub(crate) fn content_context() -> FileResolutionContext {
 
 /// Where a declaration was authored, which decides its named types'
 /// namespaces.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Site<'a> {
-    /// A Markdown document's frontmatter `$schema`, as `yaml`.
-    Document { yaml: &'a YamlValue },
+    /// A Markdown document's frontmatter `$schema`, as `yaml`, located in
+    /// the document when its text proves where it is.
+    Document { yaml: &'a YamlValue, located: Option<crate::simplified::LocatedSchemaValue> },
     /// A standalone schema document.
     File,
 }
@@ -250,7 +251,10 @@ impl Layer {
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
         };
-        resolve_authored(authored, Site::Document { yaml: value }, path, binding)
+        // A root union's inline arms are parsed again when one arm is a
+        // file reference; each projects through the same located value.
+        let located = crate::simplified::LocatedSchemaValue::locate(yaml_text, "$schema", yaml_offset, value);
+        resolve_authored(authored, Site::Document { yaml: value, located }, path, binding)
     }
 
     /// A standalone schema document, or a raw JSON Schema written in YAML or
@@ -431,9 +435,10 @@ fn resolve_authored(
         {
             let mut stack = ReferenceStack::default();
             Some(match site {
-                Site::Document { yaml } => resolve::resolve_root_union(
+                Site::Document { yaml, located } => resolve::resolve_root_union(
                     yaml.as_sequence().expect("a parsed root union is a sequence"),
                     InlineOwner::Document,
+                    located.as_ref(),
                     base_dir,
                     &[],
                     context,

@@ -679,6 +679,100 @@ mod buffer_reads {
     }
 }
 
+/// `PendingSchema::without_properties`: a host whose layering replaces some
+/// top-level properties resolves only the template that survives.
+#[cfg(feature = "file")]
+mod surviving_properties {
+    use super::*;
+
+    const TWO: &str = "os: enum({{ first }})\narch: enum({{ second }})\n";
+
+    /// The slots' expressions, sorted.
+    fn names(slots: &[Slot]) -> Vec<&str> {
+        let mut names: Vec<&str> = slots.iter().map(|slot| slot.expression.as_str()).collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// The stub panics on an expression it has no answer for, so answering
+    /// only `second` proves `first` is never evaluated.
+    #[test]
+    fn a_discarded_property_s_slot_is_neither_listed_nor_evaluated() {
+        let temp = tempfile::tempdir().unwrap();
+        let surviving = pending_inline(TWO, temp.path()).without_properties(&["os".to_string()]);
+        assert_eq!(names(surviving.slots()), ["second"]);
+        assert_eq!(surviving.omitted_properties(), ["os"]);
+        let resolved = resolve(&surviving, &StubHost::answering(&[("second", json!(["arm64"]))]), temp.path()).unwrap();
+        assert_eq!(enum_members(&resolved, "arch"), json!(["arm64"]));
+        assert!(resolved.json_schema["properties"].get("os").is_none(), "{:#}", resolved.json_schema);
+    }
+
+    #[test]
+    fn a_template_left_without_slots_resolves_without_a_host() {
+        let temp = tempfile::tempdir().unwrap();
+        let pending = pending_inline("os: enum({{ first }})\ntitle: string\n", temp.path());
+        assert!(matches!(pending.resolve_without_slots(), Err(SchemaError::UnresolvedSlots(_))));
+        let surviving = pending.without_properties(&["os".to_string()]);
+        assert!(surviving.slots().is_empty());
+        let resolved = surviving.resolve_without_slots().unwrap();
+        assert!(resolved.json_schema["properties"].get("os").is_none(), "{:#}", resolved.json_schema);
+        assert!(resolved.json_schema["properties"].get("title").is_some(), "{:#}", resolved.json_schema);
+    }
+
+    /// `Platform` is an object two properties use, so it is stored once: its
+    /// slot belongs to whichever of them survives.
+    #[test]
+    fn a_stored_definition_s_slot_survives_only_with_a_property_that_reaches_it() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("types.yaml"), "kind: schema\ntypes:\n    Platform: \"{ os: enum({{ first }}) }\"\n").unwrap();
+        let pending = pending_inline(
+            "host: Platform@./types.yaml\nguest: Platform@./types.yaml\nname: enum({{ second }})\n",
+            temp.path(),
+        );
+        assert_eq!(names(pending.slots()), ["first", "second"]);
+        let one = pending.without_properties(&["host".to_string()]);
+        assert_eq!(names(one.slots()), ["first", "second"]);
+        let both = pending.without_properties(&["host".to_string(), "guest".to_string()]);
+        assert_eq!(names(both.slots()), ["second"]);
+        let resolved = resolve(&both, &StubHost::answering(&[("second", json!(["a"]))]), temp.path()).unwrap();
+        assert!(resolved.json_schema.get("$defs").is_none(), "{:#}", resolved.json_schema);
+    }
+
+    #[test]
+    fn an_undeclared_name_or_a_root_union_arm_changes_nothing() {
+        let temp = tempfile::tempdir().unwrap();
+        let pending = pending_inline(TWO, temp.path());
+        assert_eq!(pending.without_properties(&["title".to_string()]), pending);
+        let arm = pending_inline("- os: enum({{ first }})\n- title: string\n", temp.path());
+        assert!(arm.is_union_arm());
+        assert_eq!(arm.without_properties(&["os".to_string()]), arm);
+    }
+
+    /// The arm a template was met in speaks for the whole root union: its
+    /// declared properties are those every arm declares, read before any
+    /// slot is evaluated, so a host discards what the resolved union would.
+    #[test]
+    fn a_root_union_arm_template_declares_what_every_arm_declares() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("other.yaml"), "kind: schema
+$schema:
+    os: string
+    extra: number
+").unwrap();
+        let every = pending_inline("- os: enum({{ first }})\n  arch: string\n- os: string\n  arch: string\n- ./other.yaml\n", temp.path());
+        assert!(every.is_union_arm());
+        assert_eq!(every.declared_properties(), ["os"]);
+        let later_arm = pending_inline("- os: string\n- os: enum({{ first }})\n  title: string\n", temp.path());
+        assert_eq!(later_arm.declared_properties(), ["os"]);
+        let some = pending_inline("- os: enum({{ first }})\n- title: string\n", temp.path());
+        assert_eq!(some.declared_properties(), Vec::<String>::new());
+        std::fs::write(temp.path().join("bare.yaml"), "kind: schema\n$schema:\n    extra: number\n").unwrap();
+        let file_arm = pending_inline("- os: enum({{ first }})\n- ./bare.yaml\n", temp.path());
+        assert_eq!(file_arm.declared_properties(), Vec::<String>::new());
+        assert_eq!(pending_inline(TWO, temp.path()).declared_properties(), ["os", "arch"]);
+    }
+}
+
 /// The hook is host-neutral: the slot modules name no host, so a host's
 /// types reach them only through `SlotHost`. The crate-wide dependency
 /// guard (`dependency_direction_guard`) covers manifests and crate paths;
