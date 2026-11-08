@@ -105,7 +105,7 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
             if let Some(items) = union_item_completions(ctx, ast, offset, line_start, indent, trimmed) {
                 return items;
             }
-            if let Some(items) = block_array_suggestions(ctx, offset, line_start, indent, trimmed) {
+            if let Some(items) = block_array_item_completions(ctx, offset, line_start, indent, trimmed) {
                 return items;
             }
             nested_key_completions(ctx, ast, offset, line_start, indent, trimmed)
@@ -920,7 +920,7 @@ fn value_completions(
     if partial.trim_start().starts_with('[') {
         let (element_partial, element_start) = flow_array_element(partial, start);
         return suggestion_completions(ctx, &path, element_start, offset, &element_partial)
-            .unwrap_or_default();
+            .unwrap_or_else(|| array_item_value_completions(ctx, &path, element_start, offset, &element_partial));
     }
 
     // Suggestion candidates for scalar values (checked before enum/boolish/file
@@ -934,7 +934,20 @@ fn value_completions(
     let Some(def) = memo.def_at(&segments) else {
         return Vec::new();
     };
+    def_value_completions(ctx, def, start, offset, partial, event)
+}
 
+/// The value candidates `def` offers for a scalar written from `start` to the
+/// cursor: preselected `literal(x)` values, expression completions, then enum
+/// members, boolish scaffolds, and file paths from every arm.
+fn def_value_completions(
+    ctx: &DocumentContext,
+    def: &PropertyDef,
+    start: usize,
+    offset: usize,
+    partial: &str,
+    event: Option<&crate::overlay::event_views::StackEvent>,
+) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
     // Each authored `literal(x)` value, preselected, with YAML insertion text
@@ -1457,9 +1470,11 @@ fn suggestion_completions(
     Some(items)
 }
 
-/// Detects a block-sequence item (`- value`) and returns suggestion completions
-/// when the enclosing property is suggestion-eligible.
-fn block_array_suggestions(
+/// Detects a block-sequence item (`- value`) and returns its candidates: the
+/// property's `suggest(...)` candidates when it is suggestion-eligible, else
+/// the item definition's values ([`array_item_value_completions`]). `None`
+/// when neither offers anything, so nested-key completion runs instead.
+fn block_array_item_completions(
     ctx: &DocumentContext,
     offset: usize,
     line_start: usize,
@@ -1476,7 +1491,33 @@ fn block_array_suggestions(
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
     let path: Vec<&str> = ancestors.iter().map(String::as_str).collect();
     let item_start = line_start + indent + marker_len;
-    suggestion_completions(ctx, &path, item_start, offset, after_dash)
+    if let Some(items) = suggestion_completions(ctx, &path, item_start, offset, after_dash) {
+        return Some(items);
+    }
+    let items = array_item_value_completions(ctx, &path, item_start, offset, after_dash);
+    (!items.is_empty()).then_some(items)
+}
+
+/// The value candidates for one scalar item of the array at `path`, from the
+/// item definition its array arms describe (an `enum(...)[]` or a named
+/// `os[]` whose `os` is an enum offers the members). Empty when `path` is not
+/// an array or its item has nothing to offer.
+fn array_item_value_completions(
+    ctx: &DocumentContext,
+    path: &[&str],
+    start: usize,
+    offset: usize,
+    partial: &str,
+) -> Vec<CompletionItem> {
+    let segments = key_segments(path);
+    let mut memo = ShapeMemo::new(ctx, ArrayCrossing::Transparent);
+    let Some(def) = memo.def_at(&segments) else {
+        return Vec::new();
+    };
+    let Some(item_def) = array_item_def(&array_item_atoms(def, definitions(ctx))) else {
+        return Vec::new();
+    };
+    def_value_completions(ctx, &item_def, start, offset, partial, None)
 }
 
 /// Completion for one block-sequence item of an array whose items are a union
@@ -3267,6 +3308,9 @@ mod schema_value_hover;
 
 #[cfg(test)]
 mod sequence_tests;
+
+#[cfg(test)]
+mod enum_item_tests;
 
 #[cfg(test)]
 mod snapshot_tests;
