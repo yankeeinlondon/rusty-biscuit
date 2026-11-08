@@ -22,30 +22,7 @@ $schema:
 kind: feature
 created: 2026-11-04
 status: draft-spec
-needs_rulings: true
-required_rulings:
-    - >-
-        R1 — Schema-expression authorization: approve the recommended model
-        under "Which expressions may resolve automatically?" (automatic pure
-        expressions and fingerprinted local reads only after an explicit host
-        trust opt-in, with shell, remote, and volatile operations left unresolved
-        until an explicit operation authorizes them), or select explicit
-        composition only with DMLS consuming supplied snapshots, or every
-        expression through existing approval policies. This determines whether
-        enabling editor support authorizes background local-file reads and
-        whether effectful schema slots are supported by explicit operations.
-        The same model must govern md schema validate, md clean, reference
-        checks, pre-flight walks, DMLS, and library callers. Recommendation:
-        approve the first model; trust must be granted by the host or user,
-        never by repository-controlled schema or workspace configuration.
-        Evidence: the specification explicitly reserves this safety choice for
-        the author; darkmatter/dmls/src/config/mod.rs::SchemaConfig and
-        ExpressionsConfig expose no schema-evaluation trust control, while
-        ShellConfig only selects a shell-policy path;
-        darkmatter/lib/src/markdown/compose/context/options.rs::ComposeOptions::for_reference_check
-        restricts existing composition operations but establishes no authorization
-        for dynamic schema resolution. Existing code therefore supplies no
-        product contract from which to infer this permission.
+needs_rulings: false
 area: darkmatter
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -68,9 +45,9 @@ Let the expression engine take part in defining a schema. At minimum,
 expression. The goal is **broad** support: anywhere a schema author writes a
 type expression should eventually accept a `{{ … }}` expression.
 
-This remains a **draft** until the focused investigations report and the author
-resolves the safety and trigger-loading choices under Open Questions. The
-author decisions under Rulings remain in force. Its main job is to determine
+This remains a **draft** until the focused investigations report. The
+safety, trigger-loading, and post-mutation choices are settled by Rulings
+Q5–Q7, and every author decision under Rulings is in force. Its main job is to determine
 how dynamic types can run safely with good performance. Narrowing where
 expressions may appear is the **last resort**. It is considered only if the spikes show that
 no caching or resolution strategy keeps validation and DMLS responsive.
@@ -174,8 +151,8 @@ flowchart LR
 
 ## Required semantics
 
-These rules make the existing author decisions implementable. They do not
-approve effectful evaluation during discovery or editor requests.
+These rules make the existing author decisions implementable. What may be
+evaluated, and when, is governed by Ruling Q5; nothing here widens it.
 
 ### Slot boundaries and result values
 
@@ -281,9 +258,9 @@ A command pins one concrete snapshot for each equivalent schema context.
 Approved effectful resolution must share the command's data runtime and
 read set; passes with fewer permissions cannot borrow an approved result to
 circumvent their own policy. Integrate with loading-data's existing memo
-invalidation after commands mutate files. Whether that also requires a new
-schema snapshot before another validation must be settled with the safety
-choice below; a known-stale schema must not silently validate new values.
+invalidation after commands mutate files; Ruling Q7 requires re-resolution
+before the next validation, so a known-stale schema never validates new
+values.
 
 For DMLS, watch actual dependencies regardless of extension, including missing
 candidates and imported schemas. Refresh unsaved data/schema buffers through
@@ -347,16 +324,13 @@ to evaluate. Only rejecting volatile functions would count as narrowing.
 
 ### S5. Safety and approval
 
-Decide when resolution is allowed to run. Options to evaluate: resolution is
-allowed only for slots whose functions are pure or local-input-reading, while
-shell and remote reads go through the existing approval and `--allow host=`
-flows; or a schema with an effectful slot can be discovered but stays
-unresolved until an explicit request (for example `md compose`) approves it.
-Trigger discovery and DMLS must never cause an unapproved effect, and neither
-must a pass that runs ahead of composition: the reference check
-(`ComposeOptions::for_reference_check`, also behind `md graph` and
-`md validate refs`), which holds no remote permission and runs no shell, and the
-pre-flight walk. Decide what each of those does with an unresolved slot.
+The model is decided (Ruling Q5). This design review settles how to build it:
+how the pre-flight walk collects slot targets passively from template
+expressions, including through imports and trigger payloads; how slot grants
+join the shell approval batch and policy-file store without merging the two
+rule sets; how the clean-file check reads the request's captured repository
+observation (through Sniff) rather than recapturing it; and the work limit
+for pure evaluation, set from S1's numbers.
 
 ### S6. Lazy and partial resolution
 
@@ -425,6 +399,15 @@ implementation must cover:
 - Trigger discovery, kind selection, reference checks, and pre-flight walks
   performing no unapproved evaluation. DMLS requests do no I/O or evaluation;
   stale worker results and unsaved edits cannot overwrite newer snapshots.
+- The Q5 approval model: the automatic grant for a clean same-repo file, and
+  its refusal for dirty, untracked, ignored, symlink-escaping, other-repo,
+  and no-repo targets; every grant scope, once and persisted, and deny;
+  batched pre-flight prompting beside shell commands; computed targets
+  checked at evaluation; typed `approval-required` failures on data outputs
+  and for library callers without a handler; DMLS code actions writing the
+  user-level policy; and proof that repository content cannot grant access.
+- A pending trigger payload that is never selected reads nothing, and a
+  lifecycle write to a snapshot dependency forces re-resolution (Q6, Q7).
 
 Use package-area `just test` and `just lint` for simplified-schema and
 Darkmatter, including the library's minimal-feature checks. Editor workers
@@ -436,60 +419,9 @@ spec remains an active document for author review; agents do not move it to
 
 ## Open Questions
 
-### Which expressions may resolve automatically?
-
-Local reads can expose files through completion values, and background work
-can still run dangerous code. Function cacheability does not grant permission.
-The current draft leaves this choice to the safety investigation.
-
-1. **Recommend: automatically resolve pure expressions and fingerprinted local
-   reads only in a trusted, explicitly enabled host context.** Keep shell,
-   remote, and volatile operations unresolved until an explicit operation
-   authorizes them. Pros: supports the motivating data-file case and responsive
-   editors without granting effects merely by opening a folder. Cons: requires
-   a documented enable/refresh control and pending-state UI. This best preserves
-   the existing passive discovery guarantee while enabling useful local data.
-2. **Resolve only on explicit composition, with DMLS consuming a supplied
-   snapshot.** Pros: the simplest permission boundary; no editor evaluator.
-   Cons: candidates remain unavailable until composition and snapshots need an
-   explicit refresh route.
-3. **Permit every expression through existing approval policies.** Pros: broad
-   expression support immediately. Cons: background prompts are unsuitable for
-   DMLS, volatile inputs weaken cache reuse, and mutation requires an exact
-   rule for when the pinned schema is replaced. Before choosing this, specify
-   non-interactive refusal behavior and post-mutation validation order.
-
-Whichever option is selected, specify behavior for `md schema validate`,
-`md clean`, reference checks, pre-flight walks, DMLS, and library callers;
-none may silently omit a dynamic constraint or trigger evaluation as a side
-effect of passive validation. Shell expansion syntax is not automatically
-part of the expression grammar; supporting it in slots requires an explicit
-syntax and policy decision.
-
-### How do trigger payloads carry unresolved templates?
-
-Darkmatter's current
-[`trigger assembly`](../../lib/src/markdown/schemas/triggers/assemble.rs)
-lowers and compiles every payload during discovery. Accepting templates
-requires an intentional change to this contract, even when matching stays
-passive.
-
-1. **Recommend: retain valid templates in the registry and resolve only selected
-   payloads at an authorized boundary.** Pros: preserves passive matching and
-   avoids executing irrelevant schemas. Cons: compilation errors depending on
-   slot results surface later; the registry needs a pending payload state.
-   This fits the explicit resolution model with the least automatic work.
-2. **Resolve all permitted templates in a background registry build.** Pros:
-   candidates are ready before matching. Cons: reads inputs for unused schemas
-   and requires the trust and cancellation rules above.
-3. **Initially reject slots in trigger payloads.** Pros: preserves the current
-   registry representation. Cons: prevents automatic application of dynamic
-   schemas and narrows the feature. Choose only if the investigation shows the
-   other approaches are impractical, and document that scope restriction.
-
-Retain the existing handling of genuinely invalid discovered triggers. A valid
-but unresolved template must not be mislabeled as a broken trigger, silently
-skipped, or treated as an empty schema.
+None. The safety model, trigger payloads, and post-mutation behavior were
+decided on 2026-11-07 (Rulings Q5–Q7). The spikes may still recommend
+narrowing a slot position under S8, which would need a further ruling.
 
 ## Rulings
 
@@ -516,3 +448,71 @@ skipped, or treated as an empty schema.
   selection stays passive. This does not affect an ordinary `kind: schema` document named
   by `$schema`, such as `sandboxing.yaml`. It can be relaxed later without breaking a
   document.
+- **Q5. Decided (2026-11-07): schema-slot reads use a per-resource approval model,
+  patterned on shell approval.** It applies to schema slots only; a document's own
+  `load_data` and `::file` reads keep their current rules (local reads unrestricted,
+  remote reads under `--allow host=`).
+  - *Automatic grant.* Pure expressions need no grant. A local file is read without
+    asking when it lies in the same Git repository as the slot's **defining** schema
+    file (an imported definition uses its own file) and is clean: tracked and
+    identical to `HEAD` in both the index and the working tree, judged after
+    `canonicalize_simplified`, so a symlink that leaves the repository gets no free
+    pass. An unsaved editor buffer that differs from disk counts as dirty. Untracked,
+    ignored, dirty, other-repository, and no-repository files get no automatic grant.
+    The repository state comes from the request's captured observation, never a
+    fresh capture.
+  - *Everything else asks.* The pre-flight walk collects slot targets passively and
+    raises them in the same batched approval as shell commands. Choices for a file:
+    allow **this file**, or allow **this file's directory** (recursive). For a URL:
+    allow **this exact URL** with its query; allow **this URL whatever its query**
+    (offered only when it has one); or allow **this site** (scheme, host, and port;
+    no subdomains). Each grant is **once** (this run) or **persisted**; **deny** is
+    persisted too.
+  - *Where grants live.* Persisted grants and denials go in a user-level policy file
+    beside the shell whitelist and blacklist. Repository content, schemas, and
+    workspace configuration can never grant access. A site grant feeds
+    `biscuit_file::FetchPolicy`; `--allow host=HOST` remains a one-run site grant.
+  - *Computed targets.* A target the walk cannot determine passively (for example
+    `load_data(ctx.env.DATA_FILE)`) is checked when it is evaluated: an interactive
+    run prompts then, and a non-interactive one fails with a typed
+    `approval-required` error.
+  - *Surfaces that cannot prompt.* A data output fails with a typed
+    `approval-required` diagnostic naming the grants needed, as shell does today.
+    DMLS never prompts or blocks a request: it reports a positioned diagnostic on
+    the slot whose code actions offer the same grant choices, writes the chosen
+    grant to the user-level policy, and refreshes. A library caller passes an
+    approval handler; without one, an unapproved read is `ApprovalRequired`.
+  - *Excluded and unchanged.* Shell syntax is not part of slot grammar; adding it
+    needs its own syntax and policy decision. Time- or state-dependent functions need
+    no grant; their caching is S4's question. Pure evaluation runs under a work
+    limit so a schema cannot stall DMLS.
+  - *Replacement for the passive-schema guarantee (M5).* Opening a folder may now
+    evaluate pure slots and read clean files from the schema's own repository, and
+    nothing else. What it can expose is limited to that repository's committed
+    content.
+
+  | Surface | Behavior |
+  | --- | --- |
+  | `md compose` | Resolves with automatic and persisted grants; asks for the rest in pre-flight (formatted output) or fails `approval-required` (data output) |
+  | `md schema validate <document>` | Same gate as compose; an unapproved slot is an unavailable check with exit 1, never success |
+  | `md schema validate <schema>` | Passive slot-syntax check only; no resolution |
+  | `md clean` | Same gate; an unapproved slot reports its constraint unavailable and never reports the document clean |
+  | Pre-flight walk | Collects slot targets passively and raises the batched approval; the command pins the resulting snapshot |
+  | Reference checks (`md graph`, `md validate refs`) | Use the command's pinned snapshot or resolve with automatic and persisted grants only; never prompt; defer an unapproved slot as `for_reference_check` defers today |
+  | DMLS | Resolves off the request path with automatic and persisted grants; an unapproved slot is pending with a grant code action |
+  | Library callers | Resolve only through an explicit call that takes a policy and an optional approval handler |
+
+- **Q6. Decided (2026-11-07): trigger payloads keep valid templates pending.** The
+  registry holds a valid template as pending (unresolved, or awaiting approval).
+  Matching stays passive, and only a selected payload resolves, at the authorized
+  boundary of the command using it. A trigger that no document selects reads
+  nothing. Compilation errors that depend on slot results are reported when the
+  payload resolves, positioned at the slot in the trigger file. Genuinely invalid
+  triggers keep their existing handling; a pending template is never reported as
+  broken, skipped, or empty.
+- **Q7. Decided (2026-11-07): a mutated dependency forces re-resolution.** A write
+  that loading-data's memo invalidation records against a path in a pinned
+  snapshot's dependencies marks that snapshot stale, and the next validation
+  re-resolves it from the template under the current grants. A failed re-resolution
+  is a typed error (keeping its `dm.data.*` code), never a pass, and no stale
+  snapshot validates new values.
