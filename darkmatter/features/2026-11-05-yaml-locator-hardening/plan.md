@@ -13,7 +13,15 @@ packages:
 
 # YAML Locator Hardening: Implementation Plan
 
-Spec: `2026-11-05-yaml-locator-hardening`. Non-interactive execution: no phase
+Spec: `2026-11-05-yaml-locator-hardening`.
+
+**Revised 2026-11-08** for the author's merge-key hint decision (Rule 5a,
+Definition of Done item 4, Wave 4, Rule 21) and sequencing: implement after
+2026-11-05-dynamic-schema-types, which is in progress in this worktree and also
+edits `compose/expression/data/load.rs` and `simplified/source.rs`. Rebase
+Rules 12–15 on its changes before starting Phase 2.
+
+Non-interactive execution: no phase
 waits for a human, every choice is already written down in
 [Necessary Rules](#necessary-rules). Sub-agents inherit that the whole session
 tree is non-interactive. Tests must never open or focus a terminal or browser
@@ -74,8 +82,8 @@ a quoted `"]"` locates every item. So **no change to the locator in
    quoted `]`/`}`.
 4. `load_data` records, frontmatter problems, whole-file YAML validation, and
    DMLS ranges all carry the improved locations; counts, pointers, order,
-   limits, messages, codes, malformed-input locations, and the CLI `source`
-   field are unchanged.
+   limits, messages (except the merge-key hint, Rule 5a), codes,
+   malformed-input locations, and the CLI `source` field are unchanged.
 5. `just test` and `just lint` pass in `simplified-schema/` and `darkmatter/`;
    no test or doc still claims an alias or multi-line flow forces a
    pointer-only file; the implementation log records the intentional
@@ -139,6 +147,14 @@ Each rule states the decision, then the evidence.
    an alias leaf (probe confirmed), so `/server/<</port` resolves through the
    alias leaf to `*b`. A sequence of aliases (`<<: [*a, *b]`) produces
    boundaries `/server/<</0` and `/server/<</1` by the same mechanism.
+5a. **Merge-key hint (Darkmatter, `load_data` only).** When a
+   `dm.data.contract_mismatch` record reports an unexpected key whose decoded
+   name is exactly `<<` (plain or quoted in the source), its message gains one
+   sentence: YAML merge keys are not applied, so `<<` is read as an ordinary
+   key. Add it where the record's message is built in
+   `compose/expression/data/` (Phase 2), keyed on the problem kind and the
+   decoded key name, never on source text. Code, pointer, location, ordering,
+   and record count are unchanged; every other message is byte-identical.
 6. **`locate_range_in` / `locate_in` / `byte_range` / `locate_problem` are
    unchanged.** Evidence: the loop already returns `node.span` when it meets a
    `Scalar` mid-path (`positions.rs:250`) and the `Key`/`Mapping` targets on a
@@ -354,6 +370,11 @@ show the improved locations. Prerequisite: Phase 1 complete.
       gives (2, 16) and (2, 26). A sequence of aliases used as a literal value,
       `base: &b {port: x}\nlist: [*b, *b]` with `{ base: { port: number }, list: { port: number }[] }`,
       gives `/list/0/port` (2, 8) and `/list/1/port` (2, 12).
+    - Merge-key hint (Rule 5a): the same `server` data against a **closed**
+      contract `{ base: { port: number }, server: { port: number } }` yields an
+      unexpected-key record at `/server/<<` whose message contains the hint, for
+      both `<<` and `"<<"`; a control with an unexpected key `other` has the
+      message unchanged (byte-compare with the current text).
     - Multi-line flow: `items: [\n  {port: x},\n  *b, # ]\n  "}"\n]` shapes —
       sequence of objects, nested flow mappings, comments and quoted `]`/`}`,
       an alias item, positions inside and after the collection (a key after
@@ -440,7 +461,8 @@ Prerequisite: Phases 1 and 2.
       table), multi-line flow collections are located, `<<` is a literal key
       (no inheritance; `/server/<</port` points at the alias), and the
       remaining fallback (a source layout the locator cannot prove, e.g. an
-      anchored key `&k a: 1`) is pointer-only. Keep the duplicate-key,
+      anchored key `&k a: 1`) is pointer-only. Show the merge-key hint as the
+      message a closed contract gives for `<<`. Keep the duplicate-key,
       second-document, non-string-key, and tag bullets.
     - `darkmatter/docs/topics/loading-data.md` (~lines 527-537, "YAML
       positions that cannot be proven"): same replacement, shorter.

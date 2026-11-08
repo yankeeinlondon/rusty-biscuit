@@ -21,7 +21,7 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-07
-status: draft-spec
+status: finalized-spec
 area: darkmatter
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
@@ -168,6 +168,13 @@ sequences of aliases used as literal values. Preserve explicit key order and
 validation of the literal member, including an unexpected-key failure if the
 contract does not permit it.
 
+**Merge-key hint (author decision, 2026-11-08).** When that unexpected key is
+exactly `<<` (plain or quoted), the `load_data` contract-mismatch message gains
+one sentence saying that YAML merge keys are not applied, so `<<` is read as an
+ordinary key. The code, pointer, location, and record count are unchanged; only
+the message text adds the hint. Merge-key inheritance itself stays out of scope
+and no follow-up spec is filed.
+
 ### Enable multi-line flow positions
 
 In Darkmatter, remove the multi-line-flow suppression and its now-unused
@@ -187,7 +194,8 @@ continues to convert byte offsets into one-based character columns using
 `data_location.column`. Keep the established LF/CRLF rules, leading
 byte-order-mark handling, and frontmatter delimiter offsets for each surface.
 
-Only locations become more precise. Keep JSON Pointers, messages, codes,
+Only locations become more precise, apart from the merge-key hint above. Keep
+JSON Pointers, messages, codes,
 file/URL identity, authored ordering, report limits, and omission of unknown
 coordinates unchanged. In CLI records, `source` remains the Markdown call
 site; the improved YAML position belongs in `data_location`. No output schema
@@ -253,7 +261,8 @@ avoid per-alias whole-document searches or repeated expansion.
 ## Open Questions
 
 None remain for this scope. Alias use-site locations and literal merge-key
-behavior are explicit decisions above. Supporting merge inheritance would
+behavior are explicit decisions above, and the author approved the merge-key
+hint on 2026-11-08. Supporting merge inheritance would
 change parsed data and needs a separate specification, rather than being
 introduced as a diagnostic fix.
 
@@ -281,7 +290,9 @@ introduced as a diagnostic fix.
   `*name` are not treated as alias boundaries.
 - Literal `<<` entries retain their parsed shape and key order. An explicit
   sibling value locates at itself, a descendant of the aliased literal value
-  locates at its alias token, and no inherited property is manufactured.
+  locates at its alias token, and no inherited property is manufactured. A
+  closed contract that rejects `<<` reports the unexpected key with the
+  merge-key hint; any other unexpected key's message is unchanged.
 - Multi-line flow sequences and nested flow mappings report positions inside
   and after the collection, including when a flow item is an alias and when
   comments or quoted strings contain `]` or `}`.
