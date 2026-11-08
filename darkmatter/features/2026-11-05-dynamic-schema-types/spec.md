@@ -21,7 +21,7 @@ $schema:
     implemented_by: string -> the agent who implemented the plan
 kind: feature
 created: 2026-11-04
-status: draft-spec
+status: finalized-spec
 needs_rulings: false
 area: darkmatter
 reviewed: true
@@ -45,9 +45,10 @@ Let the expression engine take part in defining a schema. At minimum,
 expression. The goal is **broad** support: anywhere a schema author writes a
 type expression should eventually accept a `{{ … }}` expression.
 
-This remains a **draft** until the focused investigations report. The
-safety, trigger-loading, and post-mutation choices are settled by Rulings
-Q5–Q7, and every author decision under Rulings is in force. Its main job is to determine
+The investigations are recorded under "Investigation outcomes", and every
+question they raised is settled by Rulings Q8–Q20 (2026-11-08). Every author
+decision under Rulings is in force; where a later ruling corrects an earlier
+one, the later ruling governs. Its main job is to determine
 how dynamic types can run safely with good performance. Narrowing where
 expressions may appear is the **last resort**. It is considered only if the spikes show that
 no caching or resolution strategy keeps validation and DMLS responsive.
@@ -359,6 +360,159 @@ passive type-definition parser and import rules. Only positions that the
 baseline, caching, and resolution investigations show cannot meet the budget
 are candidates for narrowing.
 
+## Investigation outcomes (2026-11-07)
+
+All eight investigations ran as read-only reviews plus one out-of-tree
+performance prototype; nothing was merged. Measurements: Apple M4 Max,
+16 cores, 128 GB, macOS 27.2, one-minute load below 4 except two flagged
+batches (4.1–5.5), A/B interleaved, medians of 7–9 runs. A `{{ }}` slot
+cannot load today, so resolution was simulated (read, hash, parse,
+substitute, lower, compile); evaluator cost is a compose-derived upper bound.
+
+**No slot position fails the budget, so performance gives no grounds for
+narrowing.**
+
+### S1. Baseline and budget
+
+Command setup dominates. Cold `md schema validate` is 42 ms (static sandbox
+copy) to 166 ms (provider `_schema.yaml`); cold `md compose` is 58–334 ms, of
+which schema validation is 0.33–3.8 ms; first DMLS diagnostics are 84–142 ms.
+A slot loading `os.yaml` adds 13–30 µs raw and at most 91 µs through the
+evaluator; a 500-member data file adds 0.13–0.57 ms. A single-file Git
+index/`HEAD` check is about 3–5 ms; a full `git status` walk is 109 ms.
+
+Budgets: warm overhead at most 5% per document; a cold slot at most 2× the
+lowering and compile of the schema it produces and at most 1% of the
+surface's cold time; DMLS requests do no I/O and gain at most 0.1 ms. All
+pass; the 500-member evaluator upper bound sits at the edge. A per-slot
+pure-evaluation limit of about 25 ms leaves roughly 40× headroom.
+
+### S2. Resolution cache
+
+500 documents against 3 schemas: 99.4% hit rate, and a warm hit returns the
+same `Arc`. Per-hit re-check cost: trusting the command's pinned snapshot
+0.04 µs; `stat` (size + mtime) 2.25 µs (1.8% of the 125 µs per-document
+validation); rehashing every input 20.6 µs (16%, fails the budget). An
+on-disk tier saves about 37 µs per process. **Recommendation:** a
+process-wide cache only; trust the pinned snapshot within a command and
+`stat`-check across commands (see Open Question 12).
+
+### S3. Invalidation and DMLS
+
+DMLS watches only `.md` and `.yaml` today. Every recorded dependency
+(imports, missing-file probes, `.git/index` and `HEAD` for the clean-file
+grant) needs its own watch, with a `stat` re-check as the fallback. Serving
+a snapshot from memory costs 4 ns against 1.8–9.1 ms for today's completion
+and hover; a background re-check costs 2 µs and a full re-resolve 91 µs.
+Slot resolution must not run on the registry job lane, because requests wait
+on it. Today's request path was not audited for I/O. Side finding: DMLS
+completion inside the sandbox schema's `os[]` enum list returns no items
+(Open Question 13).
+
+### S4. Function determinism classes
+
+Of 120 built-in functions: 56 pure, 28 input-reading (7 of them become
+remote reads on a URL argument: `load_data`, `file_exists`, the four
+`frontmatter`/`markdown_*` readers, `validate_schema`), 5 captured-context,
+31 live-volatile. **Recommendation, not narrowing:** move the clock,
+timezone, and `PATH` onto the captured request context (16 volatile
+functions become fingerprintable), resolve the remaining volatile slots once
+per command snapshot and never reuse them across requests, and key the
+validator cache on resolved content. A wall-clock TTL is rejected: it changes
+diagnostics without an edit and a stale-but-in-TTL snapshot would report
+"valid". The class becomes a required fact on `FunctionBinding`
+(`compose/expression/functions/mod.rs`) with a passive `slot_class(expr)`
+walk; `REMOTE_READ_FUNCTIONS` is derived from those facts.
+
+Defects found: 14 date functions registered `pure` read the live clock or
+host timezone; `has_command`/`has_binary` read the process `PATH` directly;
+23 input-reading functions record nothing in the read set and `load_data`
+drops its not-found probe; pre-fetch URL discovery matches
+`REMOTE_READ_FUNCTIONS` exactly but evaluation folds case and underscores,
+so `loaddata("https://…")` is missed. `load_data` (through contract imports)
+and `validate_schema` can re-enter schema resolution and need the shared
+resolution stack.
+
+### S5. Safety and approval
+
+- **Targets** are collected from the resolved template (document `$schema`,
+  every import at its defining file, selected trigger payloads only).
+  Literal arguments and expressions over literals and pure functions are
+  known up front; both branches of `?:` and `||` count, as in shell
+  pre-flight. Computed targets go through one check in the resolution
+  context, placed before the shared `load_data` memo so a document's ungated
+  read cannot hand a slot the file.
+- **Approval** runs in the same pre-flight step as shell, before the shell
+  decisions, with its own handler and rule types. Data outputs fail with a
+  new `dm.schema.slot_approval_required` code.
+- **Clean files** are judged on the bytes actually read: Git blob hash of the
+  worktree bytes equals the index entry equals the `HEAD` entry. The captured
+  repository observation holds no Git status today, so a once-per-request
+  cleanliness component is added; Sniff lacks a per-path check. Windows
+  autocrlf and LFS can make clean files look dirty.
+- **Surfaces:** `md schema validate <document>` and `md clean` do not use the
+  pre-flight walk and need a small collect-and-approve step; reference
+  checks use only automatic and persisted grants; DMLS needs an
+  `executeCommand` handler for the grant code action.
+- **Work limit:** reuse the existing iteration budget (visits and bytes) per
+  slot. Missing: result-size charging, evaluator cancellation, a `load_data`
+  size cap.
+- **Correction to Q5:** the shell policy files are not user-level (`md
+  compose` keeps them beside the document; library callers fall back to the
+  repository root), and a site grant fed into the request's shared
+  `FetchPolicy` would widen document reads (Open Questions 1–2).
+
+### S6. Lazy and partial resolution
+
+Resolving only reached slots saves 1.7%, because lowering (1.25 ms) and
+compiling (0.55 ms) the whole schema dominate. Compiling static parts once
+and substituting dynamic parts saves about 1.8 ms only on re-resolution and
+requires restructuring the validator. **Recommendation:** resolve the whole
+effective schema up front.
+
+### S7. Extraction boundary
+
+- **Template:** one `SimplifiedSchema` type with a template state (as Q2
+  implies). New `Constraint::TemplateMembers` / `TemplateSuggest` variants
+  hold literal elements and `SchemaSlot`s (expression, exact text, span,
+  defining file, expected shape); concrete `Members`/`Suggest` stay unchanged,
+  so their 28 reader files need no edits. Slot boundaries reuse
+  `scan_expression` (made crate-visible); spans map to YAML as suggestion
+  spans do today. The file loader records each slot's defining file through
+  import inlining and aliases.
+- **Resolver:** a host-neutral `SlotResolver` trait with an associated host
+  error and opaque observation type, `resolve_slot(&SlotRequest)`, and
+  `is_canceled()`. `SlotRequest` carries the slot, expected shape, defining
+  directory and derived context, and a shared `ResolutionStack` for cycle
+  detection. Failures are `SlotResolutionError<E>`, carried erased inside
+  `SchemaError` so Darkmatter can downcast to `DataError` (M3).
+  `with_reads_recorded` returns the exact schema-file text read, for the host
+  to hash. `resolve_with` returns a new concrete snapshot and never mutates
+  the template.
+- **Merge:** keep `merge_baseline` on lowered layers. Whole-property
+  precedence makes per-layer resolution equivalent, and existing memos hold if
+  a warm hit returns the same `Arc`.
+- **Passive checks:** a generic free-reference walker in the library;
+  Darkmatter applies Q3's rules wherever it admits a template. Q4 is checked
+  after import expansion; trigger match conditions also reject slots.
+- **Blast radius:** `effective_for` gains an `UnresolvedTemplate` error,
+  reaching 78 Darkmatter files, Claudine (15), and Messenger (3). Claudine's
+  CLI completion uses `.ok()?` and would silently show nothing for a
+  template. Also affected: `resolve_schema_with_roots` / `ResolvedSchema`
+  callers (a template-returning call is added beside it), non-exhaustive
+  `SchemaError` matches, trigger payload resolution and its memo, the
+  ownership guard, and both shipped-schema corpus tests.
+
+### S8. Breadth
+
+| Position | Recommendation |
+| --- | --- |
+| `literal(...)` | include; about enum cost |
+| `default(...)` | include; about enum cost |
+| `min` / `max` | include; about enum cost |
+| `pattern(...)` | include, with a size or backtracking cap (data-supplied regexes run on every validation, outside Q5's work limit) |
+| whole type expressions | follow-up feature: a new `TypeExpr` variant touching about 44 files, and editor features have no type until the slot resolves (Open Question 9) |
+
 ## Minimum requirements
 
 Whatever the spikes conclude, the finalized spec must deliver:
@@ -419,9 +573,8 @@ spec remains an active document for author review; agents do not move it to
 
 ## Open Questions
 
-None. The safety model, trigger payloads, and post-mutation behavior were
-decided on 2026-11-07 (Rulings Q5–Q7). The spikes may still recommend
-narrowing a slot position under S8, which would need a further ruling.
+None. The questions raised by the investigations were ruled on 2026-11-08
+(Rulings Q8–Q20), each as recommended.
 
 ## Rulings
 
@@ -469,8 +622,9 @@ narrowing a slot position under S8, which would need a further ruling.
     no subdomains). Each grant is **once** (this run) or **persisted**; **deny** is
     persisted too.
   - *Where grants live.* Persisted grants and denials go in a user-level policy file
-    beside the shell whitelist and blacklist. Repository content, schemas, and
-    workspace configuration can never grant access. A site grant feeds
+    beside the shell whitelist and blacklist (corrected by Q8: a fixed home path).
+    Repository content, schemas, and workspace configuration can never grant
+    access. A site grant feeds (corrected by Q9: a slot-only fetch policy)
     `biscuit_file::FetchPolicy`; `--allow host=HOST` remains a one-run site grant.
   - *Computed targets.* A target the walk cannot determine passively (for example
     `load_data(ctx.env.DATA_FILE)`) is checked when it is evaluated: an interactive
@@ -516,3 +670,56 @@ narrowing a slot position under S8, which would need a further ruling.
   re-resolves it from the template under the current grants. A failed re-resolution
   is a typed error (keeping its `dm.data.*` code), never a pass, and no stale
   snapshot validates new values.
+- **Q8. Decided (2026-11-08): persisted grants live in one fixed home file (corrects
+  Q5).** The shell policy files are not user-level (`md compose` keeps them beside the
+  document, and library callers fall back to the repository root), so "beside the shell
+  whitelist" would make grants repository content. Grants and denials go in
+  `<home>/.config/darkmatter/schema-read-policy`: line-based, one rule per line, deny
+  wins. No workspace setting (`.dmls.toml`, editor settings) can move it, and the shell
+  rule sets are unchanged and never merged with it.
+- **Q9. Decided (2026-11-08): slot reads use their own fetch policy (corrects Q5).** A
+  site grant never enters the request's shared `FetchPolicy`, so slot grants cannot
+  widen document reads. The slot policy matches scheme, host, and port.
+  `--allow host=HOST` keeps its meaning for document reads (any scheme or port) and
+  also acts as a one-run site grant for slots.
+- **Q10. Decided (2026-11-08): effectful functions are schema errors in a slot.** The
+  network and compose functions (`pr`, `cicd`, `ping`, `ping_under`, `as_markdown`) and
+  the login-shell probes (`has_alias`, `has_builtin_function`, `has_user_function`,
+  `can_execute`) are rejected passively.
+- **Q11. Decided (2026-11-08): listings and probes.** `find_files` and other directory
+  listings never get an automatic grant and need a directory grant. `file_exists` is
+  automatic inside the defining repository and needs a grant outside it.
+  `has_command` and `has_binary` read the `PATH` captured with the request.
+- **Q12. Decided (2026-11-08): runtime-only bindings are rejected.** In addition to
+  Q3's `fm.*`: bare identifiers (they fall through to document properties), host
+  globals, `ctx.cwd`, document-identity values (`ctx.self`, `ctx.last_updated`,
+  `ctx.hash`), and per-run nonces (`ctx.id`, `ctx.sid`). `current.*` and `local.*` are
+  allowed only inside a callback.
+- **Q13. Decided (2026-11-08): a schema outside the request's repository gets no
+  automatic grant** (for example one under `~/schemas`); every read it makes needs a
+  grant.
+- **Q14. Decided (2026-11-08): only the effective schema's slots resolve.** A slot under
+  a property that a higher layer redeclares is never read or prompted for.
+- **Q15. Decided (2026-11-08): Q4's baseline prohibition covers the DMLS extension
+  layer.**
+- **Q16. Decided (2026-11-08): breadth.** This feature delivers slots in `enum(...)`,
+  `suggest(...)`, `literal(...)`, `default(...)`, `min`/`max`, and `pattern(...)`, the
+  last with a size or backtracking cap. Whole type expressions follow in a separate
+  spec; that is sequencing, not narrowing. That spec resolves imports in a returned type
+  against the slot's defining file.
+- **Q17. Decided (2026-11-08): a grant is decided once per run.** Writes carry no
+  per-path attribution, so each target's grant is decided once per run and kept for that
+  run; Q7's re-resolution after a write still happens.
+- **Q18. Decided (2026-11-08): approval details and scope additions.** The prompt adds a
+  "deny for this run" choice, also used on cancel or end of input. Unapproved slot reads
+  report `dm.schema.slot_approval_required`. S4's read-set gaps (23 input-reading
+  functions that record nothing, `load_data`'s dropped not-found probe) and the
+  alias-folding gap in pre-fetch URL discovery are fixed in this feature.
+- **Q19. Decided (2026-11-08): cross-command re-check by `stat`.** Within a command the
+  pinned snapshot is trusted (Q7 governs writes). Across commands, size and mtime are
+  checked first and a change triggers a rehash; DMLS also re-checks on file-watch events.
+  A same-size rewrite within the filesystem's mtime resolution can be missed; this is a
+  documented limitation, accepted over a 16% per-document rehash cost.
+- **Q20. Decided (2026-11-08): DMLS enum completion is fixed here.** Completion inside
+  the sandbox schema's `os[]` enum list returns nothing today; investigate and fix it in
+  this feature, since it is the motivating editor case.
