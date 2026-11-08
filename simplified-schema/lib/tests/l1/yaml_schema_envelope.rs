@@ -248,7 +248,7 @@ fn a_kind_selection_error_names_the_kind_and_its_cause() {
     );
     let unavailable = SchemaError::KindSelection {
         kind: "inventory".into(),
-        cause: KindSelectionCause::Unavailable { file: PathBuf::from("broken.yaml"), defect: "not valid YAML".into() },
+        cause: KindSelectionCause::Unavailable { file: PathBuf::from("broken.yaml"), defect: "not valid YAML".into(), code: None },
     };
     assert!(unavailable.to_string().contains("schema selection is unavailable: definition `broken.yaml`"), "{unavailable}");
 }

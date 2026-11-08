@@ -631,7 +631,11 @@ impl DataRuntime {
         document: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<PreparedContract>, Arc<DataError>> {
         let identity = crate::markdown::compose::file_resolution_context_identity(document);
-        let key = format!("{identity:016x}\0{written}");
+        // A contract prepared inside a slot's evaluation may resolve a
+        // template through that slot's session, so it is kept apart.
+        let session = crate::markdown::schemas::slots::session::active_session_id()
+            .map_or_else(String::new, |session| format!("\0slots:{session}"));
+        let key = format!("{identity:016x}\0{written}{session}");
         let prepared = self.inner.memo.contract(key.clone(), || {
             let ((prepared, texts), observed) = simplified_schema::resolve::observed::collect(|| {
                 simplified_schema::resolve::buffers::recording(|| super::contract::prepare_contract(written, document))

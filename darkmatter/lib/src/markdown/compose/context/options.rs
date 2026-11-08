@@ -668,6 +668,12 @@ pub struct ComposeOptions {
     /// builds its own, so separate compositions never share results.
     pub(crate) data_runtime: Option<crate::markdown::compose::DataRuntime>,
 
+    // ── Shared schema-slot session ────────────────────────────────
+    /// The command's schema-slot session: its grants, pinned snapshots, and
+    /// resolution stack, shared by every pass that clones these options.
+    /// `None` means each root composition builds its own from the request.
+    pub(crate) slot_session: Option<Arc<crate::markdown::schemas::slots::SlotSession>>,
+
     // ── File-reference launch-area anchor (diagnostic only) ────────
     /// The captured launch-area directory a top-level caller (Claudine) was
     /// invoked from.
@@ -910,6 +916,13 @@ impl ComposeOptions {
             .or_else(|| self.context.observations().repository())
     }
 
+    /// The root of the request's one repository observation, which a schema
+    /// slot's automatic read grant is judged against; `None` when the request
+    /// found no repository (never a new discovery).
+    pub(crate) fn slot_repository_root(&self) -> Option<std::path::PathBuf> {
+        self.request_repository().and_then(|repository| repository.root.clone())
+    }
+
     /// The request's repository observation when it found a repository that
     /// contains `dir`, so the context builder can project it instead of
     /// discovering the repository a second time.
@@ -1051,6 +1064,7 @@ impl ComposeOptions {
             preflight_graph: None,
             remote_fetch: None,
             data_runtime: None,
+            slot_session: None,
             exclude_keys: std::collections::HashSet::new(),
             host_globals: None,
             deferred_shell_roots: Default::default(),
@@ -2425,6 +2439,23 @@ impl ComposeOptions {
         self
     }
 
+    /// Resolves schema templates (schemas holding `{{ … }}` slots) through
+    /// `session` in every pass cloned from these options, so the command's
+    /// grants are decided once and each template is pinned to one snapshot.
+    /// Without one a root composition builds its own session from the
+    /// request (its data runtime, repository, `--allow host=HOST` values,
+    /// home, and approval handler).
+    #[must_use]
+    pub fn with_slot_session(mut self, session: Arc<crate::markdown::schemas::slots::SlotSession>) -> Self {
+        self.slot_session = Some(session);
+        self
+    }
+
+    /// The attached schema-slot session, if any.
+    pub fn slot_session(&self) -> Option<&Arc<crate::markdown::schemas::slots::SlotSession>> {
+        self.slot_session.as_ref()
+    }
+
     /// The attached `load_data` runtime, if any.
     pub fn data_runtime_handle(&self) -> Option<&crate::markdown::compose::DataRuntime> {
         self.data_runtime.as_ref()
@@ -3151,6 +3182,9 @@ impl ComposeOptions {
             // A memo and read-set sink: it changes how often a file is read
             // and what the report lists, never a composed result.
             data_runtime: _,
+            // Grants and pinned snapshots: they decide whether a template
+            // resolves, and the resolved schema is judged by its content.
+            slot_session: _,
             file_ref_fallback_dir,
         } = self;
 

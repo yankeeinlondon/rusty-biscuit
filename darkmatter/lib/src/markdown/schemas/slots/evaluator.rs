@@ -22,6 +22,7 @@ use serde_json::Value;
 use simplified_schema::expression::{SpannedExpr, SpannedExprKind};
 
 use crate::markdown::compose::DataRuntime;
+use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 use crate::markdown::compose::conditions::ShortcutLookup;
 use crate::markdown::compose::context::capture::CapturedObservations;
 use crate::markdown::compose::expression::data::Observation;
@@ -39,7 +40,25 @@ pub(crate) struct DenyAllReads;
 
 impl ReadGate for DenyAllReads {
     fn check(&self, _target: &ReadTarget) -> Result<(), GateRefusal> {
-        Err(GateRefusal::ApprovalRequired)
+        Err(GateRefusal::approval_required())
+    }
+}
+
+/// Gives each slot the gate its reads are asked of. A slot's automatic
+/// grants depend on where the slot was written, so the gate is chosen per
+/// slot, by the file (or, for an inline schema, the folder) that defines it.
+pub(crate) trait SlotGates: Send + Sync + std::fmt::Debug {
+    /// The gate for a slot defined at `defining`.
+    fn gate_for(&self, defining: &Path) -> Arc<dyn ReadGate>;
+}
+
+/// One gate for every slot, wherever it was written.
+#[derive(Debug)]
+struct SameGate(Arc<dyn ReadGate>);
+
+impl SlotGates for SameGate {
+    fn gate_for(&self, _defining: &Path) -> Arc<dyn ReadGate> {
+        Arc::clone(&self.0)
     }
 }
 
@@ -79,7 +98,8 @@ pub(crate) struct SlotEvaluation {
 pub(crate) struct SlotEvaluator {
     data: DataRuntime,
     observations: CapturedObservations,
-    gate: Arc<dyn ReadGate>,
+    gates: Arc<dyn SlotGates>,
+    remote: Option<RemoteFetchRuntime>,
     limits: IterationLimits,
 }
 
@@ -91,7 +111,8 @@ impl SlotEvaluator {
         Self {
             data,
             observations: CapturedObservations::default(),
-            gate: Arc::new(DenyAllReads),
+            gates: Arc::new(SameGate(Arc::new(DenyAllReads))),
+            remote: None,
             limits: IterationLimits::default(),
         }
     }
@@ -99,7 +120,23 @@ impl SlotEvaluator {
     /// Asks `gate` about every read instead.
     #[must_use]
     pub(crate) fn with_gate(mut self, gate: Arc<dyn ReadGate>) -> Self {
-        self.gate = gate;
+        self.gates = Arc::new(SameGate(gate));
+        self
+    }
+
+    /// Asks the gate `gates` chooses for each slot.
+    #[must_use]
+    pub(crate) fn with_gates(mut self, gates: Arc<dyn SlotGates>) -> Self {
+        self.gates = gates;
+        self
+    }
+
+    /// Fetches a slot's remote reads through `remote`, the slots' own
+    /// runtime (never the document's): without one a URL read fails as
+    /// remote reads not enabled, after the gate allowed it.
+    #[must_use]
+    pub(crate) fn with_remote(mut self, remote: RemoteFetchRuntime) -> Self {
+        self.remote = Some(remote);
         self
     }
 
@@ -119,7 +156,8 @@ impl SlotEvaluator {
     }
 
     /// Evaluates `expression` (already parsed as `parsed`) in `context`,
-    /// the slot's own derived context.
+    /// the slot's own derived context, asking the gate for a slot defined at
+    /// `defining`.
     ///
     /// ## Errors
     ///
@@ -131,11 +169,13 @@ impl SlotEvaluator {
         &self,
         parsed: &SpannedExpr,
         context: FileResolutionContext,
+        defining: &Path,
     ) -> Result<SlotEvaluation, ExpressionError> {
         let mut resolution = ResolutionContext::new(context);
         resolution.data = self.data.clone();
         resolution.observations = self.observations.clone();
-        resolution.slot_gate = Some(self.gate.clone());
+        resolution.slot_gate = Some(self.gates.gate_for(defining));
+        resolution.remote_fetch = self.remote.clone();
         resolution.iteration = IterationBudget::new(self.limits);
         let erased = parsed.erase();
         let lookup = ShortcutLookup::in_context(&Value::Null, &resolution);
@@ -237,5 +277,59 @@ pub(crate) fn slot_context(request: &FileResolutionContext, defining_file: Optio
     match defining_file {
         Some(file) => request.for_source(file),
         None => request.clone(),
+    }
+}
+
+/// The context inputs `expr` can read, found passively: each `ctx` group a
+/// `ctx.KEY` read projects from (every group for a bare `ctx`), each
+/// `env.NAME`, and the whole environment for a bare or computed `env`.
+pub(crate) fn context_inputs(expr: &SpannedExpr) -> Vec<ContextInput> {
+    use crate::markdown::compose::context::capture::ContextGroup;
+    let mut names = Vec::new();
+    let mut whole = false;
+    env_reads(expr, &mut names, &mut whole);
+    let mut inputs: Vec<ContextInput> = names.into_iter().map(ContextInput::Env).collect();
+    if whole {
+        inputs.push(ContextInput::WholeEnv);
+    }
+    let mut groups = Vec::new();
+    walk_nodes(expr, &mut |node| {
+        let SpannedExprKind::Variable(path) = &node.kind else {
+            return;
+        };
+        if path == "ctx" {
+            groups.extend(ContextGroup::all());
+        } else if let Some(rest) = path.strip_prefix("ctx.") {
+            let key = rest.split('.').next().unwrap_or(rest);
+            groups.extend(ContextGroup::all().into_iter().filter(|group| group.projected_keys().any(|projected| projected == key)));
+        }
+    });
+    inputs.extend(groups.into_iter().map(|group| ContextInput::Group(format!("{group:?}"))));
+    inputs.sort();
+    inputs.dedup();
+    inputs
+}
+
+/// The digest `input` has now in `context`, computed the way an evaluation
+/// computes it: a `ctx` group captured afresh, an `env.NAME` by its value
+/// (`None` when unset), the whole environment by its sorted canonical JSON.
+pub(crate) fn context_digest_now(input: &ContextInput, context: &FileResolutionContext) -> Option<[u8; 32]> {
+    use crate::markdown::compose::context::capture::ContextGroup;
+    use crate::markdown::compose::expression::ctx::CtxLookup;
+    let environment = context.env();
+    match input {
+        ContextInput::Env(name) => environment.get(name).map(|value| biscuit_hash::blake3_hash_bytes(value.as_bytes())),
+        ContextInput::WholeEnv => {
+            let sorted: std::collections::BTreeMap<_, _> = environment.iter().collect();
+            let canonical = serde_json::to_string(&sorted).unwrap_or_default();
+            Some(biscuit_hash::blake3_hash_bytes(canonical.as_bytes()))
+        }
+        ContextInput::Group(name) => {
+            let group = ContextGroup::all().into_iter().find(|group| format!("{group:?}") == *name)?;
+            let lookup = CtxLookup::new(context.cwd(), environment);
+            let key = group.projected_keys().next()?;
+            let _ = lookup.resolve_ctx(&format!("ctx.{key}"));
+            lookup.group_digests().into_iter().find(|(captured, _)| captured == name).map(|(_, digest)| digest)
+        }
     }
 }

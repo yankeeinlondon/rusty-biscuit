@@ -258,6 +258,12 @@ pub struct DarkmatterSchemas {
     /// The YAML document kinds [`Self::validate_yaml_document`] selects from;
     /// built per call when `None`.
     kind_registry: Option<Arc<KindRegistry>>,
+    /// The session a template layer resolves through; without one a template
+    /// is [`SchemaError::UnresolvedSlots`].
+    slot_session: Option<Arc<slots::SlotSession>>,
+    /// Use only a snapshot the session already pinned (a pass that must not
+    /// read anything a slot names).
+    slot_pins_only: bool,
 }
 
 use simplified_schema::prepared::{CompiledValidators, wrapped_root_arms};
@@ -270,7 +276,7 @@ use simplified_schema::validate::SHARED_VALIDATOR_CACHE;
 /// example-target validator caches; the conversion-plan, format-validator,
 /// example-artifact, emitted-pattern, and named-type parse caches; the
 /// trigger payload and embedded-trigger memos; the trigger merge, phase
-/// derivation, and root-arm memos; and the calling thread's trigger-matcher regex cache. Compiled-in
+/// derivation, and root-arm memos; the schema-slot resolution cache; and the calling thread's trigger-matcher regex cache. Compiled-in
 /// constants (the shipped baseline, the global catalog) are kept.
 ///
 /// Never call it from production code: it only discards work. Verdicts are
@@ -283,6 +289,40 @@ pub fn reset_process_caches_for_bench() {
     triggers::matcher::reset_thread_caches();
     DERIVATIONS.lock().expect("phase schema memo poisoned").clear();
     MERGES.lock().expect("trigger merge memo poisoned").clear();
+    slots::cache::clear();
+}
+
+/// One template an effective schema would resolve
+/// ([`DarkmatterSchemas::pending_templates_for`]).
+#[derive(Debug, Clone)]
+pub struct PendingTemplate {
+    /// The template, as its layer's resolution met it.
+    pub pending: simplified_schema::slots::PendingSchema,
+    /// The slots of it the effective schema depends on: all of them, except
+    /// a trigger slot under a property the document `$schema` redeclares.
+    pub slots: Vec<simplified_schema::simplified::Slot>,
+}
+
+/// The top-level property names `root` declares (every arm's, for a union).
+fn top_level_names(root: &SchemaRoot) -> Vec<String> {
+    match root {
+        SchemaRoot::Single(shape) => shape.properties.keys().cloned().collect(),
+        SchemaRoot::Union(arms) => arms.iter().filter_map(|arm| match arm {
+            simplified_schema::simplified::SchemaArm::Inline(shape) => Some(shape.properties.keys().cloned().collect::<Vec<_>>()),
+            _ => None,
+        }).flatten().collect(),
+    }
+}
+
+/// What identifies a document's `$schema` template beyond the schema files
+/// it read: the value as written (an inline template's whole text is here)
+/// and the folder it resolves from.
+fn document_template_identity(value: &Value, base_dir: &Path) -> String {
+    format!(
+        "document\0{}\0{}",
+        biscuit_file::to_portable_string(base_dir),
+        biscuit_hash::canonical_json(value)
+    )
 }
 
 #[derive(Clone)]
@@ -370,7 +410,46 @@ impl DarkmatterSchemas {
             embedded_bundles: Vec::new(),
             file_resolution_context: context,
             kind_registry: None,
+            slot_session: None,
+            slot_pins_only: false,
         }
+    }
+
+    /// Resolves a template layer (a `$schema` or matched trigger payload
+    /// holding `{{ … }}` slots) through `session` before it is layered.
+    /// Without a session such a layer makes [`Self::effective_for`] fail with
+    /// [`SchemaError::UnresolvedSlots`].
+    #[must_use]
+    pub fn with_slot_session(mut self, session: Arc<slots::SlotSession>) -> Self {
+        self.slot_session = Some(session);
+        self
+    }
+
+    /// Uses only the snapshots the session already pinned: a template no
+    /// earlier pass resolved stays [`SchemaError::UnresolvedSlots`], so this
+    /// pass reads nothing a slot names.
+    #[must_use]
+    pub(crate) fn with_slot_pins_only(mut self, pins_only: bool) -> Self {
+        self.slot_pins_only = pins_only;
+        self
+    }
+
+    /// `pending`, a template met while preparing a layer, resolved through
+    /// the session; `unresolved` (the error that met it) without one.
+    fn resolve_template(
+        &self,
+        unresolved: SchemaError,
+        template: &str,
+    ) -> Result<simplified_schema::resolve::ResolvedSchema, SchemaError> {
+        let (Some(session), SchemaError::UnresolvedSlots(slots)) = (&self.slot_session, &unresolved) else {
+            return Err(unresolved);
+        };
+        let Some(pending) = slots.pending.as_ref() else {
+            return Err(unresolved);
+        };
+        session
+            .resolve(pending, template, &self.file_resolution_context, self.slot_pins_only)
+            .map(|resolved| simplified_schema::resolve::ResolvedSchema::clone(&resolved))
     }
 
     /// Records the launch-area anchor (typically the captured launch area).
@@ -456,9 +535,12 @@ impl DarkmatterSchemas {
         schema: &SchemaRoot,
         definitions: &DefinitionTable,
     ) -> Result<Self, SchemaError> {
-        let json = to_json_schema_with_definitions(schema, definitions).map_err(|err| SchemaError::Baseline {
-            message: "baseline could not be converted to JSON Schema".into(),
-            source: Some(Box::new(err)),
+        let json = to_json_schema_with_definitions(schema, definitions).map_err(|err| match err {
+            SchemaError::UnresolvedSlots(_) => slots::codes::refuse_slots_in_baseline("the baseline", err),
+            err => SchemaError::Baseline {
+                message: "baseline could not be converted to JSON Schema".into(),
+                source: Some(Box::new(err)),
+            },
         })?;
         let declarations = BaselineDeclarations::custom(Some(schema), Arc::new(definitions.clone()), &json);
         self.set_baseline_json(json, Vec::new(), declarations)?;
@@ -499,9 +581,16 @@ impl DarkmatterSchemas {
                 catalog::DARKMATTER_GLOBALS,
                 &self.file_resolution_context,
             )
-            .map_err(|error| SchemaError::Baseline { message: error.to_string(), source: None })?;
+            .map_err(|error| match error.reason {
+                catalog::CatalogErrorReason::SlotsNotAllowed(ref unresolved) => SchemaError::Baseline {
+                    message: error.to_string(),
+                    source: Some(Box::new(SchemaError::UnresolvedSlots(unresolved.clone()))),
+                },
+                _ => SchemaError::Baseline { message: error.to_string(), source: None },
+            })?;
             let (schema, definitions) = loaded.baseline().expect("Darkmatter's requirements include `fm`");
-            let json = to_json_schema_with_definitions(&schema, &definitions)?;
+            let json = to_json_schema_with_definitions(&schema, &definitions)
+                .map_err(|error| slots::codes::refuse_slots_in_baseline("the baseline", error))?;
             let declarations = BaselineDeclarations::custom(Some(&schema), definitions, &json);
             self.set_baseline_json(json, Vec::new(), declarations)?;
             return Ok(self);
@@ -515,6 +604,7 @@ impl DarkmatterSchemas {
                 SchemaError::NotASchemaDocument { .. }
                 | SchemaError::UnsupportedJsonDialect { .. }
                 | SchemaError::InvalidJsonSchema { .. } => err,
+                SchemaError::UnresolvedSlots(_) => slots::codes::refuse_slots_in_baseline("the baseline", err),
                 other => SchemaError::Baseline {
                     message: format!("could not load baseline from `{}`", path.display()),
                     source: Some(Box::new(other)),
@@ -720,6 +810,7 @@ impl DarkmatterSchemas {
                         trigger_roots,
                         &self.file_resolution_context,
                     )
+                    .or_else(|error| self.resolve_template(error, &document_template_identity(value, &base_dir)))
                     .map_err(|error| match triggers::assemble::refused_trigger_file(&error) {
                         Some(path) => triggers::assemble::trigger_schema_referenced(&path),
                         None => error,
@@ -817,6 +908,74 @@ impl DarkmatterSchemas {
         }))
     }
 
+    /// The templates (schemas holding `{{ … }}` slots) the effective schema
+    /// of `source` would have to resolve, for a pre-flight to collect the
+    /// reads their slots will make: the document `$schema` layer, then each
+    /// matched trigger payload that is a template, in layer order.
+    ///
+    /// Only the effective schema's slots count: a trigger slot under a
+    /// top-level property the document `$schema` redeclares is left out of
+    /// [`PendingTemplate::slots`], because the document's declaration
+    /// replaces it. An unmatched trigger contributes nothing.
+    ///
+    /// Passive with respect to slots: schema files are read as validation
+    /// reads them, but no slot is admitted or evaluated and nothing a slot
+    /// names is read. The baseline and kind definitions refuse slots. A
+    /// `$schema` that fails for any other reason yields nothing here;
+    /// validation reports it.
+    pub fn pending_templates_for(&self, source: &Markdown) -> Vec<PendingTemplate> {
+        let base_dir = base_dir_for(source, &self.file_resolution_context);
+        let trigger_roots: &[PathBuf] =
+            self.triggers.as_ref().map(|registry| registry.roots.search_paths()).unwrap_or(&[]);
+        let mut templates = Vec::new();
+        // The top-level properties the document layer declares, which
+        // replace a trigger's declaration of the same name.
+        let mut redeclared: Vec<String> = Vec::new();
+        if let Some(value) = source.frontmatter().as_map().get("$schema").cloned() {
+            match resolve::resolve_schema_with_roots(&value, &base_dir, trigger_roots, &self.file_resolution_context) {
+                Err(SchemaError::UnresolvedSlots(unresolved)) => {
+                    if let Some(pending) = unresolved.pending {
+                        if let Some((root, _)) = pending.template() {
+                            redeclared.extend(top_level_names(root));
+                        }
+                        templates.push(PendingTemplate { slots: pending.slots().to_vec(), pending });
+                    }
+                }
+                Ok(resolved) => {
+                    if let Some(root) = &resolved.simplified {
+                        redeclared.extend(top_level_names(root));
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+        let Some(registry) = self.triggers.as_ref().filter(|registry| registry.payloads.len() == registry.triggers.len()) else {
+            return templates;
+        };
+        let document = match source.source() {
+            Some(ComposeSource::File(path)) => Some(path.as_path()),
+            _ => None,
+        };
+        let fm_json = frontmatter_as_json(source);
+        for (idx, eval) in triggers::assemble::evaluate_registry(registry, &fm_json, document).into_iter().enumerate() {
+            let Some(pending) = registry.payloads[idx].pending.clone().filter(|_| eval.matched) else {
+                continue;
+            };
+            let shadowed: Vec<simplified_schema::simplified::Slot> = match pending.template() {
+                Some((SchemaRoot::Single(shape), definitions)) => shape
+                    .properties
+                    .iter()
+                    .filter(|(name, _)| redeclared.iter().any(|declared| declared == *name))
+                    .flat_map(|(_, def)| simplified_schema::slots::reachable_slots(def, definitions))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let slots = pending.slots().iter().filter(|slot| !shadowed.contains(slot)).cloned().collect();
+            templates.push(PendingTemplate { pending, slots });
+        }
+        templates
+    }
+
     /// Matches the configured trigger registry against the document and
     /// resolves each matching payload. Returns the ordered trigger layers
     /// (first schema root first). Empty when no registry is configured or no
@@ -865,23 +1024,31 @@ impl DarkmatterSchemas {
             if !eval.matched || eval.trigger.envelope.payload.is_none() {
                 continue;
             }
-            let (json_schema, shape, definitions, dependencies, advisories) = if pre_resolved {
-                let payload = &registry.payloads[idx];
-                (
-                    payload.json_schema.clone(),
-                    payload.shape.clone(),
-                    Arc::clone(&payload.definitions),
-                    payload.dependencies.clone(),
-                    payload.advisories.clone(),
-                )
+            let resolved_payload;
+            let mut payload = if pre_resolved {
+                &registry.payloads[idx]
             } else {
-                let payload = triggers::assemble::resolve_trigger_payload(
+                resolved_payload = triggers::assemble::resolve_trigger_payload(
                     eval.trigger,
                     registry.roots.search_paths(),
                     &self.file_resolution_context,
                 )?;
-                (payload.json_schema, payload.shape, payload.definitions, payload.dependencies, payload.advisories)
+                &resolved_payload
             };
+            // A matched template payload resolves now, in this document's
+            // slot session, and then passes the ordinary payload rules.
+            let concrete;
+            if let Some(pending) = &payload.pending {
+                concrete = self.resolve_pending_payload(eval.trigger, pending)?;
+                payload = &concrete;
+            }
+            let (json_schema, shape, definitions, dependencies, advisories) = (
+                payload.json_schema.clone(),
+                payload.shape.clone(),
+                Arc::clone(&payload.definitions),
+                payload.dependencies.clone(),
+                payload.advisories.clone(),
+            );
             layers.push(TriggerLayer {
                 source: eval.trigger.source.clone(),
                 json_schema,
@@ -892,6 +1059,35 @@ impl DarkmatterSchemas {
             });
         }
         Ok(layers)
+    }
+
+    /// The matched trigger `trigger`'s template payload `pending`, resolved
+    /// through the slot session and checked as a payload.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::UnresolvedSlots`] without a session; the resolution's
+    /// failure, positioned at the slot in the trigger's files; or a payload
+    /// rule the resolved schema breaks.
+    fn resolve_pending_payload(
+        &self,
+        trigger: &triggers::LoadedTrigger,
+        pending: &simplified_schema::slots::PendingSchema,
+    ) -> Result<triggers::assemble::ResolvedPayload, SchemaError> {
+        let (TriggerSource::File(source), Some(payload)) = (&trigger.source, trigger.envelope.payload.as_ref()) else {
+            return Err(SchemaError::UnresolvedSlots(Box::new(simplified_schema::UnresolvedSlots::new(
+                pending.slots().to_vec(),
+            ))));
+        };
+        let identity = format!(
+            "trigger\0{}\0{}",
+            biscuit_file::to_portable_string(source),
+            serde_json::to_string(payload).unwrap_or_default()
+        );
+        let mut unresolved = simplified_schema::UnresolvedSlots::new(pending.slots().to_vec());
+        unresolved.pending = Some(pending.clone());
+        let resolved = self.resolve_template(SchemaError::UnresolvedSlots(Box::new(unresolved)), &identity)?;
+        triggers::assemble::finish_file_payload(source, payload, resolved)
     }
 
     /// Validates a document's frontmatter, returning a [`ValidationReport`].

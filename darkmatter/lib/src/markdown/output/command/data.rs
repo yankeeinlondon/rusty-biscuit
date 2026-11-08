@@ -315,6 +315,9 @@ pub struct TriggerTraceData {
     pub source: String,
     /// Whether it matched.
     pub matched: bool,
+    /// Whether its payload is a template, resolved only for a matching
+    /// document.
+    pub pending: bool,
     /// Its conditions, in authored order.
     pub conditions: Vec<TriggerConditionData>,
 }
@@ -360,6 +363,7 @@ impl TriggersData {
                 .map(|trigger| TriggerTraceData {
                     source: trigger.source.to_string(),
                     matched: trigger.matched,
+                    pending: trigger.pending,
                     conditions: trigger
                         .conditions
                         .iter()

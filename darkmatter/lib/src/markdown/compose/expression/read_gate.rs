@@ -65,6 +65,10 @@ pub struct ReadTarget {
     pub kind: ReadKind,
     /// What is read.
     pub location: ReadLocation,
+    /// BLAKE3 of the bytes the read produced, when the gate is asked after
+    /// the read (a post-call check of an observation); `None` before a read
+    /// and for an input that yields no bytes.
+    pub observed_hash: Option<[u8; 32]>,
 }
 
 impl ReadTarget {
@@ -81,7 +85,7 @@ impl ReadTarget {
             ObservationKind::Listing => (ReadKind::Listing, ReadLocation::Local(PathBuf::from(&observation.entry))),
             ObservationKind::Glob => (ReadKind::Listing, ReadLocation::Glob(observation.entry.clone())),
         };
-        Some(Self { function: function.to_string(), kind, location })
+        Some(Self { function: function.to_string(), kind, location, observed_hash: observation.hash })
     }
 }
 
@@ -102,15 +106,26 @@ impl fmt::Display for ReadTarget {
 pub enum GateRefusal {
     /// A deny decision covers the target.
     Denied,
-    /// No grant covers the target, and none was given.
-    ApprovalRequired,
+    /// No grant covers the target, and none was given. `needed` lists the
+    /// grants any one of which would allow the read (empty when no grant
+    /// can, such as a relative glob).
+    ApprovalRequired {
+        needed: Vec<crate::markdown::schemas::slots::grants::Grant>,
+    },
+}
+
+impl GateRefusal {
+    /// [`Self::ApprovalRequired`] naming no grant.
+    pub(crate) fn approval_required() -> Self {
+        Self::ApprovalRequired { needed: Vec::new() }
+    }
 }
 
 impl fmt::Display for GateRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Denied => "the read is denied",
-            Self::ApprovalRequired => "the read needs approval",
+            Self::ApprovalRequired { .. } => "the read needs approval",
         })
     }
 }

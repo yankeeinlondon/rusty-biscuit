@@ -56,6 +56,67 @@ pub const SLOT_DIAGNOSTIC_CODES: &[&str] = &[
     SLOT_GRANT_STORE_INVALID_CODE,
 ];
 
+/// The slot code of a schema error that refuses slots where none may be
+/// written: [`SLOT_NOT_ALLOWED_IN_BASELINE_CODE`] for a baseline (or editor
+/// extension layer) that holds slots, and the code a `kind` selection
+/// carries for a kind definition that does
+/// ([`SLOT_NOT_ALLOWED_IN_KIND_CODE`]). `None` for every other error.
+#[must_use]
+pub fn slot_prohibition_code(error: &simplified_schema::SchemaError) -> Option<&'static str> {
+    use simplified_schema::{KindSelectionCause, SchemaError};
+    match error {
+        SchemaError::Baseline { source: Some(source), .. } if matches!(**source, SchemaError::UnresolvedSlots(_)) => {
+            Some(SLOT_NOT_ALLOWED_IN_BASELINE_CODE)
+        }
+        SchemaError::KindSelection {
+            cause: KindSelectionCause::Reserved { code, .. } | KindSelectionCause::Unavailable { code, .. },
+            ..
+        } => *code,
+        _ => None,
+    }
+}
+
+/// The message for slots found where `place` (a kind definition, the
+/// baseline, an editor extension layer) may not hold any.
+pub(crate) fn slots_not_allowed_message(place: &str, unresolved: &simplified_schema::UnresolvedSlots) -> String {
+    let count = unresolved.slots.len();
+    let mut message = format!(
+        "{place} cannot hold `{{{{ … }}}}` slots; it holds {count} slot{}",
+        if count == 1 { "" } else { "s" }
+    );
+    if let Some(first) = unresolved.slots.first() {
+        message.push_str(&format!(" (first: `{{{{ {} }}}}`)", first.expression));
+    }
+    message
+}
+
+/// `error` as a baseline failure when it is a template: the baseline and
+/// every editor extension layer apply to documents before any slot could be
+/// resolved, so they never hold slots. `place` names the layer for the
+/// message. Any other error is returned unchanged.
+pub(crate) fn refuse_slots_in_baseline(place: &str, error: simplified_schema::SchemaError) -> simplified_schema::SchemaError {
+    use simplified_schema::SchemaError;
+    match error {
+        SchemaError::UnresolvedSlots(unresolved) => SchemaError::Baseline {
+            message: slots_not_allowed_message(place, &unresolved),
+            source: Some(Box::new(SchemaError::UnresolvedSlots(unresolved))),
+        },
+        SchemaError::Baseline { source: Some(source), .. } if matches!(*source, SchemaError::UnresolvedSlots(_)) => {
+            refuse_slots_in_baseline(place, *source)
+        }
+        other => other,
+    }
+}
+
+/// `error` as a baseline failure when the editor extension layer at `path`
+/// is a template: an extension is merged into the baseline, so it is refused
+/// exactly as a baseline holding slots is ([`slot_prohibition_code`] gives
+/// [`SLOT_NOT_ALLOWED_IN_BASELINE_CODE`]). Any other error is unchanged.
+#[must_use]
+pub fn refuse_slots_in_extension(path: &std::path::Path, error: simplified_schema::SchemaError) -> simplified_schema::SchemaError {
+    refuse_slots_in_baseline(&format!("the schema extension `{}`", path.display()), error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +132,27 @@ mod tests {
             assert!(seen.insert(code), "{code} repeats");
         }
         assert_eq!(SLOT_DIAGNOSTIC_CODES.len(), 15);
+    }
+
+    /// Only a prohibition carries a slot code: a template met where slots
+    /// may be resolved (a `$schema` document) and every other error give none.
+    #[test]
+    fn only_a_prohibition_has_a_slot_code() {
+        use simplified_schema::{KindSelectionCause, SchemaError, UnresolvedSlots};
+        let template = || SchemaError::UnresolvedSlots(Box::new(UnresolvedSlots::new(Vec::new())));
+        assert_eq!(slot_prohibition_code(&template()), None);
+        assert_eq!(
+            slot_prohibition_code(&refuse_slots_in_baseline("the baseline", template())),
+            Some(SLOT_NOT_ALLOWED_IN_BASELINE_CODE)
+        );
+        let other = SchemaError::Baseline { message: "x".into(), source: None };
+        assert_eq!(slot_prohibition_code(&other), None);
+        assert!(matches!(refuse_slots_in_baseline("the baseline", other), SchemaError::Baseline { source: None, .. }));
+        let selection = |code| SchemaError::KindSelection {
+            kind: "k".into(),
+            cause: KindSelectionCause::Reserved { file: "d.yaml".into(), defect: "x".into(), code },
+        };
+        assert_eq!(slot_prohibition_code(&selection(None)), None);
+        assert_eq!(slot_prohibition_code(&selection(Some(SLOT_NOT_ALLOWED_IN_KIND_CODE))), Some(SLOT_NOT_ALLOWED_IN_KIND_CODE));
     }
 }

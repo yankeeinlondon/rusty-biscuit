@@ -289,6 +289,24 @@ fn a_kind_claimed_twice_is_one_error_on_the_kind_naming_both_definitions() {
     assert!(files.iter().any(|uri| uri.ends_with("schemas/roster-copy.yaml")), "{files:?}");
 }
 
+/// A kind definition holding a `{{ … }}` slot is a broken claim: one error
+/// on the document's `kind`, under the kind slot code, relating the
+/// definition.
+#[test]
+fn a_kind_definition_holding_a_slot_is_one_error_under_the_kind_slot_code() {
+    let probe = Probe::new();
+    let slotted = ROSTER_DEFINITION.replace("name: string(required)", "name: enum({{ env.PLATFORMS }}; required)");
+    assert_ne!(slotted, ROSTER_DEFINITION);
+    write(&probe.path("schemas/roster.yaml"), &slotted);
+    let diagnostics = probe.schema_diagnostics("roster.data.yaml", ROSTER);
+    let diagnostic = only(&diagnostics);
+    assert_eq!(code_of(diagnostic), "dm.schema.slot_not_allowed_in_kind", "{diagnostic:#?}");
+    assert_eq!(start(diagnostic), position_of(ROSTER, "roster\n"), "{diagnostic:#?}");
+    assert!(diagnostic.message.contains("a kind definition cannot hold"), "{diagnostic:#?}");
+    let related = diagnostic.related_information.as_deref().unwrap_or_default();
+    assert!(related.iter().any(|info| info.location.uri.as_str().ends_with("schemas/roster.yaml")), "{related:#?}");
+}
+
 #[test]
 fn completion_and_hover_describe_the_selected_definition_alone() {
     let probe = Probe::new();

@@ -189,6 +189,9 @@ impl DarkmatterSchemas {
                 // The trigger check reads the bytes the resolution just read.
                 let resolved = simplified_schema::resolve::buffers::with_reads_retained(|| {
                     let resolved = super::resolve::resolve_schema_with_roots(&json, &base_dir, &schema_roots, context)
+                        // A template resolves through the slot session, as a
+                        // Markdown document's `$schema` does.
+                        .or_else(|error| self.resolve_template(error, &super::document_template_identity(&json, &base_dir)))
                         .map_err(|error| match super::triggers::assemble::refused_trigger_file(&error) {
                             Some(path) => super::triggers::assemble::trigger_schema_referenced(&path),
                             None => error,

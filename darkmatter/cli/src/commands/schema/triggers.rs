@@ -130,7 +130,8 @@ fn trace_report(document: &Path, trace: &TriggerTrace, findings: &[InvalidTrigge
     }
     for trigger in &trace.triggers {
         let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
-        row(&mut out, &terminal, format!("- {} — {status}", Prose::escape_text(&trigger.source.to_string())));
+        let pending = if trigger.pending { " <dim>(payload pending: holds schema slots)</dim>" } else { "" };
+        row(&mut out, &terminal, format!("- {} — {status}{pending}", Prose::escape_text(&trigger.source.to_string())));
         for condition in &trigger.conditions {
             let result = if condition.matched {
                 "<green>matched</green>".to_string()
@@ -184,7 +185,8 @@ fn trace_markdown(document: &Path, trace: &TriggerTrace, findings: &[InvalidTrig
     }
     for trigger in &trace.triggers {
         let status = if trigger.matched { "matched" } else { "not matched" };
-        out.push_str(&format!("- {} — {status}\n", code_span(&trigger.source.to_string())));
+        let pending = if trigger.pending { " (payload pending: holds schema slots)" } else { "" };
+        out.push_str(&format!("- {} — {status}{pending}\n", code_span(&trigger.source.to_string())));
         for condition in &trigger.conditions {
             let result = if condition.matched {
                 "matched".to_string()

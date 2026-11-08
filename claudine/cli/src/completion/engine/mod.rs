@@ -264,11 +264,14 @@ pub(crate) fn run_with_context(
 /// property / no `$schema`), fall back to the existing `@`-gated path so the
 /// historical `spec=@docs/...` behavior remains intact.
 fn run_setter_value(token: &str, file_arg: Option<&str>, ctx: &ScopeContext) -> Vec<String> {
+    // A template's slot-dependent values are pending (completion never
+    // evaluates a slot), so its values fall back like an untyped property.
     if let Some(file_arg) = file_arg
-        && let Some(effective) = schema_completion::load_effective_schema(file_arg, ctx)
+        && let Some(schema) = schema_completion::load_prompt_schema(file_arg, ctx)
+        && let Some(effective) = schema.resolved()
         && let Some((name, value)) = split_setter(token)
     {
-        let schema_candidates = schema_completion::property_value(&effective, name, value, ctx);
+        let schema_candidates = schema_completion::property_value(effective, name, value, ctx);
         if !schema_candidates.is_empty() {
             return schema_candidates;
         }
@@ -280,7 +283,8 @@ fn run_setter_value(token: &str, file_arg: Option<&str>, ctx: &ScopeContext) -> 
 ///
 /// Loads the schema for `file_arg`, collects names already supplied in
 /// argv, and asks the schema-aware completer for ordered candidates
-/// (required first, then optional, both in declaration order).
+/// (required first, then optional, both in declaration order). A template
+/// schema still names its properties, though its slots are not resolved.
 fn run_setter_name(
     partial: &str,
     file_arg: &str,
@@ -288,12 +292,12 @@ fn run_setter_name(
     current_index: usize,
     ctx: &ScopeContext,
 ) -> Vec<String> {
-    let Some(effective) = schema_completion::load_effective_schema(file_arg, ctx) else {
+    let Some(schema) = schema_completion::load_prompt_schema(file_arg, ctx) else {
         return Vec::new();
     };
     let supplied = collect_supplied_setter_names(argv, current_index);
     let declared_order = schema_completion::declared_property_order(file_arg, ctx);
-    schema_completion::property_names(&effective, partial, &supplied, &declared_order)
+    schema_completion::property_names_in(schema.declarations(), partial, &supplied, &declared_order)
 }
 
 /// Walk argv (excluding the cursor token itself) and collect setter names

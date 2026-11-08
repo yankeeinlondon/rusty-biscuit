@@ -219,6 +219,16 @@ fn related_path(cause: &SchemaError, trigger: &Path) -> Option<PathBuf> {
         SchemaError::UnresolvedSlots(unresolved) => unresolved.slots.iter().find_map(|slot| slot.origin.as_ref())?,
         // A refused slot value names the file the slot was written in.
         SchemaError::SlotResult { slot, .. } => slot.origin.as_ref()?,
+        // A failed resolution names the file of the first slot it reports.
+        SchemaError::SlotResolution(failure) => {
+            let slot = match failure.error.as_ref() {
+                simplified_schema::slots::SlotResolutionError::Refused(refused) => refused.first().map(|(slot, _)| slot),
+                simplified_schema::slots::SlotResolutionError::Failed(failed) => failed.first().map(|(slot, _)| slot),
+                simplified_schema::slots::SlotResolutionError::Schema(schema) => return related_path(schema, trigger),
+                _ => None,
+            };
+            slot?.origin.as_ref()?
+        }
         SchemaError::TriggerPayloadCompile { payload_path, .. }
         | SchemaError::TriggerPayloadNotMergeable { payload_path, .. } => payload_path.as_ref()?,
         SchemaError::UnknownNamedType { site, namespace, .. } => {

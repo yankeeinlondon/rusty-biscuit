@@ -313,7 +313,34 @@ fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
+        MarkdownError::SchemaValidationFailed { path, source: Some(source), .. }
+            if let Some(records) = source.downcast_ref::<simplified_schema::SchemaError>().and_then(|schema| template_diagnostics(schema, path)) =>
+        {
+            records
+        }
         _ => with_expression_cause(leaf_diagnostic(leaf), expression_cause(leaf)),
+    }
+}
+
+/// The records of a schema that is a template: each slot's own failure,
+/// at the slot, when its resolution failed, and `dm.schema.slot_pending` at
+/// the document when it was not resolved for this run. `None` for any other
+/// schema error.
+fn template_diagnostics(error: &simplified_schema::SchemaError, document: &Path) -> Option<Vec<Diagnostic>> {
+    use crate::markdown::schemas::slots::codes::SLOT_PENDING_CODE;
+    match error {
+        simplified_schema::SchemaError::SlotResolution(failure) => {
+            let text_of = |origin: Option<&Path>| {
+                let origin = origin?;
+                failure.sources.iter().find(|(path, _)| path == origin).map(|(_, text)| std::sync::Arc::clone(text))
+            };
+            Some(slot_resolution_diagnostics(&failure.error, &text_of))
+        }
+        simplified_schema::SchemaError::UnresolvedSlots(_) => Some(vec![Diagnostic {
+            source: file_only(named(document)),
+            ..unlocated(SLOT_PENDING_CODE, Severity::Error, error.to_string())
+        }]),
+        _ => None,
     }
 }
 
@@ -631,6 +658,10 @@ fn shell_source(error: &ShellExpansionError) -> Option<DiagnosticSource> {
     if let ShellExpansionError::PolicyIo { path, .. } = error {
         return file_only(named(path));
     }
+    if let ShellExpansionError::SlotGrantStore(store) = error {
+        let line = (store.line > 0).then_some(store.line);
+        return Some(DiagnosticSource { line, ..DiagnosticSource::file_only(Some(store.path.clone())) });
+    }
     let file = context_file(error.context()?)?;
     let line = match error.origin() {
         Some(ShellCommandOrigin::Frontmatter { line, .. }) => *line,
@@ -663,6 +694,7 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
     match error {
         ShellExpansionError::Preflight(inner) => markdown_error_diagnostics(inner),
         ShellExpansionError::ParseDirective { .. } => vec![shell_record(DIRECTIVE_PARSE_CODE, error)],
+        ShellExpansionError::SlotGrantStore(store) => vec![shell_record(store.code(), error)],
         _ => vec![shell_record(SHELL_FAILURE_CODE, error)],
     }
 }
@@ -676,9 +708,6 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
 /// in), and a position with no text stays `null`. A failed slot keeps its
 /// typed cause: a `load_data` failure keeps its `dm.data.*` code and its
 /// `data_location`, a missing or unreadable file its reference fields.
-// The surfaces that report a slot resolution call it; until they land only
-// tests do.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn slot_resolution_diagnostics(
     error: &simplified_schema::slots::SlotResolutionError,
     text_of: &dyn Fn(Option<&Path>) -> Option<std::sync::Arc<str>>,

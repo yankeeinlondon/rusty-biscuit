@@ -316,7 +316,9 @@ fn schema_prepare_diagnostic_with_origin(
             if let SchemaError::SchemaDocument { path, .. } = other {
                 related.extend(named_types::referenced_definition_related(ctx, path, other).unwrap_or_default());
             }
-            (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone())
+            let code_value = darkmatter::markdown::schemas::slots::codes::slot_prohibition_code(other)
+                .unwrap_or(code::SCHEMA_PREPARE);
+            (code_value, other.to_string(), fallback_span.clone())
         }
     };
     let range = span
@@ -1691,7 +1693,7 @@ mod tests {
     use lsp_types::{InitializeParams, NumberOrString, Uri};
 
     use crate::capabilities::ClientProfile;
-    use crate::config::DmlsConfig;
+    use crate::config::{DmlsConfig, SchemaExtensionConfig};
     use crate::graph::WorkspaceGraph;
     use crate::overlay::OverlayState;
     use crate::source_map::PositionEncoding;
@@ -2619,11 +2621,21 @@ mod tests {
         strict: bool,
         f: impl FnOnce(&DocumentContext, &[Diagnostic]) -> R,
     ) -> R {
+        diagnostics_on_disk_with(root, text, |config| config.schema.strict = strict, f)
+    }
+
+    /// [`diagnostics_on_disk`] with the configuration `configure` makes.
+    fn diagnostics_on_disk_with<R>(
+        root: &Path,
+        text: &str,
+        configure: impl FnOnce(&mut DmlsConfig),
+        f: impl FnOnce(&DocumentContext, &[Diagnostic]) -> R,
+    ) -> R {
         let path = root.join("doc.md");
         std::fs::write(&path, text).expect("write document");
         let uri = crate::workspace::file_path_to_uri(&path).expect("document uri");
         let mut config = DmlsConfig::default();
-        config.schema.strict = strict;
+        configure(&mut config);
         let roots = [root.to_path_buf()];
         let resolution = crate::context::test_support::resolution_in(root, &path);
         let state = OverlayState::default();
@@ -2788,6 +2800,50 @@ mod tests {
                 "{diagnostics:#?}"
             );
         });
+    }
+
+    /// An editor schema extension is a baseline layer, so one holding a
+    /// `{{ … }}` slot (written in it or reached through an import) is
+    /// refused with the baseline slot code; the same extension without the
+    /// slot applies.
+    #[test]
+    fn a_schema_extension_holding_a_slot_is_refused_with_the_baseline_slot_code() {
+        use darkmatter::markdown::schemas::slots::codes::SLOT_NOT_ALLOWED_IN_BASELINE_CODE;
+        let (_dir, root) = canonical_tempdir();
+        std::fs::write(root.join("plain.yaml"), "$schema:\n    tag: enum(a, b)\n").unwrap();
+        std::fs::write(root.join("direct.yaml"), "$schema:\n    tag: enum({{ env.TAGS }})\n").unwrap();
+        std::fs::write(root.join("types.yaml"), "kind: schema\ntypes:\n    tag: enum({{ env.TAGS }})\n").unwrap();
+        std::fs::write(root.join("imported.yaml"), "$schema:\n    tag: tag@./types.yaml\n").unwrap();
+        let text = "---\ntag: c\n---\n\nbody\n";
+        for (case, file) in [("control", "plain.yaml"), ("direct", "direct.yaml"), ("imported", "imported.yaml")] {
+            let extension = root.join(file);
+            let configure = |config: &mut DmlsConfig| {
+                config.schema.extensions.insert(
+                    "ext".to_string(),
+                    SchemaExtensionConfig { path: extension.clone(), globs: vec!["**/*.md".to_string()] },
+                );
+            };
+            diagnostics_on_disk_with(&root, text, configure, |_, diagnostics| {
+                let refused: Vec<_> =
+                    diagnostics.iter().filter(|d| code_of(d) == Some(SLOT_NOT_ALLOWED_IN_BASELINE_CODE)).collect();
+                if case == "control" {
+                    assert!(refused.is_empty(), "{case}: {diagnostics:#?}");
+                    // The extension applies: `c` is not one of its members.
+                    assert!(
+                        diagnostics.iter().any(|d| d.message.contains("is not one of")),
+                        "{case}: the extension judges `tag`: {diagnostics:#?}"
+                    );
+                } else {
+                    assert_eq!(refused.len(), 1, "{case}: {diagnostics:#?}");
+                    assert_eq!(refused[0].severity, Some(DiagnosticSeverity::ERROR), "{case}");
+                    assert!(refused[0].message.contains("env.TAGS"), "{case}: {}", refused[0].message);
+                    assert!(
+                        !diagnostics.iter().any(|d| code_of(d) == Some(code::SCHEMA_PREPARE)),
+                        "{case}: one diagnostic, under the slot code: {diagnostics:#?}"
+                    );
+                }
+            });
+        }
     }
 
     #[test]

@@ -15,7 +15,8 @@ use simplified_schema::slots::{SlotAdmissionError, SlotFailure, SlotHost, SlotRe
 use simplified_schema::span::SourceSpan;
 
 use super::admission::slot_class_report;
-use super::codes::{SLOT_APPROVAL_REQUIRED_CODE, SLOT_DENIED_CODE, SLOT_FAILED_CODE, SLOT_SYNTAX_CODE};
+use super::codes::{SLOT_APPROVAL_REQUIRED_CODE, SLOT_CYCLE_CODE, SLOT_DENIED_CODE, SLOT_FAILED_CODE, SLOT_SYNTAX_CODE};
+use crate::markdown::compose::expression::data::DataError;
 use super::evaluator::{SlotEvaluation, SlotEvaluator, slot_context};
 use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::compose::expression::read_gate::GateRefusal;
@@ -27,8 +28,6 @@ pub struct DarkmatterSlotHost {
     evaluations: Mutex<Vec<(Slot, SlotEvaluation)>>,
 }
 
-// The slot session builds hosts; until it lands only tests do.
-#[cfg_attr(not(test), allow(dead_code))]
 impl DarkmatterSlotHost {
     /// A host evaluating with `evaluator`.
     pub(crate) fn new(evaluator: SlotEvaluator) -> Self {
@@ -37,6 +36,7 @@ impl DarkmatterSlotHost {
 
     /// Every successful evaluation so far, in order, with what it depended
     /// on.
+    #[cfg(test)]
     pub(crate) fn evaluations(&self) -> Vec<(Slot, SlotEvaluation)> {
         self.evaluations.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
@@ -75,7 +75,9 @@ impl SlotHost for DarkmatterSlotHost {
         let parsed = parse_spanned(&slot.expression)
             .map_err(|error| SlotFailure::new(ExpressionError::Parse(error.message), Some(SLOT_SYNTAX_CODE)))?;
         let context = slot_context(request.context, request.defining_file);
-        match self.evaluator.evaluate(&parsed, context) {
+        let defining = request.defining_file.unwrap_or_else(|| request.context.base_dir());
+        crate::note_work!(SlotResolution);
+        match self.evaluator.evaluate(&parsed, context, defining) {
             Ok(evaluation) => {
                 let value = evaluation.value.clone();
                 self.evaluations
@@ -100,6 +102,13 @@ pub(crate) fn failure_code(error: &ExpressionError) -> &'static str {
     match error.without_callbacks() {
         ExpressionError::SlotReadRefused { refusal: GateRefusal::Denied, .. } => SLOT_DENIED_CODE,
         ExpressionError::SlotReadRefused { .. } => SLOT_APPROVAL_REQUIRED_CODE,
+        // A contract naming a template already being resolved: the cycle is
+        // this slot's, whichever slot inside met it.
+        ExpressionError::Data(data)
+            if matches!(data.as_ref(), DataError::ContractSchema { source, .. } if super::session::is_cycle(source)) =>
+        {
+            SLOT_CYCLE_CODE
+        }
         ExpressionError::Data(data) => data.code().unwrap_or(SLOT_FAILED_CODE),
         ExpressionError::IterationLimit(limit) => limit.kind.code(),
         _ => SLOT_FAILED_CODE,

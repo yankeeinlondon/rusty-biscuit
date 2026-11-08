@@ -32,7 +32,7 @@ impl RecordingGate {
 impl ReadGate for RecordingGate {
     fn check(&self, target: &ReadTarget) -> Result<(), GateRefusal> {
         self.asked.lock().unwrap().push(target.clone());
-        if self.allow { Ok(()) } else { Err(GateRefusal::ApprovalRequired) }
+        if self.allow { Ok(()) } else { Err(GateRefusal::approval_required()) }
     }
 }
 
@@ -108,7 +108,7 @@ fn every_input_reading_function_asks_the_gate_and_a_refusal_is_typed() {
         let gate = RecordingGate::new(false);
         let result = call_function(name, &args, Some(&gated(&base, &gate))).expect("registered");
         assert!(
-            matches!(result, Err(ExpressionError::SlotReadRefused { refusal: GateRefusal::ApprovalRequired, .. })),
+            matches!(result, Err(ExpressionError::SlotReadRefused { refusal: GateRefusal::ApprovalRequired { .. }, .. })),
             "{name}: {result:?}"
         );
         assert!(gate.asked().iter().all(|target| target.function == name), "{name}: {:?}", gate.asked());

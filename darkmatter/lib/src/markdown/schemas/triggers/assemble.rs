@@ -68,6 +68,9 @@ pub struct TriggerTraceEntry {
     pub source: TriggerSource,
     /// Whether every top-level condition matched.
     pub matched: bool,
+    /// Whether the payload is a template (it holds `{{ … }}` slots): it is
+    /// valid, and resolves only for a document it matches.
+    pub pending: bool,
     /// Results in authored order: one per `match:` list entry, or one for a
     /// mapping `match:`.
     pub conditions: Vec<TriggerConditionTrace>,
@@ -109,10 +112,12 @@ pub fn trace_registry(
     frontmatter: &Value,
     document: Option<&Path>,
 ) -> TriggerTrace {
+    let pre_resolved = registry.payloads.len() == registry.triggers.len();
     let triggers = registry
         .triggers
         .iter()
-        .map(|trigger| {
+        .enumerate()
+        .map(|(idx, trigger)| {
             let subject = subject_for(registry, trigger, document);
             let conditions = trigger
                 .envelope
@@ -134,6 +139,7 @@ pub fn trace_registry(
             TriggerTraceEntry {
                 source: trigger.source.clone(),
                 matched: conditions.iter().all(|condition| condition.matched),
+                pending: pre_resolved && registry.payloads[idx].pending.is_some(),
                 conditions,
             }
         })
@@ -225,6 +231,12 @@ pub(crate) struct ResolvedPayload {
     pub searched: Vec<PathBuf>,
     /// Non-fatal findings produced while resolving payload references.
     pub advisories: Vec<super::super::SchemaAdvisory>,
+    /// The payload is a template (it holds `{{ … }}` slots): it is neither
+    /// invalid nor empty, and resolves only when a document matches it, in
+    /// that document's slot session ([`finish_file_payload`] then applies the
+    /// payload rules to the result). The other fields are then empty, except
+    /// `dependencies`, which name the schema files the template read.
+    pub pending: Option<simplified_schema::slots::PendingSchema>,
 }
 
 impl ResolvedPayload {
@@ -239,6 +251,7 @@ impl ResolvedPayload {
             dependencies: Vec::new(),
             searched: Vec::new(),
             advisories: Vec::new(),
+            pending: None,
         }
     }
 }
@@ -307,18 +320,39 @@ fn resolve_file_payload(
     // A trigger file is never a schema document, so the loader refuses a
     // payload that names one before any cycle check could see it; that
     // refusal is reported as the cycle it is.
-    let resolved = resolve::resolve_yaml_schema_owned_by(
+    let resolved = match resolve::resolve_yaml_schema_owned_by(
         payload,
         simplified_schema::resolve::InlineOwner::Trigger(source),
         base_dir,
         schema_roots,
         context,
-    )
-    .map_err(|error| match refused_trigger_file(&error) {
-        Some(path) => payload_cycle(source, &path).unwrap_or(error),
-        None => error,
-    })?;
+    ) {
+        // A template payload is pending: matching stays passive, and only a
+        // matched payload resolves, in the matching document's session.
+        Err(SchemaError::UnresolvedSlots(unresolved)) if unresolved.pending.is_some() => {
+            let pending = unresolved.pending.expect("checked above");
+            let mut dependencies: Vec<PathBuf> = pending.read_sources().iter().map(|(path, _)| path.clone()).collect();
+            dependencies.sort();
+            dependencies.dedup();
+            return Ok(ResolvedPayload { dependencies, pending: Some(pending), ..ResolvedPayload::matcher_only() });
+        }
+        resolved => resolved.map_err(|error| match refused_trigger_file(&error) {
+            Some(path) => payload_cycle(source, &path).unwrap_or(error),
+            None => error,
+        })?,
+    };
+    finish_file_payload(source, payload, resolved)
+}
 
+/// The payload rules applied to `resolved`, the resolution of the trigger
+/// file `source`'s `$schema` value `payload`: no cycle back to a trigger, a
+/// merge-compatible object schema that compiles, and its dependency edges.
+/// A pending payload's resolution goes through the same rules.
+pub(crate) fn finish_file_payload(
+    source: &Path,
+    payload: &YamlValue,
+    resolved: simplified_schema::resolve::ResolvedSchema,
+) -> Result<ResolvedPayload, SchemaError> {
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
 
@@ -354,6 +388,7 @@ fn resolve_file_payload(
         dependencies: deps,
         searched: resolved.searched,
         advisories: resolved.advisories,
+        pending: None,
     })
 }
 
@@ -809,6 +844,7 @@ fn resolve_embedded_payload(
         dependencies: Vec::new(),
         searched: Vec::new(),
         advisories: resolved.advisories,
+        pending: None,
     };
     Ok((payload, reads))
 }

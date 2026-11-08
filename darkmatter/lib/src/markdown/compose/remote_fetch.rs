@@ -478,6 +478,14 @@ impl RemoteFetchRuntime {
         }
     }
 
+    /// A separate runtime with this one's concurrency cap, transport cache,
+    /// and freshness settings, but `policy` for hosts and no shared fetch
+    /// state: the runtime schema slots fetch through, whose hosts are the
+    /// slot grants', so a slot grant never widens the document's reads.
+    pub(crate) fn with_other_policy(&self, policy: FetchPolicy) -> Self {
+        Self::build(policy, self.inner.concurrency, self.inner.store.clone(), self.inner.cache_config)
+    }
+
     /// Shares one normalized provider result across every surface in this run.
     pub(crate) fn cached_provider_query(
         &self,

@@ -34,6 +34,12 @@ const CATALOG_PATH: &str = "darkmatter/schemas/partials/functions.yaml";
 
 const CATALOG_SOURCE: &str = include_str!("../../../../../../schemas/partials/functions.yaml");
 
+/// The embedded function catalog's text, which a schema-slot resolution is
+/// keyed on: a build whose catalog differs never reuses a cached result.
+pub(crate) fn catalog_source() -> &'static str {
+    CATALOG_SOURCE
+}
+
 /// The file-form example artifacts a catalog entry may reference with
 /// `example(./function-examples/<name>.yaml)`, keyed by that reference
 /// without its leading `./`. Compiled in so reading the catalog never touches

@@ -141,7 +141,7 @@ pub fn prepare_contract(written: &str, document: &FileResolutionContext) -> Resu
     shape.properties.insert(CONTRACT_PROPERTY.to_string(), parsed);
     let root = SchemaRoot::Single(shape);
     let roots = crate::markdown::schemas::roots::SchemaRoots::for_document(document).map_err(schema_error)?;
-    let expansion = crate::markdown::schemas::resolve::expand_named_types(
+    let mut expansion = crate::markdown::schemas::resolve::expand_named_types(
         &root,
         document.cwd(),
         None,
@@ -149,6 +149,23 @@ pub fn prepare_contract(written: &str, document: &FileResolutionContext) -> Resu
         document,
     )
     .map_err(|error| Box::new(import_failure(written, document, error)))?;
+    // A contract naming a template resolves its slots only inside a slot's
+    // evaluation, through that slot's session; elsewhere lowering below
+    // fails with `UnresolvedSlots`.
+    if simplified_schema::slots::has_dynamic(&expansion.schema, &expansion.definitions) {
+        let slots = simplified_schema::slots::collect_slots(&expansion.schema, &expansion.definitions);
+        match crate::markdown::schemas::slots::session::resolve_contract_slots(
+            &mut expansion.schema,
+            Arc::make_mut(&mut expansion.definitions),
+        ) {
+            Some(resolved) => resolved.map_err(schema_error)?,
+            None => {
+                return Err(schema_error(SchemaError::UnresolvedSlots(Box::new(
+                    simplified_schema::UnresolvedSlots::new(slots),
+                ))));
+            }
+        }
+    }
     let property = match &expansion.schema {
         SchemaRoot::Single(shape) => shape.properties.get(CONTRACT_PROPERTY).cloned(),
         SchemaRoot::Union(_) => None,

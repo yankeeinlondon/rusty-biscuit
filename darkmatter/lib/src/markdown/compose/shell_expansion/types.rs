@@ -537,6 +537,26 @@ pub trait ShellApprovalHandler: Send + Sync {
         &self,
         request: ShellApprovalRequest,
     ) -> Result<ShellApprovalDecision, ShellExpansionError>;
+
+    /// Asks about reads schema slots need, in the same pre-flight batch as
+    /// the shell commands (slot requests come first), or about one read a
+    /// slot computed during evaluation. One decision per request, in order;
+    /// a decision that is not one of its request's
+    /// [`choices`](crate::markdown::schemas::slots::grants::SlotGrantRequest::choices)
+    /// counts as unanswered.
+    ///
+    /// The default answers nothing, so a handler that does not prompt for
+    /// slot reads leaves each one `dm.schema.slot_approval_required`.
+    ///
+    /// ## Errors
+    ///
+    /// The prompt's I/O failure.
+    fn approve_slot_reads(
+        &self,
+        requests: &[crate::markdown::schemas::slots::grants::SlotGrantRequest],
+    ) -> Result<Vec<crate::markdown::schemas::slots::grants::SlotGrantDecision>, ShellExpansionError> {
+        Ok(vec![crate::markdown::schemas::slots::grants::SlotGrantDecision::Unanswered; requests.len()])
+    }
 }
 
 /// Information provided to the approval handler.
@@ -766,6 +786,11 @@ pub enum ShellExpansionError {
     /// path rather than flattening it into an opaque policy error.
     #[error(transparent)]
     Preflight(Box<crate::markdown::types::MarkdownError>),
+
+    /// The user's schema-slot grant store has an invalid line or cannot be
+    /// read, so none of its grants (or denies) can be trusted for the run.
+    #[error(transparent)]
+    SlotGrantStore(Box<crate::markdown::schemas::slots::grants::GrantStoreError>),
 }
 
 impl ShellExpansionError {
@@ -793,7 +818,8 @@ impl ShellExpansionError {
             Self::ParseDirective { .. }
             | Self::ExpressionEvaluation { .. }
             | Self::PolicyIo { .. }
-            | Self::Preflight(_) => None,
+            | Self::Preflight(_)
+            | Self::SlotGrantStore(_) => None,
         }
     }
 
@@ -815,7 +841,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { ctx, .. }
             | Self::Timeout { ctx, .. }
             | Self::ExecutionFailed { ctx, .. } => Some(ctx),
-            Self::PolicyIo { .. } | Self::Preflight(_) => None,
+            Self::PolicyIo { .. } | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
         }
     }
 
@@ -840,7 +866,7 @@ impl ShellExpansionError {
             | Self::UnevaluatedDependencyShape { origin, .. }
             | Self::Timeout { origin, .. }
             | Self::ExecutionFailed { origin, .. } => Some(origin),
-            Self::PolicyIo { .. } | Self::Preflight(_) => None,
+            Self::PolicyIo { .. } | Self::Preflight(_) | Self::SlotGrantStore(_) => None,
         }
     }
 }
@@ -1163,6 +1189,11 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
             // Delegate to the wrapped rich error so its styled block (excerpt,
             // gutter, OSC8 header, schema problems, …) is preserved verbatim.
             ShellExpansionError::Preflight(inner) => inner.status_block(_term),
+
+            ShellExpansionError::SlotGrantStore(error) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "schema read grants unusable"))
+                .body(Prose::new(error.to_string()))
+                .hint("Fix or remove the line; until then no schema read grant or deny applies."),
         }
     }
 }

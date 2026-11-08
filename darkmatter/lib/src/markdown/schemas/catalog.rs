@@ -126,6 +126,22 @@ pub enum CatalogErrorReason {
     /// A [`GlobalRequirement::same_as`] mismatch.
     #[error("must declare the same shape as `{0}`")]
     Mismatch(Cow<'static, str>),
+    /// The definition holds `{{ … }}` schema slots (directly or through an
+    /// import). A catalog declares globals, which apply before any slot
+    /// could be resolved, so it never holds one.
+    #[error("{}", super::slots::codes::slots_not_allowed_message("a global catalog", .0))]
+    SlotsNotAllowed(Box<simplified_schema::UnresolvedSlots>),
+}
+
+impl CatalogError {
+    /// The slot code of a catalog holding slots,
+    /// [`SLOT_NOT_ALLOWED_IN_BASELINE_CODE`](super::slots::codes::SLOT_NOT_ALLOWED_IN_BASELINE_CODE);
+    /// `None` for every other failure.
+    #[must_use]
+    pub fn slot_code(&self) -> Option<&'static str> {
+        matches!(self.reason, CatalogErrorReason::SlotsNotAllowed(_))
+            .then_some(super::slots::codes::SLOT_NOT_ALLOWED_IN_BASELINE_CODE)
+    }
 }
 
 /// A typed, field-located catalog load failure.
@@ -1102,7 +1118,10 @@ fn resolve_declaration(
         }
         Source::Disk { dir, context } => resolve::resolve_catalog_declaration(&single, dir, context),
     }
-    .map_err(|error| CatalogErrorReason::Resolve(Box::new(error)))?;
+    .map_err(|error| match error {
+        SchemaError::UnresolvedSlots(unresolved) => CatalogErrorReason::SlotsNotAllowed(unresolved),
+        error => CatalogErrorReason::Resolve(Box::new(error)),
+    })?;
     match resolved.simplified {
         Some(SchemaRoot::Single(mut shape)) => shape
             .properties

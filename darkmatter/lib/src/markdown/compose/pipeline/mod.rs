@@ -74,6 +74,12 @@ impl Markdown {
         // runtime spans its whole command; otherwise this root run owns one.
         let data_runtime = options.data_runtime();
         options.data_runtime = Some(data_runtime.clone());
+        // And for schema-slot resolution: one session per command, so its
+        // grants are decided once and each template pinned once.
+        if options.slot_session.is_none() {
+            options.slot_session =
+                Some(std::sync::Arc::new(crate::markdown::schemas::slots::SlotSession::for_request(&options)));
+        }
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,

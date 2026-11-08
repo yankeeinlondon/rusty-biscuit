@@ -1120,7 +1120,11 @@ fn load_extension_schema(
     // Drive resolution through the same file-reference path a `$schema` string
     // uses, so YAML/JSON disambiguation matches document references.
     let value = Value::String(path.to_string_lossy().into_owned());
-    resolve_schema(&value, &base_dir, context)
+    // An extension is a baseline layer: it applies before any slot could be
+    // resolved, so a template is refused as a baseline would be.
+    resolve_schema(&value, &base_dir, context).map_err(|error| {
+        darkmatter::markdown::schemas::slots::codes::refuse_slots_in_extension(&path, error)
+    })
 }
 
 /// Resolves an extension's configured path: relative paths anchor on the first

@@ -223,6 +223,12 @@ impl PreparedSchemas {
         }
     }
 
+    /// The schema templates `markdown`'s effective schema would resolve
+    /// ([`DarkmatterSchemas::pending_templates_for`]); empty without schemas.
+    pub(crate) fn pending_templates_for(&self, markdown: &Markdown) -> Vec<crate::markdown::schemas::PendingTemplate> {
+        self.schemas.as_ref().map_or_else(Vec::new, |schemas| schemas.pending_templates_for(markdown))
+    }
+
     /// The schema triggers discovery skipped as invalid, in discovery order;
     /// empty when discovery did not run.
     pub(crate) fn discovery_findings(&self) -> &[crate::markdown::schemas::InvalidTriggerFinding] {
@@ -411,6 +417,14 @@ pub(crate) fn prepare_schemas(
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
     schemas = schemas.with_caller_input_records(&caller_input_records(options));
+    // A pass that defers what only composition can judge (a reference check,
+    // a pre-flight discovery walk) reads nothing a slot names: it uses only a
+    // snapshot an earlier pass pinned.
+    if let Some(session) = &options.slot_session {
+        schemas = schemas
+            .with_slot_session(std::sync::Arc::clone(session))
+            .with_slot_pins_only(options.defer_shell_pending_schema_problems);
+    }
     if options.baseline_is_darkmatter_default {
         schemas = schemas.with_darkmatter_baseline_json_schema().map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
@@ -514,6 +528,7 @@ pub(crate) fn run_with_registry(
         // to report when the caller deferred it; coercion simply has nothing to
         // work from.
         Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) if defers_template(&err, options) => return Ok(()),
         Err(err) => {
             return Err(MarkdownError::SchemaValidationFailed {
                 path: path.clone(),
@@ -771,6 +786,13 @@ pub(crate) fn validate_typed_shell_values(
     })
 }
 
+/// Whether `err` is a schema template a discovery pass leaves to the
+/// terminal pass: its slots resolve only after the approvals the discovery
+/// pass exists to collect, so nothing can be judged against it yet.
+fn defers_template(err: &simplified_schema::SchemaError, options: &crate::markdown::compose::ComposeRequest) -> bool {
+    options.defer_shell_pending_schema_problems && matches!(err, simplified_schema::SchemaError::UnresolvedSlots(_))
+}
+
 /// Rechecks only caller-file classification against the current effective
 /// schema, without taking ownership of validation or frontmatter mutation.
 pub(crate) fn verify_projection_stability(
@@ -786,6 +808,7 @@ pub(crate) fn verify_projection_stability(
     let effective = match schemas.effective_for(markdown) {
         Ok(effective) => effective,
         Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) if defers_template(&err, options) => return Ok(()),
         Err(err) => {
             return Err(MarkdownError::SchemaValidationFailed {
                 path: source_path(markdown, options),
@@ -843,6 +866,7 @@ pub(crate) fn prepare_caller_projection(
     let effective = match schemas.effective_for(markdown) {
         Ok(effective) => effective,
         Err(_) if options.defer_schema_verdict => None,
+        Err(err) if defers_template(&err, options) => None,
         Err(err) => {
             return Err(MarkdownError::SchemaValidationFailed {
                 path: source_path(markdown, options),

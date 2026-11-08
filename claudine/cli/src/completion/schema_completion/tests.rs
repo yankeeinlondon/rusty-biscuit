@@ -1147,3 +1147,47 @@ fn shipped_container_schema_resolves_for_authored_parameter_completion() {
 
 #[cfg(test)]
 mod x2_spike;
+
+/// A prompt whose `$schema` file is a template (an `enum` filled by a slot).
+fn seed_template_prompt(root: &Path) {
+    seed_repo(root);
+    write(&root.join("os.yaml"), "- macOS\n- Linux\n");
+    write(
+        &root.join("prompt.schema.yaml"),
+        concat!(
+            "$schema:\n",
+            "  os: enum({{ load_data(\"./os.yaml\", \"string[]\") }}; required) -> the target OS\n",
+            "  title: string -> the title\n",
+        ),
+    );
+    write(&root.join("p.md"), "---\n$schema: ./prompt.schema.yaml\n---\nbody\n");
+}
+
+#[test]
+fn a_template_schema_loads_as_pending_with_its_slots_and_property_names() {
+    let tmp = TempDir::new().unwrap();
+    seed_template_prompt(tmp.path());
+    let ctx = ScopeContext::discover_from(tmp.path());
+
+    let Some(PromptSchema::Pending(pending)) = load_prompt_schema("p.md", &ctx) else {
+        panic!("a template schema must load as pending, not as nothing");
+    };
+    assert_eq!(pending.slots.len(), 1);
+    assert!(pending.slots[0].expression.contains("load_data"), "{:?}", pending.slots[0]);
+    assert!(load_effective_schema("p.md", &ctx).is_none(), "a template is never a concrete schema");
+
+    let schema = PromptSchema::Pending(pending);
+    let names = property_names_in(schema.declarations(), "", &HashSet::new(), &[]);
+    assert_eq!(names, vec!["os=".to_string(), "title=".to_string()]);
+}
+
+#[test]
+fn a_concrete_schema_loads_as_resolved() {
+    let tmp = TempDir::new().unwrap();
+    seed_repo(tmp.path());
+    write(&tmp.path().join("p.md"), "---\n$schema:\n  status: 'enum(a, b)'\n---\n");
+    let ctx = ScopeContext::discover_from(tmp.path());
+    let schema = load_prompt_schema("p.md", &ctx).expect("schema loads");
+    assert!(schema.resolved().is_some());
+    assert!(schema.declarations().is_some());
+}

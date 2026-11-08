@@ -31,6 +31,8 @@
 //!   `{{ … }}` slots and cannot be lowered until they are resolved.
 //! - [`SchemaError::SlotResult`] — a resolved slot's value cannot fill its
 //!   position.
+//! - [`SchemaError::SlotResolution`] — a host resolved a template's slots
+//!   and the resolution failed ([`SlotResolutionFailure`]).
 //! - [`SchemaError::FrontmatterShape`] — `$schema` is present in frontmatter
 //!   but is not a YAML mapping/sequence/string.
 
@@ -93,11 +95,14 @@ pub enum KindSelectionCause {
     /// Two or more definitions claim the kind; `files` names each, sorted
     /// by path (a compiled-in definition by its repository-relative path).
     Duplicate { files: Vec<PathBuf> },
-    /// The definition that claims the kind failed; `defect` is its failure.
-    Reserved { file: PathBuf, defect: String },
+    /// The definition that claims the kind failed; `defect` is its failure,
+    /// and `code` the host's diagnostic code for it when the host gives the
+    /// failure one of its own (a kind definition holding schema slots).
+    Reserved { file: PathBuf, defect: String, code: Option<&'static str> },
     /// No healthy definition claims the kind, and `file` is a definition
-    /// that failed before revealing what it claims, so the kind may be its.
-    Unavailable { file: PathBuf, defect: String },
+    /// that failed before revealing what it claims, so the kind may be its;
+    /// `code` as for [`Self::Reserved`].
+    Unavailable { file: PathBuf, defect: String, code: Option<&'static str> },
     /// A schema root could not be read, so its definitions are unknown.
     RootUnreadable { root: PathBuf, defect: String },
 }
@@ -109,10 +114,10 @@ impl fmt::Display for KindSelectionCause {
                 let files: Vec<String> = files.iter().map(|file| format!("`{}`", file.display())).collect();
                 write!(f, "it is claimed by more than one definition: {}", files.join(", "))
             }
-            Self::Reserved { file, defect } => {
+            Self::Reserved { file, defect, .. } => {
                 write!(f, "its definition `{}` failed: {defect}", file.display())
             }
-            Self::Unavailable { file, defect } => write!(
+            Self::Unavailable { file, defect, .. } => write!(
                 f,
                 "schema selection is unavailable: definition `{}` failed before revealing its kind: {defect}",
                 file.display()
@@ -257,6 +262,36 @@ impl fmt::Display for SlotResultKind {
     }
 }
 
+/// A failed resolution of a template ([`SchemaError::SlotResolution`]),
+/// with the schema texts the resolution read so each slot's span can be
+/// located in its defining file.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SlotResolutionFailure {
+    /// Why no schema was produced. Shared, so a host can cache the failure
+    /// and report it again.
+    pub error: std::sync::Arc<crate::slots::SlotResolutionError>,
+    /// Every schema file the template's first pass read, with the text
+    /// read ([`crate::slots::PendingSchema::read_sources`]).
+    pub sources: std::sync::Arc<[(PathBuf, std::sync::Arc<str>)]>,
+}
+
+impl SlotResolutionFailure {
+    /// The failure `error` of a template that read `sources`.
+    pub fn new(
+        error: std::sync::Arc<crate::slots::SlotResolutionError>,
+        sources: std::sync::Arc<[(PathBuf, std::sync::Arc<str>)]>,
+    ) -> Self {
+        Self { error, sources }
+    }
+}
+
+impl fmt::Display for SlotResolutionFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the schema's slots could not be resolved: {}", self.error)
+    }
+}
+
 impl fmt::Display for UnresolvedSlots {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let count = self.slots.len();
@@ -345,6 +380,12 @@ pub enum SchemaError {
         /// What is wrong with it.
         kind: SlotResultKind,
     },
+
+    /// A host resolved the template's slots and the resolution produced no
+    /// schema: a refused or failed slot, a value that cannot fill its
+    /// position, or a cancellation. The host's typed causes are kept.
+    #[error("{0}")]
+    SlotResolution(Box<SlotResolutionFailure>),
 
     /// A `$schema` file reference could not be resolved: the syntax is
     /// invalid, or biscuit-file rejected it. A reference that resolves but
@@ -917,6 +958,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         .collect::<Vec<_>>(),
                 )
                 .hint("Resolve the schema's slots explicitly before validating documents against it."),
+
+            SchemaError::SlotResolution(failure) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema slots could not be resolved"))
+                .body(vec![Prose::new(Prose::escape_text(&failure.error.to_string()))])
+                .hint("Fix the slot's expression or the data it reads, or grant the read it needs."),
 
             SchemaError::SlotResult { slot, kind } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("SchemaError", "slot value cannot be used"))

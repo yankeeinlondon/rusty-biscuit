@@ -257,7 +257,7 @@ impl ResolutionContext {
         let Some(location) = location() else {
             return Ok(());
         };
-        let target = super::read_gate::ReadTarget { function: function.to_string(), kind, location };
+        let target = super::read_gate::ReadTarget { function: function.to_string(), kind, location, observed_hash: None };
         gate.check(&target).map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })
     }
 
@@ -287,8 +287,9 @@ impl ResolutionContext {
                         function: function.to_string(),
                         kind: super::functions::ReadKind::Content,
                         location: super::read_gate::ReadLocation::Glob(observation.entry.clone()),
+                        observed_hash: observation.hash,
                     },
-                    Err(super::read_gate::GateRefusal::ApprovalRequired),
+                    Err(super::read_gate::GateRefusal::approval_required()),
                 ),
             };
             verdict.map_err(|refusal| ExpressionError::SlotReadRefused { target: Box::new(target), refusal })?;

@@ -72,6 +72,7 @@ mod side_effect_partial;
 mod alias_lookup_once;
 mod ambient_ctx_capture;
 mod dynamic_slots_fixture_repos;
+mod dynamic_schema_slots;
 mod array_rendering_json;
 mod as_block_error_registry;
 mod backslash_escape_spans;

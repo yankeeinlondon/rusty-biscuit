@@ -24,6 +24,7 @@ types:
     trigger:
         source: string(required)
         matched: boolean(required)
+        pending: boolean(required) -> the payload holds schema slots; it resolves only for a matching document
         conditions: condition[](required)
     condition:
         index: number(required) -> zero-based authored index
