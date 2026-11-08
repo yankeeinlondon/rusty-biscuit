@@ -1,6 +1,6 @@
 ---
 kind: plan
-total_phases: 5
+total_phases: 6
 created: 2026-11-08
 phase: 1
 agent: claude/sonnet
@@ -9,723 +9,913 @@ yolo: true
 
 # Plan: Tabular Input Options for `load_data`
 
-> **Outdated (2026-11-08): re-plan before executing.** This plan predates the
-> author's 2026-11-08 decisions in the spec (`yml`/`ndjson` format aliases, the
-> TSV delimiter rule, and sequencing after 2026-11-05-dynamic-schema-types).
-> Its memo and loader design (R7 and the `load.rs` execution order) must be
-> redone on top of the dynamic-schema-types changes to `runtime.rs` and
-> `load.rs` once that feature lands. Do not execute this plan as written.
+Source: the `2026-11-05-tabular-input-options` spec, finalized 2026-11-08,
+including the author decisions of that date: `yml` and `ndjson` are accepted as
+`format` aliases and normalized to `yaml` and `jsonl`; on `tsv` only `"\t"` is a
+valid `delimiter`; this feature is implemented **after**
+`2026-11-05-dynamic-schema-types` and builds on its changes to the `load_data`
+runtime and loader. Every implementation choice is settled in **Phase 1 →
+Necessary Rules** (`R1`…`R30`). Rules that depend on dynamic-schema-types cite
+its rule IDs (`N17`, `N18`, `N20`, `N22`, `N28`, `N29`, `N35`); Phase 1 starts
+by checking each such assumption against the landed code.
+
+Execution conventions for every phase:
+
+- Paths are relative to `darkmatter/` unless stated. "Data module" means
+  `lib/src/markdown/compose/expression/data/`.
+- Run package-area recipes only: `just test` and `just lint` inside
+  `darkmatter/` (nextest under the recipe; it covers `darkmatter`,
+  `darkmatter-lsp`, and `darkmatter-cli`). A focused run during a wave may use
+  `cargo nextest run -p <package> -E '<filter>'`; never `cargo test`.
+- Never run `cargo fmt`, never commit, never move the spec, never run
+  `just complete`. The terminal state is "implementation complete, ready for
+  review".
+- Each task that changes a symbol's behavior also fixes that symbol's `///`,
+  `//!`, and inline comments in the same change (repo drift rule).
+- Docs describe current behavior and never name or link a feature, fix, spec,
+  or this plan.
+- No test opens a terminal or browser window; no L2/L3 test is added.
+- Fixtures use `tempfile` and portable path helpers (`entry`,
+  `biscuit_file::to_portable_string`) so they hold on macOS, Linux, native
+  Windows, and WSL2; CRLF and invalid-UTF-8 content is written as explicit
+  bytes. Load the `os` skill before any path-comparison code.
 
 ## Summary and Definition of Done
 
-`load_data(file, as)` gains an optional third argument, a closed options
-object `{format?, delimiter?, header?}`. The work is spread over five layers,
-and the order below follows their dependencies:
+`load_data(file, as)` gains an optional third argument, a closed options object
+`{format?, delimiter?, header?}`:
 
-1. **Contract surface** (catalog signature, option model, the new
-   `dm.data.invalid_options` code, a headerless row-shape conflict).
-2. **Library judgment and execution**: the passive check (shared by
-   composition and DMLS), the execution flow in `load.rs`, headerless row
-   views shared by binding and diagnostic lookup, and a three-layer memo
-   (raw source → parsed source → bound result).
+```md
+{{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}
+{{ load_data("rows.txt", "{ name: string, port: number }[]", {format: "csv", delimiter: ";"}) }}
+{{ load_data("https://example.com/export?id=7", "string[]", {format: "json"}) }}
+```
+
+The work lands in five layers, in dependency order:
+
+1. **Contract surface**: the catalog signature, the option model with alias
+   normalization and the delimiter rules, `dm.data.invalid_options`, and the
+   headerless row-shape conflict.
+2. **Library judgment and execution**: the passive check shared by composition
+   and DMLS; a three-layer memo (raw source → parsed source → bound result) on
+   top of the dynamic-schema-types observations, slot gate, and generation
+   counter; the new `load.rs` execution order; one logical headerless row view
+   shared by binding and diagnostic lookup.
 3. **DMLS**: nested option-key and enum-value completion from the declared
    object shape, hover, diagnostics.
 4. **Catalog examples, generated pages, hand-written docs, and the Darkmatter
    skill.**
-5. **CLI wiring tests and the final verification** (`just test`, `just lint`).
+5. **CLI wiring tests and final verification.**
 
-The feature is **done** when all of the following hold (each is also an
-acceptance bullet of the spec):
+### Definition of Done
 
-- `load_data("rows.csv", "tuple([string, number])[]", {header: false})`
-  returns every record (two-record CSV, TSV, and one-record file covered);
-  an object-row contract with `header: false` fails with
-  `dm.data.row_shape_conflict`, passively for literal values and at
-  execution for computed values and on-disk contract imports.
-- `{format: "csv", delimiter: ";"}` reads `rows.txt`; a wrong-but-supported
-  extension is overridden; TSV keeps its tab default; `"|"` works; an
-  extensionless URL loads with `{format: "json"}`.
-- Every invalid option shape listed in the spec fails with the shared binder
-  diagnostic or `dm.data.invalid_options`, located at the third argument
-  passively, before any read.
-- One source read twice with different delimiters gives `reads = 1`,
-  `parses = 2`; equivalent default spellings share a parse and a bind;
-  changing only `header` parses once and binds twice; call order never
-  changes a result; every two-argument result, read set, diagnostic field,
-  and work count is unchanged.
-- Headerless diagnostics report `/0/1` and the field's raw position for the
-  first record, and stay aligned for a later row, a quoted multiline field,
-  multibyte text, and CRLF.
-- DMLS completes option keys and enum values from the declared shape, hover
-  shows the third parameter, callback typing and null-file typing are
-  unchanged for both arities.
-- Catalog examples pass the passive shipped-artifact corpus check; `md
-  compose --output json` shows one headerless success and one option failure
-  (exit 1, empty stderr, located diagnostic, envelope-conformant).
-- `just test` and `just lint` pass in `darkmatter/`; docs and the skill
-  describe the landed behavior and never link to the spec.
+- [ ] Phase 1's rebase check passed or its failures were resolved by revising
+  the affected rules, recorded in `implementation-log.md`.
+- [ ] Every acceptance criterion of the spec has the named passing test listed
+  in "Acceptance criteria → tests" below.
+- [ ] Every existing two-argument result, diagnostic field, read set, and
+  `DataRuntime::stats()` count is unchanged: the pre-existing `load_data_*`,
+  `compose_read_set`, and dynamic-schema slot suites pass with no assertion
+  changed (only `runtime.rs` in-file unit tests are rewritten for the new
+  generics, keeping each assertion's intent).
+- [ ] The dynamic-schema guarantees hold over all three memo layers: a memo hit
+  at any layer re-records the observation (N17); the slot gate is consulted
+  before the first data-source memo layer (N28); one invalidation advances the
+  generation for all layers (N35); a three-argument call's target is collected
+  passively and found by pre-fetch discovery (N20, N29).
+- [ ] Catalog examples pass the passive shipped-artifact corpus check; the
+  generated function page and lifecycle types are regenerated, not hand-edited.
+- [ ] `docs/topics/loading-data.md`, `docs/topics/caching.md`,
+  `docs/cli/data-contracts.md`, DMLS docs, and the Darkmatter skill describe the
+  landed behavior.
+- [ ] `just test` and `just lint` pass in `darkmatter/`.
 
 Out of scope (settled by the spec): other CSV dialect settings, non-UTF-8
 encodings, content or `Content-Type` sniffing, a `columns` option, `bf`
 changes, CLI flags, size limits, persistent caches, grammar changes, new
-dependencies. **No spike, no timing benchmark, no L2/L3 test** is part of this
-plan: reuse is proven by `DataRuntime::stats()` counts and the spec states no
-performance question (ruling recorded as rule R19).
+dependencies. No spike and no timing benchmark: reuse is proven by
+`DataRuntime::stats()` counts (R30).
 
-## Phase 1: Contract surface
+### Acceptance criteria → tests
 
-Establishes every name and type the later phases build on. Nothing here changes
-a two-argument result.
+File abbreviations: **P** `lib/tests/l1/load_data_options_passive.rs`, **X**
+`lib/tests/l1/load_data_options.rs`, **H** `lib/tests/l1/load_data_headerless.rs`,
+**W** `lib/tests/l1/load_data_options_remote.rs`, **S**
+`lib/tests/l1/load_data_options_slots.rs`, **D** `dmls/tests/l1/option_arguments.rs`,
+**C** `cli/tests/l1/load_data.rs`, **U** in-file unit tests.
+
+| Spec criterion | Tests |
+| --- | --- |
+| Headerless two-record CSV, TSV, one record | H `headerless_csv_returns_both_records`, `headerless_tsv_returns_both_records`, `headerless_single_record_is_one_row` |
+| Headerless object-row conflict: passive literal; execution for computed values and on-disk imports | P `header_false_with_object_contract_is_rejected_at_as`, `header_false_with_literal_csv_format_and_computed_file_is_rejected`, `header_false_with_provisional_import_is_not_judged`; X `computed_header_false_with_object_contract_fails_at_execution`, `imported_object_contract_with_header_false_fails_before_reading` |
+| `{format: "csv", delimiter: ";"}` on `rows.txt`; wrong supported extension; TSV tab default; pipe | X `csv_format_with_semicolon_reads_txt`, `explicit_format_overrides_a_supported_extension`, `tsv_format_defaults_to_tab`, `pipe_delimiter_reads_rows` |
+| `yml`/`ndjson` aliases behave as and share memo entries with `yaml`/`jsonl` | U `options.rs::aliases_normalize_to_canonical_formats`; X `yml_alias_shares_parse_and_bind_with_yaml`, `ndjson_alias_shares_parse_and_bind_with_jsonl`, `alias_failure_names_the_canonical_format` |
+| `{format: "tsv", delimiter: ","}` fails before reading; `"\t"` accepted | P `tsv_with_non_tab_delimiter_is_invalid_options`; X `tsv_with_comma_delimiter_fails_before_reading`, `tsv_with_explicit_tab_delimiter_is_accepted`, `tsv_extension_with_semicolon_delimiter_fails_before_reading` |
+| Invalid option objects (unknown keys, unbindable types, bad format names, each bad delimiter); JSON with `header`/`delimiter`; shared diagnostic and third-argument location; no I/O | P `unknown_option_key_is_a_binding_error_at_argument_2`, `unbindable_option_field_is_a_binding_error_at_argument_2`, `invalid_format_names_are_binding_errors`, `each_invalid_delimiter_is_invalid_options_at_argument_2`, `tabular_options_on_json_are_invalid_options`, `passive_and_execution_messages_are_identical`; X `option_matrix_invalid_cells_read_nothing`, `tabular_options_on_json_fail_before_reading`; D `invalid_delimiter_is_ranged_on_the_third_argument`, `unknown_option_key_is_ranged_on_the_third_argument`, `tabular_option_on_json_is_ranged_on_the_third_argument` |
+| Computed options validated at execution; no false passive rejection; null options/fields; null-file calls | P `computed_options_beside_a_literal_json_file_are_not_judged`, `partial_object_with_computed_format_defers_format_checks`, `literal_delimiter_beside_computed_member_is_still_judged`; X `computed_invalid_delimiter_fails_at_execution`, `computed_format_overrides_a_literal_extension`, `null_options_and_null_fields_use_defaults`, `null_file_with_options_reads_and_imports_nothing`, `null_file_with_invalid_computed_options_returns_null` |
+| Headerless table rows; `/0/1` position; later row, quoted multiline, multibyte, CRLF | H `headerless_empty_and_blank_only_inputs_are_empty`, `headerless_one_record_keeps_empty_and_repeated_cells`, `headerless_blank_lines_are_skipped_with_original_positions`, `headerless_ragged_record_is_malformed_at_that_record`, `headerless_quoted_delimiter_newline_and_doubled_quote_parse_strictly`, `headerless_invalid_quoting_is_malformed_without_a_result`, `headerless_first_record_failure_reports_pointer_0_1`, `headerless_later_row_multiline_multibyte_crlf_positions`, `headerless_missing_cell_uses_nearest_parent`; U `locate.rs::headerless_root_and_rows_use_the_logical_view` |
+| Two delimiters → `reads = 1`, `parses = 2`; equivalent defaults share; header-only change; distinct formats; call ordering | U `runtime.rs::raw_source_is_read_once_for_two_parse_keys`; X `two_delimiters_read_once_and_parse_twice`, `equivalent_default_spellings_share_one_parse_and_bind`, `header_only_change_parses_once_and_binds_twice`, `distinct_formats_share_no_parse_or_failure`, `call_order_does_not_change_results` |
+| Header-name failure does not poison positional mode; reused failure names each call; invalidation and concurrency cover all layers | X `object_header_failure_does_not_poison_positional_mode`, `reused_failure_names_each_call_site`, `invalidation_rereads_every_layer_in_every_cache_mode`, `concurrent_identical_option_calls_read_once`; U `runtime.rs::invalidation_clears_all_three_layers_and_a_late_raw_load_never_populates_them`, `concurrent_callers_share_one_raw_load_and_one_parse` |
+| Extensionless URL with `{format: "json"}`; allowed/denied hosts with a warmed memo; reference-check deferral | W `extensionless_url_loads_with_json_format`, `extensionless_url_without_format_is_unsupported`, `denied_host_is_refused_even_with_a_warmed_memo`, `allowed_host_with_a_warmed_memo_makes_no_second_request`, `reference_check_defers_and_composition_reads_later`, `explicit_format_does_not_bypass_redirect_policy` |
+| Both arities keep inferred callback types and nullability in DMLS; two-argument behavior unchanged | P `result_type_is_the_contract_type_for_both_arities`, `null_file_typing_is_unchanged_with_options`; D `both_arities_keep_callback_member_completion`, `both_arities_keep_null_file_typing`; existing suites unmodified (Checkpoint 2) |
+| Catalog examples pass the corpus check; CLI headerless success and option failure | existing `function_catalog_parity`, `shipped_corpus_invocation`, catalog `tests.rs` example runner; C `compose_headerless_rows_json`, `compose_invalid_option_json_envelope` |
+| Dynamic-schema integration (sequencing note) | S `memo_hits_at_every_layer_rerecord_the_observation`, `slot_gate_refuses_before_any_warmed_layer`, `generation_advances_once_for_all_layers`, `three_argument_target_is_collected_passively`, `three_argument_url_is_discovered_before_fetch` |
+| `just test` / `just lint` | Phase 6 final verification |
+
+## Phase 1 — Rebase check, baseline, and contract surface
+
+Goal: prove the plan's dynamic-schema assumptions against the landed code,
+record a baseline, and establish every name and type later phases build on.
+Nothing here changes a two-argument result.
+
+### Dynamic-schema assumptions (checked by the first task)
+
+Each line names the dynamic-schema rule it depends on and the plan rules that
+change if it fails.
+
+- **A1 (N17)** `DataRuntime` has an observation log (`Observation` with a kind
+  and an optional BLAKE3 hash), recorded where `load_data` reads bytes, stored
+  with the memo entry (on `LoadedSource` or a field it owns), and re-recorded on
+  a memo hit; `read_mark()`/`observations_since()` exist. Affects R9, R10, R14.
+- **A2 (N17)** `load_data` records its not-found probe before returning the
+  not-found error, and `DataRuntime::prepare_contract` records missing contract
+  imports. Affects R14 step 4 only by position (it must stay before format
+  choice).
+- **A3 (N18)** The local read in `load.rs` goes through
+  `simplified_schema::resolve::buffers::read(path)`, not `std::fs::read`.
+  Affects R9 (the raw loader keeps that call).
+- **A4 (N28)** `load_data` calls `ctx.authorize_slot_read(..)` for its data
+  target after resolution and before both the remote fetch and the source memo
+  lookup; with no gate it is a no-op. Affects R14 step 8 and R27.
+- **A5 (N35)** `DataRuntime::memo_generation()` exists, advances once per
+  `invalidate_memo`, and is derived from (or bumped under the same lock as) the
+  `Generation` replacement in `DataMemo::invalidate`. Affects R8, R10.
+- **A6 (N20)** `load_data`'s registration carries its slot class as a fact,
+  `REMOTE_READ_FUNCTIONS` (`lib/src/markdown/compose/remote.rs:28`) is derived
+  from facts, and pre-fetch discovery inspects only argument 0 without
+  requiring an exact arity. Affects R27.
+- **A7 (N29)** `slots/targets.rs::collect_targets` reads `load_data`'s target
+  from argument 0 without requiring an exact arity. Affects R27.
+- **A8 (memo shape)** `runtime.rs` still has `DataMemo<S, B>` with
+  `single_flight`, `Generation { number, sources, bindings, contracts }`, and the
+  `DataRuntimeStats` fields `reads, parses, binds, source_hits, bind_hits,
+  contract_preparations, contract_hits, invalidations` (dynamic-schema may have
+  added fields; they are kept). Affects R7–R10.
+- **A9 (catalog and call check)** The `load_data` catalog entry
+  (`schemas/partials/functions.yaml:792`) and `call_check.rs::load_data_problem`
+  / `load_data_type` keep their pre-dynamic shape (N20 may have added a class
+  fact to the entry; that is kept). Affects R1, R17–R19.
+- **A10 (DMLS)** The N42 enum-completion change to
+  `dmls/src/providers/frontmatter.rs` has landed and the
+  `type_definition_argument` wiring at `dsl.rs:57,60` and `frontmatter.rs:70`
+  still exists. Affects R21.
 
 ### Necessary Rules
 
-Paths are relative to `darkmatter/` unless stated. "Data module" means
-`lib/src/markdown/compose/expression/data/`.
+**Rebase discipline**
 
-- **R1 — One overload, optional third parameter.** The catalog entry
-  `load_data` in `schemas/partials/functions.yaml` becomes
-  `parameters(file: file | null, as: type-definition(container), options?: {format: enum(yaml, json, jsonl, csv, tsv, toml, json5), delimiter: string, header: boolean} | null)`.
-  Evidence: `grammar.rs::parse_parameters` accepts `name?:` with a general
-  union, an inline object is closed (`translate.rs::inline_object`, doc
-  comment "closed unless it declares a `<string>` catch-all"), and "an
-  optional property also admits `null`" (`translate.rs`, presence rules), so
-  unknown keys, wrong field types, bad format names, `{}`, `null`, and
-  `{header: null}` are all decided by the shared binder with its existing
-  diagnostics, as the spec requires. A single overload (not two, as `pr_list`
-  uses) keeps one bound path and renders as `load_data(file, as, [options])`.
-  Callers: the catalog is read by `FunctionBinding::context("load_data", …)`
-  in `lib/src/markdown/compose/expression/functions/data.rs`, which needs no
-  change.
-- **R2 — Description text.** The catalog description is extended with the
-  third argument: keys, accepted values, defaults (`format` from the
-  extension; `delimiter` comma for CSV and tab for TSV; `header` true), and
-  one sentence that a delimiter or header is invalid for a non-tabular
-  format. Hover reads this text (R17).
-- **R3 — Option model lives in a new file** `<Data module>/options.rs`
-  (declared `pub(crate) mod options;` and re-exported items listed in R4 in
-  `data/mod.rs`). It contains:
+- **R1. Rebase check gates the plan.** Before any other task, verify A1–A10
+  against the code and against
+  `darkmatter/features/2026-11-05-dynamic-schema-types/implementation-log.md`.
+  The dynamic-schema feature must report its Phase 4 data-runtime work
+  (Observations, gate hook) as implemented; if it is still in progress, stop
+  and report to the author rather than build on uncommitted code. For each
+  assumption record "holds" or the exact difference (symbol, `path:line`) in
+  this feature's `implementation-log.md` under "Rebase check". When an
+  assumption fails, revise the affected rules in this plan **then** (edit the
+  rule text, log the revision with the reason) before any implementation task
+  starts; never work around a mismatch in code. The line numbers below are from
+  the pre-dynamic tree (2026-11-08) and are re-anchored by symbol name.
+
+**Contract surface**
+
+- **R2. One overload with an optional third parameter.** The catalog entry
+  `load_data` (`schemas/partials/functions.yaml:792-805`, today
+  `parameters(file: file | null, as: type-definition(container))`) becomes
+  `parameters(file: file | null, as: type-definition(container), options?: {format: enum(yaml, yml, json, jsonl, ndjson, csv, tsv, toml, json5), delimiter: string, header: boolean} | null)`.
+  Evidence: `simplified-schema/lib/src/simplified/grammar.rs:1331`
+  `parse_parameters` accepts `name?:` followed by `parse_union_arms`, the full
+  type grammar; inline-object properties are optional unless `required`, an
+  optional property admits `null`, and an inline object is closed. So unknown
+  keys, wrong field types, case-variant or untrimmed format names, `null`,
+  `{}`, and `{header: null}` are decided by the shared binder with its existing
+  diagnostics, as the spec requires ("do not introduce a second, stricter
+  native-type rule"). The catalog has no inline-object or `enum` parameter
+  today (only `fallback?: number` style, `functions.yaml:170`), so the catalog
+  task proves the binder accepts it (R29 risk); if the binder or catalog
+  loader cannot bind a closed inline object, stop and revise R2 with the
+  author. A single overload keeps one bound path and renders as
+  `load_data(file, as, [options])`. `FunctionBinding::context("load_data", …)`
+  in `lib/src/markdown/compose/expression/functions/data.rs` needs no change.
+- **R3. Description text.** The catalog description gains the third argument:
+  the three keys, accepted values (aliases `yml` → `yaml`, `ndjson` → `jsonl`),
+  defaults (`format` from the extension; `delimiter` comma for CSV and tab for
+  TSV; `header` true), that TSV accepts only a tab delimiter, and that
+  `delimiter` or `header` on a non-tabular format is an error. Hover reads this
+  text (R20).
+- **R4. Option model in a new file** `<Data module>/options.rs`, declared
+  `pub(crate) mod options;` in `data/mod.rs`:
   - `pub(crate) struct DataOptions { format: Option<DataFormat>, delimiter: Option<u8>, header: Option<bool> }`
-    with `DataOptions::from_bound(value: Option<&Value>) -> Result<Self, DataError>`.
-    Absent argument, `Value::Null`, and `{}` all give `DataOptions::default()`.
-    For each key: absent or `Null` is `None`. `format` must be a
-    `Value::String` equal (exact, case-sensitive, untrimmed) to one of the
-    seven canonical names (`format_from_name(&str) -> Option<DataFormat>`;
-    `yml` and `ndjson` are **not** names). `delimiter` must be a
-    `Value::String` accepted by `delimiter_byte(&str) -> Result<u8, DataError>`.
-    `header` must be a `Value::Bool`. Any other shape or key reaching this
-    function (unreachable after binding) is
-    `DataError::InvalidOptions`, never ignored, defaulted, or `.ok()`'d.
-  - `delimiter_byte`: exactly one `char`, ASCII, not `"`, CR, or LF;
-    otherwise `InvalidOptions { key: "delimiter", … }` whose reason reads
-    "must be one ASCII character other than a double quote, CR, or LF
-    (write a tab as \"\\t\")". Evidence: spec table row for `delimiter`, and
-    `biscuit_file::read_delimited`'s own refusal set (`delimited.rs`,
-    `InvalidDelimiter`).
-  - `DataOptions::check_applicability(&self, format: DataFormat) -> Result<(), DataError>`:
-    a non-`None` `delimiter` or `header` with a format other than `Csv`/`Tsv`
-    is `InvalidOptions` for the first offending key in the order
-    `delimiter`, `header`, reason "applies only to CSV and TSV data, but this
-    call reads {format name}; remove it or select a tabular format".
-    `header: true` counts as non-null.
-  - `pub(crate) fn effective_delimiter(format: DataFormat, chosen: Option<u8>) -> Option<u8>`
-    (`Some(chosen or b',' / b'\t')` for `Csv`/`Tsv`, `None` otherwise) and
-    `pub(crate) fn effective_header(format: DataFormat, chosen: Option<bool>) -> Option<bool>`
-    (`Some(chosen.unwrap_or(true))` for tabular formats, `None` otherwise).
-    These feed the memo keys (R7), so omitted and explicit defaults share
-    entries.
-- **R4 — New error `DataError::InvalidOptions { key: String, reason: String }`**
-  in `<Data module>/error.rs`. `code()` returns the new
-  `pub const INVALID_OPTIONS_CODE: &str = "dm.data.invalid_options";` which is
-  added to `DATA_DIAGNOSTIC_CODES` and re-exported from `data/mod.rs`.
-  `written_contract()` returns `None` for it. Display:
-  ``load_data(): option `{key}` is invalid: {reason}``. It is an error, not a
-  governed warning (the doc comment on `DATA_DIAGNOSTIC_CODES` already says
-  none is). `data_records` in `lib/src/markdown/compose/report_diagnostics.rs`
-  needs no arm (its `_ => vec![record]` already projects code and message), and
-  `nested.rs` / `ExpressionError::from` treat every non-file-reference
-  `DataError` uniformly.
-- **R5 — Headerless object conflict reuses `dm.data.row_shape_conflict`.** Add
-  `RowShapeConflict::HeaderlessObjectRows` in `contract.rs` (unit variant,
-  display: "`header: false` reads rows by position, but this contract
+    and `DataOptions::from_bound(value: Option<&Value>) -> Result<Self, DataError>`.
+    An absent argument, `Value::Null`, and `{}` give `DataOptions::default()`;
+    each key absent or `Null` is `None`. `format` must be a `Value::String`
+    accepted by `format_from_name`; `delimiter` a `Value::String` accepted by
+    `delimiter_byte`; `header` a `Value::Bool`. Any other shape or key reaching
+    this function (unreachable after binding) is `DataError::InvalidOptions`,
+    never ignored, defaulted, or `.ok()`'d.
+  - `pub(crate) fn format_from_name(name: &str) -> Option<DataFormat>`: exact,
+    case-sensitive, untrimmed match of `yaml`, `json`, `jsonl`, `csv`, `tsv`,
+    `toml`, `json5`, plus the aliases `yml` → `DataFormat::Yaml` and `ndjson` →
+    `DataFormat::Jsonl`. The alias is gone after this call: diagnostics and memo
+    keys see only the canonical `DataFormat` (spec: "`{format: "yml"}` and
+    `{format: "yaml"}` share entries").
+  - `pub(crate) fn delimiter_byte(text: &str) -> Result<u8, DataError>`: exactly
+    one `char`, ASCII, not `"`, CR, or LF; otherwise
+    `InvalidOptions { key: "delimiter", reason }` with reason "must be one ASCII
+    character other than a double quote, CR, or LF (write a tab as \"\\t\")".
+    Evidence: `biscuit_file::read_delimited`'s own refusal set
+    (`biscuit-file/lib/src/delimited.rs`, `InvalidDelimiter`), surfaced today as
+    the unreachable arm at `<Data module>/parse.rs:384`.
+  - `DataOptions::check_applicability(&self, format: DataFormat) -> Result<(), DataError>`,
+    in this order: (a) for a format other than `Csv`/`Tsv`, a non-`None`
+    `delimiter`, then `header` (even `Some(true)`), is `InvalidOptions` with
+    reason "applies only to CSV and TSV data, but this call reads {format name};
+    remove it or select a tabular format"; (b) for `Tsv`, a `delimiter` other
+    than `b'\t'` is `InvalidOptions { key: "delimiter" }` with reason "TSV data
+    is tab-separated, so only \"\\t\" is accepted; read data separated by
+    another character with format \"csv\"" (author decision 2026-11-08). The rule
+    applies to the **effective** format, whether selected by `format` or by a
+    `.tsv` extension. `{format: "csv", delimiter: "\t"}` is valid and stays
+    `csv` in diagnostics.
+  - `pub(crate) fn effective_delimiter(format, chosen: Option<u8>) -> Option<u8>`
+    (`Some(chosen.unwrap_or(b','))` for `Csv`, `Some(b'\t')` for `Tsv`, `None`
+    otherwise) and `pub(crate) fn effective_header(format, chosen: Option<bool>) -> Option<bool>`
+    (`Some(chosen.unwrap_or(true))` for tabular formats, `None` otherwise). These
+    feed the memo keys (R7), so omitted and explicit defaults share entries.
+  - One `pub(crate) fn invalid_options_message(key, reason) -> String` builds
+    the message used by both `DataError`'s `Display` and the passive check, so
+    the text is byte-identical (spec: "the same code and message in passive
+    checking and execution").
+- **R5. New error `DataError::InvalidOptions { key: &'static str, reason: String }`**
+  in `<Data module>/error.rs` (enum at `error.rs:67`). `code()`
+  (`error.rs:191-199`) returns the new
+  `pub const INVALID_OPTIONS_CODE: &str = "dm.data.invalid_options";`, added to
+  `DATA_DIAGNOSTIC_CODES` (`error.rs:35-42`) and re-exported from
+  `data/mod.rs:26-29`. `written_contract()` returns `None` for it. `Display`:
+  ``load_data(): option `{key}` is invalid: {reason}``, naming accepted values.
+  It is an error, never a governed warning, and carries no data location
+  ("Neither error claims a position in an unread data file"). The code reaches
+  every consumer of the catalog: `data_records` in
+  `lib/src/markdown/compose/report_diagnostics.rs` projects code and message
+  through its default arm; the DMLS code table (`dmls/src/diagnostics/codes.rs:24`)
+  and docs gain a row (Phases 4–5). No CLI output schema enumerates data codes
+  (`cli/schemas/output/render.yaml:25` names only `malformed` and
+  `contract_mismatch` for `data_location`), so no schema changes.
+- **R6. Headerless object conflict reuses `dm.data.row_shape_conflict`.** Add
+  the unit variant `RowShapeConflict::HeaderlessObjectRows` to `contract.rs:93`
+  with display "`header: false` reads rows by position, but this contract
   describes rows as objects; use a `tuple([…])[]` or `string[][]` contract, or
-  read an input that has a header"). A helper
-  `pub fn require_positional_rows(class: RowClassification) -> Result<(), RowShapeConflict>`
-  returns `Err(HeaderlessObjectRows)` for `Known(RowMode::Object)` and `Ok`
-  for `Known(RowMode::List)` and `Provisional` (provisional stays open until
-  execution, per the spec). It is exported from `data/mod.rs`. The error is
-  still raised as `DataError::RowShapeConflict { written, conflict }`, so
-  `code()` and every consumer are unchanged.
-- **R6 — Where each error is located.** Passive findings are ranged by
-  `DataProblem.argument`: `2` for `dm.data.invalid_options`, `1` (`as`) for the
-  row-shape conflict. Execution diagnostics are projected at the expression's
-  call-site span by `report_diagnostics.rs`; the evaluator carries no
-  per-argument spans (`argument_spans` exist only on `CallCheck`), and adding
-  them is out of scope. Therefore the execution location of
-  `dm.data.invalid_options` and of the headerless conflict is the call
-  expression, with the offending key named in the message. This is a
-  deliberate, documented narrowing of the spec's "locate at the third
-  argument"; Phase 5 records it in the implementation log
-  (`implementation-log.md`, created by that phase) and the docs state
-  the passive/execution difference plainly.
-- **R7 — Memo layout (decided here, implemented in Phase 2).** The memo has
-  three single-flight layers in `runtime.rs`:
+  read an input that has a header". Add
+  `pub fn require_positional_rows(class: RowClassification) -> Result<(), RowShapeConflict>`:
+  `Known(RowMode::Object)` → `Err(HeaderlessObjectRows)`; `Known(RowMode::List)`
+  and `Provisional` → `Ok` (provisional stays open until execution). Exported
+  from `data/mod.rs`. Raised as `DataError::RowShapeConflict { written, conflict }`,
+  so `code()` and every consumer are unchanged. Header-name validation
+  (`load.rs:240` `check_header`) stays specific to object rows.
+
+**Memo (built on N17 / N35)**
+
+- **R7. Three single-flight layers in one generation.** `runtime.rs`'s
+  `Generation` (`runtime.rs:177-188`) holds
   `raw: HashMap<DataSourceIdentity, Slot<R>>`,
   `sources: HashMap<SourceKey, Slot<S>>`,
-  `bindings: HashMap<BindKey, Slot<B>>` where
-  `SourceKey { identity: DataSourceIdentity, format: DataFormat, delimiter: Option<u8> }`
-  and `BindKey = (SourceKey, String /*contract key*/, Option<bool> /*effective header*/)`.
-  `DataMemo` becomes `DataMemo<R, S, B>`. All four maps (with `contracts`) are
-  replaced together in `Generation::new`, so `invalidate_memo` clears every
-  layer and still never touches the read set. `R` is
-  `RawSource { content: RawContent, len: usize }` with
-  `RawContent::Bytes(Arc<[u8]>)` (local file) and `RawContent::Text(Arc<str>)`
-  (fetched, BOM already stripped by the existing `strip_bom` call), `len` the
-  size reported in the `bytes` tracing field (local byte count; fetched body
-  length before BOM stripping, as today). `DataFormat` already derives `Hash`
-  (`biscuit-file/lib/src/format.rs`).
-- **R8 — Counters.** `reads` increments inside the raw layer's loader only;
-  `parses` increments via `note_parse()` after a successful parse (unchanged);
-  `binds` increments in the bind layer (unchanged); `source_hits` counts
-  parsed-source hits (unchanged definition, now keyed by `SourceKey`);
-  `bind_hits` unchanged. There is **no** new counter and no `raw_hits`: raw
-  reuse is read as `reads` staying flat, as the spec directs. Existing
-  two-argument tests keep passing unmodified because a parse-layer hit never
-  consults the raw layer.
-- **R9 — UTF-8 decoding stays in the interpretation layer.** `RawContent::Bytes`
-  holds undecoded bytes; `parse.rs::decode_local` takes `&[u8]` (callers:
-  `parse_local_document`, which passes `&bytes`, and the new parse loader).
-  A UTF-8 error therefore names the format of the call that triggered the
-  parse and is cached under that call's `SourceKey`.
-- **R10 — `parse_text` signature** becomes
+  `bindings: HashMap<BindKey, Slot<B>>`, and the existing `contracts`, where
+  `pub(crate) struct SourceKey { identity: DataSourceIdentity, format: DataFormat, delimiter: Option<u8> }`
+  and `pub(crate) struct BindKey { source: SourceKey, contract: String, header: Option<bool> }`
+  (both `Clone + Hash + Eq`; `DataFormat` already derives `Hash`). `DataMemo`
+  becomes `DataMemo<R, S, B>`. Evidence: the spec's effective-key table; the
+  current maps are `sources` keyed by identity and `bindings` by
+  `(identity, contract key)` (`runtime.rs:173-182`). All maps are replaced
+  together by `Generation::new`, so `invalidate` clears every layer and never
+  touches the read set (`runtime.rs:263-268`).
+- **R8. Generation chaining.** `single_flight` (`runtime.rs:276-311`) is reused
+  unchanged for all four maps. The raw layer runs with `expected = None`; the
+  parse layer with `expected = Some(raw_entry.generation)`; the bind layer with
+  `expected = Some(source_entry.generation)` (as `bind` already does at
+  `runtime.rs:349`). An entry produced from an older generation is computed for
+  its caller alone and never memoized, so an in-flight read started before an
+  invalidation cannot fill the new maps (spec: "the generation check preventing
+  an older in-flight read from filling the new maps"). `memo_generation()` (N35)
+  keeps reporting the single generation number shared by all layers; if A5
+  found a separate counter, it is bumped inside `DataMemo::invalidate` under
+  the same lock.
+- **R9. Raw-source entry carries the bytes' result and the observation.**
+  `pub(crate) struct RawSource { text: Result<Arc<str>, usize>, len: usize, observation: <N17 Observation> }`:
+  `text` is the BOM-stripped decoded text, or `Err(offset)` of the first
+  invalid UTF-8 byte in the **original** bytes (BOM counted, the existing rule
+  at `parse.rs:48-62`); `len` is the size reported in the `bytes` span field
+  (local byte count; fetched body length before BOM stripping, as `load.rs:101`
+  does). Decoding once in the raw layer shares one `Arc<str>` across every
+  interpretation (spec: "Share the retained bytes/text rather than copying it
+  for each format"), while the raw result is format-free; the parse layer turns
+  `Err(offset)` into `DataError::Malformed` naming **its** format, cached under
+  its `SourceKey` (spec: "Keep format-dependent UTF-8 errors in the
+  interpretation layer"). The raw loader reads local bytes through the same
+  call A3 found (N18 `buffers::read`) and computes the observation exactly where
+  N17 placed it; a fetched body becomes `Ok(Arc::from(strip_bom(&body)))` with
+  its observation. A local read failure is the existing memoized
+  `DataError::FileReference` (`load.rs:103-111`). The observation moves off
+  `LoadedSource` (where N17 stored it) onto `RawSource`; `LoadedSource` keeps
+  `content`, `format`, `text: Arc<str>` (an `Arc` clone of the raw text), and
+  `bytes`.
+- **R10. Observations are re-recorded from the raw layer on every call.**
+  `load_data` consults the raw layer on every non-null call (a raw hit is a map
+  lookup and bumps no counter), then the parse layer, then the bind layer, as
+  three sequential calls; no loader calls another layer, so no `OnceLock` is
+  ever waited on while another is held. After the raw lookup, `load_data`
+  records the entry's observation through the N17 recording call, whichever
+  layer later answers; a memoized raw failure records the failed-read
+  observation N17 defines for it (`hash: None`), built from the identity. So a
+  hit at the parse or bind layer still re-records, which N17 requires and which
+  a parse-only lookup would lose. This changes no two-argument count: `reads`
+  rises only when the raw loader runs and `source_hits` still counts parse-layer
+  hits.
+- **R11. Counters.** `reads` increments inside the raw loader only (moved from
+  `load_source`, `runtime.rs:325`); `parses` via `note_parse()` after a
+  successful parse (unchanged); `binds` per binder run (unchanged);
+  `source_hits` counts parse-layer hits; `bind_hits` unchanged. No new counter
+  and no `raw_hits`: raw reuse reads as `reads` staying flat (spec). The
+  `DataRuntimeStats` field docs (`runtime.rs:119-137`) are updated to say this.
+- **R12. Memo API.** `DataMemo::load_raw(&identity, loader) -> Result<RawEntry<R>, Arc<DataError>>`
+  (`RawEntry { generation, value: Arc<R>, from_memo }`);
+  `load_source(&SourceKey, &RawEntry<R>, loader)`; `bind(&SourceEntry<S>, contract_key, header, binder)`.
+  `SourceEntry` stores its `SourceKey` (keeping `identity()` and adding
+  `key()`); `DataRuntime`'s wrappers (`runtime.rs:470-489`) follow. Deferral
+  removal and failure memoization are unchanged: one computation per key for
+  concurrent callers, including failures; the reference check's
+  `RemoteNotEnabled` deferral is returned before any memo call (R14 step 9), so
+  it is still never stored.
+
+**Parsing and the row view**
+
+- **R13. `parse_text` takes the delimiter.**
   `parse_text(text: &str, format: DataFormat, delimiter: Option<u8>, identity: &DataSourceIdentity)`;
-  `Csv`/`Tsv` call `parse_delimited(text, delimiter.unwrap_or(b',' or b'\t'))`;
-  other formats ignore `delimiter`. `parse_local_document` passes `None`.
-  `parse_delimited`'s `InvalidDelimiter` arm remains unreachable because
-  `delimiter_byte` already refused the byte.
-- **R11 — Headerless row view.** `TabularSource` (in `error.rs`) gains
-  `header: bool` and two methods:
-  `row_count(&self) -> usize` and `row(&self, index: usize) -> Option<&DelimitedRecord>`.
-  With `header == true` they read `data.rows`; with `false` they read
-  `data.headers` (the first nonblank record, which the reader stores there
-  without interpreting) followed by `data.rows`. `load.rs::table_rows` (binding)
-  and `locate.rs::table_offset` (diagnostic lookup) must both iterate through
-  these methods and never touch `data.rows` directly; this is the "same
-  logical row view" the spec requires. No text is rewritten and no synthetic
-  header is prepended. Object mode is only reachable with `header == true`
-  (R5), so header-name validation (`check_header`) is untouched.
-- **R12 — Execution order in `load_data_fn`** (replaces the current order in
-  `load.rs`): (1) null `file` → `Ok(Value::Null)` immediately (existing first
-  line; the options are already bound by the shared binder, so literal mistakes
-  were already rejected); (2) `DataOptions::from_bound(call.args().get(2))`;
-  (3) read `as`, `prepare_contract`; (4) resolve the identity and `record` it
-  in the read set; (5) effective format = `options.format` else
-  `format_of(&identity)` (the `dm.data.unsupported_format` path); (6)
-  `check_applicability`; (7) for tabular formats, `contract.row_mode()` and,
-  when the effective header is `false`, `require_positional_rows`; (8) remote
-  fetch / host policy (`ctx.fetch_remote_text`) — **every call, before any
-  memo lookup**, exactly as today; (9) `load_source(SourceKey, …)` whose loader
-  calls `load_raw(identity, …)` then decodes and parses; (10) `bind(…)` keyed
-  per R7. Evidence for the ordering: the spec's "validate bound option values
-  first, then prepare the contract, resolve and record the source, choose the
-  effective format, check option applicability and row shape, enforce remote
-  policy, read and parse, and bind".
-- **R13 — Remote handling is otherwise unchanged.** Option differences never
-  change a URL identity (query and fragment stay); an explicit `format`
-  grants no network access; URL discovery (`remote.rs::REMOTE_READ_FUNCTIONS`
-  looks only at argument 0) needs no change; the reference check's
-  `RemoteNotEnabled` deferral is returned before the memo (step 8) so it is
-  still never cached.
-- **R14 — Passive judgment design (implemented in Phase 2).**
-  `call_check.rs::ArgumentType` gains one variant
+  `Csv` and `Tsv` call `parse_delimited(text, delimiter.unwrap_or(b',' / b'\t'))`
+  in place of the fixed bytes at `parse.rs:91-92`; other formats ignore it.
+  `parse_local_document` (`parse.rs:156`, public) passes `None` and keeps its
+  signature. Add `pub(crate) fn decode_bytes(bytes: &[u8]) -> Result<Arc<str>, usize>`
+  (the raw layer's decoder) and `pub(crate) fn utf8_failure(identity, format, offset) -> DataError`;
+  `decode_local` is reimplemented over them so its message and location do not
+  change.
+- **R14. Execution order in `load_data_fn`** (replaces `load.rs:52-131` and the
+  module doc at `load.rs:1-9`):
+  1. `file` is `null` → `Ok(Value::Null)` (the binder already ran, so literal
+     and binding mistakes were reported; computed options are not checked
+     further, and nothing is imported or read);
+  2. `DataOptions::from_bound(call.args().get(2))` (semantic option checks);
+  3. read `as` and `prepare_contract` (unchanged, `load.rs:56-60`);
+  4. resolve the identity, including the N17 not-found probe, and `record` it
+     in the read set (unchanged, `load.rs:62-75`);
+  5. effective format: `options.format`, else `format_of(&identity)`
+     (`load.rs:146-164`, the `dm.data.unsupported_format` path, which an
+     explicit format skips entirely);
+  6. `options.check_applicability(format)`;
+  7. for tabular formats, `contract.row_mode()` (`load.rs:79-84`) and, when the
+     effective header is `Some(false)`, `require_positional_rows`;
+  8. the N28 slot gate, at the position A4 found, which must precede steps
+     9–12 (it is not moved; a gate later than step 9 is a rebase failure);
+  9. remote fetch and host policy through `ctx.fetch_remote_text`, on every
+     call, before any memo lookup (unchanged, `load.rs:86-95`);
+  10. `load_raw(&identity, …)`, then record the observation (R10);
+  11. `load_source(&SourceKey { identity, format, delimiter: effective_delimiter(..) }, …)`,
+      whose loader turns the raw text into `LoadedSource` (or the format's
+      UTF-8 failure), parses with the effective delimiter, and calls
+      `note_parse()`;
+  12. `bind(…, &contract.key, effective_header(..), …)`.
+  Evidence: the spec's "validate bound option values first, then prepare the
+  contract, resolve and record the source, choose the effective format, check
+  option applicability and row shape, enforce remote policy, read and parse,
+  and bind". No parse or fetch follows an option or row-shape error, and
+  resolution failures keep precedence over format-dependent checks. The
+  `#[tracing::instrument]` fields (`load.rs:46-51`) record the effective format
+  and gain `delimiter` and `header` (`Empty` placeholders), plus a `raw_memo`
+  flag beside `source_memo`/`bind_memo`.
+- **R15. One logical row view.** `TabularSource` (`error.rs:158-163`) gains
+  `header: bool` and two methods: `row_count(&self) -> usize` and
+  `row(&self, index: usize) -> Option<&DelimitedRecord>`. With `header == true`
+  they read `data.rows`; with `false` they read `data.headers` (the first
+  nonblank record, which `read_delimited` stores without interpreting) followed
+  by `data.rows`. `load.rs::table_rows` (`load.rs:208-232`) and
+  `locate.rs::table_offset` (`locate.rs:172-191`, which reads `data.rows`
+  directly at `:176`) both iterate only through these methods. The root pointer
+  still resolves to the first record's offset. The parsed `DelimitedData` is
+  never mutated, no synthetic header is prepended, and no text is rewritten, so
+  `/0/1` with no header names the second cell of the first input record at its
+  raw offset. Object mode is reachable only with `header == true` (R6), so
+  `check_header` runs only there. A table with no records still binds `[]`.
+- **R16. `bind_source` takes the effective header** and builds the
+  `TabularSource { mode, header, data }` it stores in `ContractMismatch`
+  (`load.rs:174-201`).
+
+**Passive judgment**
+
+- **R17. `ArgumentType::PartialObject`.** `call_check.rs:108-121`'s
+  `ArgumentType` gains
   `PartialObject { shape: ScopeShape, literals: serde_json::Map<String, Value>, computed: Vec<String> }`,
-  produced by `ArgumentType::of` only for an object literal (through
-  `Paren`) with at least one literal-valued and at least one non-literal
-  member. Classification (`classify_argument_with_definitions`) treats it as
-  `Typed(shape)`; `Display` delegates to `Typed`. All other argument types
-  keep their meaning. Evidence: `ArgumentType` is matched only inside
-  `call_check.rs` (17 sites; no other crate matches it), so the addition is
-  contained, and without it a literal `delimiter` beside a computed member
-  would be invisible, violating "check literal option values even when
-  another argument is computed".
-- **R15 — Passive verdict order** (one `DataProblem` per call, matching
-  execution order): (a) literal option values (`delimiter` string via
-  `delimiter_byte`; `format` string via `format_from_name` only as a source of
-  the format, since the binder owns bad names); (b) the existing contract
-  judgment (unchanged); (c) applicability of a literal non-null `delimiter` /
-  `header` against the *provable* effective format; (d) the tabular row rule,
-  now also `header: false` ⇒ `require_positional_rows`. Only `Value::String`
-  delimiters and `Value::Bool(false)`/`Bool(true)` headers are judged
-  passively; any other literal shape is left to the binder and execution.
-  The effective format is provable when: a literal non-null `format` exists
-  (even with a computed `file`); otherwise the options are *closed*
-  (omitted, literal `null`, a fully literal object, or a `PartialObject`
-  whose `computed` list lacks `format`) **and** `file` is a literal string
-  whose extension is supported (existing `is_tabular_path` extension logic,
-  generalized into `provable_format`). A variable, call, or `Unknown` options
-  argument, or a computed `format`, makes the format unprovable and defers
-  every format-dependent check (spec: a computed options object might
-  override a literal extension). Dead-branch behavior and literal `null` file
-  behavior are unchanged: option judgments never look at `file` except for
-  its extension.
-- **R16 — Typing.** `load_data_type` in `call_check.rs` accepts `args.len()`
-  of 2 or 3 (`[file, contract]` or `[file, contract, _options]`) and ignores
-  the third; the inferred type stays the literal `as` type with the same
-  null-file handling, including for computed options.
-- **R17 — Hover needs no new code.** `format_function_block` renders
-  `typed_signature()`, which already prints the third parameter
-  (`[options: {…} | null]`) and the description (R2). Hover gets a test only.
-- **R18 — DMLS completion is a new module** `dmls/src/providers/option_argument.rs`
+  produced by `ArgumentType::of` (`call_check.rs:128-136`) only for an object
+  literal (through `Paren`) with at least one literal-valued and at least one
+  non-literal member. Classification treats it as `Typed(shape)` and `Display`
+  delegates to `Typed`, so every other function's verdict is unchanged.
+  Evidence: `ArgumentType` is matched only inside `call_check.rs`; without it a
+  literal `delimiter` beside a computed member is invisible, violating "check
+  literal option values even when another argument is computed".
+- **R18. Passive verdict order** in `load_data_problem` (`call_check.rs:1096`,
+  today `let [file, contract] = arguments else { return None }`), accepting two
+  or three arguments, one `DataProblem` per call in execution order:
+  (a) literal option values: a `Value::String` `delimiter` through
+  `delimiter_byte`; a `Value::String` `format` through `format_from_name` only
+  as the source of the format (bad names are the binder's); (b) the existing
+  contract judgment (`literal_contract_problem`, `call_check.rs:1114-1143`,
+  unchanged); (c) applicability (R4 `check_applicability`, including the TSV
+  delimiter rule) of literal non-null `delimiter`/`header` against the
+  **provable** effective format; (d) the tabular row rule, plus
+  `require_positional_rows` when a literal `header: false` and a provably
+  tabular format are both present. The effective format is provable when a
+  literal non-null `format` exists (even with a computed `file`); otherwise
+  when the options are closed (omitted, literal `null`, a fully literal object,
+  or a `PartialObject` whose `computed` lacks `format`) **and** `file` is a
+  literal whose extension is supported (`is_tabular_path`,
+  `call_check.rs:1155-1163`, generalized to `provable_format`). A variable,
+  call, or `Unknown` options argument, or a computed `format`, makes the format
+  unprovable and defers every format-dependent check (spec: "a computed options
+  object might override a literal filename's extension"). Dead-branch behavior
+  and literal-`null`-file behavior are unchanged; literal option mistakes are
+  still rejected for a `null` file because (a) never looks at `file`.
+  `data_problem` (`call_check.rs:1145-1151`, today `argument: 1`) maps
+  `InvalidOptions` to argument `2` and everything else to `1`, so the editor
+  ranges it via `argument_spans` (`call_check.rs:882`).
+- **R19. Typing.** `load_data_type` (`call_check.rs:236-254`) accepts
+  `[file, contract]` or `[file, contract, _options]` and ignores the third; the
+  inferred type stays the literal `as` type with the same null-file handling,
+  including for computed options. The `expression_type` doc table row
+  (`call_check.rs:150`) and both functions' docs describe both arities.
+
+**DMLS**
+
+- **R20. Hover needs no new code.** `format_function_block` renders
+  `typed_signature()` and the catalog description (R3); hover gets a test only.
+- **R21. Option completion is a new module** `dmls/src/providers/option_argument.rs`
   (registered in `providers/mod.rs`, called from `providers/dsl.rs::completion`
-  and `providers/frontmatter.rs` next to the `type_definition_argument`
-  calls, for `Site::Body` and `Site::Frontmatter`). Behavior: when the cursor
-  is inside an object literal that is argument *n* of a call, and the catalog
-  overload's parameter *n* (after dropping `null`) is an inline object, it
-  claims the cursor. At a key position it offers that object's declared
-  property names not already present in the literal; at the value position
-  of an `enum` property it offers the quoted members; at the value position
-  of a `boolean` property it offers `true` and `false`; any other value
-  position returns `None` so ordinary expression completion runs. Property
-  names and members are read from `ExpressionFunctionDescriptor.function_type.parameters[n].def`
-  (`PropertyDef` → `TypeExpr::InlineObject(shape).properties`), never from a
-  list in the editor. Parameters typed plain `object` (`pr_list`,
-  `cicd_list`) have no declared shape and are unaffected. The shared
-  expression-region and string-escape helpers in `type_definition_argument.rs`
-  (`Analyzed`, `expression_region_at` use, projection/encode) are made
-  `pub(crate)` and reused instead of duplicated. The new module recovers
-  unfinished input with the expression `Lexer` (the technique
-  `string_argument_call` already uses): tokenize the expression text up to
-  the cursor, keep a stack of open `(`/`{` frames recording call name,
-  argument index, and for `{` the last completed key and whether a `:` was
-  seen since the last `,`.
-- **R19 — No spike, no performance work.** The spec says work counts answer
-  the reuse question and requires no benchmark; nothing here needs a runtime
-  measurement. No L2/L3 test, no terminal or browser window, so focus rules
-  are moot.
-- **R20 — Fixtures and example outputs** (Phase 4): add to
-  `catalog/example_data/` and `EXAMPLE_DATA_FILES` (`catalog/mod.rs`)
-  `fixture-headerless.csv` (`web,8080\ndb,5432\n`),
-  `fixture-semicolon.txt` (`name;port\nweb;8080\ndb;5432\n`), and
-  `fixture-export` (no extension; the same JSON text as `fixture.json`). The
-  catalog gains exactly three examples:
+  beside `type_definition_argument::completion` at `dsl.rs:57` and from
+  `providers/frontmatter.rs` beside `frontmatter.rs:70`, for `Site::Body` and
+  `Site::Frontmatter`). When the cursor is inside an object literal that is
+  argument *n* of a call and the catalog overload's parameter *n* (after
+  dropping `null`) is an inline object, it claims the cursor: at a key position
+  it offers the declared property names not already present; at the value of an
+  `enum` property, the quoted members (all nine for `format`, aliases included,
+  because they are declared); at the value of a `boolean` property, `true` and
+  `false`; at any other value position it returns `None` so ordinary expression
+  completion runs. Names and members come from
+  `ExpressionFunctionDescriptor.function_type.parameters[n].def`
+  (`TypeExpr::InlineObject(shape).properties`), never from an editor list
+  (spec). Plain `object` parameters (`pr_list`, `cicd_list`) are unaffected.
+  The shared helpers in `type_definition_argument.rs` (`Analyzed`, region and
+  projection/encode helpers) are made `pub(crate)` and reused. Unfinished input
+  is recovered with the expression `Lexer` (the technique `string_argument_call`
+  uses): tokenize up to the cursor, keep a stack of open `(`/`{` frames with
+  call name, argument index, and for `{` the last completed key and whether a
+  `:` was seen since the last `,`.
+
+**Remote, slots, and robustness**
+
+- **R22. Remote handling is otherwise unchanged.** Options never change a URL
+  identity (query and fragment kept); an explicit `format` grants no network
+  access and never bypasses redirect policy; host authorization (step 9)
+  precedes every cached remote body and interpretation.
+- **R23. Test placement.** New L1 files are registered once in Phase 1 as
+  stubs so parallel test tasks never edit a shared `mod` list:
+  `lib/tests/l1/{load_data_options, load_data_options_passive, load_data_headerless, load_data_options_remote, load_data_options_slots}.rs`
+  in `lib/tests/l1/main.rs`, and `dmls/tests/l1/option_arguments.rs` in
+  `dmls/tests/l1/main.rs`. CLI tests extend `cli/tests/l1/load_data.rs`. Helpers
+  private to existing files (`write`, `entry`, `compose_file`,
+  `load_data_runtime.rs:41-74`) are re-declared locally.
+- **R24. Input robustness matrix** (one loader: the options object; validators:
+  the shared binder and `DataOptions`). Default for every invalid shape: a
+  located error, nothing read (`reads == 0`), nothing bound. Exceptions,
+  asserted individually: absent key, explicit `null` key, `null` options, and
+  `{}` mean the defaults; the shared coercion engine's normal conversions apply
+  (expected: `delimiter: 5` binds to `"5"` and is valid, `header: "false"` binds
+  to `false`; the test asserts the engine's actual outcome and, if it differs,
+  the implementation log records it; no handler rule is added). Field shapes:
+  for each of `format`, `delimiter`, `header`: absent, `null`, wrong type
+  (number, list, object), empty string; for `format` additionally `"CSV"`,
+  `" csv"`, `"yml"` (valid alias), `"ndjson"` (valid alias), `"text"`; for
+  `delimiter` `""`, `",,"`, `"é"`, `"\""`, `"\r"`, `"\n"`, `","`, `";"`, `"|"`,
+  `"\t"`; whole-object shapes `null`, `{}`, `5`, `"csv"`, `[]`, unknown key
+  `quote`. Control row: unedited `rows.csv` with header and `{}`. Two wiring
+  cells (one binder error, one `dm.data.invalid_options`) go through
+  `Markdown::compose_with_warnings`; one CLI test proves the output path. Smell
+  grep before closing Phase 2: `rg -n 'serde\(default\)|unwrap_or_default\(\)|filter_map\(.*as_str|\.ok\(\)' lib/src/markdown/compose/expression/data/options.rs`
+  returns nothing on the option parse.
+- **R25. Error locations.** Passive findings are ranged by `DataProblem.argument`:
+  `2` for `dm.data.invalid_options`, `1` (`as`) for the row-shape conflict.
+  At execution the evaluator carries no per-argument spans (`argument_spans`
+  exist only on `CallCheck`, `call_check.rs:767`), so an execution-time
+  `dm.data.invalid_options` (computed options only; a literal mistake is always
+  caught passively first) is located at the call expression with the key named
+  in the message. This narrows the spec's "locate it at the third argument" for
+  computed options only; Phase 1's log task records it as a departure and the
+  docs state it.
+- **R26. Shared message text.** Passive and execution messages for
+  `InvalidOptions` and `HeaderlessObjectRows` come from the same builders
+  (R4, R6); a test compares them.
+- **R27. Dynamic-schema surfaces accept the third argument.** The N29 target
+  collector and N20 pre-fetch discovery read `load_data`'s target from
+  argument 0 at any arity; the slot class of `load_data` stays `InputReading`;
+  an options object of literals adds no read and no forbidden binding (N14). If
+  A6 or A7 found an exact-arity match, Phase 2 Wave 2 relaxes it in that file
+  (named in the log) and nothing else.
+- **R28. Fixtures and catalog examples** (Phase 5): add to
+  `lib/src/markdown/compose/expression/catalog/example_data/` and
+  `EXAMPLE_DATA_FILES` (`catalog/mod.rs`) `fixture-headerless.csv`
+  (`web,8080\ndb,5432\n`), `fixture-semicolon.txt`
+  (`name;port\nweb;8080\ndb;5432\n`), and `fixture-export` (no extension; the
+  same JSON as `fixture.json`). Exactly three examples are added to the entry:
   `load_data("fixture-headerless.csv", "tuple([string, number])[]", {header: false}) => [["web", 8080], ["db", 5432]]`,
   `load_data("fixture-semicolon.txt", "{name: string, port: number}[]", {format: "csv", delimiter: ";"}) => [{name: "web", port: 8080}, {name: "db", port: 5432}]`,
   `load_data("fixture-export", "{name: string, tags: string[]}", {format: "json"}) => {name: "Ada", tags: ["math", "engines"]}`.
   The generated page lists a data file when an example names it as a quoted
-  string (`example_data_section`), so no generator code changes; files whose
-  name has no recognized extension are fenced as `text`.
-- **R21 — Generated artifacts.** After the catalog edit, run
-  `just regen-expr-doc` (rewrites `docs/functions/load-data.md` and the table
-  in `docs/topics/darkmatter-expressions.md`) and `just regen-lifecycle-schema`
-  (rewrites the `load_data-short`/`load_data-long` types in
-  `schemas/partials/lifecycle.yaml`; the generator, not a hand edit, decides
-  whether the short form gains the optional element). Both parity checks run in
-  `just test`. Hand-edit nothing those recipes own.
-- **R22 — Test placement.** New L1 files are registered once, in Phase 1, as
-  stubs so parallel test tasks never edit the same `mod` list:
-  `lib/tests/l1/load_data_options.rs` (execution, matrix, memo reuse),
-  `lib/tests/l1/load_data_options_passive.rs` (passive verdicts, typing),
-  `lib/tests/l1/load_data_headerless.rs` (headerless table, positions),
-  `lib/tests/l1/load_data_options_remote.rs` (wiremock). `dmls` tests extend
-  `dmls/tests/l1/type_definition_arguments.rs` neighbors with the new file
-  `dmls/tests/l1/option_arguments.rs` (registered in `dmls/tests/l1/main.rs`).
-  CLI tests extend `cli/tests/l1/load_data.rs`. Fixtures use `tempfile` and
-  portable path helpers (`entry`, `biscuit_file::to_portable_string`) so they
-  pass on macOS, Linux, native Windows, and WSL2; CRLF content is written as
-  explicit bytes. Existing helpers are re-declared locally (they are private
-  per file today).
-- **R23 — Input robustness (what the matrix covers).** The options object is
-  validated by two shared validators — the **binder** (field types, enum
-  names, closed keys) and `DataOptions` (R3) — and loaded by no new document
-  loader; the CSV/TSV reader is unchanged (`biscuit-file::read_delimited`
-  already takes any permitted delimiter). So the matrix is a field-shape
-  matrix (Phase 2 task "Options matrix"), plus the headerless data table.
-  Default outcome for every invalid shape: a located error, nothing read,
-  nothing published. Exceptions: absent and explicit `null` both mean the
-  default; `delimiter: 5` converts to `"5"` and is valid (shared
-  coercion, spec: "normal conversions"); `header: "false"` converts to
-  `false`. Smell grep before declaring done (Phase 5): no
-  `#[serde(default)]`, `unwrap_or_default()`, `filter_map(.. as_str())`, or
-  `.ok()` on the option parse in `options.rs`.
+  string; an extensionless file is fenced as `text`.
+- **R29. Generated artifacts.** After a catalog edit run `just regen-expr-doc`
+  (rewrites `docs/functions/load-data.md` and the table in
+  `docs/topics/darkmatter-expressions.md`) and `just regen-lifecycle-schema`
+  (rewrites `load_data-short`/`load_data-long` in
+  `schemas/partials/lifecycle.yaml:685-688`; the generator decides whether they
+  gain the optional element). Both parity checks run in `just test`; hand-edit
+  nothing those recipes own.
+- **R30. No spike, no performance work.** The spec states work counts answer
+  the reuse question; nothing here needs a measurement.
 
-### Wave 1 (parallel; disjoint files)
+### Wave 1 (serial; gates the plan)
 
-- [ ] **Option model** — create `data/options.rs` per R3 with unit tests
+- [ ] **Rebase check and baseline** (R1)
+  - Read `darkmatter/features/2026-11-05-dynamic-schema-types/implementation-log.md`;
+    confirm its data-runtime and gate work (its Phase 4 "Data runtime
+    observations", "Gate hook", "Remote-read discovery") is implemented and
+    not mid-edit (`git status` shows no uncommitted change under the data
+    module, `functions/`, `compose/remote.rs`, `schemas/slots/`). If it is not,
+    stop and report.
+  - Create `implementation-log.md` in this feature folder with headings
+    Rebase check, Baseline, Departures, Decisions applied. Under Rebase check,
+    one entry per assumption A1–A10: "holds" with the verified symbol and
+    `path:line`, or the difference. For each failure, revise the affected
+    R-rules in this `plan.md` now and log the revision; do not proceed until
+    every assumption is "holds" or "revised".
+  - Seed Departures with R25 (execution location of computed-option failures).
+  - Run `just test` and `just lint` in `darkmatter/`; record pass/fail counts
+    and any pre-existing failure under Baseline.
+
+### Wave 2 (parallel; disjoint files)
+
+- [ ] **Option model and error types** (R4, R5, R6) —
+  `<Data module>/options.rs` (new), `error.rs`, `contract.rs`, `mod.rs`
   - Implement `DataOptions`, `format_from_name`, `delimiter_byte`,
-    `check_applicability`, `effective_delimiter`, `effective_header`.
-  - Unit tests in the file: control (`None`, `Null`, `{}` → default), every
-    delimiter shape (`","`, `";"`, `"|"`, `"\t"` valid; `""`, `",,"`, `"é"`,
-    `"\""`, `"\r"`, `"\n"` invalid, each message naming `delimiter`), format
-    names (7 valid, `"CSV"`, `"yml"`, `"ndjson"`, `" csv"`, `""` invalid),
-    applicability (`delimiter`/`header: true` on each of the five tree formats
-    and both tabular formats), wrong shapes reaching `from_bound`
-    (`format: 5`, `header: "x"`, unknown key `"quote"`) are `InvalidOptions`.
-  - Prerequisite: none. Risk: none.
-- [ ] **Error and conflict types** — R4 and R5
-  - Add `InvalidOptions`, `INVALID_OPTIONS_CODE`, `DATA_DIAGNOSTIC_CODES`
-    entry, `RowShapeConflict::HeaderlessObjectRows`, `require_positional_rows`,
-    exports in `data/mod.rs`; unit tests in `error.rs` (`code()`, Display,
-    `written_contract()`) and `contract.rs` (conflict display contains
-    `header: false`; `Provisional` stays open).
-  - Update the module list comment in `data/mod.rs`.
-- [ ] **Catalog signature** — R1 and R2
-  - Edit the `load_data` entry in `schemas/partials/functions.yaml` (signature
-    and description only; **no new examples yet**, they need Phase 2).
-  - Run `just regen-expr-doc` and `just regen-lifecycle-schema` (R21), check the
-    diff touches only `load_data` text, the function page, and the lifecycle
-    types. Update `load.rs::tests::failed_at`'s signature string to the new
-    signature text.
-  - Risk: the catalog loader must accept the inline-object parameter; the
-    registry/catalog tests (`function_catalog_parity`,
-    `function_binding_registry`, catalog `tests.rs`) run in the checkpoint and
-    prove it.
-- [ ] **Test stubs** — R22
-  - Create the four lib stub files and `dmls/tests/l1/option_arguments.rs`,
-    each with a module doc comment and no tests, and register them in
-    `lib/tests/l1/main.rs` and `dmls/tests/l1/main.rs`.
+    `check_applicability`, `effective_delimiter`, `effective_header`,
+    `invalid_options_message`; `InvalidOptions`, `INVALID_OPTIONS_CODE`, the
+    catalog entry, `HeaderlessObjectRows`, `require_positional_rows`; exports
+    and the module list comment in `data/mod.rs`.
+  - Unit tests in `options.rs`: `defaults_from_absent_null_and_empty`,
+    `aliases_normalize_to_canonical_formats` (`yml` → Yaml, `ndjson` → Jsonl),
+    `format_names_are_exact` (`CSV`, ` csv`, `""`, `text` → `None`),
+    `valid_delimiters` (`,` `;` `|` `\t`), `invalid_delimiters_name_the_key`
+    (`""`, `,,`, `é`, `"`, CR, LF), `tabular_options_on_tree_formats_are_invalid`
+    (each of five tree formats × `delimiter`, `header: true`),
+    `tsv_accepts_only_a_tab_delimiter`, `csv_with_tab_stays_csv`,
+    `effective_values_share_defaults`, `unbound_shapes_are_invalid_options`.
+  - Unit tests in `error.rs` (`code()`, `Display`, `written_contract() == None`)
+    and `contract.rs` (`HeaderlessObjectRows` display mentions `header: false`;
+    `Provisional` and `List` stay open).
+- [ ] **Catalog signature** (R2, R3, R29) — `schemas/partials/functions.yaml`
+  plus regenerated `docs/functions/load-data.md`,
+  `docs/topics/darkmatter-expressions.md` (generated table only),
+  `schemas/partials/lifecycle.yaml`
+  - Edit signature and description only (examples come in Phase 5). Run both
+    regen recipes; check the diff touches only `load_data` text.
+  - Add a catalog unit test in `lib/src/markdown/compose/expression/catalog/tests.rs`,
+    `load_data_options_parameter_is_a_closed_inline_object`, asserting the
+    descriptor's parameter 2 is optional, admits `null`, and is an inline object
+    with exactly `format` (nine-member enum), `delimiter`, `header`.
+  - Risk: the binder's handling of a closed inline-object parameter has no
+    catalog precedent. Prove it in this task with a binder-level test (in the
+    same catalog test file) that `{quote: ","}` and `{header: [1]}` fail binding
+    at argument 2 and `{header: null}` binds; if the binder cannot do this,
+    stop and revise R2 with the author (R1 discipline).
+- [ ] **Test stubs** (R23) — the five lib stub files, `dmls/tests/l1/option_arguments.rs`,
+  `lib/tests/l1/main.rs`, `dmls/tests/l1/main.rs`
+  - Each stub has a module doc comment and no tests.
 
 ### Checkpoint 1
 
-- [ ] `cargo nextest run -p darkmatter -E 'test(options) | test(catalog) | test(function_binding_registry) | test(function_catalog_parity) | test(lifecycle)'` passes; a two-argument `load_data` call still evaluates (existing `load_data_*` suites pass unmodified).
+- [ ] `cargo nextest run -p darkmatter -E 'test(options) | test(catalog) | test(function_binding_registry) | test(function_catalog_parity) | test(lifecycle) | test(load_data)'`
+  passes; existing `load_data_*` suites pass unmodified (a two-argument call
+  still evaluates; a three-argument call binds and is ignored by the unchanged
+  handler).
 
-## Phase 2: Library judgment and execution
+## Phase 2 — Library judgment and execution
 
-Depends on Phase 1. Wave 1 tasks touch different files and run in parallel;
-Wave 2 needs Wave 1; Wave 3 tests run in parallel.
+Depends on Phase 1. Wave 1 tasks touch disjoint files.
 
 ### Wave 1 (parallel)
 
-- [ ] **Passive check** — `call_check.rs` per R14, R15, R16
-  - Add `ArgumentType::PartialObject` and its construction in
-    `ArgumentType::of`; delegate classification and `Display` to `Typed`.
-  - Replace `load_data_problem`'s two-element destructure with a 2- or
-    3-element one; build an `OptionsView` (private enum: `Closed(literals)`,
-    `Partial { literals, computed }`, `Unknown`) from the third
-    `ArgumentType` (`Literal(Null)`/missing → closed and empty;
-    `Literal(Object)` → closed; `PartialObject` → partial; everything else →
-    unknown). Implement `provable_format` and the verdict order of R15,
-    reusing `DataOptions` helpers (`delimiter_byte`, `format_from_name`,
-    `check_applicability` semantics via a shared message builder so passive
-    and execution text are byte-identical). The row rule calls
-    `classify_rows` then `require_positional_rows` when a literal
-    `header: false` and a tabular format are both provable.
-  - `data_problem(error)` keeps mapping `DataError::code()`; add the
-    argument mapping (`InvalidOptions` → 2, others → 1) there.
-  - `load_data_type` accepts arity 2 or 3 (R16).
-  - Update the doc comments on `load_data_problem`, `load_data_type`, and the
-    table in `expression_type`'s doc (`load_data(file, '<contract>')` row) so
-    they describe both arities (drift rule).
-  - Risk: `PartialObject` must not change any other function's verdict; the
+- [ ] **Memo layers** (R7–R12) — `<Data module>/runtime.rs`
+  - Add `RawSource`, `RawEntry`, `SourceKey`, `BindKey`; `DataMemo<R, S, B>`;
+    `load_raw` (counts `reads`), `load_source(&SourceKey, &RawEntry, …)` (counts
+    `source_hits`), `bind(…, header, …)`; `Generation::new` creates all four
+    maps; move the N17 observation from `LoadedSource` to `RawSource`; keep
+    `memo_generation()` covering all layers (R8).
+  - Update the module doc (`runtime.rs:1-19`: three layers, keys, generation
+    chaining, observations live on the raw layer) and the stats field docs.
+  - Rewrite in-file unit tests for the new generics, keeping each existing
+    assertion's intent (`runtime.rs:541-712`: read once and bind twice,
+    memo-answered flags, single-flight, invalidation, stale bind not memoized,
+    failure memoized but deferral not, read set survives invalidation, clones
+    share state, contract prepared once). Add
+    `raw_source_is_read_once_for_two_parse_keys`,
+    `a_raw_failure_is_shared_by_two_parse_keys`,
+    `invalidation_clears_all_three_layers_and_a_late_raw_load_never_populates_them`,
+    `a_parse_from_an_older_raw_generation_is_not_memoized`,
+    `concurrent_callers_share_one_raw_load_and_one_parse`,
+    `memo_generation_advances_once_per_invalidation`.
+- [ ] **Parse and row view** (R13, R15) — `<Data module>/parse.rs`, `error.rs`
+  (`TabularSource` only), `locate.rs`
+  - `decode_bytes`, `utf8_failure`, `decode_local` over them; `parse_text` with
+    the delimiter; module and function docs updated (CSV/TSV sentences).
+  - `TabularSource { mode, header, data }` with `row_count`/`row`;
+    `table_offset` uses them.
+  - Unit tests: `invalid_utf8_offset_is_format_free_until_named` (same bytes,
+    two formats, two messages, one offset), `custom_delimiter_parses`,
+    `headerless_view_includes_the_first_record`, and in `locate.rs`
+    `headerless_root_and_rows_use_the_logical_view` (`/0/1` → line 1, column 3
+    for `"a,b\n1,2\n"`; header-skipping behavior unchanged for `header: true`).
+- [ ] **Passive check and typing** (R17–R19, R25, R26) —
+  `lib/src/markdown/compose/expression/call_check.rs`
+  - `ArgumentType::PartialObject`; a private `OptionsView`
+    (`Closed(literals)`, `Partial { literals, computed }`, `Unknown`) built from
+    the third `ArgumentType`; `provable_format`; the R18 verdict order reusing
+    `options.rs` helpers; `data_problem` argument mapping; `load_data_type`
+    arity 2 or 3; doc comments for both arities.
+  - Risk: `PartialObject` must not change another function's verdict; the
     existing `design_time_call_check`, `flow_sensitive_narrowing`, and
-    `variable_type_projection` suites guard that.
-- [ ] **Memo layers** — `runtime.rs` per R7 and R8
-  - Introduce `RawSource`, `RawContent`, `SourceKey`, `BindKey`; make
-    `DataMemo<R, S, B>`; add `load_raw(identity, loader)` (counts `reads`),
-    change `load_source` to take `&SourceKey` (no longer counts `reads`; counts
-    `source_hits`), change `bind` to take `(source, contract_key, header)`.
-    Keep `single_flight`, deferral removal, generation checks, and
-    `invalidate` semantics exactly; `Generation::new` creates all four maps.
-  - Update `DataRuntime::{load_source, load_raw, bind}` wrappers, the module
-    doc (three layers, key definitions), and the `DataRuntimeStats` field docs
-    (`reads` = raw source loads; `source_hits` = parsed-source hits).
-  - Rewrite the in-file unit tests for the new generics and keys; keep every
-    existing assertion's intent (single-flight, invalidation generation,
-    stale-source bind not memoized, failure memoized but deferral not, read
-    set survives invalidation). Add: raw reuse across two `SourceKey`s
-    (`reads == 1`, two parses), a raw failure shared by two keys, and a late
-    old-generation raw load not populating the new maps.
-- [ ] **Parse and row view** — `parse.rs`, `error.rs`, `locate.rs` per R9–R11
-  - `decode_local(&[u8], …)`, `parse_text(…, delimiter, …)`, and
-    `parse_local_document` (still `Vec<u8>` public signature) adapt; update
-    their doc comments and the CSV/TSV sentences in the module docs.
-  - `TabularSource { mode, header, data }` with `row_count` / `row`;
-    `locate.rs::table_offset` and its unit tests use them (root path still
-    resolves to the first record's offset; `/i/…` indexes the logical row
-    view).
-  - Add unit tests: headerless view of `"a,b\n1,2\n"` has two rows; locator
-    resolves `/0/1` to line 1 column 3 for a headerless table and keeps the
-    existing header-skipping behavior for `header: true`.
+    `variable_type_projection` suites guard it in the checkpoint.
 
-### Wave 2
+### Wave 2 (after Wave 1)
 
-- [ ] **Execution flow** — `load.rs` per R12 and R13
-  - Rewrite `load_data_fn` in the order of R12 using `DataOptions`,
-    `effective_*`, `SourceKey`, and the new memo calls; move the file-reading
-    closure into the raw loader (`std::fs::read` → `RawContent::Bytes`;
-    fetched body → `RawContent::Text(Arc::from(strip_bom(&body)))` with
-    `len = body.len()`); the source loader decodes with `decode_local` /
-    clones the text `Arc`, parses with the effective delimiter, calls
-    `note_parse()`, and builds `LoadedSource`.
-  - `bind_source` and `table_rows` take the effective header; `table_rows`
-    builds `Value::Array` through `TabularSource::row_count/row`, a table
-    with no records still yields `[]`, and `TabularSource` stored in
-    `ContractMismatch` carries `header`.
-  - Record `format` in the tracing span from the *effective* format; add the
-    effective `header` and `delimiter` span fields (`Empty` placeholders in
-    the `#[tracing::instrument]` field list).
-  - Update the module and function docs (order, third argument, null file
-    before options) and the `refine_binding_error` unit-test fixture signature text
-    (change it to the new three-parameter signature).
-  - Prerequisites: all Wave 1 tasks. Risk: keeping the two-argument counts
-    unchanged — the existing `load_data_runtime`, `load_data_execution`,
-    `load_data_passive`, and `compose_read_set` suites are the guard and run
-    in the checkpoint before new tests are added.
+- [ ] **Execution flow** (R9, R10, R14, R16, R22, R27) — `<Data module>/load.rs`,
+  plus only the file(s) the rebase check named under A6/A7, if any
+  - Rewrite `load_data_fn` in the R14 order; the raw loader holds the read
+    (`buffers::read` per A3) and the observation; the parse loader turns the
+    raw text into `LoadedSource` or the format's UTF-8 failure; record the
+    observation after every raw lookup (R10); `bind_source` and `table_rows`
+    take the effective header and use `TabularSource::row_count/row`.
+  - Update the module doc (`load.rs:1-9`), the function doc (`load.rs:33-45`,
+    third argument, null file before options), span fields, and the
+    `failed_at` test fixture signature string (`load.rs:307`) to the new
+    signature text.
+  - If A6/A7 found an exact-arity match, relax it to "argument 0 at any arity"
+    and adjust its doc comment.
+  - Risk: unchanged two-argument counts and read sets; the existing suites are
+    the guard and run in the checkpoint before new tests are written.
 
 ### Checkpoint 2
 
-- [ ] `cargo nextest run -p darkmatter -E 'test(load_data) | test(compose_read_set) | test(design_time_call_check) | test(flow_sensitive_narrowing) | test(variable_type_projection)'` passes with the new code and **no existing test modified except unit tests of `runtime.rs`**.
+- [ ] `cargo nextest run -p darkmatter -E 'test(load_data) | test(compose_read_set) | test(design_time_call_check) | test(flow_sensitive_narrowing) | test(variable_type_projection) | test(slot)'`
+  passes with no existing test modified except `runtime.rs`'s in-file unit
+  tests.
+- [ ] Smell grep of R24 is clean.
 
-### Wave 3 (parallel test authoring; each file independent)
+## Phase 3 — Library tests
+
+Depends on Phase 2. Each task owns one stub file from Phase 1; all run in
+parallel.
+
+### Wave 1 (parallel)
 
 - [ ] **Passive tests** — `lib/tests/l1/load_data_options_passive.rs`
-  - Cover, through `check_expression_calls` / `expression_call_diagnostics` /
-    `expression_type` with `TypeScope::unguarded` (no filesystem):
-    control (`{header: false}` with positional contract accepted); unknown
-    key, wrong field type, bad format name (binder diagnostics, argument
-    index 2); each invalid delimiter (`""`, `",,"`, `"é"`, `"\""`, `"\r"`,
-    `"\n"`) → `dm.data.invalid_options` at argument 2 with the key named;
-    `delimiter`/`header: true` with `{format: "json"}` and with a literal
-    `x.json` file → invalid_options; `{header: null}` on json accepted; literal
-    options with a **computed** `file` still rejected; computed options
-    (variable, call, partial object with computed `format`) never produce a
-    format-dependent verdict even beside a literal `x.json` and a literal
-    `delimiter` (no false rejection); literal-`null` file with a literal
-    mistake still rejected; `header: false` + object contract → row-shape
-    conflict at argument 1 for a literal `.csv`/`.tsv` file, for a literal
-    `format: "csv"` with a computed file, and not for a provisional imported
-    contract; `{format: "json"}` on a `.csv` literal makes the row rule
-    inapplicable; result type equals the two-argument type for both arities,
-    for a null file, for computed options; callback member typing over a
-    three-argument `map(load_data(…, {header: false}), r => r.…)` is
-    unchanged; a mixed object literal (`{delimiter: ";", format: f}`) still
-    judges its literal delimiter.
-  - Assert passive and execution messages are identical by comparing against
-    `DataError::InvalidOptions` Display built from the same inputs.
-- [ ] **Options matrix and execution** — `lib/tests/l1/load_data_options.rs`
-  (R23; public result is the composed text, typed `DataError` inside
-  `ComposeFailure`, `DataRuntime::stats()`, and read set)
-  - *Control row:* unedited fixture (`rows.csv` with header, `{}`) → rows.
-  - *Field shapes through the shared validators* (each: absent, explicit
-    null, wrong type, empty where the type allows) for `format`, `delimiter`,
-    `header`, plus whole-object shapes (`null`, `{}`, `5`, `"csv"`, `[]`):
-    default outcome = error and `reads == 0`; exceptions asserted
-    individually: absent/null → defaults; `delimiter: 5` valid; `header:
-    "false"` converts; `delimiter: ""` → `dm.data.invalid_options`; `format:
-    ""`/`"CSV"` → binder error; `delimiter: [","]`, `header: [1]`, `format: 5`
-    → binder error.
-  - *Wiring cells* (one control + one invalid per validator, composed through
-    `Markdown::compose_with_warnings`): binder error and
-    `dm.data.invalid_options` each show their code and `reads == 0`.
-  - *Applicability:* non-null `delimiter` and `header` on a `.json` file and
-    with `format: "json"` on a `.csv` file fail before reading; resolution
-    failure (missing file) keeps precedence over applicability for an
-    explicit `format`.
-  - *Behavior:* semicolon via `format: "csv"` on `.txt`; supported-but-wrong
-    extension overridden (`.json` read as csv); TSV default tab; pipe; CSV
-    with `"\t"` delimiter reports format CSV in a malformed diagnostic; `.tsv`
-    with `format: "csv"` parses with comma.
-  - *Null file:* valid options with `null` file → `null`, `reads == 0`,
-    `contract_preparations == 0`, read set empty; invalid *computed* options
-    with `null` file → `null` (no semantic check), literal mistakes still fail
-    at composition via the passive check.
-  - *Computed options* validated at execution: computed bad delimiter, computed
-    `header: false` with object contract (→ `dm.data.row_shape_conflict` with
-    the `header: false` message), a contract imported from a schema file
-    resolving to object rows with `header: false` (execution-time conflict,
-    `reads == 0`), computed `format` overriding a literal extension.
-  - *Memo reuse* (`stats()`): two delimiters over one source → `reads 1`,
-    `parses 2`; `{}`, `{format: "csv"}`, `{delimiter: ",", header: true}` →
-    one parse, one bind; header-only change → `parses 1`, `binds 2`; different
-    contracts → one parse, two binds; distinct explicit formats of one source
-    never share parsed results or format-specific failures (invalid UTF-8
-    named per format); every permutation of a 3-call set yields the same
-    results; an object-mode header-name failure does not poison positional
-    mode over the same parse; a memoized failure reused at a second call site
-    projects with that site's own span; existing invalidation re-reads all
-    layers (`reads` rises, read set unchanged) in every `CacheAccessMode`;
-    concurrent identical calls (threads) read once.
+  - Through `check_expression_calls` / `expression_call_diagnostics` /
+    `expression_type` with `TypeScope::unguarded` (no filesystem): the P tests
+    in the acceptance table, plus: `{header: null}` on a JSON file accepted;
+    `{format: "yml", delimiter: ","}` is invalid and names YAML;
+    `{format: "json"}` on a literal `.csv` makes the row rule inapplicable;
+    literal-`null` file with a literal mistake still rejected
+    (`literal_mistake_with_null_file_is_rejected`); a dead ternary branch with a
+    bad literal delimiter is still rejected; callback member typing over
+    `map(load_data(…, {header: false}), r => r.…)` is unchanged.
+  - `passive_and_execution_messages_are_identical` compares the passive message
+    with `DataError::InvalidOptions`'s `Display` from the same inputs.
+- [ ] **Options matrix, execution, and memo reuse** — `lib/tests/l1/load_data_options.rs`
+  - R24 matrix (`option_matrix_control_row`, `option_matrix_invalid_cells_read_nothing`,
+    `option_matrix_null_and_absent_cells_use_defaults`,
+    `option_matrix_coercion_exceptions`, two wiring cells through
+    `Markdown::compose_with_warnings`).
+  - The X tests in the acceptance table. Assertions use the composed text,
+    the typed `DataError` inside `ComposeFailure`, `DataRuntime::stats()`, and
+    the read set. Specifics: `explicit_format_overrides_a_supported_extension`
+    reads a `.json` file holding CSV text with `{format: "csv"}`;
+    `csv_with_tab_delimiter_reports_csv_in_malformed` asserts the format field;
+    `tsv_extension_with_csv_format_parses_with_comma`;
+    `missing_file_keeps_precedence_over_applicability` (explicit
+    `{format: "json", delimiter: ";"}` on a missing file reports the
+    file-reference failure); `imported_object_contract_with_header_false_fails_before_reading`
+    uses an on-disk contract import and asserts `reads == 0`;
+    `distinct_formats_share_no_parse_or_failure` writes invalid UTF-8 and asserts
+    the YAML and JSON failures each name their own format with
+    `reads == 1`; `call_order_does_not_change_results` runs every permutation of
+    a three-call set; `invalidation_rereads_every_layer_in_every_cache_mode`
+    loops over every `CacheAccessMode` and asserts `reads` rises and the read
+    set is unchanged; `concurrent_identical_option_calls_read_once` uses
+    threads over one `DataRuntime`; `null_file_with_options_reads_and_imports_nothing`
+    asserts `reads == 0`, `contract_preparations == 0`, empty read set.
 - [ ] **Headerless table and positions** — `lib/tests/l1/load_data_headerless.rs`
-  - Spec table, one test per row: empty file and blank-lines-only → `[]`
-    judged against `as` (a `tuple([string])[]` accepts, a non-empty-required
-    contract reports its own mismatch); one record (including empty and
-    repeated cell values) → one row; leading/intervening blank lines skipped
-    with original positions; ragged later record → `dm.data.malformed` at
-    that record (first record sets width); quoted delimiter/newline/doubled
-    quote parse strictly; invalid quoting → `dm.data.malformed`, no partial
-    result; two-record CSV, TSV, and one-record file return all rows;
-    `header: true` skips the first record for positional rows.
-  - Positions: first-record failure reports pointer `/0/1` with the field's
-    raw line and character column; also a later row, a quoted multiline
-    field, multibyte text, and CRLF input, each asserting line and column so a
-    one-row shift fails; missing cell keeps the nearest-parent rule.
-  - Keep-immutability: the same file loaded `header: false` then
-    `header: true` (and in reverse order) in one runtime gives correct,
-    independent results from one parse.
-- [ ] **Remote** — `lib/tests/l1/load_data_options_remote.rs` (wiremock, follow
-  `load_data_runtime.rs`'s `RemoteReadConfig` usage; no live endpoint)
-  - Extensionless `GET /export?id=7` returning JSON loads with
-    `{format: "json"}` from an allowed host and fails
-    `dm.data.unsupported_format` without it; the URL identity and read-set
-    entry keep the query.
-  - Denied host → file-reference denial (not cached, no body returned) even
-    with a warmed memo from an allowed context; allowed host with a warmed
-    memo returns without a second request; the reference check without
-    remote permission defers (`RemoteNotEnabled` not cached) and a later
-    composition with permission reads; an explicit `format` does not bypass
-    redirect policy (redirect to a denied host fails).
+  - One test per row of the spec's headerless table and the H tests in the
+    acceptance table. Positions assert line and character column so a one-row
+    shift fails: first record `/0/1`; a later row; a quoted multiline field
+    before the failing cell; multibyte text (`é`, `日本`) before the failing
+    cell; CRLF line endings written as bytes. `header_true_skips_the_first_record_for_positional_rows`
+    is the control. `header_false_then_true_share_one_parse` loads one file both
+    ways in both orders: correct independent results, `parses == 1`,
+    `binds == 2`.
+- [ ] **Remote** — `lib/tests/l1/load_data_options_remote.rs`
+  - `wiremock` local mock following `load_data_runtime.rs`'s `RemoteReadConfig`
+    usage; no live endpoint. The W tests in the acceptance table: `GET
+    /export?id=7` returning JSON loads with `{format: "json"}` and the read-set
+    entry keeps the query; without `format` it fails
+    `dm.data.unsupported_format`; a denied host is refused even after an
+    allowed context warmed the memo, with no body returned; an allowed host
+    with a warmed memo makes one request in total (mock `expect(1)`); the
+    reference check without remote permission defers (not cached) and a later
+    composition with permission reads; a redirect to a denied host fails with
+    an explicit `format`.
+- [ ] **Dynamic-schema integration** — `lib/tests/l1/load_data_options_slots.rs`
+  - Using the observation, gate, and collector APIs the rebase check recorded:
+    `memo_hits_at_every_layer_rerecord_the_observation` (three calls answered by
+    the raw, parse, and bind layers each add the observation to
+    `observations_since(mark)`); `slot_gate_refuses_before_any_warmed_layer` (a
+    document call warms all three layers; a slot call with the same options and
+    a refusing recording gate is refused, the gate saw the target, `reads`
+    unchanged); `generation_advances_once_for_all_layers`;
+    `three_argument_target_is_collected_passively` (N29, a literal file with an
+    options object); `three_argument_url_is_discovered_before_fetch` (N20,
+    including a folded spelling such as `loadData`).
 
 ### Checkpoint 3
 
-- [ ] `just test` in `darkmatter/` is green for `lib` (new and existing); fix every failure at its cause (do not weaken an existing assertion).
+- [ ] `just test` in `darkmatter/` is green for `lib`; fix every failure at its
+  cause and never weaken an existing assertion.
 
-## Phase 3: DMLS
+## Phase 4 — DMLS
 
-Depends on Phase 2 (diagnostics) and Phase 1 (catalog). Wave 1 tasks are
-independent.
+Depends on Phases 1–2 (catalog, diagnostics).
 
 ### Wave 1 (parallel)
 
-- [ ] **Option completion provider** — R18
-  - Create `dmls/src/providers/option_argument.rs`; make the shared helpers in
-    `type_definition_argument.rs` `pub(crate)` rather than copying; wire into
-    `providers/dsl.rs::completion` (after the type-definition check, before
-    `directives::name_partial`) and `providers/frontmatter.rs` (after the
-    type-definition call), for both sites; a claimed cursor with no match
-    returns an empty list only for key/enum/boolean positions, otherwise
-    `None`.
-  - Items: `CompletionItemKind::PROPERTY` for keys (insert `key: `), `ENUM_MEMBER`
-    for enum values (quoted `"csv"`), `VALUE` for `true`/`false`; text edits
-    replace only the typed partial and are encoded with the site's
-    projection (`Analyzed::encode`) like the type-definition provider.
-  - Document the module in `dmls/docs/autocomplete.md` (what completes, from
-    the declared object shape).
-  - Risk: unfinished input; unit-test through the lexer-recovery path with
-    `{{ load_data("a.csv", "string[][]", { ` and
-    `{ format: ` cursors, quoted/unquoted partials, a key already present
-    (not offered again), a second argument position (no claim), a
-    callback inside the call.
-- [ ] **DMLS tests** — `dmls/tests/l1/option_arguments.rs`
-  - Completion at body and frontmatter sites: keys `format`, `delimiter`,
-    `header` at `{` and after `,`; `format:` offers the seven names;
-    `header:` offers `true`/`false`; `delimiter:` offers nothing and falls
-    through; `pr_list({` still shows no declared-key completion; completion
-    list is derived from the catalog (assert equality with the descriptor's
-    inline-object property names, not a literal copy).
-  - Hover on `load_data` includes `options`, `format`, `delimiter`, `header`,
-    and the defaults sentence.
-  - Diagnostics through the existing editor path
-    (`expression_call_diagnostics` style used by
-    `dmls/tests/l1/expression_call_diagnostics.rs`): invalid delimiter shows
-    `dm.data.invalid_options` ranged on the third argument, unknown key shows
-    the binder code on the third argument, `header: false` + object contract
-    shows `dm.data.row_shape_conflict` on `as`, computed options with a
-    literal `.json` file and a literal delimiter produce no diagnostic, and
-    `call_check_agreement.rs`-style parity holds: the editor diagnostics are
-    exactly the composition rejections (extend that suite with one
-    three-argument case).
-  - Both arities keep inferred callback member completion and null-file
-    typing: extend the `expressions.rs` tests near lines 2528–2535 with
-    `map(load_data("hosts.yaml", "{ name: string }[]", {}), h => h.` and the
-    `null`-file case.
-- [ ] **Diagnostics table and docs** — `dmls/src/diagnostics/codes.rs`
-  - Add `dm.data.invalid_options` (ERROR, "a literal `load_data` options
-    object the passive call check proves wrong, ranged at the third
-    argument") to the table in the module doc; update
-    `dmls/docs/hover.md` and `dmls/docs/autocomplete.md` for the third
-    argument. Keep prose written for a developer new to the repo.
+- [ ] **Option completion provider** (R21) — `dmls/src/providers/option_argument.rs`
+  (new), `providers/mod.rs`, `providers/type_definition_argument.rs`
+  (visibility only), `providers/dsl.rs`, `providers/frontmatter.rs` (one call
+  beside the existing `type_definition_argument` call)
+  - Wire after the type-definition check and before ordinary completion for
+    both sites; items: `PROPERTY` for keys (insert `key: `), `ENUM_MEMBER` for
+    quoted enum values, `VALUE` for `true`/`false`; text edits replace only the
+    typed partial and are encoded with the site's projection.
+  - In-file unit tests over the lexer recovery: cursors after `{`, after `,`,
+    after `format: `, inside a partial quoted value, a key already present (not
+    offered again), the second argument (no claim), a callback inside the call.
+- [ ] **Diagnostics table and DMLS docs** — `dmls/src/diagnostics/codes.rs`
+  (module doc table), `dmls/docs/autocomplete.md`, `dmls/docs/hover.md`,
+  `dmls/docs/diagnostics.md`
+  - Add `dm.data.invalid_options` (ERROR, a literal `load_data` options object
+    the passive call check proves wrong, ranged at the third argument; extend
+    the `row_shape_conflict` row with `header: false`). Document option
+    completion from the declared object shape and the three-parameter hover.
+    Write for a developer new to the repo.
+
+### Wave 2 (after Wave 1)
+
+- [ ] **DMLS tests** — `dmls/tests/l1/option_arguments.rs`, and one added case in
+  `dmls/tests/l1/call_check_agreement.rs`
+  - Completion at body and frontmatter sites: keys at `{` and after `,`;
+    `format:` offers the nine declared names; `header:` offers `true`/`false`;
+    `delimiter:` falls through; `pr_list({` shows no declared-key completion;
+    the offered keys equal the descriptor's inline-object property names (no
+    literal copy).
+  - Hover on `load_data` shows `options`, the three keys, and the defaults.
+  - The D tests in the acceptance table, plus
+    `header_false_with_object_contract_is_ranged_on_as` and
+    `computed_options_with_literal_json_file_produce_no_diagnostic`; one
+    three-argument parity case in `call_check_agreement.rs` (editor diagnostics
+    equal composition rejections).
+  - `both_arities_keep_callback_member_completion`
+    (`map(load_data("hosts.yaml", "{ name: string }[]", {}), h => h.`) and
+    `both_arities_keep_null_file_typing`.
 
 ### Checkpoint 4
 
-- [ ] `just test` in `darkmatter/` (covers `darkmatter-lsp`) is green.
+- [ ] `just test` in `darkmatter/` is green (includes `darkmatter-lsp`).
 
-## Phase 4: Catalog examples, generated pages, docs, skill
+## Phase 5 — Catalog examples, docs, skill
 
-Depends on Phases 2 and 3. Wave 1 tasks are independent; Wave 2 regenerates.
+Depends on Phases 2–4. Wave 1 tasks are disjoint; Wave 2 regenerates.
 
 ### Wave 1 (parallel)
 
-- [ ] **Catalog examples and fixtures** — R20
-  - Add the three fixtures, `EXAMPLE_DATA_FILES` entries, and three
-    `example(...)` lines to the `load_data` entry. Extend the catalog test
-    `load_data_function_page_shows_every_format_family` neighbor with a test
-    that the page shows each new example and its input file, mentions the
-    third parameter, and links nothing to a feature or fix.
-- [ ] **Topic docs** — write for a developer with no repo experience: lead
-  with what the reader can do, a compact example per rule, a Mermaid diagram
-  for the flow
-  - `docs/topics/loading-data.md`: new section "Options" (keys table,
-    defaults, headerless rows with a positional contract, custom delimiter,
-    extensionless URL with `format`, applicability errors, invalid-option
-    examples), update "How a call runs" (new order, R12) and its diagram,
-    "Formats" (explicit format replaces extension detection, CSV with a tab
-    delimiter stays `csv`), "CSV and TSV" (header rule becomes conditional),
-    "Reading a file once per command" (read versus parse versus bind: raw
-    source, parsed source keyed by format and delimiter, bound value keyed by
-    header), "When loading fails" (`dm.data.invalid_options` row; where it is
-    located: third argument in the editor and passive check, the call
-    expression at execution, key named in the message), "Remote URLs"
+- [ ] **Catalog examples and fixtures** (R28) — `schemas/partials/functions.yaml`,
+  `catalog/example_data/` (three new files), `catalog/mod.rs`
+  (`EXAMPLE_DATA_FILES`), `catalog/tests.rs`
+  - Add the three fixtures and examples. Add
+    `load_data_function_page_shows_option_examples` beside
+    `load_data_function_page_shows_every_format_family`: the page shows each
+    new example and its input file and mentions the third parameter.
+- [ ] **Topic docs** — `docs/topics/loading-data.md`, `docs/topics/caching.md`,
+  `docs/cli/data-contracts.md`, `docs/topics/darkmatter-expressions.md`
+  (hand-written parts only), `docs/errors/composition-problems.md` (only if its
+  `dm.data.*` list enumerates codes), `README.md` (only if its Loading Data line
+  now misstates behavior)
+  - Lead with what the reader can do, a compact example per rule, and a
+    Mermaid diagram for the call flow (R14) and for raw → parse → bind reuse.
+  - `loading-data.md`: an "Options" section (key table with aliases, defaults,
+    headerless rows with a positional contract, custom delimiter, the TSV tab
+    rule, extensionless URL with `format`, applicability errors, invalid-option
+    examples); update "How a call runs", "Formats" (an explicit format replaces
+    extension detection; CSV with a tab stays `csv`), "CSV and TSV" (the header
+    rule is conditional), "Reading a file once per command" (read versus parse
+    versus bind), "When loading fails" (`dm.data.invalid_options`; passive and
+    editor location at the third argument, the call expression for computed
+    options at execution; the key named in the message), "Remote URLs"
     (`format` grants no access).
-  - `docs/topics/caching.md` "The `load_data` memo": three layers, the
-    effective-key table, equivalent default spellings, `reads`/`parses`/
-    `binds` semantics, invalidation clears every layer, read set unchanged.
-  - `docs/cli/data-contracts.md`: the error-code tables (lines near 337 and
-    544), a headerless example, the `md compose --output json` option-failure
-    example described field by field (code, severity, span, no `data_location`
-    because no data file was read), and the new code.
-  - `docs/topics/darkmatter-expressions.md` hand-written parts (the
-    `load_data(path, as)` rows near 1337–1343): third argument; leave the
-    generated table to `just regen-expr-doc`.
-  - `README.md` stays an overview: change only the one-line description of
-    Loading Data (README line 93) to mention the optional options argument.
-  - No doc names or links to a feature/fix or this plan.
-- [ ] **Darkmatter skill** — `.claude/skills/darkmatter/`
-  - `expressions.md` (`load_data` section): signature with `options`,
-    `dm.data.invalid_options` in the codes list, headerless/`format`/`delimiter`
-    rules, passive verdict order (R15), `PartialObject`.
-  - `requests.md` / `compose.md` memo rules (near the `load_data_runtime`
-    references): the three layers, keys, counters.
-  - `dmls.md` (near line 534): option completion module and that it reads
-    the declared object shape. `testing.md` (`load_data` tests): the new
-    test files. Keep `SKILL.md` under its size rule and link rather than
-    inline.
+  - `caching.md` "The `load_data` memo": three layers, the effective-key table,
+    equivalent default spellings and aliases, `reads`/`parses`/`binds`/hits
+    semantics, invalidation clears every layer and never the read set,
+    observations recorded on every call.
+  - `data-contracts.md`: the code tables (near lines 337 and 544), a headerless
+    example, and the `md compose --output json` option-failure example
+    described field by field (code, severity, span; no `data_location` because
+    no data file was read).
+  - No doc names or links a feature, fix, spec, or this plan.
+- [ ] **Darkmatter skill** — `.claude/skills/darkmatter/expressions.md`
+  (`load_data` section), `requests.md` ("Memo shape"), `dmls.md`, `testing.md`
+  - Signature with `options`; aliases and TSV rule; `dm.data.invalid_options`;
+    passive verdict order and `PartialObject`; the three memo layers, keys,
+    counters, observation and gate placement; the option completion module; the
+    new test files. Keep `SKILL.md` within its size rule (link, do not inline).
 
-### Wave 2
+### Wave 2 (after Wave 1)
 
 - [ ] **Regenerate and verify** — run `just regen-expr-doc` and
-  `just regen-lifecycle-schema` again (examples changed), confirm the diff
-  only adds the three examples, their files, and the signature; the passive
-  shipped-artifact corpus check and the catalog example runner pass.
+  `just regen-lifecycle-schema`; confirm the diff adds only the three examples,
+  their files, and the signature; the passive shipped-artifact corpus check and
+  catalog example runner pass.
 
 ### Checkpoint 5
 
 - [ ] `cargo nextest run -p darkmatter -E 'test(catalog) | test(corpus) | test(function_catalog_parity) | test(docs)'` passes.
 
-## Phase 5: CLI wiring, log, and final verification
+## Phase 6 — CLI wiring, log, and final verification
 
-Depends on Phase 4.
+Depends on Phase 5.
 
 ### Wave 1 (parallel)
 
-- [ ] **CLI tests** — `cli/tests/l1/load_data.rs` (spawn `md` once per case
-  via `CliProcessFixture`, `--output json`)
-  - One headerless success: `{{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}` composes, exit 0, empty stderr, the rows in the output, read set lists `rows.csv`.
-  - One option failure: `{delimiter: ",,"}` exits 1 with empty stderr, one
-    diagnostic with code `dm.data.invalid_options`, a located span, and the
-    envelope validates against the existing envelope schema through the
-    existing `validate_strictly` helper (spell the schema file in this test
-    file because CI maps `include_str!` to the test that names it).
-  - No terminal or browser windows are involved.
-- [ ] **Implementation log** — create `implementation-log.md` in this feature
-  directory recording: the execution-location narrowing of R6 (spec says
-  third argument; execution reports at the call expression because the
-  evaluator carries no per-argument spans; passive and DMLS locate at the
-  argument), the `PartialObject` addition (R14), and anything else that
-  departed from the spec text. Leave `spec.md` untouched.
+- [ ] **CLI tests** — `cli/tests/l1/load_data.rs` (spawn `md` through
+  `CliProcessFixture`, `--output json`)
+  - `compose_headerless_rows_json`:
+    `{{ load_data("rows.csv", "tuple([string, number])[]", {header: false}) }}`
+    exits 0, empty stderr, rows in the output, read set lists `rows.csv`.
+  - `compose_invalid_option_json_envelope`: `{delimiter: ",,"}` exits 1, empty
+    stderr, one `dm.data.invalid_options` diagnostic whose span covers the third
+    argument, and the envelope validates strictly against the existing envelope
+    schema (spell the schema path in this file per the `rust-testing` skill's
+    read-form rule).
+- [ ] **Implementation log** — this feature's `implementation-log.md`
+  - Complete Departures (R25 and anything else that departed from the spec,
+    including any R24 coercion difference) and Decisions applied. Leave
+    `spec.md` untouched.
 
 ### Wave 2 — final verification
 
-- [ ] Run the smell grep over the changed files: `rg -n "serde\(default\)|unwrap_or_default\(\)|filter_map\(.*as_str|\.ok\(\)" darkmatter/lib/src/markdown/compose/expression/data/options.rs` returns nothing for the option parse; fix any hit.
-- [ ] Re-read every changed `///` / `//!` / `//` comment for drift (CLAUDE.md "Authoring discipline"): `load.rs`, `runtime.rs`, `parse.rs`, `error.rs`, `locate.rs`, `contract.rs`, `call_check.rs`, `data/mod.rs`, DMLS modules.
-- [ ] `just lint` in `darkmatter/` is clean (do **not** run `cargo fmt`).
+- [ ] Re-read every changed `///`/`//!`/`//` comment for drift (`load.rs`,
+  `runtime.rs`, `parse.rs`, `error.rs`, `locate.rs`, `contract.rs`,
+  `options.rs`, `call_check.rs`, `data/mod.rs`, the DMLS modules).
+- [ ] `just lint` in `darkmatter/` is clean (no `cargo fmt`).
 - [ ] `just test` in `darkmatter/` is green end to end.
-- [ ] Confirm the diff contains no `Co-authored`, no link from a doc to a feature/fix, no new dependency (`git diff --stat -- '*Cargo.toml'` empty), and no file under `_unscheduled`.
-- [ ] Update the spec frontmatter? **No** — an agent's terminal state is "implementation complete, ready for review"; do not move the feature or run `just complete`.
+- [ ] `git diff --stat -- '*Cargo.toml'` is empty; no doc links a feature or
+  fix; nothing was created under `_unscheduled`.
+- [ ] Tick the Definition of Done and state "implementation complete, ready for
+  review". Do not move the feature or run `just complete`.
+
+## Review decisions (2026-11-08)
+
+The author reviewed this plan's reported spec ambiguities and accepted its
+resolutions: a computed options argument's `dm.data.invalid_options` locates at
+the whole call (a departure, logged), literal options still locate at the
+third argument; the TSV tab-only rule applies to the effective format; DMLS
+completion offers `yml` and `ndjson`; the raw-source layer is consulted on
+every call so observations are re-recorded.
