@@ -27,6 +27,8 @@
 //!   Schema at validator-construction time.
 //! - [`SchemaError::Io`] — filesystem I/O failed while reading a referenced
 //!   file.
+//! - [`SchemaError::UnresolvedSlots`] — the schema is a template holding
+//!   `{{ … }}` slots and cannot be lowered until they are resolved.
 //! - [`SchemaError::FrontmatterShape`] — `$schema` is present in frontmatter
 //!   but is not a YAML mapping/sequence/string.
 
@@ -72,7 +74,7 @@ pub struct CycleReference {
 
 use super::simplified::{
     SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaReferenceSite,
-    SchemaSourceId, SchemaUnionRejection,
+    SchemaSourceId, SchemaUnionRejection, Slot,
 };
 
 
@@ -182,6 +184,40 @@ impl fmt::Display for NotSchemaReason {
     }
 }
 
+/// The `{{ … }}` slots that keep a schema from being lowered.
+///
+/// Each slot carries its authored span (in the type-expression string, or
+/// the whole YAML or Markdown document once source-aware parsing projected
+/// it) and its defining file when it was reached through an import.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct UnresolvedSlots {
+    /// Every slot of the schema, in declaration order, each once.
+    pub slots: Vec<Slot>,
+}
+
+impl UnresolvedSlots {
+    /// The unresolved slots `slots`.
+    pub fn new(slots: Vec<Slot>) -> Self {
+        Self { slots }
+    }
+}
+
+impl fmt::Display for UnresolvedSlots {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let count = self.slots.len();
+        write!(
+            f,
+            "the schema holds {count} unresolved `{{{{ … }}}}` slot{}; resolve it before lowering, validating, or layering it",
+            if count == 1 { "" } else { "s" }
+        )?;
+        if let Some(first) = self.slots.first() {
+            write!(f, " (first: `{{{{ {} }}}}`)", first.expression)?;
+        }
+        Ok(())
+    }
+}
+
 fn not_schema_message(path: &Path, reason: NotSchemaReason) -> String {
     with_hint_line(
         format!("`{}` is not a valid schema definition: {reason}", path.display()),
@@ -236,6 +272,14 @@ pub enum SchemaError {
     /// Phase 3 concern).
     #[error("cannot convert SimplifiedSchema for `{property}` to JSON Schema: {message}")]
     Convert { property: String, message: String },
+
+    /// The schema is a template: it holds `{{ … }}` slots, so it cannot be
+    /// lowered to JSON Schema, prepared for validation, or layered until an
+    /// explicit resolution step substitutes them. Every lowering entry point
+    /// returns this before lowering anything; it is never a placeholder
+    /// schema.
+    #[error("{0}")]
+    UnresolvedSlots(Box<UnresolvedSlots>),
 
     /// A `$schema` file reference could not be resolved: the syntax is
     /// invalid, or biscuit-file rejected it. A reference that resolves but
@@ -790,6 +834,24 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                          <cyan>{type} -> description</cyan>",
                     )
             }
+
+            SchemaError::UnresolvedSlots(unresolved) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("SchemaError", "schema template is unresolved"))
+                .body(
+                    unresolved
+                        .slots
+                        .iter()
+                        .map(|slot| {
+                            Prose::new(format!(
+                                "<dim>Slot:</dim> <cyan>{}</cyan> <dim>(bytes {}..{})</dim>",
+                                Prose::escape_text(&format!("{{{{ {} }}}}", slot.expression)),
+                                slot.span.start,
+                                slot.span.end
+                            ))
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .hint("Resolve the schema's slots explicitly before validating documents against it."),
 
             SchemaError::Convert { property, message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(

@@ -46,7 +46,10 @@ use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, Simplifie
 /// - A non-array union is a subtype when every arm is; a non-array union is a
 ///   supertype when one of its arms covers the source, so arm order never
 ///   matters. `unknown` is never a subtype of a concrete type.
-/// - Every other pair, including an unresolved reference, is not.
+/// - Every other pair, including an unresolved reference, is not. An `enum`
+///   or `literal` whose members or value hold an unresolved `{{ … }}` slot
+///   is never a subtype or supertype of anything but itself: its values are
+///   not known.
 ///
 /// A recursive reference is compared only by identity here; use
 /// [`is_subtype_with_definitions`] to compare it through its definition.
@@ -404,6 +407,11 @@ enum Identity<'a> {
 }
 
 fn identity(atom: &PropertyAtom) -> Identity<'_> {
+    // A template's members or literal are not known, so it has no identity
+    // to share: `enum({{ a }})` and `enum({{ b }})` are not one type.
+    if atom.has_pending_values() {
+        return Identity::Unresolved;
+    }
     match &atom.ty {
         TypeExpr::Primitive(ty) => Identity::Primitive {
             ty: *ty,

@@ -62,6 +62,19 @@ Darkmatter policy. Darkmatter-side details: the `darkmatter` skill's
   gate). Any other `{{`/`}}` end detector (`rfind("{{")`, a private depth
   scan) is a second rule: route it through these. Tests:
   `tests/l1/{expression_scanner,expression_regions,scanner_corpus}.rs`.
+- **Templates are passive and fail closed.** A `{{ … }}` element of
+  `enum`/`suggest`, or the whole argument of `literal`/`default`/`min`/`max`/
+  `pattern`, parses to `Constraint::Dynamic` / `Constraint::DynamicValue`
+  (only when a slot is present; static lists stay `Members`/`Suggest`). The
+  grammar reads a slot with `scan::scan_expression_at`; `source.rs`'s
+  argument scanner skips it whole and `project_atom_suggestions` projects its
+  spans. Every lowering entry returns `SchemaError::UnresolvedSlots` first
+  (`slots::reject_unresolved`), so a reader that does not know slots never
+  sees one; queries/completion set `pending`. A new `Constraint` reader that
+  could see a template must decide its slot case (see
+  [slots.md](../../../simplified-schema/docs/topics/language/slots.md)).
+  Tests: `src/simplified/grammar/slot_tests.rs`,
+  `tests/l1/{slot_spans,slot_templates}.rs`, `schema_object.rs::templates`.
 - **Layering is atomic.** Each `layer_under` / `layer_over` commits completely
   or not at all, with whole-property replacement.
 - **One implementation.** Darkmatter calls the library; it never redefines a
@@ -256,6 +269,7 @@ Language reference (`simplified-schema/docs/topics/language/`):
 - [Unions and function signatures](../../../simplified-schema/docs/topics/language/unions.md) — `|`, named union references, root unions, narrowing
 - [Schema documents](../../../simplified-schema/docs/topics/language/schema-documents.md) — resolution, standalone envelopes, raw JSON Schema
 - [Selecting a schema file](../../../simplified-schema/docs/topics/selecting-schema-files.md) — `select_schema_file` outcomes, probes, creation paths; `inspect_schema_target`
+- [Slots](../../../simplified-schema/docs/topics/language/slots.md) — `{{ … }}` slots, templates, what each operation reports before resolution
 - [Subtyping](../../../simplified-schema/docs/topics/language/subtyping.md) · [Custom vocabulary](../../../simplified-schema/docs/topics/custom-vocabulary.md) · [Host capabilities](../../../simplified-schema/docs/topics/host-capabilities.md)
 - [declaration-narrowing.md](declaration-narrowing.md) — code map for `non-null`, root `closed`, `schema`/`type-definition` options, `claimed_values`
 

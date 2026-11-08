@@ -32,16 +32,20 @@ impl SimplifiedSchema {
     ///
     /// [`SimplifiedSchemaError::Unprepared`] with the lowerer's located error
     /// when the schema has no JSON Schema form (a function-typed property),
-    /// or names a file an in-memory schema cannot read.
+    /// or names a file an in-memory schema cannot read, and
+    /// [`SimplifiedSchemaError::Unresolved`] for a template whose `{{ … }}`
+    /// slots are not resolved.
     pub fn to_json_schema(&self) -> Result<Arc<Value>, SimplifiedSchemaError> {
-        self.lowered().map_err(SimplifiedSchemaError::Unprepared)
+        self.lowered().map_err(SimplifiedSchemaError::from_lowering)
     }
 
     /// The schema as one SimplifiedSchema YAML document, in its authored
     /// envelope (`$schema` with optional `types`, or `kind: schema`).
     ///
     /// A layered schema exports as the receiver's document with the
-    /// properties merged in from the other layers.
+    /// properties merged in from the other layers. A template exports as
+    /// authored: each `{{ … }}` slot is written back as its expression and
+    /// nothing is evaluated.
     ///
     /// ## Errors
     ///

@@ -629,6 +629,46 @@ pub struct PropertyAtom {
 }
 
 impl PropertyAtom {
+    /// The atom's `suggest(...)` candidates that are known now, in authored
+    /// order: a static list's candidates, or a dynamic list's literal ones
+    /// (its slots supply the rest once resolved; see
+    /// [`Self::has_pending_suggestions`]). `None` when the atom has no list.
+    pub fn suggestion_candidates(&self) -> Option<std::borrow::Cow<'_, [SuggestionCandidate]>> {
+        self.constraints.iter().find_map(|constraint| match constraint {
+            Constraint::Suggest(candidates) => Some(std::borrow::Cow::Borrowed(candidates.as_slice())),
+            Constraint::Dynamic(list) if list.kind == DynamicKind::Suggest => Some(std::borrow::Cow::Owned(
+                list.elements
+                    .iter()
+                    .filter_map(|element| match element {
+                        DynamicElement::Suggestion(candidate) => Some(candidate.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+            )),
+            _ => None,
+        })
+    }
+
+    /// Whether the atom's `suggest(...)` list holds an unresolved slot, so
+    /// [`Self::suggestion_candidates`] is not the whole list.
+    pub fn has_pending_suggestions(&self) -> bool {
+        self.constraints
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Dynamic(list) if list.kind == DynamicKind::Suggest))
+    }
+
+    /// Whether the values this atom offers for completion (its `enum(...)`
+    /// members, `literal(...)` value, or `suggest(...)` candidates) include an
+    /// unresolved slot, so the known ones are not all of them.
+    pub fn has_pending_values(&self) -> bool {
+        self.constraints.iter().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::Dynamic(_) | Constraint::DynamicValue { kind: ValueSlotKind::Literal, .. }
+            )
+        })
+    }
+
     /// Convenience constructor for a bare-typed atom with no constraints.
     pub fn bare(ty: SimplifiedType) -> Self {
         Self {
@@ -710,8 +750,12 @@ impl PropertyAtom {
     /// Whether this atom supplies a default for its containing property.
     /// Like [`PropertyAtom::is_required`], a union type's arms count.
     pub(crate) fn has_default(&self) -> bool {
-        self.property_constraints()
-            .any(|constraint| matches!(constraint, Constraint::Default(_)))
+        self.property_constraints().any(|constraint| {
+            matches!(
+                constraint,
+                Constraint::Default(_) | Constraint::DynamicValue { kind: ValueSlotKind::Default, .. }
+            )
+        })
             || self
                 .union_arms()
                 .is_some_and(|arms| arms.iter().any(PropertyAtom::has_default))
@@ -1104,6 +1148,125 @@ pub enum Constraint {
     /// parser reads as templates. Lowers to the `x-darkmatter-operands`
     /// annotation, which never fails a value by itself.
     Operands(String),
+
+    // ── dynamic (unresolved `{{ … }}` slots) ───────────────────────────────
+    /// An `enum(...)` member list or `suggest(...)` argument list holding at
+    /// least one `{{ … }}` slot. A fully static list is always
+    /// [`Constraint::Members`] or [`Constraint::Suggest`]; this variant exists
+    /// only until resolution substitutes the slots, and lowering it fails
+    /// with [`SchemaError::UnresolvedSlots`](crate::SchemaError::UnresolvedSlots).
+    Dynamic(DynamicList),
+
+    /// A `literal(...)`, `default(...)`, `min(...)`, `max(...)`, or
+    /// `pattern(...)` whose whole argument is one `{{ … }}` slot. Resolution
+    /// replaces it with the matching concrete constraint; until then lowering
+    /// fails with [`SchemaError::UnresolvedSlots`](crate::SchemaError::UnresolvedSlots).
+    DynamicValue {
+        /// Which value position the slot fills.
+        kind: ValueSlotKind,
+        /// The type the position belongs to: the atom's type keyword, or
+        /// [`SimplifiedType::Unknown`] on a named-type reference, whose target
+        /// is known only after resolution.
+        target: SimplifiedType,
+        /// The slot.
+        slot: Slot,
+    },
+}
+
+/// One `{{ … }}` expression written as a schema value: a complete
+/// `enum(...)`/`suggest(...)` list element, or the whole argument of a value
+/// position ([`ValueSlotKind`]).
+///
+/// Parsing records it and evaluates nothing. Spans are byte ranges into the
+/// source handed to the parser, exactly like [`SuggestionCandidate::span`]:
+/// the type-expression string at first, the whole YAML or Markdown document
+/// once source-aware parsing projects them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Slot {
+    /// The trimmed text between `{{` and `}}`.
+    pub expression: String,
+    /// The whole `{{ … }}`, both delimiters included.
+    pub span: SourceSpan,
+    /// The trimmed expression text alone.
+    pub expression_span: SourceSpan,
+    /// The schema file whose context the slot evaluates in, stamped when an
+    /// imported definition is lifted into another file; `None` is the
+    /// schema's own file or document.
+    pub origin: Option<std::path::PathBuf>,
+}
+
+/// Which list a [`DynamicList`] stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DynamicKind {
+    /// `enum(...)` members.
+    Members,
+    /// `suggest(...)` candidates.
+    Suggest,
+}
+
+/// One authored element of a [`DynamicList`], in declaration order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DynamicElement {
+    /// A static enum member.
+    Member(String),
+    /// A static suggestion candidate, interpreted for the list's target.
+    Suggestion(SuggestionCandidate),
+    /// A slot whose result supplies zero or more elements.
+    Slot(Slot),
+}
+
+/// An `enum(...)` or `suggest(...)` list that contains at least one slot.
+///
+/// `target` is [`SimplifiedType::Enum`] for members, and for suggestions the
+/// type the candidates are interpreted for: `String`, `Number`, or
+/// `Alphanumeric`, and `String` on a named-type reference until resolution
+/// reinterprets them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicList {
+    /// Members or suggestions.
+    pub kind: DynamicKind,
+    /// The type the elements belong to.
+    pub target: SimplifiedType,
+    /// The elements in authored order.
+    pub elements: Vec<DynamicElement>,
+}
+
+impl DynamicList {
+    /// The slots of the list, in authored order.
+    pub fn slots(&self) -> impl Iterator<Item = &Slot> {
+        self.elements.iter().filter_map(|element| match element {
+            DynamicElement::Slot(slot) => Some(slot),
+            _ => None,
+        })
+    }
+}
+
+/// The value position a [`Constraint::DynamicValue`] slot fills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValueSlotKind {
+    /// The value of a `literal(...)` type.
+    Literal,
+    /// `default(...)`.
+    Default,
+    /// `min(...)`.
+    Min,
+    /// `max(...)`.
+    Max,
+    /// `pattern(...)`.
+    Pattern,
+}
+
+impl ValueSlotKind {
+    /// The keyword the position is written with.
+    pub fn as_keyword(self) -> &'static str {
+        match self {
+            Self::Literal => "literal",
+            Self::Default => "default",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::Pattern => "pattern",
+        }
+    }
 }
 
 impl Constraint {
@@ -1146,6 +1309,23 @@ impl Constraint {
             Constraint::Example(_) => "example",
             Constraint::Category(_) => "category",
             Constraint::Operands(_) => "operands",
+            Constraint::Dynamic(list) => match list.elements.first() {
+                Some(DynamicElement::Slot(_)) | None => "{{",
+                Some(DynamicElement::Member(_)) => "<members>",
+                Some(DynamicElement::Suggestion(_)) => "suggest",
+            },
+            Constraint::DynamicValue { kind: ValueSlotKind::Literal, .. } => "<value>",
+            Constraint::DynamicValue { kind, .. } => kind.as_keyword(),
+        }
+    }
+
+    /// The slots this constraint holds, in authored order; empty for every
+    /// concrete constraint.
+    pub fn slots(&self) -> Vec<&Slot> {
+        match self {
+            Constraint::Dynamic(list) => list.slots().collect(),
+            Constraint::DynamicValue { slot, .. } => vec![slot],
+            _ => Vec::new(),
         }
     }
 }

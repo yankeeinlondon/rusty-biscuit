@@ -501,7 +501,12 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 - Frontmatter and schema diagnostics with source spans.
 - Schema-aware completion for keys, values, suggestions, literal-discriminated
   union arms, and named types (local names bare, `name@this` only for a
-  built-in collision, imports with their target).
+  built-in collision, imports with their target). An item of a single-arm
+  scalar array (`enum(...)[]`, named `os[]`) is completed from the item
+  definition (`array_item_def(array_item_atoms(..))`) through the same
+  `def_value_completions` a scalar value uses, on `- ` lines and in flow
+  lists; `suggest(...)` wins, and union/object arrays keep
+  `union_item_completions`. Never add a second enum-member path.
 - Named-type references (`overlay/named_types.rs`,
   `providers/frontmatter/named_references.rs`, `diagnostics/named_types.rs`):
   hover and go-to-definition on bare, `@this`, and cross-file spellings;

@@ -55,15 +55,15 @@ pub use source::{
     parse_yaml_schema_with_source, project_suggestion_spans,
 };
 pub use source::locate_frontmatter_value;
-pub(crate) use source::parse_keyed_declaration;
+pub(crate) use source::{parse_keyed_declaration, project_keyed_declaration_spans};
 pub use standalone::{
     SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_selected_standalone_schema_document,
     parse_standalone_schema_document,
 };
 pub use types::{
-    CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
+    CallExample, Constraint, DynamicElement, DynamicKind, DynamicList, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
     LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SchemaRoot, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr, operands_verb,
+    SchemaRoot, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr, ValueSlotKind, operands_verb,
 };
 #[cfg(feature = "work-counters")]
 pub use yaml_scalar::alias_search_work;

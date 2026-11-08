@@ -55,7 +55,8 @@ flowchart TD
 | `envelope` | The compiled definitions of the `kind: schema` and `kind: yaml-schema` envelopes (`ENVELOPE_DEFINITIONS`) and `admit_envelope_text`, which judges a standalone document against its definition; see [Admission](./language/schema-documents.md#admission-checking-an-envelope-against-its-definition) |
 | `validation`, `positions` | `ValidationProblem` and its codes, JSON Pointers, and where a problem sits in its source text (`PositionMap::byte_range`) |
 | `completion`, `frontmatter_shape` | Which definition governs a frontmatter path, and union-aware completion choices |
-| `errors` | `SchemaError` |
+| `slots` | Finding the `{{ … }}` slots of a template without evaluating them (`collect_slots`, `has_dynamic`, `reachable_slots`); see [Slots](./language/slots.md) |
+| `errors` | `SchemaError`, `UnresolvedSlots` |
 
 `SchemaRoot` is the parsed `$schema` itself: a root union stays a union, never
 flattened to one property map.

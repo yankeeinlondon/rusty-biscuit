@@ -19,12 +19,13 @@ use std::{collections::BTreeMap, ops::Range};
 use serde_yaml_ng::Value as YamlValue;
 
 use crate::errors::SchemaError;
+use crate::expression::scan::scan_expression_at;
 
 use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
-    Constraint, DefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
-    SchemaShape, SchemaRoot, SimplifiedType, TypeExpr, parse_property_definition_located,
+    Constraint, DefinitionFailure, DynamicElement, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
+    SchemaShape, SchemaRoot, SimplifiedType, Slot, TypeExpr, parse_property_definition_located,
     parse_schema_declaration_located, parse_yaml_schema,
 };
 
@@ -785,10 +786,32 @@ fn project_standalone_payload(
         }
         SchemaDeclaration::Schema(schema) => {
             project_schema_source(schema, payload, 0, &mut source_map)?;
-            project_located_schema_suggestions(schema, payload)?;
+            project_located_schema_suggestions(schema, payload, 0)?;
         }
     }
     Ok(SourceAware { value, source_map })
+}
+
+/// Projects the suggestion-candidate and `{{ … }}` slot spans of
+/// `declaration`, the value of the entry `key` of the YAML mapping authored
+/// as `mapping_source`, into the document `mapping_source` starts
+/// `source_offset` bytes into, through the same located scalars the
+/// standalone loader uses. A whole-file reference carries no spans.
+pub(crate) fn project_keyed_declaration_spans(
+    declaration: &mut SchemaDeclaration,
+    mapping_source: &str,
+    key: &str,
+    source_offset: usize,
+) -> Result<(), SchemaError> {
+    let SchemaDeclaration::Schema(schema) = declaration else {
+        return Ok(());
+    };
+    let located = locate_yaml_value(mapping_source)?;
+    let LocatedKind::Mapping(pairs) = &located.kind else {
+        return Err(projection_error());
+    };
+    let value = pairs.iter().find(|pair| pair.key == key).map(|pair| &pair.value).ok_or_else(projection_error)?;
+    project_located_schema_suggestions(schema, value, source_offset)
 }
 
 /// Projects every `suggest(...)` candidate span through the located scalar
@@ -801,17 +824,18 @@ fn project_standalone_payload(
 fn project_located_schema_suggestions(
     schema: &mut SchemaRoot,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     match (schema, &located.kind) {
         (SchemaRoot::Single(shape), LocatedKind::Mapping(_)) => {
-            project_located_shape_suggestions(shape, located)
+            project_located_shape_suggestions(shape, located, source_offset)
         }
         (SchemaRoot::Union(arms), LocatedKind::Sequence(items))
             if arms.len() == items.len() =>
         {
             for (arm, item) in arms.iter_mut().zip(items) {
                 if let SchemaArm::Inline(shape) = arm {
-                    project_located_shape_suggestions(shape, item)?;
+                    project_located_shape_suggestions(shape, item, source_offset)?;
                 }
             }
             Ok(())
@@ -837,6 +861,7 @@ fn project_located_schema_suggestions(
 fn project_located_shape_suggestions(
     shape: &mut SchemaShape,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
@@ -857,7 +882,7 @@ fn project_located_shape_suggestions(
                     .ok_or_else(projection_error)?
             }
         };
-        project_located_property_suggestions(definition, &pair.value)?;
+        project_located_property_suggestions(definition, &pair.value, source_offset)?;
     }
     Ok(())
 }
@@ -865,6 +890,7 @@ fn project_located_shape_suggestions(
 fn project_located_property_suggestions(
     definition: &mut PropertyDef,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     if let LocatedKind::Scalar(scalar) = &located.kind
         && scalar.decoded().starts_with('*')
@@ -876,16 +902,16 @@ fn project_located_property_suggestions(
         };
     }
     match (definition, &located.kind) {
-        (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located),
+        (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located, source_offset),
         (PropertyDef::Union(atoms), LocatedKind::Scalar(scalar)) => {
             for atom in atoms {
-                project_atom_suggestions(atom, scalar, 0)?;
+                project_atom_suggestions(atom, scalar, source_offset)?;
             }
             Ok(())
         }
         (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
             for (atom, item) in atoms.iter_mut().zip(items) {
-                project_located_atom_suggestions(atom, item)?;
+                project_located_atom_suggestions(atom, item, source_offset)?;
             }
             Ok(())
         }
@@ -896,12 +922,13 @@ fn project_located_property_suggestions(
 fn project_located_atom_suggestions(
     atom: &mut PropertyAtom,
     located: &LocatedValue,
+    source_offset: usize,
 ) -> Result<(), SchemaError> {
     match (&mut atom.ty, &located.kind) {
         (TypeExpr::InlineObject(shape), LocatedKind::Mapping(_)) => {
-            project_located_shape_suggestions(shape, located)
+            project_located_shape_suggestions(shape, located, source_offset)
         }
-        (_, LocatedKind::Scalar(scalar)) => project_atom_suggestions(atom, scalar, 0),
+        (_, LocatedKind::Scalar(scalar)) => project_atom_suggestions(atom, scalar, source_offset),
         _ => Err(projection_error()),
     }
 }
@@ -2612,8 +2639,10 @@ impl ExpressionLevel {
 ///   visited. `{` opens an inline object and `(` a constraint list.
 /// - **Argument lists**, inside a constraint list's `(…)`: `(`/`)` nest and a
 ///   quote opens a string the lexer reads with `\` escapes, so
-///   `suggest('a)b', c)` holds two arguments. `[`, `{`, and the rest are
-///   argument text. String contents are not visited.
+///   `suggest('a)b', c)` holds two arguments. A `{{ … }}` slot is skipped
+///   whole, to the end [`scan_expression_at`] finds, so
+///   `enum(a, {{ f(x, [1; 2]) }})` holds two members. `[`, `{`, and the rest
+///   are argument text. String and slot contents are not visited.
 /// - **Descriptions** after `->` are prose, never visited: quotes and brackets
 ///   in them mean nothing, so `(it's fine)` and `plain [x` hide no boundary.
 ///   Inside an inline object one ends where
@@ -2649,6 +2678,16 @@ pub(super) fn scan_expression(
                     return;
                 };
                 index = next;
+                continue;
+            }
+            // A `{{ … }}` slot is one argument whatever it holds: its
+            // brackets, quotes, `,`, `;`, and `(` are expression text, ended
+            // by the expression scanner's one closing rule.
+            if byte == b'{'
+                && let Some(slot) = scan_expression_at(source, index)
+                && slot.end <= end
+            {
+                index = slot.end;
                 continue;
             }
             if visit(index, byte, level) {
@@ -2815,15 +2854,21 @@ impl Projector<'_> {
         if let TypeExpr::InlineObject(shape) = &mut atom.ty {
             self.shape(shape)?;
         }
-        if atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Suggest(_))) {
+        if atom.constraints.iter().chain(&atom.array_constraints).any(carries_spans) {
             return Err(projection_error());
         }
         Ok(())
     }
 }
 
+/// Whether `constraint` records authored spans that source-aware parsing
+/// projects into the document: suggestion candidates and `{{ … }}` slots.
+fn carries_spans(constraint: &Constraint) -> bool {
+    matches!(constraint, Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::DynamicValue { .. })
+}
+
 fn atom_has_suggestions(atom: &PropertyAtom) -> bool {
-    atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+    atom.constraints.iter().chain(&atom.array_constraints).any(carries_spans)
         || match &atom.ty {
             TypeExpr::InlineObject(shape) => shape.properties.values().any(property_has_suggestions)
                 || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def)),
@@ -2861,16 +2906,33 @@ fn project_atom_suggestions(
             project_property_suggestions(&mut pattern.def, scalar, source_offset)?;
         }
     }
-    if let Some(candidates) = atom.constraints.iter_mut().find_map(|constraint| {
-        if let Constraint::Suggest(candidates) = constraint {
-            Some(candidates)
-        } else {
-            None
-        }
-    }) {
-        for candidate in candidates {
-            let span = scalar.project(candidate.span.clone()).ok_or_else(projection_error)?;
-            candidate.span = offset_span(&span, source_offset);
+    let project = |span: &mut Range<usize>| -> Result<(), SchemaError> {
+        let projected = scalar.project(span.clone()).ok_or_else(projection_error)?;
+        *span = offset_span(&projected, source_offset);
+        Ok(())
+    };
+    let project_slot = |slot: &mut Slot| -> Result<(), SchemaError> {
+        project(&mut slot.span)?;
+        project(&mut slot.expression_span)
+    };
+    for constraint in atom.constraints.iter_mut().chain(atom.array_constraints.iter_mut()) {
+        match constraint {
+            Constraint::Suggest(candidates) => {
+                for candidate in candidates {
+                    project(&mut candidate.span)?;
+                }
+            }
+            Constraint::Dynamic(list) => {
+                for element in &mut list.elements {
+                    match element {
+                        DynamicElement::Suggestion(candidate) => project(&mut candidate.span)?,
+                        DynamicElement::Slot(slot) => project_slot(slot)?,
+                        DynamicElement::Member(_) => {}
+                    }
+                }
+            }
+            Constraint::DynamicValue { slot, .. } => project_slot(slot)?,
+            _ => {}
         }
     }
     Ok(())

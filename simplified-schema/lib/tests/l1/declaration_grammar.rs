@@ -276,3 +276,88 @@ mod rejected {
         }
     }
 }
+
+/// `{{ … }}` slots in a YAML property value: the template the grammar
+/// builds, its canonical serialization, and the located errors around it.
+/// The constraint-level cases are unit tests beside the grammar.
+mod slots {
+    use super::*;
+    use simplified_schema::simplified::{DynamicElement, DynamicKind, DynamicList, ValueSlotKind};
+
+    fn slot_expressions(def: &PropertyDef) -> Vec<String> {
+        atom_constraints(def).iter().flat_map(|constraint| constraint.slots()).map(|slot| slot.expression.clone()).collect()
+    }
+
+    #[test]
+    fn templates_round_trip_through_canonical_serialization() {
+        for (expression, slots) in [
+            ("enum(none, {{ load_data(\"./os.yaml\", \"string[]\") }}; required)", 1),
+            ("enum({{ a }}, b, {{ c || d }})", 2),
+            ("enum('x, y', {{ a }})[](max(3))", 1),
+            ("string(suggest(FreeBSD, {{ load_data('./os.yaml') }}, Plan9))", 1),
+            ("number(suggest(1, {{ n }}, 1))", 1),
+            ("literal({{ revision }}; required)", 1),
+            ("number(min({{ low }}); max({{ high }}); default({{ d }}))", 3),
+            ("string(pattern({{ p }}))", 1),
+        ] {
+            let parsed = definition(expression);
+            assert_eq!(slot_expressions(&parsed).len(), slots, "`{expression}`");
+            let canonical = serialize_property_def(&parsed);
+            let reparsed = definition(&canonical);
+            assert_eq!(slot_expressions(&reparsed), slot_expressions(&parsed), "`{expression}` → `{canonical}`");
+            assert_eq!(serialize_property_def(&reparsed), canonical, "canonical form is stable");
+        }
+    }
+
+    #[test]
+    fn a_quoted_yaml_carrier_reads_like_a_plain_one() {
+        let plain = definition("enum(a, {{ x }})");
+        let quoted = parse_property_definition("p", &yaml("'enum(a, {{ x }})'")).unwrap();
+        assert_eq!(serialize_property_def(&quoted), serialize_property_def(&plain));
+        assert!(matches!(
+            atom_constraints(&quoted).as_slice(),
+            [Constraint::Dynamic(DynamicList { kind: DynamicKind::Members, elements, .. })]
+                if matches!(elements.as_slice(), [DynamicElement::Member(_), DynamicElement::Slot(_)])
+        ));
+    }
+
+    #[test]
+    fn data_shaped_text_beside_a_slot_stays_literal() {
+        // A quoted member holding `,`, `;`, `)`, and `{{` is one literal.
+        let def = definition("enum('a, b; required) {{ c }}', {{ d }})");
+        let constraints = atom_constraints(&def);
+        let [Constraint::Dynamic(list)] = constraints.as_slice() else { panic!("{def:?}") };
+        assert!(matches!(
+            list.elements.as_slice(),
+            [DynamicElement::Member(member), DynamicElement::Slot(slot)]
+                if member == "a, b; required) {{ c }}" && slot.expression == "d"
+        ));
+    }
+
+    #[test]
+    fn a_static_list_keeps_its_static_constraint() {
+        assert_eq!(atom_constraints(&definition("enum(a, b)")), vec![Constraint::Members(vec!["a".into(), "b".into()])]);
+        assert!(matches!(atom_constraints(&definition("string(suggest(a))")).as_slice(), [Constraint::Suggest(_)]));
+        assert!(matches!(atom_constraints(&definition("literal(5)")).as_slice(), [Constraint::LiteralValue(_)]));
+        assert!(matches!(
+            atom_constraints(&definition("number(min({{ a }}))")).as_slice(),
+            [Constraint::DynamicValue { kind: ValueSlotKind::Min, .. }]
+        ));
+    }
+
+    #[test]
+    fn slot_errors_are_located_in_the_expression() {
+        for (expression, message, at) in [
+            ("enum(a, {{ b }} c)", "a `{{ … }}` slot must be a complete list element", "{{ b }} c"),
+            ("enum(a, {{ b, c)", "unterminated `{{ … }}` slot", "{{ b, c)"),
+            ("string(default({{ d }} + 1))", "a `{{ … }}` slot must be the whole argument", "{{ d }} +"),
+        ] {
+            let (found, span) = expression_error(expression);
+            assert_eq!(found, message, "`{expression}`");
+            assert_eq!(&expression[span], at, "`{expression}`");
+        }
+        let (found, span) = expression_error("enum({{ ) }})");
+        assert!(found.starts_with("invalid `{{ … }}` slot expression"), "{found}");
+        assert_eq!(&"enum({{ ) }})"[span], ")");
+    }
+}

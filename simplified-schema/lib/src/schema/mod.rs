@@ -42,6 +42,7 @@ use serde_json::Value;
 
 use crate::outcome::{ValidationFailure, ValidationSuccess};
 use crate::prepared::Prepared;
+use crate::simplified::Slot;
 use crate::{SchemaAdvisory, SchemaError};
 
 pub use error::SimplifiedSchemaError;
@@ -87,6 +88,16 @@ struct Definition {
     /// The merged lowered JSON Schema of a layered definition. `None` for a
     /// single layer, whose own lowering is the schema.
     merged: Option<Arc<Value>>,
+    /// The unresolved `{{ … }}` slots of every layer, highest precedence
+    /// first; empty for a concrete schema.
+    pending: Vec<Slot>,
+}
+
+impl Definition {
+    fn new(layers: Vec<Arc<Layer>>, receiver: usize, merged: Option<Arc<Value>>) -> Self {
+        let pending = layers.iter().flat_map(|layer| layer.pending_slots()).collect();
+        Self { layers, receiver, merged, pending }
+    }
 }
 
 /// A preparation outcome, kept so a schema that cannot be prepared reports
@@ -140,14 +151,33 @@ impl TryFrom<&str> for SimplifiedSchema {
 impl SimplifiedSchema {
     fn from_layer(layer: Layer) -> Self {
         Self {
-            definition: Arc::new(Definition {
-                layers: vec![Arc::new(layer)],
-                receiver: 0,
-                merged: None,
-            }),
+            definition: Arc::new(Definition::new(vec![Arc::new(layer)], 0, None)),
             revision: 0,
             prepared: Mutex::new(None),
         }
+    }
+
+    /// Whether the schema is concrete: no layer holds an unresolved
+    /// `{{ … }}` slot. A template is inspected and exported as authored;
+    /// lowering, validation, and layering report it unresolved.
+    ///
+    /// ```
+    /// use simplified_schema::SimplifiedSchema;
+    ///
+    /// let template = SimplifiedSchema::try_from("$schema:\n  os: enum(none, {{ load_data('./os.yaml') }})\n")?;
+    /// assert!(!template.is_resolved());
+    /// assert_eq!(template.pending_slots()[0].expression, "load_data('./os.yaml')");
+    /// # Ok::<(), simplified_schema::SimplifiedSchemaError>(())
+    /// ```
+    pub fn is_resolved(&self) -> bool {
+        self.definition.pending.is_empty()
+    }
+
+    /// The unresolved `{{ … }}` slots of every layer in declaration order,
+    /// each once; empty for a concrete schema. Listing them evaluates and
+    /// reads nothing.
+    pub fn pending_slots(&self) -> &[Slot] {
+        &self.definition.pending
     }
 
     /// The definition revision: `0` when built, bumped by each layering call
@@ -200,7 +230,9 @@ impl SimplifiedSchema {
     /// ## Errors
     ///
     /// [`ValidationFailure`] with every problem found, or
-    /// [`ValidationFailure::Unprepared`] when the schema cannot be prepared.
+    /// [`ValidationFailure::Unprepared`] when the schema cannot be prepared;
+    /// for an unresolved template its error is
+    /// [`SchemaError::UnresolvedSlots`] and nothing is judged.
     pub fn validate_strict<'input>(&self, value: &'input Value) -> Result<ValidationSuccess<'input>, ValidationFailure> {
         self.with_prepared(|prepared| prepared.validate_strict(value))
     }

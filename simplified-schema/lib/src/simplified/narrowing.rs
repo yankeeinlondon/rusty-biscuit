@@ -17,7 +17,8 @@ use serde_json::Value;
 use super::query::flattened_alternatives;
 use super::serialize::serialize_property_def;
 use super::types::{
-    Constraint, FunctionType, NarrowsClause, NarrowsKind, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
+    Constraint, DynamicKind, DynamicList, FunctionType, NarrowsClause, NarrowsKind, PropertyAtom, PropertyDef,
+    SimplifiedType, TypeExpr, ValueSlotKind,
     narrows_target_problem, returns_exact_boolean,
 };
 use crate::span::SourceSpan;
@@ -174,6 +175,11 @@ pub fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
                 | Constraint::Example(_)
                 | Constraint::Members(_)
                 | Constraint::LiteralValue(_)
+                | Constraint::Dynamic(_)
+                | Constraint::DynamicValue {
+                    kind: ValueSlotKind::Default | ValueSlotKind::Literal,
+                    ..
+                }
         )
     })
 }
@@ -193,6 +199,14 @@ pub fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
                 | Constraint::Eager
                 | Constraint::Suggest(_)
                 | Constraint::Example(_)
+                | Constraint::Dynamic(DynamicList {
+                    kind: DynamicKind::Suggest,
+                    ..
+                })
+                | Constraint::DynamicValue {
+                    kind: ValueSlotKind::Default,
+                    ..
+                }
         )
     };
     atom.constraints.retain(|constraint| !marker(constraint));

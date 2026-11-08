@@ -361,6 +361,19 @@ one (`cli/src/commands/schema/validate.rs::validate_one` records discovery, the 
 `effective_for`, and validation plus its presence lookup) or the first build
 lands outside the report and a cold request reads as a `hit`.
 
+### Schema templates (`{{ … }}` slots)
+
+A schema whose `enum`/`suggest` elements or `literal`/`default`/`min`/`max`/
+`pattern` argument is a `{{ … }}` slot parses passively in the
+`simplified-schema` crate (`Constraint::Dynamic`/`DynamicValue`) and every
+lowering of it returns `SchemaError::UnresolvedSlots`, so Darkmatter's
+existing resolution, validation, and trigger paths fail closed with that
+typed error rather than seeing a partial list. A trigger match condition
+never admits a slot (`triggers::grammar::is_match_safe_constraint` excludes
+them). `triggers/finding.rs::related_path` names an imported slot's defining
+file. Explicit resolution (the slot host, approval, cache) is not built yet;
+the language rules are in `simplified-schema/docs/topics/language/slots.md`.
+
 ## Runtime baseline
 
 The runtime baseline is the resolved `fm` declaration of the global catalog

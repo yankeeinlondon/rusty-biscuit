@@ -28,7 +28,7 @@
 //! and the in-memory lint results only.
 
 use super::{
-    Constraint, DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SchemaRoot, SuggestionCandidate, SuggestionLintProblem, TypeExpr, lint_suggestions,
 };
 
@@ -71,6 +71,10 @@ pub struct SuggestionQuery {
     pub is_array: bool,
     /// Lint-valid candidates in declaration order.
     pub items: Vec<SuggestionItem>,
+    /// Whether the list holds an unresolved `{{ … }}` slot, so `items` are
+    /// only its literal candidates and not the whole list. A consumer shows
+    /// them as incomplete rather than as every suggestion there is.
+    pub pending: bool,
 }
 
 /// Queries lint-valid suggestion candidates for `property_path` in `schema`.
@@ -107,7 +111,8 @@ pub fn suggestions_for_path(
     let lints = lint_suggestions(schema).unwrap_or_default();
     let items = alternative_items(&alternative, &lints, property_path, &root_arm);
     let is_array = alternative.is_array;
-    Some(SuggestionQuery { is_array, items })
+    let pending = alternative.atom.has_pending_suggestions();
+    Some(SuggestionQuery { is_array, items, pending })
 }
 
 /// Queries lint-valid suggestion candidates from an already-resolved property
@@ -140,11 +145,12 @@ pub fn suggestions_for_def(leaf: &str, def: &PropertyDef) -> Option<SuggestionQu
         return None;
     }
     let is_array = by_alternative.iter().any(|(alternative, _)| alternative.is_array);
+    let pending = by_alternative.iter().any(|(alternative, _)| alternative.atom.has_pending_suggestions());
     let items = by_alternative
         .into_iter()
         .flat_map(|(_, items)| items)
         .collect();
-    Some(SuggestionQuery { is_array, items })
+    Some(SuggestionQuery { is_array, items, pending })
 }
 
 /// Lint-valid candidates of each suggest-bearing alternative of `def`, in
@@ -187,12 +193,10 @@ fn alternative_items(
     root_arm: &Option<usize>,
 ) -> Vec<SuggestionItem> {
     let atom = alternative.atom;
-    let Some(candidates) = atom.constraints.iter().find_map(|c| match c {
-        Constraint::Suggest(candidates) => Some(candidates.as_slice()),
-        _ => None,
-    }) else {
+    let Some(candidates) = atom.suggestion_candidates() else {
         return Vec::new();
     };
+    let candidates = candidates.as_ref();
     let is_string = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::String));
     let is_number = matches!(atom.ty, TypeExpr::Primitive(super::SimplifiedType::Number));
     candidates
@@ -280,9 +284,7 @@ fn suggest_atom_in_def(def: &PropertyDef) -> Option<Alternative<'_>> {
 }
 
 fn has_suggest(atom: &PropertyAtom) -> bool {
-    atom.constraints
-        .iter()
-        .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
+    atom.suggestion_candidates().is_some()
 }
 
 /// One leaf alternative of a property definition, as produced by

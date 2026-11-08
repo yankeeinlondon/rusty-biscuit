@@ -25,7 +25,8 @@ variants describe the *input*: `MissingFile`, `Read`, `Reference` (a
 malformed or unresolvable reference), `Context` and `Discovery` (capturing a
 raw path's request context failed; see
 [Host Capabilities](./host-capabilities.md)), `MissingSchema`, `Frontmatter`,
-`Unprepared`, `Selection`, and `ExportUnsupported`. A malformed *definition*
+`Unprepared`, `Unresolved` (a [template](./language/slots.md) whose slots
+are not resolved), `Selection`, and `ExportUnsupported`. A malformed *definition*
 is `SimplifiedSchemaError::Schema`, which holds the language's own
 `SchemaError` by value, so the source chain is never flattened into text:
 

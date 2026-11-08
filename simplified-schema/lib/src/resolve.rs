@@ -57,8 +57,9 @@ use super::{
         SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
         SchemaSourcePath, SchemaUnionRejection, parse_standalone_schema_document, parse_yaml_schema,
         to_json_schema, to_json_schema_with_definitions,
+        grammar::{is_suggestion_list, suggestion_list_span},
         types::{
-            Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
+            Constraint, DynamicKind, ValueSlotKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
             TypeExpr,
         },
     },
@@ -2350,7 +2351,7 @@ impl ImportEngine<'_> {
         let suggestions = out
             .iter()
             .flat_map(PropertyAtom::property_constraints)
-            .filter(|constraint| matches!(constraint, Constraint::Suggest(_)))
+            .filter(|constraint| is_suggestion_list(constraint))
             .count();
         if suggestions > 1 {
             // An inherited candidate's span belongs to another source, so no
@@ -3198,29 +3199,16 @@ fn apply_import_postfix(
         });
     }
 
-    if is_array
-        && array_constraints
-            .iter()
-            .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-    {
+    if is_array && array_constraints.iter().any(is_suggestion_list) {
         return Err(SchemaError::Grammar {
             property: name.to_string(),
             message: "`suggest` is not valid at the array level".into(),
-            span: array_constraints
-                .iter()
-                .find_map(|constraint| match constraint {
-                    Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
-                    _ => None,
-                })
-                .unwrap_or(0..0),
+            span: array_constraints.iter().find_map(suggestion_list_span).unwrap_or(0..0),
             related: Vec::new(),
         });
     }
 
-    if constraints
-        .iter()
-        .any(|constraint| matches!(constraint, Constraint::Suggest(_)))
-    {
+    if constraints.iter().any(is_suggestion_list) {
         let TypeExpr::Primitive(
             ty @ (SimplifiedType::String | SimplifiedType::Number | SimplifiedType::Alphanumeric),
         ) = &base_atom.ty
@@ -3230,25 +3218,19 @@ fn apply_import_postfix(
                 message: format!(
                     "`suggest` on imported type `{name}@{reference}` requires an exact `string`, `number`, or `alphanumeric` target"
                 ),
-                span: constraints
-                    .iter()
-                    .find_map(|constraint| match constraint {
-                        Constraint::Suggest(candidates) => {
-                            candidates.first().map(|candidate| candidate.span.clone())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or(0..0),
+                span: constraints.iter().find_map(suggestion_list_span).unwrap_or(0..0),
                 related: Vec::new(),
             });
         };
         for constraint in &mut constraints {
-            if let Constraint::Suggest(candidates) = constraint {
-                super::simplified::grammar::reinterpret_suggestion_candidates(
-                    candidates,
-                    *ty,
-                    &name,
-                )?;
+            match constraint {
+                Constraint::Suggest(candidates) => {
+                    super::simplified::grammar::reinterpret_suggestion_candidates(candidates, *ty, &name)?;
+                }
+                Constraint::Dynamic(list) if list.kind == DynamicKind::Suggest => {
+                    super::simplified::grammar::reinterpret_dynamic_suggestions(list, *ty);
+                }
+                _ => {}
             }
         }
     }
@@ -3257,16 +3239,10 @@ fn apply_import_postfix(
         .constraints
         .iter()
         .chain(constraints.iter())
-        .filter(|constraint| matches!(constraint, Constraint::Suggest(_)))
+        .filter(|constraint| is_suggestion_list(constraint))
         .count();
     if suggestion_count > 1 {
-        let span = constraints
-            .iter()
-            .find_map(|constraint| match constraint {
-                Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
-                _ => None,
-            })
-            .unwrap_or(0..0);
+        let span = constraints.iter().find_map(suggestion_list_span).unwrap_or(0..0);
         return Err(SchemaError::Grammar {
             property: name.to_string(),
             message: "a property definition may contain at most one `suggest` constraint".into(),
@@ -3316,7 +3292,7 @@ fn apply_import_postfix(
     } else if base_is_array {
         let (items, container): (Vec<Tagged>, Vec<Tagged>) = use_site
             .into_iter()
-            .partition(|(constraint, _)| matches!(constraint, Constraint::Suggest(_)));
+            .partition(|(constraint, _)| is_suggestion_list(constraint));
         let container = reinterpret_bounds(container, CountedBound::Items, &property)?;
         (
             merge_constraints(inherited_value, items, &merge_site)?,
@@ -3588,6 +3564,10 @@ fn is_array_container_constraint(constraint: &Constraint) -> bool {
             | Constraint::Unique
             | Constraint::Default(_)
             | Constraint::Example(_)
+            | Constraint::DynamicValue {
+                kind: ValueSlotKind::Min | ValueSlotKind::Max | ValueSlotKind::Default,
+                ..
+            }
     )
 }
 
@@ -3618,6 +3598,9 @@ enum CountedBound {
 
 /// Reinterprets use-site `min`/`max`, which a reference parses as numeric
 /// bounds before its target is known, as counts of `counted`.
+///
+/// A `{{ … }}` bound is kept as a slot: merging it with an inherited bound,
+/// as [`merge_constraints`] does for concrete ones, waits for its value.
 fn reinterpret_bounds(
     constraints: Vec<Tagged>,
     counted: CountedBound,
@@ -3639,6 +3622,13 @@ fn reinterpret_bounds(
                 (Constraint::Max(n), CountedBound::Items) => {
                     Constraint::MaxItems(bound_count(n, "max", property)?)
                 }
+                // A slot bound is retargeted, not converted: its count is
+                // judged once resolution supplies it. An items bound needs no
+                // retarget, since it sits in the container's list.
+                (
+                    Constraint::DynamicValue { kind: kind @ (ValueSlotKind::Min | ValueSlotKind::Max), slot, .. },
+                    CountedBound::Length,
+                ) => Constraint::DynamicValue { kind, target: SimplifiedType::String, slot },
                 (other, _) => other,
             };
             Ok((constraint, origin))

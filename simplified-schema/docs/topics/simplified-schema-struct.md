@@ -154,6 +154,15 @@ prepared (a function-typed property has no JSON Schema form, or content that
 names another file) fails every validation with
 `ValidationFailure::Unprepared`, carrying the one shared error.
 
+A [template](./language/slots.md), a schema holding `{{ … }}` slots, is
+accepted by every factory and inspected and exported as authored, but it is
+not concrete: `is_resolved()` is `false`, `pending_slots()` lists its slots,
+every validation fails with `ValidationFailure::Unprepared` holding
+`SchemaError::UnresolvedSlots`, and `to_json_schema`, `layer_under`, and
+`layer_over` (with a template on either side) return
+`SimplifiedSchemaError::Unresolved`. Nothing is judged and nothing is
+evaluated.
+
 A schema built from content has no file context. Its `file(eager)` and
 `match(...)` checks cannot run, so a value that fails only those is
 `ValidationFailure::UnavailableCheck`, not invalid data.

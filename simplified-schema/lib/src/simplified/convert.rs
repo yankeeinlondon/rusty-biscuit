@@ -46,7 +46,7 @@ use super::alphanumeric::AlphanumericOptions;
 use super::definitions::{DefKey, DefinitionOuter, DefinitionTable, definition_pointer};
 use super::types::{
     Constraint, PatternKey, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SchemaRoot,
-    SimplifiedType, TupleType, TypeExpr,
+    SimplifiedType, Slot, TupleType, TypeExpr,
 };
 use crate::numeric::json_number;
 use crate::expression::parse as parse_expression;
@@ -68,6 +68,9 @@ pub const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 /// Converts a [`SchemaRoot`] into a Draft 2020-12 JSON Schema value.
 ///
 /// ## Errors
+///
+/// Returns [`SchemaError::UnresolvedSlots`] when the schema or a definition
+/// it holds is a template with `{{ … }}` slots, before lowering anything.
 ///
 /// Returns [`SchemaError::Convert`] when:
 ///
@@ -111,6 +114,7 @@ pub fn to_json_schema_with_definitions(
     schema: &SchemaRoot,
     defs: &DefinitionTable,
 ) -> Result<Value, SchemaError> {
+    crate::slots::reject_unresolved(schema, defs)?;
     let mut copies = MatchCopies::default();
     let root = match schema {
         SchemaRoot::Single(shape) => shape_to_object_schema(shape, Lowering::suggesting(defs))?,
@@ -1040,6 +1044,19 @@ fn atom_fragment_without_null_wrap(
     allow_optional_empty_file: bool,
     defs: Lowering<'_>,
 ) -> Result<(Value, bool), SchemaError> {
+    // The entry points reject a template before lowering anything; this
+    // keeps every other route into an atom's lowering just as closed, rather
+    // than letting a fragment read a dynamic list as no members.
+    let slots: Vec<Slot> = atom
+        .constraints
+        .iter()
+        .chain(&atom.array_constraints)
+        .flat_map(Constraint::slots)
+        .cloned()
+        .collect();
+    if !slots.is_empty() {
+        return Err(SchemaError::UnresolvedSlots(Box::new(crate::errors::UnresolvedSlots::new(slots))));
+    }
     // Required is hoisted out; default may appear on either constraints
     // (single/value-level) or array_constraints (array-level). Repeated
     // defaults must agree after number normalization (`3` == `3.0`).

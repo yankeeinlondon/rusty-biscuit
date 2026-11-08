@@ -64,6 +64,7 @@ pub mod schema;
 pub mod scope;
 pub mod setter_value;
 pub mod simplified;
+pub mod slots;
 pub mod span;
 pub mod timings;
 pub mod validate;
@@ -85,7 +86,9 @@ pub(crate) use note_work;
 pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use claims::{ClaimCause, ClaimProblem, claimed_values};
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::{CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError};
+pub use errors::{
+    CycleReference, DRAFT_2020_12_DIALECT, GrammarRelated, KindSelectionCause, NotSchemaReason, SchemaError, UnresolvedSlots,
+};
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, expression_atom, frontmatter_expression_values,
     frontmatter_expression_values_with_definitions, layered_property_shape, nested_property_shape,
@@ -111,6 +114,7 @@ pub use schema::{SchemaSource, repository_scope_catalog};
 pub use simplified::alias_search_work;
 pub use simplified::{
     Alternative, AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar,
+    DynamicElement, DynamicKind, DynamicList, Slot, ValueSlotKind,
     DefKey, DefNamespace, Definition, DefinitionOuter, DefinitionTable, LocatedDefinitionFailure, LocatedRelated,
     PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaConstraintConflictKind,
     SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole, SchemaDeclaration,

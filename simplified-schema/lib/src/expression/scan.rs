@@ -209,6 +209,42 @@ pub fn scan(content: &str, excluded: &[(usize, usize)]) -> ExpressionScanResult 
     }
 }
 
+/// The `{{ … }}` expression whose opener is at byte `start`, ended by the same
+/// closing rule [`scan`] applies (quote- and brace-balanced, parse-gated; see
+/// the module docs). This is the one closing-delimiter rule: a reader that
+/// meets `{{` inside other text (a schema constraint list, a YAML scanner, an
+/// editor) asks here instead of looking for `}}` itself.
+///
+/// `None` when no expression opens at `start`: the bytes there are not `{{`,
+/// the opener is escaped (`\{{`), it opens a `{{{ … }}}` literal or a
+/// `{{!data:…}}` literal token, the expression is unclosed, or it is empty.
+///
+/// ## Examples
+///
+/// ```
+/// use simplified_schema::expression::scan::scan_expression_at;
+///
+/// let text = r#"enum(a, {{ load_data("x.yaml", "string[]") }}; required)"#;
+/// let found = scan_expression_at(text, 8).expect("a slot opens at byte 8");
+/// assert_eq!(found.expression, r#"load_data("x.yaml", "string[]")"#);
+/// assert_eq!(&text[found.end..], "; required)");
+///
+/// assert!(scan_expression_at("{{ open", 0).is_none());
+/// ```
+#[must_use]
+pub fn scan_expression_at(content: &str, start: usize) -> Option<ExpressionLocation> {
+    let bytes = content.as_bytes();
+    if !content.get(start..)?.starts_with("{{") || is_escaped_opener(bytes, start) {
+        return None;
+    }
+    let after = &content[start + 2..];
+    if after.starts_with('{') || after.starts_with(LITERAL_TOKEN_BODY_PREFIX) {
+        return None;
+    }
+    let (found, _) = scan_expression(content, start);
+    found
+}
+
 /// [`scan`] with nothing excluded.
 #[must_use]
 pub fn scan_plain(content: &str) -> ExpressionScanResult {

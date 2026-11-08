@@ -30,6 +30,8 @@ mod schema_object;
 mod schema_target_classification;
 mod schema_target_inspection;
 mod setter_values;
+mod slot_spans;
+mod slot_templates;
 mod shipped_corpus;
 mod soft_validation_repair;
 mod test_layout;

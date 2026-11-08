@@ -1677,6 +1677,8 @@ fn every_shipped_yaml_schema_definition_is_in_the_shipped_table() {
 /// checkout copies of the shipped definitions sit in a schema root: each copy
 /// is recognized as the source of its built-in (source-path identity), so the
 /// corpus manufactures no duplicate claim, and validation follows the copy.
+/// A schema template (one holding `{{ … }}` slots, such as Claudine's
+/// sandboxing schema) passes passively: admission evaluates no slot.
 #[test]
 fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
     use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
@@ -1703,11 +1705,6 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
                 && exception.file == file
                 && matches!(exception.class, Class::Draft { .. } | Class::EnvelopeRejected | Class::Placeholder)
         })
-    };
-    // Not an `EXCEPTIONS` entry: `collect_artifacts` requires each of those to
-    // exist in its own groups, which do not walk the research folder.
-    let awaiting_enum_slots = |dir: &str, file: &str| {
-        dir == "claudine/docs/research" && file == "sandboxing/providers/sandboxing.yaml"
     };
     let mut checked = 0usize;
     let mut failures = Vec::new();
@@ -1742,13 +1739,6 @@ fn every_kinded_schema_artifact_passes_its_definition_through_the_registry() {
                 continue;
             }
             let outcome = schemas.validate_yaml_document(&source, &file);
-            if awaiting_enum_slots(dir, &file_label) {
-                assert!(
-                    !matches!(&outcome, Ok(YamlOutcome::Validated(validation)) if validation.report.valid),
-                    "{dir}/{file_label} validates now that `enum({{{{ … }}}})` is supported; remove this carve-out",
-                );
-                continue;
-            }
             checked += 1;
             match outcome {
                 Ok(YamlOutcome::Validated(validation)) if validation.report.valid => {}

@@ -65,7 +65,7 @@ use url::Url;
 use crate::coercion::{ContentFormat, content_error};
 use crate::file_context::resolve_document_file_ref;
 use crate::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
+    Constraint, DynamicElement, DynamicKind, DynamicList, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaRoot, SchemaShape, SimplifiedType,
     TypeExpr, declaration_options_payload, parse_schema_declaration, parse_type_definition_value,
     serialize_property_atom, serialize_property_def,
 };
@@ -757,9 +757,14 @@ fn alternative_form(atom: &PropertyAtom, forms: &[SimplifiedType]) -> FormVerdic
         SimplifiedType::Literal => {
             matches!(atom.literal_value(), Some(Value::String(text)) if !text.is_empty())
         }
-        SimplifiedType::Enum => atom.property_constraints().any(|constraint| {
-            matches!(constraint, Constraint::Members(members)
-                if !members.is_empty() && members.iter().all(|member| !member.is_empty()))
+        SimplifiedType::Enum => atom.property_constraints().any(|constraint| match constraint {
+            Constraint::Members(members) => !members.is_empty() && members.iter().all(|member| !member.is_empty()),
+            // A template's literal members are judged now; its slots return
+            // strings, and an empty one is a resolution error.
+            Constraint::Dynamic(DynamicList { kind: DynamicKind::Members, elements, .. }) => {
+                elements.iter().all(|element| !matches!(element, DynamicElement::Member(member) if member.is_empty()))
+            }
+            _ => false,
         }),
         _ => true,
     };

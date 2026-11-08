@@ -16,7 +16,7 @@ use crate::resolve::{self, InlineOwner, ReferenceStack, ResolvedSchema};
 use crate::simplified::standalone::visit_def;
 use crate::simplified::{
     Constraint, DefinitionTable, LOCAL_REFERENCE, PropertyAtom, PropertyDef, SchemaArm, SchemaCategory, SchemaDeclaration,
-    SchemaRoot, SchemaShape, StandaloneSchemaEnvelope, TypeExpr, parse_keyed_declaration,
+    SchemaRoot, SchemaShape, Slot, StandaloneSchemaEnvelope, TypeExpr, parse_keyed_declaration, project_keyed_declaration_spans,
     parse_standalone_schema_document, to_json_schema_with_definitions,
 };
 use crate::{SchemaAdvisory, SchemaError};
@@ -179,13 +179,14 @@ impl Layer {
         let Some(value) = frontmatter.as_mapping().and_then(|mapping| mapping.get("$schema")) else {
             return Err(missing_schema(path.as_deref(), "the frontmatter has no `$schema`"));
         };
+        let mut declaration = parse_keyed_declaration(value, yaml_text, "$schema", yaml_offset).map_err(|failure| {
+            failure.into_document_error(path.as_deref().unwrap_or(Path::new(CONTENT)), "invalid frontmatter `$schema`")
+        })?;
+        // Candidate and slot spans point into the Markdown document, as a
+        // standalone document's point into its file.
+        project_keyed_declaration_spans(&mut declaration, yaml_text, "$schema", yaml_offset)?;
         let authored = AuthoredSchema {
-            declaration: parse_keyed_declaration(value, yaml_text, "$schema", yaml_offset).map_err(|failure| {
-                failure.into_document_error(
-                    path.as_deref().unwrap_or(Path::new(CONTENT)),
-                    "invalid frontmatter `$schema`",
-                )
-            })?,
+            declaration,
             local_types: None,
             envelope: StandaloneSchemaEnvelope::Pure,
             categories: None,
@@ -354,7 +355,7 @@ fn resolve_authored(
                 context,
                 &mut stack,
                 shipped,
-            )?)
+            ))
         }
         (SchemaDeclaration::Schema(SchemaRoot::Union(arms)), site)
             if arms.iter().any(|arm| matches!(arm, SchemaArm::FileRef(_))) =>
@@ -369,7 +370,7 @@ fn resolve_authored(
                     context,
                     &mut stack,
                     shipped,
-                )?,
+                ),
                 Site::File => resolve::resolve_standalone_root_union(
                     arms.clone(),
                     authored.local_types.as_ref(),
@@ -379,10 +380,25 @@ fn resolve_authored(
                     context,
                     &mut stack,
                     shipped,
-                )?,
+                ),
             })
         }
         _ => None,
+    };
+    // A whole-file reference or root-union arm that reaches a template is
+    // still a valid schema: it is kept, unlowered, for explicit resolution.
+    let whole = match whole {
+        Some(Err(unresolved @ SchemaError::UnresolvedSlots(_))) => {
+            let typed = authored.schema().map(|root| Typed { root: root.clone(), definitions: Arc::default() });
+            return Ok(Layer {
+                authored: Authored::Simplified(Box::new(authored)),
+                typed,
+                lowered: Err(Arc::new(unresolved)),
+                binding: Some(binding),
+                provenance,
+            });
+        }
+        whole => whole.transpose()?,
     };
     if let Some(resolved) = whole {
         let ResolvedSchema {
@@ -519,6 +535,17 @@ pub(super) fn json_declares(json: &Value, key: &str) -> bool {
 }
 
 impl Layer {
+    /// The unresolved `{{ … }}` slots of this layer, in declaration order.
+    /// A layer whose resolution stopped at a template (a whole-file
+    /// reference to one) has no typed form; its error lists them.
+    pub(super) fn pending_slots(&self) -> Vec<Slot> {
+        match (&self.typed, self.lowered.as_ref().err().map(|error| error.as_ref())) {
+            (_, Some(SchemaError::UnresolvedSlots(unresolved))) => unresolved.slots.clone(),
+            (Some(typed), _) => crate::slots::collect_slots(&typed.root, &typed.definitions),
+            (None, _) => Vec::new(),
+        }
+    }
+
     /// The object named type `name` of this layer as a schema of its own:
     /// the expanded type for validation and queries, and, for export, the
     /// authored type with the whole authored table beside it, so the

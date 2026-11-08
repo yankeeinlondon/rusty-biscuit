@@ -42,6 +42,7 @@ use crate::{
     simplified::{
         DefKey, DefinitionOuter, DefinitionTable, SchemaConstraintOrigin, SchemaReferenceSite,
         SchemaSourcePath, SchemaSourcePathSegment, SchemaUnionRejection,
+        grammar::{is_suggestion_list, suggestion_list_span},
         types::{Constraint, PropertyAtom, PropertyDef, TypeExpr},
     },
 };
@@ -688,7 +689,13 @@ impl ImportEngine<'_> {
                     .constraints
                     .iter()
                     .chain(&arm.array_constraints)
-                    .any(|constraint| is_arm_property_marker(constraint) || matches!(constraint, Constraint::Suggest(_)))
+                    .any(|constraint| {
+                        is_arm_property_marker(constraint)
+                            || matches!(
+                                constraint,
+                                Constraint::Suggest(_) | Constraint::Dynamic(_) | Constraint::DynamicValue { .. }
+                            )
+                    })
                 && !(matches!(arm.ty, TypeExpr::Primitive(SimplifiedType::File)) && !arm.is_array)
                 && !matches!(&arm.ty, TypeExpr::Ref(target) if self.cyclic.contains(target))
         })
@@ -716,7 +723,14 @@ fn use_is_representable(
         .iter()
         .chain(value)
         .chain(array)
-        .any(|constraint| matches!(constraint, Constraint::Suggest(_) | Constraint::Options(_)))
+        .any(|constraint| {
+            // A slot is substituted where the use is written, so a use
+            // holding one is always inlined.
+            matches!(
+                constraint,
+                Constraint::Suggest(_) | Constraint::Options(_) | Constraint::Dynamic(_) | Constraint::DynamicValue { .. }
+            )
+        })
     {
         return false;
     }
@@ -983,9 +997,8 @@ fn apply_reference_postfix(
         if let Some(span) = constraints
             .iter()
             .chain(&array_constraints)
-            .find_map(|constraint| match constraint {
-                Constraint::Suggest(candidates) => Some(candidates.first().map(|c| c.span.clone()).unwrap_or(0..0)),
-                _ => None,
+            .find_map(|constraint| {
+                is_suggestion_list(constraint).then(|| suggestion_list_span(constraint).unwrap_or(0..0))
             })
         {
             return Err(SchemaError::Grammar {

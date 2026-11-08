@@ -9,6 +9,18 @@ use biscuit_file::frontmatter::FrontmatterEnvelopeError;
 
 use crate::SchemaError;
 
+impl SimplifiedSchemaError {
+    /// The error for a schema whose lowering failed with `error`:
+    /// [`Self::Unresolved`] for a template, [`Self::Unprepared`] otherwise.
+    pub(super) fn from_lowering(error: Arc<SchemaError>) -> Self {
+        if matches!(error.as_ref(), SchemaError::UnresolvedSlots(_)) {
+            Self::Unresolved(error)
+        } else {
+            Self::Unprepared(error)
+        }
+    }
+}
+
 /// Why a [`super::SimplifiedSchema`] could not be built, layered, or
 /// exported.
 ///
@@ -88,6 +100,12 @@ pub enum SimplifiedSchemaError {
     /// cannot read). The error is the one the schema holds, shared.
     #[error("the schema cannot be lowered to JSON Schema: {0}")]
     Unprepared(Arc<SchemaError>),
+
+    /// The schema, or a schema taking part in the operation, is a template
+    /// whose `{{ … }}` slots are not resolved, so it has no JSON Schema form
+    /// yet. The error is [`SchemaError::UnresolvedSlots`], shared.
+    #[error("the schema is an unresolved template: {0}")]
+    Unresolved(Arc<SchemaError>),
 
     /// [`super::SimplifiedSchema::select`] found no object type `name`.
     #[error("cannot select type `{name}`: {reason}")]

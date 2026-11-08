@@ -2,7 +2,7 @@
 //! single braces no longer end an expression early, while every span that
 //! parses under the older first-`}}` rule stays as it was.
 
-use simplified_schema::expression::scan::{ExpressionLocation, find_all_plain, scan, scan_plain};
+use simplified_schema::expression::scan::{ExpressionLocation, find_all_plain, scan, scan_expression_at, scan_plain};
 
 fn expressions(content: &str) -> Vec<String> {
     find_all_plain(content)
@@ -147,4 +147,51 @@ fn multibyte_text_keeps_byte_offsets() {
     let found = find_all_plain(content);
     assert_eq!(found.len(), 1);
     assert_eq!(&content[found[0].start..found[0].end], "{{ f(\"ü}}\\é\") }}");
+}
+
+// ── `scan_expression_at`: the one closing rule for an opener at a known byte ──
+
+#[test]
+fn scan_expression_at_ends_where_the_whole_text_scan_ends() {
+    let text = r#"enum(none, {{ load_data("../os.yaml", "string[]") }}; required)"#;
+    let start = text.find("{{").unwrap();
+    let found = scan_expression_at(text, start).expect("a slot opens there");
+    assert_eq!(found, find_all_plain(text)[0]);
+    assert_eq!(&text[found.end..], "; required)");
+}
+
+#[test]
+fn scan_expression_at_keeps_quoted_closers_and_nested_braces_inside() {
+    for (text, expected) in [
+        (r#"{{ "}}" }}, b"#, r#""}}""#),
+        ("{{ '{{' }})", "'{{'"),
+        (r#"{{ load_data(f, "{ a: { b: string }}") }}; x"#, r#"load_data(f, "{ a: { b: string }}")"#),
+        ("{{ {a: {b: 1}} }})", "{a: {b: 1}}"),
+    ] {
+        let found = scan_expression_at(text, 0).unwrap_or_else(|| panic!("for {text:?}"));
+        assert_eq!(found.expression, expected, "for {text:?}");
+        assert_eq!(found.start, 0);
+        assert!(!text[found.end..].contains("}}"), "the scan ended early for {text:?}");
+    }
+}
+
+#[test]
+fn scan_expression_at_finds_nothing_for_an_unclosed_empty_or_non_expression_opener() {
+    assert_eq!(scan_expression_at("{{ open", 0), None, "unclosed");
+    assert_eq!(scan_expression_at("x, {{ a ", 3), None, "unclosed after text");
+    assert_eq!(scan_expression_at("{{  }}", 0), None, "empty");
+    assert_eq!(scan_expression_at("{{{ a }}}", 0), None, "a triple-brace literal");
+    assert_eq!(scan_expression_at("{{!data:abc}}", 0), None, "a literal token");
+    assert_eq!(scan_expression_at("a {{ b }}", 0), None, "no opener at the byte");
+    assert_eq!(scan_expression_at("{{ a }}", 99), None, "past the end");
+}
+
+#[test]
+fn scan_expression_at_respects_an_escaped_opener() {
+    let text = r"\\{{ a }}";
+    // One backslash escapes the opener...
+    assert_eq!(scan_expression_at(&text[1..], 1), None);
+    // ...and two escape each other, leaving it active.
+    let found = scan_expression_at(text, 2).expect("an even run leaves the opener active");
+    assert_eq!(found.expression, "a");
 }

@@ -20,7 +20,7 @@ use super::layer::{Typed, declares, json_declares};
 use crate::completion::{AlternativeSite, PathStep, def_at_path};
 use crate::simplified::query::resolved_alternatives;
 use crate::simplified::{
-    Alternative, CallExample, Constraint, DefinitionTable, FunctionParameter, FunctionType, NarrowsClause, PropertyAtom,
+    Alternative, CallExample, Constraint, DefinitionTable, Slot, FunctionParameter, FunctionType, NarrowsClause, PropertyAtom,
     PropertyDef, SchemaArm, SchemaRoot, SchemaShape, TupleType, TypeExpr, serialize::serialize_property_def,
 };
 
@@ -94,6 +94,15 @@ impl<'a> TypeDefinition<'a> {
             return None;
         };
         FunctionView::of(atom)
+    }
+
+    /// The unresolved `{{ … }}` slots this type holds, directly or through a
+    /// stored definition it references, each once. Non-empty means the type
+    /// is part of a template: its `enum(...)`/`suggest(...)` lists show only
+    /// their literal elements and are not complete, and its value positions
+    /// are not known.
+    pub fn pending_slots(&self) -> Vec<Slot> {
+        crate::slots::reachable_slots(&self.def, self.definitions)
     }
 
     /// The stored definitions references in this type point into.

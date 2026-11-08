@@ -59,6 +59,10 @@
 //!                   | "category" "(" name ")"      (name: raw text up to `)`)
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
+//! slot             := "{{" expression "}}"
+//!                     (a complete `enum`/`suggest` element, or the whole
+//!                      argument of `literal`, `default`, `min`, `max`,
+//!                      `pattern`; ended by `expression::scan_expression_at`)
 //! fileref          := <biscuit-file file reference> | "this"
 //! description      := <rest-of-top-level-field, trimmed>
 //! ```
@@ -94,6 +98,12 @@
 //! next top-level comma or closing brace (Decision #9). Inline object
 //! nesting is capped at [`MAX_INLINE_OBJECT_DEPTH`] levels (Decision #11).
 //!
+//! A `slot` is recorded, never evaluated: a list holding one is
+//! [`Constraint::Dynamic`], a value position holding one is
+//! [`Constraint::DynamicValue`], and a list without one keeps its static
+//! constraint. A `{{` that does not open an element (quoted, or after other
+//! text in the same word) is ordinary text.
+//!
 //! Errors surface as [`SchemaError::Grammar`] with the byte span of the
 //! offending token.
 
@@ -110,9 +120,11 @@ use super::narrowing;
 use super::signature::duplicate_overload;
 use super::types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
-    SuggestionCandidate, TupleElement, TupleType, TypeExpr, narrows_target_problem,
+    DynamicElement, DynamicKind, DynamicList, NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom,
+    PropertyDef, SchemaShape, SimplifiedType, Slot, SuggestionCandidate, TupleElement, TupleType, TypeExpr,
+    ValueSlotKind, narrows_target_problem,
 };
+use crate::expression::scan::scan_expression_at;
 
 /// Hard maximum number of nested inline object levels the parser will accept.
 /// Exceeding this depth is a grammar error (Decision #11).
@@ -431,13 +443,28 @@ fn nested_file_reference_end(bytes: &[u8], start: usize, end: usize) -> usize {
         .unwrap_or(top)
 }
 
+/// The end of the `{{ … }}` slot opening at `index`, by the expression
+/// scanner's closing rule, or `None` when no slot opens there.
+fn slot_end(bytes: &[u8], index: usize) -> Option<usize> {
+    if bytes.get(index..index + 2) != Some(b"{{") {
+        return None;
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    scan_expression_at(text, index).map(|found| found.end)
+}
+
 /// The index of the `)` closing the constraint argument list whose `(` is at
 /// `open`, or `None` when it is unterminated. Quotes, parentheses, brackets,
-/// and braces nest, as in an inline example's call and result.
+/// and braces nest, as in an inline example's call and result; a `{{ … }}`
+/// slot is skipped whole.
 fn argument_list_end(bytes: &[u8], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut index = open;
     while index < bytes.len() {
+        if let Some(end) = slot_end(bytes, index) {
+            index = end;
+            continue;
+        }
         match bytes[index] {
             b'\'' | b'"' => {
                 index = quoted_end(bytes, index, bytes.len())?;
@@ -457,12 +484,16 @@ fn argument_list_end(bytes: &[u8], open: usize) -> Option<usize> {
     None
 }
 
-/// The first occurrence of `needle` in `bytes[range]` outside quotes and
-/// outside any `(`/`[`/`{` nesting.
+/// The first occurrence of `needle` in `bytes[range]` outside quotes, `{{ … }}`
+/// slots, and any `(`/`[`/`{` nesting.
 fn find_top_level(bytes: &[u8], range: Range<usize>, needle: &[u8]) -> Option<usize> {
     let mut depth = 0usize;
     let mut index = range.start;
     while index < range.end {
+        if let Some(end) = slot_end(bytes, index).filter(|&end| end <= range.end) {
+            index = end;
+            continue;
+        }
         match bytes[index] {
             b'\'' | b'"' => {
                 index = quoted_end(bytes, index, range.end)?;
@@ -517,6 +548,15 @@ enum ListOwner {
 }
 
 impl ListOwner {
+    /// The type a value-position slot belongs to: the type keyword, or
+    /// `unknown` where the target is not known while parsing.
+    fn value_target(self) -> SimplifiedType {
+        match self {
+            Self::Type(ty) => ty,
+            _ => SimplifiedType::Unknown,
+        }
+    }
+
     /// Whether the list may open with `alphanumeric` options.
     fn takes_options(self) -> bool {
         matches!(self, Self::Type(SimplifiedType::Alphanumeric) | Self::Reference)
@@ -1914,9 +1954,12 @@ impl<'a> Parser<'a> {
 
         // Enum requires members.
         if matches!(ty, SimplifiedType::Enum)
-            && !item_constraints
-                .iter()
-                .any(|c| matches!(c, Constraint::Members(_)))
+            && !item_constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    Constraint::Members(_) | Constraint::Dynamic(DynamicList { kind: DynamicKind::Members, .. })
+                )
+            })
         {
             return self.err(
                 "`enum` requires a constraint list with at least one member",
@@ -1927,9 +1970,13 @@ impl<'a> Parser<'a> {
         // A `literal` atom without a `LiteralValue` (bare `literal` or
         // `literal()`) is rejected the same way `enum` without members is.
         if matches!(ty, SimplifiedType::Literal)
-            && !item_constraints
-                .iter()
-                .any(|c| matches!(c, Constraint::LiteralValue(_)))
+            && !item_constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    Constraint::LiteralValue(_)
+                        | Constraint::DynamicValue { kind: ValueSlotKind::Literal, .. }
+                )
+            })
         {
             return self.err("literal requires a value", name_span);
         }
@@ -2000,6 +2047,12 @@ impl<'a> Parser<'a> {
                 }
                 Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::Unique
                     if is_array_level => {}
+                Constraint::DynamicValue { slot, .. } => {
+                    return self.err(
+                        format!("a `{{{{ … }}}}` slot is not supported on `{}`", ty.as_keyword()),
+                        slot.span.clone(),
+                    );
+                }
                 other => {
                     return self.err(
                         format!(
@@ -2197,8 +2250,8 @@ impl<'a> Parser<'a> {
         // list, if present, is just regular array constraints (min/max/etc.).
         if owner == ListOwner::Type(SimplifiedType::Enum) && !is_array_level {
             let (members, mut tail) = self.parse_enum_members()?;
-            if !members.is_empty() {
-                constraints.push(Constraint::Members(members));
+            if let Some(members) = members_constraint(members) {
+                constraints.push(members);
             }
             constraints.append(&mut tail);
             return Ok(constraints);
@@ -2229,11 +2282,7 @@ impl<'a> Parser<'a> {
             self.lex.skip_ws();
             let constraint_start = self.lex.pos;
             let constraint = self.parse_one_constraint(owner, is_array_level)?;
-            if matches!(constraint, Constraint::Suggest(_))
-                && constraints
-                    .iter()
-                    .any(|existing| matches!(existing, Constraint::Suggest(_)))
-            {
+            if is_suggestion_list(&constraint) && constraints.iter().any(is_suggestion_list) {
                 return self.err(
                     "a property definition may contain at most one `suggest` constraint",
                     constraint_start..self.lex.pos,
@@ -2350,12 +2399,32 @@ impl<'a> Parser<'a> {
     /// Parses members until we either hit the end of the list or a `;`
     /// separator, in which case we hand off to the regular constraint parser
     /// for any trailing `default(...)` / `required` constraints.
-    fn parse_enum_members(&mut self) -> Result<(Vec<String>, Vec<Constraint>), SchemaError> {
+    ///
+    /// A member that opens with `{{` is a slot ([`Self::read_element_slot`]);
+    /// the elements come back in authored order for [`members_constraint`].
+    fn parse_enum_members(&mut self) -> Result<(Vec<DynamicElement>, Vec<Constraint>), SchemaError> {
         let mut members = Vec::new();
         let mut tail = Vec::new();
 
         loop {
             self.lex.skip_ws();
+            if let Some(slot) = self.read_element_slot(SLOT_COMPLETE_ELEMENT)? {
+                members.push(DynamicElement::Slot(slot));
+                match self.lex.peek_byte() {
+                    Some(b',') => {
+                        self.lex.pos += 1;
+                        continue;
+                    }
+                    Some(b';') => {
+                        self.lex.pos += 1;
+                        return Ok((
+                            members,
+                            self.parse_remaining_constraints(ListOwner::Type(SimplifiedType::Enum), tail)?,
+                        ));
+                    }
+                    _ => return Ok((members, tail)),
+                }
+            }
             // Look ahead: if the next token is an ident immediately followed
             // by `(`, treat it as a constraint call (e.g. `default(draft)`).
             // Otherwise it's a positional member.
@@ -2432,7 +2501,7 @@ impl<'a> Parser<'a> {
                     );
                 }
             };
-            members.push(member);
+            members.push(DynamicElement::Member(member));
             self.lex.skip_ws();
             match self.lex.peek_byte() {
                 Some(b',') => {
@@ -2511,6 +2580,30 @@ impl<'a> Parser<'a> {
     /// whitespace already skipped and a non-`)` byte guaranteed.
     fn parse_literal_value(&mut self) -> Result<Vec<Constraint>, SchemaError> {
         self.lex.skip_ws();
+        if let Some(slot) = self.read_slot()? {
+            self.lex.skip_ws();
+            if !matches!(self.lex.peek_byte(), Some(b';' | b')' | b',') | None) {
+                return self.err(SLOT_WHOLE_ARGUMENT, slot.span.start..self.lex.pos + 1);
+            }
+            let constraints = vec![Constraint::DynamicValue {
+                kind: ValueSlotKind::Literal,
+                target: SimplifiedType::Literal,
+                slot,
+            }];
+            return match self.lex.peek_byte() {
+                Some(b';') => {
+                    self.lex.pos += 1;
+                    self.parse_remaining_constraints(ListOwner::Type(SimplifiedType::Literal), constraints)
+                }
+                Some(b')') => Ok(constraints),
+                Some(b',') => self.err(
+                    "`literal` takes exactly one value; use `enum(...)` for multiple allowed values",
+                    self.lex.pos..self.lex.pos + 1,
+                ),
+                Some(_) => unreachable!("checked above"),
+                None => self.err("unterminated constraint list (missing `)`)", self.lex.pos..self.lex.pos),
+            };
+        }
         let tok = self.next_token(LexMode::ArgList)?;
         let value = match tok.tok {
             // Quoted values are always strings (quoting opts out of typing).
@@ -2681,8 +2774,18 @@ impl<'a> Parser<'a> {
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    if owner == ListOwner::Type(SimplifiedType::Null) && !is_array_level {
+                        return self.err("a `null` default must be null; it cannot be a `{{ … }}` slot", slot.span);
+                    }
+                    return Ok(Constraint::DynamicValue {
+                        kind: ValueSlotKind::Default,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`default` takes exactly 1 argument, got {}", args.len()),
@@ -2706,8 +2809,15 @@ impl<'a> Parser<'a> {
             }
             ("min", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    return Ok(Constraint::DynamicValue {
+                        kind: ValueSlotKind::Min,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`min` takes exactly 1 argument, got {}", args.len()),
@@ -2727,8 +2837,15 @@ impl<'a> Parser<'a> {
             }
             ("max", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    return Ok(Constraint::DynamicValue {
+                        kind: ValueSlotKind::Max,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`max` takes exactly 1 argument, got {}", args.len()),
@@ -2748,8 +2865,15 @@ impl<'a> Parser<'a> {
             }
             ("pattern", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_WHOLE_ARGUMENT))?;
                 self.expect(Tok::RParen)?;
+                if let Some(slot) = self.whole_argument_slot(&args)? {
+                    return Ok(Constraint::DynamicValue {
+                        kind: ValueSlotKind::Pattern,
+                        target: owner.value_target(),
+                        slot,
+                    });
+                }
                 if args.len() != 1 {
                     return self.err(
                         format!("`pattern` takes exactly 1 argument, got {}", args.len()),
@@ -2760,7 +2884,7 @@ impl<'a> Parser<'a> {
             }
             ("suggest", true) => {
                 self.lex.pos += 1;
-                let args = self.parse_arglist()?;
+                let args = self.parse_arglist_with(Some(SLOT_COMPLETE_ELEMENT))?;
                 self.expect(Tok::RParen)?;
                 if args.is_empty() {
                     return self.err(
@@ -2784,6 +2908,24 @@ impl<'a> Parser<'a> {
                         );
                     }
                 };
+
+                // A list with a slot keeps every element; duplicates are
+                // dropped after resolution, first occurrence first, since a
+                // slot's values are not known yet.
+                if args.iter().any(|arg| arg.slot.is_some()) {
+                    let elements = args
+                        .into_iter()
+                        .map(|arg| match arg.slot {
+                            Some(slot) => DynamicElement::Slot(slot),
+                            None => DynamicElement::Suggestion(interpret_suggestion(&arg, target)),
+                        })
+                        .collect();
+                    return Ok(Constraint::Dynamic(DynamicList {
+                        kind: DynamicKind::Suggest,
+                        target,
+                        elements,
+                    }));
+                }
 
                 let mut candidates = Vec::with_capacity(args.len());
                 for arg in args {
@@ -2946,7 +3088,77 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Reads the slot opening at the cursor, if one does: `{{` that is not a
+    /// `{{{` literal or a `{{!data:…}}` token, which stay text. The closing
+    /// `}}` is the one the expression scanner finds ([`scan_expression_at`]);
+    /// the expression must parse. Leaves the cursor just past `}}`.
+    fn read_slot(&mut self) -> Result<Option<Slot>, SchemaError> {
+        let start = self.lex.pos;
+        let rest = &self.src[start..];
+        if !rest.starts_with("{{") || rest.starts_with("{{{") || rest.starts_with("{{!data:") {
+            return Ok(None);
+        }
+        let Some(found) = scan_expression_at(self.src, start) else {
+            if rest[2..].trim_start().starts_with("}}") {
+                let end = start + rest.find("}}").map_or(2, |close| close + 2);
+                return self.err("a `{{ … }}` slot needs an expression", start..end);
+            }
+            return self.err("unterminated `{{ … }}` slot", start..self.src.len());
+        };
+        let inner = &self.src[start + 2..found.end - 2];
+        let expression_start = start + 2 + (inner.len() - inner.trim_start().len());
+        let expression_span = expression_start..expression_start + found.expression.len();
+        if let Err(error) = parse_spanned(&found.expression) {
+            let at = (expression_span.start + error.position).min(expression_span.end);
+            return self.err(
+                format!("invalid `{{{{ … }}}}` slot expression: {}", error.message),
+                at..(at + 1).min(expression_span.end).max(at),
+            );
+        }
+        self.lex.pos = found.end;
+        Ok(Some(Slot {
+            expression: found.expression,
+            span: start..found.end,
+            expression_span,
+            origin: None,
+        }))
+    }
+
+    /// [`Self::read_slot`] for a list element: after the slot and any
+    /// whitespace the cursor must be at `,`, `;`, `)`, or the end, otherwise
+    /// `message` is reported over the slot and the text that follows it.
+    fn read_element_slot(&mut self, message: &'static str) -> Result<Option<Slot>, SchemaError> {
+        let Some(slot) = self.read_slot()? else {
+            return Ok(None);
+        };
+        self.lex.skip_ws();
+        match self.lex.peek_byte() {
+            Some(b',' | b';' | b')') | None => Ok(Some(slot)),
+            Some(_) => self.err(message, slot.span.start..self.lex.pos + 1),
+        }
+    }
+
+    /// The slot of a value position (`default`, `min`, `max`, `pattern`):
+    /// `None` when no argument is a slot; an error when a slot shares the
+    /// position with another argument.
+    fn whole_argument_slot(&self, args: &[Arg]) -> Result<Option<Slot>, SchemaError> {
+        let Some(slot) = args.iter().find_map(|arg| arg.slot.as_ref()) else {
+            return Ok(None);
+        };
+        if args.len() != 1 {
+            return self.err(SLOT_WHOLE_ARGUMENT, slot.span.clone());
+        }
+        Ok(Some(slot.clone()))
+    }
+
     fn parse_arglist(&mut self) -> Result<Vec<Arg>, SchemaError> {
+        self.parse_arglist_with(None)
+    }
+
+    /// Reads an argument list. With `slots`, an argument that opens with
+    /// `{{` is a slot ([`Arg::slot`]), and `slots` is the error for text
+    /// that follows it before the next `,` or `)`.
+    fn parse_arglist_with(&mut self, slots: Option<&'static str>) -> Result<Vec<Arg>, SchemaError> {
         let mut args = Vec::new();
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b')') {
@@ -2954,6 +3166,22 @@ impl<'a> Parser<'a> {
         }
         loop {
             self.lex.skip_ws();
+            if let Some(message) = slots
+                && let Some(slot) = self.read_element_slot(message)?
+            {
+                args.push(Arg {
+                    lex: slot.expression.clone(),
+                    number: None,
+                    quoted: false,
+                    span: slot.span.clone(),
+                    slot: Some(slot),
+                });
+                if self.lex.peek_byte() == Some(b',') {
+                    self.lex.pos += 1;
+                    continue;
+                }
+                return Ok(args);
+            }
             let tok = self.next_token(LexMode::ArgList)?;
             let arg = match tok.tok {
                 Tok::Number(n) => Arg {
@@ -2961,18 +3189,21 @@ impl<'a> Parser<'a> {
                     number: Some(n),
                     quoted: false,
                     span: tok.span,
+                    slot: None,
                 },
                 Tok::Word(s) | Tok::Ident(s) => Arg {
                     lex: s,
                     number: None,
                     quoted: false,
                     span: tok.span,
+                    slot: None,
                 },
                 Tok::Quoted(s) => Arg {
                     lex: s,
                     number: None,
                     quoted: true,
                     span: tok.span,
+                    slot: None,
                 },
                 other => {
                     return self.err(format!("expected argument, found `{:?}`", other), tok.span);
@@ -3011,6 +3242,49 @@ struct Arg {
     number: Option<f64>,
     quoted: bool,
     span: Range<usize>,
+    /// The slot this argument is, read only where slots are admitted; `lex`
+    /// then holds its expression text.
+    slot: Option<Slot>,
+}
+
+/// The grammar error for a value position whose argument mixes a slot with
+/// other text.
+const SLOT_WHOLE_ARGUMENT: &str = "a `{{ … }}` slot must be the whole argument";
+
+/// The grammar error for a list element that continues after its slot.
+const SLOT_COMPLETE_ELEMENT: &str = "a `{{ … }}` slot must be a complete list element";
+
+/// The constraint an `enum(...)` member list builds: [`Constraint::Members`]
+/// when every element is static, [`Constraint::Dynamic`] when any is a slot,
+/// `None` when there are none.
+fn members_constraint(elements: Vec<DynamicElement>) -> Option<Constraint> {
+    if elements.is_empty() {
+        return None;
+    }
+    if elements.iter().any(|element| matches!(element, DynamicElement::Slot(_))) {
+        return Some(Constraint::Dynamic(DynamicList {
+            kind: DynamicKind::Members,
+            target: SimplifiedType::Enum,
+            elements,
+        }));
+    }
+    let members = elements
+        .into_iter()
+        .map(|element| match element {
+            DynamicElement::Member(member) => member,
+            _ => unreachable!("a list without slots holds only members"),
+        })
+        .collect();
+    Some(Constraint::Members(members))
+}
+
+/// Whether `constraint` is a `suggest(...)` list, static or dynamic: a
+/// property definition may hold one.
+pub(crate) fn is_suggestion_list(constraint: &Constraint) -> bool {
+    matches!(
+        constraint,
+        Constraint::Suggest(_) | Constraint::Dynamic(DynamicList { kind: DynamicKind::Suggest, .. })
+    )
 }
 
 /// What `example(...)` held.
@@ -3077,13 +3351,20 @@ pub(crate) fn second_suggestion_span(arms: &[PropertyAtom]) -> Option<SecondSugg
         .iter()
         .enumerate()
         .flat_map(|(index, atom)| atom.constraints.iter().map(move |constraint| (index, constraint)))
-        .filter_map(|(index, constraint)| match constraint {
-            Constraint::Suggest(candidates) => candidates.first().map(|candidate| (index, candidate.span.clone())),
-            _ => None,
-        });
+        .filter_map(|(index, constraint)| suggestion_list_span(constraint).map(|span| (index, span)));
     let (first_arm, first_span) = suggestions.next()?;
     let (arm, span) = suggestions.next()?;
     Some(SecondSuggestion { arm, span, first_arm, first_span })
+}
+
+/// The authored span of one dynamic-list element: a candidate's argument or
+/// a slot's `{{ … }}`. A static member records no span.
+fn dynamic_element_span(element: &DynamicElement) -> Range<usize> {
+    match element {
+        DynamicElement::Suggestion(candidate) => candidate.span.clone(),
+        DynamicElement::Slot(slot) => slot.span.clone(),
+        DynamicElement::Member(_) => 0..0,
+    }
 }
 
 /// A second `suggest` constraint among a definition's options: where it is,
@@ -3200,6 +3481,31 @@ pub(crate) fn reinterpret_suggestion_candidates(
         candidates[index] = candidate;
     }
     Ok(())
+}
+
+/// Retargets a deferred reference's dynamic `suggest(...)` list once the
+/// target type is known, as [`reinterpret_suggestion_candidates`] does for a
+/// static one. Duplicates are not an error here: a list with a slot keeps the
+/// first occurrence of each value after resolution.
+pub(crate) fn reinterpret_dynamic_suggestions(list: &mut DynamicList, ty: SimplifiedType) {
+    list.target = ty;
+    for element in &mut list.elements {
+        if let DynamicElement::Suggestion(candidate) = element {
+            *candidate = interpret_suggestion_parts(&candidate.decoded, candidate.span.clone(), ty);
+        }
+    }
+}
+
+/// The span of a `suggest(...)` list's first element, static or dynamic:
+/// where a misplaced list is reported. `None` for any other constraint.
+pub(crate) fn suggestion_list_span(constraint: &Constraint) -> Option<Range<usize>> {
+    match constraint {
+        Constraint::Suggest(candidates) => candidates.first().map(|candidate| candidate.span.clone()),
+        Constraint::Dynamic(DynamicList { kind: DynamicKind::Suggest, elements, .. }) => {
+            elements.first().map(dynamic_element_span)
+        }
+        _ => None,
+    }
 }
 
 /// Normalizes the feature's simple-decimal grammar without converting through
@@ -4755,3 +5061,6 @@ mod narrows_clause_tests {
         assert!(message.contains("`narrows`"), "{message}");
     }
 }
+
+#[cfg(test)]
+mod slot_tests;
